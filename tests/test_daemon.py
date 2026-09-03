@@ -12,6 +12,7 @@ scheduling, and task success/failure/backoff bookkeeping.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -256,6 +257,70 @@ def test_run_workload_kill_path_closes_pipe_fds(
     assert proc.stdout is None or proc.stdout.closed, "stdout pipe fd must be closed"
     assert proc.stderr is None or proc.stderr.closed, "stderr pipe fd must be closed"
     assert proc.poll() is not None, "the child must be reaped (not a zombie/alive)"
+
+
+@pytest.mark.no_timeout_scale
+def test_run_workload_once_kills_grandchild_launcher_grants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `os.killpg` fix (TRDD-5EHBPH6G) must kill a GRANDCHILD, not just the launcher.
+
+    The real workload cmd is `taskpolicy -b claude ...` — a launcher that FORKS the
+    real work as its own child instead of exec-replacing itself. Every other test
+    here runs a fake `claude` directly (no launcher), so the process-group kill was
+    never exercised against the orphan shape it exists to fix: SIGKILL on just the
+    launcher pid leaves the forked grandchild running, still holding the inherited
+    stdout/stderr PIPE fds open. Shape it here with a tiny launcher that forks
+    `sleep 600` and waits on it, confirm the whole group (launcher's pgid == its
+    own pid, via start_new_session=True) is gone after the timeout-kill.
+    """
+    daemon = _import_daemon_module()
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    _isolate_project_paths(tmp_path, monkeypatch, daemon)
+    daemon.gs.init_global_state()
+
+    launcher = tmp_path / "launcher.sh"
+    launcher.write_text("#!/bin/sh\nsleep 600 &\nwait\n", encoding="utf-8")
+    launcher.chmod(0o755)
+
+    # Capture the launcher's own pid (== its pgid, via start_new_session=True) by
+    # wrapping Popen — same pattern as test_run_workload_kill_path_closes_pipe_fds.
+    # A real pid, not a substring grep of `ps` output: grepping the whole host
+    # process table for the literal text "sleep 600" is unsafe (an unrelated live
+    # process's multi-line command can legitimately CONTAIN that substring — e.g.
+    # a shell monitor loop with `sleep 600` in its body — and the sandbox guard
+    # correctly refuses to let a test signal a process it did not spawn).
+    captured: list = []
+    real_popen = daemon.subprocess.Popen
+
+    def _capturing_popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        captured.append(proc)
+        return proc
+
+    monkeypatch.setattr(daemon.subprocess, "Popen", _capturing_popen)
+
+    result = daemon._run_workload_once([str(launcher)], timeout=1, heartbeat_tick=1)
+    assert result is None, "a killed/timed-out workload must return None"
+    assert len(captured) == 1
+    launcher_pgid = captured[0].pid
+
+    # `ps` snapshot to a FILE first (never pipe straight into a filter — see
+    # ~/.claude/rules/never-tail-on-error-messages.md's sibling rule on pgrep
+    # self-match) so the check runs against a static, already-complete listing.
+    snap = tmp_path / "ps-snapshot.txt"
+    ps_out = subprocess.run(
+        ["ps", "-eo", "pid,pgid,command"], capture_output=True, text=True, check=False
+    ).stdout
+    snap.write_text(ps_out, encoding="utf-8")
+    leftover = [
+        line for line in ps_out.splitlines()[1:]
+        if line.split() and line.split()[1] == str(launcher_pgid)
+    ]
+    assert not leftover, (
+        f"orphaned grandchild(ren) survived the pgroup kill: {leftover!r} "
+        f"(full snapshot: {snap})"
+    )
 
 
 def test_run_workload_normal_completion_returns_completedprocess(

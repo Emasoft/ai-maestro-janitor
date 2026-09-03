@@ -128,6 +128,28 @@ def test_all_items_failing_is_a_failed_run(
     assert task._failcount() == 1, "a run where every marketplace failed must count as FAILED"
 
 
+@pytest.mark.no_timeout_scale
+def test_run_budget_stops_starting_new_items_and_does_not_fail(
+    isolated: tuple[Path, list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Follow-up (5EHBPH6G): N items x per-item timeout with no overall run budget
+    can exceed `_WORKLOAD_TIMEOUT_SEC` and get SIGKILLed by the outer watchdog
+    again. A tiny `_WORKLOAD_TIMEOUT_SEC` here forces the deadline to already be
+    exhausted before the loop starts, so every item is skipped and logged — and
+    that must NOT count as a failed run (nothing was attempted)."""
+    cache_parent, lines = isolated
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S", "1")
+    monkeypatch.setattr(daemon, "_WORKLOAD_TIMEOUT_SEC", 1)
+    _write_installed(cache_parent, ["ok-mkt-1", "ok-mkt-2"])
+
+    task = daemon.Task("marketplace-refresh", 3600, daemon.task_marketplace_refresh, background=False)
+    task.run()
+
+    assert task._failcount() == 0, "an all-skipped run (nothing attempted) must not count as FAILED"
+    joined = "\n".join(lines)
+    assert "budget exhausted after 0/2 — 2 skipped" in joined
+
+
 def test_a_partial_success_is_not_a_failed_run(
     isolated: tuple[Path, list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -557,6 +557,12 @@ def task_marketplace_refresh() -> None:
     semantics are UNCHANGED here — see `Task.poll_background`'s docstring; making
     a failed run stop refreshing that stamp is a separate, deliberately deferred
     change (TRDD-FFXGPZEI, backburner) with wider blast radius than this task.
+
+    Follow-up (same TRDD): the per-item timeout alone has no OVERALL run budget
+    — enough items x the per-item timeout can still exceed `_WORKLOAD_TIMEOUT_SEC`
+    and get SIGKILLed by the outer watchdog again. So the loop also tracks a run
+    deadline and stops starting new items once it's exhausted; unattempted items
+    are logged as skipped and count toward neither `refreshed` nor a run failure.
     """
     with gs.marketplace_lock() as got:
         if not got:
@@ -596,7 +602,25 @@ def task_marketplace_refresh() -> None:
             )
         t0 = time.time()
         refreshed = 0
+        skipped = 0
+        # TRDD-5EHBPH6G follow-up: the per-item timeout alone has no overall run
+        # budget — 32 items x the 60s per-item timeout can exceed
+        # `_WORKLOAD_TIMEOUT_SEC` (1800s), re-creating the exact outer-watchdog
+        # SIGKILL + quarantine this task was written to avoid. Leave enough
+        # margin (2 items' worth) that an item already in flight when we check
+        # can finish before the outer deadline, then stop starting new ones.
+        run_deadline = t0 + _WORKLOAD_TIMEOUT_SEC - 2 * per_item_timeout
+        attempted = 0
         for name in plan:
+            if time.time() > run_deadline:
+                skipped = len(plan) - attempted
+                state.log_line(
+                    "daemon",
+                    f"  marketplace-refresh: budget exhausted after {attempted}/{len(plan)} "
+                    f"— {skipped} skipped",
+                )
+                break
+            attempted += 1
             proc = _run_workload_once(
                 prefix + ["claude", "plugin", "marketplace", "update", name],
                 timeout=per_item_timeout,
@@ -622,12 +646,14 @@ def task_marketplace_refresh() -> None:
         state.log_line(
             "daemon", f"  marketplace-refresh: refreshed {refreshed}/{len(plan)} marketplaces in {dt_s}s"
         )
-        if refreshed == 0:
-            # Every item failed/timed out — a genuine run failure, not a partial
-            # success. Raising is what `_run_task_child` turns into rc=1, which
+        if refreshed == 0 and attempted > 0:
+            # Every ATTEMPTED item failed/timed out — a genuine run failure, not a
+            # partial success. A run that skipped everything for budget reasons
+            # before attempting any (attempted == 0) is not a failure either.
+            # Raising is what `_run_task_child` turns into rc=1, which
             # `Task.poll_background`/`run()` read to increment the consecutive-
             # failure streak and quarantine backoff exactly like any other task.
-            raise RuntimeError(f"marketplace-refresh: all {len(plan)} marketplace(s) failed")
+            raise RuntimeError(f"marketplace-refresh: all {attempted} attempted marketplace(s) failed")
 
 
 # `task_user_plugins_update` was RETIRED here 2026-08-20 (TRDD-E39YT9G6, after
