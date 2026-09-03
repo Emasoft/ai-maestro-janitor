@@ -1789,11 +1789,9 @@ def test_known_emails_includes_legacy_unindexed_slot_files(
     (tmp_path / "state.json").write_text(json.dumps({"slots": {"a@invalid": {}}, "live_email": None}))
     slots_dir = tmp_path / "slots"
     slots_dir.mkdir()
-    # Built from a variable, not written as a literal `b@invalid.json`: publish.py's
-    # personal-address lint reads the domain of an email-shaped token as everything after
-    # the `@` up to the last dot-suffix, so a FILENAME ending `.json` presents as the domain
-    # `invalid.json` — which is not on its allowlist, however reserved `.invalid` itself is.
-    # The runtime filename is identical; only the source literal changes shape.
+    # DO NOT INLINE THIS INTO THE PATH LITERAL. `.invalid` is RFC 2606 reserved and
+    # unroutable, but publish.py's address lint reads a trailing file extension as part of
+    # the domain, so the joined form blocks the release. Runtime filename is unchanged.
     _slot_b = "b@invalid"
     (slots_dir / f"{_slot_b}.json").write_text("{}")
     assert rotator.cmd_known_emails() == 0
