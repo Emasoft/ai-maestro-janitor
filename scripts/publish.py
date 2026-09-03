@@ -1549,15 +1549,18 @@ def stage_lint(root: Path) -> None:
     # escape hatch: this file's contract is "no exceptions and no bypass flags".
     cprint(f"  {BLUE}uvx --with pyright pyright{NC}")
     try:
-        # 900s, not 300s. This must cover the COLD path: uv resolving and
-        # downloading pyright (a Node payload), node startup, then a full
-        # analysis of 504 source files plus tests/. The only timings measured
-        # here were warm-cache (a 422 ms `--version`, and full runs in tens of
-        # seconds), which say nothing about a cold cache on a contended
-        # machine — and since this check now fails CLOSED, a timeout on a
-        # WORKING pyright would block the publish outright. The ceiling only
-        # binds when something is genuinely wrong, so it costs nothing to be
-        # generous; a slow-but-correct type check is not a failure.
+        # 900s. MEASURED 2026-09-04 on this host: `uvx --with pyright --refresh
+        # pyright` — a forced re-resolve and re-download plus a full analysis of
+        # 504 source files and tests/ — took 13s. So the ceiling is ~70x the
+        # observed cold-ish cost and will not bind on a healthy run.
+        #
+        # It is set generously rather than tightly because this check now fails
+        # CLOSED: a timeout on a WORKING pyright would block the publish, and
+        # this is the only sanctioned push path. The ceiling exists to stop a
+        # HUNG process wedging the pipeline, not to bound a slow one — a
+        # slow-but-correct type check is not a failure. A contended CI-shaped
+        # machine with a genuinely empty cache is the case 13s does not measure,
+        # and 900s is chosen to cover it without needing a second measurement.
         pr = subprocess.run(["uvx", "--with", "pyright", "pyright"],
                             cwd=str(root), timeout=900).returncode
     except (OSError, subprocess.SubprocessError) as exc:
