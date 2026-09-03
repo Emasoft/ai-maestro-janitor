@@ -97,13 +97,33 @@ def test_latest_context_size_missing_file_is_none(tmp_path: Path) -> None:
     assert token_meter.latest_context_size(tmp_path / "nope.jsonl") is None
 
 
-def test_latest_context_size_no_assistant_usage_is_none(tmp_path: Path) -> None:
-    """No assistant `usage` in the tail -> None rather than guess."""
+def test_latest_context_size_no_assistant_usage_in_a_small_file_is_zero(tmp_path: Path) -> None:
+    """TRDD-L32WC0H7 / F3: no assistant `usage` anywhere, and the whole file fit in the tail
+    window (it is far under `_TAIL_BYTES`) -> 0 (KNOWN-empty), not None. This is the canonical
+    post-`/clear` shape: a fresh transcript with no usage-bearing entry yet is a real empty
+    context, not an unmeasurable one."""
     tp = _write_transcript(
         tmp_path / "t.jsonl",
         [
             {"type": "user", "message": {"content": "hi"}},
             {"type": "assistant", "message": {"content": "no usage block"}},
+        ],
+    )
+    assert token_meter.latest_context_size(tp) == 0
+
+
+def test_latest_context_size_no_assistant_usage_in_a_huge_file_stays_none(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The companion case: the tail window did NOT reach the file start (a big transcript
+    whose tail is one oversized tool_result) -> stays None, never guessed as empty — the
+    2026-08-04 ruling's concern."""
+    monkeypatch.setattr(token_meter, "_TAIL_BYTES", 32)
+    tp = _write_transcript(
+        tmp_path / "t.jsonl",
+        [
+            {"type": "user", "message": {"content": "hi " * 50}},
+            {"type": "assistant", "message": {"content": "no usage block, but this line is long enough to blow past the tiny tail window"}},
         ],
     )
     assert token_meter.latest_context_size(tp) is None

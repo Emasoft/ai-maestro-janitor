@@ -145,3 +145,43 @@ def test_instance_defaults_human_active_true() -> None:
     )
     assert inst.human_active is True
     assert inst.human_age_s is None
+
+
+def _interrupt_line(epoch: int) -> str:
+    """The transcript record Claude Code writes for an ESC interrupt — an ordinary
+    `type: user` record with no `scheduledFireId`, so `_is_prompt_record` alone cannot
+    tell it apart from a genuine human-typed prompt."""
+    return json.dumps({
+        "type": "user",
+        "timestamp": _iso(epoch),
+        "message": {"role": "user", "content": "[Request interrupted by user]"},
+    })
+
+
+def test_interrupt_record_never_counts_as_a_human_turn() -> None:
+    """TRDD-L32WC0H7 / F6 derived: the daemon's own `esc_nudge` produces a
+    `[Request interrupted by user]` record. `human_activity_age_from_tail` must NOT
+    read that as the user coming back — only a real prompt after it counts."""
+    t0 = 1_784_300_000
+    tail = [
+        _prompt_line(t0, scheduled=False),          # a real human prompt, 500s ago
+        _assistant_line(t0 + 5),                    # the reply to it, 495s ago
+        _interrupt_line(t0 + 400),                   # the daemon's ESC, 100s ago
+    ]
+    now = t0 + 500
+    age = fs.human_activity_age_from_tail(tail, now=now, fallback_age=99999)
+    assert age == 495, "the interrupt record must be skipped, not read as fresh activity"
+
+
+def test_interrupt_record_with_real_reply_still_counts_the_reply() -> None:
+    """A real assistant reply AFTER the interrupt record is still substantive activity —
+    only the interrupt record ITSELF is excluded, not everything after it."""
+    t0 = 1_784_300_000
+    tail = [
+        _prompt_line(t0, scheduled=False),
+        _interrupt_line(t0 + 10),
+        _assistant_line(t0 + 20),                    # real work resumed after the ESC
+    ]
+    now = t0 + 30
+    age = fs.human_activity_age_from_tail(tail, now=now, fallback_age=99999)
+    assert age == 10, "the assistant turn after the interrupt record is real activity"

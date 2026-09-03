@@ -1151,3 +1151,49 @@ def test_a_field_that_stays_EMPTY_still_gives_up_rather_than_submitting() -> Non
     )
     assert not ok, "a field that never shows the command must not report success"
     assert sent == [], "Enter must never be pressed on an unverified field"
+
+
+def test_still_wanted_cancel_clears_a_leftover_exact_match_command() -> None:
+    """TRDD-L32WC0H7 / F4. `type_fn()` types our command; the settle read sees a
+    still-rendering partial ("/clea") so the loop treats it as malformed, and the typing
+    probe (a blinded/false-positive read) says "user typed" — so it backs off WITHOUT
+    clearing (owner rule: never delete a user's own keystrokes). By the NEXT iteration the
+    field has finished rendering to our command exactly, but `still_wanted` now cancels
+    the whole injection before the loop ever re-checks the field. The card's symptom:
+    `/clear` left sitting in the prompt of an already-cancelled session. The fix re-reads
+    on the cancel exit and clears ONLY because it is our own command, verbatim."""
+    cleared: list[str] = []
+    sent: list[str] = []
+    still_wanted_calls = iter([(True, ""), (False, "cache no longer expired")])
+    is_typing_calls = iter([False, True])
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/clear",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: cleared.append("C-u"),
+        reader=_seq(_pane(""), _pane("/clea"), _pane("/clear")),
+        is_typing=lambda _t: next(is_typing_calls),
+        still_wanted=lambda: next(still_wanted_calls),
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok is False and "cancelled" in why
+    assert sent == [], "a cancelled injection must never submit"
+    assert cleared == ["C-u"], "the leftover exact-match command must be cleared on cancel"
+
+
+def test_still_wanted_cancel_never_clears_the_users_own_text() -> None:
+    """The other half of F4: if the field does NOT show exactly our command (e.g. it
+    now holds the user's own text), the cancel exit must NOT clear it."""
+    cleared: list[str] = []
+    still_wanted_calls = iter([(True, ""), (False, "cache no longer expired")])
+    is_typing_calls = iter([False, True])
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/clear",
+        type_fn=lambda: None, submit_fn=lambda: None,
+        clear_fn=lambda: cleared.append("C-u"),
+        reader=_seq(_pane(""), _pane("/clea"), _pane("hello from the user")),
+        is_typing=lambda _t: next(is_typing_calls),
+        still_wanted=lambda: next(still_wanted_calls),
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok is False and "cancelled" in why
+    assert cleared == [], "the user's own text must never be cleared"

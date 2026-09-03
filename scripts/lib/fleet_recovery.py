@@ -34,33 +34,26 @@ COOLDOWN_S = 900
 # situation auto-recovery must yield on.
 MAX_ATTEMPTS = 4
 
-# A frozen (rate-limited) session's GENTLE recovery is ESC-only at every attempt up to here;
-# only AFTER these attempts, and only with ``include_hard``, does it escalate ONE rung to a
-# hard restart. Matches the old ladder's length (3 gentle rungs → force_restart at attempt 3),
-# so the bounded-storm math (MAX_ATTEMPTS=4 → exactly one hard attempt at 3, crash-loop at 4)
-# is unchanged.
-_FROZEN_GENTLE_ATTEMPTS = 3
-
-
 def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> str | None:
     """The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
     or None when the diagnosis is not recoverable:
 
     - ``cron_dead``        → ``rearm``  (the in-session cron died → re-arm it)
     - ``version_mismatch`` → ``reload`` (running stale code → reload the new plugin)
-    - ``frozen``           → ``esc_nudge`` for the first ``_FROZEN_GENTLE_ATTEMPTS`` attempts —
-      ESC-ONLY, NO command typed (TRDD-P7WU40G9). ``frozen`` means the session is RATE-LIMITED
-      and sitting in Claude Code's "Retrying in Xm" retry-watchdog state, which BLOCKS the input
-      line. Typing a slash-command there is the 2026-07-18 disaster: the retry-wait buffers the
-      keystrokes, the command TEXT accumulates on the one input line
+    - ``frozen``           → ``esc_nudge`` UNCONDITIONALLY, at EVERY ``attempts`` value and
+      REGARDLESS of ``include_hard`` (TRDD-P7WU40G9; capped by TRDD-L32WC0H7 / F1 derived 1).
+      ESC-ONLY, NO command typed. ``frozen`` means the session is RATE-LIMITED and sitting in
+      Claude Code's "Retrying in Xm" retry-watchdog state, which BLOCKS the input line. Typing
+      a slash-command there is the 2026-07-18 disaster: the retry-wait buffers the keystrokes,
+      the command TEXT accumulates on the one input line
       (``/janitor-arm/janitor-arm/janitor-arm…``), and when the wait finally breaks the buffer
       flushes into a flood that blocks the session and burns tokens. ESC breaks the retry-wait
       and the session's OWN ``rate-limited.flag → [janitor-resume]`` resumes the work — with NO
-      command to accumulate. With ``include_hard`` and only AFTER the ESC attempts are exhausted,
-      it escalates ONE rung to ``force_restart`` (kill the wedged pid + ``claude --continue``,
-      which RESUMES from the transcript so no work is lost) — the DEFAULT-OFF last resort for a
-      session ESC could not free. The old command-typing ladder (rearm/reload/update) is gone;
-      the hard rung is unchanged.
+      command to accumulate. It NEVER escalates to ``force_restart``: the `frozen` shape is
+      indistinguishable from a static CC retry-watchdog frame (`attempt 1/5` unchanged for
+      hours — see ``retry_wedged`` below), so a stall whose cause is unsettled must never reach
+      a kill rung. On exhaustion (``gate()`` → ``crash_loop``) the daemon alerts a human, never
+      a keystroke.
     - ``healthy`` / ``unarmed`` → None  (never poke a working or opted-out session —
       ``include_hard`` NEVER changes this)
     - ``dead``             → ``relaunch`` with ``include_hard`` (no kill — type
@@ -84,9 +77,16 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
     if diagnosis == "retry_wedged":
         return "esc_nudge"  # ESC-only, at EVERY attempt, include_hard or not — never escalates
     if diagnosis == "frozen":
-        if include_hard and attempts >= _FROZEN_GENTLE_ATTEMPTS:
-            return "force_restart"  # DEFAULT-OFF last resort after ESC is exhausted
-        return "esc_nudge"          # ESC-only; the flood-safe recovery for a rate-limited session
+        # CAPPED at esc_nudge, unconditionally (TRDD-L32WC0H7 / F1 derived 1): a `frozen`
+        # diagnosis is a STALL whose cause is UNSETTLED — it fires on the exact same shape
+        # as a static CC retry-watchdog frame (`attempt 1/5` unchanged for hours), which
+        # `retry_wedged` above already declines to escalate for the same reason. Escalating
+        # to `force_restart` here was reachable via `crash_loop_tripped`'s own budget
+        # (attempt 3 < MAX_ATTEMPTS=4) BEFORE the give-up alert ever fired, i.e. a kill could
+        # happen on a session no human had been told about yet. Never kill a session whose
+        # stall shape has not been confirmed distinct from a benign retry wait; on exhaustion
+        # (`gate()` → `crash_loop`) the daemon alerts a human instead — never a keystroke.
+        return "esc_nudge"
     if diagnosis == "dead" and include_hard:
         return "relaunch"
     return None

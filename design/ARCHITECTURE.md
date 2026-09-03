@@ -442,7 +442,10 @@ byte-for-byte across the standalone Python and the server TS so both agree on "w
   ADVANCING across successive polls while nothing else on the grid changes is itself the positive
   wedge signal (the frame redraws, but only the retry counter moves = not real progress), AND (c) NO
   transcript progress since the signature appeared (the "no progress after the signal" clause the
-  janitor's `is_session_frozen` uses). Debounce ≥ one supervision tick.
+  janitor applies in `fleet_scan.diagnose_root` → `session_liveness.diagnose_instance`). Debounce
+  ≥ one supervision tick. (That clause used to live in `session_liveness.is_session_frozen`, which
+  TRDD-L32WC0H7 F0 deleted as dead code — it had no callers; `diagnose_instance` is and was the
+  live predicate.)
 - **Do NOT gate on the statusline usage %.** The statusline (`5h … 98% @2:10pm`, `7d …`) is a LAGGING
   indicator — it refreshes on its own slow cadence, so at the moment `Session limit reached` renders
   the meter can still read 98% when the true window is 100% (owner observation 2026-07-24). A

@@ -359,6 +359,29 @@ def test_esc_only_plan_never_uses_the_aimaestro_channel() -> None:
     assert both is not None and both["channel"] == "tmux" and both["command"] == ""
 
 
+def test_esc_only_osascript_sends_exactly_one_esc() -> None:
+    """TRDD-L32WC0H7 / F2: the ESC-only osascript sends ONE press, not the two-ESC
+    command-typing rule — the second of a fixed pair was landing on the fresh cron fire
+    the first ESC provoked (killing the very heartbeat run recovery exists to unstick),
+    not on anything still needing it."""
+    script = fi.iterm_esc_only_osascript("DEADBEEF-1234-5678-9abc-def012345678")
+    assert script.count("character id 27") == 1
+
+
+def test_esc_only_plan_tmux_and_gui_channels_also_send_one_esc() -> None:
+    """The same F2 fix on the non-iTerm channels: build_esc_plan's tmux/wtype/xdotool
+    steps carry exactly one 'Escape' RUN step, not HARD_INTERRUPT_ESC_COUNT (2)."""
+    tmux_plan = fi.build_esc_plan({"tmux_pane": "%5"})
+    assert tmux_plan is not None
+    esc_steps = [s for s in tmux_plan["steps"] if s[0] == "RUN" and s[-1] == "Escape"]
+    assert len(esc_steps) == 1
+
+    wtype_plan = fi.build_esc_plan({"linux_gui_channel": "wtype"})
+    assert wtype_plan is not None
+    esc_steps = [s for s in wtype_plan["steps"] if s == ["RUN", "wtype", "-k", "Escape"]]
+    assert len(esc_steps) == 1
+
+
 def test_gentle_and_hard_paths_agree_on_every_terminal_shape() -> None:
     """The invariant the inversion violated: for the SAME terminal, the gentle builder
     and the hard builder resolve the SAME channel — including agreeing on None."""

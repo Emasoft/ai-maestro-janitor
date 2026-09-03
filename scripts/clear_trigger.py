@@ -330,10 +330,10 @@ _CHAIN_LOCK = "clear-chain.lock"
 def came_back_since(verdict_ts: int, idle_s: int, now: int) -> bool:
     """PURE. Did a SUBSTANTIVE turn land after the clear was decided?
 
-    `idle_s` is heartbeat-excluding (`fleet_scan.transcript_activity`), so `now - idle_s` is the
-    moment of the last real turn. Strictly greater, not `>=`: a turn in the SAME second as the
-    verdict is what the verdict itself was computed from, and `>=` would cancel every chain the
-    instant it was fired.
+    `idle_s` is heartbeat- AND daemon-interrupt-excluding (`fleet_scan.human_activity_age`,
+    TRDD-L32WC0H7 / F6), so `now - idle_s` is the moment of the last real HUMAN turn. Strictly
+    greater, not `>=`: a turn in the SAME second as the verdict is what the verdict itself was
+    computed from, and `>=` would cancel every chain the instant it was fired.
 
     A false `True` costs one skipped shrink; a false `False` clears a live context with no undo.
     """
@@ -438,15 +438,18 @@ def _run_chain_payload(payload_b64: str) -> int:
         #
         # Pinned to the VERDICT TIMESTAMP, never to "is the pane busy right now". Busy-now is
         # what the injection deferral already handles; re-asking it here would add a second veto
-        # with the same unreachability disease this hook just cured. `transcript_activity`
-        # excludes heartbeats (`substantive_age_from_tail`) — the very distinction the long-idle
-        # trigger is computed from, so the two can never disagree about what "activity" means.
+        # with the same unreachability disease this hook just cured. `human_activity_age`
+        # (TRDD-L32WC0H7 / F6 — NOT `transcript_activity`, which is heartbeat-INCLUDING per
+        # `fleet_scan.py`'s own docstring, so it reads EVERY cron fire as "the user is back" and
+        # cancels a pending /clear regardless of whether the session is idle) also excludes the
+        # daemon's own `esc_nudge` interrupt record (`fleet_scan._is_interrupt_record`) — so a
+        # recovery nudge on a stalled session no longer masquerades as the user returning.
         if not verdict_ts:
             return True, "no verdict timestamp — continuing"
         try:
             import fleet_scan  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
 
-            idle_s, _enq, _await = fleet_scan.transcript_activity(
+            idle_s = fleet_scan.human_activity_age(
                 os.environ.get("CLAUDE_PROJECT_DIR") or ".", int(time.time())
             )
         except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear

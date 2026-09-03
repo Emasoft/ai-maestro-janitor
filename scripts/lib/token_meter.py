@@ -240,6 +240,7 @@ def latest_context_entry(transcript_path: str | os.PathLike[str]) -> Optional[tu
     if not p.is_file():
         return None
     try:
+        size = p.stat().st_size
         lines = _read_tail_lines(p)
     except OSError:
         return None
@@ -262,6 +263,15 @@ def latest_context_entry(transcript_path: str | os.PathLike[str]) -> Optional[tu
         total = int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0)
         if total > 0:
             return total, token_history.parse_ts(str(obj.get("timestamp") or ""))
+    # No usage-bearing assistant entry found in the tail window. TRDD-L32WC0H7 / F3: if the
+    # window covered the WHOLE file (size <= _TAIL_BYTES), that is a KNOWN-empty context — the
+    # canonical case is a fresh `/clear` transcript with zero assistant entries — so report 0,
+    # not None. A bigger transcript whose tail didn't reach the file start must stay None: a
+    # >512 KB tail could be one oversized tool_result with the real usage entry further back,
+    # and reporting 0 there would wrongly veto-as-empty a large, actively-growing session (the
+    # 2026-08-04 ruling's concern — see `latest_context_size`'s own docstring above).
+    if size <= _TAIL_BYTES:
+        return 0, None
     return None
 
 

@@ -1213,6 +1213,27 @@ def _hard_restart_plan(inst) -> dict | None:
       `resurrect` (detached background claude that kills + relaunches) — the
       documented no-channel escalation on ``build_force_restart``.
 
+      **UNREACHABLE AS OF TRDD-L32WC0H7 F1 — read this before trusting the line above.**
+      THE INVARIANT: nothing routes here with a kill rung. `_run_hard_restart` (this
+      function's only caller) has exactly ONE call site, gated on `sl.is_hard_rung(action)`,
+      and `fleet_recovery.action_for` — which produces that `action` — caps `frozen` at
+      `esc_nudge` unconditionally, leaving `dead → relaunch` as its only hard return. A
+      `dead` instance is answered by the `diagnosis == "dead"` branch above, so neither kill
+      builder below is ever evaluated. Rungs 6 and 7 are live code nothing can reach;
+      exhaustion alerts a human (`HEARTBEAT-FIRES-STALL`) instead.
+
+      Re-check it by reading `action_for`'s returns, not this comment. The pin on that
+      invariant (no diagnosis returns a kill rung at any attempt count) lives in
+      `tests/test_daemon_hard_restart.py`; if you are changing routing here and find no such
+      test, WRITE IT rather than assuming the invariant is enforced.
+      NOT covered: an ai-maestro server recovering its own `server_owned` instances, which is
+      out of this repo and never was the janitor's to do.
+      The capability is DELIBERATELY KEPT, not dead code to clean up — TRDD-56d24c02 owns it
+      and is blocked on `decision:user`; that card's head block states the choice in full.
+      The reason is on `action_for`'s own branch — a `frozen` stall is shape-identical to a
+      benign retry wait, and a kill was reachable inside the crash-loop budget BEFORE any
+      human had been told. Do not re-route a diagnosis here to make an old test pass.
+
     RESTART IN THE ORIGINAL TAB WHEREVER POSSIBLE (owner directive 2026-07-29). Rungs 5/6
     already do — they type into the existing pane and create nothing. Before escalating to
     the only rung that opens a new surface, retry with the pane the session RECORDED at
@@ -1490,9 +1511,11 @@ def task_session_liveness(fleet: list | None = None) -> None:
     it; on the guard trip a human is alerted ONCE.
 
     HARD-RESTART rungs (A5, TRDD-56d24c02 increment 2 — USER-approved 2026-07-08):
-    a `dead` instance gets rung 5 `relaunch`; a `frozen` instance whose gentle
-    ladder is exhausted escalates to rung 6 `force_restart` (→ rung 7 `resurrect`
-    when no pane resolves). These EXECUTE only when BOTH the beat's fire flag AND
+    a `dead` instance gets rung 5 `relaunch`. Rungs 6 `force_restart` / 7 `resurrect`
+    are UNREACHABLE since TRDD-L32WC0H7 F1 — the invariant and the reason live on
+    ``_hard_restart_plan``; do not restate them here, two prose copies of one
+    mechanism drift apart and the drifted one is what gets read. Rung 5
+    EXECUTES only when BOTH the beat's fire flag AND
     the separate DEFAULT-OFF opt-in CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1
     hold; otherwise the built plan is dry-run-logged. Every kill path re-checks
     ``fleet_restart.is_killable`` (real claude cmdline, not `active`, not
@@ -1588,6 +1611,22 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # healthy / unarmed → never poke, and CLEAR any stale attempt counter so
             # a later freeze — or a different session that reuses this project dir —
             # starts with a fresh budget instead of inheriting a spent/alerted one.
+            #
+            # EXCEPTION (TRDD-L32WC0H7 / F1, precedent TRDD-8DR0X08A): a `healthy`
+            # diagnosis with `rate-limited.flag` still ON DISK is NOT recovered — only
+            # `dispatch.py`'s stub run clears that flag, so its presence means the
+            # heartbeat has not actually reached the model yet. The `esc_nudge` fire that
+            # produced this "healthy" read was the recovery's OWN side effect (it kills the
+            # hung turn, which lets the overdue cron fire immediately, which the second ESC
+            # then also kills) — unlinking here resets the episode counter to 0 every time,
+            # so `frozen` never escalates past attempt=0 (the self-reset the card documents).
+            # Key on the flag file, never on `rate-limited-since.ts` (that timestamp is
+            # re-stamped on every attempt and would be equally self-defeating).
+            if (
+                inst.project_root
+                and (Path(inst.project_root) / ".janitor" / "state" / state.RATE_LIMITED_FLAG).is_file()
+            ):
+                continue  # episode still open — keep the counter, do not reset it
             if sf.exists():
                 sf.unlink(missing_ok=True)
             continue
@@ -1697,6 +1736,24 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 # permanently-looping instance records the give-up exactly once
                 # rather than appending every beat forever.
                 _audit(inst, "declined_crash_loop", None, None)
+                # F1 derived 1 (TRDD-L32WC0H7): a `frozen` give-up gets a NAMED, human-facing
+                # finding — the budget is spent on esc_nudge alone (fleet_recovery caps
+                # `frozen` there unconditionally) and the stall's cause is UNSETTLED, so the
+                # end state must read as "the fires stalled", not just a generic recovery loop.
+                if inst.diagnosis == "frozen":
+                    try:
+                        findings_ledger.record(
+                            sev="HIGH",
+                            code="HEARTBEAT-FIRES-STALL",  # <=24 chars: findings_ledger._clean cap
+                            src="daemon",
+                            msg=(
+                                f"heartbeat fires kept stalling after {attempts} esc_nudge "
+                                "attempts — cause unsettled, a human must investigate"
+                            ),
+                            project_dir=inst.project_root,
+                        )
+                    except Exception:  # noqa: BLE001 -- a finding write must never crash the beat
+                        pass
             continue
         if decision == "cooldown":
             continue

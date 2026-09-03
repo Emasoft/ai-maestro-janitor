@@ -743,6 +743,28 @@ def _is_prompt_record(rec: dict) -> bool:
     return True
 
 
+_INTERRUPT_MARKER = "[Request interrupted by user]"
+
+
+def _is_interrupt_record(rec: dict) -> bool:
+    """True iff `rec` is Claude Code's OWN auto-generated record for an ESC interrupt, not a
+    real human-typed prompt (TRDD-L32WC0H7 / F6 derived). It is written as an ordinary
+    `type: user` record, so `_is_prompt_record` cannot tell it apart from a genuine prompt —
+    but `human_activity_age_from_tail` must, because the daemon's own `esc_nudge` produces
+    exactly this record. Without this exclusion, EVERY nudge the daemon fires reads back as
+    "the user just typed", cancelling the very `/clear` chain the nudge had nothing to do
+    with (six of this incident's cancels landed 2-7s after such a record)."""
+    if rec.get("type") != "user":
+        return False
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    text: str | None = content if isinstance(content, str) else None
+    if text is None and isinstance(content, list):
+        parts = [b.get("text") for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)]
+        text = "\n".join(p for p in parts if p) or None
+    return isinstance(text, str) and text.strip() == _INTERRUPT_MARKER
+
+
 def human_activity_age_from_tail(
     tail: list[str], *, now: int, fallback_age: int | None
 ) -> int | None:
@@ -778,6 +800,8 @@ def human_activity_age_from_tail(
             continue  # unparseable line: neither a prompt nor a usable timestamp
         if rec.get("type") == "queue-operation":
             continue  # bookkeeping only, same exclusion as substantive_age_from_tail
+        if _is_interrupt_record(rec):
+            continue  # our OWN esc_nudge's record — never a human turn (F6 derived)
         ts = token_history.parse_ts(rec.get("timestamp", ""))
         if group_newest_ts is None and ts is not None:
             group_newest_ts = ts

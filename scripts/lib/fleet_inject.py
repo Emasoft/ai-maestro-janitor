@@ -117,11 +117,14 @@ def is_esc_only(action: str) -> bool:
 
 def iterm_esc_only_osascript(session_id: str, *, delay_s: float = 2.0) -> str:
     """AppleScript that targets ONLY the iTerm session whose id == `session_id` and sends
-    ESC (`HARD_INTERRUPT_ESC_COUNT` presses) with NO `write text` — the flood-safe recovery
-    for a rate-limited session. The caller MUST have validated `session_id` (`valid_session_id`).
-    Shares the ESC SSOT `terminal_trigger.iterm_esc_lines`, so the two-ESC rule matches the
-    command-typing path exactly; there is no command string to escape here."""
-    esc = "\n".join(terminal_trigger.iterm_esc_lines()) + "\n"
+    ONE ESC (TRDD-L32WC0H7 / F2) with NO `write text` — the flood-safe recovery for a
+    rate-limited session. The caller MUST have validated `session_id` (`valid_session_id`).
+    Shares the ESC SSOT `terminal_trigger.iterm_esc_lines`, but at `count=1`, NOT the
+    two-ESC command-typing rule: the second of a fixed pair was landing on the FRESH cron
+    fire the first ESC provoked (killing the very heartbeat run the recovery exists to
+    unstick) rather than on anything still needing it. `pane_policy`'s own re-read/retry
+    loop sends a second press only if the screen still shows the wedge."""
+    esc = "\n".join(terminal_trigger.iterm_esc_lines(count=1)) + "\n"
     return (
         f"delay {delay_s}\n"
         'tell application "iTerm2"\n'
@@ -158,7 +161,9 @@ def build_esc_plan(terminal: dict, *, delay_s: float = 2.0) -> dict | None:
             "channel": "tmux",
             "command": "",
             "delay_s": delay_s,
-            "steps": terminal_trigger.build_tmux_steps(pane, [], esc_first=True),
+            # esc_count=1 (TRDD-L32WC0H7 / F2): a fixed 2nd ESC was killing the fresh cron
+            # fire the 1st provoked, not the wedge — the caller's own re-read loop retries.
+            "steps": terminal_trigger.build_tmux_steps(pane, [], esc_first=True, esc_count=1),
         }
     sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
     if sid and valid_session_id(sid):
@@ -179,7 +184,7 @@ def build_esc_plan(terminal: dict, *, delay_s: float = 2.0) -> dict | None:
             "channel": gui_channel,
             "command": "",
             "delay_s": delay_s,
-            "steps": builder([], esc_first=True),
+            "steps": builder([], esc_first=True, esc_count=1),  # F2: ESC-only = 1 press
         }
     return None  # no ESC-capable channel resolved
 

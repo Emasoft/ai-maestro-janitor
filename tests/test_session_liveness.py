@@ -16,63 +16,6 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import session_liveness as sl  # type: ignore[import-not-found]  # noqa: E402
 
-_HB = 300  # heartbeat interval (s)
-_FF = 3    # freeze factor → 15 min of no-progress before "frozen"
-
-
-def test_no_flag_is_never_frozen() -> None:
-    """A session with no rate-limit flag is idle/healthy — never poke it."""
-    assert not sl.is_session_frozen(
-        transcript_mtime=1000, rate_limited_since=None, flag_present=False,
-        now=999999, heartbeat_interval_s=_HB, freeze_factor=_FF,
-    )
-
-
-def test_fresh_rate_limit_is_not_frozen_yet() -> None:
-    """A rate-limit younger than freeze_factor heartbeats gets a chance to
-    self-recover via the in-session cron before the daemon intervenes."""
-    now = 1_000_000
-    assert not sl.is_session_frozen(
-        transcript_mtime=now - 60, rate_limited_since=now - 300,  # 5 min < 15 min
-        flag_present=True, now=now, heartbeat_interval_s=_HB, freeze_factor=_FF,
-    )
-
-
-def test_stale_flag_no_progress_is_frozen() -> None:
-    """The exact freeze shape: flag set 20h ago, transcript silent since → the
-    in-session cron is dead, the session is stuck, the daemon must wake it."""
-    now = 1_000_000
-    rl = now - 20 * 3600          # rate-limited 20h ago
-    assert sl.is_session_frozen(
-        transcript_mtime=rl,       # no progress since the flag
-        rate_limited_since=rl, flag_present=True, now=now,
-        heartbeat_interval_s=_HB, freeze_factor=_FF,
-    )
-
-
-def test_progress_after_flag_means_recovered() -> None:
-    """If the transcript advanced AFTER the flag, the session recovered or is
-    working — NEVER poke it, even when the flag itself is stale."""
-    now = 1_000_000
-    rl = now - 20 * 3600
-    assert not sl.is_session_frozen(
-        transcript_mtime=rl + 600,  # 10 min of progress after the rate-limit
-        rate_limited_since=rl, flag_present=True, now=now,
-        heartbeat_interval_s=_HB, freeze_factor=_FF,
-    )
-
-
-def test_grace_window_absorbs_death_burst() -> None:
-    """The few transcript writes in the rate-limit death-burst (the errors logged
-    just after the flag) are within grace and do NOT count as recovery."""
-    now = 1_000_000
-    rl = now - 20 * 3600
-    assert sl.is_session_frozen(
-        transcript_mtime=rl + 5,   # death-burst write, within default grace 120s
-        rate_limited_since=rl, flag_present=True, now=now,
-        heartbeat_interval_s=_HB, freeze_factor=_FF,
-    )
-
 
 def test_cooldown_blocks_rapid_repoke() -> None:
     """One wake, then wait a full cooldown before the next attempt."""
@@ -111,10 +54,19 @@ def test_capture_terminal_identity_omits_absent_and_blank() -> None:
     assert sl.capture_terminal_identity({"TMUX_PANE": "%3"}) == {"tmux_pane": "%3"}
 
 
-def test_recovery_ladder_full_sequence() -> None:
+def test_dead_ladder_records_the_intended_rung_order() -> None:
     """The ladder escalates gentlest→hard-restart — rung 1 (ESC+nudge) is NOT the whole
     thing ('1 is not enough'): re-arm, reload, update, relaunch, force_restart,
-    resurrect follow."""
+    resurrect follow.
+
+    THIS TEST DOES NOT DESCRIBE LIVE BEHAVIOUR, and a green run here is not evidence that
+    the janitor escalates to a kill. `recovery_action_for` has no production caller; the
+    routing the daemon runs is `fleet_recovery.action_for`, which since TRDD-L32WC0H7 F1
+    caps `frozen` at `esc_nudge` and returns a kill rung for NO diagnosis. What this pins is
+    the intended rung ORDER, kept as the written record TRDD-56d24c02 needs if the USER ever
+    authorizes the janitor to kill a session. Retire this together with the function if that
+    decision comes back "never kill".
+    """
     assert sl.recovery_action_for(0) == "esc_nudge"
     assert sl.recovery_action_for(1) == "rearm"
     assert sl.recovery_action_for(2) == "reload"
@@ -124,9 +76,13 @@ def test_recovery_ladder_full_sequence() -> None:
     assert sl.recovery_action_for(6) == "resurrect"
 
 
-def test_recovery_ladder_clamps_to_hard_restart() -> None:
+def test_dead_ladder_clamps_to_the_last_rung() -> None:
     """Sustained failure stays at the hard-restart rung, never wraps to a gentle no-op
-    that could never recover a hard freeze."""
+    that could never recover a hard freeze.
+
+    Same caveat as `test_dead_ladder_records_the_intended_rung_order` above: this pins the DEAD
+    ladder's clamp, not live behaviour — nothing routes to `recovery_action_for` any more.
+    """
     assert sl.recovery_action_for(7) == "resurrect"
     assert sl.recovery_action_for(99) == "resurrect"
     assert sl.recovery_action_for(-1) == "esc_nudge"

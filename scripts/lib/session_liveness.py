@@ -283,44 +283,6 @@ def capture_terminal_identity(env: Mapping[str, str]) -> dict[str, str]:
     return out
 
 
-def is_session_frozen(
-    *,
-    transcript_mtime: int,
-    rate_limited_since: int | None,
-    flag_present: bool,
-    now: int,
-    heartbeat_interval_s: int,
-    freeze_factor: int,
-    grace_s: int = 120,
-) -> bool:
-    """True iff a session is FROZEN-AND-STUCK and needs an external wake.
-
-    The STUCK signal is a rate-limit flag that the session's OWN heartbeat should
-    have cleared but didn't, with no transcript progress since — distinguishing a
-    genuinely stuck session from one that is merely idle (no flag) or recovering
-    (transcript advanced after the flag).
-
-    Frozen iff ALL hold:
-      * ``flag_present`` and ``rate_limited_since`` is set — the session recorded
-        a rate-limit/throttle and has not cleared it;
-      * the flag is OLDER than ``freeze_factor`` heartbeat intervals — a healthy
-        session clears it within one heartbeat, so a stale flag means the
-        in-session recovery (the cron) is not running. The factor gives the
-        session several heartbeats to self-recover before we ever intervene;
-      * the transcript has NOT advanced past the flag (+ ``grace_s`` for the
-        death-burst writes around the rate-limit) — any progress AFTER the flag
-        means the session recovered or is actively working, so we must NOT poke
-        it. This is the load-bearing safety clause.
-    """
-    if not flag_present or rate_limited_since is None:
-        return False  # no stuck signal — idle or healthy, never poke
-    if (now - rate_limited_since) <= freeze_factor * max(1, heartbeat_interval_s):
-        return False  # too fresh — give the in-session cron its chance first
-    if transcript_mtime > rate_limited_since + max(0, grace_s):
-        return False  # progress after the flag → recovered / actively working
-    return True
-
-
 def rate_limit_flag_is_stale(flag_mtime: int | None, now: int, max_age_s: int) -> bool:
     """True iff a `rate-limited.flag` is old enough to be litter rather than a rate limit.
 
@@ -388,7 +350,21 @@ def recovery_action_for(attempt: int) -> str:
     """The recovery action for the Nth (0-based) consecutive failed wake. Walks
     ``RECOVERY_LADDER`` and CLAMPS to the last rung, so sustained failure stays at
     the hard-restart option (bounded by ``crash_loop_tripped``) rather than wrapping
-    back to a gentle no-op that would never recover a hard freeze."""
+    back to a gentle no-op that would never recover a hard freeze.
+
+    **NOT THE LIVE LADDER — it has NO production caller.** `git grep recovery_action_for`
+    finds only this definition, the `"frozen": "ladder"` comment above, and its own tests.
+    The routing the daemon actually runs is ``fleet_recovery.action_for``, whose single
+    caller is ``daemon.py``'s session-liveness pass, and which since TRDD-L32WC0H7 F1 caps
+    `frozen` at ``esc_nudge`` and returns a kill rung for NO diagnosis.
+
+    So this function and the live one now DISAGREE, and this one's tests still assert
+    ``force_restart``/``resurrect`` and still pass — which is exactly how a reader concludes
+    the escalation is live when it is not. Kept rather than deleted only because it is the
+    written record of the intended 7-rung ORDER, which TRDD-56d24c02 needs if the USER ever
+    authorizes the janitor to kill a session (that card is blocked on `decision:user`). If
+    that decision comes back "never kill", delete this, ``RECOVERY_LADDER``, ``HARD_RUNGS``
+    and their tests together — one version of the routing must exist, not two."""
     if attempt < 0:
         attempt = 0
     return RECOVERY_LADDER[min(attempt, len(RECOVERY_LADDER) - 1)]
@@ -438,7 +414,15 @@ _DIAGNOSIS_RECOVERY: dict[str, str | None] = {
                                     # attempt count. fleet_recovery.action_for maps this to esc_nudge
                                     # UNCONDITIONALLY (see there) — this string is only the "is this
                                     # diagnosis actionable at all" marker, never invoked directly.
-    "frozen": "ladder",            # run recovery_action_for() (the 7-rung escalation)
+    "frozen": "ladder",            # STALE LABEL — see below. Like `retry_wedged` above, this
+                                    # string is only the "is this diagnosis actionable at all"
+                                    # marker; the live routing is fleet_recovery.action_for, which
+                                    # since TRDD-L32WC0H7 F1 maps `frozen` to esc_nudge
+                                    # UNCONDITIONALLY and never reaches a kill rung.
+                                    # `recovery_action_for()` — the 7-rung escalation this once
+                                    # named — has NO production caller (`git grep` finds only its
+                                    # own definition, this comment, and its tests). Do not read it,
+                                    # or its passing tests, as evidence that the escalation is live.
     "version_mismatch": "reload",  # inject /reload-plugins (+ ensure update)
     "cron_dead": "rearm",          # inject /janitor-arm to restore the heartbeat
     "dead": "relaunch",            # gated hard-restart: claude --continue in the pane

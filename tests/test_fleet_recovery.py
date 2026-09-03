@@ -56,16 +56,15 @@ def test_crash_loop_wins_over_cooldown() -> None:
     assert fr.gate(last_ts=now - fr.COOLDOWN_S - 100, attempts=fr.MAX_ATTEMPTS + 3, now=now) == "crash_loop"
 
 
-def test_include_hard_frozen_escalates_only_after_esc_is_exhausted() -> None:
-    """include_hard (TRDD-56d24c02 increment 2 + TRDD-P7WU40G9): the first
-    `_FROZEN_GENTLE_ATTEMPTS` frozen attempts are ESC-ONLY (no typed command, so no flood); ONLY
-    after those does it escalate ONE rung to force_restart (kill + `claude --continue`, which
-    resumes from the transcript so no work is lost) — the DEFAULT-OFF last resort. dead→relaunch;
-    healthy/unarmed stay None at ANY attempt."""
-    for attempt in range(fr._FROZEN_GENTLE_ATTEMPTS):          # 0,1,2 → ESC-only
+def test_include_hard_frozen_never_escalates_past_esc_nudge() -> None:
+    """include_hard (TRDD-56d24c02 increment 2 + TRDD-P7WU40G9, capped by TRDD-L32WC0H7 / F1
+    derived 1): frozen is ESC-ONLY (no typed command, so no flood) at EVERY attempt, with or
+    without include_hard — it never escalates to force_restart, because a `frozen` diagnosis
+    is a stall whose cause is unsettled (indistinguishable from a static retry-watchdog frame).
+    dead→relaunch (an unrelated diagnosis, unaffected); healthy/unarmed stay None at ANY attempt."""
+    for attempt in (0, 1, 2, 3, 4, 99):
         assert fr.action_for("frozen", attempt, include_hard=True) == "esc_nudge", attempt
-    assert fr.action_for("frozen", fr._FROZEN_GENTLE_ATTEMPTS, include_hard=True) == "force_restart"
-    assert fr.action_for("frozen", 99, include_hard=True) == "force_restart"  # clamps, no wrap
+        assert fr.action_for("frozen", attempt, include_hard=False) == "esc_nudge", attempt
     assert fr.action_for("dead", 0, include_hard=True) == "relaunch"
     assert fr.action_for("dead", 0) is None                    # unwired view preserved
     assert fr.action_for("healthy", 99, include_hard=True) is None
@@ -75,8 +74,9 @@ def test_include_hard_frozen_escalates_only_after_esc_is_exhausted() -> None:
 
 def test_frozen_never_TYPES_a_command_even_when_it_hard_restarts() -> None:
     """The invariant that kills the flood: a frozen session's action is NEVER a command-typing
-    rung — it is ESC-only, or (last resort) a process-killing rung that types no slash-command.
-    So no `/janitor-arm` can ever accumulate on a rate-limited session's input line, at any attempt."""
+    rung — it is ESC-only at every attempt, capped there (never a process-killing rung either;
+    TRDD-L32WC0H7 / F1). So no `/janitor-arm` can ever accumulate on a rate-limited session's
+    input line, at any attempt."""
     import fleet_inject as fi
     for attempt in range(fr.MAX_ATTEMPTS + 2):
         action = fr.action_for("frozen", attempt, include_hard=True)

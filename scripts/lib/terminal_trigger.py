@@ -268,14 +268,20 @@ def applescript_quote(command: str) -> str:
     return command.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def iterm_esc_lines(indent: str = "            ") -> list[str]:
+def iterm_esc_lines(indent: str = "            ", *, count: int = HARD_INTERRUPT_ESC_COUNT) -> list[str]:
     """AppleScript lines for a HARD interrupt inside an iTerm ``tell s`` block:
-    ``HARD_INTERRUPT_ESC_COUNT`` raw-ESC writes, each followed by a settle delay. Shared by
-    every iTerm self-trigger / fleet-recovery osascript builder so the two-ESC rule (see
-    ``HARD_INTERRUPT_ESC_COUNT``) has a single source of truth. ``indent`` is the leading
-    whitespace matching the builder's ``tell s`` block (default 12 spaces)."""
+    ``count`` raw-ESC writes, each followed by a settle delay. Shared by every iTerm
+    self-trigger / fleet-recovery osascript builder so the ESC rule has a single source of
+    truth. ``indent`` is the leading whitespace matching the builder's ``tell s`` block
+    (default 12 spaces). Default ``count`` is ``HARD_INTERRUPT_ESC_COUNT`` (2) for the
+    command-typing (``esc_first``) plans, which need to both kill a running tool AND swallow
+    the fresh fire the first ESC provokes. An ESC-ONLY plan (``esc_nudge``, TRDD-L32WC0H7 /
+    F2) passes ``count=1``: it sends ONE press per call and leaves it to the caller's own
+    re-read/retry loop (``pane_policy``) to send a second only if the screen still needs it —
+    a fixed double-press there was killing the CRON FIRE the first ESC provoked, which is the
+    entire reason ``frozen``'s attempt counter never advanced (TRDD-L32WC0H7 defect 1)."""
     out: list[str] = []
-    for _ in range(HARD_INTERRUPT_ESC_COUNT):
+    for _ in range(max(0, count)):
         out.append(f"{indent}write text (character id 27) without newline")
         out.append(f"{indent}delay {_ESC_SETTLE_S}")
     return out
@@ -753,6 +759,22 @@ def inject_until_sent(
     deadline = clock() + giveup_s
     last = "not attempted"
     unreadable = 0  # CONSECUTIVE failed reads on a readable channel; reset by any good read
+    typed_once = False  # TRDD-L32WC0H7 / F4: has type_fn() run at least once this call?
+
+    def _clear_leftover_command() -> None:
+        """F4: on ANY non-submit exit AFTER `type_fn()` has run, re-read the pane and clear
+        it ONLY if it still shows exactly our own command — never the user's own keystrokes
+        (owner 2026-08-02: never delete what the user typed). Reached from the `still_wanted`
+        cancel and the giveup-deadline exit, which used to return with no clear at all — only
+        the settle-failure branch below did. That gap left `/clear` sitting in the prompt of a
+        0% context session (the card's symptom): `still_wanted` re-asks EVERY iteration, so a
+        cancel that lands right after `type_fn()` typed the command, but before the settle-poll
+        judged it, skipped straight past the one branch that would have cleared it."""
+        if not typed_once or clear_fn is None:
+            return
+        text = reader(terminal)
+        if text is not None and prompt_field_shows_only(text, command):
+            clear_fn()
     # Clock-independent bound (see wait_until_pane_free): a frozen/stalled clock must not
     # turn "bounded by giveup_s" into an infinite CPU-pinned loop inside a hook or daemon
     # beat. Exits through the same loud give-up return.
@@ -761,12 +783,14 @@ def inject_until_sent(
         max_iters -= 1
         if clock() >= deadline or max_iters <= 0:
             state.log_line("terminal_trigger", f"inject gave up after {giveup_s:.0f}s: {last}")
+            _clear_leftover_command()
             return False, f"gave up after {giveup_s:.0f}s ({last})"
 
         if still_wanted is not None:
             wanted, wanted_why = still_wanted()
             if not wanted:
                 state.log_line("terminal_trigger", f"inject cancelled: {wanted_why}")
+                _clear_leftover_command()
                 return False, f"cancelled — {wanted_why}"
 
         if typing_probe(terminal):
@@ -801,6 +825,7 @@ def inject_until_sent(
             continue
 
         type_fn()
+        typed_once = True
         # POLL for the field to settle — do NOT judge on ONE immediate read. Typing is
         # asynchronous: the keystrokes cross an Apple Event / tmux send-keys boundary and the
         # pane must then RENDER before a capture can show them. On a loaded host that is not
@@ -882,7 +907,8 @@ def inject_until_sent(
 
 
 def build_tmux_steps(
-    pane: str, commands: str | Sequence[str], *, esc_first: bool = True
+    pane: str, commands: str | Sequence[str], *, esc_first: bool = True,
+    esc_count: int = HARD_INTERRUPT_ESC_COUNT,
 ) -> list[list[str]]:
     """The ordered send sequence for a tmux pane: an OPTIONAL leading ESC, then each
     command typed as LITERAL text and submitted with Enter. Pure — returns argv steps
@@ -907,8 +933,11 @@ def build_tmux_steps(
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     steps: list[list[str]] = []
     if esc_first:
-        # TWO ESCs (HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one ends the turn.
-        for _ in range(HARD_INTERRUPT_ESC_COUNT):
+        # `esc_count` defaults to HARD_INTERRUPT_ESC_COUNT (2: one clears a running tool, one
+        # ends the turn) for a COMMAND-typing plan. An ESC-ONLY wedge plan (empty `commands`,
+        # TRDD-L32WC0H7 / F2) passes `esc_count=1`: the second of a fixed pair was landing on
+        # the FRESH cron fire the first ESC provoked, not on anything still needing it.
+        for _ in range(max(0, esc_count)):
             steps.append(["RUN", "tmux", "send-keys", "-t", pane, "Escape"])
             steps.append(["SLEEP", _ESC_SETTLE_S])
     for i, command in enumerate(cmds):
@@ -920,7 +949,8 @@ def build_tmux_steps(
 
 
 def build_wtype_steps(
-    commands: str | Sequence[str], *, esc_first: bool = True
+    commands: str | Sequence[str], *, esc_first: bool = True,
+    esc_count: int = HARD_INTERRUPT_ESC_COUNT,
 ) -> list[list[str]]:
     """The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
     leading ESC, then each command typed as LITERAL text and submitted with Enter.
@@ -937,8 +967,8 @@ def build_wtype_steps(
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     steps: list[list[str]] = []
     if esc_first:
-        # TWO ESCs (HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one ends the turn.
-        for _ in range(HARD_INTERRUPT_ESC_COUNT):
+        # See build_tmux_steps' `esc_count` docstring — same ESC-only vs command-typing split.
+        for _ in range(max(0, esc_count)):
             steps.append(["RUN", "wtype", "-k", "Escape"])
             steps.append(["SLEEP", _ESC_SETTLE_S])
     for i, command in enumerate(cmds):
@@ -950,7 +980,8 @@ def build_wtype_steps(
 
 
 def build_xdotool_steps(
-    commands: str | Sequence[str], *, esc_first: bool = True
+    commands: str | Sequence[str], *, esc_first: bool = True,
+    esc_count: int = HARD_INTERRUPT_ESC_COUNT,
 ) -> list[list[str]]:
     """The X11 (`xdotool`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
     leading ESC, then each command typed as LITERAL text and submitted with Enter.
@@ -966,8 +997,8 @@ def build_xdotool_steps(
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     steps: list[list[str]] = []
     if esc_first:
-        # TWO ESCs (HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one ends the turn.
-        for _ in range(HARD_INTERRUPT_ESC_COUNT):
+        # See build_tmux_steps' `esc_count` docstring — same ESC-only vs command-typing split.
+        for _ in range(max(0, esc_count)):
             steps.append(["RUN", "xdotool", "key", "Escape"])
             steps.append(["SLEEP", _ESC_SETTLE_S])
     for i, command in enumerate(cmds):

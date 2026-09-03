@@ -302,6 +302,29 @@ def test_recovered_instance_resets_its_attempt_budget(tmp_path, monkeypatch) -> 
     assert not sf.exists()
 
 
+def test_healthy_with_rate_limited_flag_still_present_keeps_the_episode_open(
+    tmp_path, monkeypatch
+) -> None:
+    """TRDD-L32WC0H7 / F1: a `healthy` diagnosis does NOT mean the episode is over when
+    `rate-limited.flag` is still on disk — only `dispatch.py`'s stub run clears that flag, so
+    its presence means the heartbeat has not actually reached the model yet. Unlinking the
+    attempt counter here is exactly the daemon's own esc_nudge side effect (kill the hung
+    turn → the overdue cron fires → the second ESC kills that fire too → next beat reads
+    `healthy`) resetting the counter to 0 forever, so `frozen` never escalates past attempt=0."""
+    root = tmp_path / "proj-flag"
+    (root / ".janitor" / "state").mkdir(parents=True)
+    (root / ".janitor" / "state" / daemon.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+    fleet = [_inst("healthy", str(root), {"tmux_pane": "%4"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    rec = tmp_path / "recovery"
+    rec.mkdir(parents=True)
+    sf = daemon._recovery_state_path(rec, str(root))
+    sf.write_text(json.dumps({"attempts": 2, "last_ts": 1}), encoding="utf-8")
+    daemon.task_session_liveness()
+    assert sf.exists()                                    # NOT unlinked — episode still open
+    assert json.loads(sf.read_text(encoding="utf-8"))["attempts"] == 2
+
+
 def test_restarted_session_gets_a_fresh_budget(tmp_path, monkeypatch) -> None:
     """A spent/alerted budget left by a PREVIOUS occupant of the same project dir
     (different pid:tty) must NOT be inherited by a freshly-restarted session — the new
