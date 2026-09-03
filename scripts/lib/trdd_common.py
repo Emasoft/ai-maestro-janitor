@@ -342,6 +342,15 @@ TERMINAL_COLUMNS = frozenset(
 # ever unblock the dependent by completing.
 BLOCKER_CLEARED_COLUMNS = TERMINAL_COLUMNS
 
+# Strict subset of TERMINAL_COLUMNS meaning the TRDD actually SHIPPED (DONE), not merely
+# closed-without-shipping. `completed` is the archived-bracket spelling some older cards use
+# for the same state as `complete`. dispatch.py's `_blocked_reason` classifies a
+# `failed`/`refused`/`cancelled`/`superseded` blocker as decision-needed (still a hold, a human
+# must look) — only a DONE blocker clears a `blocked-by:` hold (RTRS704K). The
+# `unblock-when: trdd:<id> terminal` PREDICATE deliberately keeps the wider `TERMINAL_COLUMNS`
+# semantics its rule text documents; a card that wants "shipped" there says so via `blocked-by:`.
+DONE_COLUMNS = frozenset({"complete", "completed", "published", "live"})
+
 
 def norm_state(value: str) -> str:
     """Normalise a status/column token to lowercase kebab-case.
@@ -767,6 +776,11 @@ def parse_trdd_record(path: Path) -> TrddRecord:
 def is_terminal_column(column: str) -> bool:
     """True iff `column` is one of the DONE/closed terminal columns."""
     return column in TERMINAL_COLUMNS
+
+
+def is_done_column(column: str) -> bool:
+    """True iff `column` means the TRDD actually SHIPPED — see `DONE_COLUMNS`."""
+    return column in DONE_COLUMNS
 
 
 # Markers in a STATE block that say the latest work is DONE/SHIPPED. A ✅ /

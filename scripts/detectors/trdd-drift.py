@@ -89,6 +89,13 @@ _PRED_LOG_RE = re.compile(r"^log:(\S+)\s+matches\s+(.+)$")
 _PRED_DATE_RE = re.compile(r"^date:>=(\d{4})-(\d{2})-(\d{2})$")
 _PRED_DECISION_RE = re.compile(r"^decision:\S+$")
 
+# `log:` predicate reads only the TAIL of the target file — a `.janitor/logs/` file can grow
+# to multi-MB and this predicate is re-evaluated every heartbeat, so a whole-file read+regex
+# on every fire is an unbounded cost that scales with log age, not with what changed. 256 KiB
+# comfortably covers the tail a fresh log line needs to appear in; older matches age out, same
+# as `tail -f` behaviour a human would expect from a "did the log just say X" check.
+_LOG_PRED_TAIL_BYTES = 256 * 1024
+
 
 def _repo_relative(rel: str) -> bool:
     """True iff `rel` cannot escape the project root — a PROJECT card is pushed, so an
@@ -102,7 +109,7 @@ def _evaluate_predicate(
     *,
     column_by_uid: dict[str, str],
     project_repo_slug: str | None,
-    open_issue_numbers: set[int],
+    open_issue_numbers: set[int] | None,
     project_root: Path,
     now: int,
 ) -> bool | None:
@@ -121,6 +128,16 @@ def _evaluate_predicate(
         # typo, so it is NOT malformed.
         if project_repo_slug is None or owner_repo.lower() != project_repo_slug.lower():
             return False
+        # `None` means the snapshot itself is missing/unreadable — the ONLY safe reading is
+        # "unknown, so not satisfied" (never True): an empty-but-present set already means
+        # "snapshot read fine, zero open issues", which correctly satisfies this predicate.
+        # Collapsing "missing" into "empty" is the bug this comment guards against — it made
+        # every `issue:` predicate auto-satisfy the moment the watcher snapshot vanished.
+        if open_issue_numbers is None:
+            return False
+        # The snapshot caps at the newest 50 open issues (github-issues-watch.py) — an issue
+        # outside that window reads as "not present" i.e. closed, a false satisfy. Reliable
+        # only while the repo has ≤50 open issues; not fixable here without changing the watcher.
         return num not in open_issue_numbers
     m = _PRED_FILE_RE.match(pred)
     if m:
@@ -134,13 +151,33 @@ def _evaluate_predicate(
         if not _repo_relative(rel):
             return None
         try:
-            text = (project_root / rel).read_text(encoding="utf-8")
+            with (project_root / rel).open("rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+                truncated = size > _LOG_PRED_TAIL_BYTES
+                fh.seek(max(0, size - _LOG_PRED_TAIL_BYTES))
+                tail = fh.read()
         except OSError:
             return False
+        text = tail.decode("utf-8", errors="replace")
+        if truncated:
+            # The seek can land mid-line, and `^` matches at index 0 of the decoded string
+            # regardless of `re.MULTILINE` — so a `^`-anchored pattern could match a line
+            # FRAGMENT the seek cut in half (the real line started before the window). A
+            # sentinel byte at index 0 is NOT enough: `^.*needle` swallows the sentinel and
+            # still matches the fragment. Drop everything up to and including the first `\n`
+            # instead — every line left in the window is then whole, so a match can only be a
+            # line the log genuinely wrote. A tail with no `\n` at all is one >256 KiB line,
+            # not a log; it matches nothing.
+            nl = text.find("\n")
+            text = text[nl + 1 :] if nl >= 0 else ""
         try:
-            return re.search(pattern, text, re.MULTILINE) is not None
+            compiled = re.compile(pattern, re.MULTILINE)
         except re.error:
             return None
+        # A pathological pattern can only backtrack across the bounded tail read above, not
+        # an unbounded log — the size cap is what keeps this call's worst case finite.
+        return compiled.search(text) is not None
     m = _PRED_DATE_RE.match(pred)
     if m:
         try:
@@ -162,7 +199,7 @@ def evaluate_unblock_when(
     *,
     column_by_uid: dict[str, str],
     project_repo_slug: str | None,
-    open_issue_numbers: set[int],
+    open_issue_numbers: set[int] | None,
     project_root: Path,
     now: int,
 ) -> tuple[bool, list[str]]:
@@ -193,12 +230,21 @@ def evaluate_unblock_when(
 
 _FM_COLUMN_BLOCKED_RE = re.compile(r"^column:[ \t]*blocked[ \t]*$", re.MULTILINE)
 _FM_UPDATED_LINE_RE = re.compile(r"^updated:[ \t]*.*$", re.MULTILINE)
+_FM_PRE_BLOCK_COLUMN_LINE_RE = re.compile(r"^pre-block-column:[ \t]*.*\n?", re.MULTILINE)
 
 
 def _restore_column_text(text: str, target_column: str, now_iso: str) -> str | None:
-    """Rewrite `column: blocked` → `column: <target_column>` and bump `updated:`, both
-    scoped to the frontmatter block only. None if the shape doesn't match — the caller then
-    writes nothing rather than risk a malformed rewrite."""
+    """Rewrite `column: blocked` → `column: <target_column>`, bump `updated:`, clear
+    `blocked-by:` and drop `pre-block-column:` — both scoped to the frontmatter block only.
+
+    `blocked-by:` and `pre-block-column:` MUST be cleared here (rule §6: "`blocked-by:`
+    empties; restore previous column"), not left behind — otherwise `check4_stale_blockers`
+    re-flags the leftover id as a "cleared blocker" every fire (advisor finding B2), even
+    though the card already left `blocked`.
+
+    None if the shape doesn't match — the caller then writes nothing rather than risk a
+    malformed rewrite.
+    """
     m = trdd_common.FRONTMATTER_RE.match(text)
     if not m:
         return None
@@ -209,6 +255,8 @@ def _restore_column_text(text: str, target_column: str, now_iso: str) -> str | N
     block, n = _FM_UPDATED_LINE_RE.subn(f"updated: {now_iso}", block, count=1)
     if n != 1:
         return None
+    block = trdd_common.FM_BLOCKED_BY_RE.sub("blocked-by: []", block, count=1)
+    block = _FM_PRE_BLOCK_COLUMN_LINE_RE.sub("", block, count=1)
     return text[: m.start(1)] + block + text[m.end(1) :]
 
 
@@ -218,7 +266,7 @@ def _try_unblock(
     *,
     column_by_uid: dict[str, str],
     project_repo_slug: str | None,
-    open_issue_numbers: set[int],
+    open_issue_numbers: set[int] | None,
     project_root: Path,
     now: int,
     seen: Path,
@@ -250,7 +298,47 @@ def _try_unblock(
         )
     if not satisfied:
         return
+    # `unblock-when:` predicates can all hold while `blocked-by:` still names a live blocker
+    # (the two fields are authored independently) — restoring past that would unblock a card
+    # whose actual dependency has not resolved. `blocked_by_ids` extracts only TRDD-SHAPED
+    # ids — a `#N`/`owner/repo#N` issue ref or a descriptive token (e.g. `owner-decision-x`)
+    # does NOT match its pattern and is silently skipped by design: RTRS704K's own
+    # `unblock-when: decision:` predicate is the machine-checkable replacement for those, and
+    # `blocked-by:` is scoped to TRDD-to-TRDD dependencies only. Every id `blocked_by_ids`
+    # DOES return here IS a TRDD reference, and it must have actually SHIPPED (`DONE_COLUMNS`)
+    # to clear the hold — `failed`/`refused`/`cancelled`/`superseded` are terminal but NOT
+    # done, so they stay a hold too, mirroring dispatch.py's `_blocked_reason`, which
+    # classifies both an unresolvable id and a non-shipped terminal blocker as decision-needed.
+    fm = trdd_common.FRONTMATTER_RE.match(head)
+    blocked_by_raw = trdd_common.FM_BLOCKED_BY_RE.search(fm.group(1)) if fm else None
+    if blocked_by_raw:
+        for blocker_id in trdd_common.blocked_by_ids(blocked_by_raw.group(1)):
+            blocker_column = column_by_uid.get(blocker_id)
+            if blocker_column is None:
+                state.log_line(
+                    "trdd-drift",
+                    f"TRDD-{uid[:8]} unblock-when satisfied but blocked-by "
+                    f"TRDD-{blocker_id} is unresolvable — holding.",
+                )
+                return
+            if not trdd_common.is_done_column(blocker_column):
+                state.log_line(
+                    "trdd-drift",
+                    f"TRDD-{uid[:8]} unblock-when satisfied but blocked-by "
+                    f"TRDD-{blocker_id} still {blocker_column} — holding.",
+                )
+                return
     target = trdd_common.pre_block_column(head) or "todo"
+    # `pre-block-column:` is free-text frontmatter — an author typo or corruption there must
+    # not silently plant an illegal `column:` value on restore (advisor finding B4). "blocked"
+    # itself is also refused: restoring INTO the state being restored FROM is not a restore.
+    if target not in trdd_common.ALL_COLUMNS or target == "blocked":
+        state.log_line(
+            "trdd-drift",
+            f"TRDD-{uid[:8]} unblock-when satisfied but pre-block-column "
+            f"{target!r} is not a legal column — holding rather than write it.",
+        )
+        return
     try:
         text = f.read_text(encoding="utf-8")
     except OSError:
@@ -352,14 +440,18 @@ def main() -> int:
     now = int(time.time())
 
     # Pass 1 — a uid->column board for the `trdd:<id> terminal` predicate kind (mirrors
-    # trdd-state-reconciliation's Check-4 board): built once so resolving one card's blocker
-    # never re-reads the whole tree per predicate.
+    # trdd-state-reconciliation's Check-4 board) AND for the `blocked-by:` hold below. Built
+    # over EVERY design folder (tasks/archived/proposals/refused), not just `tasks/` — a
+    # blocker that already SHIPPED is archived and therefore invisible to `trdd_files("tasks")`
+    # alone, which made a completed-and-archived blocker look "unresolvable" and held its
+    # dependent blocked forever (RTRS704K finding #1; mirrors dispatch.py's `_all_folders_columns`).
     column_by_uid: dict[str, str] = {}
-    for _scope, _f in trdds:
-        _uid = trdd_common.extract_uid(_f.name)
-        if _uid is not None:
-            _, _col = _parse_trdd_state(_f)
-            column_by_uid[_uid] = _col
+    for _folder in trdd_common.DESIGN_FOLDERS:
+        for _scope, _f in trdd_common.trdd_files(_folder, str(root)):
+            _uid = trdd_common.extract_uid(_f.name)
+            if _uid is not None and _uid not in column_by_uid:
+                _, _col = _parse_trdd_state(_f)
+                column_by_uid[_uid] = _col
 
     # This project's own `owner/repo` + its currently-open issue numbers, from the
     # network-free snapshot `github-issues-watch` already maintains (dispatch.py's
@@ -375,7 +467,10 @@ def main() -> int:
         import issues_watch  # noqa: PLC0415 - lazy, this detector's only use of it (lib already on sys.path)
 
         project_repo_slug = issues_watch.parse_remote_slug(remote_proc.stdout or "")
-    open_issue_numbers: set[int] = set()
+    # `None` = no readable snapshot yet, distinct from an empty-but-present one (zero open
+    # issues) — collapsing the two used to auto-satisfy `issue:` predicates the moment the
+    # snapshot was absent, since `num not in set()` is always True (advisor finding B1).
+    open_issue_numbers: set[int] | None = None
     try:
         import json  # noqa: PLC0415 - lazy, this detector's only use of it
 
@@ -385,7 +480,7 @@ def main() -> int:
         if isinstance(seen_issues_raw, dict):
             open_issue_numbers = {int(k) for k in seen_issues_raw if str(k).isdigit()}
     except (OSError, ValueError):
-        pass  # no snapshot yet — every `issue:` predicate on THIS repo stays unsatisfied
+        pass  # no snapshot yet — every `issue:` predicate on THIS repo stays unsatisfied (None)
 
     for scope, f in trdds:
         status, column = _parse_trdd_state(f)

@@ -23,10 +23,9 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
 
 > **FULL REFERENCE (read on demand — do NOT paste it here):**
 > `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/rules-reference/trdd-design-tasks-full.md`
-> Holds the id/timestamp recipe, the full frontmatter schema, the column-transition matrix,
-> the folder lifecycle, the grep cheat-sheet, the v1→v2 migration, and the rationale. Read it
-> when you need a field or a transition you don't know. Everything below is normative on its
-> own; the reference only expands it.
+> Holds the id/timestamp recipe, full frontmatter schema, column-transition matrix, folder
+> lifecycle, grep cheat-sheet, v1→v2 migration, and rationale. Everything below is normative
+> on its own; the reference only expands it.
 
 ## The normative core
 
@@ -43,21 +42,20 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
    be gitignored; LOCAL/USER need no entry.
 
    **Scope routing.** Ask: *true and useful for a contributor on a DIFFERENT machine?* No →
-   LOCAL (a `$HOME` path, hostname, username, credential, "on THIS machine", install state).
-   One project → PROJECT. Fleet-wide or owned by none → USER. UNSURE → LOCAL. May SPLIT,
-   cross-linked. `scope:` may appear (absent = `project`) but the **path is authoritative**.
+   LOCAL (a `$HOME` path, hostname, credential, install state). One project → PROJECT.
+   Fleet-wide or owned by none → USER. UNSURE → LOCAL. May SPLIT, cross-linked. `scope:` may
+   appear (absent = `project`) but the **path is authoritative**.
 
 2. **Filename.** `TRDD-<YYYYMMDD_HHMMSS±HHMM>-<id8>-<slug>.md`. `<id8>` is an **8-char
    UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id (no UUID), unique across
-   **every scope root that exists** (the collision check scans all of them). Test for a taken
-   id with `find … -iname … | grep -q .` — **never** `ls <glob>`, and **`-iname`, never
-   `-name`** (both load-bearing; why: the reference).
+   **every scope root that exists**. Test for a taken id with `find … -iname … | grep -q .`
+   — **never** `ls <glob>`, and **`-iname`, never `-name`** (load-bearing; why: the reference).
 3. **Reference a TRDD as `TRDD-<id8>`** (or `#<id8>` casually). Lookups are
    case-insensitive; the id is always WRITTEN uppercase. Put it in the commit subject of
    every commit that implements it, and in whatever the session uses to track work in flight.
    **A LOCAL TRDD may cite a PROJECT TRDD** (`parent-trdd`, `blocked-by`, `npt`, `eht`).
    **A PROJECT TRDD MUST NOT cite a LOCAL one** — a dangling reference for every other
-   contributor. The one hard invariant the scope split introduces; greppable.
+   contributor.
 4. **Frontmatter is grep-first.** One field per line. Lists are flow-style `[a, b, c]`.
    Enums are bare kebab-case. Titles contain no colons. Dates are ISO 8601 with the local
    offset (`%Y-%m-%dT%H:%M:%S%z`). No trailing whitespace or comments on data lines.
@@ -77,27 +75,25 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
    ```
 
 6. **`column:` is the state machine.** v2 moved pipeline state here from v1's `status:` (not
-   retired — specs carry `status: normative`): the residue is a **VALUE, never the field
-   NAME** — never key on the name, `column:` wins, a missing field gets no synthesized value,
-   one pipeline claim per card. The 22-column vocabulary lives in `universal-kanban.md`; the
+   retired — specs carry `status: normative`): the residue is a VALUE, never the field
+   NAME — never key on the name, `column:` wins, a missing field gets no synthesized value,
+   one pipeline claim per card. The 22-column vocabulary lives in `universal-kanban.md`;
    terminal branch follows `release-via: publish|deploy|none`; `blocked` applies whenever
    `blocked-by:` is non-empty (record `pre-block-column:`, restore when cleared).
 7. **BUMP `updated:` on every edit that CHANGES WHAT THE TRDD ASSERTS** — not just column
-   changes. The board sorts on it, so a MECHANICAL repair (a format/syntax pass that changes
-   no fact) must NOT bump it, or the repair silently reorders the whole board.
+   changes. A MECHANICAL repair (format/syntax only, no fact change) must NOT bump it. Why:
+   the reference.
 8. **`implementation-commits:`** accumulates the SHAs that landed this TRDD's code — the
    backtracking field: how a bug found later is traced to the TRDD that introduced it.
-9. **NPT vs EHT.** `npt:` = Necessary Prerequisite Tasks (must finish BEFORE `dev`). `eht:`
-   = Effects Handling Tasks (post-conditions — parent **cannot reach `complete`** until every
-   EHT is terminal). **Derived TRDDs are MANDATORY, depth-1**: empty `npt:`/`eht:`, never a
-   `parent-trdd:`; siblings order via `blocked-by:`; `created-by:` set once; refusals archive
-   `approved: false`. Full: the reference.
+9. **NPT vs EHT.** `npt:` = Necessary Prerequisite Tasks (finish BEFORE `dev`). `eht:` =
+   Effects Handling Tasks (parent **cannot reach `complete`** until every EHT is terminal).
+   **Derived TRDDs are MANDATORY, depth-1**: empty `npt:`/`eht:`, never a `parent-trdd:`. Full
+   semantics: the reference.
 10. **STATE head block — MANDATORY once a TRDD spans more than one session.** Right after the
     title (append-only growth otherwise surfaces stale facts as current) add:
     `## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — <date>`.
-    Single source of truth, kept current on every edit; carries each component's state, the
-    **NEXT ACTION** (one step, runnable as written), load-bearing gotchas, an explicit
-    **SUPERSEDED — do NOT carry forward** list, and artifacts to read first.
+    Single source of truth, kept current on every edit, and it WINS on disagreement with the
+    frontmatter. Full contents (NEXT ACTION, gotchas, SUPERSEDED list): the reference.
 11. **Reports are evidence; decisions become TRDDs.** A report (audit, benchmark) presents DATA
     and lives in gitignored `reports/`. The moment it leads to a DECISION, that decision goes
     into a TRDD — a new one, or an existing TRDD's STATE block.
@@ -107,11 +103,9 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
     closing edit itself; `## Approval log` (append-only, EXEMPT); EVERY terminal column
     archives AS ITSELF — no rename on the way in (archive-eligible =
     `complete|completed|cancelled|superseded|published|live`; absent `release-via:` defaults
-    to `none`; 3-pillars spec 2.0.0 amended 3P-ZON-05 on 2026-08-18 to admit `complete`
-    because the complete→completed rename was a dual-write measured drifting 232 times
-    fleet-wide — the rule moved, not the cards); and a body line FALSELY, MACHINE-VERIFIABLY
-    contradicting the terminal `column:` MAY be removed. Worked example + why so narrow: the
-    reference.
+    to `none`; why `complete` is included: the reference); and a body line FALSELY,
+    MACHINE-VERIFIABLY contradicting the terminal `column:` MAY be removed. Worked example +
+    why so narrow: the reference.
 13. **One atomic task per TRDD.** If you catch yourself writing "and also do X", X is an
     NPT, an EHT, or its own TRDD.
 14. **One kanban board, `scope` as a badge — not a second board.** Columns and transitions
@@ -129,15 +123,10 @@ Implementation: `scripts/detectors/trdd-drift.py::review_after_epoch`.
 
 ## `unblock-when:` — machine-checkable wait conditions on a `blocked` card
 
-`unblock-when: [<pred>, ...]` (kinds: `trdd:<id> terminal`, `issue:<owner/repo#N> closed`,
-`file:<repo-relative path> exists`, `log:<repo-relative path> matches <regex>`,
-`date:>=YYYY-MM-DD`, `decision:<who>` — the only human-only kind) lets `trdd-drift` restore
-`column: blocked` to `pre-block-column:` on its own once ALL predicates hold; a malformed
-predicate MUST fail OPEN toward staying blocked, never toward unblocking. `blocked-by:` keeps
-only TRDD/issue references going forward — a descriptive token migrates to
-`unblock-when: [decision:<who>]` on next touch, superseding (for new cards) the F4IBIDB6
-`has_blocked_by_value` accommodation. Full grammar: the reference.
-Implementation: `scripts/detectors/trdd-drift.py::evaluate_unblock_when`.
+`unblock-when: [<pred>, ...]` (kinds: `trdd:`, `issue:`, `file:`, `log:`, `date:`, `decision:` —
+the only human-only kind, never auto-clears) lets `trdd-drift` auto-restore a `blocked` card
+once ALL predicates hold; malformed MUST fail OPEN (stay blocked). Full grammar + migration:
+the reference. Implementation: `scripts/detectors/trdd-drift.py::evaluate_unblock_when`.
 
 ## Cross-project scope discriminators
 
@@ -163,6 +152,5 @@ frontmatter (hand-edits beat stale fields) — then fix the frontmatter. Exact c
 ## Does NOT apply to
 
 Session handoffs (`docs_dev/`), scenario tests, proposal reports, inline `TODO:` comments, or
-trivial same-session tasks (track those in-session; they need no TRDD). For **non-trivial design
-tasks that must survive
-as tracked project artifacts**.
+trivial same-session tasks (track those in-session; they need no TRDD). This rule is for
+**non-trivial design tasks that must survive as tracked project artifacts**.

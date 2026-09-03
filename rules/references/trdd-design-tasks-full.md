@@ -266,6 +266,12 @@ layout). A malformed predicate fails OPEN toward **staying blocked** — the inv
 tests: `scripts/detectors/trdd-drift.py::evaluate_unblock_when`,
 `tests/test_trdd_drift_unblock_when.py`.
 
+The list itself is split on `,` (`parse_flow_list`) — **no comma may appear inside a single
+predicate.** A `log:` regex written as `foo{2,3}` or `a,b` silently becomes two malformed
+tokens (fails safe: stays blocked, never unblocks on the typo — but not what the author meant).
+Write comma-free forms (`\{2,3\}` has no bare comma to split on either — escape doesn't help;
+avoid the quantifier shape, or use a character class `[,]`/`a[,]b` instead of a literal comma).
+
 ### Minimal TRDD (most fields use defaults)
 
 ```yaml
@@ -608,6 +614,12 @@ installed.
 - **Frontmatter format** — every edit re-runs the greppability invariants
   check (one field per line, flow-style lists, bare kebab-case enums).
 
+### Why a mechanical repair must NOT bump `updated:`
+
+Relocated from the base rule for the corpus floor cap. The kanban board sorts on `updated:`, so
+a pass that only fixes format/syntax (no fact changes) and still bumps it would silently
+reorder the whole board around cards nobody actually touched.
+
 ### Resuming work on a TRDD in a later session
 
 1. Find the id across EVERY scope root (never `ls <glob>` — an unmatched glob passes through
@@ -949,6 +961,14 @@ own LOCAL/PROJECT/USER taxonomy 1:1 (janitor#103).
 damage is done the moment it's committed. Promoting a LOCAL TRDD to PROJECT later is a
 deliberate, cheap act (copy + commit); the reverse (a private TRDD already in git history) is
 not undoable by a `git rm`. That asymmetry is why the default leans LOCAL.
+
+## Why "archive AS ITSELF" (3P-ZON-05) — no rename on the way into `design/archived/`
+
+Relocated from the base rule for the corpus floor cap. 3-pillars spec 2.0.0 amended 3P-ZON-05 on
+2026-08-18 to admit `complete` (alongside `completed|cancelled|superseded|published|live`) to the
+archive-eligible set: the previous complete→completed rename on archival was a dual-write,
+measured drifting 232 times fleet-wide. The fix moved the RULE (accept `complete` as terminal
+too), not the cards (no mass rename).
 
 ## The janitor#139 carve-out — deleting a false pipeline-state line from a terminal TRDD
 

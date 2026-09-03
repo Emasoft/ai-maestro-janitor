@@ -28,6 +28,31 @@ def test_no_field_yields_no_predicates():
     assert tc.unblock_when_predicates(_head()) == []
 
 
+# ── DONE_COLUMNS / is_done_column (RTRS704K finding #2) ─────────────────────
+#
+# A `blocked-by:` hold and `unblock-when: trdd:<id> terminal` must only clear on a blocker
+# that actually SHIPPED — `is_terminal_column` alone is too broad, since `failed`/`refused`/
+# `cancelled`/`superseded` are terminal (closed) but the blocker never landed.
+
+
+def test_is_done_column_true_for_shipped_states():
+    """`complete`/`completed`/`published`/`live` all mean the blocker actually shipped."""
+    for col in ("complete", "completed", "published", "live"):
+        assert tc.is_done_column(col) is True
+
+
+def test_is_done_column_false_for_terminal_but_not_shipped_states():
+    """`failed`/`refused`/`cancelled`/`superseded` are terminal but never landed — not done."""
+    for col in ("failed", "refused", "cancelled", "superseded"):
+        assert tc.is_terminal_column(col) is True  # still terminal...
+        assert tc.is_done_column(col) is False  # ...but not a shipped blocker
+
+
+def test_is_done_column_false_for_open_states():
+    assert tc.is_done_column("dev") is False
+    assert tc.is_done_column("") is False
+
+
 def test_single_predicate_extracted():
     head = _head("unblock-when: [trdd:ABCD1234 terminal]")
     assert tc.unblock_when_predicates(head) == ["trdd:ABCD1234 terminal"]

@@ -92,6 +92,29 @@ def test_issue_predicate_on_another_repo_never_auto_clears(drift):
     assert (ok, malformed) == (False, [])
 
 
+def test_issue_predicate_missing_snapshot_never_auto_unblocks(drift):
+    """`None` (no readable snapshot yet) must NOT read as "zero open issues" — collapsing the
+    two used to satisfy every `issue:` predicate on the project's own repo the moment the
+    watcher snapshot was absent (`num not in set()` is always True). Advisor finding B1."""
+    ok, malformed = _eval(
+        drift,
+        ["issue:Emasoft/ai-maestro-janitor#42 closed"],
+        open_issue_numbers=None,
+    )
+    assert (ok, malformed) == (False, [])
+
+
+def test_issue_predicate_empty_snapshot_still_satisfies(drift):
+    """An empty-but-PRESENT snapshot (watcher ran, zero issues open) is a real signal and must
+    still satisfy — distinguishing this from `None` is the whole point of B1's fix."""
+    ok, malformed = _eval(
+        drift,
+        ["issue:Emasoft/ai-maestro-janitor#42 closed"],
+        open_issue_numbers=set(),
+    )
+    assert (ok, malformed) == (True, [])
+
+
 # ── file: <repo-relative path> exists ────────────────────────────────────────
 
 
@@ -135,6 +158,61 @@ def test_log_predicate_not_satisfied_without_a_match(drift, tmp_path):
 def test_log_predicate_missing_file_not_satisfied_not_malformed(drift, tmp_path):
     ok, malformed = _eval(drift, ["log:missing.log matches x"], project_root=tmp_path)
     assert (ok, malformed) == (False, [])
+
+
+def test_log_predicate_matches_within_the_bounded_tail(drift, tmp_path):
+    """A match sitting in the last bytes of a >1MiB log is still found — the tail bound
+    doesn't just truncate to nothing. The filler is newline-terminated lines, as a real log
+    is: the truncated window drops its first (cut) line, so a single 1 MiB line would be
+    dropped whole — that is the documented ceiling, not a bug."""
+    filler = ("x" * 79 + "\n") * (1024 * 1024 // 80)
+    (tmp_path / "big.log").write_text(filler + "release v9 shipped\n", encoding="utf-8")
+    ok, malformed = _eval(drift, ["log:big.log matches release v9"], project_root=tmp_path)
+    assert (ok, malformed) == (True, [])
+
+
+def test_log_predicate_misses_a_match_outside_the_bounded_tail(drift, tmp_path):
+    """A match sitting only in the first bytes of a >1MiB log, far outside the tail window,
+    is correctly NOT found — the whole point of bounding the read."""
+    (tmp_path / "big.log").write_text(
+        "release v9 shipped\n" + "x" * (1024 * 1024), encoding="utf-8"
+    )
+    ok, _ = _eval(drift, ["log:big.log matches release v9"], project_root=tmp_path)
+    assert ok is False
+
+
+def test_log_predicate_invalid_regex_is_malformed(drift, tmp_path):
+    (tmp_path / "out.log").write_text("boot ok\n", encoding="utf-8")
+    ok, malformed = _eval(drift, ["log:out.log matches [unclosed"], project_root=tmp_path)
+    assert ok is False
+    assert malformed == ["log:out.log matches [unclosed"]
+
+
+def test_log_predicate_tail_boundary_does_not_false_match_a_cut_line(drift, tmp_path):
+    """The seek can land mid-line: the real line is `PREneedle body\\n` but the tail window
+    starts 3 bytes in, at `needle body\\n`. With `re.MULTILINE`, `^` matches index 0 of ANY
+    string, so `^needle` would spuriously match a fragment that never actually started a line
+    in the source file — RTRS704K #3. Sized so the window boundary lands exactly there.
+    `^.*needle` is the hole a sentinel byte at index 0 left open (the wildcard swallowed the
+    sentinel): the cut line must be dropped, not prefixed."""
+    tail_bytes = drift._LOG_PRED_TAIL_BYTES
+    line = "PREneedle body text\n"
+    filler_len = tail_bytes - len(line) + 3  # window_start (= size-TAIL) lands 3 bytes into `line`
+    (tmp_path / "boundary.log").write_text(line + ("b" * filler_len), encoding="utf-8")
+    ok, _ = _eval(drift, [r"log:boundary.log matches ^needle"], project_root=tmp_path)
+    assert ok is False  # the real line started with "PRE", never with "needle"
+    ok, _ = _eval(drift, [r"log:boundary.log matches ^.*needle"], project_root=tmp_path)
+    assert ok is False  # a wildcard after the anchor must not reach the fragment either
+
+
+def test_log_predicate_tail_boundary_still_matches_a_real_line_start(drift, tmp_path):
+    """A genuine `^`-anchored match, on a line that starts well inside the tail window (a real
+    `\\n` precedes it, not the truncation boundary), must still fire."""
+    tail_bytes = drift._LOG_PRED_TAIL_BYTES
+    filler = "x" * tail_bytes  # entirely before the window boundary except its own tail slice
+    (tmp_path / "boundary2.log").write_text(filler + "\nneedle body text\n", encoding="utf-8")
+    ok, _ = _eval(drift, [r"log:boundary2.log matches ^needle"], project_root=tmp_path)
+    assert ok is True
 
 
 # ── date: >=YYYY-MM-DD ────────────────────────────────────────────────────────
@@ -326,6 +404,136 @@ def test_try_unblock_leaves_the_card_blocked_on_a_malformed_predicate(drift, tmp
         seen=tmp_path / "seen.txt",
     )
     assert f.read_text(encoding="utf-8") == text  # never auto-unblocked on a parse error
+
+
+def test_try_unblock_holds_when_blocked_by_is_still_open(drift, tmp_path):
+    """`unblock-when:` satisfied but `blocked-by:` names a still-open card — don't restore
+    past a live blocker the two fields track independently."""
+    f = tmp_path / "TRDD-20260101_000000+0000-ABCDEFGH-x.md"
+    text = _blocked_card_with(
+        "unblock-when: [trdd:ZZZZZZZZ terminal]",
+        "blocked-by: [TRDD-YYYYYYYY]",
+        "pre-block-column: dev",
+    )
+    f.write_text(text, encoding="utf-8")
+    drift._try_unblock(
+        f,
+        text,
+        column_by_uid={"ZZZZZZZZ": "complete", "YYYYYYYY": "dev"},
+        project_repo_slug=None,
+        open_issue_numbers=set(),
+        project_root=tmp_path,
+        now=int(time.time()),
+        seen=tmp_path / "seen.txt",
+    )
+    assert f.read_text(encoding="utf-8") == text  # blocked-by still open — held
+
+
+def test_try_unblock_holds_when_blocked_by_is_unresolvable(drift, tmp_path):
+    """A `blocked-by:` id that resolves NOWHERE (typo, or unindexed) is a hold too — mirrors
+    dispatch.py's `_blocked_reason` classifying it decision-needed, not cleared."""
+    f = tmp_path / "TRDD-20260101_000000+0000-ABCDEFGH-x.md"
+    text = _blocked_card_with(
+        "unblock-when: [trdd:ZZZZZZZZ terminal]",
+        "blocked-by: [TRDD-NOSUCH12]",
+        "pre-block-column: dev",
+    )
+    f.write_text(text, encoding="utf-8")
+    drift._try_unblock(
+        f,
+        text,
+        column_by_uid={"ZZZZZZZZ": "complete"},
+        project_repo_slug=None,
+        open_issue_numbers=set(),
+        project_root=tmp_path,
+        now=int(time.time()),
+        seen=tmp_path / "seen.txt",
+    )
+    assert f.read_text(encoding="utf-8") == text  # unresolvable blocked-by — held
+
+
+def test_try_unblock_restores_when_blocked_by_is_terminal(drift, tmp_path):
+    """Same shape, but the named blocker has reached a terminal column — restore proceeds."""
+    f = tmp_path / "TRDD-20260101_000000+0000-ABCDEFGH-x.md"
+    text = _blocked_card_with(
+        "unblock-when: [trdd:ZZZZZZZZ terminal]",
+        "blocked-by: [TRDD-YYYYYYYY]",
+        "pre-block-column: dev",
+    )
+    f.write_text(text, encoding="utf-8")
+    drift._try_unblock(
+        f,
+        text,
+        column_by_uid={"ZZZZZZZZ": "complete", "YYYYYYYY": "complete"},
+        project_repo_slug=None,
+        open_issue_numbers=set(),
+        project_root=tmp_path,
+        now=int(time.time()),
+        seen=tmp_path / "seen.txt",
+    )
+    out = f.read_text(encoding="utf-8")
+    assert "column: dev" in out
+    # B2: `blocked-by:` empties and `pre-block-column:` is dropped on restore — otherwise
+    # `check4_stale_blockers` re-flags TRDD-YYYYYYYY as a "cleared blocker" every fire even
+    # though this card already left `blocked` (rule §6: "blocked-by: empties; restore
+    # previous column").
+    assert "blocked-by: []" in out
+    assert "blocked-by: [TRDD-YYYYYYYY]" not in out
+    assert "pre-block-column:" not in out
+
+
+def test_try_unblock_holds_on_an_illegal_pre_block_column(drift, tmp_path):
+    """A corrupted/typo'd `pre-block-column:` must never be written verbatim as `column:` —
+    advisor finding B4."""
+    f = tmp_path / "TRDD-20260101_000000+0000-ABCDEFGH-x.md"
+    text = _blocked_card_with(
+        "unblock-when: [trdd:ZZZZZZZZ terminal]",
+        "pre-block-column: not-a-real-column",
+    )
+    f.write_text(text, encoding="utf-8")
+    drift._try_unblock(
+        f,
+        text,
+        column_by_uid={"ZZZZZZZZ": "complete"},
+        project_repo_slug=None,
+        open_issue_numbers=set(),
+        project_root=tmp_path,
+        now=int(time.time()),
+        seen=tmp_path / "seen.txt",
+    )
+    assert f.read_text(encoding="utf-8") == text  # never rewrote an illegal target
+
+
+def test_column_by_uid_spans_all_design_folders(drift, tmp_path):
+    """The `main()` board-build loop walks `trdd_common.DESIGN_FOLDERS` (tasks + archived +
+    proposals + refused), not just `tasks/` — a blocker that shipped is ARCHIVED and would be
+    invisible (and its dependent held forever) if the board were built from `tasks/` alone
+    (RTRS704K #1; mirrors dispatch.py's `_all_folders_columns`)."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
+    import trdd_common
+
+    project = tmp_path / "proj"
+    tasks_dir = project / "design" / "tasks"
+    archived_dir = project / "design" / "archived"
+    tasks_dir.mkdir(parents=True)
+    archived_dir.mkdir(parents=True)
+    (archived_dir / "TRDD-20260101_000000+0000-YYYYYYYY-y.md").write_text(
+        "\n".join(["---", "trdd-id: YYYYYYYY", "title: t", "column: complete", "---", "", "#"]),
+        encoding="utf-8",
+    )
+
+    column_by_uid: dict[str, str] = {}
+    for folder in trdd_common.DESIGN_FOLDERS:
+        for _scope, f in trdd_common.trdd_files(folder, str(project)):
+            uid = trdd_common.extract_uid(f.name)
+            if uid is not None and uid not in column_by_uid:
+                _, col = trdd_common.parse_trdd_state(f)
+                column_by_uid[uid] = col
+
+    assert column_by_uid.get("YYYYYYYY") == "complete"
+    assert trdd_common.is_done_column(column_by_uid["YYYYYYYY"]) is True
 
 
 def test_try_unblock_leaves_the_card_blocked_on_a_decision_predicate(drift, tmp_path):
