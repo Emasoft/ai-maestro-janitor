@@ -1493,8 +1493,8 @@ def stage_check_clean(root: Path) -> None:
     cprint(f"  {GREEN}Clean.{NC}")
 
 def stage_lint(root: Path) -> None:
-    """Step 2: Lint + typecheck (ruff + mypy + pyright). MANDATORY — no skip
-    for ruff/mypy; pyright degrades to a WARNING when it cannot be launched.
+    """Step 2: Lint + typecheck (ruff + mypy + pyright). MANDATORY — no skip,
+    and pyright fails CLOSED: a pyright that cannot run BLOCKS the publish.
 
     Runs ruff for style/syntax and mypy for static types in the same stage.
     Both must succeed — the cornerstone rule forbids any push with lint or
@@ -1523,32 +1523,43 @@ def stage_lint(root: Path) -> None:
     run(["uv", "run", "mypy", "scripts/", "--ignore-missing-imports"], cwd=root)
 
     # Pyright, invoked EXACTLY as CI does (no path, no extra flags) — parity
-    # with ci.yml Lint job. `uvx` fetching pyright over the network can fail
-    # on an offline machine; the jscpd/actionlint pattern above in run_gate()
-    # applies here too: a `--version` probe tells 'pyright unavailable' (WARN
-    # + skip, never false-block) apart from 'pyright ran, found errors'
-    # (BLOCK) — issue #143's degrade-gracefully pattern.
+    # with ci.yml Lint job.
+    #
+    # This FAILS CLOSED, unlike the jscpd/actionlint checks it sits beside, and
+    # the difference is deliberate. Those degrade gracefully because a missed
+    # copy-paste report is an inconvenience. Pyright is the check CI BLOCKS a
+    # merge on, and its absence from this gate is the measured cause of 3.4.14
+    # being tagged, released, installed and adopted by the daemon while CI was
+    # rejecting the same commit for 7 pyright errors (TRDD-MYQGMAQZ). Copying
+    # the degrade-gracefully pattern onto the load-bearing check would rebuild
+    # that failure with extra steps: a cold-cache fetch hiccup — rare, silent,
+    # correlated with nothing anyone would notice — would skip the check on the
+    # very run that publishes.
+    #
+    # The two error costs are not close. A false BLOCK refuses the publish with
+    # a message on screen: minutes, visible, recoverable. A false PASS ships a
+    # public artifact that CI then rejects. "Could not verify" is not "verified",
+    # so a release gate must fail closed on a check it cannot perform.
+    #
+    # One invocation, no availability probe: `uvx` exits non-zero both when it
+    # cannot fetch the tool and when pyright reports type errors, so the two are
+    # indistinguishable by exit code — a probe could tell them apart, but it only
+    # ever existed to feed a skip branch that should not exist. The message names
+    # both causes and pyright's own output is directly above it. No env-var
+    # escape hatch: this file's contract is "no exceptions and no bypass flags".
     cprint(f"  {BLUE}uvx --with pyright pyright{NC}")
-    uvx_bin = shutil.which("uvx")
-    if uvx_bin is None:
-        cprint(f"  {YELLOW}WARNING: uvx not found — pyright check SKIPPED locally.{NC}")
-        cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI.{NC}")
-    else:
-        try:
-            probe = subprocess.run([uvx_bin, "--with", "pyright", "pyright", "--version"],
-                                   cwd=str(root), capture_output=True, text=True, timeout=180)
-        except (OSError, subprocess.SubprocessError):
-            probe = None
-        if probe is None or probe.returncode != 0:
-            cprint(f"  {YELLOW}WARNING: pyright could not run (uvx fetch/install failed) — SKIPPED locally.{NC}")
-            cprint(f"  {YELLOW}CI's Lint job WILL enforce it; a green gate does NOT guarantee green CI.{NC}")
-        else:
-            pr = subprocess.run([uvx_bin, "--with", "pyright", "pyright"],
-                                cwd=str(root), timeout=300).returncode
-            if pr != 0:
-                cprint(f"  {RED}BLOCKED: pyright found type errors (parity with CI Lint job).{NC}")
-                sys.exit(1)
-            cprint(f"  {GREEN}Pyright check passed.{NC}")
+    try:
+        pr = subprocess.run(["uvx", "--with", "pyright", "pyright"],
+                            cwd=str(root), timeout=300).returncode
+    except (OSError, subprocess.SubprocessError) as exc:
+        cprint(f"  {RED}BLOCKED: pyright could not be run ({exc}).{NC}")
+        cprint(f"  {RED}         CI's Lint job enforces it and would reject this commit.{NC}")
+        sys.exit(1)
+    if pr != 0:
+        cprint(f"  {RED}BLOCKED: pyright failed — type errors above, or the tool could not{NC}")
+        cprint(f"  {RED}         be fetched. Either way CI's Lint job would reject this commit.{NC}")
+        sys.exit(1)
+    cprint(f"  {GREEN}Pyright check passed.{NC}")
 
     cprint(f"  {GREEN}Lint + typecheck passed.{NC}")
 

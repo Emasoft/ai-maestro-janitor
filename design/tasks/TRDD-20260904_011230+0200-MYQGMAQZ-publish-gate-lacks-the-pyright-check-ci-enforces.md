@@ -41,9 +41,20 @@ Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it
       landed in `stage_lint` (step 2) rather than 4b, because that is where the other
       linters already live and the cheap fails belong before the test suite. Invoked
       `uvx --with pyright pyright` with no path and no extra flags, exactly as CI does;
-      a `--version` probe separates "cannot launch" (WARN + skip, never a false block on
-      an offline machine) from "ran and found errors" (BLOCK), copying the jscpd/actionlint
-      pattern already in this file.
+      and it FAILS CLOSED: a pyright that cannot run BLOCKS the publish, exactly as a
+      pyright that finds errors does.
+      This started as a WARN+skip copying the jscpd/actionlint pattern beside it, and that
+      was wrong on review: those degrade gracefully because a missed copy-paste report is
+      an inconvenience, whereas pyright is the check CI blocks a merge on and whose absence
+      here IS this card. A cold-cache fetch hiccup — rare, silent, correlated with nothing
+      anyone would notice — would have skipped it on the very run that publishes, rebuilding
+      the incident with extra steps. The error costs are not close: a false BLOCK refuses
+      the publish with a message on screen, while a false PASS ships a public artifact CI
+      then rejects. "Could not verify" is not "verified".
+      Failing closed also DELETED the `--version` availability probe — it existed only to
+      feed the skip branch, and with both outcomes blocking there is nothing to tell apart.
+      No env-var escape hatch either: publish.py's stated contract is "no exceptions and no
+      bypass flags", and Gate 0 exists to catch exactly that shape.
 - [x] The gate's ruff scope matches CI's — now `ruff check scripts/ tests/`.
 - [ ] The remaining rows of the divergence table are each either adopted into the
       gate or explicitly declared out of scope ON THIS CARD with a reason — an
@@ -55,10 +66,11 @@ Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it
       — 2026-09-04, verified by invoking `stage_lint(root)` DIRECTLY (not by running a
       publish), three paths: (a) clean tree → returns, pyright reported `0 errors`;
       (b) a deliberate `x: int = "not an int"` appended to a tracked test file →
-      `BLOCKED: pyright found type errors`, `SystemExit code=1`; (c) `shutil.which("uvx")`
-      forced to None → WARN and continue, no false block. The probe file was restored
-      byte-identically (sha match, clean `git status`). The happy path alone would have
-      proved nothing — the value of this change is entirely in (b).
+      `BLOCKED: pyright failed`, `SystemExit code=1`; (c) `uvx` made unlaunchable (OSError)
+      → `BLOCKED: pyright could not be run`, `SystemExit code=1`. All three re-run after
+      the fail-closed change. The probe file was restored byte-identically (sha match,
+      clean `git status`). The happy path alone would have proved nothing — the value of
+      this change is entirely in (b) and (c).
 - [ ] A test pins that the gate's checker set is not a strict subset of CI's Lint job, so a future CI check added without a gate counterpart is caught.
 - [ ] The CLAUDE.md sentence describing the gate's checkers is updated once the gate changes.
 
