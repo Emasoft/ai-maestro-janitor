@@ -1,11 +1,10 @@
 ---
 trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
-column: blocked
-pre-block-column: todo
-blocked-by: [awaiting-live-429-observation]
+column: todo
+blocked-by: []
 created: 2026-08-06T13:23:24+0200
-updated: 2026-08-13T04:22:00+0200
+updated: 2026-09-03T10:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -178,7 +177,11 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
       the daemon lane, a manual `rotator.py switch`, or any future caller.
 - [x] wake-pass default decided + recorded — the periodic sweep STAYS dormant, a rotation
       OVERRIDES it. See the STATE block for the reasoning; it is written into the code too.
-- [ ] one live observation: 429 → rotate → pane continues with no human keystroke
+- [x] one live observation: 429 → rotate → pane continues with no human keystroke — proven
+      twice on NACCL0CB's evidence: `daemon.log.1:9518-9522` (2026-09-02T22:17:55-58 rotation,
+      22:18:01 `rotation-esc: FIRED ESC → iterm for ai-maestro-janitor`) and `daemon.log:695-698`
+      (2026-09-03T04:10:24-29, matching `rotator.log.1:1172` account switch) — no human keystroke
+      visible in either log
 - [ ] harness gap explicitly delegated upstream (#110 cross-referenced)
 
 ## Pointers
@@ -189,3 +192,10 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
 - Code: `scripts/lib/fleet_inject.py` (build_esc_plan), `scripts/daemon.py` (MF1 wake
   pass + `_RATELIMIT_WAKE_ENABLED_ENV`), `scripts/oauth_rotator/rotator.py`
   (cmd_auto/cmd_switch), `scripts/detectors/peer-freeze-recovery.py` (daemon-dark path).
+
+## Approval log
+
+- 2026-09-03T10:05:00+0200 — UNBLOCK (blocked → todo) by janitor-main-session acting for USER
+  (delegation 2026-09-03 09:58). NACCL0CB's live ESC evidence (`daemon.log.1:9518-9522`,
+  `daemon.log:695-698`) IS the live-429-observation this card was waiting on; box 1 closed on
+  that proof. Box 2 (#110 upstream) remains open.

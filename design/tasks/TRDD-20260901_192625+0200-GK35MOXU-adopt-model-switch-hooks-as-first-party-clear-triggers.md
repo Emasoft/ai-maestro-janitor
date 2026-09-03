@@ -1,10 +1,9 @@
 ---
 trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
-column: blocked
-pre-block-column: dev
+column: dev
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-02T01:15:00+0200
+updated: 2026-09-03T10:05:00+0200
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
 task-type: feature
@@ -12,7 +11,7 @@ scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: [claude-plugins-validation#222]
+blocked-by: []
 npt: []
 eht: []
 relevant-rules: []
@@ -91,3 +90,11 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
   project, session B's switch can trigger a clear aimed at session A. Same holds for the
   reload stamps since birth; a per-session stamp keyed on session id is the upgrade if it
   ever bites.
+
+## Approval log
+
+- 2026-09-03T10:05:00+0200 — UNBLOCK (blocked → dev) by janitor-main-session acting for USER
+  (delegation 2026-09-03 09:58). `blocked-by: claude-plugins-validation#222` is CLOSED
+  (COMPLETED) — verified `gh issue view 222 --repo Emasoft/claude-plugins-validation --json state`
+  → `CLOSED`. Restored to `pre-block-column: dev` per
+  `reports/board-drain/20260903_091543+0200-blocked-cards-audit.md`.
