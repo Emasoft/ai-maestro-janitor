@@ -21,8 +21,9 @@ Rows encoded here are exactly the ones the 2026-09-02 incident dictates (Proposa
 - `awaiting_user` -> never type, for ANY event -- a human decision is pending. (Phase 3 added
   ONE exception, `STALE_PROMPT` + a measured `unattended` verdict: an ESC, which can only
   dismiss, never answer.)
-- `working` -> no screen-driven sequence, ever. (Phase 3 law 2 below admits the caller-driven
-  soft enqueue and the ESC-only nudge, and refuses hard-plus-command.)
+- `working` -> no screen-driven sequence, ever. (Phase 3 law 2 below admits ONLY the
+  caller-driven soft enqueue; anything starting with ESC -- hard-plus-command AND the ESC-only
+  nudge -- is refused, because ESC cancels the live turn.)
 - `idle` + cron dead -> `/janitor-arm`.
 - `None`/`unknown` -> never type -- an unreadable or unclassifiable pane is not a green light.
 
@@ -59,10 +60,13 @@ load-bearing rather than theoretical:
    unless the CALLER asserts `blind_ok` -- and only `pane_actuate.act`, which knows the
    channel identity, may assert it. A blind step then carries `Expect.ANY`: we cannot verify
    what we cannot read, and pretending otherwise would be worse than admitting it.
-2. **A pane showing `working` still accepts the CALLER-DRIVEN rungs.** A soft enqueue buffers
-   to the turn boundary and destroys no in-flight work (TRDD-0GPQROC1, owner directive
-   2026-07-10 for the machine-wide stop), and an ESC-only `esc_nudge` is authorized by a
-   15-minute-stale transcript the SCREEN cannot see. What `working` still refuses is every
+2. **A pane showing `working` accepts a caller-driven rung ONLY when it types a command and
+   does NOT begin with ESC.** A soft enqueue buffers to the turn boundary and destroys no
+   in-flight work (TRDD-0GPQROC1, owner directive 2026-07-10 for the machine-wide stop). Every
+   sequence that STARTS WITH ESC is refused over a live turn -- hard-plus-command and ESC-only
+   alike -- because ESC cancels the turn, and a stale transcript is not authority to do that
+   to a screen that says work is happening (owner report 2026-09-03: `esc_nudge` firing into
+   working panes was breaking session continuity; see `_at_working`). Also refused: every
    screen-driven sequence -- the rotation flush, the no-headroom model switch, the cron
    re-arm, the stale-prompt ESC -- because those read the screen for their authority and the
    screen says a turn is live.
@@ -306,19 +310,36 @@ def _at_idle(state: PaneState, event: Event, *, command: str | None, esc_first: 
 
 
 def _at_working(state: PaneState, event: Event, *, command: str | None, esc_first: bool) -> tuple[Step, ...]:
-    """Law 2 in the module docstring: only the caller-driven rungs (and finishing our own
-    send) may land at a live turn — never a screen-driven sequence.
+    """Law 2 in the module docstring: at a live turn, the ONLY thing that may land is a rung
+    that TYPES A COMMAND WITHOUT INTERRUPTING (and finishing our own send).
 
-    HARD-plus-command is refused here even though it is caller-driven: an ESC followed by a
-    typed command over a live turn is neither of the two things law 2 defends. A soft enqueue
-    buffers to the turn boundary and destroys nothing; an ESC-ONLY nudge is authorized by a
-    15-minute-stale transcript the screen cannot show. "Interrupt this turn AND type at it"
-    is a stale proxy overriding a screen that says work is happening — the exact shape this
-    TRDD exists to kill. The rung falls back to its next beat, when the screen agrees.
+    A soft enqueue buffers to the turn boundary and destroys nothing, so it is safe over work
+    in progress. Everything that begins with ESC is refused here, and the two refusals have
+    the same reason:
+
+    - HARD-plus-command ("interrupt this turn AND type at it") is a stale proxy overriding a
+      screen that says work is happening.
+    - ESC-ONLY (`command is None` — `esc_nudge`, the `frozen` recovery) is the SAME proxy with
+      the typing removed, and it is the more destructive of the two, because ESC alone cancels
+      the live turn and leaves nothing behind that says why the work stopped.
+
+    This carve-out used to be granted to ESC-only rungs on the reasoning that "a 15-minute-stale
+    transcript is authority the screen cannot see". It is not: a session inside one long tool
+    call — a 13-minute test suite, a build, a slow API poll — writes NOTHING to its transcript
+    for the whole call, so the proxy goes stale precisely when the screen is most certainly
+    right. Measured 2026-09-03: two `esc_nudge` fires 22 minutes apart into one project, both at
+    `attempt=0`, and the owner reported the interruptions broke session continuity.
+
+    Nothing is lost by refusing. A genuinely rate-limited or wedged pane does not classify as
+    WORKING at all — it is `RETRY_WEDGE` / `SESSION_LIMIT` / `API_ERROR`, and `_at_wedge` owns
+    the first while the others type nothing by design. So the only pane this carve-out could
+    ever reach was one visibly doing work. A refusal here returns NOOP, which `_decline`s
+    WITHOUT spending a recovery attempt, so the rung simply retries on the next beat — when
+    the screen agrees.
     """
     if event is Event.OWN_COMMAND_UNSUBMITTED:
         return _submit(state)
-    if event in _CALLER_DRIVEN and not (esc_first and command):
+    if event in _CALLER_DRIVEN and command and not esc_first:
         return _rung(state, command=command, esc_first=esc_first, label=event.value)
     return ()
 

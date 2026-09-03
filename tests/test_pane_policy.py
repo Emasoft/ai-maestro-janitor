@@ -122,6 +122,44 @@ def test_working_never_types_for_any_event(event: pp.Event) -> None:
     assert pp.plan(state, event) == ()
 
 
+def test_working_refuses_an_esc_only_rung_because_esc_cancels_the_live_turn() -> None:
+    """The owner-reported continuity break (2026-09-03): `esc_nudge` reaches `plan()` as a
+    caller-driven RECOVERY_RUNG carrying `command=None`, and the old law admitted it at a
+    WORKING pane on the strength of a stale transcript. A session inside one long tool call
+    writes no transcript for the whole call, so that proxy goes stale exactly when the screen
+    is right — and ESC alone cancels the turn."""
+    state = _state("synthetic-working-spinner.txt")
+    assert state.status.kind is ps.StatusKind.WORKING
+    assert pp.plan(state, pp.Event.RECOVERY_RUNG, command=None) == ()
+    assert pp.plan(state, pp.Event.RECOVERY_RUNG, command=None, esc_first=True) == ()
+
+
+def test_working_still_accepts_a_soft_enqueue_that_types_a_command() -> None:
+    """The half of law 2 that must survive: a soft enqueue buffers to the turn boundary and
+    destroys nothing, so the cron re-arm and the machine-wide stop still land at a live turn.
+    Refusing these too would make the fix above a regression, not a fix."""
+    state = _state("synthetic-working-spinner.txt")
+    for event in (pp.Event.RECOVERY_RUNG, pp.Event.STOP_FLAG, pp.Event.RESUME_WAKE):
+        steps = pp.plan(state, event, command="/janitor-arm")
+        assert [s.keys for s in steps] == ["/janitor-arm"], f"{event} must still enqueue"
+
+
+def test_working_refuses_hard_plus_command_unchanged() -> None:
+    """Unchanged by the ESC-only fix, and pinned so a later edit cannot quietly re-admit it."""
+    state = _state("synthetic-working-spinner.txt")
+    assert pp.plan(state, pp.Event.RECOVERY_RUNG, command="/janitor-arm", esc_first=True) == ()
+
+
+def test_a_rate_limited_pane_is_never_classified_working_so_the_fix_strands_nothing() -> None:
+    """Why refusing the ESC-only rung at WORKING costs the `frozen` recovery nothing: the panes
+    that recovery exists for do not present as WORKING. Read from the real captured frames, so
+    a parser change that broke this would fail here rather than silently strand the ladder."""
+    for name in ("real-wedged-fable-limit.txt", "real-wedged-rate-limit-429.txt",
+                 "real-wedged-session-limit.txt", "synthetic-api-error.txt",
+                 "synthetic-session-limit-terminal.txt"):
+        assert _state(name).status.kind is not ps.StatusKind.WORKING, name
+
+
 def test_idle_cron_dead_re_arms() -> None:
     state = _state("synthetic-idle-empty-field.txt")
     steps = pp.plan(state, pp.Event.CRON_DEAD)
