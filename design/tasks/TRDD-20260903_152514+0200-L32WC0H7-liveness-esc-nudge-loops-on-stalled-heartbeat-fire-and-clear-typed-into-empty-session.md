@@ -101,7 +101,7 @@ Mechanism, verified in code + transcript:
    with no daemon ESC logged (liveness deferred on HID activity at 15:31/15:42/15:44) — the
    owner's own ESC. Nine of the pairs match a FIRED line to the second; attribute only those.
 
-## Defect 2 — the cold-cache gate reads a pre-`/clear` context size and leaves `/clear` typed
+## Defect 2 — the cold-cache gate reports a post-`/clear` empty context as unknown and leaves `/clear` typed
 
 - `external-clear.log` (global-state): `fired: trigger=cache-certain-expired` at 14:15, 14:20,
   14:35, 14:45, 15:00 on this root, while the session sat at 0 %.
