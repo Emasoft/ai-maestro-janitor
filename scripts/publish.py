@@ -1556,8 +1556,12 @@ def stage_lint(root: Path) -> None:
         # measurement. `--refresh` was tried as a proxy and is not one: it timed
         # 13s against 14s for the plain warm run, i.e. it added no download at
         # all, so it never exercised the fetch path it was supposed to stand in
-        # for. Getting a real number means `uv cache clean`, which destroys
-        # shared machine state — not worth it to calibrate a ceiling.
+        # for. `uv cache clean` would not give the number either: the `pyright`
+        # wheel is a thin WRAPPER (it ships `node.py` and provisions a Node
+        # runtime plus the real analyzer at first use, outside uv's cache —
+        # visible here as the wrapper reporting pyright 1.1.411 while uv's
+        # cached dist-info says 1.1.410). uv's cache holds the wrapper; the
+        # payload that dominates a cold run is not uv's to refresh.
         #
         # So the value is chosen for its error costs, which is sound on its own:
         # this check fails CLOSED and this is the only sanctioned push path, so
