@@ -124,6 +124,35 @@ Note this does not conflict with the working rule "after publish.py, do NOT
 sit and watch CI" — that rule governs the operator's attention, not the
 pipeline's ordering. A pipeline that waits costs the human nothing to watch.
 
+## The pyright timeout, and a worked example of measuring the wrong thing
+
+`stage_lint`'s pyright call carries a 900s ceiling chosen on ASYMMETRY, not measurement:
+the check fails closed on the only sanctioned push path, so a tight ceiling can kill a
+WORKING pyright and block the release, while a generous one costs nothing because it
+binds only when something is already wrong. Do not tune it toward the warm figure.
+
+The measurement story is worth keeping because two claims died in it, both stated as
+fact before being checked:
+
+1. **`--refresh` as a cold-path proxy — FALSE.** `uvx --with pyright --refresh pyright`
+   timed 13s; the same command WITHOUT the flag timed 14s. Identical within noise, so
+   the flag added no download and never exercised the fetch path it was standing in for.
+   The 13s went into a code comment as a "cold-ish measurement" — in the same commit that
+   removed a different false claim from that comment.
+2. **"The analyzer is fetched at runtime, so the payload is not uv's to refresh" —
+   NOT SUPPORTED, and its evidence was wrong.** The evidence offered was that the wrapper
+   reported pyright 1.1.411 while a cached dist-info said 1.1.410. Enumerating the cache
+   killed it: SIX pyright archives are cached and **1.1.411 is among them** — one archive
+   had been grepped and read as the whole picture. Measuring further: the wheel's `dist/`
+   is **34M of bundled analyzer inside uv's cache**, not a thin wrapper; what IS separate
+   is a Node runtime that `node.py` provisions via nodeenv into
+   `get_cache_dir()/pyright-python/<version>`. So most of the payload IS uv's, and why
+   `--refresh` added no time remains UNEXPLAINED.
+
+What survives: a warm full analysis of 504 source files plus `tests/` takes 13-14s here,
+and there is no cold-cache measurement. The 900s stands on the asymmetry argument alone,
+which never needed a number.
+
 ## OPEN QUESTION FOR THE USER — should an unavailable pyright block the publish?
 
 As shipped (2026-09-04, `82944b56`), a pyright that CANNOT RUN blocks the publish,

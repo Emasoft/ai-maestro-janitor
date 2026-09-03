@@ -1549,28 +1549,16 @@ def stage_lint(root: Path) -> None:
     # escape hatch: this file's contract is "no exceptions and no bypass flags".
     cprint(f"  {BLUE}uvx --with pyright pyright{NC}")
     try:
-        # 900s, and the honest basis for it is ASYMMETRY, not a measurement.
+        # 900s, chosen for its ERROR COSTS, not from a measurement. This check
+        # fails CLOSED on the only sanctioned push path, so a timeout on a
+        # WORKING pyright blocks the release; the ceiling is here to stop a HUNG
+        # process, never to bound a slow one. It binds only when something is
+        # already wrong, so generous costs nothing while tight can kill a working
+        # check — raising is safe in a way lowering is not.
         #
-        # What IS measured here (2026-09-04): a full analysis of 504 source
-        # files plus tests/ takes 13-14s WARM. There is NO cold-cache
-        # measurement. `--refresh` was tried as a proxy and is not one: it timed
-        # 13s against 14s for the plain warm run, i.e. it added no download at
-        # all, so it never exercised the fetch path it was supposed to stand in
-        # for. `uv cache clean` would not give the number either: the `pyright`
-        # wheel is a thin WRAPPER (it ships `node.py` and provisions a Node
-        # runtime plus the real analyzer at first use, outside uv's cache —
-        # visible here as the wrapper reporting pyright 1.1.411 while uv's
-        # cached dist-info says 1.1.410). uv's cache holds the wrapper; the
-        # payload that dominates a cold run is not uv's to refresh.
-        #
-        # So the value is chosen for its error costs, which is sound on its own:
-        # this check fails CLOSED and this is the only sanctioned push path, so
-        # a timeout on a WORKING pyright blocks the release. The ceiling exists
-        # to stop a HUNG process wedging the pipeline, never to bound a slow
-        # one. It binds only when something is already wrong, so generous costs
-        # nothing while tight can block a working check. Raising is therefore
-        # safe in a way lowering is not — do not "optimise" this down toward the
-        # 13s figure, which measures the case that was never in question.
+        # Do NOT tune this down toward the 13-14s a WARM run takes here: no
+        # cold-cache measurement exists, and the attempt to get one cheaply
+        # failed (see TRDD-MYQGMAQZ for what `--refresh` did not do, and why).
         pr = subprocess.run(["uvx", "--with", "pyright", "pyright"],
                             cwd=str(root), timeout=900).returncode
     except (OSError, subprocess.SubprocessError) as exc:
