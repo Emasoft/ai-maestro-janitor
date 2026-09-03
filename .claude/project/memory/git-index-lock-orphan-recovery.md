@@ -20,8 +20,10 @@ A killed `git commit` leaves `.git/index.lock` behind with nobody to release it,
 ## Governed by
 
 - [[janitor-architecture]] — the architecture hub.
-- [[memory-system]] — cites this page for the same "a correct mechanism that never
-  reaches its case" shape, there caused by the PROJECT scope gate.
+- [[memory-system-editor-gotchas]] — cites this page for the same "a correct
+  mechanism that never reaches its case" shape, there caused by the PROJECT
+  scope gate (moved from memory-system's overview when that page split
+  2026-09-03).
 
 ## Notes and lessons learned
 
