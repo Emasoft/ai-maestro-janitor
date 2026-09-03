@@ -3,7 +3,8 @@ trdd-id: X6I04SAO
 title: the daemon's Python has no CA bundle, so every slot refresh fails TLS and the rotator stays put while the user rotates by hand
 column: testing
 created: 2026-09-02T15:57:54+0200
-updated: 2026-09-02T20:55:00+0200
+updated: 2026-09-03T11:09:13+0200
+review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -14,7 +15,19 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 16:12
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** boxes 1-3 remain proven (unchanged, self-consistent
+with STATE). Box 4 stays open: `rotator.log:806` shows a fresh SCOPED wall today
+(`2026-09-03T10:15:46+0200 auto: switched emanuele.sabetta@gmail.com -> ipazia.emasoft@gmail.com
+… +SCOPED[7d/Fable=90%] -> rotate`), and it rotated cleanly — but `daemon.log` in the same
+`oauth-rotator-tick` window (10:15:43-10:15:53) shows only `rotation-esc: cannot read the pane
+for IOSVoice_bak — skipped`, no `rotation-esc: FIRED ESC` for any pane. This was a proactive
+scoped switch (util still healthy, no pane was actually wedged/blocked at the time), not the
+"scoped wall + paired ESC" pairing the box needs — genuinely still unobserved.
+`review-after: 2026-09-05` set.
+
+## ⏵ PRIOR STATE — 2026-09-02 16:12
 
 - **User report 15:50:** "I had to rotate the account manually again." Diagnosed, not guessed.
 - **Root cause (verified first-hand):** the launchd daemon runs

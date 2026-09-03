@@ -3,7 +3,8 @@ trdd-id: 1PDCPIZC
 title: the keep-going cue never surfaces blocked, failed, design or planned cards — 21 blocked cards sat invisible through a whole night of heartbeats
 column: testing
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-03T09:37:27+0200
+updated: 2026-09-03T11:09:13+0200
+review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -22,7 +23,15 @@ created-by: USER report 2026-09-03 09:18
 
 # The keep-going cue never surfaces blocked or attention columns
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:37:27+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** boxes 1-2 confirmed proven (unit tests, unchanged).
+Box 3 stays open: the implementing commits (`81c927ac`, `edf0bcd2`, `edd19f0a`) are UNPUBLISHED
+(`git tag --contains` on `edd19f0a` is empty; not in installed 3.4.13) and `.janitor/logs/
+dispatch.log` has zero `attention:` clause occurrences — cannot be observed live yet.
+`review-after: 2026-09-05` set.
+
+## ⏵ PRIOR STATE — 2026-09-03T09:37:27+0200
 
 Boxes 1-2 of Fix/Acceptance implemented and tested:
 `scripts/dispatch.py` — `_attention_summary()` (~L2709), `_blocked_reason()` (~L2676),

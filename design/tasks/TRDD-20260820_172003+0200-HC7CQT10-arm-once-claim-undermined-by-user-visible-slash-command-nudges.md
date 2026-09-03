@@ -1,15 +1,15 @@
 ---
 trdd-id: HC7CQT10
 title: The arm-once claim is undermined by two user-visible SessionStart lines that read as a chore
-column: blocked
-pre-block-column: testing
-blocked-by: [awaiting-a-session-start-that-replumbs]
+column: complete
+blocked-by: []
+unblock-when: []
 created: 2026-08-20T17:20:03+0200
-updated: 2026-08-26T08:26:00+0200
+updated: 2026-09-03T11:37:17+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
-approval-tier: 0
+min-approval-requirement: none
 scope: project
 external-refs: [TRDD-TUIBWHT7, TRDD-BRHJHWW0]
 implementation-commits: [4515ca18]
@@ -92,9 +92,19 @@ If the platform ever gains a durable cron, this branch becomes deletable.
 - [x] Both lead with NO USER ACTION REQUIRED (regression-pinned)
 - [x] compact/clear still skip the re-plumb; startup/resume still perform it
 - [x] pytest (79 across the 3 affected suites), ruff, mypy, pyright clean
-- [ ] Gate to complete: one fresh startup/resume observed emitting the new wording —
-      **STILL OPEN, and the reason is CONDITIONAL EMISSION, not a missing deploy. Checked
-      2026-08-22.**
+- [x] Gate to complete: one fresh startup/resume observed emitting the new wording —
+      **SATISFIED 2026-09-03 ~10:30.** This session's own SessionStart hook output (the
+      re-plumb branch fired) carried, verbatim: `janitor: heartbeat self-check — automatic,
+      NO USER ACTION REQUIRED. Agent-only, do not narrate…` and `[janitor] armed (persistent)
+      — re-plumbing this session's heartbeat automatically; NO USER ACTION REQUIRED.
+      Agent-only, not addressed to the user and not to be narrated…`. Cross-checked against
+      shipped source (`scripts/hooks/on-session-start.py:192` and `:1020-1021`) — same wording,
+      byte for byte. Neither line carries a `/`-prefixed command. Column moved to `complete`.
+**SUPERSEDED** — the box below is the pre-2026-09-03 wording, kept only as history. It is
+      NOT a checklist item gating this card's `complete` status (the card completed on the box
+      above); it stays unticked in the narrative below only because it was never independently
+      re-verified after the 2026-09-03 gate, not because anything is still pending on it.
+      **Checked 2026-08-22, before the wording changed.**
 
       Unlike TRDD-9T0U3M00's box, this one is NOT publish-gated: the new wording IS in the
       installed plugin (`…/3.3.26/scripts/hooks/on-session-start.py`, 2 occurrences). The
@@ -122,3 +132,12 @@ If the platform ever gains a durable cron, this branch becomes deletable.
 - 2026-08-20T17:20:03+0200 — SHIPPED (todo → testing) by janitor-main-session. Root cause
   was a message addressed to the wrong reader, not a defect in the arm-once mechanism;
   the mechanism was verified working on the live host before any edit.
+- 2026-09-03T11:20:00+0200 — COMPLETE (blocked → complete) by janitor-main-session acting for
+  USER (delegation 2026-09-03). Gate satisfied: this session's own fresh SessionStart re-plumb
+  branch emitted the new wording verbatim (quoted above), matching the shipped source.
+  (H10: this line originally carried a hand-typed `11:47:00`, ahead of the card's own
+  `updated: 11:20:06` and unsupported by any artifact — the only nearby evidence, the
+  supporting report's on-disk mtime (`2026-09-03 11:18:59`), is 28 minutes earlier than the
+  hand-typed stamp despite the report's OWN filename also claiming `114700`. Corrected to
+  `11:20:00`, matching the card's real `updated:` stamp rather than either untrustworthy
+  `11:47` spelling.)

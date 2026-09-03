@@ -3,8 +3,9 @@ trdd-id: YWMKNKVT
 title: Librarian notice must not carry a machine-local path; overview pages exempt from globs
 column: blocked
 created: 2026-08-08T12:41:58+0200
-updated: 2026-08-22T12:02:05+0200
+updated: 2026-09-03T11:08:56+0200
 blocked-by: [stale-plugin-session-in-another-project]
+unblock-when: [decision:owner]
 pre-block-column: todo
 current-owner: janitor-main-session
 task-type: bugfix

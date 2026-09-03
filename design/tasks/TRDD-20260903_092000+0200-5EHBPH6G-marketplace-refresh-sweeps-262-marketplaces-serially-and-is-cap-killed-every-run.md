@@ -3,7 +3,8 @@ trdd-id: 5EHBPH6G
 title: marketplace-refresh sweeps 262 registered marketplaces serially under background QoS and is cap-killed on every run — five consecutive rc=-9 and plugin updates deferred behind its lock
 column: testing
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-03T09:46:54+0200
+updated: 2026-09-03T11:09:13+0200
+review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -61,7 +62,14 @@ heartbeat's task-quarantine drift line.
    detector sees the truth.
 4. Surface the count: the task logs `refreshed N/M marketplaces in T s`.
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** boxes 1-3 confirmed proven (unchanged). Box 4 stays
+open: implementing commit `69feb820` is UNPUBLISHED (`git tag --contains` empty) and
+`daemon.log`/`daemon.log.1` show no `marketplace-refresh` run since the last FAILED (`02:59:24`,
+consecutive=3, quarantined) — no rc=0 run to observe yet. `review-after: 2026-09-05` set.
+
+## ⏵ PRIOR STATE — 2026-09-03
 
 Implemented (`scripts/daemon.py`, `scripts/lib/marketplace_refresh_plan.py`, tests). Gates
 clean (`ruff`, `mypy`, targeted `pytest` — 84 tests: 73 daemon/marketplace unit +

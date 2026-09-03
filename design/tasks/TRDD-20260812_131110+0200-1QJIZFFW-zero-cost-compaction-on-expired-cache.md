@@ -1,11 +1,9 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: blocked
-pre-block-column: dev
-blocked-by: [QZVAEWQH]
+column: testing
 created: 2026-08-12T13:11:10+0200
-updated: 2026-09-02T05:16:16+0200
+updated: 2026-09-03T11:17:55+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -20,7 +18,30 @@ external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 
 # Zero-cost compaction on an expired cache
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+
+### ✅ 2026-09-03 11:17 — box 4 PROVEN live; dev → testing (only box 5 left, a measurement)
+
+The 2026-09-03T05:25:28 automated cycle on `llm-externalizer` proves box 4 (zero Claude tokens on
+the whole clear path): `global-state/cold-cache-clear.log:1421-1424` — daemon fire →
+`CLEAR_CHAIN_SPAWNED` → `SUMMARY_DELEGATED key=9ba2dd9f` (a subprocess `llm-ext session-summary`,
+never a Claude call — `scripts/external_handoff_clear.py:15-27` states the delegation and
+`grep -rn "anthropic\|messages.create" scripts/summarize_previous_session.py` returns nothing).
+The RESUMED session (`cefcb4d9`) held on the summary: `llm-externalizer/.janitor/logs/
+dispatch.log:2766-2769` shows only `summary hold active` heartbeat lines from 05:26:05 to
+05:35:28, then `post-clear resume cue emitted` at 05:40:13 — no model turn ran before the summary
+landed (`session-summary.log:5-6`, ready 05:35:39). Box 4 ticked.
+
+Box 5 (cross-`/clear` verification via `handoff_clear_verify.py`) is NOT proven by this cycle: the
+daemon fire path only captures a `--phase before` snapshot (`handoff-clear-verify.json` on
+`llm-externalizer` has only a `before` key, `ts=1788405929`, no `after`) — the `--phase after` half
+is meant to be run by the resumed session and was not. **Missing measurement:** on the next
+automated clear, run `uv run scripts/handoff_clear_verify.py --phase after` in the resumed session
+right after its `post-clear resume cue`, before further turns run, and compare against that
+project's `before` snapshot.
+
+No code work remains — the two open boxes are both measurements on future/next automated fires.
+Column moved `dev → testing` accordingly.
 
 ### ⛔ 2026-09-02 05:15 — THE DRILL FIRED; the summary half is dark. Blocked on TRDD-QZVAEWQH
 
@@ -442,8 +463,13 @@ deliberately, because today it means nothing either way.
 - [x] A CLI or probe failure degrades to `compose_template_handoff`, never to a lost handoff
 - [x] agentlensPro-certain expiry triggers the same path as the predictive miss — `169d967d`,
       `295c1243`. Live: `cache_certainly_expired` returns a real `False` on this project.
-- [ ] Measured: the whole cycle costs zero Claude tokens (no model turn on the clear path)
+- [x] Measured: the whole cycle costs zero Claude tokens (no model turn on the clear path)
+      — proven: 2026-09-03T05:25:28 automated cycle on `llm-externalizer` — see STATE 2026-09-03
+      (`cold-cache-clear.log:1421-1424`, `dispatch.log:2766-2769`, `session-summary.log:5-6`).
 - [ ] Cross-`/clear` verification via the existing `handoff_clear_verify.py` harness
+      — only a `--phase before` snapshot exists for the 2026-09-03 cycle (`llm-externalizer/
+      .janitor/state/handoff-clear-verify.json`, no `after` key). Missing measurement: run
+      `--phase after` in the resumed session immediately after its next automated clear.
 
 ## Approval log
 
@@ -459,3 +485,8 @@ deliberately, because today it means nothing either way.
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
 - 2026-09-02T05:16:16+0200 — dev → blocked by janitor-main-session (delegated review authority, USER 2026-09-01). Blocked on TRDD-QZVAEWQH: the first automated clear fired but llm-ext could not summarize under launchd (no OpenRouter key in the daemon env); the measurement boxes need a fire whose summary lands.
+- 2026-09-03T11:08:56+0200 — UNBLOCKED by janitor-main-session acting for USER (delegation
+  2026-09-03): blocker TRDD-QZVAEWQH is `column: complete`; restored to the pre-block column.
+- 2026-09-03T11:17:55+0200 — dev → testing by janitor-main-session acting for USER (delegation
+  2026-09-03). Box 4 proven live on the 2026-09-03T05:25:28 automated cycle; only box 5 remains
+  (a `--phase after` measurement on a future automated fire) — no code work left.

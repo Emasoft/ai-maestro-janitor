@@ -3,7 +3,8 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-02T22:46:41+0200
+updated: 2026-09-03T11:09:13+0200
+review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -15,7 +16,15 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02T22:46:41+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** all 3 boxes stay open, correctly — code is
+implemented (`bd3af652`) and re-verified (`uv run pytest tests/test_gitignore_coverage.py
+tests/test_tracked_ignored.py -q` → 17 passed), but `git tag --contains bd3af652` is empty
+(UNRELEASED, not in installed 3.4.13) — the live fleet check cannot run yet.
+`review-after: 2026-09-05` set.
+
+## ⏵ PRIOR STATE — 2026-09-02T22:46:41+0200
 
 Took the smaller-diff option: dropped the `is_ignored` OR-branch from
 `lib/gitignore_coverage.tracked_offenders`. It now takes `(tracked, is_negated=...)` — no more

@@ -3,7 +3,8 @@ trdd-id: Q0Y4M1TF
 title: the rotator lands on the Fable-spent account because is_active false reads as model not in use, and a burn projection is allowed to do it
 column: testing
 created: 2026-09-02T22:04:52+0200
-updated: 2026-09-02T22:36:00+0200
+updated: 2026-09-03T11:09:13+0200
+review-after: 2026-09-04
 current-owner: janitor-main-session
 task-type: bugfix
 priority: critical
@@ -21,7 +22,15 @@ implementation-commits: []
 
 # The rotator lands on the Fable-spent account because `is_active: false` reads as "model not in use", and a burn projection is allowed to do it
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:05
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** boxes 1-2 stay proven. Box 3 stays open: elapsed
+since the 22:22:18 install is ~13h, not the required full day. One more `auto: switched` event
+found since the last audit (`rotator.log:806`, `2026-09-03T10:15:46+0200`, emanuele → ipazia,
+target 7d=33%) — the target's 7d/Fable is well under 99%, so still **zero violations**, but the
+box's own 24h bar is not yet met. `review-after: 2026-09-04` set (past the 22:22 tonight mark).
+
+## ⏵ PRIOR STATE — 2026-09-02 22:05
 
 - **Owner, 22:00:** "why the hell you rotate back to the account with the fable window
   exhausted??? i had to rotate again because of the janitor!"

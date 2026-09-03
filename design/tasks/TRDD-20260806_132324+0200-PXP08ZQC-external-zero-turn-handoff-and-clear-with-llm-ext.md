@@ -1,11 +1,10 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: blocked
-pre-block-column: testing
-blocked-by: [QZVAEWQH, BDZG8Y8A]
+column: testing
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-02T05:16:16+0200
+updated: 2026-09-03T11:17:55+0200
+review-after: 2026-09-05
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -16,9 +15,27 @@ implementation-commits: [def783f5, 95a5beda, 73a426c4, 07e8d986]
 
 # External zero-turn handoff-and-clear (owner failure report 2026-08-06, item 3)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
 
-### ⛔ 2026-09-02 05:15 — ONE AUTOMATED CYCLE OBSERVED, minus its external handoff. Blocked on TRDD-QZVAEWQH + TRDD-BDZG8Y8A
+### ⏵ 2026-09-03 11:17 — cycle-observed half now succeeds with a REAL summary; PASS table still missing. soak: review-after 2026-09-05
+
+The 2026-09-02 05:15 failure below is superseded by a clean cycle: 2026-09-03T05:25:28 the daemon
+fired on `llm-externalizer` (`global-state/cold-cache-clear.log:1421-1424` — `VERDICT FIRE` →
+`CLEAR_CHAIN_SPAWNED` → `SUMMARY_DELEGATED key=9ba2dd9f`), the resumed session held on and
+received a real llm-ext summary (`llm-externalizer/.janitor/logs/session-summary.log:5-6`, ready
+05:35:39, 8617 chars) and resumed clean — the five elements of the acceptance box (big idle
+session → external handoff → clear → re-arm → resume) are now ALL observed on the automated path
+with a genuine summary, not the earlier degraded/failed one.
+
+**Still missing: the `handoff_clear_verify.py` PASS table.** The daemon fire path only captures a
+`--phase before` snapshot (TRDD-BDZG8Y8A); `llm-externalizer/.janitor/state/
+handoff-clear-verify.json` for this cycle has only a `before` key (`ts=1788405929`), no `after`.
+**Missing measurement:** on the next automated clear, run `uv run scripts/
+handoff_clear_verify.py --phase after` in the resumed session right after its `post-clear resume
+cue`, before further turns run, and compare against that project's `before` snapshot to produce
+the PASS table. `review-after: 2026-09-05` set so this is revisited without needing a live nudge.
+
+### ⛔ 2026-09-02 05:15 — ONE AUTOMATED CYCLE OBSERVED, minus its external handoff. Blocked on TRDD-QZVAEWQH + TRDD-BDZG8Y8A (SUPERSEDED — see above)
 
 > **The first LIVE automated clear on the 3.4.7 lane fired at 04:23:48 on AgentlensPro**
 > (trigger `next-fire-misses`; context 418,505 tokens measured from the captured transcript;
@@ -361,8 +378,10 @@ the right moment (before the next turn executes).
 - [x] /clear + bootstrap land via run_chained_inject with no model turn before them
 - [ ] one observed end-to-end unattended cycle: big idle session → external handoff →
       clear → re-arm → resume, with the verify harness PASS table
-      — the CYCLE was observed 2026-08-15 (below); the `handoff_clear_verify.py` PASS table was NOT
-      captured, so this stays open on that half alone
+      — the CYCLE (with a genuine llm-ext summary, not template/failed) was observed
+      2026-09-03T05:25:28 — see STATE 2026-09-03. The `handoff_clear_verify.py` PASS table was
+      still NOT captured (only a `--phase before` snapshot exists for that cycle); missing
+      measurement: run `--phase after` in the resumed session on the next automated clear.
 - [x] cost note: measured per-cycle cost vs today's per-fire cache-miss write — see
       `reports/trdd-verify/20260829_224254+0200-79LXF6PJ-token-saving.md` for the NEW-path
       cost, cross-referenced against this TRDD's own baseline below.
@@ -439,3 +458,10 @@ equality test now pins producer and checker together so they cannot drift apart 
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
 - 2026-09-02T05:16:16+0200 — testing → blocked by janitor-main-session (delegated review authority, USER 2026-09-01). Blocked on TRDD-QZVAEWQH (daemon llm-ext has no OpenRouter key under launchd) and TRDD-BDZG8Y8A (no before-snapshot on the daemon fire path); four of the five cycle elements observed live 04:23.
+- 2026-09-03T11:08:56+0200 — UNBLOCKED by janitor-main-session acting for USER (delegation
+  2026-09-03): blockers TRDD-QZVAEWQH and TRDD-BDZG8Y8A are both `column: complete`; restored
+  to the pre-block column.
+- 2026-09-03T11:17:55+0200 — reviewed by janitor-main-session acting for USER (delegation
+  2026-09-03). The 2026-09-03T05:25:28 automated cycle proves the cycle-observed half with a
+  genuine llm-ext summary; the PASS-table half still needs a `--phase after` capture on a future
+  fire. `review-after: 2026-09-05` set; card stays `testing`.

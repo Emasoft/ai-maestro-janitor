@@ -1,10 +1,12 @@
 ---
 trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
-column: testing
-blocked-by: []
+column: blocked
+blocked-by: [TRDD-N954KWUC]
+unblock-when: [log:.janitor/logs/pane-policy.log matches rotation unwedge: ok]
+pre-block-column: testing
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-03T10:12:00+0200
+updated: 2026-09-03T10:59:30+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -15,7 +17,24 @@ implementation-commits: [f3f664de, 624c63a4]
 
 # Post-rotation ESC unblock (owner failure report 2026-08-06, item 4)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-12
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T10:59:30+0200
+
+### 2026-09-03 — `testing → blocked` on TRDD-N954KWUC (the only card that can produce box 3's evidence)
+
+Box 3 needs a post-ESC pane frame showing the input field free and the model working. That
+frame is exactly what N954KWUC's closed-loop `execute` (Phase 2, landed) logs once Phase 3
+routes the daemon's ESC through it. Until then nobody can produce the observation, so
+`testing` overstated available work. `blocked-by:` names the real dependency; the
+`unblock-when:` predicate keys on the REAL condition, not on the parent card's column
+(review-fork 2026-09-03: N954KWUC's `complete` is gated by EHT 3T9HQEQ6, which needs a
+real Fable wall nobody can schedule — a `trdd:… terminal` predicate would park this card
+past its own evidence). Phase 3's adapter appends
+`pane-policy: rotation_landed rotation unwedge: ok (observed <status>)` to this project's
+`.janitor/logs/pane-policy.log` on the first live closed-loop success; the `log:` predicate
+fires on that line (file absent ⇒ stays blocked). **NEXT ACTION:** none here — when the
+line lands, `trdd-drift` restores `testing`; then cite it in box 3 and close.
+
+### 2026-08-12 (historical)
 
 ### 2026-08-12 — THE TRIGGER IS BLACKED OUT ON A SERVER-OWNED HOST. `testing → todo`
 
@@ -87,10 +106,11 @@ user's GitHub-reply gate. Nothing here can be pulled and worked, so leaving it i
 the board overstate its available work — the failure `the-kanban-is-a-pipeline-that-must-drain`
 names: a column that asserts activity nobody is providing.
 
-`blocked-by: [awaiting-live-429-observation]` is deliberately an EVENT, not a card id. The rule
-wants a blocker that is true and greppable; inventing a placeholder card so the field could
-name one would be ceremony, and would hide that the blocker is the physical world rather than
-another task. `pre-block-column: todo` restores it the moment the observation lands.
+(Historical: the blocker was first written as the descriptive token
+`awaiting-live-429-observation`. Since 2026-09-03 the card is `blocked-by: [TRDD-N954KWUC]`
+with `unblock-when: [trdd:N954KWUC terminal]` and `pre-block-column: testing` — the
+observation can only come from that card's closed-loop verify, so it IS a task, not the
+physical world.)
 
 **This is a park, not an abandonment.** The code is shipped (`f3f664de`, `624c63a4`) and live;
 what remains is confirmation. If a 429 occurs and the pane continues untouched, box 1 closes on
@@ -220,3 +240,7 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
   design/archived/ with box 3 unticked and its true acceptance named (N954KWUC Phase 2
   closed-loop re-read). Boxes 1, 2, 4 stand: box 1's delta IS measured (22:17:55 rotation →
   22:18:01 ESC, one beat).
+- 2026-09-03T10:59:30+0200 — BLOCKED testing → blocked by janitor-main-session acting for USER
+  (delegation 2026-09-03 10:5x: "you can do the review columns of the kanban in my stead").
+  Advisor finding on the 2026-09-03 batch: the only producer of box 3's evidence is
+  TRDD-N954KWUC's closed-loop verify, so the card is blocked on that card, not on an event.

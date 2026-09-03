@@ -3,7 +3,7 @@ trdd-id: WP7TCRME
 title: The janitor FIXES instead of notifying — loudness gate, own-project-only warnings, and cross-project issue filing
 column: blocked
 created: 2026-08-12T20:13:28+0200
-updated: 2026-08-13T00:15:36+0200
+updated: 2026-09-03T11:08:56+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -14,6 +14,8 @@ relevant-rules: []
 npt: []
 eht: []
 blocked-by: [user-decision-exempt-subset-applier]
+unblock-when: [decision:user]
+pre-block-column: todo
 external-refs: [TRDD-FENWWB4E, TRDD-CGYMUKO6]
 ---
 

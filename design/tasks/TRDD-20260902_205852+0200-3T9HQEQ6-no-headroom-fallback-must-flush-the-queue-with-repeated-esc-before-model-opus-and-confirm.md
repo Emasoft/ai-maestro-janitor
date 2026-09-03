@@ -3,7 +3,8 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-02T22:40:00+0200
+updated: 2026-09-03T11:09:13+0200
+review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -22,7 +23,14 @@ created-by: USER directive 2026-09-02 21:05, filed during TRDD-NACCL0CB
 
 # When no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02 22:40
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** boxes 1-2 ticked — `97 passed, 1 skipped` re-run
+just now, matches STATE. Box 3 stays open: zero `queue-flush ESC`/`queue clear after` lines in
+`daemon.log`/`daemon.log.1`, and the review-fork follow-ups (`fb25366f`, `1533ccc9`) are still
+UNPUBLISHED. `review-after: 2026-09-05` set.
+
+## ⏵ PRIOR STATE — 2026-09-02 22:40
 
 - **Review-fork correction, 22:40.** The worker's loop treated an UNREADABLE pane (reader
   `None`, or a raising reader swallowed by `except Exception`) as "queue clear" after one
@@ -109,11 +117,18 @@ this card still flushes whatever is already queued.
 
 ## Acceptance
 
-- [ ] Unit: a pane frame with two queued commands on the input line needs two ESC reads before
+- [x] Unit: a pane frame with two queued commands on the input line needs two ESC reads before
       `/model opus` is typed; a clean field gets it on the first pass.
-- [ ] Unit: the confirmation Enter is sent only after the Ask-user menu is observed.
+      — proven by tests/test_terminal_trigger.py::test_two_queued_commands_need_three_escs_before_model_opus_is_typed
+      + tests/test_terminal_trigger.py::test_a_clean_field_gets_one_esc_then_the_command (2026-09-03)
+- [x] Unit: the confirmation Enter is sent only after the Ask-user menu is observed.
+      — proven by tests/test_terminal_trigger_readback.py::test_true_error_switch_flushes_the_queue_then_submits_then_confirms_the_detected_menu
+      + tests/test_terminal_trigger_readback.py::test_true_error_switch_sends_no_blind_enter_when_no_menu_appears (2026-09-03)
 - [ ] Live: next scoped-only wall with no headroom ends with `/model opus` confirmed and no
-      human keystroke.
+      human keystroke. — NOT YET: `daemon.log`/`daemon.log.1` carry zero `queue-flush ESC`/
+      `queue clear after` lines; the core fix `e0c328c4` is in installed 3.4.13, but the
+      review-fork follow-ups `fb25366f`/`1533ccc9` are UNPUBLISHED — publish first, then wait
+      for a genuine no-headroom Fable wall.
 
 ## Approval log
 

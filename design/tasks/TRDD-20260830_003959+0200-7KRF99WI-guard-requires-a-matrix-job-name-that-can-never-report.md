@@ -1,11 +1,12 @@
 ---
 trdd-id: 7KRF99WI
 title: the branch-protection guard proposes a matrix job name that can never report
-column: blocked
-pre-block-column: testing
-blocked-by: [AMAMA-peer-matrix-repo-re-measure]
+column: testing
+blocked-by: []
+unblock-when: []
+review-after: 2026-09-05
 created: 2026-08-30T00:39:59+0200
-updated: 2026-09-01T19:55:00+0200
+updated: 2026-09-03T11:47:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -19,6 +20,48 @@ external-refs: [janitor#294, TRDD-H8WRCW0I]
 ---
 
 # The guard restores a required check that can never pass
+
+## ⏵ 2026-09-03 11:47 — VERIFIED against a real PR-triggered matrix repo; `testing` box ticked
+
+Re-measured live, read-only, against `/Users/emanuelesabetta/ai-maestro`
+(`.github/workflows/ci.yml` has `strategy.matrix` on job `test`, `on: pull_request`):
+
+```
+detect_required_status_checks(ai-maestro) -> [{'context': 'lint'}, {'context': 'test-installers'}]
+```
+
+The matrix job `test` is **OMITTED** — never emitted as a bare `test`/`Test matrix` context —
+exactly as the fix intends. `test-installers.yml`'s own (non-matrix) job `test-installers` is
+emitted correctly.
+
+Then compared against what GitHub ACTUALLY reports for a real merged PR on that repo (PR #52,
+commit `c8198ebe`):
+
+```
+gh api repos/Emasoft/ai-maestro/commits/c8198ebe.../check-runs --jq '.check_runs[].name'
+  -> lint, Socket Security: Project Report, Socket Security: Pull Request Alerts,
+     test (22), test-installers
+```
+
+Both detector-emitted contexts (`lint`, `test-installers`) are exact names GitHub reports. The
+matrix job reports as `test (22)` (per-combination) and is never required — no unsatisfiable
+context. **Verified**, not merely re-derived: this IS the peer's exact repro shape (a
+PR-triggered matrix job), measured first-hand rather than assumed clean by inference.
+
+**#294 defect 2 (empty-but-present ruleset silently reported as converged) — also checked, and
+it is NOT live.** `baselines_present()` (`branch_protection_lib.py:618`) only compares ruleset
+NAMES, so in isolation an empty-but-present ruleset (name matches, `rules: []`) would read as
+"present". But content drift is NOT decided there — `ruleset_content_drift()` (`:658`) is the
+content-comparison path (called from `baselines_content_current`), and for every EXPECTED rule
+type it does `if rtype not in live_rules: drift.append(f"{name}: missing rule {rtype}")`. An
+empty `rules: []` on the live ruleset makes `live_rules == {}`, so every expected rule type is
+reported as a `missing rule` drift line. **An empty-but-present ruleset IS caught as drift** —
+`baselines_present` is only the cheap "do the names exist" short-circuit before the content
+check runs, not the drift decision itself.
+
+Acceptance box 4 ticked below. `review-after: 2026-09-05` set per the sequencing note (final
+close waits on publish, per the orchestrator's instruction) — see report
+`reports/board-drain/…-blocked-rulings-verification.md`.
 
 ## The defect
 
@@ -133,9 +176,11 @@ requiring `${{ matrix.asset }}` — that is a narrow escape, not a design.** Add
       pre-fix code — PROVEN by running both versions on one fixture rather than assuming:
       `OLD: [{'context': 'Lint'}, {'context': 'Test matrix'}]` vs `NEW: [{'context': 'Lint'}]`.
       Two tests added to `tests/test_branch_protection_guard.py`
-- [ ] the fix is verified against a repo that HAS a PR-triggered matrix job, not only against this
-      one, since this one does not reproduce it — the peer (AMAMA) has such a repo and offered to
-      re-measure; ask before assuming safe
+- [x] the fix is verified against a repo that HAS a PR-triggered matrix job, not only against this
+      one, since this one does not reproduce it — VERIFIED 2026-09-03 against
+      `/Users/emanuelesabetta/ai-maestro` (real PR-triggered `strategy.matrix` job), see STATE
+      block above: the matrix job is omitted and every emitted context matches a real GitHub
+      check-run name
 - [x] `uv run pytest -q` (guard file: 56 passed) + ruff clean + mypy clean. **Full-suite run still
       owed** — see TRDD-CI9AC02Y for the one known suite-only failure
 

@@ -4,8 +4,9 @@ title: Cold-cache-clear via auto-rolling shell-out launcher so the server can fi
 column: blocked
 pre-block-column: testing
 blocked-by: [peer-repo-hub-lane-wiring]
+unblock-when: [decision:peer]
 created: 2026-08-19T20:15:22+0200
-updated: 2026-08-26T08:26:00+0200
+updated: 2026-09-03T11:08:56+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal

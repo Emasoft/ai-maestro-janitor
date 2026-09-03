@@ -1,16 +1,14 @@
 ---
 trdd-id: 79LXF6PJ
 title: retire the daemon-composed handoff and route every compaction through the llm-externalizer
-column: blocked
-pre-block-column: testing
-blocked-by: [QZVAEWQH]
+column: complete
 created: 2026-08-23T16:45:05+0200
-updated: 2026-09-02T05:16:16+0200
+updated: 2026-09-03T11:37:17+0200
 current-owner: janitor-main-session
 task-type: refactor
 severity: high
 scope: project
-approval-tier: 3
+min-approval-requirement: user
 release-via: publish
 relevant-rules: []
 npt: []
@@ -200,12 +198,19 @@ theory — see 5RXBI65T). But 5RXBI65T must not be closed as "solved by D" if E 
       — one commit `155833b3` both retires `_compose`'s daemon call site and ships the
       skills-then-summary replacement + the hard "no summary → no clear" gate
       (`external_handoff_clear.py:250`, re-enforced in `main()`); 139 external-clear tests pass
-- [ ] an idle unattended session is proven to still be resumable after the change (the drill that
+- [x] an idle unattended session is proven to still be resumable after the change (the drill that
       TRDD-1QJIZFFW box 2 already defines — an AUTOMATED run, not a hand-typed one)
-      — **still open, and now UNBLOCKED**: 1QJIZFFW's gate (3.4.0 publishes + installs) discharged
-      2026-08-29; the only remaining step is flipping
-      `CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED` to `true` at a seam and letting one
-      automated clear fire. This box closes when 1QJIZFFW box 2 closes — same run, one drill.
+      — proven: 2026-09-03T05:25:28+0200 the daemon fired on `llm-externalizer`
+      (`~/.claude/plugins/data/…/global-state/cold-cache-clear.log:1421-1424` — `VERDICT FIRE
+      trigger=next-fire-misses` → `CLEAR_CHAIN_SPAWNED` → `SUMMARY_DELEGATED key=9ba2dd9f`), and
+      the RESUMED session (`cefcb4d9`) held on the real llm-ext summary and released it:
+      `llm-externalizer/.janitor/logs/session-summary.log:5-6` — `[05:25:34] holding this session
+      while llm-ext summarizes 9ba2dd9f-…jsonl` → `[05:35:39] summary ready (8617 chars) — hold
+      released`; the summary is on disk at
+      `llm-externalizer/.janitor/state/agent-handoff-9ba2dd9f-20260903_052534+0200-35993.md`
+      (121 lines, substantive). `dispatch.log:2766-2769` shows only `summary hold active` lines
+      during the hold and the first `post-clear resume cue emitted` only at 05:40:13, after the
+      hold released — no model turn ran before the summary landed (2026-09-03).
 - [x] TRDD-5RXBI65T is re-columned or closed honestly against whichever option ends up shipping
       — 2026-08-29: option D shipped and is now INSTALLED (3.4.1 carries `lib/handoff_files.py`
       and the keyed-name skill); 5RXBI65T moved `dev` → `testing` with its 3.4.0 gate marked
@@ -243,3 +248,10 @@ theory — see 5RXBI65T). But 5RXBI65T must not be closed as "solved by D" if E 
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
 - 2026-09-02T05:16:16+0200 — testing → blocked by janitor-main-session (delegated review authority, USER 2026-09-01). Blocked on TRDD-QZVAEWQH: the first automated clear resumed from the mechanical handoff because the daemon's llm-ext has no OpenRouter key under launchd.
+- 2026-09-03T11:08:56+0200 — UNBLOCKED by janitor-main-session acting for USER (delegation
+  2026-09-03): blocker TRDD-QZVAEWQH is `column: complete`; restored to the pre-block column.
+- 2026-09-03T11:17:55+0200 — COMPLETE by janitor-main-session acting for USER (delegation
+  2026-09-03). Last open box (automated-clear resumability) proven by the 2026-09-03T05:25:28
+  `llm-externalizer` cycle: daemon fire → `SUMMARY_DELEGATED` → resumed session held on and
+  released a real llm-ext summary, zero model turns before it landed. All 5 acceptance boxes
+  now ticked.

@@ -3,7 +3,8 @@ trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
 column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-02T05:16:16+0200
+updated: 2026-09-03T11:09:13+0200
+review-after: 2026-09-05
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
 task-type: feature
@@ -20,7 +21,16 @@ external-refs: [TRDD-1QJIZFFW, TRDD-79LXF6PJ, TRDD-PXP08ZQC, TRDD-XCJFCJUX]
 
 # The clear must precede the summary, not follow it
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-02
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+
+**Board reconciliation (2026-09-03 11:09):** re-verified — `external-clear.log:603` still
+carries the ONLY `prefix invalidated` occurrence (`grep -c` = 1), paired with a `HOLD` verdict
+(context already small, no clear was needed). Detection works; the "measured" box's own claim
+(a large-context invalidation skipping a paid write) has not yet had a qualifying event.
+`review-after: 2026-09-05` set — soak: box needs a `prefix invalidated` event on a session
+≥300k context; re-check after that date.
+
+## ⏵ PRIOR STATE — 2026-09-02
 
 ### ✅ 2026-09-02 05:15 — the clear-first ORDERING is observed live; the "measured" box still waits for a prefix-invalidation event
 

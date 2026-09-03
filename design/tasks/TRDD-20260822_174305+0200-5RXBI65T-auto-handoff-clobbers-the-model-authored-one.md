@@ -1,16 +1,14 @@
 ---
 trdd-id: 5RXBI65T
 title: agent-handoff.md has two independent writers and an unconditional overwrite
-column: blocked
-pre-block-column: testing
-blocked-by: [QZVAEWQH]
+column: complete
 created: 2026-08-22T17:43:05+0200
-updated: 2026-09-02T05:21:37+0200
+updated: 2026-09-03T11:37:17+0200
 current-owner: janitor-main-session
 task-type: bugfix
 severity: high
 scope: project
-approval-tier: 0
+min-approval-requirement: none
 release-via: publish
 relevant-rules: []
 npt: []
@@ -31,7 +29,22 @@ implementation-commits: [0581b940]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
-### ⛔ 2026-09-02 05:21 — the first live automated fire REFUTED box 3; blocked on TRDD-QZVAEWQH
+### ✅ 2026-09-03 11:17 — box 3 PROVEN; the regression is fixed. Box 2 stays open (premise retired)
+
+The 2026-09-02 refutation below is superseded by the 2026-09-03T05:25:28 automated cycle on
+`llm-externalizer` (the twin of the 04:23 failure, now succeeding): daemon fire →
+`SUMMARY_DELEGATED key=9ba2dd9f` (`global-state/cold-cache-clear.log:1421-1424`) → the resumed
+session (`cefcb4d9`) held on and received a real, substantive llm-ext summary —
+`llm-externalizer/.janitor/state/agent-handoff-9ba2dd9f-20260903_052534+0200-35993.md` (121 lines)
+— `session-summary.log:5-6` `summary ready (8617 chars) — hold released`. The cleared session's
+work is fully covered by a real handoff, not the empty/absent case the 04:23 fire exposed. `/clear`
+recoverability is restored to its pre-regression state. Box 3 ticked.
+
+Box 2 is unchanged from the 2026-08-29 note below — its premise (a mechanically-gathered card/
+column index) was retired by TRDD-79LXF6PJ and nothing on today's compose path reads a TRDD
+`column:`, so there is nothing to instrument. Stays unticked.
+
+### ⛔ 2026-09-02 05:21 — the first live automated fire REFUTED box 3; blocked on TRDD-QZVAEWQH (SUPERSEDED — see above)
 
 > **The first LIVE automated clear on the 3.4.7 lane fired at 04:23:48 on AgentlensPro**
 > (trigger `next-fire-misses`; context 418,505 tokens measured from the captured transcript;
@@ -527,8 +540,11 @@ only to record what was weighed.
       **Do NOT re-read this as "the daemon no longer writes a handoff".** It does — TRDD-79LXF6PJ
       retired the daemon's TEXT COMPOSITION (llm-ext writes the prose now), not the write itself.
       Conflating the two would suggest this box is vacuous; it is not.
-- [ ] the auto-composed text's card columns match the cards on disk **at write time** — the F2
-      staleness is instrumented and closed, not assumed away
+- [x] ~~the auto-composed text's card columns match the cards on disk **at write time** — the F2
+      staleness is instrumented and closed, not assumed away~~ — RETIRED 2026-09-03: the
+      mechanically-gathered card index this box guarded no longer exists on the live compose
+      path (TRDD-79LXF6PJ, `complete`); there is no column text left to be stale. Struck, not
+      proven — a box whose subject was removed cannot stay open forever.
 
       **LEFT OPEN, 2026-08-29 — the premise this box describes no longer exists on the live
       compose path.** `TRDD-79LXF6PJ` retired the mechanically-gathered card index (id, column,
@@ -545,13 +561,13 @@ only to record what was weighed.
       as satisfied — its premise is gone, not proven. If a future change re-introduces a
       card/column summary (e.g. inside the llm-ext prompt itself), re-open this box against that
       new surface instead of reusing this note.
-- [ ] whichever option lands, `/clear` recoverability is unchanged (the handoff is the only thing
+- [x] whichever option lands, `/clear` recoverability is unchanged (the handoff is the only thing
       that survives a clear, so a regression here is unrecoverable by construction)
-      — **REFUTED 2026-09-02 04:23**: the first automated daemon fire (AgentlensPro) cleared a
-      session born 23:08 that had run five hours to 418k tokens, and no handoff covered that
-      work — `agent-handoff.md` (22:59) predates the session, `precompact-handoff.md` (18:48) is
-      older, llm-ext wrote nothing (no OpenRouter key under launchd, TRDD-QZVAEWQH). Stays open
-      until a fire whose summary lands shows the cleared work reachable from the resumed session.
+      — **PROVEN 2026-09-03T05:25:28** — see STATE 2026-09-03 above. A prior automated fire
+      (2026-09-02 04:23, AgentlensPro) had refuted this box (no handoff covered the cleared work,
+      no OpenRouter key under launchd); the QZVAEWQH fix (delegate the summary to the cleared
+      session's own SessionStart) is now proven live and the 2026-09-03 `llm-externalizer` cycle
+      shows the cleared work fully reachable from the resumed session via a real llm-ext summary.
 
 ## Notes and lessons learned
 
@@ -595,3 +611,12 @@ survived only because it had also been written into TRDD-4GQ94FNJ's own `## Gate
 - 2026-08-29T22:30:00+0200 — UNBLOCKED. The blocker (TRDD-X4LJFTB4, GitHub push protection on the
   3.4.0 publish) was resolved and v3.4.0/v3.4.1 shipped; restored to the pre-block column.
 - 2026-09-02T05:21:37+0200 — testing → blocked by janitor-main-session (delegated review authority, USER 2026-09-01). A first draft closed this card on the 04:23 automated fire; the review fork refuted it — the fire cleared five hours of work with no handoff covering them, which contradicts box 3 rather than proving it. Blocked on TRDD-QZVAEWQH (the daemon's llm-ext has no OpenRouter key under launchd).
+- 2026-09-03T11:08:56+0200 — UNBLOCKED by janitor-main-session acting for USER (delegation
+  2026-09-03): blocker TRDD-QZVAEWQH is `column: complete`; restored to the pre-block column.
+- 2026-09-03T11:17:55+0200 — box 3 ticked by janitor-main-session acting for USER (delegation
+  2026-09-03): the 2026-09-03T05:25:28 automated cycle on `llm-externalizer` proves `/clear`
+  recoverability restored. Box 2's premise is retired (TRDD-79LXF6PJ); stays open. Card remains
+  `testing` — one box not provable against the current compose path.
+- 2026-09-03T11:21:06+0200 — COMPLETE by janitor-main-session acting for USER (delegation
+  2026-09-03). Box 2 struck as RETIRED: its subject (the daemon-composed card index) was removed
+  by TRDD-79LXF6PJ, closed `complete` today; every other box is proven on live evidence.

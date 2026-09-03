@@ -4,8 +4,9 @@ title: The janitor plugin must update as soon as a new version is detected under
 column: blocked
 pre-block-column: todo
 blocked-by: [peer-decision-absorbed-version-update-lane]
+unblock-when: [decision:peer]
 created: 2026-08-26T14:06:12+0200
-updated: 2026-08-26T18:49:24+0200
+updated: 2026-09-03T11:08:56+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
