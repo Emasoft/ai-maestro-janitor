@@ -813,12 +813,12 @@ _LEGACY_WHERE_RE = re.compile(r"^[^:]+:\d+$")
 
 def migrate_legacy_where(
     code: str,
-    new_key_by_rel: dict[str, str],
+    new_keys_by_rel: dict[str, list[str]],
     *,
     project_dir: str | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """One-shot re-key of proposals still carrying a pre-content-addressed `{rel}:{line}` dedupe
-    key (TRDD-QNMBH3ES). Returns (migrated, dropped).
+    key (TRDD-QNMBH3ES). Returns (migrated, dropped, ambiguous).
 
     `reconcile()` treats "absent from the live set" as "the finding is gone" — correct for the new
     content-addressed keys, but a legacy-keyed entry for a finding that is STILL THERE would look
@@ -829,10 +829,18 @@ def migrate_legacy_where(
     through `ticket_proposal.retract`, which would write "WITHDRAWN BY THE JANITOR" and assert the
     finding was seen and cleared, a claim this code cannot actually back (the old key never told us
     which rule fired, so a caller-side "still live" miss here is not proof the finding is gone).
+
+    A legacy key only ever named `{rel}:{line}` — no rule id, no column, nothing to disambiguate
+    it — so when a `rel` now carries MORE THAN ONE live finding (two spans, same rule, same file)
+    there is no honest way to pick which one the legacy entry meant. Guessing (e.g. "last wins")
+    silently re-keys it to a finding it may never have been about. So an ambiguous `rel` is
+    dropped like a vanished one (never re-keyed, never merged) and counted separately so a fire
+    log can distinguish "the finding is gone" from "we could not tell which finding it was".
     """
     prefix = f"{code}:"
     migrated = 0
     dropped = 0
+    ambiguous = 0
     for _scope, path in ticket_proposal.trdd_common.trdd_files("proposals", project_dir):
         try:
             text = path.read_text(encoding="utf-8")
@@ -845,11 +853,11 @@ def migrate_legacy_where(
         if not _LEGACY_WHERE_RE.match(where):
             continue  # already new-shape, or not this migration's shape at all
         rel = where.rsplit(":", 1)[0]
-        new_key = new_key_by_rel.get(rel)
-        if new_key:
+        new_keys = new_keys_by_rel.get(rel, [])
+        if len(new_keys) == 1:
             new_text = re.sub(
                 r"(?m)^ticket-dedupe-key: .*$",
-                f"ticket-dedupe-key: {new_key}",
+                f"ticket-dedupe-key: {new_keys[0]}",
                 text,
                 count=1,
             )
@@ -859,12 +867,14 @@ def migrate_legacy_where(
                 continue
             migrated += 1
         else:
+            if len(new_keys) > 1:
+                ambiguous += 1
             try:
                 path.unlink()
             except OSError:
                 continue
             dropped += 1
-    return migrated, dropped
+    return migrated, dropped, ambiguous
 
 
 def issue_domain(code: str) -> str:

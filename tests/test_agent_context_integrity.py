@@ -798,15 +798,15 @@ def test_migrate_legacy_where_rekeys_live_findings_and_drops_vanished_ones_witho
     assert opened_vanished.first_seen
     assert len(_proposals(_catalog_project)) == 2
 
-    new_key_by_rel = {
-        present_rel: f"{aci._CODE}:{aci._dedupe_where(present_rel, still_present)}",
+    new_keys_by_rel = {
+        present_rel: [f"{aci._CODE}:{aci._dedupe_where(present_rel, still_present)}"],
     }
-    migrated, dropped = issue_catalog.migrate_legacy_where(aci._CODE, new_key_by_rel)
-    assert (migrated, dropped) == (1, 1)
+    migrated, dropped, ambiguous = issue_catalog.migrate_legacy_where(aci._CODE, new_keys_by_rel)
+    assert (migrated, dropped, ambiguous) == (1, 1, 0)
 
     remaining = _proposals(_catalog_project)
     assert len(remaining) == 1, "the vanished-finding entry must be gone from design/proposals/"
-    assert new_key_by_rel[present_rel] in remaining[0].read_text(encoding="utf-8"), (
+    assert new_keys_by_rel[present_rel][0] in remaining[0].read_text(encoding="utf-8"), (
         "the surviving entry must carry the new-shape key"
     )
 
@@ -816,3 +816,51 @@ def test_migrate_legacy_where_rekeys_live_findings_and_drops_vanished_ones_witho
     assert retract_calls == [], (
         f"neither the migration nor the follow-up reconcile may call retract: {retract_calls!r}"
     )
+
+
+def test_migrate_legacy_where_drops_ambiguous_rel_without_guessing(
+    _catalog_project: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QNMBH3ES-unique-match: a legacy `{rel}:{line}` key carries no rule id, so when its `rel`
+    now maps to TWO live findings (same file, same rule, two spans) there is no honest way to
+    tell which one it meant. It must be dropped — never re-keyed to either candidate, never
+    merged — and counted separately as `ambiguous` so the fire log can say so."""
+    aci = _load_detector()
+    import agent_config_patterns as acp  # type: ignore[import-not-found]
+    import issue_catalog  # type: ignore[import-not-found]
+    import ticket_proposal  # type: ignore[import-not-found]
+
+    retract_calls: list[str] = []
+    monkeypatch.setattr(
+        ticket_proposal, "retract",
+        lambda key, **kw: (retract_calls.append(key), None)[1],
+    )
+
+    rel = "CLAUDE.md"
+    old_key = f"{rel}:40"
+    opened = issue_catalog.raise_issue(
+        aci._CODE, where=old_key, evidence=[old_key], severity="critical", path=rel,
+    )
+    assert opened.first_seen
+    assert len(_proposals(_catalog_project)) == 1
+
+    finding_a = acp.Finding(
+        rule_id="prompt-injection-multilingual", line=40, column=1,
+        matched_text="ignore all previous instructions",
+        severity="CRITICAL", description="d", owasp_asi="ASI-01",
+    )
+    finding_b = acp.Finding(
+        rule_id="prompt-injection-multilingual", line=80, column=1,
+        matched_text="ignore all previous instructions",
+        severity="CRITICAL", description="d", owasp_asi="ASI-01",
+    )
+    new_keys_by_rel = {
+        rel: [
+            f"{aci._CODE}:{aci._dedupe_where(rel, finding_a)}",
+            f"{aci._CODE}:{aci._dedupe_where(rel, finding_b)}",
+        ],
+    }
+    migrated, dropped, ambiguous = issue_catalog.migrate_legacy_where(aci._CODE, new_keys_by_rel)
+    assert (migrated, dropped, ambiguous) == (0, 1, 1)
+    assert _proposals(_catalog_project) == [], "the ambiguous legacy entry must be dropped"
+    assert retract_calls == [], "an ambiguous drop must never go through retract"

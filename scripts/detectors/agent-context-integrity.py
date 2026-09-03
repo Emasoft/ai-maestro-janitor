@@ -649,12 +649,15 @@ def main() -> int:
     # QNMBH3ES review finding): without this, every legacy-keyed proposal is absent from the
     # new-shape live set below and `reconcile` would retract it, only for the loop above to
     # re-mint the identical proposal moments later — one fire of pure churn per host.
-    new_key_by_rel = {rel: f"{_CODE}:{_dedupe_where(rel, f)}" for rel, f in findings}
-    migrated, dropped = issue_catalog.migrate_legacy_where(_CODE, new_key_by_rel)
+    new_keys_by_rel: dict[str, list[str]] = {}
+    for rel, f in findings:
+        new_keys_by_rel.setdefault(rel, []).append(f"{_CODE}:{_dedupe_where(rel, f)}")
+    migrated, dropped, ambiguous = issue_catalog.migrate_legacy_where(_CODE, new_keys_by_rel)
     if migrated or dropped:
         state.log_line(
             _NAME,
-            f"{_CODE}: migrated {migrated} legacy line-keyed entries, dropped {dropped}",
+            f"{_CODE}: migrated {migrated} legacy line-keyed entries, "
+            f"dropped {dropped} (ambiguous {ambiguous})",
         )
 
     for uid in issue_catalog.reconcile(_CODE, [_dedupe_where(rel, f) for rel, f in findings]):

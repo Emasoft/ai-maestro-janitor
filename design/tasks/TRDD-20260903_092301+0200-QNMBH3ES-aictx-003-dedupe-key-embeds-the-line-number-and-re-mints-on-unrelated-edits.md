@@ -3,7 +3,7 @@ trdd-id: QNMBH3ES
 title: AICTX-003 dedupe key embeds the line number so an unrelated edit above the match re-mints a byte-identical proposal
 column: testing
 created: 2026-09-03T09:23:01+0200
-updated: 2026-09-03T11:05:00+0200
+updated: 2026-09-03T10:11:09+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -45,6 +45,23 @@ tests/test_agent_context_integrity.py tests/test_issue_catalog.py -q -p no:rando
 
 **NEXT ACTION:** none — ready for `testing`/`ai_review`. No git add/commit/push performed (out
 of scope per the dispatch prompt).
+
+- QNMBH3ES-unique-match follow-up (2026-09-03T10:11:09+0200): `migrate_legacy_where` no longer
+  guesses on an ambiguous `rel` (two live findings, same file, same rule) — it now takes
+  `new_keys_by_rel: dict[str, list[str]]`, migrates only when exactly one candidate key exists,
+  and drops (never re-keys, never merges) otherwise, counting the ambiguous case separately in
+  the fire log (`migrated N, dropped M (ambiguous A)`). Caller updated in
+  `scripts/detectors/agent-context-integrity.py`. Checked the `_dedupe_where` empty-span
+  `ValueError` propagation asked about in the same follow-up: it is NOT swallowed inside
+  `agent-context-integrity.py` — it raises out of that detector's `main()`. But each detector
+  runs as its OWN subprocess (`dispatch.py::_run_detector`, `subprocess.run([script,
+  "--one-shot"], ...)`), so the exception only crashes that child process (Python prints the
+  traceback to the detector's inherited stderr and exits 1); it never reaches `dispatch.py`'s
+  own process. `_run_detector` then observes `proc.returncode != 0` and DOES swallow it into a
+  log line (`state.log_line("dispatch", f"detector '{name}' exited non-zero")` +
+  `_record_default_outcome(name, "error:rc=1", started)`) — the heartbeat itself proceeds to the
+  next detector unaffected. So: guard swallows = yes, but at the subprocess-boundary in
+  `dispatch.py`, not inside the detector's own exception handling (there is none there).
 
 ## Measured (janitor#291, re-verified 2026-09-03)
 
