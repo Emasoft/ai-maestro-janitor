@@ -182,7 +182,17 @@ Two cheap cold-path proxies were tried and both failed — don't repeat them:
 asymmetry argument was sufficient from the start, and every empirical justification
 written after the number was chosen turned out false. See [[debugging-methodology-verify-before-concluding-mechanism-and-rule-claims]].
 
-## Why the false CI-parity claims survived — an ORPHANED `.mega-linter.yml`
+## Why the false CI-parity claims survived — a `.mega-linter.yml` NO WORKFLOW RUNS
+
+SCOPE OF THAT CLAIM, stated up front because the first draft of this section called the
+file "orphaned" on the strength of one directory check — the same shape as the error the
+section is about. What is VERIFIED: no file under `.github/workflows/` invokes it, there
+is no `.pre-commit-config.yaml`, and `git grep -il 'mega.\?linter'` finds it referenced
+only by `.cspell.json`, this card, publish.py's stale comments and one test.
+What is NOT checked: whether **CPV's `ci-preflight`** reads it — publish.py's own stage-4b
+docstring says that preflight covers "the enabled Mega-Linter sub-linters", and stage 4b
+runs on EVERY publish. If CPV consumes this config, the file is live and deleting it would
+silently weaken the preflight. Settle that before acting on the follow-up below.
 
 `.mega-linter.yml` is present and git-tracked at the repo root, and NO workflow runs
 Mega-Linter (verified 2026-09-04 — `grep -rn mega-linter .github/workflows/` is empty).
@@ -195,11 +205,30 @@ That is the mechanism behind the whole class: a config outliving its runner read
 evidence the runner exists. Anyone auditing by looking for the config — rather than for a
 workflow step that invokes it — concludes CI enforces it.
 
-FOLLOW-UP, not done here: decide whether `.mega-linter.yml` should be deleted (nothing
-runs it) or a workflow restored to run it. Leaving an orphaned linter config is drift that
-will re-seed this exact confusion. NOT deleted tonight because it is a deliberate
-repo-config decision, and because a `.gitignore`d-or-not config may still be consumed by
-something outside this repo's workflows.
+Verified properly, not from one directory: `git grep -il 'mega.\?linter'` finds the config
+only in `.cspell.json`, this card, `publish.py`'s stale comments and one test — and there
+is no `.pre-commit-config.yaml`. Nothing in this repo invokes it. (A reusable workflow in
+another repo could in principle, which is why the follow-up below is a decision and not a
+deletion.)
+
+The references were also ACCURATE TO THE CONFIG: `ENABLE_LINTERS` really does list
+`COPYPASTE_JSCPD` and `BASH_SHELLCHECK`, with `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"`.
+So publish.py was not describing something imaginary — it named real enabled sub-linters of
+a suite that was switched off. That is what made the claims so durable.
+
+**The loss is bigger than the two linters this card started from.** The config enables
+ELEVEN: PYTHON_RUFF, PYTHON_MYPY, PYTHON_BANDIT, BASH_SHELLCHECK, BASH_SHFMT,
+JSON_JSONLINT, YAML_YAMLLINT, MARKDOWN_MARKDOWNLINT, SPELL_CSPELL, COPYPASTE_JSCPD,
+REPOSITORY_CHECKOV. Of those, ruff/mypy/bandit/shellcheck/jscpd have some counterpart in
+the gate or ci.yml; shfmt, jsonlint, yamllint, markdownlint, cspell and checkov appear to
+run NOWHERE. Whatever removed that workflow silently dropped a lint surface nobody has
+missed since.
+
+FOLLOW-UP, not done here: decide whether to delete `.mega-linter.yml` (nothing runs it),
+restore a workflow to run it, or adopt the still-wanted linters individually. Leaving an
+orphaned config is drift that re-seeds this exact confusion. NOT decided tonight because
+which of eleven linters the project still wants is a repo-config judgement, not a defect
+with a right answer.
 
 Coverage note measured while checking this: 8 shell files are tracked; ci.yml's
 "Lint shell scripts" step names only `scripts/dispatch.sh` and `git-hooks/pre-push`, while
