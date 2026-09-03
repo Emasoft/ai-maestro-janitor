@@ -3,7 +3,7 @@ trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
 column: todo
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-03T10:05:00+0200
+updated: 2026-09-03T09:14:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -89,7 +89,7 @@ to the wrong state.
 
 ## Approval log
 
-- 2026-09-03T10:05:00+0200 — APPROVED design → todo by janitor-main-session acting for USER
+- 2026-09-03T09:14:00+0200 — APPROVED design → todo by janitor-main-session acting for USER
   (USER delegation 2026-09-03 09:58: "you can replace me even in human review columns").
   Rationale: the proposal is the USER's own verbatim directive made concrete; the 14 proxy
   call sites are the measured cause of every mis-typed keystroke this month. Phased delivery:

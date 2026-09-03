@@ -1,0 +1,68 @@
+---
+trdd-id: 1PDCPIZC
+title: the keep-going cue never surfaces blocked, failed, design or planned cards — 21 blocked cards sat invisible through a whole night of heartbeats
+column: todo
+created: 2026-09-03T09:20:00+0200
+updated: 2026-09-03T09:20:00+0200
+current-owner: janitor-main-session
+task-type: bugfix
+priority: high
+severity: high
+scope: project
+project-id: ai-maestro-janitor
+min-approval-requirement: none
+labels: [heartbeat, kanban, continuity, dispatch]
+relevant-rules: []
+blocked-by: []
+npt: []
+eht: []
+implementation-commits: []
+created-by: USER report 2026-09-03 09:18
+---
+
+# The keep-going cue never surfaces blocked or attention columns
+
+## Directive (USER, 2026-09-03 09:18, verbatim)
+
+"21 tasks blocked and the janitor didn't nudge the claude agent at all??? do you realize that
+one of the janitor jobs (to ensure continuity of work) is to remind to the main claude agent
+that there are pending tasks and tasks that require attention. in particular blocked tasks.
+WHY THE JANITOR DOES NOT DO THIS PROACTIVELY EVER N CHRONS??"
+
+## Measured
+
+Every `[janitor-resume]` fire between 2026-09-03 00:30 and 09:15 printed exactly
+`open board: 11 in testing (TRDD-2F3I2P18, TRDD-38PB1B86, TRDD-3T9HQEQ6 +8 more)` while the
+board held **21 `blocked`, 1 `design` (N954KWUC, awaiting a ruling), 1 `planned`**. None of
+those ever reached the cue.
+
+Cause, verified: `scripts/dispatch.py:2626-2652` (`_board_summary`) keeps only columns in
+`_WORK_COLUMNS`; `blocked`, `failed`, `design`, `design_human_review`, `human_review`,
+`planned` are dropped before the summary is built. A blocked-cards audit
+(`reports/board-drain/20260903_091543+0200-blocked-cards-audit.md`) found 10 of the 21 carry
+a DESCRIPTIVE pseudo-blocker (`owner-decision-…`, `awaiting-live-…`) rather than a TRDD id —
+i.e. they are decisions nobody was ever reminded to take.
+
+## Fix
+
+1. Add an ATTENTION summary next to the work summary: counts + up to 3 ids for `blocked`,
+   `failed`, `design`, `design_human_review`, `human_review`, `planned`. Blocked cards whose
+   `blocked-by:` names a terminal or non-existent TRDD, or a non-TRDD descriptive token, are
+   flagged `unblockable` / `decision-needed` explicitly.
+2. Emit it on every Nth fire (`CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES`, default 6 ≈ 30
+   min at `*/5`) AND on the first fire after any card enters an attention column, so a new
+   block is announced within one beat.
+3. Never let it break the survival pulse (same best-effort guard as `_board_summary`).
+
+## Acceptance
+
+- [ ] A board with 2 blocked (one on a completed TRDD, one on a descriptive token) + 1 design
+      card yields a cue line naming all three with their attention reason (unit test on the
+      summary builder with a temp `design/tasks/`).
+- [ ] The attention line appears on fire 1 and fire N+1 but not on fires 2..N (test drives the
+      fire counter).
+- [ ] Live: the next heartbeat after this ships lists the current blocked count.
+
+## Approval log
+
+## Notes and lessons learned
