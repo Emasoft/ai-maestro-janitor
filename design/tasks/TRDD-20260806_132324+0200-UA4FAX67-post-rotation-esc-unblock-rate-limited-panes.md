@@ -1,10 +1,10 @@
 ---
 trdd-id: UA4FAX67
 title: A successful account rotation leaves the rate-limited pane BLOCKED — nobody types the ESC that lets it continue
-column: complete
+column: testing
 blocked-by: []
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-03T10:05:20+0200
+updated: 2026-09-03T10:12:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -177,11 +177,16 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
       the daemon lane, a manual `rotator.py switch`, or any future caller.
 - [x] wake-pass default decided + recorded — the periodic sweep STAYS dormant, a rotation
       OVERRIDES it. See the STATE block for the reasoning; it is written into the code too.
-- [x] one live observation: 429 → rotate → pane continues with no human keystroke — proven
-      twice on NACCL0CB's evidence: `daemon.log.1:9518-9522` (2026-09-02T22:17:55-58 rotation,
-      22:18:01 `rotation-esc: FIRED ESC → iterm for ai-maestro-janitor`) and `daemon.log:695-698`
-      (2026-09-03T04:10:24-29, matching `rotator.log.1:1172` account switch) — no human keystroke
-      visible in either log
+- [ ] one live observation: 429 → rotate → pane continues with no human keystroke —
+      ACTUATION observed twice on NACCL0CB's evidence: `daemon.log.1:9518-9522`
+      (2026-09-02T22:17:55-58 rotation, 22:18:01 `rotation-esc: FIRED ESC → iterm for
+      ai-maestro-janitor`) and `daemon.log:695-698` (2026-09-03T04:10:24-29, matching
+      `rotator.log.1:1172` account switch). OUTCOME unobserved: no post-ESC pane read exists
+      anywhere in the log (measured 2026-09-03 10:10 — zero `rotation-esc: verified|cleared|
+      after` lines), so "the pane continues" is inferred from the absence of a human keystroke,
+      not seen. A `FIRED` line records that osascript was spawned. True acceptance = the
+      closed-loop re-read TRDD-N954KWUC Phase 2 adds: the frame after the ESC shows the input
+      field free and the model working. Re-tick when that lands and one such frame is logged.
 - [x] harness gap explicitly delegated upstream (#110 cross-referenced) — ai-maestro#110 is
       OPEN, filed by this project, and cross-referenced in this card's WHY, task 4, and
       Pointers sections (`gh issue view 110 --repo Emasoft/ai-maestro` confirmed live 2026-09-03)
@@ -209,3 +214,9 @@ for ai-maestro harness agents) into the affected pane(s) so work continues unatt
   this card's own body. No remaining work on this card; box 2 of the original task list
   (#110 harness primitive) is explicitly NOT ours (janitor#100 split) and stays tracked
   upstream, not here.
+- 2026-09-03T10:12:00+0200 — REOPENED complete → testing by janitor-main-session (review-fork
+  finding on commit 3e095d5a). Box 3 was closed on `FIRED ESC` lines, which record actuation,
+  not outcome; no post-ESC pane state was ever logged. The card moves back out of
+  design/archived/ with box 3 unticked and its true acceptance named (N954KWUC Phase 2
+  closed-loop re-read). Boxes 1, 2, 4 stand: box 1's delta IS measured (22:17:55 rotation →
+  22:18:01 ESC, one beat).
