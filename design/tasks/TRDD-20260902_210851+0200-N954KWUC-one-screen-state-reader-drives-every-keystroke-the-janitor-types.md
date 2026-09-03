@@ -3,7 +3,7 @@ trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
 column: testing
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-03T22:31:00+0200
+updated: 2026-09-03T21:45:37+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: [NACCL0CB, 3T9HQEQ6]
-implementation-commits: [afd3af70, 30508054, 8cb71c3b, e93a9203]
+implementation-commits: [afd3af70, 30508054, 8cb71c3b, 2a625380, e93a9203, 6197d7c2, 1a06ea49]
 created-by: USER directive 2026-09-02 21:07
 ---
 
