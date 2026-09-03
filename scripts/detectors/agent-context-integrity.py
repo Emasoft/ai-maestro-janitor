@@ -515,7 +515,19 @@ def main() -> int:
             pass
 
     findings, exfil_drift = _scan(scanned, project_root, _max_files())
-    state.atomic_write(last_hash_file, signature)
+    # janitor#291 follow-up: a scan the cap truncated is not a scan of every candidate, so
+    # `reconcile` (which reads "absent from the live set" as "the finding is gone") must not
+    # run this fire — a proposal for an unscanned file would look vanished and get retracted
+    # on no evidence at all. `scanned_rels` is also what `migrate_legacy_where` uses to leave
+    # an unscanned file's legacy entry untouched rather than guess at it.
+    scanned_rels = {str(p.relative_to(project_root)) for p in scanned}
+    capped = len(scanned) < len(candidates)
+    if capped:
+        state.log_line(
+            _NAME,
+            f"scan capped at {len(scanned)} of {len(candidates)} candidate files — "
+            f"reconcile skipped (absence unprovable)",
+        )
 
     # `exfil_drift` is independent of `findings` — a file may carry ONLY a VERIFIED
     # exfil-structural-probe match and nothing else, and that must still reach the human
@@ -528,9 +540,16 @@ def main() -> int:
     if not findings:
         # Clean now — withdraw every standing proposal. Reconciling only when there IS
         # something to report would strand the last proposal forever, and that is exactly the
-        # one that matters: the finding the user just fixed.
-        for uid in issue_catalog.reconcile(_CODE, []):
-            state.log_line(_NAME, f"withdrew TRDD-{uid} — the context file is clean again")
+        # one that matters: the finding the user just fixed. Skipped on a capped scan (above).
+        if not capped:
+            for uid in issue_catalog.reconcile(_CODE, []):
+                state.log_line(_NAME, f"withdrew TRDD-{uid} — the context file is clean again")
+        # Stamp LAST (janitor#291 follow-up): everything above that could still raise has
+        # already run, so a signature written here is a true "this fire fully succeeded"
+        # mark. Stamping right after `_scan` (the old spot) meant a later step's exception —
+        # e.g. `_dedupe_where`'s empty-span guard — left the signature written anyway, and the
+        # crash went silent until the tree's content next changed.
+        state.atomic_write(last_hash_file, signature)
         state.rotate_log_if_big(_NAME)
         return 0
 
@@ -605,6 +624,35 @@ def main() -> int:
     )
     print(f"[{_NAME}] {headline}\n" + "\n".join(lines) + (f"\n{hint}" if hint else ""))
 
+    # One-shot migration off the pre-TRDD-QNMBH3ES `{rel}:{line}` dedupe-key shape (janitor
+    # QNMBH3ES review finding) — MUST run BEFORE the raise loop below, not after. The old order
+    # raised first: the first fire after the key-shape change minted a FRESH new-shape proposal
+    # (exact-key compare in `ticket_proposal.propose`, no way to know a legacy one already
+    # covers the same finding), and only THEN re-keyed the legacy entry onto that same new key —
+    # landing two proposal files under one dedupe key, forever, since neither `raise_issue` nor
+    # `reconcile` ever again sees a reason to touch either. Migrating first means the legacy
+    # entry already IS the new key by the time the raise loop runs, so `raise_issue`'s own
+    # exact-key dedupe (a real proposal already exists under this key) makes the raise a no-op
+    # instead of a duplicate mint.
+    new_keys_by_rel: dict[str, list[tuple[str, int]]] = {}
+    for rel, f in findings:
+        # `dedupe_key_for` (not a hand-built `f"{_CODE}:{...}"`) — that raw form skips the
+        # `_yaml_plain` canonicalization `raise_issue`/`propose` apply before persisting, so a
+        # `where` containing `: `, `[`, `]`, or over 200 chars produced a key that never matched
+        # the real persisted one: duplicate mint + immediate silent retract of the migrated entry.
+        new_keys_by_rel.setdefault(rel, []).append(
+            (issue_catalog.dedupe_key_for(_CODE, _dedupe_where(rel, f)), f.line)
+        )
+    migrated, dropped, ambiguous = issue_catalog.migrate_legacy_where(
+        _CODE, new_keys_by_rel, scanned_rels=scanned_rels
+    )
+    if migrated or dropped:
+        state.log_line(
+            _NAME,
+            f"{_CODE}: migrated {migrated} legacy line-keyed entries, "
+            f"dropped {dropped} (ambiguous {ambiguous})",
+        )
+
     raised = 0
     skipped = 0
     provenance_skipped = 0
@@ -645,24 +693,14 @@ def main() -> int:
             f"provenance (janitor#214)",
         )
 
-    # One-shot migration off the pre-TRDD-QNMBH3ES `{rel}:{line}` dedupe-key shape (janitor
-    # QNMBH3ES review finding): without this, every legacy-keyed proposal is absent from the
-    # new-shape live set below and `reconcile` would retract it, only for the loop above to
-    # re-mint the identical proposal moments later — one fire of pure churn per host.
-    new_keys_by_rel: dict[str, list[str]] = {}
-    for rel, f in findings:
-        new_keys_by_rel.setdefault(rel, []).append(f"{_CODE}:{_dedupe_where(rel, f)}")
-    migrated, dropped, ambiguous = issue_catalog.migrate_legacy_where(_CODE, new_keys_by_rel)
-    if migrated or dropped:
-        state.log_line(
-            _NAME,
-            f"{_CODE}: migrated {migrated} legacy line-keyed entries, "
-            f"dropped {dropped} (ambiguous {ambiguous})",
-        )
+    # Skipped on a capped scan (see the `capped` guard above `_scan`) — absence of a proposal's
+    # rel from `findings` is only evidence the finding is gone when every candidate was scanned.
+    if not capped:
+        for uid in issue_catalog.reconcile(_CODE, [_dedupe_where(rel, f) for rel, f in findings]):
+            state.log_line(_NAME, f"withdrew TRDD-{uid} — that pattern is gone")
 
-    for uid in issue_catalog.reconcile(_CODE, [_dedupe_where(rel, f) for rel, f in findings]):
-        state.log_line(_NAME, f"withdrew TRDD-{uid} — that pattern is gone")
-
+    # Stamp LAST — see the identical comment on the `if not findings:` early-return above.
+    state.atomic_write(last_hash_file, signature)
     state.rotate_log_if_big(_NAME)
     return 0
 

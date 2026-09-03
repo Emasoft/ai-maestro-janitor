@@ -40,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import findings_ledger  # noqa: E402
+import state  # noqa: E402
 import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
 
@@ -586,6 +587,19 @@ def _finding_key(code: str, issue: Issue, fields: dict[str, str], dedupe_key: st
     return dedupe_key or f"{code}:{fields['where'] or _render(issue.title, fields)}"
 
 
+def dedupe_key_for(code: str, where: str) -> str:
+    """The exact dedupe key `raise_issue(code, where=where)` (no other data) will persist.
+
+    Mirrors `_finding_key`'s composition plus `ticket_proposal.propose`'s own `_dedupe_key`
+    canonicalization (`_yaml_plain` + `_clean`) — the SAME two-stage pipeline `raise_issue` walks
+    a `where` value through before it lands in `ticket-dedupe-key:`. A caller that needs to
+    PREDICT a key before actually raising (e.g. `migrate_legacy_where`'s re-keying, which must
+    compare its guess against already-persisted keys) has to walk the identical pipeline or the
+    comparison silently never matches — see janitor QNMBH3ES follow-up.
+    """
+    return ticket_proposal._dedupe_key(f"{code}:{tickets._clean(where, _FIELD_CAP)}")
+
+
 @dataclass(frozen=True)
 class Raised:
     """The outcome of `raise_issue`. `line` is a ready-to-print heartbeat line (empty when silent).
@@ -810,15 +824,38 @@ def reconcile(
 
 _LEGACY_WHERE_RE = re.compile(r"^[^:]+:\d+$")
 
+# A legacy `{rel}:{line}` entry and a live finding for the same rel are "the same finding" only
+# when their line numbers are close: an edit above the span shifts it by a few lines, but a span
+# hundreds of lines away is a different defect wearing the same rel. Never guess, never merge —
+# proximity is the only evidence a legacy line and a live span are the same finding.
+_LEGACY_LINE_SLACK = 25
+
 
 def migrate_legacy_where(
     code: str,
-    new_keys_by_rel: dict[str, list[str]],
+    new_keys_by_rel: dict[str, list[tuple[str, int]]],
     *,
+    scanned_rels: set[str] | None = None,
     project_dir: str | None = None,
 ) -> tuple[int, int, int]:
     """One-shot re-key of proposals still carrying a pre-content-addressed `{rel}:{line}` dedupe
-    key (TRDD-QNMBH3ES). Returns (migrated, dropped, ambiguous).
+    key (TRDD-QNMBH3ES). `new_keys_by_rel` maps each rel to `(new_key, line)` pairs for every live
+    finding at that rel THIS run. Returns (migrated, dropped, ambiguous).
+
+    `scanned_rels`, when given, is the set of rels the caller actually scanned THIS fire (the
+    scan is budget-capped — janitor#291 follow-up). A legacy entry whose `rel` fell outside the
+    cap is left COMPLETELY untouched: with no scan of that file this run, "no live match" is not
+    evidence the finding is gone, only that we didn't look — migrating OR dropping it would be a
+    claim this call cannot back. It stays legacy-keyed and is retried on the fire that scans it.
+
+    Two or more legacy entries can independently proximity-match the SAME single live finding
+    (an old bug minted one proposal per shifted line for what was really one finding, so `{rel}:40`,
+    `{rel}:43`, `{rel}:47` all survive as separate proposals). Re-keying every one of them onto that
+    finding's new key would leave several proposal files sharing one `ticket-dedupe-key` — a
+    dedupe key stops deduping the moment two files claim it. `taken` tracks every new-shape key
+    already spoken for (by an already-pending proposal, or by an EARLIER legacy entry migrated
+    during this same call) so only the first claimant is re-keyed; every later one is dropped like
+    a vanished finding — never merged into it, never left duplicating it.
 
     `reconcile()` treats "absent from the live set" as "the finding is gone" — correct for the new
     content-addressed keys, but a legacy-keyed entry for a finding that is STILL THERE would look
@@ -833,14 +870,25 @@ def migrate_legacy_where(
     A legacy key only ever named `{rel}:{line}` — no rule id, no column, nothing to disambiguate
     it — so when a `rel` now carries MORE THAN ONE live finding (two spans, same rule, same file)
     there is no honest way to pick which one the legacy entry meant. Guessing (e.g. "last wins")
-    silently re-keys it to a finding it may never have been about. So an ambiguous `rel` is
-    dropped like a vanished one (never re-keyed, never merged) and counted separately so a fire
-    log can distinguish "the finding is gone" from "we could not tell which finding it was".
+    silently re-keys it to a finding it may never have been about. Same story with exactly one live
+    finding whose line is far from the legacy line: that is not the finding the legacy entry named
+    (the old one was fixed; a new, unrelated one appeared elsewhere in the file) — re-keying onto it
+    would silently rewrite a proposal about A into one about B, wearing A's stale evidence. Both
+    cases are dropped like a vanished one (never re-keyed, never merged); the far-line case counts
+    as `dropped`, the multi-finding case as `ambiguous`, so a fire log can tell "the finding is
+    gone", "a different one took its place", and "we could not tell which finding it was" apart.
     """
     prefix = f"{code}:"
     migrated = 0
     dropped = 0
     ambiguous = 0
+    # Seed `taken` with every new-shape key already spoken for by a STANDING proposal, so a
+    # legacy entry never re-keys onto a key some other file already carries.
+    taken: set[str] = {
+        p.key
+        for p in ticket_proposal.pending(project_dir)
+        if p.key.startswith(prefix) and not _LEGACY_WHERE_RE.match(p.key[len(prefix) :])
+    }
     for _scope, path in ticket_proposal.trdd_common.trdd_files("proposals", project_dir):
         try:
             text = path.read_text(encoding="utf-8")
@@ -852,23 +900,33 @@ def migrate_legacy_where(
         where = key[len(prefix) :]
         if not _LEGACY_WHERE_RE.match(where):
             continue  # already new-shape, or not this migration's shape at all
-        rel = where.rsplit(":", 1)[0]
+        rel, _, legacy_line_str = where.rpartition(":")
+        if scanned_rels is not None and rel not in scanned_rels:
+            continue  # capped scan never looked at this file — absence is unprovable
         new_keys = new_keys_by_rel.get(rel, [])
+        new_key = None
         if len(new_keys) == 1:
+            live_key, live_line = new_keys[0]
+            if live_key not in taken and abs(int(legacy_line_str) - live_line) <= _LEGACY_LINE_SLACK:
+                new_key = live_key
+        elif len(new_keys) > 1:
+            ambiguous += 1
+        if new_key is not None:
             new_text = re.sub(
                 r"(?m)^ticket-dedupe-key: .*$",
-                f"ticket-dedupe-key: {new_keys[0]}",
+                f"ticket-dedupe-key: {new_key}",
                 text,
                 count=1,
             )
             try:
-                path.write_text(new_text, encoding="utf-8")
+                # Atomic (write-tmp + rename), not a plain `write_text` — this file is
+                # git-tracked, so a crash mid-write must never leave it half-rewritten (A9).
+                state.atomic_write(path, new_text)
             except OSError:
                 continue
+            taken.add(new_key)
             migrated += 1
         else:
-            if len(new_keys) > 1:
-                ambiguous += 1
             try:
                 path.unlink()
             except OSError:

@@ -3,7 +3,7 @@ trdd-id: QNMBH3ES
 title: AICTX-003 dedupe key embeds the line number so an unrelated edit above the match re-mints a byte-identical proposal
 column: testing
 created: 2026-09-03T09:23:01+0200
-updated: 2026-09-03T10:11:09+0200
+updated: 2026-09-03T11:05:58+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: normal
@@ -16,14 +16,46 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [b0dca228, 436cca65]
 external-refs: [janitor#291]
 created-by: issue triage 2026-09-03
 ---
 
 # AICTX-003 dedupe key is line-number-unstable
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T10:20:00+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:05:58+0200
+
+- QNMBH3ES-migration-order follow-up (2026-09-03T11:05:58+0200): fixed four more advisor/fork-
+  confirmed defects in the same migration path.
+  1. **Order** — `migrate_legacy_where` now runs BEFORE the raise loop in `main()` (was after):
+     the old order minted a fresh new-key proposal first, then re-keyed the legacy entry onto
+     that same key, landing two files under one dedupe key forever. New test:
+     `test_migration_runs_before_the_raise_loop_so_no_duplicate_proposal_survives`.
+  2. **Many legacy entries → one key** — `migrate_legacy_where` (`scripts/lib/issue_catalog.py`)
+     now tracks a `taken: set[str]` (seeded from already-pending new-shape keys, grown as each
+     legacy entry is migrated); a second legacy entry proximity-matching an already-taken key is
+     dropped, never re-keyed onto it too. New test:
+     `test_migrate_legacy_where_drops_a_second_legacy_entry_claiming_an_already_taken_key`.
+  3. **Stamp-before-process** — `state.atomic_write(last_hash_file, signature)` moved to the LAST
+     statement of both success paths in `main()` (was right after `_scan`, before anything that
+     could still raise). New test:
+     `test_last_hash_stamp_is_written_only_after_the_fire_fully_succeeds` (forces the crash by
+     monkeypatching `agent_config_patterns.scan_text`, not the detector's own logic).
+  4. **Capped scan** — `migrate_legacy_where` takes a new `scanned_rels: set[str] | None` kwarg;
+     a legacy entry whose rel fell outside the cap is left completely untouched. `main()` also
+     skips `reconcile` entirely on a capped fire (absence from a live set built without scanning
+     every candidate proves nothing) and logs `scan capped at N of M candidate files — reconcile
+     skipped`. New test:
+     `test_a_capped_scan_leaves_an_unscanned_files_legacy_proposal_untouched_and_skips_reconcile`.
+
+  Gates green: `ruff check scripts tests` clean, `mypy scripts/ --ignore-missing-imports` clean
+  (502 files), `pytest tests/test_agent_context_integrity.py tests/test_issue_catalog.py -q` →
+  87 passed (38 test functions in the detector file, up from 34).
+
+  **NEXT ACTION:** none — ready for `testing`/`ai_review`. No git add/commit/push performed (out
+  of scope per this dispatch).
+
+## Earlier state (2026-09-03T10:20:00+0200) — superseded by the block above
 
 Implemented + tested. Added `_dedupe_where(rel, f)` at
 `scripts/detectors/agent-context-integrity.py:283` (`sha1(f.matched_text)[:12]:{rel}:{f.rule_id}`,
