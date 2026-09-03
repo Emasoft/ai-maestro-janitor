@@ -165,6 +165,21 @@ AICTX-003 (agent-context-integrity) dedupe keys are CONTENT-ADDRESSED — `sha1(
 
 `trdd-drift` auto-restores a `column: blocked` card to `pre-block-column:` (default `todo`) only when EVERY `unblock-when:` predicate holds AND every TRDD id in `blocked-by:` is DONE — `trdd_common.DONE_COLUMNS` = {complete, completed, published, live}, NOT `TERMINAL_COLUMNS` (a `cancelled`/`refused`/`failed`/`superseded` blocker stays a hold, mirroring dispatch.py's decision-needed class); the `trdd:<id> terminal` PREDICATE keeps the wider TERMINAL semantics its rule text documents. Blocker ids resolve across all four `DESIGN_FOLDERS` (proposals, tasks, archived, refused; first seen wins) — resolving from `tasks/` alone made every archived-because-shipped blocker read as "unresolvable — holding" forever. Issue refs and descriptive tokens in `blocked-by:` are invisible to the hold by design; `unblock-when: [decision:<who>]` is their machine-checkable form and never auto-clears. The `log:<repo-relative> matches <regex>` predicate reads only the last 256 KiB of the file and DROPS the cut first line of the window (a sentinel byte is not enough: `^.*needle` swallows it) — a malformed predicate or an absent file keeps the card blocked (fail toward staying blocked). Verified end-to-end on UA4FAX67: `unblock-when: [log:.janitor/logs/pane-policy.log matches rotation unwedge: ok]` parses intact through `unblock_when_predicates` (the `: ` inside a flow-list item survives) and evaluates True on the seeded line.
 
+
+^ATOM-IWIB-QH0Y [desc: "A whole test suite passing both before and after a behaviour change proves the behaviour was undefended — settle it with a mutation probe, not with a green run", keywords: tests_passed_before_and_after_my_fix did_my_change_actually_do_anything green_suite_proves_nothing how_do_I_know_the_test_is_not_vacuous mutation_probe_on_a_policy_condition no_test_asserted_the_old_behaviour behaviour_survived_a_migration_undetected prove_a_new_test_would_fail is_my_new_test_a_decoration revert_the_condition_and_re-run all_tests_already_passed_so_why_fix_it my_fix_has_no_visible_effect_on_the_suite undefended_behaviour_shipped how_to_verify_a_regression_test_really_pins_the_fix, type: project, trdd: TRDD-KE88RIKX, ocd: 2026-09-03, lmd: 2026-09-03]
+
+When TRDD-KE88RIKX changed `pane_policy._at_working`, all 116 policy-adjacent tests passed
+BEFORE the change as well. That is not reassurance — it is the finding: no test had ever
+asserted that an ESC-only rung lands at a working pane, so the behaviour was undefended, which
+is exactly how a consequential carve-out survived a Phase-3 migration whose whole purpose was to
+stop screen-blind keystrokes.
+
+A green suite cannot distinguish "the new test pins the change" from "the new test would pass
+either way". Only generating an independent value can. Revert the ONE condition, re-run the new
+test, confirm it fails, restore. Here it failed with
+`Left contains one more item: Step(keys='ESC', label='recovery_rung ESC')` — the defect printed
+itself. Two Edits and two seconds, and it is the difference between a test and a decoration.
+
 ## Governed by
 
 - [[janitor-architecture]] — the architecture overview hub this page details.

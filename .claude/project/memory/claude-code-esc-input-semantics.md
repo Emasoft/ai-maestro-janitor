@@ -2,7 +2,7 @@
 name: claude-code-esc-input-semantics
 description: "how many ESC to unstick claude / too many ESC opens rewind and could delete turns / commands typed while claude is busy just enqueue and flood later / double esc cleared my draft / ctrl-c exited claude / what does esc actually do in the claude code TUI — the verified input state machine that makes typing keystrokes safe / the typing gate let a keystroke through while the user was typing / a sub-second quiet_s silently disarmed the presence probe / is it safe to send Esc to a Claude Code pane / why did the rewind menu open when I only meant to clear the input / does pressing Ctrl+C twice exit Claude Code / how many dialogs stack before Esc reaches the running turn / is there a difference between stopping a tool call and closing a permission dialog with Esc / how do I background a running bash or agent command / how do I safely type a slash command into a session pane / what is inject_until_sent and why not send_self_command / why does the keystroke sender give up when it should retry / channel_is_readable and the write-only ai-maestro session channel gap"
 ocd: 2026-07-18
-lmd: 2026-08-27
+lmd: 2026-09-03
 metadata:
   node_type: memory
   type: reference
@@ -56,6 +56,26 @@ commands indefinitely — a queue of operations fires whenever the turn happens 
 Typing a command into a session's own pane is SOLVED — do not re-derive it. THE THREE RULES (owner, 2026-08-02), implemented in `terminal_trigger.inject_until_sent`: (1) inject ONLY when the input field is EMPTY, else re-check after an 8s quiet window; (2) the moment the user types any key, STOP — no cleanup, just stop; (3) after typing, RE-READ the field and submit only if it shows exactly the intended command. These **REPLACE the old presence-cancel entirely** — "the user is present" means WAIT AND RETRY, never abandon. THE TRAP: `send_self_command(respect_user_presence=True)` is that retired presence-cancel, still in the tree. It checks once, returns `USER_PRESENT`, and gives up — so a caller who picks the obvious-looking public API silently gets one-shot behaviour and no retry. Reach for `inject_until_sent`; treat `send_self_command`'s presence gate as legacy.
 
 CHANNEL ASYMMETRY, load-bearing: the rules need a READ-BACK, so they hold only on tmux (`capture-pane`) and iTerm (AppleScript). An ai-maestro agent is reached via `aimaestro-agent.sh session command`, which is WRITE-ONLY — the frozen CLI has no pane/field verb — so rules 1 and 3 are unenforceable there and a command typed mid-turn merely ENQUEUES (no raw-ESC primitive either). `channel_is_readable()` exists for exactly this split. Gap filed upstream as Emasoft/ai-maestro#110. [^3] [^4]
+
+
+^ATOM-CSC5-PSG2 [desc: "ESC alone CANCELS a live turn, so no stale-transcript proxy may authorize it at a pane the screen shows as working — pane_policy._at_working now refuses every ESC-first rung", keywords: janitor_ESC_interrupted_my_work esc_cancelled_a_live_turn agent_activity_blocked_by_esc session_continuity_broken_by_the_janitor esc_nudge_fired_into_a_working_pane FIRED_esc_nudge_attempt=0 long_tool_call_looks_frozen stale_transcript_during_a_long_test_run why_did_my_turn_stop_by_itself recovery_rung_typed_ESC_while_claude_was_busy _at_working_caller_driven_rung command_is_None_esc_only_rung, type: project, trdd: TRDD-KE88RIKX, ocd: 2026-09-03, lmd: 2026-09-03]
+`esc_nudge` is ESC-ONLY: `action_to_command("esc_nudge")` returns None, and one `Event`
+(`RECOVERY_RUNG`) carries the whole session-liveness ladder. So a discriminator written as
+`not (esc_first and command)` reads a command-less rung as the SAFE case and admits it — when it
+is the most destructive of the three at a live turn. ESC alone cancels the turn and leaves
+nothing on screen saying why the work stopped.
+
+THE LAW (`pane_policy._at_working`, TRDD-KE88RIKX): at a pane the screen shows as WORKING, admit
+a caller-driven rung ONLY when it types a command and does NOT begin with ESC —
+`event in _CALLER_DRIVEN and command and not esc_first`. A soft enqueue buffers to the turn
+boundary and destroys nothing; anything ESC-first is refused.
+
+The carve-out that shipped said an ESC-only nudge was "authorized by a 15-minute-stale
+transcript the SCREEN cannot see". That proxy inverts exactly where it matters: a session inside
+ONE long tool call — a 13-minute suite, a build, a slow poll — writes no transcript for the whole
+call, so it goes stale precisely when the screen is right. Refusing strands nothing: a genuinely
+rate-limited pane is never `WORKING` (it parses `RETRY_WEDGE`/`SESSION_LIMIT`/`API_ERROR`), and
+the refusal `_decline`s WITHOUT spending a recovery attempt, so the rung retries next beat.
 
 ## See also
 
