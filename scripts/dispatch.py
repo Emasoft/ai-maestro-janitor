@@ -2654,6 +2654,173 @@ def _board_summary_bit() -> str:
         return ""
 
 
+_ATTENTION_COLUMNS = (
+    "blocked",
+    "failed",
+    "design",
+    "design_ai_review",
+    "design_human_review",
+    "human_review",
+    "planned",
+)
+# A `#123` element is a legitimate non-TRDD blocker (a GitHub issue reference) — only a bare
+# descriptive token (`owner-decision-…`, `awaiting-live-…`) means nobody but a human can ever
+# resolve it.
+_ISSUE_REF_RE = re.compile(r"^#\d+$")
+_ATTENTION_EVERY_ENV = "CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES"
+_ATTENTION_EVERY_DEFAULT = 6
+_ATTENTION_COUNTER_FILE = "attention-fire-counter.txt"
+_ATTENTION_LAST_IDS_FILE = "attention-last-ids.txt"
+
+
+def _blocked_reason(head: str, columns: dict[str, str]) -> str:
+    """Classify a `blocked` card's `blocked-by:` claim: "unblockable", "decision-needed", or "".
+
+    "unblockable": every named TRDD id has already reached a terminal column (or the id
+    resolves to no file at all) — the card is stuck citing a blocker that can never drain it.
+    "decision-needed": at least one `blocked-by:` element is neither a TRDD id nor a `#N`
+    issue reference — a bare descriptive token (`owner-decision-…`) nobody was ever asked to
+    resolve. "" is a plain, currently-valid block — nothing extra worth saying.
+    Best-effort: any parse fault (including a missing lib) degrades to "" — never breaks the
+    survival pulse.
+    """
+    try:
+        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+        m = trdd_common.FM_BLOCKED_BY_RE.search(head)
+        if not m:
+            return ""
+        raw = trdd_common.parse_flow_list(m.group(1))
+        if not raw:
+            return ""
+        ids = trdd_common.blocked_by_ids(m.group(1))
+        issue_refs = sum(1 for el in raw if _ISSUE_REF_RE.match(el))
+        if len(raw) - len(ids) > issue_refs:
+            return "decision-needed"
+        if ids and all(
+            columns.get(i) is None or trdd_common.is_terminal_column(columns[i]) for i in ids
+        ):
+            return "unblockable"
+        return ""
+    except Exception:  # noqa: BLE001 -- a classification bug must never break the nudge
+        return ""
+
+
+def _attention_summary() -> tuple[str, str]:
+    """The ATTENTION clause (columns `_board_summary_bit` never names) + its id signature.
+
+    WHY (TRDD-1PDCPIZC, USER 2026-09-03): `_board_summary_bit` only ever named the WORK
+    columns — 21 `blocked` cards and a `design` card sat invisible through a whole night of
+    heartbeats because nothing on the nudge ever named them. These columns are exactly the
+    ones where NOBODY is actively working: `blocked`/`failed` are stalled, `design*` and
+    `human_review`/`planned` are awaiting a human decision.
+
+    Returns `(clause, ids_signature)` — `ids_signature` is the sorted `"col:uid"` set across
+    every attention column, used by the caller to detect "a card just entered an attention
+    column" independent of the periodic cadence. Both are `("", "")` when there is nothing to
+    report. Best-effort: an unreadable board must never break the survival pulse.
+    """
+    try:
+        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+        project_root = str(state.project_root())
+        columns: dict[str, str] = {}
+        heads: dict[str, str] = {}
+        for _scope, path in trdd_common.trdd_files("tasks", project_root):
+            uid = trdd_common.extract_uid(path.name)
+            if not uid:
+                continue
+            try:
+                head = path.read_text(encoding="utf-8", errors="replace")[
+                    : trdd_common.RECONCILE_BYTES
+                ]
+            except OSError:
+                continue
+            _, column = trdd_common.parse_state_text(head)
+            columns[uid] = column
+            heads[uid] = head
+        by_column: dict[str, list[str]] = {}
+        for uid, column in columns.items():
+            if column in _ATTENTION_COLUMNS:
+                by_column.setdefault(column, []).append(uid)
+        if not by_column:
+            return "", ""
+        signature = "|".join(
+            f"{col}:{uid}" for col in _ATTENTION_COLUMNS for uid in sorted(by_column.get(col, []))
+        )
+        parts = []
+        for col in _ATTENTION_COLUMNS:
+            ids = sorted(by_column.get(col, []))
+            if not ids:
+                continue
+            if col == "blocked":
+                reasons = {u: _blocked_reason(heads[u], columns) for u in ids}
+                unblockable = [u for u in ids if reasons[u] == "unblockable"]
+                decision = [u for u in ids if reasons[u] == "decision-needed"]
+                clause = f"{len(ids)} blocked"
+                flagged = []
+                for label, flagged_ids in (
+                    ("unblockable", unblockable),
+                    ("decision-needed", decision),
+                ):
+                    if not flagged_ids:
+                        continue
+                    shown = ", ".join(f"TRDD-{u}" for u in flagged_ids[:3])
+                    more = f" +{len(flagged_ids) - 3} more" if len(flagged_ids) > 3 else ""
+                    flagged.append(f"{len(flagged_ids)} {label}: {shown}{more}")
+                if flagged:
+                    clause += " (" + "; ".join(flagged) + ")"
+                else:
+                    shown = ", ".join(f"TRDD-{u}" for u in ids[:3])
+                    more = f" +{len(ids) - 3} more" if len(ids) > 3 else ""
+                    clause += f" ({shown}{more})"
+                parts.append(clause)
+            else:
+                shown = ", ".join(f"TRDD-{u}" for u in ids[:3])
+                more = f" +{len(ids) - 3} more" if len(ids) > 3 else ""
+                parts.append(f"{len(ids)} {col} ({shown}{more})")
+        return "attention: " + "; ".join(parts), signature
+    except Exception:  # noqa: BLE001 -- a board read must never break the always-on nudge
+        return "", ""
+
+
+def _attention_gate(sd: Path, ids_signature: str) -> bool:
+    """True iff this fire should carry the attention clause: the very first fire ever, every
+    Nth fire since the last one that carried it, or any fire whose attention-id set changed.
+
+    Fires-since-last-emit is tracked in a counter file reset to 0 on every emission, so
+    "every Nth" means Nth-since-last-shown, not a raw modulo of all-time fires. The id-set
+    change check is independent of the cadence — a NEW blocked/design/etc. card is announced
+    on the very next fire regardless of where the counter sits. Best-effort: any I/O fault
+    fails open (emit) — a missed attention line is worse than a repeated one.
+    """
+    counter_file = sd / _ATTENTION_COUNTER_FILE
+    last_ids_file = sd / _ATTENTION_LAST_IDS_FILE
+    try:
+        first_fire = not counter_file.is_file()
+        raw = counter_file.read_text(encoding="utf-8").strip() if not first_fire else ""
+        count = state.coerce_int(raw, 0) + 1
+        every = state.coerce_int(
+            os.environ.get(_ATTENTION_EVERY_ENV, ""),
+            _ATTENTION_EVERY_DEFAULT,
+            detector_name="keep-going-nudge",
+            var_name=_ATTENTION_EVERY_ENV,
+        )
+        if every <= 0:
+            every = _ATTENTION_EVERY_DEFAULT
+        last_ids = last_ids_file.read_text(encoding="utf-8").strip() if last_ids_file.is_file() else None
+        ids_changed = last_ids is not None and last_ids != ids_signature
+        due = first_fire or (count % every == 0) or ids_changed
+        if due:
+            state.atomic_write(counter_file, "0")
+            state.atomic_write(last_ids_file, ids_signature)
+        else:
+            state.atomic_write(counter_file, str(count))
+        return due
+    except Exception:  # noqa: BLE001 -- a cadence bug must never silence the attention line
+        return True
+
+
 def _open_issues_bit() -> str:
     """One clause counting the repo's open GitHub issues, from the issues-watch seen-map.
 
@@ -2782,6 +2949,13 @@ def _phase_keep_going_nudge() -> None:
     for extra in (_board_summary_bit(), _open_issues_bit()):
         if extra:
             bits.append(extra)
+    # The ATTENTION clause (TRDD-1PDCPIZC, USER 2026-09-03) is GATED, unlike the two above —
+    # it would otherwise dominate every single nudge on a board that has any blocked card at
+    # all. Gating is by cadence (every Nth fire) OR by a genuine change in which cards need
+    # attention, so a fresh block is still announced within one beat regardless of the cadence.
+    attn_clause, attn_signature = _attention_summary()
+    if attn_clause and _attention_gate(sd, attn_signature):
+        bits.append(attn_clause)
     if bits:
         note = "continue your pending task (keep-going mode) — " + "; ".join(bits)
     else:

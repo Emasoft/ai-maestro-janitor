@@ -3270,6 +3270,82 @@ def test_open_issues_bit_counts_the_seen_map_without_calling_gh(env_isolation: d
     assert "2 open GitHub issue(s)" in dispatch._open_issues_bit()
 
 
+# ---------- attention clause: blocked/failed/design/human_review/planned (TRDD-1PDCPIZC) ---
+
+
+def _card_blocked_by(folder: Path, uid: str, column: str, blocked_by: str) -> None:
+    """Like `_card` but also writes a `blocked-by:` frontmatter line."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"TRDD-20260901_000000+0200-{uid}-t.md").write_text(
+        f"---\ntrdd-id: {uid}\ntitle: t\ncolumn: {column}\nblocked-by: {blocked_by}\n---\n"
+        "body\n",
+        encoding="utf-8",
+    )
+
+
+def test_attention_summary_names_blocked_unblockable_decision_and_design(
+    env_isolation: dict,
+) -> None:
+    """21 blocked cards sat invisible through a whole night of heartbeats (TRDD-1PDCPIZC) —
+    the attention clause must name blocked/design cards and classify each blocked card's
+    `blocked-by:` claim."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card(tasks, "DONE0001", "complete")  # the terminal blocker one card cites
+    _card_blocked_by(tasks, "UNBLOCKA", "blocked", "[TRDD-DONE0001]")
+    _card_blocked_by(tasks, "DECIDE1A", "blocked", "[owner-decision-run-the-migration]")
+    _card(tasks, "DESIGN01", "design")
+
+    clause, signature = dispatch._attention_summary()
+
+    assert "attention:" in clause
+    assert "2 blocked" in clause
+    assert "1 unblockable: TRDD-UNBLOCKA" in clause
+    assert "1 decision-needed: TRDD-DECIDE1A" in clause
+    assert "1 design (TRDD-DESIGN01)" in clause
+    assert "blocked:UNBLOCKA" in signature and "design:DESIGN01" in signature
+
+
+def test_attention_summary_is_empty_on_a_clean_board(env_isolation: dict) -> None:
+    """No attention-column cards ⇒ no clause, never a fabricated one."""
+    dispatch = _import_dispatch()
+    tasks = env_isolation["project"] / "design" / "tasks"
+    _card(tasks, "AAAA1111", "todo")
+    clause, signature = dispatch._attention_summary()
+    assert clause == ""
+    assert signature == ""
+
+
+def test_attention_gate_fires_on_first_and_every_nth_fire_since(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fire 1 emits; fires 2..N are silent; fire N+1 emits again — the counter tracks fires
+    SINCE the last emission, not raw modulo of all-time fires."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES", "3")
+    dispatch = _import_dispatch()
+    import state as _st
+
+    sd = _st.state_dir()
+    results = [dispatch._attention_gate(sd, "same-signature") for _ in range(5)]
+    # fire1=True, fire2..3 (N=3) False, fire4=True (N+1), fire5 False
+    assert results == [True, False, False, True, False]
+
+
+def test_attention_gate_fires_immediately_when_the_id_set_changes(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A NEW blocked/design/etc. card is announced on the very next fire, regardless of
+    where the periodic cadence counter sits."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES", "6")
+    dispatch = _import_dispatch()
+    import state as _st
+
+    sd = _st.state_dir()
+    assert dispatch._attention_gate(sd, "sig-a") is True  # fire 1
+    assert dispatch._attention_gate(sd, "sig-a") is False  # fire 2, unchanged
+    assert dispatch._attention_gate(sd, "sig-b") is True  # fire 3, but the id set changed
+
+
 # ---------- per-detector last-outcome stamp (TRDD-COQN6KVA) -------------
 
 
