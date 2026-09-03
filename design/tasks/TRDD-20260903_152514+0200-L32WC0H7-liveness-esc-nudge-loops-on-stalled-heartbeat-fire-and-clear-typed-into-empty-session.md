@@ -238,8 +238,12 @@ Mechanism, verified in code + transcript:
 
 - [ ] A session whose fires stall shows at most ONE `Interrupted` row per liveness episode,
       then a human-facing finding; never a 21-min ESC cadence.
-      — NO TEST, by nature: this counts rows across a real multi-beat episode, so it is a
-      field observation like F5, not a unit-testable property. Audited 2026-09-04; the
+      — NO TEST TODAY, and the box splits in two. The ROW COUNT is buildable now: drive N
+      simulated stalled fires through the beat seam and assert at most one ESC plan, the
+      same shape as `test_daemon_hard_restart.py::test_no_diagnosis_ever_routes_to_a_kill_rung`
+      (8 diagnoses x 6 attempts x 2 flags). Only the second clause — the 21-minute
+      wall-clock cadence — is field-only. Do not read this annotation as "untestable";
+      it is a test someone can write this week. Audited 2026-09-04; the
       underlying counter-reset fix is covered by
       `test_daemon_session_liveness.py::test_healthy_with_rate_limited_flag_still_present_keeps_the_episode_open`,
       but nothing asserts the row count or the cadence bound. Observe with F5.

@@ -114,10 +114,17 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
       bound from a live payload found on disk; `external_clear.cache_expired_from_harness_payload`
       (new) is wired into `on-session-start-cold-cache-clear.py` and outranks + skips the
       agentlensPro probe when the harness already answered (2026-09-03, 4 new unit tests)
-- [x] pytest + ruff + mypy green — the 3.4.14 publish gate ran all three on this tree
-      (2026-09-04): ruff clean, mypy clean over 504 source files, pytest 16351 passed /
-      1 skipped / 0 failed. The rules-floor-cap byte-budget failure noted here on
-      2026-09-03 is gone, so the box is now green without the carve-out.
+- [ ] pytest + ruff + mypy green — ticked 2026-09-04 citing "this tree", which was wrong:
+      the 3.4.14 publish gate ran on commit `4326519d` (ruff clean, mypy clean over 504
+      source files, 16351 passed / 1 skipped / 0 failed), three doc commits behind HEAD.
+      Re-running the three on HEAD `9d0a5a86` was NOT a formality — it surfaced a real
+      failure the gate had not:
+      `test_git_index_lock_e2e.py::test_stale_orphaned_lock_is_removed_and_renamed_aside`
+      returned `live-git` for a scratch worktree, because `git_utils`' probes never used
+      the `state.timeout_scale()` seam and `lsof` timed out under xdist load. Fixed in
+      `git_utils.py` (all four probes scaled) with three regression tests. Re-tick only
+      against a NAMED commit, once the full suite is green on it.
+      The 2026-09-03 rules-floor-cap carve-out is separately gone.
 
 ## Notes and lessons learned
 

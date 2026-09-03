@@ -241,7 +241,7 @@ def test_kill_process_group_terminates_a_grandchild_too(tmp_path: Path) -> None:
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
-    proc = subprocess.Popen([str(script)], start_new_session=True)
+    proc = subprocess.Popen([str(script)], start_new_session=True, text=True)
     try:
         for _ in range(50):
             if pid_file.is_file() and pid_file.read_text().strip():

@@ -85,6 +85,7 @@ def test_rotation_landed_presses_once_and_stops_when_the_wedge_clears(monkeypatc
     fired = _seam(monkeypatch)
     outcome = _act(pa.Event.ROTATION_LANDED)
     assert _keys(fired) == ["ESC"]
+    assert fired[0][1] is not None
     assert fired[0][1]["channel"] == "tmux"
     assert fired[0][1]["command"] == ""  # ESC-only: never a typed command
     assert outcome.status is pa.OutcomeStatus.DONE
@@ -182,6 +183,7 @@ def test_resume_wake_types_the_slash_command_at_an_idle_pane(monkeypatch) -> Non
     fired = _seam(monkeypatch)
     outcome = _act(pa.Event.RESUME_WAKE, command="/janitor-resume")
     assert _keys(fired) == ["/janitor-resume"]
+    assert fired[0][1] is not None
     assert fired[0][1]["command"] == "/janitor-resume"
     assert outcome.status is pa.OutcomeStatus.DONE
 
@@ -267,6 +269,7 @@ def test_stale_prompt_escs_an_unattended_dialog_and_never_answers_it(monkeypatch
     fired = _seam(monkeypatch)
     outcome = _act(pa.Event.STALE_PROMPT, unattended=True)
     assert _keys(fired) == ["ESC"]
+    assert fired[0][1] is not None
     assert fired[0][1]["command"] == ""
     assert outcome.status is pa.OutcomeStatus.DONE
 
@@ -304,6 +307,7 @@ def test_own_command_unsubmitted_presses_enter_alone(monkeypatch) -> None:
     ref = fleet_inject.build_command_plan(_TMUX, "/janitor-arm", esc_first=False)
     outcome = _act(pa.Event.OWN_COMMAND_UNSUBMITTED, state=state, submit_ref=ref)
     assert _keys(fired) == ["Enter"]
+    assert fired[0][1] is not None
     assert fired[0][1]["command"] == ""  # Enter alone — no text is retyped
     assert outcome.status is pa.OutcomeStatus.DONE
 
@@ -457,6 +461,7 @@ def test_fail_open_fires_into_a_readable_pane_that_did_not_answer(monkeypatch) -
     # the soft half's `_keys(fired) == [...]` was quietly relying on.
     assert len(fired) == 2, "the hard call must have fired, and nothing else may have"
     hard_plan = fired[-1][1]
+    assert hard_plan is not None
     assert any("Escape" in step for step in hard_plan["steps"]), "a frozen target keeps its ESC"
 
 
