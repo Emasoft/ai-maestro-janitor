@@ -1549,8 +1549,17 @@ def stage_lint(root: Path) -> None:
     # escape hatch: this file's contract is "no exceptions and no bypass flags".
     cprint(f"  {BLUE}uvx --with pyright pyright{NC}")
     try:
+        # 900s, not 300s. This must cover the COLD path: uv resolving and
+        # downloading pyright (a Node payload), node startup, then a full
+        # analysis of 504 source files plus tests/. The only timings measured
+        # here were warm-cache (a 422 ms `--version`, and full runs in tens of
+        # seconds), which say nothing about a cold cache on a contended
+        # machine — and since this check now fails CLOSED, a timeout on a
+        # WORKING pyright would block the publish outright. The ceiling only
+        # binds when something is genuinely wrong, so it costs nothing to be
+        # generous; a slow-but-correct type check is not a failure.
         pr = subprocess.run(["uvx", "--with", "pyright", "pyright"],
-                            cwd=str(root), timeout=300).returncode
+                            cwd=str(root), timeout=900).returncode
     except (OSError, subprocess.SubprocessError) as exc:
         cprint(f"  {RED}BLOCKED: pyright could not be run ({exc}).{NC}")
         cprint(f"  {RED}         CI's Lint job enforces it and would reject this commit.{NC}")
