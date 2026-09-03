@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - **tests:** Finish the address-lint fixes — a redaction that kept the real domain, and a filename that reads as one (235f281)
+- **tests:** The comment explaining the address-lint workaround contained the literal it avoided (26e06f0)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.4.14 (1a8627c)
 ## [3.4.14] — 2026-09-03
 
 ### Bug Fixes
