@@ -289,6 +289,21 @@ def _offset_of(text: str, line: int, col: int) -> int:
     return sum(len(p) + 1 for p in lines[: line - 1]) + (col - 1)
 
 
+def _dedupe_where(rel: str, f: acp.Finding) -> str:
+    """The catalog dedupe key's `where` — content-addressed, NOT line-addressed (TRDD-QNMBH3ES).
+
+    `f.line` shifts whenever an edit lands above the matched span, so keying on it minted a
+    fresh, byte-identical proposal for the same finding on every unrelated edit. Hashing the
+    matched text instead makes the key stable across such edits and distinct across genuinely
+    different matches. Hash BEFORE `rel` — `issue_catalog._fields` caps `where` at 200 chars, so
+    a long path must not push the (fixed-width) hash past the cap. `raise_issue` and `reconcile`
+    MUST call this identically: a mismatch would retract every live proposal on the next fire
+    (`issue_catalog.reconcile` keys via `_finding_key(..., "")` = `code:where`).
+    """
+    digest = hashlib.sha1(f.matched_text.encode("utf-8")).hexdigest()[:12]
+    return f"{digest}:{rel}:{f.rule_id}"
+
+
 def _route_exfil_candidate(rel: str, text: str, f: acp.Finding) -> str:
     """Run the TRDD-HYV0SOC6 verification ladder on one `exfil-structural-probe` match and
     record the outcome in the findings ledger — never the print+ticket pipeline `_scan`
@@ -598,8 +613,10 @@ def main() -> int:
             continue
         r = issue_catalog.raise_issue(
             _CODE,
-            where=f"{rel}:{f.line}",
-            evidence=[rel],
+            where=_dedupe_where(rel, f),
+            # Line kept here (not in `where`) so the ticket stays jumpable without making the
+            # dedupe key line-unstable (TRDD-QNMBH3ES).
+            evidence=[f"{rel}:{f.line}"],
             # lowercase: the catalog's vocabulary, not the pattern lib's (see _REPORTABLE).
             severity=f.severity.strip().lower(),
             path=rel,
@@ -622,7 +639,7 @@ def main() -> int:
             f"provenance (janitor#214)",
         )
 
-    for uid in issue_catalog.reconcile(_CODE, [f"{rel}:{f.line}" for rel, f in findings]):
+    for uid in issue_catalog.reconcile(_CODE, [_dedupe_where(rel, f) for rel, f in findings]):
         state.log_line(_NAME, f"withdrew TRDD-{uid} — that pattern is gone")
 
     state.rotate_log_if_big(_NAME)
