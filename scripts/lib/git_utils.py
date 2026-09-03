@@ -134,7 +134,7 @@ def _lock_is_held(lock_path: Path) -> Optional[bool]:
             # probe that goes UNKNOWN under ordinary load has no margin; the sole
             # production caller is a heartbeat detector with a 120s budget, so the
             # wider window costs nothing it can't afford.
-            timeout=15,
+            timeout=15 * state.timeout_scale(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -385,7 +385,10 @@ def _gather_ps_snapshot() -> Optional[str]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=10,
+            # Scaled at the seam like every other probe in this module — a
+            # truncated process snapshot is another way to reach a wrong verdict
+            # about who holds a lock.
+            timeout=10 * state.timeout_scale(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -448,7 +451,18 @@ def _pid_cwd(pid: int) -> Optional[Path]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            # 15s base and scaled at the seam, matching the sibling lsof above.
+            # This call site was left at a bare 5s when that one was widened on
+            # 2026-08-15, and it failed the same way on 2026-09-04: under a 16-way
+            # xdist run the probe timed out, `_live_git_holds` could not confirm the
+            # pid was elsewhere, and it failed closed with 'live-git' on a scratch
+            # worktree no git had ever entered. Fail-closed makes that SAFE and
+            # INVISIBLE — a guard that refuses under load is indistinguishable from
+            # one that is working — so the margin has to be real, not implicit.
+            # Scale, don't hand-tune: enumerating probe call sites is what missed
+            # this one, and `state.timeout_scale()` is the seam every other lib
+            # module already uses.
+            timeout=15 * state.timeout_scale(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -515,7 +529,11 @@ def _pid_is_zombie(pid: int) -> bool:
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            # Scaled at the same seam. This probe fails closed in the OPPOSITE
+            # direction (a timeout answers "not provably a corpse", which BLOCKS a
+            # removal), so a squeezed timeout here silently re-arms the very
+            # never-fires bug `_pid_is_zombie` was added to cure.
+            timeout=5 * state.timeout_scale(),
         )
     except (OSError, subprocess.SubprocessError):
         return False

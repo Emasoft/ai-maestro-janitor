@@ -16,6 +16,7 @@ git repository. `tmp_path` supplies a throwaway `.git/index.lock` file.
 from __future__ import annotations
 
 import errno
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -376,3 +377,54 @@ def test_removed_renames_aside_instead_of_unlinking(tmp_path):
     assert not lock.exists(), "the original index.lock path must be gone"
     stale_files = list(lock.parent.glob("index.lock.stale-*"))
     assert len(stale_files) == 1, "exactly one renamed-aside stale marker must remain"
+
+
+# --- Probe timeouts scale at the state.timeout_scale() seam -----------------
+# janitor#245 follow-up (2026-09-04): three of the four subprocess probes in
+# git_utils.py had hard-coded timeouts and skipped this seam; under a 16-way
+# xdist run `_pid_cwd`'s `lsof` timed out, `_live_git_holds` failed CLOSED,
+# and a scratch worktree no git had ever entered came back 'live-git'. These
+# pin the MULTIPLICATION, not the base number, so a future probe added with a
+# bare `timeout=N` breaks one of them.
+
+
+def test_pid_cwd_lsof_timeout_scales_at_the_seam(monkeypatch):
+    """`_pid_cwd`'s `lsof` timeout must be `15 * state.timeout_scale()`."""
+    monkeypatch.setattr(git_utils.state, "timeout_scale", lambda: 4.0)
+    recorded = {}
+
+    def fake_run(*args, **kwargs):
+        recorded["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(args[0], returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr(git_utils.subprocess, "run", fake_run)
+    git_utils._pid_cwd(9999)
+    assert recorded["timeout"] == 15 * 4.0
+
+
+def test_pid_is_zombie_ps_timeout_scales_at_the_seam(monkeypatch):
+    """`_pid_is_zombie`'s `ps` timeout must be `5 * state.timeout_scale()`."""
+    monkeypatch.setattr(git_utils.state, "timeout_scale", lambda: 4.0)
+    recorded = {}
+
+    def fake_run(*args, **kwargs):
+        recorded["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(args[0], returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr(git_utils.subprocess, "run", fake_run)
+    git_utils._pid_is_zombie(9999)
+    assert recorded["timeout"] == 5 * 4.0
+
+
+def test_process_snapshot_ps_timeout_scales_at_the_seam(monkeypatch):
+    """`_gather_ps_snapshot`'s `ps -eo ...` timeout must be `10 * state.timeout_scale()`."""
+    monkeypatch.setattr(git_utils.state, "timeout_scale", lambda: 4.0)
+    recorded = {}
+
+    def fake_run(*args, **kwargs):
+        recorded["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(args[0], returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr(git_utils.subprocess, "run", fake_run)
+    git_utils._gather_ps_snapshot()
+    assert recorded["timeout"] == 10 * 4.0
