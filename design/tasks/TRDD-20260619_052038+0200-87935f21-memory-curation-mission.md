@@ -98,7 +98,7 @@ implementation-commits: [d14510a, aa4c593, 10ee8d1]
 The v0.10.0 wikimem editor (TRDD-54b25d7e + A–G) shipped the autonomous
 split/merge/conflict passes. The USER then audited the **ai-maestro fleet
 Claude's** real output (the 72-file LOCAL corpus at
-`~/.claude/projects/-Users-emanuelesabetta-ai-maestro/memory/`) and found the
+`~/.claude/projects/<ai-maestro-project-slug>/memory/`) and found the
 skills do NOT reliably enforce the model. This TRDD elevates memory curation to
 the janitor's core, self-maintaining mission and tracks the program.
 

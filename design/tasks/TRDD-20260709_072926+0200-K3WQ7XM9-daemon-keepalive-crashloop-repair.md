@@ -133,7 +133,7 @@ keychain hang. This TRDD collects the full repair.
    auto-rotates at 256KB; not worth touching live daemon state).
 
    [ORIGINAL DIAGNOSIS, retained for the record:]
-   The production `daemon-keepalive.boot.log` contains `pytest-of-emanuelesabetta/pytest-1572/
+   The production `daemon-keepalive.boot.log` contains `pytest-of-<user>/pytest-1572/
    test_corrupt_stage_is_restaged0/...` paths — keepalive tests wrote to REAL DATA state.
    This is the class in project-memory note **`janitor-keepalive-test-isolation-fsevents`**
    (TRDD-ZNN0UK5K, 2026-07-03): frozen `Path.home()` module constants invisible to a test's

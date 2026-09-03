@@ -19,7 +19,7 @@ REAL_SAMPLE = """
 [
   {
     "id": "5704891f",
-    "cwd": "/Users/emanuelesabetta/Code/ANIME2SVG",
+    "cwd": "/Users/testuser/Code/PROJECT-A",
     "kind": "background",
     "startedAt": 1783299091026,
     "sessionId": "5704891f-0fa1-479f-a828-279eabf977c7",
@@ -28,7 +28,7 @@ REAL_SAMPLE = """
   },
   {
     "pid": 44740,
-    "cwd": "/Users/emanuelesabetta/Code/claude-voice-loop",
+    "cwd": "/Users/testuser/Code/PROJECT-B",
     "kind": "interactive",
     "startedAt": 1786117223783,
     "sessionId": "5df835f5-96e9-40b2-b24a-51ce4becc7d7",
@@ -37,7 +37,7 @@ REAL_SAMPLE = """
   },
   {
     "pid": 45377,
-    "cwd": "/Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor",
+    "cwd": "/Users/testuser/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor",
     "kind": "interactive",
     "startedAt": 1786118464904,
     "sessionId": "35e1e917-2249-4deb-a6b4-f1a89faa806b",
@@ -98,9 +98,9 @@ def test_roster_by_cwd_groups_real_sample_by_cwd() -> None:
     rows = car.parse_agents_json(REAL_SAMPLE)
     grouped = car.roster_by_cwd(rows)
     assert set(grouped.keys()) == {
-        "/Users/emanuelesabetta/Code/ANIME2SVG",
-        "/Users/emanuelesabetta/Code/claude-voice-loop",
-        "/Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor",
+        "/Users/testuser/Code/PROJECT-A",
+        "/Users/testuser/Code/PROJECT-B",
+        "/Users/testuser/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor",
     }
     for group in grouped.values():
         assert len(group) == 1

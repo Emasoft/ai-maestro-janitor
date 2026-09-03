@@ -64,7 +64,7 @@ clean.
 **NEXT ACTION — NOT janitor work.** The ai-maestro corpus migration is the OWNING
 project's Claude's job: it runs the dry-run, reviews the plan, then runs `--apply` in
 its OWN session. This janitor session must NOT run `--apply` against
-`~/.claude/projects/-Users-emanuelesabetta-ai-maestro/memory` — that is exactly the
+`~/.claude/projects/<ai-maestro-project-slug>/memory` — that is exactly the
 cross-project mutation the guards refuse.
 
 **SUPERSEDED — do NOT carry forward** (the `### The tool` sketch further down predates
@@ -100,7 +100,7 @@ ai-maestro corpus migration.
 **The remaining step is not janitor work, by this card's own load-bearing contract**, which the
 NEXT ACTION below states outright: the OWNING project's Claude runs `--apply` in ITS OWN session,
 and this session must never run it against
-`~/.claude/projects/-Users-emanuelesabetta-ai-maestro/memory` — that is exactly the cross-project
+`~/.claude/projects/<ai-maestro-project-slug>/memory` — that is exactly the cross-project
 mutation the guards refuse, and `~/.claude/rules/how-to-fix-issues-of-other-projects.md` forbids
 it independently. A card cannot stay open waiting for an action it is forbidden to take; holding
 it in `dev` implied someone here was still going to do it.
@@ -121,7 +121,7 @@ it in `dev` implied someone here was still going to do it.
   `--apply` against it. The helper enforces this — `--apply` refuses unless invoked
   for the store whose owning repo is the cwd (or an explicit opt-in flag).
 - **Recon (2026-06-20, read-only):** corpus at
-  `~/.claude/projects/-Users-emanuelesabetta-ai-maestro/memory` = 70 real notes
+  `~/.claude/projects/<ai-maestro-project-slug>/memory` = 70 real notes
   (excl. `user-mem/` + generated). Owning repo `~/ai-maestro` exists; its
   `.claude/project/memory/` is **absent** (no PROJECT scope yet). `type:`
   distribution ≈ project 34, feedback 29, reference 7 (two frontmatter styles —

@@ -104,7 +104,7 @@ FS-churn root, so bounding that churn (S8) is the real prevention.
      `launchd_keepalive.data_scripts_dir()` / `latest_cache_scripts_dir()` read
      real env. So the keepalive TESTS (test_keepalive_boot/stage/launchd/entry)
      write their `_loud()` narration into the **REAL** boot log (pytest tmp paths
-     `pytest-of-emanuelesabetta/pytest-15xx/…/keepalive_install.sh` + `kaboom`
+     `pytest-of-<user>/pytest-15xx/…/keepalive_install.sh` + `kaboom`
      appear IN the production log — proof) AND, via `verify_or_restage → _repair`
      (line 119 `is_data = staged==data_scripts_dir()` → True when
      `CLAUDE_PLUGIN_DATA` isn't overridden), RE-STAGE the **real**
