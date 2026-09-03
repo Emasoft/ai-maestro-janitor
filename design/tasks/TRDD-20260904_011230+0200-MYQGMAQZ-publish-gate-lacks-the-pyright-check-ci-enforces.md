@@ -59,9 +59,7 @@ Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it
 - [ ] The remaining rows of the divergence table are each either adopted into the
       gate or explicitly declared out of scope ON THIS CARD with a reason — an
       undocumented gap is what produced this defect.
-- [ ] The GitHub release is not created until CI is green for the pushed sha
-      (the ordering defect above), or that ordering is explicitly rejected here
-      with a reason.
+- [x] The ordering defect is split out to its own card — see TRDD-J1KRAY9C.
 - [x] A tree with a deliberate pyright error is BLOCKED by publish.py before any tag or push.
       — 2026-09-04, verified by invoking `stage_lint(root)` DIRECTLY (not by running a
       publish), three paths: (a) clean tree → returns, pyright reported `0 errors`;
@@ -191,11 +189,25 @@ is no `.pre-commit-config.yaml`, and `git grep -il 'mega.\?linter'` finds it ref
 only by `.cspell.json`, this card, publish.py's stale comments and one test.
 CHECKED, 2026-09-04, by RUNNING it rather than leaving it on the card: stage 4b's
 `cpv-remote-validate ci-preflight .` reports 11 checks and is clearly Mega-Linter-aware —
-`jscpd`, `bandit`, `shellcheck`, `shfmt`, `actionlint`, `mypy` all run and several are
-labelled "(Mega-Linter <SUB_LINTER> parity)". So the answer flips the follow-up: those
-checks are NOT unenforced — **the preflight is the enforcer, on every publish**, and CI
-was never the backstop for them. Still unproven is whether CPV PARSES `.mega-linter.yml`
-or carries its own list; that is what the delete-vs-keep decision turns on.
+`jscpd`, `bandit`, `shellcheck`, `shfmt`, `actionlint` and `mypy` all REPORT PASSING, and
+several are labelled "(Mega-Linter <SUB_LINTER> parity)". Note the precision: a `✓` proves
+the check reported success, NOT that it scanned this repo's files — `shellcheck passed`
+reads identically whether it linted 8 files or found 0. Distinguishing them means planting
+a deliberate violation and re-running; not done. So the answer flips the follow-up FOR
+THOSE SIX: they are NOT unenforced — the preflight is the enforcer, on every publish, and CI was
+never the backstop for them. Stage 4b `sys.exit(1)`s on a non-zero preflight, so a FAIL
+there really does stop a release.
+
+**But the enforcement is exactly as wide as the tools present on the machine, and no
+wider.** The same run reported `VERDICT: PARITY-CLEAN (FAIL=0 WARNING=3 PASS=8)` and
+exited **0** — with `cspell`, `checkov` and `trivy` absent and therefore SKIPPED. A missing
+tool becomes a WARNING, the preflight still exits 0, stage 4b still passes, and those three
+checks run NOWHERE while the operator is told CI will handle them. That is the same
+fail-open shape rejected for pyright, one layer up, in another project's tool, and it is
+why the message defect below matters rather than being cosmetic.
+
+Still unproven is whether CPV PARSES `.mega-linter.yml` or carries its own list; that is
+what the delete-vs-keep decision turns on (TRDD-6SIY2VX2).
 
 ### The same falsehood is upstream, in CPV, and fires on every publish
 
