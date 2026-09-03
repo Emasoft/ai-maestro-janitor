@@ -1,9 +1,9 @@
 ---
 trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
-column: design
+column: todo
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-02T21:08:51+0200
+updated: 2026-09-03T10:05:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -88,5 +88,13 @@ to the wrong state.
       `working` with no human keystroke, logged step by step.
 
 ## Approval log
+
+- 2026-09-03T10:05:00+0200 — APPROVED design → todo by janitor-main-session acting for USER
+  (USER delegation 2026-09-03 09:58: "you can replace me even in human review columns").
+  Rationale: the proposal is the USER's own verbatim directive made concrete; the 14 proxy
+  call sites are the measured cause of every mis-typed keystroke this month. Phased delivery:
+  P1 `pane_state.py` + anonymized real-frame fixture corpus + tests (no call-site changes);
+  P2 policy table + closed-loop verify; P3 migrate the 14 call sites. EHTs NACCL0CB /
+  3T9HQEQ6 gate `complete`, not `dev`.
 
 ## Notes and lessons learned
