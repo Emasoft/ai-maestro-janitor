@@ -1549,18 +1549,24 @@ def stage_lint(root: Path) -> None:
     # escape hatch: this file's contract is "no exceptions and no bypass flags".
     cprint(f"  {BLUE}uvx --with pyright pyright{NC}")
     try:
-        # 900s. MEASURED 2026-09-04 on this host: `uvx --with pyright --refresh
-        # pyright` — a forced re-resolve and re-download plus a full analysis of
-        # 504 source files and tests/ — took 13s. So the ceiling is ~70x the
-        # observed cold-ish cost and will not bind on a healthy run.
+        # 900s, and the honest basis for it is ASYMMETRY, not a measurement.
         #
-        # It is set generously rather than tightly because this check now fails
-        # CLOSED: a timeout on a WORKING pyright would block the publish, and
-        # this is the only sanctioned push path. The ceiling exists to stop a
-        # HUNG process wedging the pipeline, not to bound a slow one — a
-        # slow-but-correct type check is not a failure. A contended CI-shaped
-        # machine with a genuinely empty cache is the case 13s does not measure,
-        # and 900s is chosen to cover it without needing a second measurement.
+        # What IS measured here (2026-09-04): a full analysis of 504 source
+        # files plus tests/ takes 13-14s WARM. There is NO cold-cache
+        # measurement. `--refresh` was tried as a proxy and is not one: it timed
+        # 13s against 14s for the plain warm run, i.e. it added no download at
+        # all, so it never exercised the fetch path it was supposed to stand in
+        # for. Getting a real number means `uv cache clean`, which destroys
+        # shared machine state — not worth it to calibrate a ceiling.
+        #
+        # So the value is chosen for its error costs, which is sound on its own:
+        # this check fails CLOSED and this is the only sanctioned push path, so
+        # a timeout on a WORKING pyright blocks the release. The ceiling exists
+        # to stop a HUNG process wedging the pipeline, never to bound a slow
+        # one. It binds only when something is already wrong, so generous costs
+        # nothing while tight can block a working check. Raising is therefore
+        # safe in a way lowering is not — do not "optimise" this down toward the
+        # 13s figure, which measures the case that was never in question.
         pr = subprocess.run(["uvx", "--with", "pyright", "pyright"],
                             cwd=str(root), timeout=900).returncode
     except (OSError, subprocess.SubprocessError) as exc:
