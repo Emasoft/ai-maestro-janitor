@@ -136,8 +136,16 @@ external-refs: [TRDD-7NSRD8OV]
   My own verification run over the 5 affected files —
   `2 failed, 130 passed in 971s` at loadavg 15-31 — still red on:
   - `test_capture_all_logins.py::test_kill_process_group_terminates_a_grandchild_too`
-    — classified **`(b) test defect → FIXED`** by the report. **It is not fixed.** The
-    scaled poll budget was not enough at this load. Reopen it; do not trust the row.
+    — classified **`(b) test defect → FIXED`** by the report. **CORRECTION 09:31: my
+    first wording here said "it is NOT fixed", and that OVERSTATED it.** Measured
+    since: it passes alone in **3.26 s at loadavg 6.54**, and failed in the 5-file run
+    at loadavg 15-31. So the worker's scaled poll budget genuinely works — it just does
+    not survive enough contention. The honest status is **`(b) fixed, residual `(c)`** —
+    the same category the report itself assigned the sibling, not a broken fix. The row
+    should be amended from a clean FIXED to fixed-with-residual, not reopened as wrong.
+    *(Overturning a subagent's classification too aggressively is the mirror of
+    accepting one too readily, and I did the first here one turn after warning about
+    the second.)*
   - `test_capture_all_logins.py::test_capture_one_kills_the_whole_tree_and_reports_timeout`
     — the report DID disclose this one as a residual `(c)` (its own deliberate 1.0s
     timeout races the fake script's fork; widening further weakens the assertion under
