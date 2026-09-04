@@ -119,6 +119,21 @@ that two things AGREED and reported that as correctness, without asking what the
 ABOUT. The `if not slug` safety I cited is also void here — the manifest is present in the
 cache, so a slug always resolves; the bail never fires.
 
+## Why `priority: medium` — derived, not adopted
+
+The field was `high` while this looked like a live defect, and the STATE block was later
+rewritten to say the running path resolves correctly. Medium is the value that follows
+from the facts now established, and the derivation is recorded because a number adopted
+on someone's recommendation is unjustified again the next time anyone reads it:
+
+- **Not `low`.** The hazard is one environment variable away from live, and its failure is
+  **silent** — an automated write path targeting the wrong repo logs success. Silent-wrong
+  outranks noisy-broken.
+- **Not `high`.** It does not manifest on any path that currently runs, and all four links
+  of that are verified: no hook invokes the guard, neither the stub nor `dispatch.py` sets
+  `CLAUDE_PLUGIN_ROOT`, both vars are unset, and nothing calls `chdir`.
+- **Therefore `medium`:** real impact, currently-zero likelihood, non-zero fragility.
+
 ## Acceptance criteria
 
 - [ ] One real guard invocation logs `CLAUDE_PLUGIN_ROOT` and the resolved `slug`, from a
