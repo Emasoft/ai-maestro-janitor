@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T11:41:00+0200
+updated: 2026-09-04T11:53:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [5b5267a5]
 external-refs: [TRDD-7NSRD8OV]
 ---
 
@@ -28,6 +28,56 @@ external-refs: [TRDD-7NSRD8OV]
   `/tmp/soak8.txt` and one session's conversation, both of which die with the session. A
   finding that is not on the board has not been recorded — it has been *noticed*. This card
   is the record; the `/tmp` paths below are evidence, not storage.
+- **11:52 — MEASURED failure state of rows 1 & 2.** Report:
+  `reports/suite-failures/20260904_114209+0200-capture-all-logins-failure-state.md`.
+  - `slack = 10.0` in every run, so the poll budget was **50 s** (row 1) / 30 s (row 2) — NOT
+    the 5 s I argued about all morning — and the loop ran to **full exhaustion** (`_` = 499 /
+    299). **`grandchild.pid` was NEVER created**: every preserved tmp dir holds only the
+    `.sh` script. **This kills load starvation outright** — 50 s is not a latency problem.
+  - Serial: **9/10 individual outcomes FAILED**. One `-n auto` run: **both PASSED**. Standalone
+    `Popen` harness: 50/50 wrote the file. So the failure needs the serial in-process pytest
+    environment; it is not the OS and not contention.
+  - **`proc.returncode == -9` is NOT evidence of a mystery killer.** `--showlocals` renders
+    during traceback formatting, i.e. AFTER the frame's `finally:` has run, and row 1's
+    `finally` calls `proc.kill()`. The report hedged this ("by the time the locals are
+    captured") and I first read it as an external SIGKILL. Do not build on it.
+  - **Excluded by READING SOURCE, not by inference:** guard denial (a denial raises inside the
+    patched `Popen.__init__`, so the test would fail at the spawn — it fails at the later
+    `read_text()`, so the spawn succeeded); `sandbox_guard.is_tmp_path(exe_path) → _ALLOW`
+    (`:560`); `_harden_child_env` returns `child_env` UNCHANGED for a non-Python spawn
+    (`:350-351`); `capture_one`'s single `unlink` targets a different path
+    (`capture_all_logins.py:163`).
+  - **CAUSE UNDETERMINED.** Spawn succeeds, shell never writes the file, and I have run out of
+    cheap reads. Do not add a fifth hypothesis here.
+- **THESE TWO EARLIER FINDINGS SURVIVE THE 11:45 RETRACTION — do not bin them with it.** They
+  are properties of an instrument and of shell semantics, independent of the triage timeline:
+  (1) probe A and the 25 empty-env latency rows are **void instruments** — they measure a
+  `PATH`-independent write, so they read identically under both hypotheses; (2) the
+  `$!`-at-fork argument, checked against source. The retraction invalidated three claims
+  ("cause unknown", "premise false as stated", "a prior author's hypothesis"), not five.
+  **Discovering one error does not license discarding the batch it arrived in** — that is the
+  mirror of the overclaiming it was correcting.
+- **THE TRIAGE REPORT IS NOT UNIFORMLY EVIDENCED, and I repeated it as if it were.** Of its 12
+  rows: **#3/#4 are its best** (a timed manual repro — 87 s worker against a 60 s deadline);
+  #1 and #5 name a specific seam with a mechanical fix; #6/#7 inherit #5's root cause.
+  But **#9–11 are classified from a serial pass plus a mechanism the report admits was NOT
+  re-triggered under `-n auto`**, and **#8 is "reran once, passed"** on a failure its author
+  never reproduced. Those four changed no code. **They fail this card's OWN acceptance
+  criterion** ("passes serially" alone is a symptom, not a cause) and the card's own box warns
+  against exactly this inference in the opposite direction. They need the USER's acceptance,
+  which has not been sought.
+- **CORRECTED COUNT (my earlier table summed to 13 of 12):** **6 fully fixed** (#1,3,4,5,6,7)
+  · **1 fixed-with-residual** (#2) · **4 load-artifact, no code change, weakly evidenced**
+  (#8,9,10,11) · **1 never failed** (#12) = 12. "Four fixes" is the count of FILES changed,
+  not of tests fixed.
+- **ROW 2's "not further fixable" IS FALSE.** The report calls the kill-vs-fork race inherent.
+  It is not: the test polls for the pid file *after* `capture_one` has already timed out and
+  killed the tree (`:322-329`), and the script sleeps 600 s — so **any** timeout between
+  "fork completed" and 600 s still yields `TimeoutExpired`. 1.0 s is the bottom of a
+  ~600-second window, not a design constraint. Raising it tests the identical property
+  (`capture_one` times out leaving no orphan) with the race removed. **NOT applied yet** —
+  rows 1 & 2's undetermined cause above must be settled first, since row 1 has no
+  `capture_one` and no 1.0 s timeout, so this cannot be the whole story.
 - **⇒ NEXT ACTION (11:45, CURRENT).** **Re-run the FULL suite under `-n auto`.** All 12
   failures were triaged at 08:49 and four fixes landed in `5b5267a5`; the ONLY unmet
   acceptance criterion is the full-suite green run, and no `-n auto` run has happened since
