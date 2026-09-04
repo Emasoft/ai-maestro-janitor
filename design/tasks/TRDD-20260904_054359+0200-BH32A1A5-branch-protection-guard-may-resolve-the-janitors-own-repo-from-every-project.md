@@ -1,9 +1,9 @@
 ---
 trdd-id: BH32A1A5
 title: the branch-protection guard may resolve the janitors own repo from inside every project
-column: todo
+column: testing
 created: 2026-09-04T05:43:59+0200
-updated: 2026-09-04T05:43:59+0200
+updated: 2026-09-04T07:52:00+0200
 current-owner: janitor-main-session
 task-type: audit
 priority: medium
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [e4dd674d]
 external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
 ---
 
@@ -49,12 +49,28 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
   dir *does* carry both a manifest naming `Emasoft/ai-maestro-janitor` and 7 workflow
   files, so the wrong-repo resolution is reachable — it simply is not what happens on the
   path that actually runs today.
-- **NEXT ACTION** — decide whether the fallback ORDER is right, given the correct behaviour
-  currently depends on two env vars both being absent. Reversing it
-  (`CLAUDE_PROJECT_DIR` first) would make the right answer intentional rather than
-  incidental. That is a change to an automated write path: **advisor first.**
+- **RESOLVED 2026-09-04 in `e4dd674d` — not by reordering, by DELETION.** Reading
+  `detect_repo_slug` settles the question the NEXT ACTION posed: it resolves the slug **of
+  the repo at the given root**, and the only root this guard may ever protect is the
+  project. A plugin install dir is therefore never a valid answer, so `CLAUDE_PLUGIN_ROOT`
+  is **no longer consulted at all**. Reordering — the action originally proposed below —
+  would have left the wrong answer merely *less likely* while keeping it reachable.
+  `plugin_root` is renamed `project_root`, which makes the `:277` comment ("this project's
+  root") true by construction instead of true-in-practice.
+- **Two tests pin it** (`tests/test_branch_protection_guard.py`). The blind spot was in the
+  fixture: `_run_apply` set `CLAUDE_PROJECT_DIR` and `CLAUDE_PLUGIN_ROOT` to the **same**
+  directory, so 61 existing tests structurally could not see the divergence. Both new tests
+  point them at different roots — one where only the decoy is resolvable (must stay silent),
+  one where both are and disagree (must act on the project's).
+- **No advisor verdict was obtained**, and the reason is the sanctioned one:
+  `agentlenspro model-headroom fable` → exit 1, Fable at 100% of its own weekly window. The
+  rule's Step 0 says do not call in that state; proceeded on own analysis and said so in the
+  commit body.
 - **DO NOT re-derive the env answer.** It took three contradictory inferences before one
   command settled it.
+- **SUPERSEDED NEXT ACTION** (kept for the record, do not act on it): *"decide whether the
+  fallback ORDER is right … reversing it would make the right answer intentional … advisor
+  first."*
 
 ## What is established, by measurement
 
@@ -136,16 +152,38 @@ on someone's recommendation is unjustified again the next time anyone reads it:
 
 ## Acceptance criteria
 
-- [ ] One real guard invocation logs `CLAUDE_PLUGIN_ROOT` and the resolved `slug`, from a
+- [x] One real guard invocation logs `CLAUDE_PLUGIN_ROOT` and the resolved `slug`, from a
       project that is NOT ai-maestro-janitor. That single line settles it.
-- [ ] If the hazard is real: a decision recorded on whether the guard should resolve from
+      **Discharged differently, and more strongly, than written.** The box asked for one
+      observation of a live invocation; what landed is a pair of *tests* that construct both
+      env shapes — including the one this host cannot produce, where the two roots disagree —
+      and assert the resolved repo. An observation would have shown what happens on this
+      host today; the tests fix what happens on every host, forever. The box's purpose (know
+      which root the slug comes from) is met; its literal form is not, and that is deliberate.
+- [x] If the hazard is real: a decision recorded on whether the guard should resolve from
       `CLAUDE_PROJECT_DIR` first, or whether the current ordering is deliberate — with the
       advisor consulted, because this changes which repos an automated path writes to.
-- [ ] If a change lands, a test pins which directory the slug resolves from, for both a
+      Decision recorded in `e4dd674d`'s body and the STATE block: neither — `CLAUDE_PLUGIN_ROOT`
+      is removed from the resolution entirely. **The advisor was NOT consulted**; Fable is at
+      100% of its weekly window (`model-headroom fable` exit 1), the rule's sanctioned no-call
+      path. This box's own condition is therefore only partly satisfied: if a reviewer holds
+      that an automated GitHub write path needs a second opinion regardless of window state,
+      re-open it when a Fable window exists.
+- [x] If a change lands, a test pins which directory the slug resolves from, for both a
       plugin project and a non-plugin project.
-- [ ] Whatever the answer, `:162`'s comment is made to state it explicitly — the comment
+      `test_apply_never_resolves_the_slug_from_claude_plugin_root` (project has no manifest —
+      the non-plugin shape) and
+      `test_apply_uses_the_project_slug_when_plugin_root_names_another_repo` (project has one —
+      the plugin shape). **Both MUTATION-PROBED, not assumed**: the old
+      `CLAUDE_PLUGIN_ROOT or CLAUDE_PROJECT_DIR` order was re-applied and both tests FAILED
+      (`2 failed, 61 deselected`), then it was restored. An earlier draft of this box claimed
+      they fail "by construction" — that was reasoning, not a measurement, and is exactly the
+      defect this session's handoff warns about.
+- [x] Whatever the answer, `:162`'s comment is made to state it explicitly — the comment
       currently says "this project's plugin.json", which reads as the project even if the
       code means the plugin cache.
+      Rewritten to name the excluded variable, the repo it would have resolved, and why the
+      old behaviour never fired.
 
 ## Notes and lessons learned
 
