@@ -32,19 +32,52 @@ run_release_gate() {
 }
 ```
 
-`uv run` reads `requires-python` (`>=3.11`) and selects a conforming
-interpreter. The fallback does not: it takes whatever `python3` is first on
-PATH, which may be any version. The fallback exists precisely for machines
-WITHOUT `uv` — i.e. the least-controlled environments, where the mismatch is
-most likely.
+The fallback takes whatever `python3` is first on PATH, which may be any
+version. That half is not in doubt — it is what the branch literally does. The
+fallback exists precisely for machines WITHOUT `uv`, i.e. the least-controlled
+environments, where a mismatch is most likely.
+
+**The `uv` branch is only ASSUMED safe, and the assumption is not fully
+verified.** It runs `uv run python scripts/publish.py --gate` — note `uv run
+python <script>`, not `uv run <script>` or `uv run --script`. On this host it
+resolves to 3.12.13, which satisfies `requires-python = ">=3.11"`, but that
+shows the local venv happens to conform; it does NOT prove `uv run python`
+would REFUSE a non-conforming interpreter. Settling it needs a host where the
+project venv is below the floor. The defect below stands either way, because it
+is about the branch that demonstrably performs no check at all.
+
+## Reachability — narrower than it first looks, and that sets the priority
+
+`run_release_gate` is invoked only for a DEFAULT-BRANCH or TAG push; a
+feature-branch push takes the trufflehog path instead and never calls it. And
+pushing the default branch is supposed to go through `publish.py`, which
+CLAUDE.md documents as `uv run scripts/publish.py`. So the exposed path is:
+someone on a machine with no `uv` pushes main or a tag directly, and the gate
+then runs under an unchecked interpreter.
+
+That is narrow. It is not zero, and it is the case where the diagnostic is
+worst — an `ImportError` naming a `typing` symbol tells the operator nothing
+about interpreter version. Priority accordingly: real, low urgency, worth
+fixing when the generator is next touched rather than as its own errand.
 
 ## How it surfaced, and why the trigger is a red herring
 
 Found 2026-09-04 while reviewing TRDD-S7FIQTCO. That card added
 `from typing import Literal, assert_never` to `publish.py`, and `assert_never`
-is 3.11+. Verified by grep that it is now the ONLY 3.11-only construct in the
-file (no `tomllib`, `except*`, `Self`, `LiteralString`, `TypeVarTuple`), so
-before that change the module loaded on 3.10 and now it does not.
+is 3.11+. A grep for the 3.11 additions I could name (`tomllib`,
+`ExceptionGroup`, `except*`, `Self`, `LiteralString`, `TypeVarTuple`,
+`assert_never`) matched only `assert_never`, so on that evidence the module
+loaded on 3.10 before the change and does not now.
+
+**That grep is a NAMED-FEATURE check, not a proven version floor**, and the
+difference matters to anyone re-deriving this. It would miss
+`asyncio.TaskGroup`, `enum.StrEnum`, `datetime.UTC`, `contextlib.chdir`,
+`typing.Never`/`assert_type`/`dataclass_transform`, `hashlib.file_digest`, the
+`re` atomic-group syntax, and all 3.12 syntax (PEP 695 `type` statements,
+nested f-string quotes). None is plausible in this file today, but the honest
+claim is "my grep found one", not "there is one". A real floor check —
+`vermin`, or `ruff` with `target-version` — is wired up nowhere in this repo,
+which is itself worth knowing.
 
 On a 3.10 host with no `uv`, the gate therefore dies with an `ImportError` on a
 typing symbol, during a push, and takes EVERY entry point with it — `--gate`,
