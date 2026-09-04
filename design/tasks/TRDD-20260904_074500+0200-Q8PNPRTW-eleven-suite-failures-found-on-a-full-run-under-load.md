@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T09:43:00+0200
+updated: 2026-09-04T11:21:46+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -161,6 +161,31 @@ external-refs: [TRDD-7NSRD8OV]
   **Put the status-bearing command LAST, or read the captured exit from the file — never
   trust a compound's reported exit.**
 - **MECHANISM — row 1 CONFIRMED, row 2 STILL UNDETERMINED. Do not read one traceback as
+  **UPDATE 2026-09-04 11:01 — THE CAPTURED SECTIONS DO NOT EXIST.** Measured, not
+  inferred: `grep -c "Captured" /tmp/verify.txt` returns **0**. Neither failure has a
+  `Captured stdout`, `Captured stderr` or `Captured log` section. So the earlier note
+  below — "whether they carry a discriminating detail is unknown" — is settled in the
+  worst way: there is nothing to read, and no amount of re-reading that file will
+  discriminate row 2.
+
+  **ROOT CAUSE OF THE UNDECIDABILITY (not of the failure): the fake script has no
+  ENTRY MARKER.** It writes `grandchild.pid` only AFTER forking. A missing pid file is
+  therefore consistent with both "the script never got scheduled" and "the script
+  started and was SIGKILLed before it forked", and no observation currently
+  distinguishes them because the script emits nothing on entry.
+
+  **THE FIX IS INSTRUMENTATION, NOT A TIMEOUT.** Have the fake script record its own
+  entry — one `touch <tmp>/script_started` (or an echo) as its FIRST statement, before
+  the fork. Then:
+  - marker absent + pid absent ⇒ never scheduled (row 1's mechanism);
+  - marker present + pid absent ⇒ started, killed before the fork completed (the
+    kill-vs-fork race).
+  This is a test-instrumentation defect and fixing it costs one line. Do NOT widen the
+  1.0 s timeout to make row 2 pass — that destroys the very race the test exists to
+  exercise and converts a diagnosable failure into a hidden one.
+
+  *(Evidence report: `reports/suite-failures/20260904_110119+0200-row2-mechanism-evidence.md`.)*
+
   proof of one cause.** The two `E ` lines in `/tmp/verify.txt` both read
   `FileNotFoundError: … grandchild.pid`. That is NOT the whole evidence: the
   `Captured stdout/stderr` and `Captured log` sections for those failures were never
