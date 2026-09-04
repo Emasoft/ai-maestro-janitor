@@ -13,6 +13,7 @@ relevant-rules: []
 npt: []
 eht: []
 blocked-by: []
+created-by: S7FIQTCO
 implementation-commits: []
 ---
 
@@ -97,9 +98,27 @@ path.
 
 The one case where it is first is a direct `git push origin main` bypassing
 `publish.py` — and that push is refused anyway, by the process-ancestry check
-inside the very gate that is failing to import. Same for the ref-deletion case
-above: the push was going to be refused; it now gets refused with a worse
-message.
+inside the very gate that is failing to import.
+
+**THE REF-DELETION PATH BREAKS THAT ARGUMENT, and it is the one case that is a
+genuine regression.** A deletion (`git push origin --delete <branch>`) is never
+started by `publish.py` — the user types it directly — so there is no outer
+invocation that already loaded, and the "it would have failed earlier" reasoning
+simply does not apply. On a no-`uv`, sub-3.11 host:
+
+- BEFORE `assert_never`: the gate imported fine, ran, and refused the deletion
+  via the ancestry check with a message naming the actual reason.
+- AFTER: the gate dies at import with `ImportError: cannot import name
+  'assert_never'`, and the operator is told nothing about why their branch
+  deletion was blocked.
+
+Same outcome (refused), materially worse diagnostic, on an operation that has
+nothing to do with releasing. That is the honest worst case, and an earlier
+draft of this section missed it by reusing the outer-publish.py argument
+everywhere instead of checking it per path. It does not raise the priority to
+urgent — it still needs a host both without `uv` and below the floor — but it
+is a real behaviour change on an innocuous command, which "a worse message on a
+path that already fails" undersold.
 
 **So the defect is: an unsupported interpreter produces a misleading diagnostic
 on a path that already fails.** Not a new broken capability. `requires-python`
