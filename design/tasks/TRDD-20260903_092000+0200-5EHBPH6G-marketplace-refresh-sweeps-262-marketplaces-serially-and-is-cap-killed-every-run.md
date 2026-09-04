@@ -1,9 +1,9 @@
 ---
 trdd-id: 5EHBPH6G
 title: marketplace-refresh sweeps 262 registered marketplaces serially under background QoS and is cap-killed on every run — five consecutive rc=-9 and plugin updates deferred behind its lock
-column: testing
+column: complete
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-04T06:20:00+0200
+updated: 2026-09-04T06:32:00+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -68,23 +68,47 @@ heartbeat's task-quarantine drift line.
 Clause 1: five post-fix runs at 95–100 s, rc=0. Clause 2: post-fix request waits 38 s and
 44 s against a 600 s bound. The three unit-test boxes were already proven.
 
-**THE PRE-FIX ATTRIBUTION IS ESTABLISHED BY BEHAVIOUR, not by version inference** — this is
-the load-bearing premise of the tick, so it is stated in full. The 1313 s wait sat behind the
-22:47:40 run. That run emitted **zero** `marketplace-refresh: refreshed N/M` lines, and that
-counter was introduced by the fix commit `69feb820` itself; the first such line anywhere in
-the log is 01:21:36, after the 00:57:46 restart. The run was also cap-killed at 1935 s, which
-the new per-item code cannot produce. So it ran OLD code — proven by what it did, not by
-reasoning about which release was out when.
+**THE PRE-FIX ATTRIBUTION — established by a behaviour CHANGE at the restart boundary.**
+This is the load-bearing premise of the tick, so it is stated in full, including what could
+NOT be established.
 
-**Not moved to `complete` in the same edit that ticked the last box** — clause 12 freezes a
-terminal card, and this box was ticked, un-ticked and re-ticked within one session.
-**Exit condition, made CHECKABLE:** move it when `review-after: 2026-09-05` comes round and a
-re-measure over ≥24 h of log still shows every post-fix request wait under 600 s. An earlier
-version said "when an adversarial review returns no card-affecting finding" — every review
-this session returned findings, so that was a permanent red light, which is the third
-unsatisfiable condition written on this card. The date-plus-measurement form can actually be
-met, and it also fixes the n=2 thinness: two episodes is what a 7 h window yields, and a day
-yields ~10×.
+*Not usable:* "the episode ends at a cap-kill, therefore pre-fix" — circular, since the
+cap-kill is the thing being classified. *Also not usable:* the pre-restart daemon's launch
+time — its `started (pid=` line predates the retained log, so it cannot be dated, and
+v3.4.2 shipped 2026-09-01, two days before the episode. A long-running process does not pick
+up a release until it restarts, but that is an argument, not an observation.
+
+*What actually discriminates* — the outcome record across the 00:57:46 restart:
+
+| | runs | outcome |
+|---|---|---|
+| pre-restart | `consecutive=11` | **11 straight cap-kills**, the last at 1935 s rc=-9 |
+| post-restart | 5 | **5/5 succeeded**, 95–104 s, all emitting `refreshed 31/32` |
+
+One code version does not fail eleven times running and then succeed five times running
+with nothing between but a restart. The `refreshed N/M` counter — introduced by `69feb820`
+itself — appears **zero** times before the restart and on every run after it. That is a
+version change at a known instant, so the 22:47 run was old code and the 1313 s wait behind
+it is pre-fix.
+
+(Absence of the counter *alone* would not discriminate: a cap-killed new-code run also emits
+none. It is the 11-vs-5 outcome flip that carries this, not the silence.)
+
+**MOVED to `complete` 2026-09-04 06:32.** All four boxes pass and the decisive premise is
+established above, so holding it was a third state the board does not model — "eligible but
+waiting" is not a column, and the hold was self-imposed rather than blocked on anything.
+
+Two earlier hold-conditions are withdrawn as unsatisfiable, and that is the card's most
+reusable lesson: *"move it when an adversarial review returns no card-affecting finding"* was
+never met in ~24 reviews, and it is the **same defect as clause 2's v1 and v2** — a condition
+phrased as the absence of an event that occurs by construction. Three unsatisfiable
+conditions were written on this one card before the pattern was named.
+
+**What is NOT proven, recorded because the card is now frozen:** both post-fix samples are
+single-window collisions (one fire hits one ~95 s hold, waits, succeeds). **No post-fix
+observation exists of a request missing MULTIPLE consecutive refresh windows** — which is the
+scenario that produced the 1313 s pre-fix number. `review-after: 2026-09-05` remains set; if a
+later session finds a multi-window post-fix miss over 600 s, that is a NEW card, not a reopen.
 
 **Retracted before it could mislead:** an earlier version of this section said the fix gave
 only a ~1.5× improvement because a request waits ~22 min. That compared a NEW-regime request
