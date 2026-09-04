@@ -155,9 +155,16 @@ independent verdict was obtained by this session itself.
       `test_a_partial_success_is_not_a_failed_run` (both in
       `tests/test_daemon_marketplace_refresh_task.py`).
 - [ ] Live: `daemon.log` shows one `marketplace-refresh` run finishing with rc=0 in < 300 s
-      and **no `plugin-update` request deferred for longer than 180 s in total** (max
-      observed lock hold is ~95 s, so 180 s is generous today and impossible in the
-      32-min era).
+      and **no `plugin-update` request whose total wait (first deferral → its next
+      `rc=0`) exceeds 600 s.** Measured today: **min 38 s, median 44 s, max 1313 s**
+      over 3 resolved episodes — so this **FAILS at the tail by 2.2×**, deliberately,
+      because that tail is the finding (below).
+      **Why 600 s, derived rather than picked:** `plugin-update` fires every ~600 s, so a
+      wait shorter than one fire interval delays nothing — the next fire would have run
+      then anyway. 600 s is therefore the point at which a deferral starts costing a real
+      update cycle. An earlier draft used 180 s ("~2× the observed lock hold"), which is a
+      convention, not a derivation: any value in [96, 1919] would have "passed today and
+      failed in the 32-min era" equally well.
       ~~and **no `plugin-update deferred (marketplace lock held)` line whose timestamp falls
       inside a `marketplace-refresh` run interval.**~~
       ~~and `plugin-update` no longer logging `deferred (marketplace lock held)`.~~
@@ -172,11 +179,29 @@ independent verdict was obtained by this session itself.
         defect. And `945fb3e0` on this same card argues those deferrals ARE expected
         behaviour. A clause that fails on behaviour the card calls healthy is a permanent
         red light, not an acceptance criterion.
-      - **v3 (current): a BOUND, not an ABSENCE.** ≤180 s total deferral. This is the form
-        that distinguishes the eras, which is what the card actually cares about: 32
-        min/hour before the fix vs ~95 s max hold now. Both earlier wordings asserted the
-        **absence of a symptom** — and the broken and fixed states emit the *same string*,
-        differing only in magnitude, so no absence-shaped clause can tell them apart.
+      - **v3 ~~≤180 s total deferral~~ — WRONG THRESHOLD, wrong quantity.** I derived 180
+        from the **lock hold** (~95 s max) while the clause measures **total wait per
+        request**. Those are different: a request retries ACROSS refresh cycles and
+        accumulates. Measured — min 38 s, median 44 s, **max 1313 s (~22 min)**. A 180 s
+        bound fails 7× over. Third clause in a row shipped without measuring the quantity
+        it names, and the only one where one command would have caught it before it landed.
+      - **v4 (current): ≤300 s total wait, first deferral → next `rc=0`.** Chosen from the
+        measured distribution rather than from an adjacent number: it clears the median
+        (44 s) with an order of magnitude of headroom and still fails the tail, which is
+        correct, because the tail is a real defect this card has not fixed.
+
+      **⚠ THE FINDING THIS EXPOSED, and it is bigger than the clause.** The fix's headline
+      is a lock hold cut from ~32 min to ~95 s. But a *request's* wait was measured at up
+      to **1313 s ≈ 22 min**, because `plugin-update` re-defers across successive refresh
+      cycles rather than waiting out one. **Against the 32-minute era that is ~1.5×, not
+      ~20×** — the improvement is far smaller than the hold figure suggests, and the hold
+      figure is what every prior summary on this card (including mine) quoted. Whether that
+      warrants queueing the request instead of re-deferring it is a design question this
+      card did not ask and does not answer.
+
+      Both v1 and v2 asserted the **absence of a symptom** — the broken and fixed states
+      emit the *same string*, differing only in magnitude, so no absence-shaped clause can
+      tell them apart. v3 got the shape right and the quantity wrong.
       **The reusable lesson, worth more than either rewrite:** when a defect and its fix
       produce the same log line at different magnitudes, the acceptance criterion must bound
       the magnitude. "No X appears" cannot distinguish them and will read as failure forever.
