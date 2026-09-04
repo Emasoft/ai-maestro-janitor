@@ -78,28 +78,24 @@ wait against an OLD-regime lock hold — different quantities, different regimes
 waits are 38–44 s. The comparison it should never have made cannot be computed at all: no
 old-regime request-wait was ever measured.
 
-**Historical, for the reader coming to this card cold —** the reword history below is kept
-because absence-shaped criteria were tried twice and failed twice, and the reason generalises. As written ("`plugin-update`
-no longer logging `deferred (marketplace lock held)`") it reads as *the string never appears*,
-which no fix to this task can deliver — any lock holder produces it. What the card always MEANT
-is refresh-caused starvation. Rewrite as: **"no `plugin-update deferred` line whose timestamp
-falls inside a `marketplace-refresh` run interval."** That is the condition measured below, and
-it is the one the fix is responsible for.
+**Everything below this line is HISTORICAL and every conclusion in it has been superseded by
+the paragraphs above.** It is kept, not deleted, because the reasoning errors are the
+transferable part — absence-shaped acceptance criteria were tried twice and failed twice, and
+a max taken across a window straddling a fix produced a confident, wrong headline. Read it as
+a record of how the box got answered, never as its current state.
 
-**SUPERSEDED 2026-09-04 06:02 — the two facts this block waited on have both arrived.**
-`69feb820` IS published (v3.4.2 onward; `git tag --contains` is no longer empty), and
-`daemon.log` now carries five clean runs. Box 4 was measured today: **clause 1 PASSES,
-clause 2 FAILS.** Read the box's own annotation for the numbers; do not re-derive them.
-The short version: refresh completes rc=0 in 95–100 s (was SIGKILLed at the 1920 s outer
-cap, 11 times running), but `plugin-update deferred (marketplace lock held)` still appears
-**211 times** in a 7 h window, landing inside the refresh runs. **The fix removed the cap
-kill, not the lock contention** — starvation went from ~32 min to ~100 s, a different
-severity rather than a different failure. Closing box 4 needs a shorter lock hold
-(per-item rather than per-run) or an explicit decision to reword clause 2.
+- ~~"Rewrite clause 2 as: no `deferred` line inside a refresh run interval."~~ That v2 wording
+  is itself unsatisfiable — refresh and `plugin-update` are independent schedules and collide
+  ~16% of fires forever. The live wording is v4 (a 600 s bound on per-request wait).
+- ~~"Clause 1 PASSES, clause 2 FAILS. 211 deferrals land inside refresh runs. The fix removed
+  the cap kill, not the lock contention; starvation went from ~32 min to ~100 s. Closing box 4
+  needs a shorter lock hold or a reword."~~ **Both clauses pass.** The 211 figure is real but
+  counts one plugin's bounded retries; the request-wait measurement that actually answers the
+  clause is 38 s and 44 s post-fix.
+- ~~"Box 4 stays open: `69feb820` is UNPUBLISHED and no rc=0 run exists to observe."~~ Both
+  premises became false — it ships from v3.4.2, and five clean runs exist.
 
-**Board reconciliation (2026-09-03 11:09) — HISTORICAL, both premises now false:** boxes
-1-3 confirmed proven (still true). Box 4 stays open: implementing commit `69feb820` is
-UNPUBLISHED and no rc=0 run exists to observe yet. `review-after: 2026-09-05` set.
+Boxes 1-3 were confirmed proven on 2026-09-03 and that has not changed.
 
 ## ⏵ PRIOR STATE — 2026-09-03
 
