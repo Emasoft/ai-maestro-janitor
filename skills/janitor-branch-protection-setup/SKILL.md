@@ -142,7 +142,22 @@ Its table of contents:
    if present is None:
        print('ERR ruleset list lookup failed'); sys.exit(1)
    if present:
-       print('NOOP both ratified rulesets already present'); sys.exit(0)
+       # NAME presence is not convergence (janitor#294 defect 2, TRDD-DD0M4QL7).
+       # A ruleset can exist under the right NAME with `rules: []` — zero rules,
+       # nothing required — and a name-only check calls that converged and NOOPs,
+       # so the baseline is never repaired. Measured downstream on a real repo
+       # where github-config-audit correctly raised NO_REQUIRED_CHECKS while this
+       # step reported NOOP. Content drift must FALL THROUGH to the apply: an
+       # idempotent restore to the ratified baseline is explicitly EXEMPT
+       # (manager-approval-defaults §F). None = lookup failed = uncertain = stop.
+       verdict = bpl.baselines_content_current(slug, default_branch, project_root)
+       if verdict is None:
+           print('ERR ruleset detail lookup failed — content unverified'); sys.exit(1)
+       current, reasons = verdict
+       if current:
+           print('NOOP all ratified rulesets present and content-current'); sys.exit(0)
+       for r in reasons:
+           print('DRIFT', r)
    all_ok, results, checks = bpl.apply_baseline_rulesets(slug, default_branch, project_root)
    for name, ok, msg in results:
        print(('OK' if ok else 'FAIL'), name, msg)
@@ -234,8 +249,11 @@ Copy this checklist and track your progress:
 * [ ] Confirm the user wants to apply (DO NOT skip this step — Tier 1
       is human-in-the-loop by definition)
 * [ ] Check viewer is admin (`gh api repos/<slug>` `.permissions.admin`)
-* [ ] Convergence check (`baselines_present(slug)`) — bail with NOOP if
-      BOTH ratified rulesets are already in place
+* [ ] Convergence check — NAME **and CONTENT**. `baselines_present(slug)` first,
+      then `baselines_content_current(slug, default_branch, project_root)`; bail
+      with NOOP only when the rulesets are present AND content-current. A
+      name-only check calls a ruleset with `rules: []` converged and never
+      repairs it (janitor#294 defect 2)
 * [ ] Apply via `bpl.apply_baseline_rulesets(slug, default_branch, project_root)`
       (PATCH-or-POST both + delete legacy orphan)
 * [ ] Report one `OK`/`FAIL` line per ruleset (or `NOOP`)

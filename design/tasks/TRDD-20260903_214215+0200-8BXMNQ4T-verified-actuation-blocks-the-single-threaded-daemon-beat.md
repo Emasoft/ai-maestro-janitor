@@ -24,17 +24,32 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
-- **MEASURED. Cumulative foreground occupancy is the only surviving explanation; the
-  remedy is split out to TRDD-QJ5LP4W2.** 12 stalls (`wait > 60 s`) in 1048 task-beats
-  over 6 h 22 m. **11 of 12 substantially explained** (median 92.7% of a stall's window
-  filled by foreground bodies, vs **0.0%** on a normal beat); one row at 54% with ~84 s
-  unaccounted, clustered at 04:15–04:18. Sleep, jitter, backoff and parse artifacts are
-  each excluded — they all predict LOW coverage. Beat is healthy at med 4–5 s / p90 12–15 s.
+- **⚠ THIS CARD'S OWN HYPOTHESIS WAS NEVER TESTED.** The title claims verified *rotation
+  actuation* starves the beat. `grep -c 'rotation-esc'` = **0** — no rotation window has
+  occurred on this host, so that was never measured and will not be, on this card. What
+  WAS measured is that *other* foreground work blocks the loop; **none of the measured
+  blockers is rotation actuation.** Read the next bullet as an adjacent finding, not as
+  an answer to the title.
+- **The generalisation is a DEDUCTION, not a guess.** The measured mechanism is *any*
+  foreground body occupying a single-threaded loop. Rotation actuation is foreground work
+  with a known ~9 s/pane cost, so the prediction follows from the measured mechanism — it
+  is unmeasured, not unsupported.
+- **MEASURED: cumulative foreground occupancy is the PROXIMATE mechanism; the remedy is
+  split out to TRDD-QJ5LP4W2.** 12 stalls (`wait > 60 s`) in 1048 task-beats over 6 h 22 m.
+  **11 of 12 substantially explained** (median 92.7% of a stall's window filled by
+  foreground bodies, vs **0.0%** on a normal beat); one row at 54% with ~84 s unaccounted,
+  clustered at 04:15–04:18. Beat is healthy at med 4–5 s / p90 12–15 s.
+  **Scope of the exclusion, stated precisely:** four rival explanations were tested and
+  excluded — sleep, jitter, backoff, parse artifacts — because each predicts LOW coverage
+  on stalls. That is *four of the five considered*, **not** an enumerated hypothesis
+  space. An earlier version said "the only surviving explanation", which is unfalsifiable
+  as phrased and contradicted this card's own documented confound.
+  **WHY those bodies were slow is UNEXAMINED** — the 1920 s SIGKILLed `marketplace-refresh`
+  child overlapping the 23:06 episode is a live candidate. That is a *distal cause*, not a
+  rival: the bodies did occupy the loop, which is measured.
   **NOT "confirmed":** the control excludes rivals, it does not independently prove
   causation, because on a single-threaded loop "waited long" and "the loop was busy" are
-  near-definitional. An earlier version of this block said "confirmed" and "every one
-  explained" while the body it supersedes said the opposite — and by rule this block wins,
-  so the overclaim would have been the only thing read.
+  near-definitional.
 - **NEXT ACTION** — box 1's remaining half only: the *during-a-rotation-window* measurement.
   It is **not obtainable on this host** (`grep -c 'rotation-esc'` = 0; no rotation has ever
   occurred here), so it needs a rotation to happen, not more looking. Everything else on this
@@ -505,9 +520,16 @@ surface for a number nobody is waiting on.
       than left pending.
 
 **All three boxes are now resolved, so this card is `complete`-eligible.** It is NOT
-being moved to `complete` in the same edit that ticks its last box: the terminal-column
-rule freezes a card after the transition, and a card whose boxes were ticked and
-un-ticked three times this session should sit through one more read before it is frozen.
+being moved yet, and the reason is concrete rather than a feeling: **TRDD clause 12
+freezes a terminal card against body edits**, and this card is mid-review-cycle — the
+last four turns each produced corrections to it, and a review of the commit that ticked
+these boxes is outstanding. Freezing now would forfeit the ability to fix what that
+review finds.
+
+**EXIT CONDITION (checkable, so this cannot drift):** move to `complete` when an
+adversarial review of this card returns with no card-affecting finding. An earlier
+version said it should "sit through one more read", which names no test and is how a
+card sits in `todo` for a month.
 
 ## Notes and lessons learned
 

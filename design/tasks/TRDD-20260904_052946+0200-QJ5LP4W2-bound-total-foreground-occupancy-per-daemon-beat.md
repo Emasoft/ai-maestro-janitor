@@ -41,13 +41,18 @@ Two decisions, both deliberate:
    empty `npt:`/`eht:`, **never a `parent-trdd:`**. A first version of this file set one.
    Keep it that way: this card must not grow an `eht:` either, or closures start
    requiring an unbounded graph walk instead of a flat check.
-2. **Not listed in 8BXMNQ4T's `eht:`** — a reviewer argued it should be, since the
-   measurement "revealed a defect needing a fix". Declining that, because `eht:` means
-   *the parent cannot reach `complete` until every EHT is terminal*, and it exists for
-   effects **of a change**. 8BXMNQ4T changed nothing; it is a pure measurement, and its
-   done-state is "measured and decided". Gating it on this card would keep a finished
-   measurement open until the daemon is fixed — which is precisely the scope drift the
-   split was performed to cure. The relationship is a cross-reference, not a gate.
+2. **Not listed in 8BXMNQ4T's `eht:` — this is TRDD clause 13's THIRD branch.** Clause 13
+   says: *"If you catch yourself writing 'and also do X', X is an NPT, an EHT, **or its own
+   TRDD**."* Three peer options, and only the third carries no gate. NPT is wrong (nothing
+   here is a prerequisite *for* the measurement); EHT is defensible but would mean
+   8BXMNQ4T cannot reach `complete` until the daemon is fixed, keeping a finished
+   measurement open — the scope drift the split was performed to cure. So: its own TRDD,
+   cross-referenced.
+   **A first version justified this by asserting `eht:` "exists for effects OF A CHANGE".
+   That qualifier is not in the rule** — clause 9 defines only the gating semantics. It
+   was a gloss supplied to reach the closure I wanted, which is the same defect as a
+   manufactured number, in a register with nothing to grep. The outcome is unchanged; the
+   argument is now the rule's own text.
 
 ## What was measured (8BXMNQ4T — read that card for method and caveats)
 
