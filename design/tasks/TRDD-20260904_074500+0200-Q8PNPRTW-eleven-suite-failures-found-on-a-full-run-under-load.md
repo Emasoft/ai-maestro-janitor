@@ -10,7 +10,7 @@ priority: high
 severity: medium
 scope: project
 project-id: ai-maestro-janitor
-min-approval-requirement: none
+min-approval-requirement: user
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
 blocked-by: []
