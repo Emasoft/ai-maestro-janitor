@@ -206,10 +206,21 @@ coverage is `min(c,w)/w`, so a 5 s window needs only 5 body-seconds to reach 100
 while a 184 s window needs 184. Short windows are mechanically *easier* to saturate
 and still measure 0.0%.
 
-**Caveat on independence:** the 12 rows are not 12 independent confirmations.
-`session-liveness` appears in 8 of them, so one body legitimately delays three tasks
-and is counted in three rows — correct physics, but the effective sample is ~5
-distinct blocking episodes viewed 12 times.
+**Caveat on independence — the 12 rows are 5 EPISODES, and this is now derived, not
+estimated.** One body legitimately delays several tasks, so a single blocking event
+appears as several rows. Grouping stalls whose resume times fall within 120 s:
+
+| episode | tasks | stalls |
+|---|---|---|
+| 23:06:47–23:07:02 | all three | 94, 89, 97 s |
+| 03:51:47 | `fleet-stop` | 67 s |
+| 04:17:50–04:20:24 | all three (`fleet-stop` twice) | 90, 184, 145, 94 s |
+| 04:34:06–04:35:54 | all three | 78, 150, 187 s |
+| 04:48:43 | `oauth-rotator-tick` | 108 s |
+
+3+1+4+3+1 = 12 stalls, **5 distinct blocking episodes**. An earlier draft wrote
+"~5" from eyeballing the timestamps and never derived it — the estimate happened to
+be right, which is not the same as having checked.
 
 **The unexplained mass is CLUSTERED, not a lone outlier.** The 54% row (184 s, the
 second-largest wait) and the 78% row sit adjacent at 04:17:50 and 04:18:26, while
