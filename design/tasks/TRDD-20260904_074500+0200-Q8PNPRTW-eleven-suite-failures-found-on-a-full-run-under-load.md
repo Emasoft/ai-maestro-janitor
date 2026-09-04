@@ -74,14 +74,36 @@ and at the truncation point.
 not an identification, and `FAILED` summary lines print only at the end. A truncated pytest
 capture cannot be counted, only re-run.
 
-## Partial serial isolation (evidence, NOT the verdict)
+## Serial isolation — COMPLETE and labelled (`/tmp/isolate11.txt`, finished 07:41)
 
-A serial re-run of exactly these 11 (`-p no:randomly`, no `-n`) was started at 07:31;
-`/tmp/isolate11.txt` held `FF.F....FFF` when this card was written — **incomplete, and the
-mapping of dots to test ids is an inference from argument order, not a labelled result.**
-Do not classify anything from it. It is recorded here only because it establishes the one
-thing that matters for priority: **several of these reproduce serially**, so "it is all just
-load" is already refuted, and the triage is not optional.
+`7 failed, 5 passed in 588.29s` running exactly these tests serially, `-p no:randomly`, no
+`-n`. (12 ran, not 11: `TestMemoryLibrarianReindex` expands to 4.)
+
+**Reproduce WITHOUT parallelism — not load artifacts:**
+
+```
+tests/test_capture_all_logins.py::test_kill_process_group_terminates_a_grandchild_too
+tests/test_capture_all_logins.py::test_capture_one_kills_the_whole_tree_and_reports_timeout
+tests/test_marketplace_refresh_scoped.py::test_per_session_refreshes_each_unique_marketplace
+tests/test_memory_librarian.py::TestMemoryLibrarianReindex::test_reindex_invoked_for_the_local_root
+tests/test_memory_librarian.py::TestMemoryLibrarianReindex::test_reindex_runs_before_index_query
+tests/test_memory_librarian.py::TestMemoryLibrarianReindex::test_reindex_failure_is_tolerated
+tests/test_token_usage_anomaly_detector.py::test_alarm_enriched_with_agentlens
+```
+
+**Pass serially, fail under `-n auto` — candidate load/parallelism artifacts, cause still
+unnamed:** the three `test_gh_reply_watch.py` tests and
+`test_marketplace_refresh_scoped.py::test_disabled_plugins_are_skipped`. "Passes serially"
+is a symptom; the acceptance criteria below require the CAUSE before any of these four is
+accepted as an artifact.
+
+> **PROVENANCE CORRECTION.** The first version of this section, and commit `81c9373b`'s
+> body, asserted "several already reproduce serially" from an *unlabelled progress-dot
+> string* (`FF.F....FFF`) whose mapping to test ids was an inference from argument order.
+> The card said so explicitly and the commit message then leaned on it anyway. The claim has
+> since turned out TRUE — but it was stated before it was established, which is the same
+> defect (`ATOM-I13I-A52N`, "reading a check as establishing more than it did") this session
+> has now hit twice. The dot string is not evidence; this labelled run is.
 
 ## Acceptance criteria
 
