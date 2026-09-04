@@ -187,16 +187,24 @@ one is a genuine discriminating prediction and it is one run.**
 **Not yet tested. Recorded as the leading hypothesis, not a finding** — four have already died
 on Q8PNPRTW for being plausible.
 
-## NEXT ACTION
+## NEXT ACTION — REORDERED 13:00; the old order is stale
 
-1. **Read `_enforce_spawn`** (`tests/sandbox_guard.py:726`, called before `original_init`). It
-   is the only function in the spawn path nobody has opened. **This is the cheapest next read,
-   NOT a lead** — it is suspicious by elimination, which is the reasoning that produced three
-   dead diagnoses on Q8PNPRTW. One weak positive signal: `:730` grows an unbounded
-   module-level `_SPAWNED_PIDS` set that persists across a serial session but is fresh per
-   xdist worker — an asymmetry matching serial-fails / xdist-passes.
-2. If that is clean, instrument to separate (a)/(b)/(c) — e.g. capture the child's exit status
-   and stderr directly rather than inferring from the pid file's absence.
+1. **⇒ CAPTURE A FAILING RUN'S CHILD STDERR. This is now step 1.** The child inherits the
+   parent's stderr (no `stderr=` at `:274`), so `pytest ... -s` shows anything `/bin/sh`
+   prints — and if the surviving sub-hypothesis is right it prints `sh: cannot create ...`,
+   which names the cause outright.
+   **THE TRAP, measured: failures need a LOADED box.** Six `-s` runs at load ~9 all PASSED, so
+   nothing was captured. Run it against a concurrent full-suite run, or wait for a busy
+   machine. **Six clean runs are not evidence of anything but load-gating.**
+2. **Read `_enforce_spawn`** (`tests/sandbox_guard.py:726`). **DEMOTED from step 1** — the
+   errpipe argument shows the spawn SUCCEEDED (a live `Popen`, readable `returncode`), so the
+   pre-spawn guard is much less interesting than it looked. It remains the one unread function
+   in the path, so read it if step 1 is inconclusive — **but as the cheapest remaining read,
+   never as a lead.** Suspicion-by-elimination produced three dead diagnoses on Q8PNPRTW.
+   *(The `_SPAWNED_PIDS` "weak positive signal" that used to be cited here is WITHDRAWN — a
+   set of ints exhausts nothing; it qualified only by matching the serial-vs-xdist shape.)*
+3. Only then: instrument to separate (a) never exec'd / (b) exec'd then died / (c) exec'd but
+   writes failed. Note (a) is already near-excluded by the errpipe argument.
 
 ## Acceptance criteria
 
