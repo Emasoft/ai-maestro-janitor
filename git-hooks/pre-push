@@ -62,7 +62,13 @@ run_release_gate() {
     fi
     if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
         echo "pre-push: refusing to run the release gate." >&2
-        echo "  \`uv\` is not installed, and \`python3\` on PATH is older than 3.11," >&2
+        # "or could not be run" is load-bearing, not hedging: `command -v` proves a
+        # file is FINDABLE, never that it EXECUTES. A dead shebang, a permission
+        # problem, or a half-installed pyenv shim all reach here, and without this
+        # clause the refusal would state a version fact it has not established —
+        # the same defect as the message it replaced.
+        echo "  \`uv\` is not installed, and \`python3\` on PATH is older than 3.11" >&2
+        echo "  (or could not be run)," >&2
         echo "  which this project requires (pyproject.toml: requires-python >=3.11)." >&2
         echo "  Install uv (https://docs.astral.sh/uv/) or put a >=3.11 python3 on PATH." >&2
         return 1

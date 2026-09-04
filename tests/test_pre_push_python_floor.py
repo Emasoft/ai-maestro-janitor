@@ -112,9 +112,13 @@ def test_absent_python3_gets_its_own_message_not_the_too_old_one() -> None:
     # And the two refusals must not be the same sentence. Count only ECHO lines:
     # the phrase also appears in the comment explaining why the branch exists, and
     # counting raw occurrences would fail on a file that is correct.
-    echoed = [ln for ln in text.splitlines()
-              if ln.strip().startswith("echo") and "older than 3.11" in ln]
-    assert len(echoed) == 1, f"the too-old wording must appear in exactly one refusal, got {echoed}"
+    # Filter by NOT-a-comment rather than startswith("echo"): the latter misses a
+    # second refusal written with printf, a heredoc, or a continuation line, and
+    # that failure mode is a false PASS. Excluding comments catches every output
+    # verb for the same line count.
+    refusals = [ln for ln in text.splitlines()
+                if "older than 3.11" in ln and not ln.strip().startswith("#")]
+    assert len(refusals) == 1, f"the too-old wording must appear in exactly one refusal, got {refusals}"
 
 
 def test_the_refusal_names_the_floor_and_both_remedies() -> None:
