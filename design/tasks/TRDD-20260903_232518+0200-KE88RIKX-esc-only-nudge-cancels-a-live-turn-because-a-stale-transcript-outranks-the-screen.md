@@ -123,8 +123,29 @@ keystrokes.
 - [x] a refusal does not spend a recovery attempt
 - [x] mutation probe demonstrates the new test fails against the old condition
 - [x] ruff + mypy clean on the changed files; 128 policy-adjacent tests pass
-- [ ] LIVE: after the release, no `FIRED esc_nudge` line in `daemon.log` names a working pane
+- [ ] LIVE: after the release, no `FIRED esc_nudge … pane=working` line appears in `daemon.log`
       (blocked on publishing — the daemon runs the installed plugin)
+
+**Box 6 was UNMEASURABLE as originally written and was rewritten 2026-09-04, not measured.**
+It said "no `FIRED esc_nudge` line names a working pane". The event class does occur — 5
+`FIRED esc_nudge` lines in the live log — so it was not vacuous for lack of events. It was
+unreadable for lack of a FIELD: the emitter logged
+`FIRED {action} → {channel} for {LABEL} [{diagnosis}]`, and `[frozen]` is the SESSION
+diagnosis, a different axis from the pane class the policy table actually branches on. No
+`FIRED` line has ever named a pane class, so the criterion could be neither passed nor failed
+from its own named evidence source — it would have read as "pass" forever.
+
+`pane.status.kind` was in scope at the emit site and simply not logged, so the fix is a field,
+not a rewrite of the test: `daemon.py` now appends `pane=<kind>` to both the FIRED/FIRE-FAILED
+line and the `REFUSED by the pane policy` line (`unread` when the pane could not be read — a
+distinct value, so an unreadable pane can never be mistaken for a working one). The box above
+now names a string the log will actually contain.
+
+**Do not tick this from the current log.** Every `FIRED esc_nudge` line in it predates the
+field, and the 10 `REFUSED by the pane policy` lines that follow them were emitted by the
+INSTALLED plugin — they do not establish that this card's `_at_working` law is what refused,
+because the installed build predates it and the line does not say which guard fired. That
+ambiguity is the same missing-field defect, one layer down.
 
 ## Considered and DECLINED — do not re-litigate without new evidence
 

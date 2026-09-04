@@ -2075,7 +2075,8 @@ def task_session_liveness(fleet: list | None = None) -> None:
             state.log_line(
                 "daemon",
                 f"session-liveness: {tag} REFUSED by the pane policy — would {action}; "
-                f"the screen does not allow it right now",
+                f"the screen does not allow it right now "
+                f"(pane={pane.status.kind.value if pane is not None else 'unread'})",
             )
             _decline("policy_refused", action, str(plan["channel"]))
             continue
@@ -2102,10 +2103,15 @@ def task_session_liveness(fleet: list | None = None) -> None:
         _write_recovery_state(
             sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity}
         )
+        # `pane=<kind>` is what makes "did an ESC-only rung land at a WORKING pane?" answerable
+        # from the log (TRDD-KE88RIKX box 6). `tag` carries the session DIAGNOSIS (`[frozen]`),
+        # which is a different axis: the pane class is what the policy table branches on, and
+        # without it the acceptance criterion names a field the evidence never recorded.
         state.log_line(
             "daemon",
             f"session-liveness: {'FIRED' if ok else 'FIRE-FAILED'} {action} → "
-            f"{plan['channel']} for {tag}",
+            f"{plan['channel']} for {tag} "
+            f"pane={pane.status.kind.value if pane is not None else 'unread'}",
         )
         _audit(inst, "fired" if ok else "fire_failed", action, str(plan["channel"]))
 
