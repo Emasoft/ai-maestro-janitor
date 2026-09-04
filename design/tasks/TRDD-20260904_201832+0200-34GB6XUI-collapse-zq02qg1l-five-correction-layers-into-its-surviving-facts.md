@@ -9,8 +9,7 @@ task-type: docs
 min-approval-requirement: none
 scope: project
 project-id: ai-maestro-janitor
-parent-trdd: L46IG69Y
-external-refs: [TRDD-ZQ02QG1L]
+external-refs: [TRDD-ZQ02QG1L, TRDD-L46IG69Y]
 relevant-rules: []
 npt: []
 eht: []
@@ -22,11 +21,16 @@ implementation-commits: []
 
 ## Why this exists
 
-This is TRDD-L46IG69Y's EHT. L46IG69Y carried the collapse as one of its own
-acceptance boxes, which was the wrong home: a box describing work on a
-*different card's file* cannot be ticked by finishing L46IG69Y, so it would have
-held that card open — or, worse, been quietly ignored while the card sat in a
-column asserting activity.
+An UNGATED chore. It began as one of TRDD-L46IG69Y's acceptance boxes, which was
+the wrong home — a box describing work on a *different card's file* cannot be
+ticked by finishing L46IG69Y — so it became this card, wired as L46IG69Y's
+`eht:`. That was wrong too, and more interestingly so: it made a finished,
+tested fix wait on a readability cleanup **I** had decided was worth doing.
+Asked directly, the USER dropped the gate (2026-09-05); L46IG69Y closed
+`complete` and this card stands on its own, to be picked up when it is worth
+someone's time or dropped if it never is.
+
+**Nothing waits on this.** If that stops being true, say so here.
 
 ## The task
 
@@ -41,10 +45,11 @@ need calls those two cannot supply. (Small worked examples, if wanted:
 L46IG69Y's `## Superseded` marker and OES0NN3F's empty-body note, both
 2026-09-04.)
 
-**Where this card sits in a CHAIN of effects, which is not a cycle:** ZQ02QG1L
-shipped the composer -> L46IG69Y is its EHT (fixing the concision-check
-interaction that shipped with it) -> this card is L46IG69Y's EHT (the doc hygiene
-L46IG69Y's own box could not tick).
+**How it got here, which is a chain and not a cycle:** ZQ02QG1L shipped the
+composer -> L46IG69Y was its EHT (fixing the concision-check interaction that
+shipped with it) -> this card came out of L46IG69Y as doc hygiene its own box
+could not tick. The chain ends there: the `eht:` link was dropped, so this card
+gates nothing.
 
 ## Acceptance criteria
 
@@ -59,13 +64,11 @@ L46IG69Y's own box could not tick).
       this is an ordinary edit to an open card and NO terminal-freeze question
       arises. Stated explicitly because a first draft of this card called it
       terminal and claimed a freeze exception; a review then correctly concluded
-      the whole task was forbidden, reasoning from that false premise. **If it
-      ever DOES reach a terminal column, this card is void** — the freeze permits
-      only the closing edit, the append-only Approval log, and removal of a line
-      that falsely and machine-verifiably contradicts the terminal column. A
-      400-line readability collapse is none of the three, and would then need
-      USER approval as a deliberate departure, not a claimed exception.
-- [ ] L46IG69Y can then reach `complete` (this card is its `eht:` gate).
+      the whole task was forbidden, reasoning from that false premise. Whoever
+      works this card must read ZQ02QG1L to collapse it and will see its column
+      on the way in, so the condition enforces itself through the task — no prose
+      warning needed, and this card is in no position to carry one after
+      criticizing exactly that below.
 
 ## Notes and lessons learned
 

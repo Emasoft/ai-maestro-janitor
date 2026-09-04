@@ -1,9 +1,9 @@
 ---
 trdd-id: L46IG69Y
 title: the composer-authored handoff may trip clear_trigger's concision warning on every clear
-column: human_review
+column: complete
 created: 2026-09-04T03:37:25+0200
-updated: 2026-09-04T20:17:08+0200
+updated: 2026-09-05T00:34:59+0200
 current-owner: main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -12,7 +12,7 @@ project-id: ai-maestro-janitor
 external-refs: [TRDD-ZQ02QG1L]
 relevant-rules: []
 npt: []
-eht: [34GB6XUI]
+eht: []
 blocked-by: []
 implementation-commits: []
 ---
@@ -106,12 +106,21 @@ are cut FROM THIS CARD, where a reader met them before the correct ones.
 
 ## Acceptance criteria
 
-**Why `column: human_review` and not `complete` or `testing`:** every criterion
-this card owns is met, and `eht:` bars `complete` until TRDD-34GB6XUI is
-terminal. `testing` and `dev` would both assert active work on a card nobody is
-working — an untrue WORK column is worse than an unstarted card. `human_review`
-is the one available column that is not a lie: what remains is a human's call.
-The vocabulary gap this exposes is recorded in 34GB6XUI's notes.
+**Closed `complete` 2026-09-05, USER decision.** The card briefly carried
+`eht: [34GB6XUI]` — the ZQ02QG1L collapse — which walked it through three wrong
+columns in an hour: `dev` and `testing` each assert active work nobody was doing,
+and `human_review` asserts a review from a human who had never been asked. **The
+gate was the defect, not the column.** Asked directly, the USER dropped it;
+TRDD-34GB6XUI stays in `todo` as an unlinked chore.
+
+The lesson: **a gate whose only claimant is an agent's judgment — not a
+correctness requirement — should be ASKED about, not encoded.** `eht:` exists for
+effects that genuinely must be handled, and this is no argument against it; a
+readability cleanup is not one of those. The collapse box was inherited here from
+an earlier session, and promoting it into a formal `eht:` is what turned a latent
+preference into a blocker on a finished, tested fix. Distinguishing a
+correctness-effect from preference-work is the call worth making — and when it is
+preference, the person who owns the priorities answers it, not the agent.
 
 - [x] The two questions above are measured and the answers recorded here.
       **TAKEN 2026-09-04, and the earlier "cannot close here" was wrong** — not
