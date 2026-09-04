@@ -1,7 +1,7 @@
 ---
 trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
-column: dev
+column: todo
 created: 2026-09-04T07:45:00+0200
 updated: 2026-09-04T12:02:00+0200
 current-owner: janitor-main-session
@@ -136,12 +136,25 @@ external-refs: [TRDD-7NSRD8OV]
      **What remains true is the ORIGINAL objection, which needs no load data:** #8 was
      classified from a single re-run of a failure its author never reproduced, which does not
      meet this card's "name the cause" criterion. It still needs a mechanism or a USER waiver.
-  2. **✅ SETTLED — the 9 `branch_protection` failures are a LOAD/PARALLELISM artifact, and
-     `e4dd674d` is EXONERATED.** Serial run of BOTH files at low load (~9.7):
-     **`78 passed in 583.69s`, exit 0 — zero failures**, including the test `e4dd674d` itself
-     added. So the timeline that made that commit look causal (landed 07:37:27, 8 min after
-     soak8) was a coincidence of ordering, not evidence. **The regression reading was a
-     hypothesis and measurement killed it** — which is why it was hedged rather than reported.
+  2. **The 9 `branch_protection` failures — NOT a regression on the best available argument,
+     but NOT "settled" and `e4dd674d` is NOT "exonerated". ⚠ I published both words and both
+     overreach.** Serial run of both files at low load (~9.7): `78 passed in 583.69s`, exit 0.
+     - **What that run CANNOT do**, and the card's own box says so verbatim — *"THIS RUN RULES
+       OUT `xdist`, NOT LOAD — a serial invocation is not an unloaded one"*: it rules out
+       xdist, not load; and it never ran these tests **without** `e4dd674d`, so it cannot
+       isolate the commit. **A regression that only manifests under contention passes
+       serially** — regression and load-sensitivity are not mutually exclusive, since a commit
+       that adds an unscaled subprocess seam makes a test NEWLY load-sensitive.
+     - **THE STRONGEST ARGUMENT IS THE ONE I BURIED:** 4 of the 9 live in
+       `tests/test_branch_protection.py`, a file `e4dd674d` **never touched**, exercising a
+       different script (`scripts/detectors/branch-protection.py`). That is structural and
+       needs no run at all. A 5th is a test `e4dd674d` itself ADDED. I led with the weak
+       evidence (one serial pass) and buried the strong.
+     - **The only test that isolates the commit** is an A/B: the 9 under `-n auto` at
+       `e4dd674d^` vs at `e4dd674d`, same load, same invocation. Not run.
+     - Independent of all that, the signature `assert 'BRPROT-001' in ''` (detector exits 0,
+       EMPTY stdout) IS the documented `timeout_scale` fail-open shape — real evidence for the
+       load-artifact class, and no evidence either way about the commit.
      Note 583 s for 78 tests ≈ 7.5 s/test: these are heavy subprocess tests, exactly the
      profile that fails open under a 14-worker `-n auto` fan-out on a loaded box, and the
      signature (`assert 'BRPROT-001' in ''`, detector exits 0 with EMPTY stdout) is the
