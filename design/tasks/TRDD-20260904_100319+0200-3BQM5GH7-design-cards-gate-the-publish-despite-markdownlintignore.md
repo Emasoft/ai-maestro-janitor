@@ -3,13 +3,14 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:06:28+0200
+updated: 2026-09-04T10:09:26+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
 project-id: ai-maestro-janitor
 relevant-rules: [how-to-fix-issues-of-other-projects]
 external-refs: [reports/publish/20260904_100628+0200-publish-exit4-cpv-nit.txt]
+external-refs-note: local-only path (reports/ is gitignored) — the load-bearing lines are quoted inline below
 ---
 
 # design cards gate the publish even though markdownlintignore excludes them
@@ -32,8 +33,12 @@ CPV "does NOT honor `.markdownlintignore`" and that all 435 design cards gate
 the publish. Both are retracted here: the mechanism is undetermined (five
 candidates below, the mildest likeliest), and the number of cards in scope is
 unknown. A reader arriving at `d4e5f055` from `git blame` sees only the wrong
-version — this card is the correction, and a `git notes` on that commit points
-back here.
+version. A `git notes` retraction is attached to it on the authoring machine,
+but notes live in `refs/notes/commits` and are NOT pushed — so **this card is
+the only copy of the retraction a cloner gets.** `d4e5f055` was not rewritten:
+that was a choice (non-destructive, after two history rewrites already), not an
+impossibility — `reset --soft` and a non-interactive rebase were both available
+and unsurveyed.
 
 ## Symptom
 
@@ -62,14 +67,26 @@ least one of them did.
 **How many are in scope is UNKNOWN.** CPV's stage-4 file selection was never
 determined — only that it included one `design/` card. Do not assume all 437.
 
-`.mega-linter.yml` is **not a lever here, and reasoning from it is a trap.** That
-file is INERT: its own header records the measurement — *"NOTHING in this repo
-parses this file — measured by deleting COPYPASTE_JSCPD from ENABLE_LINTERS and
-re-running: jscpd still ran. So no value below is in force."* Its
-`FILTER_REGEX_EXCLUDE` (which omits `design/`) and its `VALIDATE_ALL_CODEBASE:
-false` therefore describe nothing that runs. See the completed
-`TRDD-6SIY2VX2` — *decide the fate of a mega-linter config that no workflow in
-this repo runs*.
+`.mega-linter.yml` is **probably not a lever, but that is PHASE-SPECIFIC and the
+relevant phase is untested.** Precisely what is established, per the completed
+`TRDD-6SIY2VX2`:
+
+- **No workflow runs Mega-Linter.** Verified there 2026-09-04 and re-confirmed
+  here: nothing under `.github/workflows/`, `scripts/`, or a Makefile references
+  it.
+- **CPV's stage-4b `ci-preflight` does NOT read the config.** Proven by
+  PERTURBATION, which is why it is trustworthy: `- COPYPASTE_JSCPD` was removed
+  from `ENABLE_LINTERS`, the preflight re-run, and jscpd still ran. CPV carries
+  its own list and merely labels checks with Mega-Linter sub-linter names.
+- **Whether CPV's stage-4 `cpv-remote-validate plugin . --strict` reads it is
+  UNTESTED** — and that is the phase that emitted our markdownlint NITs. The two
+  phases demonstrably differ: `TRDD-6SIY2VX2` records that markdownlint,
+  jsonlint and yamllint **never appeared at all** in the preflight's check list.
+  A perturbation of the preflight says nothing about a linter the preflight
+  never ran.
+
+So Option 1 is probably dead, not certainly dead — and the same perturbation
+method settles it cheaply (see acceptance criteria).
 
 ## Mechanism — NOT diagnosed, five candidates
 
@@ -104,14 +121,24 @@ even applicable.
 
 ## Options (a decision is required — do not pick one unilaterally)
 
-1. **Repo-side — and NO working lever is currently known.** The obvious one
-   (adding `design/` to `.mega-linter.yml`'s `FILTER_REGEX_EXCLUDE`) is DEAD:
-   that file is parsed by nothing, so editing it changes nothing. Finding a
-   real repo-side lever requires first knowing how CPV selects files and which
-   ignore mechanism it honors — i.e. it depends on the mechanism question
-   above. Whatever the lever turns out to be, using it **changes what gates
-   this repo's publish**, which is a governance change dressed as a lint tweak
-   and needs sign-off, not a drive-by edit.
+1. **Repo-side — no lever is known to work, and exactly one is cheap to test.**
+   The obvious candidate is adding `design/` to
+   `MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE` in `.mega-linter.yml`. That is
+   probably dead (the file is read by no workflow and not by CPV's preflight)
+   but **not proven dead for stage 4**, which is the phase that flags us. Test
+   it the same way `TRDD-6SIY2VX2` tested the preflight — perturb and re-run —
+   then restore the file byte-identically. If some other lever turns out to be
+   the real one, using it still **changes what gates this repo's publish**,
+   which is a governance change dressed as a lint tweak and needs sign-off, not
+   a drive-by edit.
+
+   **Other candidate levers were NOT surveyed** — "no lever is known" means only
+   that nobody looked, not that the space is empty. Unexamined: whether
+   `markdownlint-cli` honours a `.markdownlintignore` in a parent directory or
+   an env var; whether CPV reads a `.cpvignore` / `.cpvrc` / a `pyproject.toml`
+   or `plugin.json` key; whether `publish.py` passes anything through to CPV;
+   whether `--strict` has a NIT-severity or path-exclusion flag (checkable from
+   `cpv-remote-validate --help`). Start there.
 2. **Upstream.** File an issue on `Emasoft/claude-plugins-validation` (CPV is a
    DIFFERENT project — per `how-to-fix-issues-of-other-projects`, never edit its
    tree from here; issue first, PR only if asked). The reproducer is already in
@@ -128,8 +155,13 @@ CPV-side, and 1 is a local mitigation either way.
 - [ ] CPV's stage-4 file selection is determined — the changed set, or the whole
       tree — and recorded here. This decides the blast radius and therefore
       which option is proportionate. Do NOT test it by running a release with a
-      deliberately-broken card: a publish pushes to a public repo under a shared
-      identity, and the question is answerable from CPV's own source.
+      deliberately-broken card: `cpv-remote-validate plugin . --strict` can be
+      invoked standalone (see the `uvx --from git+…claude-plugins-validation@…`
+      line in the preserved log), so no publish and no push is needed.
+- [ ] Perturbation test on stage 4: add `design/` to
+      `MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE`, re-run stage 4 standalone,
+      record whether the NIT disappears — then restore the file byte-identically
+      and confirm a clean `git status`. This answers Option 1 outright.
 - [ ] A decision is recorded on which side of the mismatch is wrong — CPV
       linting `design/`, or `.markdownlintignore` claiming it should not.
 
@@ -139,6 +171,16 @@ The last acceptance box matters more than it looks: the mismatch could equally
 be resolved by deciding the ignore file is wrong. Nobody has established which
 side of the mismatch expresses the current intent — the comment in
 `.markdownlintignore` is from whenever it was written, not necessarily now.
+
+**I broke the speaking-vs-quoting rule in the same edit that added it.** Having
+caught the `# Only lint changed files` misread, I then took `.mega-linter.yml`'s
+own header — *"NOTHING in this repo parses this file"* — at face value and wrote
+"INERT" into this card. That is a document's self-description, exactly the kind
+of claim the rule says to verify. It happens to be backed by a real perturbation
+test recorded in `TRDD-6SIY2VX2`, but I did not know that when I asserted it, and
+the backing turned out to be NARROWER than the claim (preflight only, and
+markdownlint never ran there). Catching a defect does not immunise the next
+paragraph against it.
 
 **A comment quoted inside tool output is not the tool's own log line.** The
 publish log contains the line `# Only lint changed files (faster, less noise)`.
