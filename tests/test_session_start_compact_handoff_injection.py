@@ -117,23 +117,26 @@ def test_the_same_compaction_injects_only_once(tmp_path: Path) -> None:
     compaction likelier — a feedback loop on the resource the feature protects.
     """
     project, env = _project(tmp_path)
-    _arm(project)
+    sd = _arm(project)
     assert _injections(project, env) == 1, "positive control failed — fixture is broken"
     assert _injections(project, env) == 0
     assert _injections(project, env) == 0
+    # The guard must suppress the REPEAT without consuming the flag. Injected SessionStart
+    # context is passive and starts no turn, so the heartbeat remains the actuator — and it is
+    # also what re-attaches background agents, which this hook cannot do. Consuming the flag
+    # here would leave a session holding a perfect handoff and no cue to act on it: the very
+    # failure this feature fixes, reproduced by the fix. Nothing asserted this until now, and
+    # `flag.unlink()` after the print would have passed every other test in this module.
+    assert (sd / "resume-after-compact.flag").is_file(), "the injection consumed the flag"
 
 
 def test_a_later_compaction_injects_again(tmp_path: Path) -> None:
-    """The guard must stop REPEATS, not stop the feature: a genuinely new compaction
-    rewrites `resume-after-compact.ts` to a later epoch and must be delivered.
+    """A genuinely new compaction must still be delivered.
 
-    BOTH timestamps are in the PAST, deliberately. An earlier version armed at `now` and
-    then wrote `now + 10`, which passed — but a FUTURE `.ts` is not an input production can
-    produce (`post-compact-resume.py:238` writes `str(int(time.time()))`, always now). That
-    test proved "a future timestamp injects" and left the real shape untested, because with
-    the first arm at `now` every "later but still past" value is `<= now` and the `>=`
-    comparison suppresses it. Back-dating the first compaction makes the second one later
-    AND past, which is what the production path actually looks like.
+    Both timestamps are PAST: production never writes a future `.ts`
+    (`post-compact-resume.py:238` writes `str(int(time.time()))`), and with the first arm at
+    `now` no "later but still past" value can beat the `>=`, so the real shape is only
+    reachable by back-dating compaction #1.
     """
     project, env = _project(tmp_path)
     sd = _arm(project, age_s=60)  # compaction #1, a minute ago
@@ -156,20 +159,19 @@ def test_no_flag_means_no_injection(tmp_path: Path) -> None:
 def test_only_source_compact_injects(tmp_path: Path) -> None:
     """A startup/resume/clear entry must not consume the compaction's delivery.
 
-    The control runs FIRST. An earlier version put it last, where a trailing `== 1` was
-    doing positive-control duty only by accident: if `_arm()` had produced nothing
-    injectable, all three `== 0` arms would have passed vacuously and the reader would have
-    had to reason backwards from the final line to know they meant anything.
-
-    NO stamp reset between the control and the arms, deliberately. A version of this test
-    unlinked `compact-handoff-injected.ts` here "so each arm is independent of guard state"
-    — but these three sources never enter `_inject_post_compact_handoff` at all, so they
-    never read the stamp. The reset changed nothing and implied a dependency that does not
-    exist, in the one test whose whole point is that these sources never reach the guard.
+    THE STAMP RESET IS LOAD-BEARING, and it was measured to be. It was removed once as
+    "dead ceremony" on the reasoning that these sources never enter
+    `_inject_post_compact_handoff`, so they never read the stamp — true of the code as
+    written, and therefore true only while the gate is correct. Mutation-tested 2026-09-04:
+    widening the gate to `if source in ("compact", "clear")` — the plausible regression this
+    test exists to catch — SURVIVED all nine tests without the reset, because the control
+    run had already written the stamp and the `clear` arm returned early on it. The reset is
+    what makes the arms measure the GATE instead of the guard.
     """
     project, env = _project(tmp_path)
-    _arm(project)
+    sd = _arm(project)
     assert _injections(project, env) == 1, "positive control failed — fixture is broken"
+    (sd / "compact-handoff-injected.ts").unlink()
     for source in ("startup", "resume", "clear"):
         assert _injections(project, env, source=source) == 0, f"{source} injected"
 

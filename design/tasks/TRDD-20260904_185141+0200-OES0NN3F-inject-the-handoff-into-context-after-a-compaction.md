@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T20:52:00+0200
+updated: 2026-09-04T21:06:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -90,6 +90,15 @@ injection lands before the first turn and needs no nudge to have fired.
       fails; **`sanitize_for_drift_line` dropped → only the defang test fails, and all eight
       others pass** — which is why that ninth test exists: a security control could have been
       deleted without reddening the suite.
+- [x] **The flag SURVIVES injection** — asserted in the once-only test. `flag.unlink()` after
+      the print passed every other test; the heartbeat is the actuator and also re-attaches
+      background agents, which this hook cannot do.
+- [x] **The source gate is PRECISE, not merely present.** Widening it to
+      `("compact", "clear")` first SURVIVED all nine tests: the control run had written the
+      stamp, so the `clear` arm returned early on the guard instead of exercising the gate. The
+      stamp reset that catches it had been removed as "dead ceremony" — dead only while the
+      gate is correct, which is precisely what the test is for. Restored, and the mutation now
+      fails the test named for it.
 - [x] The flag is **not** consumed by the injection (it must stay for the heartbeat, which is
       the actuator and also re-attaches background agents). — **MEASURED**: flag still on disk
       after injection.
