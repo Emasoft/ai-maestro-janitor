@@ -157,18 +157,37 @@ audit, then the load-bearing negative re-checked by hand — report:
       — `skills/janitor-write-handoff/SKILL.md:17` describes the composer and
       `:45` invokes it (`uv run --script --quiet
       "${CLAUDE_PLUGIN_ROOT}/scripts/compose_agent_handoff.py"`).
-- [ ] `janitor-handoff-and-clear` step 2 delegates to the external composer.
-      — **NOT DONE, verified by hand rather than relayed.** `grep` for
-      `compose_agent_handoff|llm-ext|llm_ext` over
-      `skills/janitor-handoff-and-clear/SKILL.md` returns NOTHING, and its
-      step 2 (`:68 ### 2. Write the CONCISE, LINK-ONLY handoff`) is still
-      model-authored. Only ONE of the two skills was converted in `f9bf82ed`.
-- [ ] Each converted skill degrades to the on-disk template when `llm-ext` is absent,
+- [x] `janitor-handoff-and-clear` step 2 delegates to the external composer.
+      — DONE 2026-09-04. Was verified NOT done by hand first (a grep for
+      `compose_agent_handoff|llm-ext|llm_ext` over the skill returned nothing,
+      and step 2 read `### 2. Write the CONCISE, LINK-ONLY handoff` — only ONE
+      of the two skills was converted in `f9bf82ed`). Step 2 is now the same
+      one-command `compose_agent_handoff.py --project-root` invocation
+      `/janitor-write-handoff` uses.
+      **It fixed a SECOND defect in the same edit**: the step wrote to the FIXED
+      `agent-handoff.md`, the path retired by TRDD-5RXBI65T for having several
+      independent writers and no coordination — one silently destroying another,
+      measured twice in two days. The sibling skill already carried an explicit
+      "never Write to `agent-handoff.md`" warning while THIS skill still
+      instructed exactly that. The composer writes the per-session/ts/pid name
+      through `handoff_files.write`, the only writer.
+      Swept the repo for the retired path per the breaking-change rule: fixed a
+      further 3 references in this skill (the `clear_trigger.py --directive`,
+      the resume-flow description, the Resources entry) and 1 in `README.md`.
+      The remaining hits are all in TRDD cards that DOCUMENT the retirement and
+      are correctly historical.
+- [x] Each converted skill degrades to the on-disk template when `llm-ext` is absent,
       exactly as `external_handoff_clear.py` already does. A missing CLI is never a
       reason to skip the handoff.
-      — **PARTIAL**: correct for the one converted skill, but blocked on the
-      box above, because the second skill is not converted at all. Cannot be
-      ticked before box 3.
+      — DONE 2026-09-04, unblocked by the box above. Both skills now carry the
+      same stdout table: a path → proceed; `SUMMARY_FAILED <reason>` → NOT an
+      error, the free mechanical `precompact-handoff.md` still covers the
+      resume, say so and proceed; `NO_TRANSCRIPT` → report, nothing written.
+      Both also carry the explicit prohibition that matters more than the table:
+      **do not fall back to authoring the handoff yourself** — that is the cost
+      the card exists to remove, and on the clear path it would be spent at the
+      worst possible moment. The degradation is to the mechanical handoff, never
+      to the model.
 - [ ] `uv run pytest` green; `uv run ruff check scripts tests` and
       `uv run mypy scripts/ --ignore-missing-imports` clean.
       — deliberately NOT ticked. The audit was told not to run these (the tree

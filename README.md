@@ -447,13 +447,18 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
   - **`--hard`** — press ESC first, interrupting the in-flight turn so `/compact`
     runs NOW. For emergencies (context near the wall); the ≥85% enforcement hook
     requests this explicitly.
-  - **`--handoff`** — run `/janitor-write-handoff` (a rich, agent-authored
+  - **`--handoff`** — run `/janitor-write-handoff` (a rich, script-composed
     handoff) BEFORE `/compact`, for delicate junctures where the free mechanical
     PreCompact handoff isn't enough. Combinable with `--hard`.
-- `/janitor-write-handoff` — writes a rich, agent-authored session handoff to
-  `<project>/.janitor/state/agent-handoff.md` (the semantic layer — the plan, the
-  next concrete action, the traps already hit) that COMPLEMENTS the always-on,
-  zero-cost `pre-compact-handoff.py` mechanical handoff. Usually run by
+- `/janitor-write-handoff` — writes a rich session handoff to
+  `<project>/.janitor/state/agent-handoff-<session>-<ts>-<pid>.md` (the semantic
+  layer — the plan, the next concrete action, the traps already hit) that
+  COMPLEMENTS the always-on, zero-cost `pre-compact-handoff.py` mechanical handoff.
+  It is composed OUT OF PROCESS by `scripts/compose_agent_handoff.py` through the
+  `llm-ext` CLI, at zero model cost — the model authors none of it (owner directive
+  2026-09-03). The fixed `agent-handoff.md` path is retired: it had several
+  independent writers and no coordination, so one silently destroyed another
+  (TRDD-5RXBI65T). Usually run by
   `/janitor-compact-context --handoff` (which passes `--then-compact`, so the skill
   chains to `/compact` when done); a bare `/janitor-write-handoff` writes the
   handoff and stops. Opt-in because authoring it costs tokens — reserve it for

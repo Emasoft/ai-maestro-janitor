@@ -65,26 +65,42 @@ If material state is NOT yet harvested and you cannot harvest it now, **STOP and
 `/janitor-compact-context` instead** — `/compact` preserves a summary, so it is the
 safe choice when knowledge isn't durably written yet.
 
-### 2. Write the CONCISE, LINK-ONLY handoff
+### 2. Compose the handoff — ONE command, and you author nothing
 
-Author a short index and Write it to
-`${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff.md`. Rules:
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/compose_agent_handoff.py" \
+  --project-root "${CLAUDE_PROJECT_DIR:-$(pwd)}"
+```
 
-- **Link, never inline.** Every big chunk of information is a LINK to where it durably
-  lives: `[[wikimem-page]]`, `id:ATOM-xxxx-xxxx`, `TRDD-<id8>`, `memgrep recall
-  "<symptom>"`, `#issue`. A line like *"decided X because Y — see ATOM-xxxx-xxxx"* is
-  correct; pasting the full Y reasoning inline is NOT, even if Y is short.
-- **Exhaustive by REFERENCE.** Omit nothing material — every open issue, pending
-  decision, and in-flight task gets a line: what it is + a pointer to the detail. The
-  detail is read on demand; the handoff is the table of contents.
-- **Do NOT duplicate TRDD `## STATE` blocks.** They are already surfaced on the next
-  SessionStart. Point at the `TRDD-<id8>`; don't restate its STATE.
-- **Cover, terse:** the in-flight TRDD id(s) + one line each; the ONE concrete NEXT
-  ACTION (runnable as written, pointing at durable state); each open issue + its
-  pointer; any decision/fact NOT already in a TRDD/file → its wikimem link.
-- **Target a few hundred bytes to low KB** — never the tens-of-KB a compaction summary
-  runs. `clear_trigger.py` WARNS on stderr if the handoff is over-budget, has no
-  references, or inlines a large fenced block.
+The script summarizes THIS session's own transcript through the `llm-ext` CLI — out of
+process, at zero model cost — and writes
+`.janitor/state/agent-handoff-<session>-<ts>-<pid>.md`. Same script, same contract as
+`/janitor-write-handoff`.
+
+**This step used to ask the MODEL to author the prose**, which is the cost owner
+directive 2026-09-03 retired: tokens spent inside the very window this skill is about to
+`/clear`, which is the worst possible place to spend them. Handoff, compaction and clear
+work is done by scripts, via `llm-ext` where intelligence is genuinely needed, never by
+an agent writing prose.
+
+**It also used to Write to `agent-handoff.md`** — a FIXED path that had several
+independent writers and no coordination, so one silently destroyed another, measured
+twice in two days (TRDD-5RXBI65T). The composer goes through `handoff_files.write`, the
+only writer, onto a per-session/timestamp/pid name; readers load the whole group in write
+order, so nothing is lost by there being more than one. Do not reintroduce the fixed
+path, and do not hand-write a handoff beside it.
+
+Read the script's last stdout line:
+
+| line | meaning | what to do |
+|---|---|---|
+| a path | the handoff was written | proceed to step 3 |
+| `SUMMARY_FAILED <reason>` | `llm-ext` absent or failing | **NOT an error, and NOT a reason to skip the handoff.** The free mechanical `precompact-handoff.md` (PreCompact hook, on-disk truth) still carries git state, the working tree, the in-flight TRDD `## STATE` blocks and verbatim recent turns. Say so in one line and proceed to step 3. |
+| `NO_TRANSCRIPT` | no transcript resolved for this project | report it; nothing was written |
+
+**Do NOT fall back to authoring the handoff yourself on `SUMMARY_FAILED`** — that is
+exactly the cost this step exists to remove, and it would be spent at the worst moment.
+The degradation is to the mechanical handoff, never to the model.
 
 ### 3. Fire the trigger
 
@@ -97,7 +113,7 @@ automatically on resume), then to read the handoff and resume:
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/clear_trigger.py" \
-  --directive "run handoff_clear_verify.py --phase after FIRST, then read .janitor/state/agent-handoff.md (link-only handoff) and continue TRDD-<id8> — read its STATE block"
+  --directive "run handoff_clear_verify.py --phase after FIRST, then read the newest .janitor/state/agent-handoff-*.md and continue TRDD-<id8> — read its STATE block"
 ```
 
 Read the result (#154, #136 — this is the CURRENT contract; older docs describe
@@ -168,8 +184,9 @@ stop. Do NOT do more work: the next thing that must run is `/clear`.
    to `reports/continuity-build/` — proving the heartbeat cron is healthy (survived
    unchanged or was destroyed+recreated, whichever this build does), the context
    collapsed, and every handoff link resolves.
-4. The fresh session reads `.janitor/state/agent-handoff.md` and reconstructs the
-   issues/needs by following its wikimem/TRDD links (`memgrep recall`) on demand.
+4. The fresh session reads the newest `.janitor/state/agent-handoff-*.md` and
+   reconstructs the issues/needs by following its wikimem/TRDD links (`memgrep recall`)
+   on demand.
 
 ## Scope
 
@@ -186,8 +203,12 @@ disarm the heartbeat, does NOT clear other sessions.
   persists the resume marker immediately before the verified `/clear` keystroke, or
   falls back to a synchronous write + blind send on an unreadable channel;
   `--dry-run` prints the plan and fires nothing).
-- `${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff.md` — the link-only handoff this
-  skill writes; read FIRST on resume, then follow its links.
+- `${CLAUDE_PROJECT_DIR}/.janitor/state/agent-handoff-<session>-<ts>-<pid>.md` — the
+  handoff `compose_agent_handoff.py` writes, one file per write (TRDD-5RXBI65T); read
+  the newest FIRST on resume, then follow its links. `scripts/lib/handoff_files.py
+  --path` prints the name; `handoff_files.newest_group()` is how readers collect a
+  session's handoffs in write order. The fixed `agent-handoff.md` is RETIRED — several
+  writers, no coordination, one silently destroying another.
 - `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-after-clear.flag` — the pre-clear resume
   marker `dispatch.py::_phase_clear_resume` consumes on the re-armed cron's first fire.
   ONLY that phase may consume it; no other resume phase may treat it as subsumed, since
