@@ -58,10 +58,17 @@ implementation-commits: []
     is CIRCULAR: CPV can only warn about tools it implements, so silence is
     exactly what you would observe whether they are unimplemented OR merely
     absent-and-unknown-to-it. The inference distinguishes nothing and is
-    withdrawn. What would settle it: install one of them (e.g. `npm i -g
-    jsonlint`) and re-run the preflight — if it appears, it is implemented and
-    was simply missing; if it still does not, it is not implemented.
-    `ci-parity` (CIP-1..8) is also opaque and could in principle fold them in.
+    withdrawn.
+    A VALID argument for the same conclusion does exist, and it does not touch
+    the warning logic: these three appear in NEITHER list. An implemented check
+    that PASSES prints `✓`; an implemented check whose tool is MISSING prints
+    `!`. Absent from both ⇒ either not implemented, or folded into `ci-parity`
+    (CIP-1..8, which is opaque). That rests only on the reported-checks list
+    being complete — not on CPV reading this config, which the perturbation test
+    showed it does not.
+    What would settle the remaining disjunction: install one (e.g. `npm i -g
+    jsonlint`) and re-run — if it appears, it was implemented and merely
+    missing; if not, it is unimplemented or inside ci-parity.
 
   The 12-count above is from a `yaml.safe_load` of the file, not a grep — the
   original "11" came from a truncated `head -12`, and a `sed` bounded by a
