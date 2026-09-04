@@ -406,13 +406,12 @@ def _handoff_body(state, sd: Path) -> str | None:  # noqa: ANN001 - local module
 # gates an ACTION ("go pick this task back up"), this gates CONTEXT ("here is what you were
 # doing"), and a 6 h-old compaction wants the second without the first.
 #
-# A CONSTANT, not an env var, after two wrong turns: 42a24e6f invented a private
-# `..._COMPACT_RESUME_MAX_AGE_S` nobody could discover, and 2c852b51 then read the CLEAR path's
-# var from this compact-path function — where the name lies at the point of use, and where
-# someone tuning `/clear` would silently retune compaction with no warning at their edit site.
-# The cure for an undocumented option is to document it, not to alias onto a differently-named
-# one. There is no evidence anyone tunes these; if that changes, add
-# `CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S` here and document it beside its sibling.
+# 24 h, its own env var, `0` disables the bound — mirroring the clear injection at `:343`.
+# The number is deliberately NOT `dispatch._DIRECTIVE_MAX_AGE_DEFAULT_S` (3 h): that gates an
+# ACTION ("go pick this task back up"), this gates CONTEXT ("here is what you were doing"), and
+# a 6 h-old compaction wants the second without the first. (How this landed — three earlier
+# spellings, each wrong differently — is in TRDD-OES0NN3F, not here.)
+_COMPACT_MAX_AGE_ENV = "CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S"
 _COMPACT_HANDOFF_MAX_AGE_S = 86400
 
 
@@ -456,10 +455,14 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     flag = sd / "resume-after-compact.flag"
     if not flag.is_file():
         return
-    # See `_COMPACT_HANDOFF_MAX_AGE_S` above for why 24 h and why a constant. 0b4f72c3 briefly
-    # used dispatch's 3 h here and broke the case this feature exists for: compact at 02:00,
-    # open at 08:00, nothing injected (measured — 1 h/2 h injected, 4 h/6 h/10 h silent).
-    max_age = _COMPACT_HANDOFF_MAX_AGE_S
+    # See `_COMPACT_MAX_AGE_ENV` above for why 24 h and why its own var. 0b4f72c3 briefly used
+    # dispatch's 3 h here and broke the case this feature exists for: compact at 02:00, open at
+    # 08:00, nothing injected (measured — 1 h/2 h injected, 4 h/6 h/10 h silent).
+    # `0` disables the bound entirely, same as the clear path — hence the `> 0` guard below,
+    # which is load-bearing again now that the value can come from the environment.
+    max_age = state.coerce_int(
+        os.environ.get(_COMPACT_MAX_AGE_ENV), _COMPACT_HANDOFF_MAX_AGE_S
+    )
     ts = sd / "resume-after-compact.ts"
     written_at = (
         state.coerce_int(ts.read_text(encoding="utf-8"), 0) if ts.is_file() else 0
@@ -482,13 +485,16 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     # the old order printed anyway: guard skipped, compounding restored.
     # The tolerable failure is "injected twice"; the intolerable one is "injected never",
     # because never is invisible.
-    # THE PRINT CAN RAISE, and the most plausible way is not a signal: the handoff is arbitrary
-    # prior-session text, so a stdout whose encoding is not UTF-8 (a hook spawned under
-    # `LC_ALL=C`, a stray `PYTHONIOENCODING`) raises `UnicodeEncodeError` on one non-ASCII byte.
-    # `main()`'s `except Exception` absorbs it and `_slog`s, so the stamp is skipped and the
-    # next re-entry retries — right for a transient fault, and for a permanent one it retries
-    # silently forever while printing nothing. Left as-is because the ordering above is still
-    # the correct trade; noted so the next reader does not mistake the silence for "no handoff".
+    # THE PRINT CAN RAISE. Measured on this platform 2026-09-04: `PYTHONIOENCODING=ascii` makes
+    # `print` raise `UnicodeEncodeError` on one non-ASCII byte, and the handoff is arbitrary
+    # prior-session text. `LC_ALL=C` does NOT — PEP 540 UTF-8 mode auto-enables there
+    # (`sys.stdout.encoding` == utf-8, `sys.flags.utf8_mode` == 1), so an earlier version of
+    # this comment named a trigger that does not fire. NOT measured: stdout here is a pipe, so
+    # a write error can surface at FLUSH, after this `print` returns and outside any `try`
+    # reasoning about it. `main()`'s `except Exception` absorbs whatever does reach it, so the
+    # stamp is skipped and the next re-entry retries — right for a transient fault, silent
+    # forever for a permanent one. Noted so the next reader does not read that silence as
+    # "there was no handoff".
     # ponytail: clear and compact stamp separately, so a clear→compact pair inside one process
     # injects twice (once per banner). Costs one handoff; a shared stamp would make a /clear
     # suppress the compact injection it should not.

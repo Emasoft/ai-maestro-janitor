@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T19:58:00+0200
+updated: 2026-09-04T20:12:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [42a24e6f, 0b4f72c3, 2c852b51]
+implementation-commits: [42a24e6f, 0b4f72c3, 2c852b51, b7fa08bf]
 external-refs: [TRDD-74AA4PAL, TRDD-PXP08ZQC]
 ---
 
@@ -99,7 +99,7 @@ injection lands before the first turn and needs no nudge to have fired.
 - `_inject_post_compact_handoff(state)` — gated on `resume-after-compact.flag`, **no
   manual/auto distinction** (compaction has no discard case, unlike `/clear`), flag deliberately
   not consumed.
-- **Age bound: 24 h, shared with the CLEAR injection (now the module constant `_COMPACT_HANDOFF_MAX_AGE_S`).**
+- **Age bound: 24 h, shared with the CLEAR injection (`CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S`, default 86400, `0` disables the bound).**
   This took two wrong turns. 42a24e6f invented a private `..._COMPACT_RESUME_MAX_AGE_S` (24 h,
   right number, undiscoverable knob). 0b4f72c3 then adopted dispatch's 3 h directive bound to
   'fix a disagreement' — **but there was no disagreement to fix.** Dispatch's 3 h gates an
@@ -118,10 +118,12 @@ injection lands before the first turn and needs no nudge to have fired.
 
 ## Notes
 
-- **`implementation-commits:` lags by exactly one, by construction, and that is accepted rather
+- **`implementation-commits:` never contains the newest CODE-CARRYING commit, by construction, and that is accepted rather
   than re-noticed each round.** The card is edited in the same change as the code, so the hash
   of the commit carrying both cannot be in it. Each entry is added by the NEXT commit; the
-  newest implementation commit for this card is therefore always one ahead of this list.
+  newest code-carrying commit for this card is therefore never in this list. (A card-only
+  edit — a STATE update, a correction — adds no hash at all, so the lag is measured against
+  code commits, not against `updated:`.)
 
 - Zero model tokens: the handoff is already composed with no model turn (`TRDD-PXP08ZQC`,
   `agent-handoff-compose.log`). This card only changes whether the existing file reaches the
