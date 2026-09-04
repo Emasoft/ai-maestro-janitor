@@ -325,4 +325,29 @@ answerable by reading one file, and using it there produces confident prose
 about a hazard that does not exist. If the prose explaining a finding would be
 longer than the check that settles it, run the check.
 
+## THE BENEFIT IS ZERO ON THIS HOST UNTIL A RELEASE SHIPS
+
+Measured 2026-09-04, one hour after the conversion landed: I invoked
+`/janitor-write-handoff` and it told me to author the prose myself, so I did —
+by hand, with Write, which is exactly what this card exists to stop.
+
+That is not a lapse, it is the deploy boundary. The skill that LOADED was the
+installed cache
+(`~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/3.4.13/skills/janitor-write-handoff/SKILL.md`),
+which contains **zero** occurrences of `compose_agent_handoff` and still says at
+line 53: *"Author a dense, semantic handoff and Write it"*. My conversion is in
+the SOURCE tree, unpublished. Skills load from the cache; only a publish+install
+updates it.
+
+**So this card's saving is currently unrealised on this machine**, and will stay
+so until a release ships. Anyone reading the closed boxes and expecting
+zero-model-cost handoffs today would be wrong.
+
+The pairing with TRDD-CN62E66F is what makes this worth recording: both asked
+"is the committed fix in effect?" and the answer differed by mechanism. The hook
+runs from the TRACKED SOURCE (`core.hooksPath = git-hooks`), so its fix was live
+the moment the file was saved. A skill runs from the CACHE, so its fix is live
+only after a publish. **"Committed" and "in effect" are different facts, and
+which one you have depends on the loader — check the loader, not the file.**
+
 ## Notes and lessons learned
