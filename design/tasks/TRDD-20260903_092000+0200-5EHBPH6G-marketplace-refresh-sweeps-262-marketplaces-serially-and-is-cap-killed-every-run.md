@@ -3,7 +3,7 @@ trdd-id: 5EHBPH6G
 title: marketplace-refresh sweeps 262 registered marketplaces serially under background QoS and is cap-killed on every run — five consecutive rc=-9 and plugin updates deferred behind its lock
 column: testing
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-04T06:02:00+0200
+updated: 2026-09-04T06:20:00+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -64,7 +64,22 @@ heartbeat's task-quarantine drift line.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
 
-**CLAUSE 2 SHOULD BE REWORDED before anyone tries to close it.** As written ("`plugin-update`
+**ALL FOUR ACCEPTANCE BOXES PASS as of 2026-09-04 06:20 — this card is `complete`-eligible.**
+Clause 1: five post-fix runs at 95–100 s, rc=0. Clause 2: post-fix request waits 38 s and
+44 s against a 600 s bound. The three unit-test boxes were already proven. **Not moved to
+`complete` in the same edit that ticked the last box** — clause 12 freezes a terminal card,
+and this box was ticked, un-ticked and re-ticked within one session. **Exit condition: move
+it when an adversarial review of this card returns no card-affecting finding.**
+
+**Retracted before it could mislead:** an earlier version of this section said the fix gave
+only a ~1.5× improvement because a request waits ~22 min. That compared a NEW-regime request
+wait against an OLD-regime lock hold — different quantities, different regimes — and the
+1313 s sample driving it turned out to be pre-fix (it ends at the cap-kill reap). Post-fix
+waits are 38–44 s. The comparison it should never have made cannot be computed at all: no
+old-regime request-wait was ever measured.
+
+**Historical, for the reader coming to this card cold —** the reword history below is kept
+because absence-shaped criteria were tried twice and failed twice, and the reason generalises. As written ("`plugin-update`
 no longer logging `deferred (marketplace lock held)`") it reads as *the string never appears*,
 which no fix to this task can deliver — any lock holder produces it. What the card always MEANT
 is refresh-caused starvation. Rewrite as: **"no `plugin-update deferred` line whose timestamp
@@ -154,11 +169,17 @@ independent verdict was obtained by this session itself.
       that DO match what shipped: `test_all_items_failing_is_a_failed_run` and
       `test_a_partial_success_is_not_a_failed_run` (both in
       `tests/test_daemon_marketplace_refresh_task.py`).
-- [ ] Live: `daemon.log` shows one `marketplace-refresh` run finishing with rc=0 in < 300 s
+- [x] Live: `daemon.log` shows one `marketplace-refresh` run finishing with rc=0 in < 300 s
       and **no `plugin-update` request whose total wait (first deferral → its next
-      `rc=0`) exceeds 600 s.** Measured today: **min 38 s, median 44 s, max 1313 s**
-      over 3 resolved episodes — so this **FAILS at the tail by 2.2×**, deliberately,
-      because that tail is the finding (below).
+      `rc=0`) exceeds 600 s.** **BOTH CLAUSES PASS.** Clause 1: five runs, 95–100 s, rc=0
+      (inferred from the absence of the `FAILED … rc=-9` form, which appears in this same
+      log for this same task 11 times pre-fix). Clause 2: post-fix waits **38 s and 44 s**,
+      an order of magnitude under the bound.
+      **Sample size stated plainly: n=2 post-fix deferral episodes.** That is thin, and the
+      clause names no minimum. Both pass by ~15×, and the pre-fix comparator in the same log
+      is 1313 s — so the margin, not the count, is what makes this a tick. An earlier draft
+      of this box said it FAILED 2.2×; that was a max taken across a window straddling the
+      fix (see the breakdown below).
       **Why 600 s, derived rather than picked:** `plugin-update` fires every ~600 s, so a
       wait shorter than one fire interval delays nothing — the next fire would have run
       then anyway. 600 s is therefore the point at which a deferral starts costing a real
@@ -190,14 +211,26 @@ independent verdict was obtained by this session itself.
         (44 s) with an order of magnitude of headroom and still fails the tail, which is
         correct, because the tail is a real defect this card has not fixed.
 
-      **⚠ THE FINDING THIS EXPOSED, and it is bigger than the clause.** The fix's headline
-      is a lock hold cut from ~32 min to ~95 s. But a *request's* wait was measured at up
-      to **1313 s ≈ 22 min**, because `plugin-update` re-defers across successive refresh
-      cycles rather than waiting out one. **Against the 32-minute era that is ~1.5×, not
-      ~20×** — the improvement is far smaller than the hold figure suggests, and the hold
-      figure is what every prior summary on this card (including mine) quoted. Whether that
-      warrants queueing the request instead of re-deferring it is a design question this
-      card did not ask and does not answer.
+      **~~⚠ THE FINDING THIS EXPOSED: a request waits up to 1313 s ≈ 22 min, so the real
+      improvement is ~1.5×, not ~20×.~~ WRONG — RETRACTED. The 1313 s episode is PRE-FIX.**
+      Splitting the three episodes by their endpoints, which is what I should have done
+      before drawing any conclusion from the max:
+
+      | first defer | last defer | success | wait | regime |
+      |---|---|---|---|---|
+      | 22:58:03 | 23:19:40 | 23:19:56 | **1313 s** | **PRE-FIX** — spans the cap-killed run (22:47:40 → reaped 23:19:56) |
+      | 02:22:44 | 02:23:11 | 02:23:22 | **38 s** | post-fix |
+      | 04:26:00 | 04:26:31 | 04:26:44 | **44 s** | post-fix |
+
+      The 22-minute wait is the OLD behaviour, ending at the exact instant the 1920 s cap
+      killed that run. **Post-fix, a request waits 38–44 s** — an order of magnitude under
+      the 600 s bound. So clause 2 **passes** on the data that is actually about the fix.
+
+      **How I got it backwards:** I took a max across a window that straddles the fix and
+      attributed it to the post-fix system, then built a "~1.5× not ~20×" headline on it —
+      after spending the same commit arguing that hold and request-wait are different
+      quantities. Mixing pre- and post-fix samples is the same error one level up, and the
+      episode's own timestamps show it: its success is the cap-kill reap.
 
       Both v1 and v2 asserted the **absence of a symptom** — the broken and fixed states
       emit the *same string*, differing only in magnitude, so no absence-shaped clause can
