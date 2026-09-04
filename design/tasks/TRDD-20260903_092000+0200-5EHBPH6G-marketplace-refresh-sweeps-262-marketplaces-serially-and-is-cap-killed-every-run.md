@@ -157,11 +157,18 @@ independent verdict was obtained by this session itself.
         1800 + `_BULK_CHILD_KILL_GRACE_SEC` 120) with nothing completed, 11 consecutive
         times — that is a ~19× reduction, and `refreshed 31/32 marketplaces` confirms it
         is doing near-full work rather than less of it.
-      - **Clause 2 ✗** — `plugin-update deferred (marketplace lock held)` appears **211
-        times** in this window, most recently 04:26:21/27/31 for
-        `claude-menu-system@emasoft-plugins`. Those land INSIDE the 04:25:03→04:26:44
-        refresh run. So the lock is still held for the whole ~95–100 s pass and
-        `plugin-update` still queues behind it.
+      - **Clause 2 ✗ — and ATTRIBUTED, which a first version of this note only asserted.**
+        `plugin-update deferred (marketplace lock held)` appears **211 times**. Every one
+        of them — **211/211, 100%** — falls inside one of the 6 `marketplace-refresh` run
+        intervals; **zero** occur outside. So `marketplace-refresh` is the sole cause of
+        these deferrals, not one candidate among several lock holders
+        (`version-update`, `fleet-plugins-update` and per-session marketplace ops all
+        take the same lock and none of them produced a deferral here). The earlier
+        wording cited three timestamps and said "some land inside a run", which was true
+        and much weaker than the data.
+      - **On clause 1's rc=0:** the daemon writes `done in Ns (background)` on success and
+        `FAILED in Ns (background rc=-9)` on failure — distinct lines, so `done in` IS the
+        rc=0 signal rather than merely "the task ended".
       **What this means for the card:** the fix removed the *cap kill*, not the
       *contention*. TRDD-5EHBPH6G's own framing is that the sweep "held the marketplace
       lock for the whole ~32 min attempt and starved every other marketplace op behind
