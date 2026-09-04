@@ -45,6 +45,15 @@ external-refs: [TRDD-7NSRD8OV]
   janitor-main-session` and nobody working it; that is the 37-cards-in-`dev` failure the
   kanban rule was written from. (`current-owner` naming the main session is CORRECT — the
   subagent is not addressable, holds no resumable state, and owns nothing.)
+- **THE WORKER'S REPORT MAY BE MIXED-VINTAGE — do not read it as internally consistent.**
+  It was dispatched under a wrong framing ("11 failures") and a confounded bucket-(c)
+  predicate ("passes serially"), then corrected MID-FLIGHT by SendMessage to 12 tests and a
+  name-the-mechanism predicate. If it had already classified some tests under the old rules
+  it can either reconcile or append, and an appended row is classified under different
+  assumptions than its siblings. **Check that all 12 were classified under the CORRECTED
+  predicate — not merely that 12 rows exist.** If it appended, re-run the classification
+  rather than accept the report. Sending the correction was still right: a wrong predicate
+  propagating into a committed classification is far worse than re-work.
 - **COMMIT THE WORKER'S FIXES THE TURN THEY LAND.** It was told to fix but not to commit
   (a subagent must not land unreviewed code under this session's name). The cost is
   uncommitted work in a tree where a peer Claude session also commits and where a
@@ -99,9 +108,15 @@ invented to make the sum close, then written into the card and commit `0ff898c3`
 statement of fact. It has since been **measured** — `pytest <class> --collect-only -q` →
 `4 tests collected`, the fourth being `test_no_reindex_when_no_notes` — and the real error
 was in my own framing: I dispatched **9 selectors, not 11 ids** (8 single test ids + 1 bare
-class selector). 8 + 4 = 12 exactly, so the count is fully accounted for with nothing left
-over, which also excludes the competing explanations (a parametrized id expanding, a
-collection difference under `-p no:randomly`, a subtest, a mis-pasted argument).
+class selector). 8 + 4 = 12 exactly.
+
+**What excludes the competing explanations is the MEASUREMENT, not the sum closing** — an
+earlier draft of this paragraph, and commit `90ef4dd7`'s body, attributed it to the
+arithmetic, which is a counting fallacy: a total consistent with my model does not rule out
+other models that also total 12 (e.g. one single id parametrized into 2 *and* the class
+holding 3 would also give 12). The class was **measured** at 4 members, which forces the
+remaining 8 selectors to contribute exactly 8 — so none of them expanded. That measurement
+is the load-bearing step; the sum merely agrees with it.
 
 Because the total closes exactly, the pass-list below is **derived, not observed** — no
 `PASSED` line names those five — but it is now arithmetically determined rather than

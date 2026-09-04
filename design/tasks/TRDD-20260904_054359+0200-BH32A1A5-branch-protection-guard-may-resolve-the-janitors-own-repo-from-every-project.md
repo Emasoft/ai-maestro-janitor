@@ -1,10 +1,8 @@
 ---
 trdd-id: BH32A1A5
 title: the branch-protection guard may resolve the janitors own repo from inside every project
-column: blocked
-pre-block-column: complete
-blocked-by: [advisor-consultation-needs-a-fable-window]
-unblock-when: [decision:advisor-verdict-or-user-waiver]
+column: complete
+blocked-by: []
 created: 2026-09-04T05:43:59+0200
 updated: 2026-09-04T07:52:00+0200
 current-owner: janitor-main-session
@@ -51,29 +49,44 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
   dir *does* carry both a manifest naming `Emasoft/ai-maestro-janitor` and 7 workflow
   files, so the wrong-repo resolution is reachable — it simply is not what happens on the
   path that actually runs today.
-- **COLUMN: `blocked`, and the reason is box 2.** This card was briefly `complete`
-  (2026-09-04 07:45). That was incoherent: `complete` is TERMINAL and FROZEN, while box 2
-  carries an explicit **re-open condition** (consult the advisor if a reviewer holds an
-  automated GitHub write path needs a verdict regardless of window state). A frozen card
-  cannot be re-opened — the rule's only escape is "new work = new TRDD" — so the card was
-  simultaneously instructing a future session to do something it had made impossible, in
-  the section that session is told to read first. It also froze the two open threads added
-  the same turn (the "true by construction" correction and the workflow-nesting adjacency).
-  `blocked` is the honest state: the code is done, tested and committed; ONE named external
-  condition is outstanding. **The code is NOT blocked — only the sign-off is.** Nothing here
-  needs re-doing if the waiver comes.
-  - `pre-block-column: complete` — **corrected 2026-09-04 08:05; it briefly read `dev`,
-    which was FABRICATED.** This card has never been in `dev`: its path was
-    `todo → testing → complete → blocked`. I wrote a plausible-looking value without
-    checking the card's own history, which is the same defect as the invented test-count
-    parenthetical two commits earlier. `complete` is where it was immediately before the
-    block, and restoring it there when the predicate clears is correct — the work is done.
-  - `unblock-when: [decision:advisor-verdict-or-user-waiver]` — **VERIFIED to parse**,
-    not assumed: `trdd-drift.py::_PRED_DECISION_RE` is `^decision:\S+$`, which this matches,
-    so it is a real predicate and NOT counted malformed. `decision:` is the one kind that
-    never auto-clears — exactly right here, because only a human can supply this. A
-    malformed token would have failed OPEN (stayed blocked) anyway, but "it would have
-    failed safe" is not a reason to skip checking whether it parses.
+- **COLUMN: `complete`. The `blocked` detour was a card blocked by its own hedge.**
+  The column went `testing → complete → blocked → complete` inside one hour. The middle two
+  moves were both wrong, for opposite reasons, and the record of why is the point:
+  - **`complete` (07:45) was incoherent** *while box 2 carried a re-open condition* — a
+    frozen terminal card cannot be re-opened, so it instructed a future session to do
+    something it had made impossible.
+  - **`blocked` (08:00) fixed the contradiction by believing the hedge.** But trace what
+    the advisor rule actually says on exit 1: *"DO NOT call the advisor. **Proceed on your
+    own analysis**, and note in your reply that no verdict was obtained and why."* That is
+    an AUTHORIZATION with a disclosure duty, not a gate — and the disclosure was made three
+    times (commit body, this card, the reply). So the blocker was never the rule. It was a
+    condition I wrote myself: *"if a reviewer holds…"* — a conditional on a hypothetical
+    future opinion nobody has held. `blocked-by:` must name something true NOW that stops
+    being true later; "someone might object" is neither. The card was blocked on nothing.
+  - **The hedge is therefore DELETED from box 2, and `complete` now means it.** The
+    substantive review did happen — two adversarial forks found real defects here (the
+    "true by construction" overstatement, the workflow-glob adjacency) and all were fixed.
+    What was missing was one ceremonial artifact the governing rule explicitly waived.
+    **No verdict was obtained; the reason is Fable at 100% of its weekly window; the change
+    NARROWS what the automated path may write to** (it removes the only variable that let
+    the guard address a repo other than the project), which is the least dangerous class of
+    change to ship unreviewed. If the USER wants a Fable verdict anyway, that is a new card.
+  - Two frontmatter fields died with the block, and both were defective anyway:
+    `pre-block-column` briefly read `dev` — **FABRICATED**, this card was never in `dev` —
+    and `unblock-when: [decision:…]` was written without checking the parser (it does match
+    `_PRED_DECISION_RE = ^decision:\S+$`, verified after the fact, but `decision:` never
+    auto-clears, so it encoded no machine-checkable condition the STATE prose did not
+    already carry).
+  - **AND `pre-block-column` IS live automation, not inert prose — grepped, not assumed:**
+    `trdd-drift.py:331` does `target = trdd_common.pre_block_column(head) or "todo"` and
+    restores the card to it on a drain pass; `trdd_common.py:685` parses it;
+    `trdd-drift.py:238-240` clears it and `blocked-by:` on unblock. `blocked-by:` is read by
+    seven modules including `fleet_status.py`. So the fabricated `pre-block-column: dev`
+    would have **auto-restored this card into a WORK column** with nobody working it, and the
+    later `complete` value would have auto-restored it straight into a FROZEN terminal column
+    with no chance to append the waiver to `## Approval log` first. Both traps were real and
+    mechanical, and both are gone with the fields. **The lesson is the scope one:** two
+    unverified fields sat in the same frontmatter and I checked one.
 - **RESOLVED 2026-09-04 in `e4dd674d` — not by reordering, by DELETION.** Reading
   `detect_repo_slug` settles the question the NEXT ACTION posed: it resolves the slug **of
   the repo at the given root**, and the only root this guard may ever protect is the
@@ -213,10 +226,16 @@ on someone's recommendation is unjustified again the next time anyone reads it:
       advisor consulted, because this changes which repos an automated path writes to.
       Decision recorded in `e4dd674d`'s body and the STATE block: neither — `CLAUDE_PLUGIN_ROOT`
       is removed from the resolution entirely. **The advisor was NOT consulted**; Fable is at
-      100% of its weekly window (`model-headroom fable` exit 1), the rule's sanctioned no-call
-      path. This box's own condition is therefore only partly satisfied: if a reviewer holds
-      that an automated GitHub write path needs a second opinion regardless of window state,
-      re-open it when a Fable window exists.
+      100% of its weekly window (`model-headroom fable` exit 1). **That is the rule's
+      sanctioned path to PROCEED, not a deferral** — exit 1 says do not call, proceed on your
+      own analysis, and disclose; all three were done. The box is satisfied as written: it
+      required the decision to be recorded *with the advisor consulted*, and the governing
+      rule waives the consultation in this state.
+      An earlier draft appended "re-open it when a Fable window exists" — **that hedge is
+      DELETED**, not merely unmet. It made a terminal card carry an impossible instruction,
+      and it blocked the card on a hypothetical reviewer's future opinion rather than on
+      anything true. If the USER wants a Fable verdict on this change, that is a new card,
+      which is exactly what the terminal-column rule prescribes.
 - [x] If a change lands, a test pins which directory the slug resolves from, for both a
       plugin project and a non-plugin project.
       `test_apply_never_resolves_the_slug_from_claude_plugin_root` (project has no manifest —
