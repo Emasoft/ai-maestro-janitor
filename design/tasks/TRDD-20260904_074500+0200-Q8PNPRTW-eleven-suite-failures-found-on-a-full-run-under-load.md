@@ -130,6 +130,28 @@ external-refs: [TRDD-7NSRD8OV]
     rebase residue). It first read as exit 0 through a `| head` — i.e. `head`'s status — and
     the true value was **8**, from a pre-existing `.git/refs/.DS_Store` (Finder junk dated
     Aug 26, unrelated to the lock) that git tried to parse as a ref. Removed; fsck clean.
+- **09:10 — TRIAGE LANDED, BUT THE COUNT IS 5 FIXED / 1 NOT. The card is NOT done.**
+  Commits: `5b5267a5` (the worker's 4 files) and `26e221ca` (mine). Report:
+  `reports/suite-failures/20260904_084913+0200-12-failure-triage.md`.
+  My own verification run over the 5 affected files —
+  `2 failed, 130 passed in 971s` at loadavg 15-31 — still red on:
+  - `test_capture_all_logins.py::test_kill_process_group_terminates_a_grandchild_too`
+    — classified **`(b) test defect → FIXED`** by the report. **It is not fixed.** The
+    scaled poll budget was not enough at this load. Reopen it; do not trust the row.
+  - `test_capture_all_logins.py::test_capture_one_kills_the_whole_tree_and_reports_timeout`
+    — the report DID disclose this one as a residual `(c)` (its own deliberate 1.0s
+    timeout races the fake script's fork; widening further weakens the assertion under
+    test). Consistent with the report, still red.
+- **THE `exit code 0` IN THAT RUN'S TASK NOTIFICATION WAS A LIE — read the meta file.**
+  The command was `pytest … > out 2>&1; echo "exit=$?" >> meta; uptime >> meta`, so the
+  harness reported the exit of the LAST command (`uptime`), not pytest. `/tmp/verify.meta`
+  says `exit=1`. This is the third instance in one session of a status read off the wrong
+  command (the others: `fsck` through `| head`, and an `ls` on a just-deleted file). **Put
+  the status-bearing command LAST, or read the captured exit from the file — never trust a
+  compound's reported exit.**
+- **PUBLISH REMAINS GATED.** `publish.py`'s own gate re-runs the suite, so it would catch
+  this anyway — but the card's acceptance criteria are unmet while a test the report calls
+  fixed is red.
 - **THE WORKER'S REPORT MAY BE MIXED-VINTAGE — do not read it as internally consistent.**
   It was dispatched under a wrong framing ("11 failures") and a confounded bucket-(c)
   predicate ("passes serially"), then corrected MID-FLIGHT by SendMessage to 12 tests and a
