@@ -251,6 +251,75 @@ def _fresh_cover(proj: Path) -> None:
     (_state(proj) / "daemon-wake-covered.ts").write_text(str(int(time.time())))
 
 
+def test_a_stale_caller_sample_does_not_hide_a_fresh_directive(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The directive's age is measured against the REAL clock, not the caller's `now` sample.
+
+    THE BUG THIS PINS, and it is measured, not hypothetical: `now` is sampled at the top of a
+    fire and a directive written any time after that sample is fresher than `now` knows, so
+    `now - mtime` goes NEGATIVE and the old `0 <= age` rejected the freshest possible signal.
+    It reddened the 12-minute full suite (1 failed / 16413 passed) while passing standalone in
+    2 s — a load-dependent race, forced deterministically here by handing the function a `now`
+    that is 5 s behind reality instead of hoping to lose a one-second race.
+
+    A `now` in the PAST is exactly what a slow fire has by the time it reaches this check.
+    """
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
+    dispatch = _import_dispatch()
+    sd = _state(proj)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
+
+    (sd / "resume-directive.txt").write_text("continue TRDD-2640RYR5")
+    stale_now = int(time.time()) - 5
+    assert dispatch._cadence_active_waiting(sd, stale_now) is True, (
+        "a directive written after the caller sampled `now` is maximally fresh, not stale — "
+        "measuring its age against that stale sample is what made this return False"
+    )
+
+
+def test_a_future_dated_directive_does_not_read_as_waiting(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A genuinely future-dated mtime is clock skew, not freshness, and must NOT count.
+
+    The bound stays ASYMMETRIC on purpose. Were an hours-ahead file treated as fresh, it would
+    claim 'actively waiting' until the clock caught up — the same indefinite-fire shape as the
+    staleness bug the 30-minute upper bound exists for, reached from the other direction. (An
+    analogy to that incident, not a second instance of it: no skew incident has been observed
+    here.) A `max(0, age)` clamp would have had exactly that effect, which is why the fix reads
+    the real clock instead of widening the bound.
+
+    Both halves use ONE fixture and differ only in mtime, so the False is attributable to the
+    mtime rather than to some other branch of the function returning False for its own reasons.
+    """
+    import os
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
+    dispatch = _import_dispatch()
+    sd = _state(proj)
+    monkeypatch.setattr(dispatch, "_fresh_external_agent_count", lambda now, state_dir=None: 0)
+
+    now = int(time.time())
+    directive = sd / "resume-directive.txt"
+    directive.write_text("continue TRDD-2640RYR5")
+
+    os.utime(directive, (now - 60, now - 60))  # plainly inside the window
+    assert dispatch._cadence_active_waiting(sd, now) is True, (
+        "positive control — a directive one minute old must count as active waiting, or the "
+        "False below proves nothing about the mtime"
+    )
+
+    os.utime(directive, (now + 10800, now + 10800))  # 3 h ahead — skew, not freshness
+    assert dispatch._cadence_active_waiting(sd, now) is False, (
+        "an hours-ahead mtime is clock skew; treating it as fresh would keep the cadence "
+        "claiming 'actively waiting' until the clock caught up"
+    )
+
+
 def test_active_waiting_non_ratelimit_reasons_stay_true_without_coverage(
     proj: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

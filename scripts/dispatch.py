@@ -3280,6 +3280,9 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     (rate-limit or post-compact), a pending directive resume, or in-flight background agents.
     Fail-open (any read error → the pending agents probe, itself fail-open).
 
+    `now` governs the stamp comparisons only — the directive's age is read from the real clock,
+    so this is not evaluable as-of an arbitrary time.
+
     Formerly the FAST-tier signal for a since-removed dynamic-cadence controller
     (TRDD-0QQX9H0G, retired by TRDD-BRHJHWW0 — mid-session tier flips were re-arming the cron
     on every flip, several times an hour). What survives is the boolean itself: the idle-compact
@@ -3323,7 +3326,13 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
         # distinction the stamp already made and this branch conflated.
         directive = sd / "resume-directive.txt"
         if directive.is_file() and directive.stat().st_size > 0:
-            age = now - int(directive.stat().st_mtime)
+            # Against `time.time()`, NOT the passed `now`: the branch above compares a RECORDED
+            # STAMP (caller's frame, correct), this compares a FILESYSTEM MTIME (not the caller's
+            # frame). A directive written after `now` was sampled is fresher than `now` knows, so
+            # `now - mtime` went negative and `0 <=` rejected the freshest possible signal —
+            # measured: reddened the 12-min suite, passed standalone in 2 s. A future-dated
+            # mtime (skew) still fails `0 <=`, which is deliberate; see TRDD-2640RYR5.
+            age = time.time() - directive.stat().st_mtime
             if 0 <= age < _RESUME_RECENCY_WINDOW_S:
                 return True
     except OSError:
