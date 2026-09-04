@@ -24,6 +24,20 @@ external-refs: [TRDD-7NSRD8OV]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
+> ### ⇒ THE USER DECISION, IN ONE LINE (everything else here is how we got to it)
+> **Accept the 10 remaining failures as load artifacts caused by TOTAL OVERSUBSCRIPTION — the
+> full suite's 14-worker fan-out on top of elevated host load, neither sufficient alone — or
+> refuse and require more measurement.** Accepting closes this card via the final criterion's
+> second branch. Refusing keeps the publish gate shut until a rate or threshold is measured.
+> *Read this line, not the archaeology below it: the ask went through three superseded framings
+> today (waive-the-criterion → cause-is-fan-out → the retraction) and each is marked, but the
+> current question is only the sentence above.*
+>
+> **Evidence, preserved off `/tmp`:** `reports/suite-failures/raw-captures-20260904/`
+> (37 files — soak8/soak9 + meta, the serial and low-load `-n auto` runs, every marker and
+> solo/paired capture). `/tmp` does not survive a reboot and this card's own opening lesson is
+> a soak run that was lost that way.
+
 - **WHY THIS CARD EXISTS AT ALL.** The failures were found at 07:29 and lived only in
   `/tmp/soak8.txt` and one session's conversation, both of which die with the session. A
   finding that is not on the board has not been recorded — it has been *noticed*. This card
