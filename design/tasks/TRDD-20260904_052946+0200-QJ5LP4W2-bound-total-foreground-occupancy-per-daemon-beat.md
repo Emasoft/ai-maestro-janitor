@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-04T14:23:51+0200
+updated: 2026-09-04T14:28:28+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -136,6 +136,11 @@ bounds that **sum** — only individual subprocess workloads are capped
   / `reverse` / `shuffle` finds **nothing**. The apparent gaps in the `Task(` line
   numbers (3002–3004) are a comment block, not conditional registration.
 
+  **Scope:** this is a claim about the MAIN LOOP only. `_build_tasks()` has a second
+  call site at `:3634` inside `_run_task_child` (`:3620`) — a separate child path,
+  irrelevant to beat ordering. Do not read "order-as-written at runtime" as a
+  whole-file claim.
+
   Order: … `github-config-audit` (`:2996`), **`session-liveness` (`:2998`)**,
   **`fleet-stop` (`:2999`)**, `cold-cache-clear` (`:3000`), `gh-notify-inbox` (`:3001`),
   `integrity-repin`, `oauth-recovery`.
@@ -148,18 +153,43 @@ bounds that **sum** — only individual subprocess workloads are capped
   typical. Meanwhile `cold-cache-clear` and `gh-notify-inbox` are registered *after*
   `fleet-stop`, so they cannot contribute to its wait in the same pass at all.
 
-  **The position-in-chain reading is both better supported and points the other way:**
-  `fleet-stop` is **tenth of fifteen**, behind *every* named foreground contributor
-  (`oauth-rotator-tick`, `memory-guard`, `github-config-audit`, `session-liveness` …).
-  Its wait accumulates all nine predecessors' bodies. That explains a 0 s-body task
-  stalling most often **without needing `session-liveness` specifically** — and it is
-  evidence for **candidate 3** (a cumulative budget), whereas the adjacency story quietly
-  argues for **candidate 4** (cap `session-liveness` alone). The advisor consultation
-  chooses between exactly those two, so a slanted brief would have decided it in advance.
+  **The position-in-chain reading is better supported.** `fleet-stop` is **11th of 15**,
+  with **ten** predecessors, so its wait accumulates all ten bodies ahead of it. That
+  explains a 0 s-body task stalling most often **without needing `session-liveness`
+  specifically**.
+
+  **Counted, because the first two versions of this paragraph both got it wrong** — it
+  said "tenth of fifteen … all nine predecessors", off by one, in a commit whose subject
+  was a miscitation:
+
+  | # | task | # | task | # | task |
+  |---|---|---|---|---|---|
+  | 1 | marketplace-refresh | 6 | memory-guard | 11 | **fleet-stop** |
+  | 2 | fleet-plugins-update | 7 | cache-prune | 12 | cold-cache-clear |
+  | 3 | version-update | 8 | rules-cleanup | 13 | gh-notify-inbox |
+  | 4 | oauth-rotator-supervisor | 9 | github-config-audit | 14 | integrity-repin |
+  | 5 | oauth-rotator-tick | 10 | session-liveness | 15 | oauth-recovery |
+
+  **And it is behind FOUR of the six named contributors, not "every" one** — the earlier
+  wording said both "behind every named foreground contributor" *and* "`cold-cache-clear`
+  and `gh-notify-inbox` are registered after `fleet-stop`", four sentences apart. Both
+  cannot hold. Ahead of it: `oauth-rotator-supervisor`, `oauth-rotator-tick`,
+  `memory-guard`, `session-liveness`. Behind it: `cold-cache-clear`, `gh-notify-inbox`.
+  The "behind everything" phrasing is what made the cumulative reading sound decisive, so
+  the correction matters.
+
+  **What this does and does NOT do to the candidate choice.** It shows **candidate 4**
+  (cap `session-liveness` alone) would be **insufficient**, not wrong — and 4 keeps
+  direct empirical support this ordering finding does not touch: the measurement has
+  `session-liveness` in **8 of 12** stall rows as the single largest contributor. So the
+  honest brief is *"the chain reading shows 4 alone cannot close the gap; it does not
+  displace 4"*. An earlier version framed this as evidence *for* 3 *whereas* adjacency
+  argues for 4 — having caught myself tilting the brief toward 4, I tilted it toward 3
+  instead. **The choice is the advisor's; this card supplies the chain, not the verdict.**
 
   **The precedent, and it is the useful half.** The BACKGROUND lane deliberately does
   NOT use list order: `_next_bulk_task` (`:3065-3066`) picks `min(due, key=_last_run)`
-  — least-recently-run — and the comment at `:3084-3086` says why in the daemon's own
+  — least-recently-run — and the comment at `:3084-3085` says why in the daemon's own
   words: *"Decided ONCE, before the loop, so the choice cannot depend on where we are
   in list order — that dependence is exactly the starvation `_next_bulk_task` cures."*
 
@@ -178,10 +208,22 @@ bounds that **sum** — only individual subprocess workloads are capped
   | survival tasks | none — every bulk chore is deferrable | **`oauth-rotator-tick` must NEVER be deferred** |
 
   `min(due, key=_last_run)` is a pure **fairness** rule with no concept of a task exempt
-  from the policy. Ported verbatim it would cheerfully defer `oauth-rotator-tick`
-  whenever that task happened to be the most-recently-run — which is precisely the
-  2026-07-17 starvation class the comment above exists to prevent. The foreground policy
-  needs fairness **plus a priority floor**, and the floor has no precedent here.
+  from the policy.
+
+  **⚠ "Ported verbatim it would defer `oauth-rotator-tick`" was a category error — and
+  the real argument is stronger.** Verbatim, `_next_bulk_task` never sees that task at
+  all: its candidate list is `[t for t in tasks if t.background and …]` (`:3065`) and
+  `oauth-rotator-tick` is **foreground** — `_build_tasks`' own preamble says the lane
+  exists so that *"the 60 s survival beats below (`oauth-rotator-tick` above all) are
+  never starved behind them"*. Porting therefore *means* dropping the `background`
+  filter, at which point "verbatim" no longer describes anything.
+
+  The correct form: `is_due()` gates the candidate list, so among **due** tasks a
+  60 s-interval survival beat is **systematically** the most-recently-run against
+  1800 s-interval neighbours. Least-recently-run would defer it **structurally, on
+  every pass** — not "whenever it happened to be". That is a sharper statement of the
+  2026-07-17 starvation class than the one I replaced. The foreground policy needs
+  fairness **plus a priority floor**, and the floor has no precedent here.
 
   **What IS directly transferable is the STRUCTURE, and it is the valuable half:**
   *decide the budget/deferral set ONCE, before the loop*, so the outcome cannot depend on
