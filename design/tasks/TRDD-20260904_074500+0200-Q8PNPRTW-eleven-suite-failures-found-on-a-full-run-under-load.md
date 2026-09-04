@@ -164,7 +164,12 @@ external-refs: [TRDD-7NSRD8OV]
   rows 1 & 2's undetermined cause above must be settled first, since row 1 has no
   `capture_one` and no 1.0 s timeout, so this cannot be the whole story.
 - **12:30 — `blocked` → `human_review`, and `blocked-by:`/`unblock-when:`/`pre-block-column:`
-  all REMOVED. `blocked` was wrong and I reached it by patching fields to satisfy a grammar
+  all REMOVED.**
+  > **⚠ SKIM GUARD — NOTHING BLOCKS THIS CARD. `blocked-by:` is `[]`, and the frontmatter is
+  > authoritative.** The bullet below narrates a `blocked-by: [K7WQ2NRB]` I set and then
+  > retracted; it is HISTORY. A reader scanning for "what blocks this" will hit that string
+  > before the frontmatter, so: the answer is **nothing** — the card waits on a USER decision,
+  > not on another card. `blocked` was wrong and I reached it by patching fields to satisfy a grammar
   check instead of questioning the column.** The sequence: I set `blocked-by:
   [decision:...]` (wrong field), corrected it to `[]`, was then told `column: blocked` with an
   empty `blocked-by:` is off-grammar, and "fixed" that by putting `[K7WQ2NRB]` in the field —
