@@ -1,9 +1,9 @@
 ---
 trdd-id: S7FIQTCO
 title: interrupted-publish recovery reuses the stale local tag so the release can name a commit behind main
-column: todo
+column: testing
 created: 2026-09-04T00:54:43+0200
-updated: 2026-09-04T00:54:43+0200
+updated: 2026-09-04T02:58:00+0200
 current-owner: main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -59,11 +59,66 @@ this.
 
 ## Acceptance criteria
 
-- [ ] The recovery path re-points the tag, or refuses to reuse a stale one.
-- [ ] A post-push check asserts the pushed tag resolves to the pushed head,
+- [x] The recovery path re-points the tag, or refuses to reuse a stale one.
+      — `_retag_stale_local_tag` (`scripts/publish.py`), 2026-09-04. It does
+      BOTH, on a distinction the card did not draw: an UNPUSHED stale tag is
+      re-pointed at HEAD (`git tag -f -a`), because a tag no one has fetched is
+      not history; a stale tag ALREADY ON ORIGIN is REFUSED with `sys.exit(1)`,
+      because moving it would redefine a release other clones have already
+      fetched. Wired into both tag steps — the plain `v<N>` tag and the
+      `<plugin>--v<N>` dependency-resolution tag, which had the identical
+      skip-if-exists branch and the identical defect.
+      **The first draft of this had an INVERTED FAIL-SAFE, found and fixed
+      before commit.** It gated the force-move on `_remote_tag_exists`, which
+      returns False for BOTH "origin does not have it" and "the network was
+      unreachable" — deliberately, so its own caller never prints a false
+      "Verified on remote". Here False is what AUTHORIZES a mutation, so a
+      network blip would have licensed rewriting a published tag. Split into a
+      tri-state `_remote_tag_state` (True/False/None); `_retag_stale_local_tag`
+      now refuses on None as firmly as on True, because force-moving needs
+      PROOF the tag is unpublished, and `_remote_tag_exists` is redefined as
+      that tri-state with None folded to False so there is one source of truth.
+      The general lesson: a helper whose failure mode is chosen for one
+      caller's safety is not automatically safe for a second caller that acts
+      on the opposite answer.
+- [x] A post-push check asserts the pushed tag resolves to the pushed head,
       and fails the publish if not.
-- [ ] A test reproduces the interrupted-publish state (local tag present,
+      — The remote verification now compares what the tag RESOLVES TO against
+      the pushed head, not merely that it exists (existence is what reported
+      "Verified on remote" for a tag 4 commits behind). It REPORTS loudly
+      rather than exiting: it runs post-push and cannot un-push anything, and a
+      hard exit there would skip the verification of the second tag. The
+      blocking check is the pre-push one above.
+- [x] A test reproduces the interrupted-publish state (local tag present,
       origin one version behind) and proves the tag lands on the new head.
+      — `tests/test_publish_stale_tag_recovery.py`, 8 tests, REAL git repos
+      (a working repo plus a bare origin), no mocks — the defect lives in what
+      `git rev-parse` resolves an annotated tag to, and a mocked git cannot have
+      that bug. Covers: annotated-tag peeling (`^{commit}`; the tag OBJECT's own
+      sha differs from the commit's, and comparing the wrong one is how a
+      stale-tag check passes while comparing two different kinds of thing),
+      unknown-rev → None, stale-unpushed → re-pointed, already-at-HEAD → the tag
+      object is byte-identical afterwards, stale-and-pushed → `SystemExit(1)`,
+      unreachable-remote → refuses (the inverted-fail-safe regression),
+      the tri-state/exists relationship, and unreadable-comparison → left
+      untouched.
+      MUTATION-PROBED: with `_retag_stale_local_tag` reverted to the pre-fix
+      body (print-and-return), 4 of the 6 FAIL; the 2 that still pass are the
+      `_rev_parse_commit` unit tests, which do not depend on the fix.
+      `publish.py` was restored byte-identically afterwards (sha256 verified).
+
+## Verification run 2026-09-04
+
+`uv run ruff check scripts/publish.py` and `uv run mypy scripts/publish.py
+--ignore-missing-imports` clean; `uvx --with pyright pyright
+tests/test_publish_stale_tag_recovery.py scripts/publish.py` → 0 errors,
+0 warnings.
+
+Note on the fixture: `tests/sandbox_guard.py` refuses any mutating git verb
+whose cwd resolves to the real repository, and a bare
+`subprocess.run(["git", "init", ...])` inherits this repo as its cwd — so the
+bare origin is created with an explicit `cwd=tmp_path`. The guard caught this
+on the first run; it is doing its job.
 
 ## Related memory
 

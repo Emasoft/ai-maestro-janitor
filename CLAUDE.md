@@ -17,9 +17,12 @@ paid on every turn; see [[janitor-architecture]] for the architecture hub.
 ## Commands
 
 - Tests: `uv run pytest`
-- Lint: `uv run ruff check scripts tests` **and `uv run mypy scripts/ --ignore-missing-imports`**
-  — the publish gate runs ruff + **mypy**, not pyright. A pyright-clean tree is NOT the gate:
-  mypy has caught errors here that pyright passed, at the gate, after the work looked done.
+- Lint: `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`,
+  **and `uvx --with pyright pyright`** — the gate runs all three, and a clean run of any two
+  proves nothing. mypy has caught errors here that pyright passed; pyright catches the
+  `scripts/lib/` sibling-import class mypy structurally cannot (TRDD-BMDZK4RA), and CI's Lint
+  job rejected 3.4.14 on 7 of them. Pyright joined the gate 2026-09-04 (TRDD-MYQGMAQZ) and
+  FAILS CLOSED — a pyright that cannot be launched blocks the publish rather than warning.
 - Release pipeline: `uv run scripts/publish.py`
 - Bundled wiki-search crate (memgrep): `cargo install --path scripts/memgrep`
 
@@ -120,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=7877fcaa9d7e generated=2026-09-03T22:40:44+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=19e4f519c8af generated=2026-09-04T02:34:14+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.

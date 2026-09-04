@@ -198,7 +198,14 @@ _TEST_SUITE_TIMEOUT_SEC = 3600
 # --dist loadgroup: identical to the default `load` for ungrouped tests, but honours
 # `xdist_group` markers — tests/test_state_cache_isolation.py's a/b pair is order- and
 # process-dependent and broke a publish when plain `load` split it across workers.
-_PYTEST_CMD = ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short", "-n", "auto", "--dist", "loadgroup"]
+# `--timeout=300 --timeout-method=thread` MIRRORS ci.yml's tests job, and the
+# direction of the divergence is why it is here (TRDD-MYQGMAQZ): without it a
+# test that HANGS makes CI fail on the timeout while the gate merely runs long
+# and passes — the gate-green/CI-red shape that shipped a broken 3.4.14. Every
+# other difference from CI's invocation fails the SAFE way (the gate blocks
+# where CI would have passed), so only this one was adopted.
+_PYTEST_CMD = ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short", "-n", "auto", "--dist", "loadgroup",
+               "--timeout=300", "--timeout-method=thread"]
 
 # Wall-clock bound for every remote-CPV invocation, for the same reason as above.
 # MEASURED: `cpv-remote-validate plugin . --strict` on this plugin takes ~237 s on
@@ -2416,6 +2423,49 @@ def _refresh_integrity_manifest(root: Path) -> None:
     run(["uv", "run", str(gen), "--root", str(root)], cwd=root)
 
 
+def _rev_parse_commit(root: Path, rev: str) -> str | None:
+    """The commit sha `rev` resolves to, or None if it does not resolve.
+
+    `^{commit}` PEELS an annotated tag to its commit. Without it a tag compares
+    unequal to the very commit it points at, because an annotated tag's own sha
+    is the tag OBJECT's — which is how a stale-tag check can pass while
+    silently comparing two different kinds of thing (TRDD-S7FIQTCO).
+    """
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{rev}^{{commit}}"],
+            capture_output=True, text=True, cwd=str(root),
+            check=False, timeout=10, env=_readonly_git_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip()
+    return out if r.returncode == 0 and out else None
+
+
+def _remote_tag_state(root: Path, tag: str) -> bool | None:
+    """True = origin has `tag`, False = it does not, None = COULD NOT ASK.
+
+    The tri-state `_remote_tag_exists` collapses. That collapse is right for the
+    post-push verification (an unreachable remote must not print a green
+    "Verified"), and WRONG for any caller where the negative answer authorizes a
+    mutation: there, False-on-network-error would license rewriting a published
+    tag on a blip. Callers that act on "not published" must branch on None
+    separately (TRDD-S7FIQTCO).
+    """
+    try:
+        r = subprocess.run(
+            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
+            capture_output=True, text=True, cwd=str(root),
+            check=False, timeout=30, env=_readonly_git_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return bool(r.stdout.strip())
+
+
 def _remote_tag_exists(root: Path, tag: str) -> bool:
     """True iff `tag` exists on origin, per `git ls-remote`.
 
@@ -2425,17 +2475,67 @@ def _remote_tag_exists(root: Path, tag: str) -> bool:
     being undependable (ai-maestro#62 R3).
 
     Any failure to answer (network down, timeout, git error) returns False, so
-    the caller reports UNVERIFIED — never a false green.
+    the caller reports UNVERIFIED — never a false green. One source of truth
+    with `_remote_tag_state`: this is that tri-state with None folded into
+    False, which is safe HERE and unsafe for a caller that mutates on False.
     """
-    try:
-        r = subprocess.run(
-            ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}"],
-            capture_output=True, text=True, cwd=str(root),
-            check=False, timeout=30, env=_readonly_git_env(),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0 and bool(r.stdout.strip())
+    return _remote_tag_state(root, tag) is True
+
+
+def _retag_stale_local_tag(root: Path, tag: str, message: str) -> None:
+    """Re-point a leftover local `tag` at HEAD, or REFUSE if it is already published.
+
+    THE BUG THIS EXISTS FOR (TRDD-S7FIQTCO, measured on release 3.4.14): when a
+    previous publish created the local tag and died before pushing, the recovery
+    path re-bumps to the SAME version — a second `chore: bump version to <N>`
+    commit — but used to leave the tag on the FIRST bump commit. The push then
+    carried a tag naming a commit BEHIND the head it pushed, and every
+    downstream signal stayed green: `Verified on remote` only asked whether the
+    tag EXISTS. On 3.4.14 the tag was 4 commits behind main. Impact that day was
+    nil, but a functional commit landing in that window would have shipped a
+    release silently missing it.
+
+    NOT a blanket force-move. A tag that is ALREADY on origin is published
+    history: other clones, the release, and anything that fetched it all name
+    that commit. Silently redefining it is the destructive case, so this REFUSES
+    and stops the publish instead — the operator decides whether to burn the
+    version or delete the remote tag deliberately.
+    """
+    head = _rev_parse_commit(root, "HEAD")
+    tagged = _rev_parse_commit(root, tag)
+    if head is None or tagged is None:
+        # Cannot answer ⇒ do not act. Leaving the tag put is the pre-existing
+        # behaviour; force-moving on an unreadable comparison would be worse.
+        cprint(f"  {YELLOW}Tag {tag} exists locally but could not be compared to HEAD "
+               f"(head={head}, tag={tagged}) — leaving it untouched.{NC}")
+        return
+    if tagged == head:
+        cprint(f"  {YELLOW}Tag {tag} already exists locally and points at HEAD — skipping tag step.{NC}")
+        return
+    # FAIL CLOSED ON "CANNOT ASK", not just on "yes". `_remote_tag_exists` answers
+    # False for BOTH "origin does not have it" and "the network was unreachable" —
+    # correct for its own caller (never a false green) and exactly inverted here,
+    # where False is what AUTHORIZES a force-move. A network blip would license
+    # rewriting a published tag. Force-moving needs PROOF the tag is unpublished,
+    # so an unknown answer refuses like a present one.
+    published = _remote_tag_state(root, tag)
+    if published is not False:
+        _why = ("exists on origin already and points at" if published
+                else "could not be checked against origin (network/git error); it points at")
+        cprint(f"  {RED}BLOCKED: {tag} {_why} {tagged[:8]}, "
+               f"not the head being published ({head[:8]}).{NC}")
+        if published:
+            cprint(f"  {RED}  That tag is published history — moving it would redefine a release{NC}")
+            cprint(f"  {RED}  other clones have already fetched. Refusing.{NC}")
+        else:
+            cprint(f"  {RED}  Refusing to move a tag that cannot be PROVEN unpublished.{NC}")
+            cprint(f"  {RED}  Re-run once the remote is reachable.{NC}")
+        cprint(f"  {RED}  Resolve deliberately: publish the NEXT version, or delete the remote{NC}")
+        cprint(f"  {RED}  tag by hand (git push origin :refs/tags/{tag}) and re-run.{NC}")
+        sys.exit(1)
+    cprint(f"  {YELLOW}Tag {tag} is stale (points at {tagged[:8]}, HEAD is {head[:8]}) — "
+           f"re-pointing it (interrupted-publish recovery).{NC}")
+    run(["git", "tag", "-f", "-a", tag, "-m", message], cwd=root)
 
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
@@ -2533,7 +2633,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         _git_write_or_recover_lock(["git", "commit", "-m", expected_subject], root)
 
     if tag_exists:
-        cprint(f"  {YELLOW}Tag {tag} already exists locally — skipping tag step.{NC}")
+        _retag_stale_local_tag(root, tag, f"Release {tag}")
     else:
         run(["git", "tag", "-a", tag, "-m", f"Release {tag}"], cwd=root)
 
@@ -2544,7 +2644,7 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
                f".claude-plugin/plugin.json - SKIPPING the dependency tag. Dependent "
                f"plugins will fail to resolve this release with `no-matching-tag`.{NC}")
     elif dep_tag_exists:
-        cprint(f"  {YELLOW}Tag {dep_tag} already exists locally — skipping.{NC}")
+        _retag_stale_local_tag(root, dep_tag, f"{_plugin_name(root)} {new_ver}")
     else:
         run(["git", "tag", "-a", dep_tag, "-m", f"{_plugin_name(root)} {new_ver}"], cwd=root)
 
@@ -2576,9 +2676,25 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     # Never a false green AND never a false block: the refs are already pushed by
     # this point, so failing the run could not un-push them — an unverifiable tag
     # is reported UNVERIFIED with the command to check it by hand.
+    # EXISTENCE IS NOT ENOUGH (TRDD-S7FIQTCO). The check below used to ask only
+    # whether the tag was on origin, so a tag pointing 4 commits behind the head
+    # it shipped with reported "Verified on remote" and a green publish. Compare
+    # what it RESOLVES TO. This runs post-push and cannot un-push anything, so a
+    # mismatch is reported as loudly as possible rather than exiting — the
+    # operator needs to see it, and a hard exit here would skip the remaining
+    # verifications for the other tag.
+    _pushed_head = _rev_parse_commit(root, "HEAD")
     for _verify_tag in (tag, *([dep_tag] if dep_tag else [])):
         if _remote_tag_exists(root, _verify_tag):
-            cprint(f"  {GREEN}Verified on remote: {_verify_tag}{NC}")
+            _tagged = _rev_parse_commit(root, _verify_tag)
+            if _pushed_head is not None and _tagged is not None and _tagged != _pushed_head:
+                cprint(f"  {RED}WRONG COMMIT: {_verify_tag} is on origin but resolves to "
+                       f"{_tagged[:8]}, not the pushed head {_pushed_head[:8]}.{NC}")
+                cprint(f"  {RED}  The release names a commit that is not what was just "
+                       f"pushed — treat this release as suspect.{NC}")
+                cprint(f"  {RED}  Inspect: git log --oneline {_verify_tag}..HEAD{NC}")
+            else:
+                cprint(f"  {GREEN}Verified on remote: {_verify_tag}{NC}")
         else:
             cprint(f"  {YELLOW}Could NOT verify {_verify_tag} on remote (ls-remote found "
                    f"nothing, or the network was unreachable).{NC}")

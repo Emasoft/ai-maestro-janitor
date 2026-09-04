@@ -1,7 +1,7 @@
 ---
 trdd-id: MYQGMAQZ
 title: the publish gate lacks the pyright check CI enforces so a release can be tagged before CI rejects it
-column: todo
+column: testing
 created: 2026-09-04T01:12:30+0200
 updated: 2026-09-04T01:52:00+0200
 current-owner: main-session
@@ -56,9 +56,16 @@ Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it
       No env-var escape hatch either: publish.py's stated contract is "no exceptions and no
       bypass flags", and Gate 0 exists to catch exactly that shape.
 - [x] The gate's ruff scope matches CI's — now `ruff check scripts/ tests/`.
-- [ ] The remaining rows of the divergence table are each either adopted into the
+- [x] The remaining rows of the divergence table are each either adopted into the
       gate or explicitly declared out of scope ON THIS CARD with a reason — an
       undocumented gap is what produced this defect.
+      — DONE 2026-09-04. Every CI `run:` step was re-enumerated by
+      `yaml.safe_load` of `ci.yml` (five jobs: lint, tests, validate,
+      memgrep-build, smoke), not from the table above, which was written from
+      one publish log and named no job. Row-by-row verdicts in the section
+      "Divergence rows — adopted or declared" below. One adoption
+      (`--timeout=300 --timeout-method=thread` on `_PYTEST_CMD`); everything
+      else declared, with the direction of each remaining gap stated.
 - [x] The ordering defect is split out to its own card — see TRDD-J1KRAY9C.
 - [x] A tree with a deliberate pyright error is BLOCKED by publish.py before any tag or push.
       — 2026-09-04, verified by invoking `stage_lint(root)` DIRECTLY (not by running a
@@ -106,7 +113,81 @@ Add `uvx --with pyright pyright` to stage 4b, invoked the same way CI invokes it
       against the wrong stated counterpart. Gate 2f also WARNs+skips when shellcheck is
       unavailable — the fail-open pattern rejected for pyright above; whether it should
       change is the same open question, with lower stakes.
-- [ ] The CLAUDE.md sentence describing the gate's checkers is updated once the gate changes.
+- [x] The CLAUDE.md sentence describing the gate's checkers is updated once the gate changes.
+      — DONE 2026-09-04. It read "the publish gate runs ruff + **mypy**, not
+      pyright", which the pyright adoption made false in the file every session
+      loads. Now names all three, says a clean run of any two proves nothing,
+      keeps the mypy-catches-what-pyright-misses point, adds the converse
+      (pyright owns the `scripts/lib/` sibling-import class mypy structurally
+      cannot — TRDD-BMDZK4RA), and records that pyright FAILS CLOSED.
+
+## Divergence rows — adopted or declared (2026-09-04)
+
+Re-derived by `yaml.safe_load`ing `ci.yml` and listing every `run:` step per
+job, because the table above was written from a single publish log and does
+not name which job each row came from. CI has FIVE jobs: `lint`, `tests`,
+`validate`, `memgrep-build`, `smoke`.
+
+| CI step | gate | verdict |
+|---|---|---|
+| lint: `uvx ruff check scripts/ tests/` | `stage_lint`, identical paths | **already closed** (this card) |
+| lint: `uvx --with pyright pyright` | `stage_lint`, identical | **already closed** (this card) |
+| lint: `shellcheck scripts/dispatch.sh git-hooks/pre-push` | Gate 2f (`publish.py:1380`) | **covered, with a caveat** — see below |
+| lint: `uv sync --extra dev` | CPV preflight's `uv-sync-dev` check | covered |
+| gate-only: `mypy scripts/` | — | superset, correct as-is |
+| tests: `--timeout=300 --timeout-method=thread` | absent | **ADOPTED** — the one gap failing the dangerous way |
+| tests: `-m "not integration"` + separate serial `-m integration` | one parallel run over everything | declared — fails safe |
+| tests: `--extra dev` | absent | declared — fails safe |
+| memgrep-build: cargo build + `stage.sh` + staged-binary run | absent | declared out of scope |
+| smoke: hooks.json validity, dispatch smoke, per-hook smoke, per-detector strict-run | absent | declared out of scope |
+
+**The adoption.** CI passes `--timeout=300 --timeout-method=thread`; the gate
+did not. A test that HANGS therefore fails CI on the timeout while the gate
+runs long and passes — gate-green/CI-red, the exact shape that shipped a
+broken 3.4.14. Added to `_PYTEST_CMD` with the reason in a comment. Verified
+the flag is accepted under the gate's own invocation (`uv run pytest tests/`
+WITHOUT `--extra dev`, `--collect-only`: 16357 collected, no unrecognized-arg
+error), because the gate does not pass `--extra dev` and an unavailable
+`pytest-timeout` would have broken every publish.
+
+**Why the other test-job differences were declared, not adopted.** Each fails
+the SAFE way — the gate blocks where CI would have passed:
+- CI runs integration tests SERIALLY; the gate runs everything in one parallel
+  `--dist loadgroup` pass. A test needing serial execution fails the GATE and
+  would have passed CI. Wrong direction to be dangerous.
+- CI passes `--extra dev`; the gate does not. A missing dev dependency breaks
+  the gate, not CI.
+Adopting either would roughly double gate wall-clock (a second full serial
+pass) to close a direction that cannot ship a bad release. Revisit if a real
+gate-green/CI-red is ever traced to the marker split — that observation, not
+this reasoning, is what should reopen it.
+
+**The shellcheck caveat, stated because it is the same defect class.** Gate 2f
+runs shellcheck, but WARNs-and-skips when the binary is absent
+(`publish.py:1392`), so on a host without shellcheck the gate passes and CI's
+"Lint shell scripts" step can still reject the commit. Pyright was just made
+FAIL-CLOSED for precisely this reason. Not changed here: this card's scope is
+the pyright gap and the divergence inventory, and flipping a second gate to
+fail-closed is its own change with its own blast radius. **Recorded as a known
+fail-open, not as covered.**
+
+**Why memgrep-build and smoke are out of scope.** Both are CI jobs whose steps
+invoke project scripts and toolchains (cargo/rustup with a Linux target, then
+`./scripts/dispatch.py`, every `scripts/hooks/*.py`, every
+`scripts/detectors/*.py --one-shot`) rather than linters. Reproducing them in
+the gate means cross-compiling for `x86_64-unknown-linux-gnu` on macOS and
+executing every hook and detector against the author's LIVE machine state —
+the detectors write real state and touch the real daemon. That is a different
+kind of check from a lint gate, and running it locally would have side
+effects CI's disposable runner does not. They stay CI-only, deliberately.
+
+**The parity test's blind spot, so nobody mistakes it for full cover.**
+`tests/test_publish_gate_ci_parity.py` guards the `lint` job only (it selects
+the job that runs both ruff and pyright) and only uv/uvx-prefixed tools — its
+own docstring says a bare `shellcheck` is out of scope. It therefore cannot
+catch a new step added to `tests`, `memgrep-build`, or `smoke`. That is a
+deliberate scope, and it is written here because an undocumented gap is what
+produced this defect in the first place.
 
 ## The divergence is wider than pyright — measured 2026-09-04
 
