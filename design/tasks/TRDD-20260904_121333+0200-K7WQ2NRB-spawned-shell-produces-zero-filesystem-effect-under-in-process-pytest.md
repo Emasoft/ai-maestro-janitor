@@ -39,21 +39,6 @@ external-refs: [TRDD-Q8PNPRTW]
 
 ## What is MEASURED
 
-- **2026-09-05 00:5x–01:2x — BOTH ROWS PASSED IN TWO CONSECUTIVE FULL-SUITE RUNS.** 16416
-  passed / 1 skipped in 11m03s, then 16416 passed / 1 skipped in 13m02s (`pytest=0`). Neither
-  row carries a skip decorator and both appear in `--collect-only` (verified, not assumed), so
-  both ran in **the full-suite pytest process** — the configuration step 1a says was never
-  reproduced against, and the one soak9 failed in. The runs were incidental: they were
-  verifying TRDD-2640RYR5, not hunting this.
-  **What this is NOT: a load data point. Host load was never sampled during either run**, so
-  these two greens cannot be placed on the load axis that every other measurement here turns
-  on, and they license nothing about whether load is the discriminator. Recorded because the
-  configuration is the interesting variable and 2 in-config greens are cheap evidence nobody
-  had to spend a run on — not because they narrow the cause.
-  **The experiment this suggests, still NOT PERFORMED:** a full-suite loop that samples host
-  load throughout and preserves each run's output, so a failure is caught *in the config that
-  fails* with its load recorded. That is the shape step 1a's 2-test selection could not have.
-
 - **When they fail, the child produces ZERO filesystem effect.** A temporary marker line
   (`echo started > {pid_file}.started`) as the script's FIRST statement, run 8×, then reverted:
   **3/3 failing runs wrote NEITHER file; 6/6 passing runs wrote BOTH.** Marker and pid file
@@ -69,6 +54,11 @@ external-refs: [TRDD-Q8PNPRTW]
 - **Rates:** row 2 fails 3/3 solo and in all 3 paired runs (`/tmp/pair_2.txt`, `pair_3.txt`
   name it in their `FAILED` lines). Row 1 is intermittent — 1/3 solo in one batch, 0/4 in a
   later one. Both pass more often under `-n auto` than serially.
+- **2026-09-05, WEAK and in-config:** both rows passed in two consecutive full-suite runs
+  (16416 passed, 11m03s / 13m02s), incidental to TRDD-2640RYR5. Host load unsampled, so
+  unplaceable on the load axis; the module runs 0 skips standalone, so the suite's 1 skip is
+  not these. Takes the full-suite cell from 2 points to 4 (soak8 PASS 11.39, soak9 FAIL 15.53);
+  cannot narrow the cause — only a captured failure can.
 
 ## Excluded BY READING SOURCE (not by inference)
 
@@ -230,6 +220,17 @@ one is a genuine discriminating prediction and it is one run.**
 on Q8PNPRTW for being plausible.
 
 ## NEXT ACTION — REORDERED 13:00; the old order is stale
+
+0. **THE EXPERIMENT STEP 1a's SHAPE CANNOT PRODUCE — a full-suite loop with load sampling.**
+   Step 1a burned 14 runs on a 2-TEST SELECTION and proved only that that configuration does
+   not fail at load ≤36. The failing observations (soak9) are IN-CONFIG, i.e. the rows running
+   inside the full-suite pytest process. So the experiment is: loop the FULL suite, sample host
+   load throughout each run, and preserve every run's output — then a failure is caught in the
+   configuration that actually fails, with its load on the record. Expensive by construction
+   (~12 min/iteration), which is exactly why the 4 in-config data points so far are worth
+   counting before spending more. Note this does NOT contradict step 1's "do not re-attempt by
+   re-running the tests": that forbids re-running the 2-test selection, which is the shape that
+   cannot reproduce.
 
 1. **⇒ CAPTURE A FAILING RUN'S CHILD STDERR — NOT PERFORMED. The step splits by row: for
    ROW 1 it was ANSWERED FROM THE ARCHIVE (1c); for ROW 2 it is UNREACHABLE as written (1b).
