@@ -1,5 +1,21 @@
 # Mega-Linter configuration
 # https://megalinter.io/latest/configuration/
+#
+# DORMANT — NOTHING IN THIS REPO READS THIS FILE (verified 2026-09-04,
+# TRDD-6SIY2VX2). No workflow under .github/workflows/ invokes Mega-Linter and
+# there is no .pre-commit-config.yaml. CPV's `ci-preflight` (publish.py stage
+# 4b) labels several of its checks "(Mega-Linter <SUB_LINTER> parity)" but does
+# NOT parse this file — measured by deleting COPYPASTE_JSCPD from
+# ENABLE_LINTERS and re-running: jscpd still ran. So no value below is in
+# force, `--threshold 5` included.
+#
+# It is KEPT rather than deleted because it records four decisions with issue
+# references (gitleaks #138, reporter-schema #29, the single-quote/yamllint
+# escape gotcha, the fixture-exclusion rationale) that a deleted file only
+# yields to someone who already knows to look for it. Adding a Mega-Linter
+# workflow would newly enforce jsonlint/yamllint/markdownlint/cspell/checkov/
+# trivy/shfmt — seven linters this repo has never passed — so that is a
+# deliberate decision, not a restoration.
 
 # Only lint changed files (faster, less noise)
 APPLY_FIXES: none

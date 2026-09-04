@@ -1,9 +1,9 @@
 ---
 trdd-id: 6SIY2VX2
 title: decide the fate of a mega-linter config that no workflow in this repo runs
-column: todo
+column: complete
 created: 2026-09-04T01:53:00+0200
-updated: 2026-09-04T01:53:00+0200
+updated: 2026-09-04T03:07:00+0200
 current-owner: main-session
 task-type: infra
 min-approval-requirement: none
@@ -90,6 +90,40 @@ implementation-commits: []
       configuration for a Mega-Linter run that nothing performs — including its
       `COPYPASTE_JSCPD_ARGUMENTS: "--threshold 5"`, which therefore does NOT set
       the threshold the preflight's jscpd actually uses.
-- [ ] Decide: delete / restore a workflow / adopt wanted linters
+- [x] Decide: delete / restore a workflow / adopt wanted linters
       individually.
-- [ ] Execute that decision.
+      — DECIDED 2026-09-04: **keep the file, annotate it as dormant.** Neither
+      of the other two options survives its own cost check:
+      · DELETE loses four documented decisions carrying issue references
+        (gitleaks #138, reporter-schema #29, the single-quote/yamllint escape
+        gotcha, the fixture-exclusion rationale). A deleted tracked file is
+        recoverable only by someone who already knows to look for it, which is
+        the worst kind of recoverable. The criterion was named BEFORE reading
+        the file — "if it holds no knowledge beyond the linter list, delete
+        wins" — and the file failed it four times over.
+      · RESTORE A WORKFLOW would newly enforce seven linters this repo has
+        never run (jsonlint, yamllint, markdownlint, cspell, checkov, trivy,
+        shfmt); the other five are already covered (ruff+mypy in `stage_lint`;
+        bandit/shellcheck/jscpd at G2b/G2f/preflight). That is an unbounded
+        new-findings change, not a restoration, and it is the user's call.
+      · ADOPT INDIVIDUALLY is the same change wearing a smaller name — it still
+        turns on linters nothing has ever run.
+      The hazard the card actually names — that the file makes it LOOK like CI
+      enforces these — is addressed at BOTH ends: the false "CI's Mega-Linter
+      WILL enforce it" operator messages were corrected in `publish.py`
+      (`3bf69302`/`aea0483e`), and the config now says so in its own header.
+- [x] Execute that decision.
+      — Header added to `.mega-linter.yml` stating it is dormant, that no
+      workflow or pre-commit config invokes Mega-Linter (re-verified 2026-09-04:
+      `.github/workflows/` holds ci, memgrep-release, notify-marketplace,
+      release, weekly-audit, zizmor-scan — none reference it; no
+      `.pre-commit-config.yaml` exists), that CPV does not parse it, and why it
+      is kept rather than deleted. Comment-only: `yaml.safe_load` after the edit
+      returns the same 11 keys, 12 linters, `--threshold 5`.
+
+## Approval log
+
+- 2026-09-04T03:07:00+0200 — COMPLETED by janitor-main-session, deciding for the
+  USER under their standing delegation ("you are in charge... you can do the
+  review columns of the kanban in my stead", 2026-09-03). Keep-and-annotate; no
+  workflow added, no linter newly enforced, no runtime value changed.
