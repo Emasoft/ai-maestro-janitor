@@ -1,9 +1,11 @@
 ---
 trdd-id: ZQ02QG1L
 title: Compose every janitor handoff out of process — no model turn spent authoring one
-column: complete
+column: blocked
+blocked-by: [L46IG69Y]
+pre-block-column: complete
 created: 2026-09-03T18:09:45+0200
-updated: 2026-09-04T03:52:00+0200
+updated: 2026-09-04T03:40:00+0200
 current-owner: main-session
 task-type: refactor
 min-approval-requirement: none
@@ -11,7 +13,7 @@ scope: project
 project-id: ai-maestro-janitor
 relevant-rules: []
 npt: []
-eht: []
+eht: [L46IG69Y]
 implementation-commits: []
 ---
 
@@ -210,6 +212,29 @@ audit, then the load-bearing negative re-checked by hand — report:
       run that predated part of what it claimed to cover. A gates box is only
       meaningful against a tree you can name.
 
+## Why this card is `blocked`, not `complete` — the SAME rule violation, one card later
+
+Every acceptance box is closed. The card was moved to `complete` and archived
+anyway, and that was wrong for exactly the reason S7FIQTCO was wrong hours
+earlier: it carries an unfixed consequence THIS card's change introduced (the
+concision-check interaction below), and an effect of a change is that change's
+post-condition — an EHT. `eht:` was `[]`.
+
+The rescuing argument does not work, and it is worth naming because it is
+tempting: *S7FIQTCO's regression was in shipped code, this one is only a
+downstream WARNING.* The EHT rule is about effects, not severity — and I
+explicitly rejected the structurally identical "but the defect is broader"
+argument on S7FIQTCO. Applying a rule to one card and finding an exception for
+the next is how a rule stops being one.
+
+Worse, the consequence was living only as PROSE on an ARCHIVED card: no
+acceptance box, no `todo` entry, nothing that would ever surface it again.
+Archiving made it strictly less likely to be fixed than leaving it open.
+
+Now filed as TRDD-L46IG69Y with its own acceptance criteria; this card is
+`blocked` on it with `pre-block-column: complete` recording that acceptance was
+already met.
+
 ## What the conversion TRADED AWAY, recorded because it is a real consequence
 
 The old step 2 imposed a shape by construction: link-never-inline, exhaustive by
@@ -265,10 +290,29 @@ that on the CLEAR path no compaction follows, so the file would be left armed
 for an unrelated later compaction — and wrote ~25 lines about it, deferring the
 fix as "not fixed blind".
 
-**It is not a bug.** `clear_trigger.py` already owns that file: `:219` targets
-it, and `:503-506` unlink it on chain failure with the comment that it is
-*"SHARED with the compact-resume flow"*. The clear path is aware of it by
-design. Two further facts I had not checked also blunt it: the recorded
+**It is not a bug.** `clear_trigger.py` already owns that file — and the
+load-bearing evidence is the SUCCESS path, not the failure path. `:219` is
+`_write_directive`, *"Persist the one-shot resume pointer (shared with the
+compact path)"*, which `_atomic_write`s `resume-directive.txt` with
+`clear_trigger`'s OWN `--directive`. So on the clear path the composer's
+directive is not left stale; it is overwritten by the one that belongs to this
+path.
+
+**Two earlier drafts of this retraction cited `:503-506` and BOTH were wrong,
+in opposite directions.** The first said it "unlinks on chain failure"; the
+second kept that while noting failure-path evidence proves nothing about the
+success path. Reading `:498-514` to the end shows it does not unlink at all —
+it is a comment explaining why there is **deliberately NO cleanup**, because a
+2026-08-02 review found the old unconditional unlink "was deleting a directive
+another flow owned, breaking its pending resume". That comment is affirmative
+support for the conclusion: the sharing of this file was already reasoned about
+carefully by someone who chose NOT to touch it.
+
+So the finding is retracted on `:219` alone, and the lesson compounds: I
+retracted a hazard using a line reference I had not read, then defended the
+retraction with the same unread reference, and the actual settling fact was in a
+different function. Three passes over one file, each stopping at the first thing
+that looked like an answer. Two further facts I had not checked also blunt it: the recorded
 directive points at a GLOB (`the newest agent-handoff-*.md`), so it self-corrects
 to whatever handoff is newest when read; and any intervening compaction
 overwrites the file via `state.atomic_write` on the same path.
