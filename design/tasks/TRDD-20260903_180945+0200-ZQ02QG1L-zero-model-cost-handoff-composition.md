@@ -348,11 +348,25 @@ Only box 3's — `janitor-handoff-and-clear`, converted this session — is
 unpublished. The benefit is HALF realised, not zero.
 
 **The real finding, which is the one worth keeping:** this session loaded
-**3.4.13** while **3.4.14** is installed. A session's skill text is fixed at
-start and does not follow an upgrade — so the hand-author instruction I obeyed
-came from a version already superseded on disk. That is the rollout-staleness
-family this repo already documents
+**3.4.13** while **3.4.14** is installed — so the hand-author instruction I
+obeyed came from a version already superseded on disk. That is the
+rollout-staleness family this repo already documents
 (`memgrep recall "the fix is published but the bug keeps happening"`).
+
+**That is a STATE, and the mechanism behind it is NOT established here.** A
+draft of this line asserted "a session's skill text is fixed at start and does
+not follow an upgrade". That is one explanation; a cached conversation prefix,
+or skills resolving differently from the cron stub (which this repo documents as
+auto-rolling to the newest cached version on each fire), would look identical
+from inside the session. Measured: 3.4.13 text loaded, 3.4.14 installed. NOT
+measured: why. Saying which would need a controlled upgrade mid-session, and
+asserting it from one observation is the same move this whole section retracts.
+
+VERIFIED rather than inferred, since the retraction turns on it:
+`installed_plugins.json` has ZERO local-scope entries whose `projectPath` is this
+repo, and exactly one `user`-scope entry, at 3.4.14. A local entry would have
+outranked user scope — several exist for OTHER project paths — so this was worth
+checking rather than assuming.
 
 **Two lessons, and the second is sharper than the first:**
 1. "Installed" has THREE distinct values here — what is in the repo, what is in
