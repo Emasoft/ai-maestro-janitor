@@ -1,11 +1,10 @@
 ---
 trdd-id: S7FIQTCO
 title: interrupted-publish recovery reuses the stale local tag so the release can name a commit behind main
-column: blocked
-blocked-by: [CN62E66F]
-pre-block-column: complete
+column: complete
+blocked-by: []
 created: 2026-09-04T00:54:43+0200
-updated: 2026-09-04T03:26:00+0200
+updated: 2026-09-04T04:05:00+0200
 current-owner: main-session
 task-type: bugfix
 min-approval-requirement: none
