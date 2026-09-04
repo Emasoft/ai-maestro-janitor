@@ -2,11 +2,11 @@
 name: janitor-compaction-floor-gate-triggers
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / compacting barely shrank anything / why is the context still huge right after a compaction / what should the auto-compact threshold be / who compacts my context now that auto-compact is off / how do I turn auto-compact back on / claude stopped responding near the context limit / why did the janitor clear my session / what survives a clear now / the clear cooldown is too long / cache expired but nothing happened / why did the janitor not clear after the cache died / a busy session never gets cleared / prompt is too long / context window full and nothing happened / what is the compaction threshold now / infinite compact loop / auto compact fires again and again / does a cooldown end a loop or just defer it / what is the floor vs the threshold / skills missing after compaction"
 ocd: 2026-07-17
-lmd: 2026-09-02
+lmd: 2026-09-04
 metadata:
   node_type: memory
   type: project
-  tier: hub
+  tier: component
   functionality: proactive-compaction
   globs: ["scripts/lib/cold_cache_compact.py"]
 publish-globally: false

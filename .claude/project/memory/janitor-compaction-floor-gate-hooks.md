@@ -2,11 +2,11 @@
 name: janitor-compaction-floor-gate-hooks
 description: "the hook says compact but I just compacted / context reading is wrong right after a compaction / cache state unknown not clearing / cold resume did not shrink / every session paid a full cache write on its first turn / llm-ext is not on PATH / handoff degraded to the template / summary permanent not retrying / the janitor did not compact my big context on restart / the compaction cleared a live session and left a refusal in its handoff / summary ok but the summary was garbage / agent-handoff.md contains a lecture / exit 0 but wrong output / model refused the compaction / compaction failed could not be answered without a repro / blast radius of poisoned handoffs / why does the hook report stale usage right after compact / what does resolve_context prefer over the transcript / why is a gate fed only by an optional tool unreachable / why is a CLI in a plugin-cache bin dir invisible to a hook child"
 ocd: 2026-08-12
-lmd: 2026-09-02
+lmd: 2026-09-04
 metadata:
   node_type: memory
   type: project
-  tier: hub
+  tier: component
   functionality: proactive-compaction
   globs: ["scripts/hooks/*compact*.py"]
 publish-globally: false

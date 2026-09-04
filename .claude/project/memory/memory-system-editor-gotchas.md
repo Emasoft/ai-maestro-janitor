@@ -2,11 +2,11 @@
 name: memory-system-editor-gotchas
 description: "add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / can I raise the atom budget knob / memgrep refused my write because the atom is too big / no memory chore runs on PROJECT scope by default / edit_project_scope / why did the repair chore skip my project page / does memgrep ever refuse a write outright / publish-globally-missing never drains / should I add publish-globally to repair_defect / scope=None suppresses a finding in a fail-open module / an argument whose failure mode has zero live instances / code implements a variant nothing exercises / memgrep binary is stale on this host / cargo install does not roll forward with a plugin update / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached"
 ocd: 2026-06-13
-lmd: 2026-09-03
+lmd: 2026-09-04
 metadata:
   node_type: memory
   type: project
-  tier: hub
+  tier: component
   functionality: janitor
   globs: [".claude/project/memory/**"]
   originSessionId: memory-audit-draft

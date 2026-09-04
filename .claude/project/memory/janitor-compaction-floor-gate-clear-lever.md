@@ -2,11 +2,11 @@
 name: janitor-compaction-floor-gate-clear-lever
 description: "the cache-expired trigger never fires / the janitor did not compact my big context on restart / compact fired over and over on an idle session / session was cleared but the janitor never re-armed / heartbeat died after a clear / can the janitor compact itself / can I compact my own context / only the user can run /compact / session too expensive and I am waiting for the user / clear a session without a model turn / idle session clears itself from outside / cleared session never resumed / injection did nothing and reported nothing / keystrokes never arrived / osascript refused to build / why is my 600k session not compacted / what is DEFAULT_MIN_IDLE_SECONDS / why does the cache-expired trigger ignore context size / will the next fire miss the cache / terminal identity has two dict shapes"
 ocd: 2026-08-04
-lmd: 2026-09-02
+lmd: 2026-09-04
 metadata:
   node_type: memory
   type: project
-  tier: hub
+  tier: component
   functionality: proactive-compaction
   globs: ["scripts/compact_trigger.py"]
 publish-globally: false

@@ -2,7 +2,7 @@
 name: janitor-detector-and-hook-roster
 description: "full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16) / how many detectors are there / what does the github-issues-watch detector do / what does gh-reply-watch do / boundedness invariants for self-healing loops / what are the 16 janitor hooks / what does pre-tool-context-usage do / what does pre-tool-token-budget do / what does post-mcp-response-sanitizer do / pattern libraries scripts/lib/*_patterns.py / why does the token-spike advisory never fire / TURN_OUTPUT knob has no effect / every tool call is denied after a plugin update or reload / bash and edit fail for ~15 minutes in a live session / a hook that exits 2 blocks the tool call / uv run on a missing script exit code / the plugin cache dir is emptied mid-refetch / a detector emitted nothing and I read that as clean / an opt-in flag silently disabled an unrelated check / project-map-drift does nothing in this repo / the CLAUDE.md slim-contract nudge never fires / which detectors cover supply-chain security / list of detectors for supply chain / which detectors watch for scope drift / the cleanup and observability detector groups"
 ocd: 2026-08-02
-lmd: 2026-09-02
+lmd: 2026-09-04
 metadata:
   node_type: memory
   type: reference
