@@ -175,7 +175,26 @@ independent verdict was obtained by this session itself.
         and much weaker than the data.
       - **On clause 1's rc=0:** the daemon writes `done in Ns (background)` on success and
         `FAILED in Ns (background rc=-9)` on failure — distinct lines, so `done in` IS the
-        rc=0 signal rather than merely "the task ended".
+        rc=0 signal rather than merely "the task ended". Not read from an `rc=0` string;
+        inferred from the absence of the FAILED form, which is strong here because that
+        form appears in this same log for this same task 11 times before the fix.
+      - **⚠ ALL 211 DEFERRALS NAME ONE PLUGIN: `claude-menu-system@emasoft-plugins`.**
+        Distinct plugins in the 211 lines: **1**. So this is not "the fleet stops
+        updating" — it is **one update request retried 211 times in 7 h**, every retry
+        landing inside a refresh window. Two consequences:
+        1. **The card's framing is too broad for what is happening now.** "Every
+           `plugin-update` fire logs `deferred` — the fleet stops updating" described the
+           32-minute era. Today exactly one plugin is affected, so clause 2's failure is
+           real but far narrower than the card's prose implies.
+        2. **A separate question this card did not ask: why is ONE plugin retried 211
+           times in 7 h?** ~30/hour is not a cadence any documented interval produces.
+           That may be a retry loop worth its own card, and it is NOT part of
+           TRDD-5EHBPH6G's fix. **Do not fold it in — scope it first.**
+        This corrects my own rebuttal to a review: I claimed the daemon logs one deferral
+        per PLUGIN (~40 per fire), reconciling 211 with 5 runs. False — it is one plugin,
+        many retries. I inferred "per plugin" from three sample lines that all named the
+        SAME plugin, which was evidence for the opposite reading. The 211/211-inside-a-run
+        interval join is unaffected; only my explanation of the count was wrong.
       **What this means for the card:** the fix removed the *cap kill*, not the
       *contention*. TRDD-5EHBPH6G's own framing is that the sweep "held the marketplace
       lock for the whole ~32 min attempt and starved every other marketplace op behind
