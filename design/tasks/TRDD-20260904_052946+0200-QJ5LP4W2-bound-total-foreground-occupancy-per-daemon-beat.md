@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-04T05:29:46+0200
+updated: 2026-09-04T14:21:30+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -119,11 +119,35 @@ bounds that **sum** — only individual subprocess workloads are capped
 - **~84 s of one episode is unaccounted for** (the 54% row, 04:18:26, a 184 s wait).
   The unexplained mass clusters at 04:15–04:18 rather than spreading evenly, which
   is the signature of one unmodelled event.
-- **Does the loop dispatch due tasks in registration order?** `fleet-stop` has a 0 s
-  body yet stalls most often, and it is registered immediately after
-  `session-liveness`. If ordering holds, that asymmetry is corroboration; it is a
-  hypothesis from the `started (pid=…, tasks=[…])` line, not a reading of the
-  dispatch code.
+- ~~**Does the loop dispatch due tasks in registration order?**~~ **ANSWERED YES from
+  the dispatch code, 2026-09-04 — and the answer carries a design precedent the card
+  should use.**
+
+  `_run_due_pass` (`scripts/daemon.py:3080-3103`) is a plain `for task in tasks:` over
+  the list, with **no sort** on the foreground path. Registration order (`:2984-3006`)
+  puts `session-liveness` (`:2998`) immediately before `fleet-stop` (`:2999`), then
+  `cold-cache-clear` (`:3000`), then `gh-notify-inbox` (`:3001`) — i.e. the three tasks
+  that queue behind `session-liveness` are exactly the ones the measurement named as
+  stall contributors. **So the `fleet-stop` asymmetry is corroboration, as hypothesised:
+  a 0 s body stalls most often because it is dispatched directly after the largest
+  foreground body, every beat.**
+
+  **The precedent, and it is the useful half.** The BACKGROUND lane deliberately does
+  NOT use list order: `_next_bulk_task` (`:3065-3066`) picks `min(due, key=_last_run)`
+  — least-recently-run — and the comment at `:3084-3086` says why in the daemon's own
+  words: *"Decided ONCE, before the loop, so the choice cannot depend on where we are
+  in list order — that dependence is exactly the starvation `_next_bulk_task` cures."*
+
+  **The daemon therefore already classifies list-order dependence as a starvation bug,
+  and has already fixed it — for the bulk lane only. The foreground loop still has the
+  identical dependence.** That matters for candidate 3, whose open sub-problem is "a
+  policy for which tasks may be deferred": a fairness rule for foreground deferral does
+  not need to be invented, it needs to be ported from `_next_bulk_task` fifteen lines
+  above it, including its rationale and the incident that produced it.
+
+  Read-only source reading; no `daemon.py` change written, so the advisor gate on the
+  first acceptance box is untouched. This narrows what the advisor is asked, rather
+  than pre-empting it.
 
 ## Notes and lessons learned
 
