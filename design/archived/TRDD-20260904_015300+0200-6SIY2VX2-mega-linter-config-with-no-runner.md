@@ -3,7 +3,7 @@ trdd-id: 6SIY2VX2
 title: decide the fate of a mega-linter config that no workflow in this repo runs
 column: complete
 created: 2026-09-04T01:53:00+0200
-updated: 2026-09-04T03:07:00+0200
+updated: 2026-09-04T02:35:00+0200
 current-owner: main-session
 task-type: infra
 min-approval-requirement: none
@@ -123,7 +123,7 @@ implementation-commits: []
 
 ## Approval log
 
-- 2026-09-04T03:07:00+0200 — COMPLETED by janitor-main-session, deciding for the
+- 2026-09-04T02:35:00+0200 — COMPLETED by janitor-main-session, deciding for the
   USER under their standing delegation ("you are in charge... you can do the
   review columns of the kanban in my stead", 2026-09-03). Keep-and-annotate; no
   workflow added, no linter newly enforced, no runtime value changed.
