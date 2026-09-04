@@ -6,7 +6,7 @@ pre-block-column: todo
 unblock-when: [decision:user]
 min-approval-requirement: user
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T14:16:34+0200
+updated: 2026-09-04T14:19:13+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -165,13 +165,31 @@ git show 595a3a9d^:design/tasks/TRDD-…-Q8PNPRTW-….md > $T/pre.md
 markdownlint-cli2 pre.md   →   45 × MD056
 ```
 
-| region | lines | findings |
+**Line numbers below are PRE-fix.** The post-fix figures quoted earlier in this
+card (221, 790–806) are the *same* defects shifted **+2** by the first repair's
+two inserted lines (one at 35, one at 88) — so post-fix 221 = pre-fix 219, and
+post-fix 790–806 = pre-fix 788–804. Stated explicitly because an unexplained
+coordinate mismatch, in a document whose entire subject is miscounted findings,
+is precisely what a reader will trip on. The clean +2 offset is also a check:
+both measurements describe the same defects.
+
+| region | lines (pre-fix) | findings |
 |---|---|---|
 | A | 35–50 | 16 |
 | B | **87–97** | **11** |
 | C | 219 | 1 |
 | D | 788–804 | 17 |
 | | **total** | **45** |
+
+**45 is unconditional, not a defaults-only artifact.** The measurement was
+repeated with the repo's own root `.markdownlint.json` copied alongside the
+blob: **still exactly 45 MD056**. (Under cli2 defaults the file reports 693
+issues in total vs 45 with the repo config — that entire gap is other rules,
+MD013 and friends; `grep -c MD056 .markdownlint.json` = **0**, so the repo
+config never touches this rule either way.) Checked rather than reasoned,
+because "the gap is obviously other rules" is the same
+plausible-attribution-stated-flatly that this card has already had to retract
+three times.
 
 **Region B is 87–97, not 87–89 — the cap sliced it MID-REGION.** CPV's 20 slots
 went: 1 planted probe + 19 Q8PNPRTW, and Q8PNPRTW's 19th finding is line 89,
