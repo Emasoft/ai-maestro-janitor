@@ -47,3 +47,58 @@ def refresh_plan(installed: dict, extra_csv: str | None) -> list[str]:
         if tok:
             names.add(tok)
     return sorted(names)
+
+
+# Marketplaces whose `source.source` is this are LOCAL DIRECTORIES on this host.
+# Two independent reasons the janitor must never refresh one, either sufficient:
+#   1. OWNERSHIP (owner ruling 2026-09-04): local marketplaces are an internal
+#      mechanism of the ai-maestro SERVER harness. They are not the janitor's to
+#      touch, regardless of whether refreshing them would work.
+#   2. It is a no-op by construction — there is no remote to re-fetch from; the
+#      "marketplace" is a path that is already on disk.
+_LOCAL_SOURCE = "directory"
+
+
+def filter_refreshable(
+    names: list[str], known: dict | None
+) -> tuple[list[str], dict[str, str]]:
+    """Split a plan into (refreshable, {dropped_name: reason}).
+
+    WHY (owner report 2026-09-04): `marketplace-refresh` logged
+    `ai-maestro-local-marketplace exited rc=1` on EVERY hourly run — a permanent
+    31/32 that never converged and never escalated. Two distinct defects fed it,
+    and this filter closes both at the only place that can see them:
+
+    * **An orphan install record.** The plan is derived from
+      `installed_plugins.json` keys, and that file still carried
+      `backend-infrastructure-engineer@ai-maestro-local-marketplace` for a
+      marketplace that had since been RENAMED (to `-roles-` / `-custom-`). The
+      CLI cannot refresh a name it does not know, so the item failed every hour,
+      forever. Deriving intent from install records is right; treating a stale
+      record as a live target is not.
+    * **Ownership.** Both surviving local marketplaces are directory-source and
+      belong to the ai-maestro server harness (see `_LOCAL_SOURCE`).
+
+    `known` is the parsed `known_marketplaces.json` (the CLI's own registry,
+    name -> record). **Passing `None` disables filtering entirely** and returns
+    the plan unchanged — deliberate FAIL-OPEN: if that file is missing or
+    unreadable we do not know what is registered, and silently refusing to
+    refresh anything would be a far worse failure than the rc=1 this fixes.
+    PURE — no I/O; the caller reads the registry (see `daemon.py`).
+    """
+    if not isinstance(known, dict):
+        return list(names), {}
+    keep: list[str] = []
+    dropped: dict[str, str] = {}
+    for name in names:
+        record = known.get(name)
+        if not isinstance(record, dict):
+            dropped[name] = "not registered (orphan install record?)"
+            continue
+        source = record.get("source")
+        src_kind = source.get("source") if isinstance(source, dict) else None
+        if src_kind == _LOCAL_SOURCE:
+            dropped[name] = "local directory marketplace (ai-maestro server owns it)"
+            continue
+        keep.append(name)
+    return keep, dropped

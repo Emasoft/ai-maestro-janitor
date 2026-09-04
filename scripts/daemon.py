@@ -595,6 +595,35 @@ def task_marketplace_refresh() -> None:
         plan = mrp.refresh_plan(
             installed, state.plugin_option("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_EXTRA")
         )
+        # Drop what CANNOT or MUST NOT be refreshed, using the CLI's own registry
+        # (owner report 2026-09-04). Without this the plan inherits every stale
+        # `<plugin>@<marketplace>` install record, so a marketplace that was renamed
+        # is retried hourly forever — observed as a permanent `31/32` with
+        # `ai-maestro-local-marketplace exited rc=1` on every run, which converged
+        # to nothing and escalated to nobody. It also kept re-refreshing the local
+        # directory marketplaces that belong to the ai-maestro server harness.
+        # FAIL-OPEN: an unreadable registry means "do not filter", never "refresh
+        # nothing" — see `mrp.filter_refreshable`.
+        known: dict | None = None
+        try:
+            km_path = _plugins_cache_root().parent / "known_marketplaces.json"
+            known = json.loads(km_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            state.log_line(
+                "daemon",
+                f"  marketplace-refresh: could not read known_marketplaces.json ({exc}) "
+                "— refreshing the unfiltered plan",
+            )
+        plan, dropped = mrp.filter_refreshable(plan, known)
+        if dropped:
+            # ONE line per run naming what was dropped and why. The orphan record this
+            # was written for is a real thing for the USER to clean up, so it must stay
+            # visible — but as a bounded advisory, not as a recurring item FAILURE.
+            state.log_line(
+                "daemon",
+                "  marketplace-refresh: skipping "
+                + "; ".join(f"{n} ({why})" for n, why in sorted(dropped.items())),
+            )
         if not plan:
             state.log_line("daemon", "  marketplace-refresh: refreshed 0/0 marketplaces (none installed)")
             return
