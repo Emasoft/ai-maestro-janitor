@@ -18,7 +18,6 @@ npt: []
 eht: []
 implementation-commits: []
 external-refs: [TRDD-8BXMNQ4T]
-parent-trdd: 8BXMNQ4T
 ---
 
 # Bound total foreground occupancy per daemon beat
@@ -34,6 +33,21 @@ design question where its risk is visible.
 Do **not** re-derive the measurement here. It is complete and its corrections are on
 8BXMNQ4T; the load-bearing results are restated below only so this card is
 self-contained.
+
+**Why this card is INDEPENDENT — not 8BXMNQ4T's EHT, and carrying no `parent-trdd:`.**
+Two decisions, both deliberate:
+
+1. **No `parent-trdd:`** — the TRDD rule is explicit that a derived card is *depth-1*:
+   empty `npt:`/`eht:`, **never a `parent-trdd:`**. A first version of this file set one.
+   Keep it that way: this card must not grow an `eht:` either, or closures start
+   requiring an unbounded graph walk instead of a flat check.
+2. **Not listed in 8BXMNQ4T's `eht:`** — a reviewer argued it should be, since the
+   measurement "revealed a defect needing a fix". Declining that, because `eht:` means
+   *the parent cannot reach `complete` until every EHT is terminal*, and it exists for
+   effects **of a change**. 8BXMNQ4T changed nothing; it is a pure measurement, and its
+   done-state is "measured and decided". Gating it on this card would keep a finished
+   measurement open until the daemon is fixed — which is precisely the scope drift the
+   split was performed to cure. The relationship is a cross-reference, not a gate.
 
 ## What was measured (8BXMNQ4T — read that card for method and caveats)
 

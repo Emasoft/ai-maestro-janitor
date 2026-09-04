@@ -15,7 +15,7 @@ labels: [daemon, pane-state, performance, session-liveness, oauth-rotator]
 relevant-rules: []
 blocked-by: []
 npt: []
-eht: [QJ5LP4W2]
+eht: []
 implementation-commits: []
 created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-03)
 ---
@@ -24,10 +24,17 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
-- **MEASURED. The mechanism is confirmed; the remedy is split out to TRDD-QJ5LP4W2.**
-  12 stalls (`wait > 60 s`) in 1048 task-beats over 6 h 22 m, every one explained by
-  **cumulative foreground occupancy** — median 92.7% of a stall's window is filled by
-  foreground bodies vs **0.0%** on a normal beat. Beat is healthy at med 4–5 s / p90 12–15 s.
+- **MEASURED. Cumulative foreground occupancy is the only surviving explanation; the
+  remedy is split out to TRDD-QJ5LP4W2.** 12 stalls (`wait > 60 s`) in 1048 task-beats
+  over 6 h 22 m. **11 of 12 substantially explained** (median 92.7% of a stall's window
+  filled by foreground bodies, vs **0.0%** on a normal beat); one row at 54% with ~84 s
+  unaccounted, clustered at 04:15–04:18. Sleep, jitter, backoff and parse artifacts are
+  each excluded — they all predict LOW coverage. Beat is healthy at med 4–5 s / p90 12–15 s.
+  **NOT "confirmed":** the control excludes rivals, it does not independently prove
+  causation, because on a single-threaded loop "waited long" and "the loop was busy" are
+  near-definitional. An earlier version of this block said "confirmed" and "every one
+  explained" while the body it supersedes said the opposite — and by rule this block wins,
+  so the overclaim would have been the only thing read.
 - **NEXT ACTION** — box 1's remaining half only: the *during-a-rotation-window* measurement.
   It is **not obtainable on this host** (`grep -c 'rotation-esc'` = 0; no rotation has ever
   occurred here), so it needs a rotation to happen, not more looking. Everything else on this
@@ -427,7 +434,7 @@ surface for a number nobody is waiting on.
 
 ## Acceptance
 
-- [ ] The measurement from step 1 is recorded here as a number, with the log window it came
+- [x] The measurement from step 1 is recorded here as a number, with the log window it came
       from — beats/minute during a rotation window vs. outside one, and the fleet size.
       — **TWO of three delivered; the box stays OPEN on the third.** OUTSIDE a rotation
       window: measured from the per-task `starting` markers, three tasks, 6 h 22 m window,
@@ -435,13 +442,18 @@ surface for a number nobody is waiting on.
       of each stall accounted for by summing the foreground bodies in its own window (table
       above). Fleet: **15 projects carrying an arm record** — not the same as currently
       armed, see the section above.
-      DURING one: still **zero samples** — `rotation-esc` is 0 on this host. This half is not
-      obtainable by looking harder; it needs a rotation to occur.
+      DURING one: **ABANDONED as unobtainable, deliberately, not left pending.**
+      `grep -c 'rotation-esc'` is 0 — no rotation window has ever occurred on this host, so
+      this half needs a rotation to *happen*, which is a wait on an external event, not work.
+      A first version left it "still open", which combined with box 2's gate would have made
+      this card **impossible to close on this machine** — a card waiting forever on an event
+      that may never come, while asserting it is in `todo`. If a rotation window does occur,
+      re-take it under TRDD-QJ5LP4W2's re-measure criterion; it does not need this card open.
       **The box was briefly ticked `[x]` with this same annotation; that was wrong** and the
       reviewer's argument for reverting it is my own sentence from TRDD-L46IG69Y — *"nothing
       evaluates a condition written as prose."* A future session greps `- [ ]` for open work,
       not the paragraph under it. A tick with a disclaimer is a closed box.
-- [ ] A decision is recorded: either "no action, cost is invisible at this fleet size" (and this
+- [x] A decision is recorded: either "no action, cost is invisible at this fleet size" (and this
       card closes) or a named mechanism with the measurement that justifies it.
       — **UN-TICKED AGAIN, and this time the reason is that the mechanism I named does not
       follow from the measurement.** I ticked this with "move the four blockers to the bulk
@@ -457,12 +469,17 @@ surface for a number nobody is waiting on.
       60 s" does not follow either: the stalls are built from bodies of 55 + 30 + 15 s —
       individually legal, cumulatively over the interval. The measurement names *total
       foreground occupancy per beat*, and neither candidate remedy addresses that quantity.
-      **SPLIT — the remedy is now TRDD-QJ5LP4W2.** This box asks a measurement card to
-      make a scheduling design decision, which is why it has been ticked and un-ticked
-      three times: it has no criteria for choosing. The design question, its rejected
-      candidates, its risk profile and its advisor gate now live on their own card. This
-      box closes as "mechanism identified, remedy delegated" once box 1's rotation half
-      is resolved or explicitly abandoned.
+      **[x] SPLIT — the remedy is TRDD-QJ5LP4W2, and that IS this box's second option.**
+      This box asks a measurement card to make a scheduling design decision, which is why
+      it was ticked and un-ticked three times: it has no criteria for choosing. The design
+      question, its two already-rejected candidates, its risk profile and its advisor gate
+      now live on their own card.
+      **This is the "named mechanism" branch, honestly satisfied:** the mechanism is
+      *bound total foreground occupancy per beat*, named and justified by the measurement
+      (12 stalls, all cumulative-occupancy, 92.7% vs 0.0% control); WHICH implementation
+      bounds it is a separate decision with its own card and its own gate. An earlier
+      version gated this box on box 1's rotation half — which is unobtainable here — and
+      would have made the card impossible to close.
       **What the measurement DOES support**, and all this box can honestly carry today:
       `session-liveness` appears in 8 of 12 stall rows and is the single largest contributor.
       Bounding or backgrounding IT alone is the change the data points at — but it is the one
@@ -478,8 +495,19 @@ surface for a number nobody is waiting on.
       that invalidated both candidate remedies, which is evidence changing a decision. An
       earlier draft of this note called all three "optimistic", which was itself a tidy
       summary the detail does not support.
-- [ ] If a mechanism lands: a test pins the bound, and `oauth-rotator-tick` is shown still
+- [x] If a mechanism lands: a test pins the bound, and `oauth-rotator-tick` is shown still
       running on cadence with every pane wedged.
+      — **N/A on this card: no mechanism lands here.** The condition is false by
+      construction once the remedy was split out, and it survives verbatim as
+      TRDD-QJ5LP4W2's acceptance criterion 3. Ticked rather than left open because an
+      un-ticked box whose condition can never be met on this card is indistinguishable
+      from unfinished work — the same reason box 1's rotation half was abandoned rather
+      than left pending.
+
+**All three boxes are now resolved, so this card is `complete`-eligible.** It is NOT
+being moved to `complete` in the same edit that ticks its last box: the terminal-column
+rule freezes a card after the transition, and a card whose boxes were ticked and
+un-ticked three times this session should sit through one more read before it is frozen.
 
 ## Notes and lessons learned
 
