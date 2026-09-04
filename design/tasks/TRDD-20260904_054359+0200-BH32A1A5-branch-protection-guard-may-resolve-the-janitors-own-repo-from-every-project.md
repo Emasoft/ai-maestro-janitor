@@ -2,7 +2,7 @@
 trdd-id: BH32A1A5
 title: the branch-protection guard may resolve the janitors own repo from inside every project
 column: blocked
-pre-block-column: dev
+pre-block-column: complete
 blocked-by: [advisor-consultation-needs-a-fable-window]
 unblock-when: [decision:advisor-verdict-or-user-waiver]
 created: 2026-09-04T05:43:59+0200
@@ -62,6 +62,18 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
   `blocked` is the honest state: the code is done, tested and committed; ONE named external
   condition is outstanding. **The code is NOT blocked — only the sign-off is.** Nothing here
   needs re-doing if the waiver comes.
+  - `pre-block-column: complete` — **corrected 2026-09-04 08:05; it briefly read `dev`,
+    which was FABRICATED.** This card has never been in `dev`: its path was
+    `todo → testing → complete → blocked`. I wrote a plausible-looking value without
+    checking the card's own history, which is the same defect as the invented test-count
+    parenthetical two commits earlier. `complete` is where it was immediately before the
+    block, and restoring it there when the predicate clears is correct — the work is done.
+  - `unblock-when: [decision:advisor-verdict-or-user-waiver]` — **VERIFIED to parse**,
+    not assumed: `trdd-drift.py::_PRED_DECISION_RE` is `^decision:\S+$`, which this matches,
+    so it is a real predicate and NOT counted malformed. `decision:` is the one kind that
+    never auto-clears — exactly right here, because only a human can supply this. A
+    malformed token would have failed OPEN (stayed blocked) anyway, but "it would have
+    failed safe" is not a reason to skip checking whether it parses.
 - **RESOLVED 2026-09-04 in `e4dd674d` — not by reordering, by DELETION.** Reading
   `detect_repo_slug` settles the question the NEXT ACTION posed: it resolves the slug **of
   the repo at the given root**, and the only root this guard may ever protect is the
