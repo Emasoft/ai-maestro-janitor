@@ -160,18 +160,29 @@ line and the `REFUSED by the pane policy` line (`unread` when the pane could not
 distinct value, so an unreadable pane can never be mistaken for a working one). The box above
 now names a string the log will actually contain.
 
-**Half (a) IS reachable — OBSERVED, not argued.** "Requires the bug to recur" reads alarming
-until you know it is recurring. The mutation probe run against the pre-fix `daemon.py` printed
-the real line for the WORKING fixture:
+**Half (a)'s MECHANISM is observed; its OCCURRENCE is what the box measures — do not conflate
+them.** The mutation probe against the pre-fix `daemon.py` printed the real line for the
+WORKING fixture:
 
 ```text
 session-liveness: proj-a [frozen] attempt=0 REFUSED by the pane policy — would esc_nudge;
 the screen does not allow it right now
 ```
 
-That is half (a) minus the field the same commit added. So the state exists, it is produced by
-the path box 6 greps, and `AgentlensPro` has been in it steadily since 01:10 today — expect
-half (a) within hours of the release, not never.
+That is half (a) minus the field the same commit added, so the emit path is real. **But that
+line came from a test that CONSTRUCTS the precondition by fiat** — a synthetic
+`working-spinner` frame, a synthetic `Instance`, `gather_fleet` patched. It establishes *if a
+working pane reaches the rung, the field-bearing REFUSED line is emitted*. It does NOT
+establish that a working pane reaches that rung in production, **which is exactly what half (a)
+measures.**
+
+The `AgentlensPro` refusals do not close that gap either: they came from the INSTALLED build,
+which emits no `pane=` at all, and — this card's own finding — the line does not say which
+guard refused. So whether that pane classified `working` is unknown.
+
+**On day 7, therefore, a zero result is more likely an unmet precondition than a broken
+field.** Check the field first with a grep for `pane=` on ANY line before concluding anything
+about the law.
 
 **Which test pins WHAT — they are different claims, and conflating them lets a refactor drop
 the law with the new test still green:**
