@@ -2,7 +2,7 @@
 trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: blocked
-pre-block-column: dev
+pre-block-column: todo
 created: 2026-09-04T07:45:00+0200
 updated: 2026-09-04T12:15:00+0200
 current-owner: janitor-main-session
@@ -14,7 +14,7 @@ project-id: ai-maestro-janitor
 min-approval-requirement: none
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
-blocked-by: [decision:user-accepts-load-artifacts]
+blocked-by: []
 unblock-when: [decision:user-accepts-load-artifacts]
 npt: []
 eht: []
@@ -121,11 +121,27 @@ external-refs: [TRDD-7NSRD8OV]
   was false by this block's own standing condition. **I first set `todo`, which was also
   wrong**: `todo` asserts "ready to work, nothing in the way", true of rows 1 & 2 and false of
   the load-artifact bucket, which cannot advance without a decision only the USER can make.
-  `blocked-by: [decision:user-accepts-load-artifacts]` — the `decision:` predicate kind never
-  auto-clears, which is correct here. **Per rule 13 ("one atomic task per TRDD") rows 1 & 2
-  SHOULD be split into their own card** — they are blocked on nobody and are being parked
-  behind a human decision that has nothing to do with them. They sit here only because they
-  arrived in the same soak run, which is provenance, not atomicity. Not split yet.
+  **⚠ I first encoded that as `blocked-by: [decision:...]` and `pre-block-column: dev`, and
+  BOTH were wrong — corrected against the detector SOURCE, not the prose:**
+  `scripts/detectors/trdd-drift.py:303,307` states *"`blocked-by:` is scoped to TRDD-to-TRDD
+  dependencies only"* and `blocked_by_ids` extracts only TRDD-SHAPED ids, so a `decision:`
+  predicate there is **silently dropped** — it would have looked like a blocker and been read
+  by nothing. Predicates belong in `unblock-when:` (`_PRED_DECISION_RE` at `:90`), where
+  `decision:` is valid and, by design, **never auto-clears**. And `:331`
+  (`pre_block_column(head) or "todo"`) shows that field is the column to RESTORE — `dev` would
+  have restored the very lie this bullet removes, since no worker is alive. Now
+  `blocked-by: []`, `unblock-when: [decision:user-accepts-load-artifacts]`,
+  `pre-block-column: todo`.
+  **Consequence to be honest about: a `decision:` predicate never auto-clears, so nothing will
+  ever re-examine this card on its own.** It is parked until a human moves it — which is the
+  correct semantics for a waiver, but it means the card is now invisible to drift, not merely
+  paused. **✅ SPLIT DONE (rule 13) — rows 1 & 2 are now `TRDD-K7WQ2NRB`**, at `column: todo`,
+  `blocked-by: []`, because they are blocked on nobody. Parking live technical work behind a
+  human waiver that has nothing to do with it would have hidden it — and with a `decision:`
+  predicate that never auto-clears, hidden permanently. **This card now covers ONLY the
+  load-artifact waiver (#8 + the 9 branch_protection + the gh_reply_watch trio)**, so the
+  `blocked` claim is true of everything remaining in it. Two separate forks flagged that the
+  split is what makes either column honest; I flagged it twice before doing it.
 - **⇒ NEXT ACTION (12:15, CURRENT). The `-n auto` run is DONE and the suite is RED —
   `11 failed, 16391 passed, 1 skipped` in 822.89 s** (`/tmp/soak9.txt`, `/tmp/soak9.meta`,
   load 15.53 → 8.52). Same count as the 07:14 run, **different composition**:
