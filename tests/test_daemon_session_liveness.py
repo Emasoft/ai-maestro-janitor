@@ -698,3 +698,70 @@ def test_a_decline_that_changes_shape_restarts_its_own_stall_clock(tmp_path, mon
     assert st2["sig_since"] > first_since, "a changed decline must get a fresh clock"
     assert st2["escalated"] is False, "a changed decline must re-arm the escalation"
     assert len(findings) == 1, "the re-armed escalation must wait for the threshold again"
+
+
+# --- TRDD-KE88RIKX box 6: the FIRED/REFUSED lines must name the PANE CLASS ------------------
+#
+# The acceptance box asks "did an ESC-only rung land at a WORKING pane?". Before these tests
+# the log could not answer it: the FIRED line carried `[frozen]`, which is the SESSION
+# diagnosis, while the pane class the policy table actually branches on was never printed.
+# A criterion naming a field the evidence never records reads as "pass" forever.
+#
+# These tests pin the field itself. Without them the 213-test daemon suite proves only that
+# the edit did not crash — nothing asserted either line's content.
+
+_WORKING_PANE = (
+    _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-working-spinner.txt"
+).read_text(encoding="utf-8")
+
+
+def test_fired_line_names_the_pane_class_so_box6_is_answerable(tmp_path, monkeypatch) -> None:
+    """A rung that LANDS logs `pane=<kind>` — the field box 6 greps for."""
+    fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)          # _setup serves the IDLE frame
+    daemon.task_session_liveness()
+    assert len(fired) == 1
+    log = _log(tmp_path)
+    assert "FIRED esc_nudge" in log
+    assert "pane=idle" in log, "the FIRED line must name the pane class, not only the diagnosis"
+
+
+def test_a_working_pane_refuses_esc_nudge_and_the_refusal_names_pane_working(
+    tmp_path, monkeypatch
+) -> None:
+    """THE BOX-6 POSITIVE CONTROL, and proof the state it requires is REACHABLE.
+
+    Box 6 (a) needs at least one `REFUSED … would esc_nudge … (pane=working)` line, or the
+    box's other half — an absence — could pass on a quiet week having proven nothing. This
+    test establishes the pair `working` + `esc_nudge` actually co-occurs: a session diagnosed
+    `frozen` (a 15-minute-stale transcript is invisible on screen) whose pane is mid-turn is
+    exactly the case KE88RIKX exists for, and the policy must refuse rather than cancel the
+    live turn."""
+    fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    # Last write wins over _setup's IDLE frame (the harness documents this seam).
+    monkeypatch.setattr(
+        daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: _WORKING_PANE
+    )
+    daemon.task_session_liveness()
+    log = _log(tmp_path)
+    assert fired == [], "an ESC-only rung must never reach a working pane"
+    assert "REFUSED by the pane policy" in log
+    assert "would esc_nudge" in log, "the action token box 6 greps for"
+    assert "(pane=working)" in log, "the refusal must name the class, or box 6 (a) is ungreppable"
+    assert "FIRED esc_nudge" not in log
+
+
+def test_an_unreadable_pane_logs_unread_and_never_reads_as_working(
+    tmp_path, monkeypatch
+) -> None:
+    """`pane=unread` is a DISTINCT token on purpose: collapsing it to anything else would let
+    a pane nobody could see be counted as evidence about a working one, which is the exact
+    confusion the field was added to remove. Box 6's grep for `pane=working` must not match."""
+    fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
+    _setup(monkeypatch, tmp_path, fleet)
+    monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: None)
+    daemon.task_session_liveness()
+    log = _log(tmp_path)
+    assert "pane=working" not in log
+    assert "pane=unread" in log or "REFUSED" in log

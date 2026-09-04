@@ -123,10 +123,22 @@ keystrokes.
 - [x] a refusal does not spend a recovery attempt
 - [x] mutation probe demonstrates the new test fails against the old condition
 - [x] ruff + mypy clean on the changed files; 128 policy-adjacent tests pass
-- [ ] LIVE: after the release, `daemon.log` shows **BOTH** (a) at least one
-      `REFUSED by the pane policy — would esc_nudge … (pane=working)` line — the law observably
-      firing on the situation it exists for — **and** (b) zero
-      `FIRED esc_nudge … pane=working` lines. Both halves, or the box does not pass.
+- [ ] LIVE: after the release, `daemon.log` shows **BOTH** (a) ≥1 refusal at a working pane —
+      the law observably firing on the situation it exists for — **and** (b) zero ESC-only
+      rungs landing at one. Both halves, or the box does not pass. Run BOTH commands; do not
+      retype the prose (the separator is an em-dash and the elisions are not literal):
+
+      ```bash
+      L=~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log
+      grep -cE 'REFUSED by the pane policy .* would esc_nudge.*\(pane=working\)' "$L"  # (a) must be >=1
+      grep -cE 'FIRED esc_nudge .*pane=working' "$L"                                   # (b) must be 0
+      ```
+
+      **If (a) returns 0 the box is NOT YET CHECKABLE — neither pass nor fail.** Re-run after
+      **7 days** of post-release log; if it is still 0 then, record that on this card and
+      reassess whether the state is reachable at all, rather than leaving the box open
+      indefinitely. Without that expiry this box inherits the first version's defect in mirror
+      form: never resolving instead of always passing.
       (blocked on publishing — the daemon runs the installed plugin)
 
 **Box 6 was UNMEASURABLE as originally written and was rewritten 2026-09-04, not measured.**
@@ -144,6 +156,16 @@ line and the `REFUSED by the pane policy` line (`unread` when the pane could not
 distinct value, so an unreadable pane can never be mistaken for a working one). The box above
 now names a string the log will actually contain.
 
+**Half (a) IS reachable, and the state is live on this host right now — so the box is not a
+trap.** "Requires the bug to recur" reads alarming until you know it is recurring: `_at_working`
+is entered only at `StatusKind.WORKING`, the esc_nudge rung is ESC-only, and this card's law
+refuses ESC-prefixed sequences → empty step tuple → NOOP → the REFUSED line. So a working pane
+reaching that rung produces half (a) BY CONSTRUCTION. It reaches it whenever `diagnosis=frozen`
+coincides with a working screen — this card's whole premise, and the body documents the repaint
+path. `AgentlensPro` has been refused steadily since 01:10 today. Expect half (a) within hours
+of the release, not never. **A regression test pins the pair** —
+`test_a_working_pane_refuses_esc_nudge_and_the_refusal_names_pane_working`.
+
 **The box has TWO halves for a reason — a purely absence-shaped criterion cannot fail.** The
 first rewrite said only "no `FIRED … pane=working` line appears", which passes vacuously if
 `esc_nudge` never fires at all post-release, for reasons having nothing to do with this fix.
@@ -159,8 +181,15 @@ ambiguity is the same missing-field defect, one layer down.
 
 **Verified before shipping the field, so nobody re-derives it:**
 
-- **Nothing PARSES either changed line.** The only other mentions of `FIRE-FAILED` in the tree
-  are docstring prose in `fleet_inject.py` and `test_fleet_inject.py`.
+- **One parser DOES read a `FIRED` line, and the suffix is invariant to it.** An earlier
+  version of this block claimed "nothing parses either changed line" — that was a
+  literal-string grep presented as exhaustive, and it was wrong.
+  `session_liveness.latest_iterm_rearm_epoch` is a real parser: it matches
+  `"FIRED rearm → iterm"` as a **substring** and dates the line from its LEADING timestamp, so
+  a field appended at the END changes neither test. Its own docstring warns that a wording
+  change here would silently return None forever — which is exactly why this needed reading
+  rather than a grep for `$`. (The `FIRE-FAILED` mentions in `fleet_inject.py` /
+  `test_fleet_inject.py` really are only docstring prose.)
 - **The `FLEET-DECLINE-STALL` escalation is NOT coupled to the log text.** `_decline` builds
   its signature as `f"{outcome}:{rung or '-'}"` from its own arguments (`daemon.py:1666`) — the
   log line is a separate `state.log_line` call. So changing the line reset no stall clock and
