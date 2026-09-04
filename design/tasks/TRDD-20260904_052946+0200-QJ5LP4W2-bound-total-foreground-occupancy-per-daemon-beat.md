@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-04T14:28:28+0200
+updated: 2026-09-04T14:30:41+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -178,14 +178,22 @@ bounds that **sum** — only individual subprocess workloads are capped
   The "behind everything" phrasing is what made the cumulative reading sound decisive, so
   the correction matters.
 
-  **What this does and does NOT do to the candidate choice.** It shows **candidate 4**
-  (cap `session-liveness` alone) would be **insufficient**, not wrong — and 4 keeps
-  direct empirical support this ordering finding does not touch: the measurement has
-  `session-liveness` in **8 of 12** stall rows as the single largest contributor. So the
-  honest brief is *"the chain reading shows 4 alone cannot close the gap; it does not
-  displace 4"*. An earlier version framed this as evidence *for* 3 *whereas* adjacency
-  argues for 4 — having caught myself tilting the brief toward 4, I tilted it toward 3
-  instead. **The choice is the advisor's; this card supplies the chain, not the verdict.**
+  **What this does and does NOT do to the candidate choice — third attempt at this
+  balance, and the first two both tilted.** v1 said the adjacency proved candidate 4;
+  v2 said the chain is evidence *for* 3 *whereas* adjacency argues for 4; v3 said 4
+  "cannot close the gap". **All three were verdicts, and the third performed neutrality
+  while pre-loading the answer in the sentence before it** — "cannot close the gap"
+  asserts an insufficiency nobody quantified.
+
+  **What is actually established:** contributors other than `session-liveness` also
+  accumulate into `fleet-stop`'s wait (four of the six named precede it). **What is
+  NOT established:** how much stall mass those ten predecessors contribute *versus*
+  `session-liveness` alone — nothing here measures that, and the card's own data has
+  `session-liveness` in **8 of 12** rows as the single largest contributor, which is
+  consistent with capping it closing *most* of the gap.
+
+  **So: whether candidate 4 alone suffices is UNMEASURED.** That is the whole brief.
+  The choice is the advisor's, and this card supplies the chain, not the verdict.
 
   **The precedent, and it is the useful half.** The BACKGROUND lane deliberately does
   NOT use list order: `_next_bulk_task` (`:3065-3066`) picks `min(due, key=_last_run)`
@@ -218,12 +226,33 @@ bounds that **sum** — only individual subprocess workloads are capped
   never starved behind them"*. Porting therefore *means* dropping the `background`
   filter, at which point "verbatim" no longer describes anything.
 
-  The correct form: `is_due()` gates the candidate list, so among **due** tasks a
-  60 s-interval survival beat is **systematically** the most-recently-run against
-  1800 s-interval neighbours. Least-recently-run would defer it **structurally, on
-  every pass** — not "whenever it happened to be". That is a sharper statement of the
-  2026-07-17 starvation class than the one I replaced. The foreground policy needs
-  fairness **plus a priority floor**, and the floor has no precedent here.
+  **⚠ The replacement was ALSO wrong, and inverted — second failed attempt at this
+  paragraph.** It read: *"among due tasks a 60 s survival beat is systematically the
+  most-recently-run … least-recently-run would defer it structurally, on every pass."*
+  The premise is right — `_last_run()` is a timestamp (`:2810-2814`), and among **due**
+  tasks a 60 s beat's is ≈ now while an 1800 s neighbour's is ≈ 1800 s old, so the beat
+  IS the most-recently-run. The conclusion inverts the code: `min(due, key=_last_run)`
+  picks the **smallest** timestamp — the **least**-recently-run — so that rule never
+  selects the frequent beat at all.
+
+  **The honest finding is that the port's semantics are UNDERSPECIFIED, and its effect
+  on the survival beat is therefore undetermined in EITHER direction:**
+
+  | if the ported rule selects… | then `oauth-rotator-tick` is… |
+  |---|---|
+  | **who RUNS** (the bulk lane's meaning) | never selected → **starved** |
+  | **who is DEFERRED** (a budget's meaning) | never deferred → **protected** |
+
+  The bulk lane selects who *runs*; a foreground budget selects who is *deferred*. Those
+  are opposite polarities, and until the port fixes one, no claim about the survival
+  beat follows. **Two attempts here reached for a concrete failure mode the evidence
+  does not pin down** — the first a category error (`t.background` filters the beat out
+  entirely), the second this inversion, each presented as sharper than the last.
+
+  **What stands without any of that, and is sufficient on its own:
+  `min(due, key=_last_run)` has NO exemption concept.** A foreground policy needs
+  fairness **plus a priority floor** for tasks that must never be deferred, and the
+  floor has no precedent in this file.
 
   **What IS directly transferable is the STRUCTURE, and it is the valuable half:**
   *decide the budget/deferral set ONCE, before the loop*, so the outcome cannot depend on
