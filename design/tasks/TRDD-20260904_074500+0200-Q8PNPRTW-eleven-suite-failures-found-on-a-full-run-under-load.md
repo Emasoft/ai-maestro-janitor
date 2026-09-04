@@ -153,10 +153,19 @@ external-refs: [TRDD-7NSRD8OV]
 - **THE `exit code 0` IN THAT RUN'S TASK NOTIFICATION WAS A LIE — read the meta file.**
   The command was `pytest … > out 2>&1; echo "exit=$?" >> meta; uptime >> meta`, so the
   harness reported the exit of the LAST command (`uptime`), not pytest. `/tmp/verify.meta`
-  says `exit=1`. This is the third instance in one session of a status read off the wrong
-  command (the others: `fsck` through `| head`, and an `ls` on a just-deleted file). **Put
-  the status-bearing command LAST, or read the captured exit from the file — never trust a
-  compound's reported exit.**
+  says `exit=1`. **SECOND instance in one session** — the other is `fsck` read through
+  `| head`, where `$?` was `head`'s. *(A third was miscounted here at first: an `ls` on a
+  just-removed file exiting 2. That one was diagnosed correctly at the time — the status
+  was investigated and explained — so it is a COUNTER-EXAMPLE, the check working. Counting
+  a correct diagnosis as an instance of the defect teaches the wrong reflex.)*
+  **Put the status-bearing command LAST, or read the captured exit from the file — never
+  trust a compound's reported exit.**
+- **MECHANISM CONFIRMED for both `test_capture_all_logins` failures — traceback, not
+  inference.** `/tmp/verify.txt` carries exactly two `E ` lines, both
+  `FileNotFoundError: … grandchild.pid`. That is the report's own quoted evidence for
+  row 1: the poll budget expires before the forked shell can fork/exec/write the pid file.
+  So it is NOT row 2's kill-vs-fork race, and both failures share one cause — the ×10
+  scaling helps and does not cover loadavg 31.
 - **PUBLISH REMAINS GATED.** `publish.py`'s own gate re-runs the suite, so it would catch
   this anyway — but the card's acceptance criteria are unmet while a test the report calls
   fixed is red.
