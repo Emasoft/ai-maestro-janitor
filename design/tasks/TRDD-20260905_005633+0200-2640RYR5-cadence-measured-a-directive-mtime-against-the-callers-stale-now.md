@@ -1,9 +1,9 @@
 ---
 trdd-id: 2640RYR5
 title: the cadence measured a directive's mtime against the caller's stale now sample
-column: dev
+column: complete
 created: 2026-09-05T00:56:33+0200
-updated: 2026-09-05T00:56:33+0200
+updated: 2026-09-05T01:27:16+0200
 current-owner: main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -94,10 +94,18 @@ the future. The asymmetry is load-bearing.
       False is attributable to the mtime and not to another branch. It exists to pin the
       ASYMMETRY: it is the test that reddens if someone later "fixes" a negative age with
       `max(0, ...)` or `abs(...)` — the exact wrong turn taken and caught during this work.
-- [ ] The full suite passes (the run that exposed this must go green). — **RUNNING at commit
-      time**; the module's 15 tests plus ruff/mypy/pyright are green. Left unticked
-      deliberately rather than held for 12 minutes of wall clock. **If it reds, the next
-      commit says so** — an unticked box here means pending, not forgotten.
+- [x] The full suite passes (the run that exposed this must go green). — **GREEN: `pytest=0`,
+      16416 passed, 1 skipped, 13m02s.** The test that reddened the original run passes in the
+      full run, which is the only condition under which the defect was ever observable.
+      Two runs were needed, and the first one's lesson is worth more than its result:
+      it reported `16416 passed` but exited **3** (pytest's INTERNAL-ERROR code, not a test
+      failure) because the REAL-STATE WRITE GUARD tripped on
+      `[source-tree] CHANGED: scripts/dispatch.py` — I edited that file's comments WHILE the
+      suite ran. The guard cannot tell a mid-run source edit from a test escaping isolation,
+      and it is right not to try. **Do not touch tracked source during a full run**: the edits
+      were comment-only so no outcome depended on them, but that is reasoning, and the guard's
+      whole job is to stop anyone reasoning past it. Re-run against a verified-clean tree,
+      untouched, to get an exit code that means what it says.
 
 ## Notes and lessons learned
 
@@ -107,3 +115,10 @@ the future. The asymmetry is load-bearing.
 - **No advisor verdict was obtainable** — built-in tool absent, `fable-advisor:advisor` not
   installed (agent-not-found) despite `model-headroom fable` reporting the window reset. The
   tolerance-vs-clock call is my own analysis, corrected by a review fork.
+- **A non-zero exit with every test passing is a HARNESS signal, not a test signal.** The first
+  confirm run printed `16416 passed` and exited 3. Reading the summary line alone would have
+  called it green; reading the exit code alone would have called it a test failure. Both were
+  wrong — the guard had fired between them. This is the same shape as the earlier slip in this
+  session where `$?` after a pipe reported `tail`'s status, and the general form is: **the
+  summary line and the exit code answer different questions, so a run is only understood when
+  both agree and you have read what sits between them.**
