@@ -160,12 +160,24 @@ external-refs: [TRDD-7NSRD8OV]
   a correct diagnosis as an instance of the defect teaches the wrong reflex.)*
   **Put the status-bearing command LAST, or read the captured exit from the file — never
   trust a compound's reported exit.**
-- **MECHANISM CONFIRMED for both `test_capture_all_logins` failures — traceback, not
-  inference.** `/tmp/verify.txt` carries exactly two `E ` lines, both
-  `FileNotFoundError: … grandchild.pid`. That is the report's own quoted evidence for
-  row 1: the poll budget expires before the forked shell can fork/exec/write the pid file.
-  So it is NOT row 2's kill-vs-fork race, and both failures share one cause — the ×10
-  scaling helps and does not cover loadavg 31.
+- **MECHANISM — row 1 CONFIRMED, row 2 STILL UNDETERMINED. Do not read one traceback as
+  proof of one cause.** `/tmp/verify.txt` carries two `E ` lines, both
+  `FileNotFoundError: … grandchild.pid`.
+  - For **row 1** (`test_kill_process_group_terminates_a_grandchild_too`) that IS the
+    report's quoted evidence: the poll budget expires before the forked shell can
+    fork/exec/write the pid file. Confirmed.
+  - For **row 2** (`test_capture_one_kills_the_whole_tree_and_reports_timeout`) the same
+    symptom is produced by BOTH candidate mechanisms, so it discriminates nothing. That
+    test calls `cal.capture_one(..., timeout=1.0)`, which SIGKILLs the fake script; if the
+    kill lands before the script forks its grandchild, `grandchild.pid` is never written —
+    the report's kill-vs-fork race — and the read at `int(pid_file.read_text())` raises the
+    identical `FileNotFoundError`. A missing pid file is equally consistent with "the
+    writer never got scheduled" and "the writer was killed first".
+  - **An earlier version of this bullet claimed both failures share row 1's cause "one
+    cause, two tests".** That was inferred from SYMPTOM IDENTITY across two tests whose
+    designs differ — precisely the move this card exists to forbid. Distinguishing them
+    needs evidence the current capture does not carry (e.g. whether the SIGKILL fired
+    before or after the fork).
 - **PUBLISH REMAINS GATED.** `publish.py`'s own gate re-runs the suite, so it would catch
   this anyway — but the card's acceptance criteria are unmet while a test the report calls
   fixed is red.
