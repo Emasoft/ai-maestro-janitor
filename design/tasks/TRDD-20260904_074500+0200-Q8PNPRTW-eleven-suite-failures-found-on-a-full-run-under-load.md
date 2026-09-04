@@ -1,8 +1,7 @@
 ---
 trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
-column: blocked
-pre-block-column: todo
+column: human_review
 created: 2026-09-04T07:45:00+0200
 updated: 2026-09-04T12:15:00+0200
 current-owner: janitor-main-session
@@ -14,8 +13,7 @@ project-id: ai-maestro-janitor
 min-approval-requirement: none
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
-blocked-by: [K7WQ2NRB]
-unblock-when: [decision:user-accepts-load-artifacts]
+blocked-by: []
 npt: []
 eht: []
 implementation-commits: [5b5267a5]
@@ -128,7 +126,20 @@ external-refs: [TRDD-7NSRD8OV]
   (`capture_one` times out leaving no orphan) with the race removed. **NOT applied yet** —
   rows 1 & 2's undetermined cause above must be settled first, since row 1 has no
   `capture_one` and no 1.0 s timeout, so this cannot be the whole story.
-- **12:15 — `dev` → `blocked`.** No worker is alive (the measurement worker returned), so `dev`
+- **12:30 — `blocked` → `human_review`, and `blocked-by:`/`unblock-when:`/`pre-block-column:`
+  all REMOVED. `blocked` was wrong and I reached it by patching fields to satisfy a grammar
+  check instead of questioning the column.** The sequence: I set `blocked-by:
+  [decision:...]` (wrong field), corrected it to `[]`, was then told `column: blocked` with an
+  empty `blocked-by:` is off-grammar, and "fixed" that by putting `[K7WQ2NRB]` in the field —
+  **which is false.** This card's remaining scope is a WAIVER DECISION, and K7WQ2NRB does not
+  block it: the USER can rule on the load artifacts today with rows 1 & 2 wide open. The final
+  criterion is **disjunctive** — *"comes back green, OR every remaining red is a load artifact
+  with its cause named and accepted by the USER"* — and K7WQ2NRB gates only the first branch,
+  not the branch this card is waiting on. It would also have produced a standing warning every
+  sweep (`trdd-drift.py:320,327` refuses to restore while a TRDD-shaped blocker is open).
+  **`human_review` is the honest column**: escalated to the USER, nothing else outstanding,
+  and it advances the moment they rule. Three field patches to avoid one column question.
+- *(12:15 — `dev` → `blocked`, superseded by the above.)* No worker is alive (the measurement worker returned), so `dev`
   was false by this block's own standing condition. **I first set `todo`, which was also
   wrong**: `todo` asserts "ready to work, nothing in the way", true of rows 1 & 2 and false of
   the load-artifact bucket, which cannot advance without a decision only the USER can make.
@@ -732,7 +743,9 @@ accepted as an artifact.
 >   waiver, and it belongs in `blocked-by:` — the TRDD-to-TRDD field, per
 >   `trdd-drift.py:303`.
 
-- [ ] Every one of the 12 (not 11 — see the arithmetic above) is classified into exactly one
+- [ ] Every one of the **10** still owned here (rows 1 & 2 moved to `TRDD-K7WQ2NRB`; the
+      12-vs-11 arithmetic below is dated history and no longer defines this card's population)
+      is classified into exactly one
       bucket — product defect / test defect / load-parallelism artifact / environment — each
       with the quoted assertion or traceback line that justifies it. *(The "no bucket assigned
       by elimination" clause that was here is DROPPED: there is no artifact distinguishing a
