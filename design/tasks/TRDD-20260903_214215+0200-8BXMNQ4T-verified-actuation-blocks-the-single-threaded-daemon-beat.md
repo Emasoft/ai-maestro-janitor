@@ -124,22 +124,64 @@ beat.
 Three tasks agree to within 1 s at the median and exactly at p90, which is what
 makes this a beat measurement rather than three chore measurements.
 
-**VERDICT — the tail BREACHES the ceiling; this card is NOT a comment-and-close.**
-The card's own criterion is *"if beats stay on cadence, this card is a comment and
-a close; if they stretch toward 60 s, it is urgent."* Median 5 s and p90 15 s are
-fine. But **p99 is 78–98 s on all three tasks — past 60 s, not toward it** — and
-the max reaches 194 s. Roughly 1 % of beats miss a full cycle. An earlier draft of
-this card said "beats stay ON CADENCE" and closed on the median; that conclusion
-was drawn by tabling the max and then omitting it from the verdict.
+**CORRECTION to the table above (applied after a review).** `starting` is emitted
+before the body, but eligibility is computed from `last-run.ts`, which is stamped
+AFTER the body returns. So `delta = 60 + body(n) + wait`, and `delta − 60` is an
+upper bound, not the wait. `task 'X' done in Ns` IS `body(n)` and is in the same
+log, so the correction is one subtraction:
 
-**Still NOT measured: the condition the card is about.** `grep -c 'rotation-esc'`
-is **0** — no rotation window has ever occurred on this host, so none of the above
-is measured while actuation is verifying against wedged panes. The p99 breach is
-therefore a floor, taken with the suspected cause absent. What causes it is
-unidentified: the failure paths were checked and ruled out (no
-`gh-notify-inbox.failcount`, no `.err.seen`, zero `fetch failed` lines, so
-`Task._backoff_penalty` never fired in this window), which leaves a long
-foreground chore, machine sleep, or scheduler jitter — undistinguished.
+| task | n | med | p90 | max |
+|---|---|---|---|---|
+| `fleet-stop` | 339 | 5 s | 15 s | 94 s |
+| `oauth-rotator-tick` | 335 | 4 s | 12 s | 187 s |
+| `gh-notify-inbox` | 335 | 4 s | 15 s | 184 s |
+
+Bodies are small at the median, so the correction moves med 5→4 s and p90 15→12 s.
+**Use this table, not the one above it.**
+
+**STALLED BEATS: 9 distinct minutes out of ~339 beats (2.7%)** — a stall being
+`wait > 60 s`, i.e. a full cycle missed. Per task: `fleet-stop` 5, `oauth-rotator-tick`
+4, `gh-notify-inbox` 3, at 23:04 · 03:49 · 04:14 · 04:15 · 04:16 · 04:17 · 04:31 ·
+04:32 · 04:45.
+
+**CAUSE — two candidates eliminated from the same log, one supported.**
+
+- **Machine sleep: EXCLUDED.** Sleep stops every task at the same instant for the
+  same duration. Only **1 of the 9** stall minutes (23:04) hit all three tasks; the
+  rest are one- or two-task, and the maxima differ (94 / 187 / 184 s). A single
+  clean sleep window cannot produce that. This matters because the window is
+  overnight on a laptop, where sleep is the natural prior.
+- **Bulk lane: EXCLUDED.** `marketplace-refresh` spawned 6× (22:47, 23:38, 01:19,
+  02:21, 03:23, 04:25) and coincides with **none** of the 9 stall minutes.
+- **Long foreground body: SUPPORTED, and it is this card's own thesis.** The
+  largest gap between any two consecutive daemon events in 6 h 22 m is **95 s**, and
+  the biggest gaps sit INSIDE one task's execution:
+  `S cold-cache-clear 04:34:11 → D 04:35:46` (95 s), `S session-liveness → D` at
+  81 / 79 / 78 s. Durations agree: `cold-cache-clear` max 94 s, `session-liveness`
+  max 78 s. The max single-task body (94 s) equals the max beat wait (94 s), which
+  is what one long body blocking a single-threaded loop produces.
+- **Host load is the likely trigger, not the daemon.** 6 of the 9 stalls fall in
+  04:14–04:45 — the window in which this session ran a full compaction (~04:44) and
+  left a `.git/index.lock` (04:35). Evidence:
+  `reports/board-drain/20260904_045735+0200-8bxmnq4t-p99-attribution.md`.
+
+**VERDICT — on cadence at the median; a real but load-correlated tail; NOT the
+condition the card is about.** The beat holds at med 4–5 s and p90 12–15 s against
+a 60 s ceiling. ~2.7% of beats miss a cycle, attributable to a long foreground body
+(`cold-cache-clear`, `session-liveness` — both pane-touching, which is the family
+this card suspects) under heavy host load. **An earlier draft said "p99 BREACHES the
+ceiling" as a property of the daemon while the body admitted the cause was unknown;
+that was cause-attribution ahead of the evidence, and it is withdrawn.**
+
+**Still ZERO samples of the condition the card exists for.** `grep -c 'rotation-esc'`
+is **0** — nothing above was measured while actuation verifies against wedged panes.
+So this is a floor taken with the suspected cause absent, and it neither closes the
+card nor confirms its hypothesis.
+
+**Fleet size: 15 armed projects** (`.janitor/state/armed*` under the workspace). An
+earlier draft recorded **9**, which was the count of `gh-issues-monitor/` registry
+dirs — a cumulative never-pruned set, not the armed fleet. The `Task` docstring's
+"40 armed projects" is a 2026-07-17 incident figure, not a current count.
 
 ## (SUPERSEDED — both numbers and premise wrong) attempt 2, via the published-line proxy
 
@@ -237,7 +279,9 @@ surface for a number nobody is waiting on.
       from — beats/minute during a rotation window vs. outside one, and the fleet size.
       — **TWO of three delivered; the box stays OPEN on the third.** OUTSIDE a rotation
       window: measured from the per-task `starting` markers, three tasks, 6 h 22 m window,
-      med 5 s / p90 15 s / **p99 78–98 s** (see the measured section above). Fleet size: **9**.
+      med 4–5 s / p90 12–15 s, with **9 stalled beats in ~339 (2.7%)** attributed to long
+      foreground bodies under host load (sleep and the bulk lane both eliminated from the
+      same log). Fleet size: **15 armed projects**.
       DURING one: still **zero samples** — `rotation-esc` is 0 on this host, and that is the
       condition the card exists for.
       **The box was briefly ticked `[x]` with this same annotation; that was wrong** and the
@@ -246,13 +290,17 @@ surface for a number nobody is waiting on.
       not the paragraph under it. A tick with a disclaimer is a closed box.
 - [ ] A decision is recorded: either "no action, cost is invisible at this fleet size" (and this
       card closes) or a named mechanism with the measurement that justifies it.
-      — **OPEN, and the measurement now argues AGAINST the "no action" branch.** p99 exceeds
-      the 60 s ceiling on all three tasks, so the card's own urgency trigger is met at the
-      tail even with the suspected cause (a rotation window) entirely absent. A mechanism
-      cannot be chosen yet because the p99 cause is unidentified — long foreground chore vs
-      machine sleep vs jitter are undistinguished. **Next action: attribute the p99 breach**
-      (the `task 'X' done in Ns` markers, already in the log, bound each task's own duration
-      and should say whether one chore owns the stall).
+      — **OPEN, and now for a specific reason.** The tail IS real (2.7% of beats miss a
+      cycle) and IS attributed (a long foreground body blocks the loop — this card's own
+      thesis, via `cold-cache-clear` / `session-liveness` rather than rotation actuation).
+      But it correlates with host load, and the condition the card exists for has never
+      occurred here. So neither enumerated branch is honest yet: "no action, cost is
+      invisible" is contradicted by 9 stalls, and "a named mechanism" would be chosen
+      against a trigger that has zero samples.
+      **Next action: bound the two blocking bodies** — `cold-cache-clear` (max 94 s) and
+      `session-liveness` (max 78 s) are the measured loop-blockers; either they move to the
+      bulk lane or they get an internal deadline. That is a decision the measurement now
+      supports, independent of whether a rotation window ever occurs.
       This box was also briefly ticked, on a "defer and re-measure" outcome that is neither of
       the two the box enumerates.
 - [ ] If a mechanism lands: a test pins the bound, and `oauth-rotator-tick` is shown still
@@ -274,6 +322,22 @@ surface for a number nobody is waiting on.
   about a TAIL condition (panes wedged during rotation), the tail sample is the
   population of interest, not noise to trim — discarding it silently is how a card about
   rare stalls gets closed on its common case.
+- **The generator behind all three failed attempts is ONE habit, and it is not "wrong
+  population".** Each attempt stated a claim at higher confidence than the step that
+  produced it: attempt 1 read a grep's silence as proof no marker existed; attempt 2
+  called `delta − 60` "the wait" when it is `body + wait`, and called three tasks on ONE
+  loop "agreeing" as if that were independent corroboration (it is entailed by the shared
+  loop and certifies nothing); attempt 3's commit subject attributed the stall to the
+  daemon while its own body said the cause was unknown. Wrong-population was one symptom.
+  The check that would have caught all three is the same: **before writing a claim, name
+  the step that produced it and ask what that step actually establishes.**
+- **`f5885338`'s commit message justified the `backburner → todo` revert with "the
+  transition matrix lists only the forward direction" — that is argument-from-absence,
+  inside the commit that exists to correct argument-from-absence.** The matrix is a
+  "Quick reference" of transitions and their side effects and does not claim to be
+  exhaustive. The revert is right on other grounds: a measured ceiling breach is not a
+  park, and undoing my own unjustified edit needs no transition warrant. Retracted here
+  because the commit message cannot be.
 - **A ticked box with a prose disclaimer is a closed box.** Both acceptance boxes were
   briefly `[x]` with honest annotations explaining they were only partly satisfied. That
   is the same defect corrected one card earlier on TRDD-L46IG69Y, and the argument
