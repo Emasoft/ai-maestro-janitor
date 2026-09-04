@@ -155,17 +155,34 @@ independent verdict was obtained by this session itself.
       `test_a_partial_success_is_not_a_failed_run` (both in
       `tests/test_daemon_marketplace_refresh_task.py`).
 - [ ] Live: `daemon.log` shows one `marketplace-refresh` run finishing with rc=0 in < 300 s
-      and **no `plugin-update deferred (marketplace lock held)` line whose timestamp falls
-      inside a `marketplace-refresh` run interval.**
+      and **no `plugin-update` request deferred for longer than 180 s in total** (max
+      observed lock hold is ~95 s, so 180 s is generous today and impossible in the
+      32-min era).
+      ~~and **no `plugin-update deferred (marketplace lock held)` line whose timestamp falls
+      inside a `marketplace-refresh` run interval.**~~
       ~~and `plugin-update` no longer logging `deferred (marketplace lock held)`.~~
-      **REWORDED 2026-09-04.** The struck text reads as *the string never appears*, which no
-      fix to THIS task can deliver — every holder of `marketplace-op.lock` produces it
-      (`version-update`, `fleet-plugins-update`, per-session marketplace ops). The interval
-      form is what this card's own body always meant ("**while the child runs it holds** the
-      lock, so every `plugin-update` fire logs `deferred`") and it is measurable. An earlier
-      version of this edit put the new wording in prose ABOVE the box and left the box text
-      alone — which is the "nothing evaluates a condition written as prose" defect this
-      session corrected three times on TRDD-8BXMNQ4T, committed onto a checkbox.
+      **REWORDED TWICE 2026-09-04, and the second reword is the lesson.**
+      - **v1 (original)** "no `deferred` line at all" — unsatisfiable: every holder of
+        `marketplace-op.lock` produces it (`version-update`, `fleet-plugins-update`,
+        per-session ops), so no change to THIS task can suppress it.
+      - **v2 "no line inside a refresh interval"** — also unsatisfiable, which I did not
+        see until a review did the arithmetic. Refresh holds the lock ~95 s; `plugin-update`
+        fires ~every 10 min; the schedules are independent, so they collide on roughly
+        **95/600 ≈ 16%** of fires — ~23 times a day, forever, by chance rather than by
+        defect. And `945fb3e0` on this same card argues those deferrals ARE expected
+        behaviour. A clause that fails on behaviour the card calls healthy is a permanent
+        red light, not an acceptance criterion.
+      - **v3 (current): a BOUND, not an ABSENCE.** ≤180 s total deferral. This is the form
+        that distinguishes the eras, which is what the card actually cares about: 32
+        min/hour before the fix vs ~95 s max hold now. Both earlier wordings asserted the
+        **absence of a symptom** — and the broken and fixed states emit the *same string*,
+        differing only in magnitude, so no absence-shaped clause can tell them apart.
+      **The reusable lesson, worth more than either rewrite:** when a defect and its fix
+      produce the same log line at different magnitudes, the acceptance criterion must bound
+      the magnitude. "No X appears" cannot distinguish them and will read as failure forever.
+      (Also: an earlier edit put a reword in prose ABOVE the box and left the box text alone
+      — the "nothing evaluates a condition written as prose" defect, committed onto a
+      checkbox one card after correcting it three times on TRDD-8BXMNQ4T.)
       **MEASURED 2026-09-04, window 22:32→05:58 (7 h 26 m). Clause 1 PASSES, clause 2
       FAILS, so the box stays open — and the failure is the interesting half.**
       - **Clause 1 ✓** — four consecutive clean runs: `done in 98s / 98s / 100s / 95s`
