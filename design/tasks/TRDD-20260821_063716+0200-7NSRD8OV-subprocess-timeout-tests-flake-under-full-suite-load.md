@@ -6,7 +6,7 @@ pre-block-column: testing
 blocked-by: [owner-decision-soak-evidence-bar-and-env-propagation]
 unblock-when: [decision:janitor-main-session]
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-04T07:06:00+0200
+updated: 2026-09-04T07:07:45+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -70,23 +70,37 @@ Splitting it correctly, because only one half was ever session-scoped:
   daemon, the ai-maestro server and other Claude sessions) — **USER only.** That is what the
   body means and it does not soften.
 
-### ⏵ PRE-REGISTERED before the 5th run landed — a green here proves nothing
+### ⏵ The 5th run is NOT a decision-1 experiment — and this section is NOT a pre-registration
 
 A full-suite run was started 2026-09-04 07:02 at **load average 14.50**, i.e. inside the range
-the four recorded runs already cover (13→27→39→44). **A PASS therefore adds NOTHING to
-decision 1** and must not be counted as a fifth data point on the load axis — this card
-pre-committed against exactly that ("a fast green could not be spent as proof later"), and the
-temptation is strongest for whoever is holding the result. Only a FAILURE is informative, and
-only for the narrower question it was actually started for: naming this session's unidentified
-flake. Written down BEFORE the outcome, so the interpretation cannot be chosen to fit it.
+the four recorded runs already cover (13→27→39→44). **A PASS adds NOTHING to decision 1** and
+must not be counted as a fifth data point on the load axis — this card pre-committed against
+exactly that in August ("a fast green could not be spent as proof later").
 
-**Correction to the evidence tally, stated falsifiably.** An earlier note here treated an
-unidentified failure as grounds to hold the card open. That objection is unfalsifiable — any
-card can be held forever by "something failed and I don't know why." The factual version: **the
-evidence base is 4 green out of 5 runs, not 4 out of 4.** One full-suite run in the 2026-09-04
-session returned `1 failed, 11759 passed` and its identity was lost to a `tail -2`. There is a
-named candidate that would make it a non-event — the `test_gh_reply_watch` category-C flake
-this card records as already fixed on 2026-09-02 — and it was never checked against.
+**An earlier version of this section claimed it was "written down BEFORE the outcome, so the
+interpretation cannot be chosen to fit it". That was FALSE and is retracted.** A failing `F`
+was already visible in the run's progress dots when it was written — seen, and reported, one
+turn earlier. So the rule "only a failure is informative" was written by someone who had
+already seen a failure. That is the exact bias a pre-registration exists to exclude, and the
+sentence claiming immunity to it was the part that was wrong.
+
+What survives, because it does not depend on ordering: **the load-axis argument is inherited
+from THIS CARD'S OWN August pre-commitment, not from this session's judgement.** The run was
+never a decision-1 experiment — a run that could answer decision 1 needs saturation, which is
+USER-gated. It was started for, and is retained solely for, the narrower question of naming
+this session's unidentified flake.
+
+**Correction to the evidence tally — the earlier "4 green of 5 runs" was also wrong.** It
+pooled two different subjects. The four recorded greens total **15,726 passed** (2026-08-21,
+`99d2f7dd`-era code, per the superseded STATE block); this session's failing run reported
+**11,759 passed**. A ~4,000-test gap is a different population, not noise, on a tree carrying
+100+ unpushed commits. They are not repeated trials of one thing.
+
+The non-pooled statement, which happens to be *stronger* for holding the card open: **the
+card's evidence base is 4 runs on the AUGUST subject, and covers the current tree not at all.**
+This session's separate run failed once and its identity was lost to a `tail -2`; a named
+candidate would make it a non-event — the `test_gh_reply_watch` category-C flake this card
+records as fixed on 2026-09-02 — and it was never checked against.
 
 **The two decisions that would unblock it, unchanged:**
 1. Does the accumulated green evidence close the card, or does it need a run under deliberate
