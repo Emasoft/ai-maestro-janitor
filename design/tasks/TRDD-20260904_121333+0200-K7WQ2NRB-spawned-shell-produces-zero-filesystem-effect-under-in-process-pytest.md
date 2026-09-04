@@ -76,8 +76,49 @@ The evidence shows no write landed. It does **not** distinguish: (a) `exec` neve
 writes into that directory failed. Q8PNPRTW published "the shell never runs" and had to
 retract it — **do not repeat that.**
 
-## ⭐ THE LEADING HYPOTHESIS — per-worker fd / process-table exhaustion
+## ☠ HYPOTHESIS 5, DEAD ON ARRIVAL — per-worker fd / process-table exhaustion
 
+**RETRACTED ~20 minutes after I recorded it as "the leading hypothesis" in `1dce8845`.
+Refuted by the very measurement it claimed to uniquely explain.**
+
+**Why it is dead:** `subprocess.Popen.__init__` does not return until `_execute_child`
+completes, and that path raises on every resource failure. fd exhaustion (EMFILE/ENFILE) hits
+`os.pipe()` for the errpipe **before the fork** → `OSError` in the parent, no Popen object.
+fork/proc-table failure (EAGAIN/ENOMEM) → raises. And a child that fails at `exec` writes the
+exception down `errpipe_write` before `_exit`; the parent reads it and **re-raises it** — that
+is why a missing binary surfaces as `FileNotFoundError` *from the `Popen(...)` call*. CPython
+closed the silent-child path deliberately.
+**The measured failure has `Popen` returning a LIVE object with a readable `returncode`, the
+poll loop running to full exhaustion, and the failure landing at `read_text()`.** So the child
+**was created and DID exec successfully.** Exhaustion-at-spawn predicts an exception at
+`:274`/`:138`. That is not what happens.
+
+**Two further errors in how I recorded it, both this card's own retracted patterns:**
+- **`_SPAWNED_PIDS` was never evidence.** A `set` of ints exhausts nothing — not fds, not the
+  process table, not memory. Its only qualification was that it is per-process state growing
+  serially and fresh per xdist worker, which *matches the shape* of serial-fails/xdist-passes.
+  I promoted a shape match to "one weak positive signal", which is the `E `-census error.
+- **"Load average ⇒ fewer free fds/procs machine-wide" is not a mechanism.** Load average
+  counts RUNNABLE PROCESSES. A box at load 15 is not measurably nearer `kern.maxproc` than at
+  load 11. That row was the only one addressing the soak8/soak9 load evidence, and it was
+  doing so with an assertion, not a cause.
+
+**AND THE TWO-CARDS-ONE-BUG FRAMING IS WITHDRAWN — it is `c54627f0`'s retracted error one
+level up.** Q8PNPRTW's `assert 'BRPROT-001' in ''` is a **detector subprocess exiting 0 with
+empty stdout**, which has a DOCUMENTED, DESIGNED cause: `run_subprocess` fails open on timeout,
+returns None, the caller's `if x is None: return 0` fires. `timeout_scale`'s own docstring
+describes that exact scenario. **That is a TIMEOUT.** This card's zero-write measurement
+*refutes* timeouts — a timeout predicts a LATE write, and no write ever landed. The two cannot
+share a mechanism, and unifying them on "both look empty" is precisely "both raise
+FileNotFoundError" at a higher abstraction, where it is harder to see rather than more
+defensible. **Risk if left standing: scaling Q8PNPRTW's timeouts and declaring this card
+solved.**
+
+**What actually fits the data, and it is all that fits:** the child exec'd successfully, then
+produced no filesystem effect. Cause unknown. Naming that "fd exhaustion" was a label, not a
+mechanism.
+
+*(Original text below, kept as provenance for a hypothesis that lived 20 minutes:)*
 **This is the only candidate that explains BOTH this card and `TRDD-Q8PNPRTW`, and it is the
 first one that predicts the ZERO-WRITE signature instead of merely tolerating it.**
 
