@@ -114,9 +114,25 @@ FileNotFoundError" at a higher abstraction, where it is harder to see rather tha
 defensible. **Risk if left standing: scaling Q8PNPRTW's timeouts and declaring this card
 solved.**
 
+**MEASURED AFTERWARDS, and it independently kills the exhaustion story on this box:**
+`ulimit -n` = **1,048,576**; `kern.maxfiles` = 491,520; `kern.maxfilesperproc` = 245,760.
+There is no plausible regime where a pytest worker approaches those. Do not re-raise fd
+exhaustion here without new numbers.
+
+**ALSO MEASURED, and it is the load-sensitivity again:** row 2 run 6× solo with `-s` at host
+load ~9 → **6/6 PASSED**, so no failing run's child stderr was captured (the point of the
+run). Earlier today the same test failed **3/3 solo at load ~15**. Same test, same code, same
+day; the only variable that moved is host load.
+
 **What actually fits the data, and it is all that fits:** the child exec'd successfully, then
-produced no filesystem effect. Cause unknown. Naming that "fd exhaustion" was a label, not a
-mechanism.
+produced no filesystem effect, and it happens far more at high host load. Cause unknown.
+Naming that "fd exhaustion" was a label, not a mechanism.
+
+**THE MEASUREMENT STILL OWED — and note the trap:** capture a FAILING run's child stderr.
+Row 1/row 2 inherit the parent's stderr (no `stderr=` at `:274`), so `-s` would show anything
+`/bin/sh` printed. **But failures need a loaded box, and the box is quiet now.** Either run it
+under a concurrent full-suite run, or accept that this measurement is only available when the
+machine is busy. Six clean runs proved nothing except that the bug is load-gated.
 
 *(Original text below, kept as provenance for a hypothesis that lived 20 minutes:)*
 **This is the only candidate that explains BOTH this card and `TRDD-Q8PNPRTW`, and it is the
