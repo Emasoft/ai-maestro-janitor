@@ -3,7 +3,7 @@ trdd-id: 5EHBPH6G
 title: marketplace-refresh sweeps 262 registered marketplaces serially under background QoS and is cap-killed on every run — five consecutive rc=-9 and plugin updates deferred behind its lock
 column: testing
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-03T11:09:13+0200
+updated: 2026-09-04T06:02:00+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -139,6 +139,29 @@ independent verdict was obtained by this session itself.
       `tests/test_daemon_marketplace_refresh_task.py`).
 - [ ] Live: `daemon.log` shows one `marketplace-refresh` run finishing with rc=0 in < 300 s
       and `plugin-update` no longer logging `deferred (marketplace lock held)`.
+      **MEASURED 2026-09-04, window 22:32→05:58 (7 h 26 m). Clause 1 PASSES, clause 2
+      FAILS, so the box stays open — and the failure is the interesting half.**
+      - **Clause 1 ✓** — four consecutive clean runs: `done in 98s / 98s / 100s / 95s`
+        (01:21, 02:23, 03:25, 04:26, 05:28), all rc=0, all far under 300 s. Against the
+        pre-fix behaviour — SIGKILLed at the 1920 s outer cap (`_WORKLOAD_TIMEOUT_SEC`
+        1800 + `_BULK_CHILD_KILL_GRACE_SEC` 120) with nothing completed, 11 consecutive
+        times — that is a ~19× reduction, and `refreshed 31/32 marketplaces` confirms it
+        is doing near-full work rather than less of it.
+      - **Clause 2 ✗** — `plugin-update deferred (marketplace lock held)` appears **211
+        times** in this window, most recently 04:26:21/27/31 for
+        `claude-menu-system@emasoft-plugins`. Those land INSIDE the 04:25:03→04:26:44
+        refresh run. So the lock is still held for the whole ~95–100 s pass and
+        `plugin-update` still queues behind it.
+      **What this means for the card:** the fix removed the *cap kill*, not the
+      *contention*. TRDD-5EHBPH6G's own framing is that the sweep "held the marketplace
+      lock for the whole ~32 min attempt and starved every other marketplace op behind
+      it" — starvation is now ~100 s instead of ~32 min, which is a different severity,
+      not a different failure. Closing this box needs either a shorter lock hold (per-item
+      lock rather than per-run) or an explicit decision that ~100 s of deferral is
+      acceptable and clause 2 should be reworded. **Neither is decided here.**
+      (Read and measured after a review pointed out I had flagged this card as a likely
+      close without reading its box. The box text asks for TWO conditions; only one was
+      ever going to be satisfied by the #297 work.)
 
 ## Approval log
 
