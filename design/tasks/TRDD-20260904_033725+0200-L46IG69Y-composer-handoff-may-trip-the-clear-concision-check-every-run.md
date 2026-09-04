@@ -1,9 +1,9 @@
 ---
 trdd-id: L46IG69Y
 title: the composer-authored handoff may trip clear_trigger's concision warning on every clear
-column: todo
+column: human_review
 created: 2026-09-04T03:37:25+0200
-updated: 2026-09-04T03:37:25+0200
+updated: 2026-09-04T20:17:08+0200
 current-owner: main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -12,7 +12,7 @@ project-id: ai-maestro-janitor
 external-refs: [TRDD-ZQ02QG1L]
 relevant-rules: []
 npt: []
-eht: []
+eht: [34GB6XUI]
 blocked-by: []
 implementation-commits: []
 ---
@@ -96,121 +96,101 @@ proposed confidently.
    warning for it — narrowest, and honest about the fact that two producers
    legitimately have two shapes.
 
-## MEASUREMENT ATTEMPTED AND INVALID — wrong population. NOT taken.
+## Superseded — a first measurement over the wrong population
 
-The section below was written as if the measurement succeeded. It did not, and
-the box above is un-ticked. Kept because the failure is instructive.
-
-**What I measured:** all 29 `.janitor/state/agent-handoff-*.md` on disk.
-**What the card asks about:** output of `compose_agent_handoff.py`.
-**Those are different populations, and I cannot show the sample contains ANY of
-the second.**
-
-- `f9bf82ed` shipped the composer at 2026-09-03 18:59. Splitting the 29 on that
-  timestamp gives 21 pre / 8 post — but DATE IS NOT THE TEST. A file is composer
-  output only if the session that wrote it RAN a version whose skill calls the
-  composer. This session loaded **3.4.13**, whose `janitor-write-handoff` says
-  *"Author a dense, semantic handoff and Write it"* — so its handoffs are
-  hand-written, and **I hand-wrote at least two of the eight myself**.
-- The data corroborates it: the largest files carry refs=37, 22, 12. Dense
-  `[[wikilink]]`/`TRDD-`/`ATOM-` referencing is the SIGNATURE OF THE OLD
-  LINK-HEAVY INSTRUCTION, not of an `llm-ext` prose summary. So "26/29 match
-  `_REFERENCE_RE`" measures the instruction this card's parent REMOVED.
-- Three files are byte-identical (60,932 / refs=37, one session at 10:38, 10:43,
-  11:55) — one handoff rewritten thrice, not three samples. They are the max and
-  they inflate both the median and the 90%.
-- `check_handoff_concise` was never called. I approximated it with `wc -c` +
-  `grep`, and its own reported failure reasons include *"inlines a large fenced
-  block"* — neither a byte count nor a regex, so its logic is richer than my
-  proxy.
-
-**Which half survives, and which does not.** The SIZE inference weakly survives:
-hand-written dense prose and an `llm-ext` summary are both prose-shaped, so
-"composer output likely exceeds 4096" stays plausible — as an inference from an
-analogous population, not a measurement. The REFERENCE half does not survive at
-all, and that was the load-bearing uncertainty ("intermittent is worse than
-always") — it is exactly the axis where the two populations differ most.
-
-**The real finding, which IS solid:** no composer-written handoff appears to
-exist on this host to measure, and generating one is blocked —
-`compose_agent_handoff.py --dry-run` timed out at 300 s (it still calls
-`llm-ext`). So this box cannot close here.
-
-**And the method note was self-flattering.** "Taken WITHOUT an `llm-ext` call"
-was written as a virtue. It is the defect: not calling `llm-ext` is precisely why
-there was no composer output to measure. The honest phrasing is "I measured a
-PROXY population because generating real samples was blocked" — which is a
-different claim, and a weaker one.
-
-## THE INVALID MEASUREMENT FOLLOWS — see above before using any number in it
-
-Taken WITHOUT an `llm-ext` call and without side effects, from the 29
-composer-written handoffs already on disk in `.janitor/state/`. That is a
-DISTRIBUTION, which is what "always / never / sometimes" actually requires — one
-fresh sample could not have answered it. Raw data:
-`reports/board-drain/20260904_042225+0200-l46ig69y-handoff-concision-measurement.txt`.
-
-| question | answer |
-|---|---|
-| exceeds `_HANDOFF_MAX_BYTES = 4096`? | **26 of 29 (90%)**. min 3,374 · median 8,978 · max 60,932 — 15× the budget |
-| matches `_REFERENCE_RE`? | **26 of 29 DO**. Only 3 have zero refs |
-
-**Both predictions on this card were wrong, in the same direction — I assumed
-the composer's output looks unlike a link-only index on both axes:**
-
-1. I expected the size warning to be *possible*. It is **near-constant**: 90% of
-   real handoffs blow the budget, the median by more than 2×.
-2. I expected `no-references` to be the common case and reference-matching to be
-   the lucky accident, making the warning intermittent. It is the **reverse**:
-   references are usually PRESENT (a summary of a session that discusses TRDD ids
-   reproduces them), so `no-references` is the rare case.
-
-So the composite warning is **near-constant via size, rare via references** —
-and that is worse than either prediction, because an operator sees a warning on
-almost every clear whose *stated reason* changes occasionally. That is the shape
-this card called out as worst: a signal that fires so often it is ignored, with
-enough variation to look like it means something.
-
-**REMEDY NARROWING — RE-HEDGED, because it cited the invalid numbers.** One
-section of this card says the measurement is invalid and this one used it to
-eliminate an option; that contradiction is itself the defect. Restated at the
-strength the evidence actually supports: option 2 (retune the constants) is
-PLAUSIBLY wrong — 4096 was set
-for a hand-written link-only index, and the analogous population (hand-written
-prose handoffs) exceeds it 90% of the time — so "retuning" would likely mean
-raising the budget several-fold to fit prose it was never meant to measure. That
-is an inference from a proxy, NOT the measurement this card asked for, and it
-does not eliminate option 2 on its own. Option 1 (a link-only composer mode) and option 3 (recognise
-composer-authored handoffs and skip the shape check) both remain live, and
-choosing between them is a design decision about whether the clear path still
-wants a link-only artifact at all — which is TRDD-ZQ02QG1L's territory, not a
-constant to tweak.
+A first measurement was taken over the wrong population — all 29 handoffs on
+disk, split by the composer's ship DATE rather than attributed to it, so the
+"post" half included files the measuring session had hand-written itself — and
+discarded. Its lesson is in the measurement box below; its ~90 lines of numbers
+are cut FROM THIS CARD, where a reader met them before the correct ones.
 
 ## Acceptance criteria
 
-- [ ] The two questions above are measured and the answers recorded here.
-      — UN-TICKED. The attempt measured hand-written handoffs, not composer
-      output; see "MEASUREMENT ATTEMPTED AND INVALID" above. Method note worth keeping: the measurement was blocked as
-      framed (`compose_agent_handoff.py --dry-run` timed out at 300 s producing
-      nothing — it still calls `llm-ext`), and became free once I stopped trying
-      to GENERATE a sample and looked for samples already on disk. 29 of them
-      were, from previous sessions. Verified no side effects: handoff count
-      unchanged at 29, `resume-directive.txt` byte-identical.
-- [ ] A remedy is chosen with the measurement cited, or the interaction is
+**Why `column: human_review` and not `complete` or `testing`:** every criterion
+this card owns is met, and `eht:` bars `complete` until TRDD-34GB6XUI is
+terminal. `testing` and `dev` would both assert active work on a card nobody is
+working — an untrue WORK column is worse than an unstarted card. `human_review`
+is the one available column that is not a lie: what remains is a human's call.
+The vocabulary gap this exposes is recorded in 34GB6XUI's notes.
+
+- [x] The two questions above are measured and the answers recorded here.
+      **TAKEN 2026-09-04, and the earlier "cannot close here" was wrong** — not
+      because the invalid attempt's numbers were salvageable (they were not), but
+      because the POPULATION was never unavailable. It is enumerable exactly:
+      `.janitor/logs/agent-handoff-compose.log` carries one
+      `wrote <name> (<n> chars)` line per composer run, so the composer names its
+      own output. Five files, all still on disk, zero missing, no date heuristic
+      and no shape guess. The invalid attempt failed on the one axis it had
+      controlled for — provenance — while the composer had been recording
+      provenance the whole time. **A producer's own log is the provenance oracle;
+      generating a fresh sample was never the only way in.**
+      Measured by calling the REAL `check_handoff_concise` (not a `wc -c` + grep
+      proxy — the proxy is what the invalid attempt was faulted for):
+      - **Q2, size: ALWAYS over.** 5/5 `too-large`; 23816 / 25823 / 35910 /
+        38362 / 40535 bytes against the 4096 budget = **5.8-9.9x**. Not marginal,
+        so the warning fired on EVERY run — never "only for long sessions".
+      - **Q1, references: matched in all 5** (6-32 hits each — `TRDD-`, `memgrep`,
+        `#\d+`), because a summary reproduces ids the session discussed.
+        INCIDENTAL, not by construction: nothing stops a reference-free summary,
+        and that residual possibility is why the check is LIFTED rather than
+        tuned — kept, it would fire on exactly that summary, and an intermittent
+        warning looks like signal.
+      - **Third check, unasked and it decided the remedy:** `inlined-block`
+        fired 0/5.
+- [x] A remedy is chosen with the measurement cited, or the interaction is
       explicitly accepted with a reason.
-      — NARROWED, not chosen: option 2 (retune the constants) is eliminated by
-      the measurement above. Options 1 and 3 remain and the choice between them
-      is a design question about whether the clear path still wants a link-only
-      artifact — deliberately left, because choosing it here would decide
-      ZQ02QG1L's scope from a downstream card.
-- [ ] COLLAPSE TRDD-ZQ02QG1L when this card closes and it returns to `complete`.
-      Its body is 404 lines carrying five correction layers; a reader must
-      reconstruct four reversals to extract three facts. This box lives HERE, on
-      the card that closes first, because a prose note on ZQ02QG1L would be
-      honoured only if someone read the top of a 404-line file at exactly the
-      right moment. Nothing evaluates a condition written as prose.
-- [ ] If a remedy is applied, a test pins it so the warning cannot silently
+      **CHOSEN: option 3, split TWO-of-three** — not option 3 as this card wrote
+      it ("skip the shape warning", singular). The measurement splits the three
+      checks apart, which the card could not have known before taking it:
+      - `too-large` and `no-references` are LIFTED for composer output. Both
+        restate the link-only DESIGN (concise; exhaustive by REFERENCE), and a
+        prose summary is exhaustive by INCLUSION on purpose. Lifting only the
+        byte check would leave `no-references` free to fire on the summary that
+        names no ids — intermittent, which looks like signal and is worse than
+        always-on.
+      - `inlined-block` STAYS LIVE for both producers. Its rationale is link-only
+        but its PREDICATE is "you pasted a big blob", which survives the shift to
+        prose: llm-ext quoting a source file instead of summarizing it is the one
+        shape where composer output is bloated beyond its own nature. It fired
+        0/5, so keeping it costs no noise on any handoff this host has. A first
+        draft lifted all three and a review caught it — "inapplicable to prose"
+        is true of the two design restatements, false of the predicate.
+      Option 2 (retune the constants) was never on the table once read closely:
+      `_HANDOFF_MAX_BYTES`'s own comment scopes it to *"the link-only handoff …
+      never the tens-of-KB a compaction summary runs"*, i.e. the ratified
+      contract already names composer output as what it is NOT about. So this is
+      a SCOPING of a ratified check, not a governance change — Tier 0.
+      Option 1 (a link-only mode in the composer) is declined: it would give the
+      composer two output shapes to satisfy a check that does not apply to the
+      shape the composer produces. (The check DOES apply to the link-only shape —
+      it is that shape's contract, which is the premise of this whole fix.)
+      Implemented: `handoff_files.COMPOSED_MARKER`, stamped by
+      `compose_agent_handoff.py`, honoured by `clear_trigger`. Marker lives in
+      the shared module because both sides already import it; it goes in the
+      PAYLOAD rather than the filename because every consumer groups by the
+      filename's key and a new key would split the session's group.
+      (The ZQ02QG1L collapse that used to be a box HERE is now **TRDD-34GB6XUI**,
+      this card's `eht:`. The instinct that put it here was right — a prose note
+      on ZQ02QG1L would be honoured only if someone read the top of a 404-line
+      file at the right moment, and nothing evaluates a condition written as
+      prose. But a box that finishing THIS card cannot tick is not this card's
+      acceptance criterion: it would either hold the card open or be ignored, and
+      both hide the real state. A TRDD in `todo` is the thing that gets seen.)
+- [x] If a remedy is applied, a test pins it so the warning cannot silently
       return to firing on every run.
+      `test_a_composer_handoff_is_exempt_from_size_and_references_but_not_the_fence`
+      — ONE payload violating all three, asserted TWICE: unmarked yields exactly
+      `{too-large, no-references, inlined-block}`, marked yields exactly
+      `["inlined-block"]`. One payload, not two, because the split IS the claim —
+      two payloads could not show that the marker is what moved, and asserting
+      only the marked half would pass on a check that had stopped working for
+      everyone. Plus
+      `test_the_exemption_needs_the_marker_at_the_top_not_merely_present`: the
+      marker EXEMPTS, so a model-authored handoff that merely quotes the string
+      mid-prose (this repo's handoffs discuss the janitor constantly) must not
+      exempt itself. The exact-list assertion deliberately pins order: a NEW
+      reason appearing on a composed handoff should fail this test, because
+      whether it falls inside the exemption is a human's call.
 
 ## Notes and lessons learned
 

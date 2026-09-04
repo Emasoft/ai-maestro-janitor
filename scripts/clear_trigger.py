@@ -156,12 +156,34 @@ def check_handoff_concise(
                            be exhaustive-by-reference (it links to nothing).
       - `inlined-block`  — a fenced block longer than `max_fence_lines`, i.e. a big
                            chunk of content INLINED instead of replaced with a link.
+
+    A COMPOSER-AUTHORED handoff is exempt from the first TWO, and NOT from the third
+    (TRDD-L46IG69Y). `too-large` and `no-references` restate the link-only DESIGN — concise, and
+    exhaustive by REFERENCE — and an `llm-ext` prose summary makes the opposite trade on purpose,
+    exhaustive by INCLUSION. Measured 2026-09-04 over every composer handoff this host had
+    (n=5): 23.8-40.5 KB, so 5.8-9.9x the budget — `too-large` fired on EVERY run, and a warning
+    that always fires trains its reader to ignore it. References matched in 5/5 (6-32 hits), but
+    only INCIDENTALLY (a summary reproduces ids the session discussed), so leaving that check
+    live would let it fire on the summary that happens to name none — intermittent, which looks
+    like signal and is worse than always.
+
+    `inlined-block` STAYS LIVE for both producers. Its rationale is link-only but its PREDICATE
+    is "a fenced block over `max_fence_lines`", i.e. you pasted a big blob — which stays true of a prose
+    summary, and is the one shape where composer output is bloated beyond its own nature
+    (llm-ext quoting a source file, not summarizing it). It fired 0/5, so keeping it costs no
+    noise, and a check that has earned its keep by staying quiet is not one to drop.
+
+    The fatal ABSENCE check in `main()` is untouched: a failed compose writes nothing, so a
+    clear with no handoff is still REFUSED.
     """
     reasons: list[str] = []
-    if len(text.encode("utf-8")) > max_bytes:
-        reasons.append("too-large")
-    if not _REFERENCE_RE.search(text):
-        reasons.append("no-references")
+    # ONE block, not two guarded lines: membership in the exemption is structural, so a link-only
+    # check added inside it inherits the exemption and one added outside is a visible choice.
+    if not text.lstrip().startswith(handoff_files.COMPOSED_MARKER):
+        if len(text.encode("utf-8")) > max_bytes:
+            reasons.append("too-large")
+        if not _REFERENCE_RE.search(text):
+            reasons.append("no-references")
     # Longest run of lines inside any ``` fenced block — a big inlined blob is exactly
     # the "pasting the full reasoning inline" the owner forbids.
     in_fence = False

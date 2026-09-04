@@ -84,7 +84,17 @@ def main() -> int:
         return 0
 
     key = handoff_files.in_session_key()
-    path = handoff_files.write(sd, key, text, now=now)
+    # Stamped so `clear_trigger.check_handoff_concise` can tell WHO wrote this. Prepended to
+    # the text, not tracked beside it: the file is the only artifact the check ever sees.
+    # This changes what `handoff_files.write` compares for its identical-re-write no-op. Steady
+    # state is fine (the marker is constant, so two identical summaries still match), but ACROSS
+    # THIS CHANGE a session that composed before and after gets two files instead of one no-op —
+    # one extra injection of the same summary, once per such session. Accepted rather than
+    # special-cased: `write`'s rule is "a CHANGED handoff is always written", the text genuinely
+    # changed, and stripping a prefix inside a producer-agnostic helper to fake a match would be
+    # a worse thing to leave behind than a bounded one-time duplicate.
+    marked = f"{handoff_files.COMPOSED_MARKER}\n{text}"
+    path = handoff_files.write(sd, key, marked, now=now)
 
     # Same one-line pointer the model-authored path writes (janitor-write-handoff SKILL.md
     # step 3) — the PostCompact hook and the heartbeat's resume nudge only know to look here.

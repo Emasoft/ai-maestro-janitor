@@ -59,6 +59,22 @@ LEGACY_KEY = "legacy"
 # groups slightly wrong; a clobbered handoff is gone.
 UNKEYED_KEY = "unkeyed"
 
+# First line of a handoff written by `compose_agent_handoff.py` — an `llm-ext` PROSE SUMMARY,
+# not the link-only index a model authors. It lives HERE because the two modules that need to
+# agree on it already import this one: the composer stamps it, `clear_trigger` reads it. A
+# second copy of the string in either would be a contract with no single source of truth.
+#
+# WHY IT EXISTS (TRDD-L46IG69Y): `clear_trigger.check_handoff_concise` enforces the LINK-ONLY
+# shape — its own comment says so, and names this output class as what it is NOT about ("never
+# the tens-of-KB a compaction summary runs"). Two producers legitimately have two shapes, and
+# the marker is how one check serves both without retuning a ratified constant that never
+# applied here. The measurement that sized the problem lives at that check and on the card.
+#
+# No brackets: the injection path defangs `[`->`⟦`, which is the form a DEFANGED HOSTILE marker
+# takes — cosmetic only (the on-disk marker the reader matches is untouched), but it would make
+# every composed handoff look like one that smuggled a janitor marker through.
+COMPOSED_MARKER = "<!-- janitor:composed-handoff -->"
+
 
 def session_key(target: str | Path | None) -> str:
     """The group key: the first 8 chars of the TARGET session's id.

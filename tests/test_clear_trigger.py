@@ -18,6 +18,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _PROJECT_ROOT / "scripts" / "clear_trigger.py"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+import handoff_files  # noqa: E402  # COMPOSED_MARKER — the marker is defined there, never retyped
 import state  # noqa: E402  # for the per-pane presence key (matches compact_trigger tests)
 
 
@@ -163,6 +164,57 @@ def test_check_handoff_concise_flags_inlined_block() -> None:
     fenced = "TRDD-Z582IKIR\n\n```\n" + "\n".join(f"line {i}" for i in range(20)) + "\n```\n"
     ok, reasons = mod.check_handoff_concise(fenced)
     assert not ok and "inlined-block" in reasons
+
+
+def test_a_composer_handoff_is_exempt_from_size_and_references_but_not_the_fence() -> None:
+    """TRDD-L46IG69Y — the marker lifts `too-large` + `no-references`, and NOT `inlined-block`.
+
+    ONE payload violating all three, asserted twice, because the split is the whole point: the
+    same bytes must yield all three unmarked and exactly `inlined-block` marked. Two payloads
+    could not show that the marker is what moved, and asserting only the marked half would pass
+    on a check that had stopped working for everyone.
+
+    WHY the first two lift: they restate the link-only DESIGN (concise, exhaustive by
+    REFERENCE); an `llm-ext` summary is exhaustive by INCLUSION by design, and measured over
+    every composer handoff this host had (n=5) it ran 5.8-9.9x the budget — `too-large` on every
+    run, and an always-firing warning trains its reader to ignore it.
+
+    WHY the fence does NOT lift, and an earlier draft that lifted it was wrong: its predicate is
+    "you pasted a big blob", which stays true of prose — it is llm-ext quoting a file instead of
+    summarizing it. It fired 0/5, so it is a check that earned its keep by staying quiet.
+    """
+    mod = _import()
+    body = (
+        "prose with no pointers at all.\n"
+        "```\n" + "\n".join(f"line {i}" for i in range(20)) + "\n```\n" + ("x" * 5000)
+    )
+    ok, reasons = mod.check_handoff_concise(body)
+    assert not ok and set(reasons) == {"too-large", "no-references", "inlined-block"}, (
+        f"positive control failed — the payload must violate all three unmarked, got {reasons}"
+    )
+    ok, reasons = mod.check_handoff_concise(f"{handoff_files.COMPOSED_MARKER}\n{body}")
+    assert not ok and reasons == ["inlined-block"], (
+        f"the marker must lift exactly too-large + no-references, got {reasons}"
+    )
+
+
+def test_the_exemption_needs_the_marker_at_the_top_not_merely_present() -> None:
+    """The marker EXEMPTS, so a handoff must not be able to earn it by quoting the string.
+
+    A model-authored handoff that discusses this mechanism (this repo's handoffs discuss the
+    janitor constantly) would otherwise exempt itself by mentioning the marker mid-prose, and
+    the check would go quietly dead on the one producer it is for.
+    """
+    mod = _import()
+    quoting = (
+        "TRDD-L46IG69Y\n\n"
+        f"the composer stamps `{handoff_files.COMPOSED_MARKER}` on its output.\n"
+        + ("x" * 5000)
+    )
+    ok, reasons = mod.check_handoff_concise(quoting)
+    assert not ok and "too-large" in reasons, (
+        f"only a LEADING marker may exempt; a quoted one must not, got {reasons}"
+    )
 
 
 def test_build_osascript_soft_clear_targets_uuid() -> None:
