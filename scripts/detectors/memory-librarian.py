@@ -497,16 +497,27 @@ def _find_memgrep() -> str | None:
 def _run_memgrep(binary: str, args: list[str], memdir: Path) -> str | None:
     """Run `memgrep <args> <memdir>` and return stdout, or None on any failure.
 
-    Bounded by a 30s timeout. Never raises — a memgrep failure (missing binary,
-    crash, timeout) degrades the detector to a silent no-op rather than crashing
-    the heartbeat.
+    Bounded by a 30s timeout (scaled by `state.timeout_scale()` — 1.0 in
+    production, so this is byte-identical there). Every sibling subprocess
+    seam in this codebase (`state.run_subprocess`, `agentlens_probe.probe_json`)
+    already scales this way; this one was missed, and it is exactly the
+    TRDD-7NSRD8OV shape: this detector runs as a SUBPROCESS spawned by its own
+    tests, so the conftest in-process Popen patch never reaches this call —
+    only the env-var half does, and only if the call actually reads it. Under
+    suite load a bare 30s ceiling expires, `_run_memgrep` fails open (returns
+    None), and `reindex`/`index --markdown` silently never ran — read as a
+    detector logic bug in code that is otherwise correct.
+
+    Never raises — a memgrep failure (missing binary, crash, timeout)
+    degrades the detector to a silent no-op rather than crashing the
+    heartbeat.
     """
     try:
         proc = subprocess.run(
             [binary, *args, str(memdir)],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=30 * state.timeout_scale(),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None

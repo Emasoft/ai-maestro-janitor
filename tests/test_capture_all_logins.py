@@ -31,6 +31,35 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+_DEADLINE_SLACK = 1.0
+
+
+def _deadline_slack() -> float:
+    """Wall-clock headroom multiplier for the fixed-iteration poll loops below.
+
+    Same rationale/shape as `test_daemon_integration._deadline_slack()`
+    (TRDD-7NSRD8OV): these loops wait on a REAL forked shell subprocess to
+    fork/exec/write a pid file, not on anything conftest's Popen-kwarg patch
+    can scale — that patch only stretches an explicit `timeout=` kwarg,
+    never a raw `for _ in range(N): time.sleep(0.1)` budget. Under this
+    suite's own load the fork/exec/write can outrun a fixed 3-5s budget,
+    so the fake process is presumed dead-on-arrival and the test fails on a
+    missing pid file — a load artifact, not a hang in `_kill_process_group`.
+
+    Read at CALL time (not module level): conftest's autouse fixture sets
+    the scale env var per-test, AFTER this module is imported.
+    """
+    try:
+        lib = str(_REPO / "scripts" / "lib")
+        if lib not in sys.path:
+            sys.path.insert(0, lib)
+        import state as _state  # noqa: PLC0415
+
+        return max(_DEADLINE_SLACK, float(_state.timeout_scale()))
+    except Exception:  # noqa: BLE001 -- a slack lookup must never decide a test's verdict
+        return _DEADLINE_SLACK
+
+
 def test_known_emails_parses_one_email_per_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`known_emails()` returns the real subprocess's stdout lines, blank lines dropped."""
     fake_rotator = tmp_path / "rotator.py"
@@ -241,9 +270,10 @@ def test_kill_process_group_terminates_a_grandchild_too(tmp_path: Path) -> None:
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
+    slack = _deadline_slack()
     proc = subprocess.Popen([str(script)], start_new_session=True, text=True)
     try:
-        for _ in range(50):
+        for _ in range(int(50 * slack)):
             if pid_file.is_file() and pid_file.read_text().strip():
                 break
             time.sleep(0.1)
@@ -251,9 +281,9 @@ def test_kill_process_group_terminates_a_grandchild_too(tmp_path: Path) -> None:
         assert _pid_alive(grandchild_pid)  # sanity: it really is running
 
         cal._kill_process_group(proc)
-        proc.wait(timeout=5)
+        proc.wait(timeout=5 * slack)
 
-        for _ in range(20):
+        for _ in range(int(20 * slack)):
             if not _pid_alive(grandchild_pid):
                 break
             time.sleep(0.1)
@@ -288,15 +318,16 @@ def test_capture_one_kills_the_whole_tree_and_reports_timeout(
     monkeypatch.setattr(cal, "_capture_cmd", lambda email: [str(fake_cmd_script)])
     monkeypatch.setattr(cal, "_CAPTURE_PY", _REPO / "scripts" / "oauth_rotator" / "slot_capture_browser.py")
 
+    slack = _deadline_slack()
     with pytest.raises(subprocess.TimeoutExpired):
         cal.capture_one("a@example.com", env={}, timeout=1.0)
 
-    for _ in range(30):
+    for _ in range(int(30 * slack)):
         if pid_file.is_file() and pid_file.read_text().strip():
             break
         time.sleep(0.1)
     grandchild_pid = int(pid_file.read_text().strip())
-    for _ in range(20):
+    for _ in range(int(20 * slack)):
         if not _pid_alive(grandchild_pid):
             break
         time.sleep(0.1)

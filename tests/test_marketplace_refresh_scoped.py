@@ -118,7 +118,26 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def _wait_for_worker(env_paths: dict[str, Path], deadline: float = 60.0) -> Path:
+def _worker_deadline_slack() -> float:
+    """Wall-clock headroom multiplier for `_wait_for_worker`'s deadline (TRDD-7NSRD8OV shape).
+
+    The worker is a DETACHED process the detector forks with `start_new_session=True` —
+    conftest's in-process Popen-kwarg patch never reaches it (it isn't a subprocess of the
+    test at all), so the deadline below is the ONLY thing bounding it. Reading
+    `state.timeout_scale()` here matches the sibling fix elsewhere in this suite
+    (`test_daemon_integration._deadline_slack`, `test_capture_all_logins._deadline_slack`) —
+    without it a 60s deadline is invisible to the suite-wide load knob and the worker (two
+    sequential real `claude` subprocess spawns) can outrun it under contention alone.
+    """
+    try:
+        import state as _state  # noqa: PLC0415 -- local: sys.path is set up at module import
+
+        return float(_state.timeout_scale())
+    except Exception:  # noqa: BLE001 -- a slack lookup must never decide a test's verdict
+        return 1.0
+
+
+def _wait_for_worker(env_paths: dict[str, Path], deadline: float | None = None) -> Path:
     """Block until the detached worker has EXITED, then return its claude log.
 
     Waits on the WORKER'S OWN PID (`.janitor/state/marketplace-refresh.pid`, which the
@@ -135,8 +154,13 @@ def _wait_for_worker(env_paths: dict[str, Path], deadline: float = 60.0) -> Path
 
     An empty log after the worker exits is now a REAL result (the worker ran and refreshed
     nothing), not an artifact of having looked too early. `deadline` remains only as a
-    runaway backstop; the happy path returns as soon as the process is gone.
+    runaway backstop; the happy path returns as soon as the process is gone. Scaled by the
+    suite-wide `state.timeout_scale()` knob (`_worker_deadline_slack`) — a bare 60s constant
+    would be invisible to that knob even though the worker's own two sequential `claude`
+    invocations are exactly the kind of real subprocess spawn suite load stretches out.
     """
+    if deadline is None:
+        deadline = 60.0 * _worker_deadline_slack()
     log = env_paths["claude_log"]
     pid_file = env_paths["project"] / ".janitor" / "state" / "marketplace-refresh.pid"
     start = time.time()

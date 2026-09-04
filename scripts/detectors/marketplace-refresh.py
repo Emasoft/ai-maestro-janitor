@@ -187,7 +187,11 @@ def _run_worker() -> int:
                     subprocess.run(  # noqa: S603,S607 - explicit args, fixed command
                         ["claude", "plugin", "marketplace", "update", market],
                         stdout=logf, stderr=subprocess.STDOUT,
-                        timeout=120, check=False,
+                        # Scaled by state.timeout_scale() (1.0 in production — byte-identical
+                        # there). This worker is a DETACHED process the test's conftest
+                        # Popen-kwarg patch cannot reach; without this the ceiling is invisible
+                        # to the suite-wide load knob (TRDD-7NSRD8OV shape).
+                        timeout=120 * state.timeout_scale(), check=False,
                     )
             except subprocess.TimeoutExpired:
                 state.log_line(_NAME, f"[worker] refresh timed out: {market}")
