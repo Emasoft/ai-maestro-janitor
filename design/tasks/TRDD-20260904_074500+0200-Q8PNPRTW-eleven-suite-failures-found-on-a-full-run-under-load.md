@@ -36,14 +36,26 @@ external-refs: [TRDD-7NSRD8OV]
   |---|---|---|---|
   | pytest-1438 (PASSED) | 344 B | ✓ 8 B | ✓ 6 B |
   | pytest-1439 (FAILED) | 344 B | **absent** | **absent** |
-  In the failing run `/bin/sh` never completed even its FIRST line — an 8-byte `echo` into the
-  same directory. **So it is not the fork, not `$!`, not the second redirect, not `PATH`, and
-  not a timing budget.** The child produces nothing at all.
-- **AND THE SPAWN IS GENUINE — `guarded_init` is EXONERATED, by reading it.**
-  `tests/sandbox_guard.py:727` calls `original_init(self, args, *a, **kw)` unmodified after
-  `_enforce_spawn`; it neither substitutes nor rewrites argv/cwd/env. So a real `Popen` runs a
-  real `/bin/sh` against a real +x script, and the child dies at or immediately after `exec`.
-  **That is where the remaining question sits, and no hypothesis is offered for it here.**
+  **WHAT THIS ESTABLISHES, EXACTLY: no write from the child ever landed** — not even an 8-byte
+  `echo` into the same directory. So it is not the `sleep` fork, not `$!`, not the second
+  redirect, not `PATH`, and not a timing budget.
+  **⚠ IT DOES NOT ESTABLISH "the shell never runs", which is what I first published here and
+  to the USER.** The evidence cannot separate three cases: (a) `exec` never happened,
+  (b) `exec` happened and the child died before completing the write, (c) `exec` happened and
+  every write into that directory failed. I collapsed three to one and led with the strongest.
+  Third instance of that move on this card — see the `E `-census and progress-dot retractions.
+  **⚠ AND IT IS n=1/n=1** (one failing dir, one passing dir), published with the word
+  "decisive" ONE TURN after an n=1 solo pass had already misled me into the cross-test-state
+  story. A 4× repeat per row is running; until it lands, treat this as an anecdote, not a rate.
+- **The spawn ARGUMENTS are passed through unmodified — a NARROWER claim than the
+  "`guarded_init` is EXONERATED" I first wrote.** `tests/sandbox_guard.py:727` calls
+  `original_init(self, args, *a, **kw)` without substituting or rewriting argv/cwd/env — that
+  much is read. **But `_enforce_spawn` at `:726` runs FIRST and I have NOT read it**, so
+  "exonerated" was the same "I looked and saw nothing" pattern one level down. Note `:724`
+  already proves this function mutates `kw` in place (`_harden_child_env`), and `:730` grows
+  an unbounded module-level `_SPAWNED_PIDS` set that persists across a serial session but is
+  fresh per xdist worker — **an asymmetry matching the serial-fails/xdist-passes split.** Not
+  a claim that it IS the cause; a claim that "exonerated" foreclosed looking.
 - **`capture_one`'s 1.0 s IS scaled to 10 s — verified twice.** conftest `:812-884` wraps
   `Popen.communicate`/`wait` to multiply an explicit numeric `timeout=`, and
   `grep -n "no_timeout_scale" tests/test_capture_all_logins.py` returns NOTHING, so the test
@@ -114,15 +126,57 @@ external-refs: [TRDD-7NSRD8OV]
   | `token_usage_anomaly` #8 | failed | **still failing** |
   | `branch_protection*` ×9 | — | **NEW — not in the original 12** |
   Three things follow, in priority order:
-  1. **#8's "load artifact" classification is CONTRADICTED.** It failed again at *lower* load
-     (8.52 vs the original run's) — "reran once, passed" was never sufficient and now has
-     counter-evidence. It needs a real mechanism or a USER waiver, not a re-run.
-  2. **The 9 `branch_protection` failures are NEW.** `e4dd674d` ("branch protection resolves
-     the repo from the PROJECT root only", TRDD-BH32A1A5) landed **07:37:27**; soak8 finished
-     **07:29** — so they could not have been in the original run, and that commit is the only
-     recent one touching those exact files. Signature is `assert 'BRPROT-001' in ''` — the
+  1. **#8 failed again — but this does NOT contradict its load-artifact label. ⚠ I claimed it
+     did, in this card and to the USER, and the claim was FALSE.** I compared soak9's
+     *post-run* load (8.52) against soak8's *pre-run* load (11.39) and called it "lower". The
+     like-for-like comparison is **start vs start: soak8 11.39 → soak9 15.53**, so soak9 ran
+     at HIGHER load and #8 failing again is exactly what a load artifact predicts. Reading the
+     wrong end of a two-sample file is the same class of error as dropping the subagent's
+     "likely" from "likely cold-start" — a figure lifted without checking which one it was.
+     **What remains true is the ORIGINAL objection, which needs no load data:** #8 was
+     classified from a single re-run of a failure its author never reproduced, which does not
+     meet this card's "name the cause" criterion. It still needs a mechanism or a USER waiver.
+  2. **✅ SETTLED — the 9 `branch_protection` failures are a LOAD/PARALLELISM artifact, and
+     `e4dd674d` is EXONERATED.** Serial run of BOTH files at low load (~9.7):
+     **`78 passed in 583.69s`, exit 0 — zero failures**, including the test `e4dd674d` itself
+     added. So the timeline that made that commit look causal (landed 07:37:27, 8 min after
+     soak8) was a coincidence of ordering, not evidence. **The regression reading was a
+     hypothesis and measurement killed it** — which is why it was hedged rather than reported.
+     Note 583 s for 78 tests ≈ 7.5 s/test: these are heavy subprocess tests, exactly the
+     profile that fails open under a 14-worker `-n auto` fan-out on a loaded box, and the
+     signature (`assert 'BRPROT-001' in ''`, detector exits 0 with EMPTY stdout) is the
+     documented `timeout_scale` fail-open shape verbatim. They join #8–#11's bucket — and
+     inherit that bucket's unmet obligation: **a named cause and a USER waiver, not a re-run.**
+     *(Superseded analysis kept for provenance:)*
+     ⚠ I first called them "NEW, not in the original 12" and implied `e4dd674d` caused them.
+     That over-read the evidence:** soak8 ran with `-q`, which prints only FAILURES, and its
+     ONLY `branch_protection` line (`:237`) is the sandbox's `[source-tree] CHANGED` warning,
+     not a test result. **Absence from a FAILED list is not a pass** — those tests may have
+     passed, or not been collected. What IS established, per file:
+     - **1 of the 9 is a test `e4dd674d` ITSELF ADDED** —
+       `test_apply_uses_the_project_slug_when_plugin_root_names_another_repo`. It has never
+       passed anywhere; that is not a regression.
+     - **4 in `test_branch_protection_guard.py` are pre-existing tests** against
+       `branch_protection_apply.py`, which `e4dd674d` DID modify — genuine regression
+       candidates.
+     - **4 in `test_branch_protection.py` — a file `e4dd674d` NEVER TOUCHED**, exercising a
+       different script (`scripts/detectors/branch-protection.py`). **Not explained by that
+       commit at all.**
+     Also relevant: `e3299d8d` (2026-09-01) records fixing a *pre-existing* branch-protection
+     suite failure, so this area has failed before. And soak9 collected **11 more tests** than
+     soak8 (16403 vs 16392), consistent with `e4dd674d` adding cases. Signature is
+     `assert 'BRPROT-001' in ''` — the
      detector exits 0 with EMPTY stdout, which is ALSO the documented load fail-open shape, so
      **this is not yet attributed.** A serial low-load run was started to discriminate.
+     Corroborating, and worth knowing before blaming the commit: **soak8's own log line 237
+     records `[source-tree] CHANGED: scripts/guard/branch_protection_apply.py` DURING that
+     run** — the file was being edited while soak8 executed, and `e4dd674d` committed those
+     edits 8 minutes after it finished. So soak8 tested a dirty tree and soak9 tested the
+     committed result; "the tests passed at 07:29" is therefore NOT a clean baseline for that
+     file. Note also soak9 collected **11 more tests** than soak8 (16403 vs 16392 total),
+     consistent with `e4dd674d` adding cases to `test_branch_protection_guard.py` — so some of
+     the 9 may be NEW tests that never passed anywhere, not regressions. **Do not report these
+     as a regression until the serial run and a per-test history say which.**
   3. Rows 1 & 2 remain open on the exec question above.
   Everything below this bullet is HISTORY — read it for the WHY, not for the state.
 - **⚠ RETRACTION (11:45) — "the other 10 have never been triaged" was FALSE, and I published
