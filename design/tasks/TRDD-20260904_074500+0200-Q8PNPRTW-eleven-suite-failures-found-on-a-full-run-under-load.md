@@ -14,7 +14,7 @@ project-id: ai-maestro-janitor
 min-approval-requirement: none
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
-blocked-by: []
+blocked-by: [K7WQ2NRB]
 unblock-when: [decision:user-accepts-load-artifacts]
 npt: []
 eht: []
@@ -706,6 +706,20 @@ accepted as an artifact.
 > even the labelled run only names the 7 that FAILED.
 
 ## Acceptance criteria
+
+> **⚠ SCOPE NARROWED 12:20 BY THE K7WQ2NRB SPLIT — read this before ticking anything.** These
+> criteria were written when this card owned all 12 failures. It no longer owns rows 1 & 2
+> (`test_capture_all_logins.py`), which moved to **`TRDD-K7WQ2NRB`**. Left unamended, this
+> card could NEVER reach terminal: its last criterion demands a green `-n auto` run, which
+> depends on work that is now another card's. **Splitting a card without narrowing its
+> acceptance criteria creates an unclosable card** — the criteria are the closing condition,
+> so they move with the scope.
+> - Criterion 1 now reads: every one of the **10** failures still owned here.
+> - The final criterion is now satisfied by **`blocked-by: [K7WQ2NRB]`-style dependency**: a
+>   green full-suite run cannot happen until K7WQ2NRB lands, so this card's terminal
+>   transition WAITS on it. That is a genuine cross-card dependency, unlike the `decision:`
+>   waiver, and it belongs in `blocked-by:` — the TRDD-to-TRDD field, per
+>   `trdd-drift.py:303`.
 
 - [ ] Every one of the 12 (not 11 — see the arithmetic above) is classified into exactly one
       bucket — product defect / test defect / load-parallelism artifact / environment — each
