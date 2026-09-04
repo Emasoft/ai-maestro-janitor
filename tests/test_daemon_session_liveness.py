@@ -757,11 +757,17 @@ def test_an_unreadable_pane_logs_unread_and_never_reads_as_working(
 ) -> None:
     """`pane=unread` is a DISTINCT token on purpose: collapsing it to anything else would let
     a pane nobody could see be counted as evidence about a working one, which is the exact
-    confusion the field was added to remove. Box 6's grep for `pane=working` must not match."""
+    confusion the field was added to remove. Box 6's grep for `pane=working` must not match.
+
+    The first version of this test asserted `"pane=unread" in log or "REFUSED" in log`. That
+    disjunction PASSED against the pre-fix daemon — `REFUSED` was already there — so it was a
+    check that could not fail, caught only by running the mutation probe the other two tests
+    in this block were written to satisfy. The `or` is the whole defect: a weak clause in a
+    disjunction makes every strong clause beside it decorative."""
     fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
     _setup(monkeypatch, tmp_path, fleet)
     monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: None)
     daemon.task_session_liveness()
     log = _log(tmp_path)
+    assert "pane=unread" in log, "an unreadable pane must be named, not left silent"
     assert "pane=working" not in log
-    assert "pane=unread" in log or "REFUSED" in log
