@@ -144,3 +144,16 @@ def test_filter_keeps_a_registered_entry_with_no_source_block() -> None:
     plan, dropped = mrp.filter_refreshable(["m"], {"m": {}})
     assert plan == ["m"]
     assert dropped == {}
+
+
+def test_filter_also_drops_an_unregistered_OPERATOR_EXTRA() -> None:
+    """`CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_EXTRA` is an explicit operator override,
+    but it is NOT exempt from the registry check — you cannot refresh what the CLI does
+    not know, so an unregistered extra would just be the rc=1 defect under a new name.
+    Pinned because it makes an operator's explicit request subordinate to the registry,
+    which is a deliberate choice rather than an oversight."""
+    plan = mrp.refresh_plan({"plugins": {}}, "typo-marketplace,ai-maestro-plugins")
+    assert plan == ["ai-maestro-plugins", "typo-marketplace"]
+    keep, dropped = mrp.filter_refreshable(plan, _known(**{"ai-maestro-plugins": "github"}))
+    assert keep == ["ai-maestro-plugins"]
+    assert "not registered" in dropped["typo-marketplace"]

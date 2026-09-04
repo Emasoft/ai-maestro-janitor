@@ -79,6 +79,18 @@ def filter_refreshable(
     * **Ownership.** Both surviving local marketplaces are directory-source and
       belong to the ai-maestro server harness (see `_LOCAL_SOURCE`).
 
+    **A DROP IS A SKIP, NOT A RETRY — this is the trade, stated so nobody has to
+    reconstruct it.** Before this filter, an unregistered name failed with `rc=1`
+    on every run, which was useless noise but *did* retry forever, so a registry
+    entry that landed late would self-heal on the next tick. Now the name is
+    dropped before the CLI is called. The steady state still self-heals (the name
+    reappears in `known` and is refreshed again), but a marketplace that is
+    installed and PERMANENTLY absent from the registry for some reason other than
+    a rename — a truncated or partially-written registry — is now silent where it
+    used to be loudly broken. That is a deliberate trade of a loud-but-ignored
+    failure for a quiet advisory, and the advisory line in `daemon.py` is the only
+    thing that will say so. Read it before concluding a marketplace is fine.
+
     `known` is the parsed `known_marketplaces.json` (the CLI's own registry,
     name -> record). **Passing `None` disables filtering entirely** and returns
     the plan unchanged — deliberate FAIL-OPEN: if that file is missing or

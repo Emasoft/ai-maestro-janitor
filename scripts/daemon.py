@@ -691,7 +691,14 @@ def task_marketplace_refresh() -> None:
             refreshed += 1
         dt_s = int(time.time() - t0)
         state.log_line(
-            "daemon", f"  marketplace-refresh: refreshed {refreshed}/{len(plan)} marketplaces in {dt_s}s"
+            # `(N skipped)` keeps THIS line honest. `len(plan)` is the POST-filter
+            # count, so dropping the orphan turned `refreshed 31/32` into
+            # `refreshed 31/31` — the same 31 successes now reading as a clean
+            # full house. This is the line people grep; the separate advisory is
+            # not. Never let the summary imply nothing was excluded.
+            "daemon",
+            f"  marketplace-refresh: refreshed {refreshed}/{len(plan)} marketplaces in {dt_s}s"
+            + (f" ({len(dropped)} skipped)" if dropped else "")
         )
         if refreshed == 0 and attempted > 0:
             # Every ATTEMPTED item failed/timed out — a genuine run failure, not a
