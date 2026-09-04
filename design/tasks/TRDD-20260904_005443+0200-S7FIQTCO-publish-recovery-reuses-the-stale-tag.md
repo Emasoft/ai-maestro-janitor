@@ -1,7 +1,9 @@
 ---
 trdd-id: S7FIQTCO
 title: interrupted-publish recovery reuses the stale local tag so the release can name a commit behind main
-column: testing
+column: blocked
+blocked-by: [CN62E66F]
+pre-block-column: complete
 created: 2026-09-04T00:54:43+0200
 updated: 2026-09-04T03:26:00+0200
 current-owner: main-session
@@ -12,7 +14,7 @@ project-id: ai-maestro-janitor
 relevant-rules: []
 npt: []
 eht: [CN62E66F]
-implementation-commits: []
+implementation-commits: [397c3786, 93bd6c15, d130c8b5]
 ---
 
 ## Symptom
@@ -223,9 +225,21 @@ introduced a regression it names below, and `eht:` was `[]`.
 
 Per the TRDD rules, `eht:` is the Effects Handling Task field and **a parent
 cannot reach `complete` until every EHT is terminal**. A regression this card
-created, documented in its own body, is the textbook case. `eht: [CN62E66F]`
-now records it, and the column is back to `testing` until that card is
-terminal.
+created, documented in its own body, is the textbook case.
+
+The column is `blocked`, not `testing`. Reopening into `testing` was the first
+attempt and was wrong for the same reason `complete` was: `testing` asserts
+someone is running tests on this card RIGHT NOW, and nobody is — the tests are
+written, passing, and mutation-probed three times. The card is not being
+tested, it is WAITING ON ANOTHER CARD, and the kanban rule names that column
+directly (`blocked` applies whenever `blocked-by:` is non-empty; record
+`pre-block-column:` and restore when cleared). It also keeps the card visible
+to "what is blocked" queries, which `testing` did not.
+
+`blocked-by:` and `eht:` naming the same card is not duplication: `eht:` says
+WHY it exists (a post-condition of my change), `blocked-by:` says what it is
+doing to this card right now. `pre-block-column: complete` records that every
+acceptance box was already met, so restoring it needs no re-derivation.
 
 The tempting counter-argument — "the defect is broader than my change, the
 fallback would misbehave under any interpreter" — is TRUE and does not help. A

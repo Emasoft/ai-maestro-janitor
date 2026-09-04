@@ -13,7 +13,7 @@ relevant-rules: []
 npt: []
 eht: []
 blocked-by: []
-created-by: S7FIQTCO
+external-refs: [TRDD-S7FIQTCO]
 implementation-commits: []
 ---
 
@@ -107,13 +107,24 @@ invocation that already loaded, and the "it would have failed earlier" reasoning
 simply does not apply. On a no-`uv`, sub-3.11 host:
 
 - BEFORE `assert_never`: the gate imported fine, ran, and refused the deletion
-  via the ancestry check with a message naming the actual reason.
+  via the ancestry check with a message naming the actual reason. **VERIFIED,
+  not assumed** — `--gate` dispatches to `run_gate`, whose Gate 0
+  (`scripts/publish.py:1062`) calls `_called_by_publish_orchestrator` and on a
+  false answer prints `BLOCKED: Direct push not allowed` with the three
+  `publish.py` invocations to use instead, then `return 1`. A review raised the
+  possibility that `--gate` skipped the ancestry check entirely — which would
+  have meant deletions previously RAN the full 16k-test suite and were then
+  ALLOWED, a worse pre-existing bug. It does not; the check is the gate's first
+  action.
 - AFTER: the gate dies at import with `ImportError: cannot import name
   'assert_never'`, and the operator is told nothing about why their branch
   deletion was blocked.
 
-Same outcome (refused), materially worse diagnostic, on an operation that has
-nothing to do with releasing. That is the honest worst case, and an earlier
+Same outcome (refused), materially worse diagnostic. And the operation is not
+some exotic corner: deleting a merged feature branch is ROUTINE CLEANUP, which
+makes it the most frequent thing that reaches this gate at all — and the case
+where an operator has the least context for interpreting an ImportError about
+`typing`. That is the honest worst case, and an earlier
 draft of this section missed it by reusing the outer-publish.py argument
 everywhere instead of checking it per path. It does not raise the priority to
 urgent — it still needs a host both without `uv` and below the floor — but it
