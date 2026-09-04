@@ -6,7 +6,7 @@ pre-block-column: todo
 unblock-when: [decision:user]
 min-approval-requirement: user
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T14:08:26+0200
+updated: 2026-09-04T14:11:03+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -164,8 +164,18 @@ MD056 specifically, which neither config disables, and the sets are disjoint.
 Consistency check — **and note what it does and does not show**: 19 Q8PNPRTW +
 1 planted probe = **exactly 20** = the cap, so CPV stopped precisely at the
 ceiling. That confirms the list was **cut**, not the **total**; it establishes
-that more existed, never how many. The weight for 37 is carried entirely by
-disjointness and structural independence above.
+that more existed, never how many.
+
+**37 needs a lower AND an upper bound, and they come from different evidence.**
+Disjointness + structural independence give **at least** 37 — they say nothing
+about a 38th. The upper bound is the final run: after all four regions were
+repaired CPV reported **`NIT=0`**, which is *sub-cap and therefore a complete
+count*, so nothing remained. That is this card's own truncation rule doing real
+work. It also sidesteps a question the card never settled: whether regions A/B
+contributed *exactly* 19, or "19 before the cap bit", depends on the emitter's
+file/line ordering, which was never established. Argued as `19 + 18 + a final
+NIT=0`, the ordering is irrelevant; argued from disjointness alone, the 19 is
+itself a possibly-truncated figure.
 (This justification is stated because the earlier "stateful parser" story — the
 only reason the states might NOT have composed — was retracted, and removing it
 silently would have left a composed total with no composition argument.) The card predicted *"the **next** card
@@ -759,10 +769,13 @@ names only lever 1; that was an omission, not a distinction.
 **A COMMIT MESSAGE MUST CARRY THE SAME HEDGE THE CARD CARRIES — history is
 where an over-confident claim survives longest.** Commit `595a3a9d` says
 *"repairing 37 MD056 defects"* and *"cli2 has **never** supported
-`.markdownlintignore`"*. Both are correct, and both are stated more firmly than
-the card behind them: 37 is a **derived** total (19 listed + 18 found after,
-with a composition argument), and "never" quantifies over cli2's whole history
-from a probe of exactly one version, which the card explicitly caveats. Neither
+`.markdownlintignore`"*. Both are **very likely** correct, and both are stated
+more firmly than the card behind them — **but they fail differently, and
+flattening that would repeat the error.** "37" is the right number with its
+derivation hidden (19 listed + 18 found after, plus a composition argument): a
+*phrasing* gap. "Never" quantifies over cli2's entire history from a probe of
+exactly one version: a *scope* gap, where calling it flatly "correct" would
+itself be the overconfidence under discussion. Neither
 is worth rewriting history for — the TRDD id in the subject leads to the
 qualified version, which is the mechanism working. But this is `d4e5f055`'s
 defect in miniature, committed by the very card that documents it: **write a
