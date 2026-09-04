@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T21:06:00+0200
+updated: 2026-09-04T21:20:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -136,6 +136,16 @@ injection lands before the first turn and needs no nudge to have fired.
   session start.
 
 ## Notes
+
+- **KNOWN, not covered: the empty-body path's silence is indistinguishable from a CRASH's
+  silence.** Drop `_handoff_body`'s `if body is None: return` and the caller does
+  `print(banner + None)` → `TypeError` → absorbed by `main()`'s `except Exception` → no output
+  and a `_slog` line nobody reads. `test_an_empty_handoff_injects_nothing` still passes: same
+  observable, opposite meaning. Catching it needs an assertion on `session-start.log`, which is
+  low value; recorded instead of tested.
+- **What the mutation tally actually claims.** Six mutations run, six caught — but they were
+  chosen AFTER the tests existed, and five correspond to bugs this feature actually had. So the
+  suite is calibrated against KNOWN failure modes, not proven against unknown ones.
 
 - **`implementation-commits:` never contains the newest CODE-CARRYING commit, by construction, and that is accepted rather
   than re-noticed each round.** The card is edited in the same change as the code, so the hash

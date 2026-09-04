@@ -119,15 +119,14 @@ def test_the_same_compaction_injects_only_once(tmp_path: Path) -> None:
     project, env = _project(tmp_path)
     sd = _arm(project)
     assert _injections(project, env) == 1, "positive control failed — fixture is broken"
-    assert _injections(project, env) == 0
-    assert _injections(project, env) == 0
-    # The guard must suppress the REPEAT without consuming the flag. Injected SessionStart
-    # context is passive and starts no turn, so the heartbeat remains the actuator — and it is
-    # also what re-attaches background agents, which this hook cannot do. Consuming the flag
-    # here would leave a session holding a perfect handoff and no cue to act on it: the very
-    # failure this feature fixes, reproduced by the fix. Nothing asserted this until now, and
-    # `flag.unlink()` after the print would have passed every other test in this module.
+    # Checked HERE, not at the end: the guard must suppress the REPEAT without consuming the
+    # flag (injected context is passive and starts no turn, so the heartbeat stays the actuator
+    # and is also what re-attaches background agents). Asserted before the once-only calls so a
+    # `0` from them means the STAMP — with the flag already gone, they would return early on the
+    # missing flag and pass for the wrong reason while this failed.
     assert (sd / "resume-after-compact.flag").is_file(), "the injection consumed the flag"
+    assert _injections(project, env) == 0
+    assert _injections(project, env) == 0
 
 
 def test_a_later_compaction_injects_again(tmp_path: Path) -> None:
@@ -159,14 +158,12 @@ def test_no_flag_means_no_injection(tmp_path: Path) -> None:
 def test_only_source_compact_injects(tmp_path: Path) -> None:
     """A startup/resume/clear entry must not consume the compaction's delivery.
 
-    THE STAMP RESET IS LOAD-BEARING, and it was measured to be. It was removed once as
-    "dead ceremony" on the reasoning that these sources never enter
-    `_inject_post_compact_handoff`, so they never read the stamp — true of the code as
-    written, and therefore true only while the gate is correct. Mutation-tested 2026-09-04:
-    widening the gate to `if source in ("compact", "clear")` — the plausible regression this
-    test exists to catch — SURVIVED all nine tests without the reset, because the control
-    run had already written the stamp and the `clear` arm returned early on it. The reset is
-    what makes the arms measure the GATE instead of the guard.
+    The reset below is what makes these arms measure the GATE rather than the guard: without
+    it, a control run's stamp makes a widened gate (`source in ("compact", "clear")`) return
+    early and the test passes anyway. Measured — do not delete.
+
+    `clear` is the DISCRIMINATING arm, the only source a plausible widening would admit;
+    `startup`/`resume` are cheap cover against the gate being dropped entirely.
     """
     project, env = _project(tmp_path)
     sd = _arm(project)
