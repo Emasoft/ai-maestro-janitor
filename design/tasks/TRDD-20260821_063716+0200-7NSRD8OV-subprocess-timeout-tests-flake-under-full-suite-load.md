@@ -6,7 +6,7 @@ pre-block-column: testing
 blocked-by: [owner-decision-soak-evidence-bar-and-env-propagation]
 unblock-when: [decision:janitor-main-session]
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-03T11:47:00+0200
+updated: 2026-09-04T07:06:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high

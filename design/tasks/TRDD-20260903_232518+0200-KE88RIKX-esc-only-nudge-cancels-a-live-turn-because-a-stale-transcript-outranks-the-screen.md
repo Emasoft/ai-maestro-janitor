@@ -3,7 +3,7 @@ trdd-id: KE88RIKX
 title: the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
 column: testing
 created: 2026-09-03T23:25:18+0200
-updated: 2026-09-03T23:36:12+0200
+updated: 2026-09-04T07:06:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
