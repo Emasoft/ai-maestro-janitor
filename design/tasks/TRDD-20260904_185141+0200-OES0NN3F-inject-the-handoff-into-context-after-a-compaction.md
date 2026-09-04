@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T20:12:00+0200
+updated: 2026-09-04T20:28:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [42a24e6f, 0b4f72c3, 2c852b51, b7fa08bf]
+implementation-commits: [42a24e6f, 0b4f72c3, 2c852b51, b7fa08bf, 34b0d74d]
 external-refs: [TRDD-74AA4PAL, TRDD-PXP08ZQC]
 ---
 
@@ -76,10 +76,14 @@ injection lands before the first turn and needs no nudge to have fired.
 ## Acceptance criteria
 
 - [x] A session that auto-compacts has the handoff text in its context at the next turn, with
-      **no** heartbeat fire and **no** keystroke injection involved. — **MEASURED 19:20**, three
-      arms against a temp project dir, **simulating the SessionStart payload only** (not the
-      real PostCompact→SessionStart sequence): `source=compact` + flag → injects, handoff body
-      present in stdout; `source=startup` + flag → silent; `source=compact` + no flag → silent.
+      **no** heartbeat fire and **no** keystroke injection involved. — **COVERED BY
+      `tests/test_session_start_compact_handoff_injection.py`, 8 tests, all passing.** The
+      throwaway shell arms of earlier rounds are superseded: they were hand-run, uncounted, and
+      twice produced a silence that was a FIXTURE bug rather than a working guard (a handoff
+      filename outside `handoff_files`' pattern; a shell indirection that dropped an env var).
+      Every test in the module now leads with a positive control for exactly that reason.
+      It runs the hook as a SUBPROCESS with a real payload — still not the live
+      PostCompact→SessionStart sequence, which remains the open box below.
 - [x] The flag is **not** consumed by the injection (it must stay for the heartbeat, which is
       the actuator and also re-attaches background agents). — **MEASURED**: flag still on disk
       after injection.
