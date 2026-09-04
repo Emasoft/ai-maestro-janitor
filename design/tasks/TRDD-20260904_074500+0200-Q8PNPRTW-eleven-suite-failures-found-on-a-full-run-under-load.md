@@ -729,6 +729,18 @@ accepted as an artifact.
 
 ## Acceptance criteria
 
+> **⚠⚠ THE WAIVER CANNOT BE GRANTED AS THESE CRITERIA STAND — read this before asking the USER.**
+> The final criterion's waiver branch requires *"every remaining red is a load artifact **with
+> its cause named** and accepted by the USER"*. **Not one of the 10 meets the "cause named"
+> half.** #8 rests on "reran once, passed" for a failure its author never reproduced; the nine
+> `branch_protection` rows have a signature *consistent with* the `timeout_scale` fail-open but
+> **no demonstrated mechanism** — a serial pass at low load rules out xdist, not load, and the
+> `-n auto`-at-low-load run that would separate them was never made. So a USER ruling closes
+> the card mechanically while the criteria are asking them to accept causes nobody has
+> established. **That is a request to waive the criterion, not to satisfy it, and it must be
+> put to the USER in those words.** Either demonstrate the mechanism first (one `-n auto` run
+> at low load would do most of it), or say plainly that the ask is to relax the bar.
+>
 > **⚠ SCOPE NARROWED 12:20 BY THE K7WQ2NRB SPLIT — read this before ticking anything.** These
 > criteria were written when this card owned all 12 failures. It no longer owns rows 1 & 2
 > (`test_capture_all_logins.py`), which moved to **`TRDD-K7WQ2NRB`**. Left unamended, this
