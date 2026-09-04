@@ -45,6 +45,17 @@ run_release_gate() {
     # common operation unrelated to releasing. TRDD-CN62E66F.
     #
     # The floor is pyproject's `requires-python`; keep the two in step.
+    # ABSENT and TOO-OLD are different failures and must not share a message.
+    # `python3 -c ...` exits 127 when there is no python3 at all, which `!` turns
+    # into the same branch as a 3.10 interpreter — so a single message would tell
+    # an operator with NO python3 that theirs is "older than 3.11". A refusal that
+    # misdescribes the cause is barely better than the ImportError it replaced.
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "pre-push: refusing to run the release gate." >&2
+        echo "  Neither \`uv\` nor \`python3\` is on PATH, and the gate needs one of them." >&2
+        echo "  Install uv (https://docs.astral.sh/uv/) — it is the supported path." >&2
+        return 1
+    fi
     if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
         echo "pre-push: refusing to run the release gate." >&2
         echo "  \`uv\` is not installed, and \`python3\` on PATH is older than 3.11," >&2

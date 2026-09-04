@@ -95,6 +95,28 @@ def test_the_uv_branch_returns_rather_than_falling_through() -> None:
     assert tail.lstrip().splitlines()[1].strip() == "return $?"
 
 
+def test_absent_python3_gets_its_own_message_not_the_too_old_one() -> None:
+    """ABSENT and TOO-OLD are different failures: `python3 -c` exits 127 when there is no python3.
+
+    Without a separate branch, `!` folds 127 into the same arm as a 3.10 interpreter and the
+    operator is told theirs is "older than 3.11" when they have none at all. A refusal that
+    misdescribes its cause is barely better than the ImportError it replaced.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    absent_at = text.index("command -v python3")
+    floor_at = text.index(_PREDICATE)
+    assert absent_at < floor_at, "the absent-python3 check must precede the version predicate"
+    # Backtick-free substring on purpose: the hook escapes backticks for `sh`
+    # (`\`uv\``), so asserting the rendered form would fail on the source text.
+    assert "nor" in text and "is on PATH, and the gate needs one of them." in text
+    # And the two refusals must not be the same sentence. Count only ECHO lines:
+    # the phrase also appears in the comment explaining why the branch exists, and
+    # counting raw occurrences would fail on a file that is correct.
+    echoed = [ln for ln in text.splitlines()
+              if ln.strip().startswith("echo") and "older than 3.11" in ln]
+    assert len(echoed) == 1, f"the too-old wording must appear in exactly one refusal, got {echoed}"
+
+
 def test_the_refusal_names_the_floor_and_both_remedies() -> None:
     """A refusal that does not say WHY or HOW to fix it just relocates the confusion."""
     text = HOOK.read_text(encoding="utf-8")
