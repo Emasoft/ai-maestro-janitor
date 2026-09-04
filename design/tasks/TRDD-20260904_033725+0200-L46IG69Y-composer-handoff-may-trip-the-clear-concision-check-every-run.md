@@ -171,11 +171,16 @@ almost every clear whose *stated reason* changes occasionally. That is the shape
 this card called out as worst: a signal that fires so often it is ignored, with
 enough variation to look like it means something.
 
-**Remedy chosen on the measurement, per this card's own instruction not to choose
-before it:** option 2 (retune the constants) is now clearly wrong — 4096 was set
-for a hand-written link-only index and 90% of real composer output exceeds it, so
-"retuning" would mean raising the budget ~4× to fit prose it was never meant to
-measure. Option 1 (a link-only composer mode) and option 3 (recognise
+**REMEDY NARROWING — RE-HEDGED, because it cited the invalid numbers.** One
+section of this card says the measurement is invalid and this one used it to
+eliminate an option; that contradiction is itself the defect. Restated at the
+strength the evidence actually supports: option 2 (retune the constants) is
+PLAUSIBLY wrong — 4096 was set
+for a hand-written link-only index, and the analogous population (hand-written
+prose handoffs) exceeds it 90% of the time — so "retuning" would likely mean
+raising the budget several-fold to fit prose it was never meant to measure. That
+is an inference from a proxy, NOT the measurement this card asked for, and it
+does not eliminate option 2 on its own. Option 1 (a link-only composer mode) and option 3 (recognise
 composer-authored handoffs and skip the shape check) both remain live, and
 choosing between them is a design decision about whether the clear path still
 wants a link-only artifact at all — which is TRDD-ZQ02QG1L's territory, not a
