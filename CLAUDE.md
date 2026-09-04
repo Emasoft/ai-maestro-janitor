@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=19e4f519c8af generated=2026-09-04T02:34:14+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=cdd87b365d55 generated=2026-09-04T06:37:03+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -157,17 +157,11 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 
 **janitor-compaction-floor-gate** — the janitor compacted my context over and over
 - [janitor-compaction-floor-gate](.claude/project/memory/janitor-compaction-floor-gate.md) — the janitor compacted my context over and over
+  - [janitor-compaction-floor-gate-hooks](.claude/project/memory/janitor-compaction-floor-gate-hooks.md) — the hook says compact but I just compacted
+  - [janitor-compaction-floor-gate-triggers](.claude/project/memory/janitor-compaction-floor-gate-triggers.md) — the janitor compacted my context over and over
+  - [janitor-compaction-floor-gate-clear-lever](.claude/project/memory/janitor-compaction-floor-gate-clear-lever.md) — the cache-expired trigger never fires
   - [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
   - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
-
-**janitor-compaction-floor-gate-clear-lever** — the cache-expired trigger never fires
-- [janitor-compaction-floor-gate-clear-lever](.claude/project/memory/janitor-compaction-floor-gate-clear-lever.md) — the cache-expired trigger never fires
-
-**janitor-compaction-floor-gate-hooks** — the hook says compact but I just compacted
-- [janitor-compaction-floor-gate-hooks](.claude/project/memory/janitor-compaction-floor-gate-hooks.md) — the hook says compact but I just compacted
-
-**janitor-compaction-floor-gate-triggers** — the janitor compacted my context over and over
-- [janitor-compaction-floor-gate-triggers](.claude/project/memory/janitor-compaction-floor-gate-triggers.md) — the janitor compacted my context over and over
 
 **janitor-detector-and-hook-roster** — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
@@ -180,6 +174,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 **memory-system** — how does the wiki-memory system work
 - [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
   - [memory-system-scopes-and-format](.claude/project/memory/memory-system-scopes-and-format.md) — how does the wiki-memory 3-scope model work
+  - [memory-system-editor-gotchas](.claude/project/memory/memory-system-editor-gotchas.md) — add-atom inserts a new atom in the wrong place
   - [memory-system-superseded-history](.claude/project/memory/memory-system-superseded-history.md) — why does a superseded atom about publish-globally still exist
   - [claude-md-canonical-form](.claude/project/memory/claude-md-canonical-form.md) — what is allowed to live in CLAUDE.md
   - [feedback_memory_system_is_more_than_memgrep](.claude/project/memory/feedback_memory_system_is_more_than_memgrep.md) — Is memgrep the whole memory system? No — what the AI-Maestro memory system actually is, and where the recall/…
@@ -187,9 +182,6 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
   - [wikimem-retrieval-engine](.claude/project/memory/wikimem-retrieval-engine.md) — recall returned the wrong page
   - [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/
-
-**memory-system-editor-gotchas** — add-atom inserts a new atom in the wrong place
-- [memory-system-editor-gotchas](.claude/project/memory/memory-system-editor-gotchas.md) — add-atom inserts a new atom in the wrong place
 
 **memory-system-tooling-and-protocol** — how does the memgrep engine work
 - [memory-system-tooling-and-protocol](.claude/project/memory/memory-system-tooling-and-protocol.md) — how does the memgrep engine work

@@ -181,7 +181,7 @@ test, confirm it fails, restore. Here it failed with
 itself. Two Edits and two seconds, and it is the difference between a test and a decoration.
 
 
-^ATOM-PLJ6-NM0P [desc: "marketplace-refresh cap-kills are fixed but the close rests on 2 single-window samples — a post-fix plugin-update wait over the bound is a NEW card, not a reopen", keywords: marketplace-refresh_cap_killed plugin-update_deferred_marketplace_lock_held daemon_workload_cap_1920 plugin_update_waits_behind_refresh marketplace_lock_contention refreshed_N_of_M_marketplaces is_the_marketplace-refresh_fix_verified multi-window_deferral_miss 5EHBPH6G_closed post-fix_request_wait_over_the_bound, ocd: 2026-09-04, lmd: 2026-09-04]
+^ATOM-PLJ6-NM0P [desc: "marketplace-refresh cap-kills are fixed but the close rests on 2 single-window samples — a post-fix plugin-update wait over the bound is a NEW card, not a reopen", keywords: marketplace-refresh_cap_killed plugin-update_deferred_marketplace_lock_held daemon_workload_cap_1920 plugin_update_waits_behind_refresh marketplace_lock_contention refreshed_N_of_M_marketplaces is_the_marketplace-refresh_fix_verified multi-window_deferral_miss 5EHBPH6G_closed post-fix_request_wait_over_the_bound, trdd: TRDD-5EHBPH6G, ocd: 2026-09-04, lmd: 2026-09-04]
 **`marketplace-refresh`'s cap-kill defect is FIXED and TRDD-5EHBPH6G is closed — but the
 closure rests on two samples, and the untested case is named here because the card is
 archived where no board query looks.**
@@ -206,7 +206,16 @@ SINGLE-window: one `plugin-update` fire hits one refresh hold, waits under a min
 succeeds. **No post-fix observation exists of a request missing MULTIPLE consecutive refresh
 windows** — the scenario that produced the ~22 min pre-fix wait.
 
-**DO NOT reopen 5EHBPH6G if a long post-fix deferral appears — it is terminal and frozen.
+**THE BOUND, stated here so acting on this atom needs no lookup: ≤600 s total wait**, measured
+from a plugin's first `plugin-update deferred (marketplace lock held)` to that same plugin's
+next `rc=0`. **600 s is a THRESHOLD CHOSEN on the card, not a constant derived from the code**
+— an earlier version of this atom claimed it was the `plugin-update` fire interval, which is
+false: `plugin-update` is not an interval Task at all but a request-queue drain
+(`daemon.py:3147-3167`) that runs every daemon loop and RE-ENQUEUES on lock contention, so its
+retry cadence is the loop's, not a configured period. Observed post-fix waits were ~38 s and
+~44 s, so the threshold has an order of magnitude of headroom over anything measured.
+
+**DO NOT reopen 5EHBPH6G if a post-fix wait exceeds that bound — it is terminal and frozen.
 DO file a NEW card, BECAUSE the bound it closed against was met by the evidence available,
 and new contradicting evidence is new work rather than a defect in that closure.**
 
