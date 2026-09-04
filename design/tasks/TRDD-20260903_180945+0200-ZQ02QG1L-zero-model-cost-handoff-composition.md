@@ -1,9 +1,9 @@
 ---
 trdd-id: ZQ02QG1L
 title: Compose every janitor handoff out of process — no model turn spent authoring one
-column: todo
+column: complete
 created: 2026-09-03T18:09:45+0200
-updated: 2026-09-03T18:09:45+0200
+updated: 2026-09-04T03:52:00+0200
 current-owner: main-session
 task-type: refactor
 min-approval-requirement: none
@@ -196,13 +196,19 @@ audit, then the load-bearing negative re-checked by hand — report:
       did not read that script's absent-CLI path. The tick rests on the two
       skills sharing one composer whose literals are now confirmed, not on a
       comparison to `external_handoff_clear.py`.
-- [ ] `uv run pytest` green; `uv run ruff check scripts tests` and
+- [x] `uv run pytest` green; `uv run ruff check scripts tests` and
       `uv run mypy scripts/ --ignore-missing-imports` clean.
-      — deliberately NOT ticked. The audit was told not to run these (the tree
-      was in use by another suite run), so this box has no independent
-      verification, and this session has already been caught twice citing a
-      suite run that predated what it claimed to cover. Tick it only against a
-      NAMED sha from a run that postdates the remaining work.
+      — TICKED AGAINST A NAMED SHA: `f2599bb0`, working tree clean
+      (`git status --porcelain` empty, so HEAD and the tree are identical), all
+      three run on THAT tree after every other box was closed:
+      `ruff check scripts tests` → All checks passed; `mypy scripts/
+      --ignore-missing-imports` → no issues in 504 source files; the full suite
+      → 16370 passed, 1 skipped, 8 subtests passed.
+      The earlier refusal to tick was correct and is why this reads the way it
+      does: the delegated audit was told not to run these, so the box had no
+      independent verification, and this session was twice caught citing a suite
+      run that predated part of what it claimed to cover. A gates box is only
+      meaningful against a tree you can name.
 
 ## What the conversion TRADED AWAY, recorded because it is a real consequence
 
@@ -248,32 +254,31 @@ authorship, this is a downstream shape contract, and guessing at a fix without
 the measurement above would be the same shape as the remedies this session had
 to retract.
 
-## A SECOND cross-path interaction, found while verifying the first
+## A second interaction I asserted and then DISPROVED with one grep
 
-`compose_agent_handoff.py:95` writes `.janitor/state/resume-directive.txt`
-(`state.atomic_write`). That file is the ONE-SHOT pointer the **PostCompact**
-hook (`post-compact-resume.py`) consumes.
+Briefly recorded here as a WRONG finding, because the way I reached it is worth
+more than the finding was.
 
-On the `/janitor-write-handoff` path that is exactly right — a compaction
-follows, and the hook consumes it. **On THIS skill's path there is no
-compaction**: step 3 fires `clear_trigger.py`, which carries its own
-`--directive` through the keystroke chain, a different mechanism with a
-different consumer. So the composer's `resume-directive.txt` is written and
-NOT consumed here, and sits on disk armed for whatever compaction happens next
-— potentially an unrelated one, hours later, pointing at a session that has
-already been cleared and resumed.
+`compose_agent_handoff.py:95` writes `.janitor/state/resume-directive.txt`, the
+one-shot pointer `post-compact-resume.py` consumes on PostCompact. I reasoned
+that on the CLEAR path no compaction follows, so the file would be left armed
+for an unrelated later compaction — and wrote ~25 lines about it, deferring the
+fix as "not fixed blind".
 
-The two directives do NOT clobber each other (different file, different
-consumer), so this is not a repeat of TRDD-5RXBI65T. It is the adjacent shape:
-a one-shot pointer left armed on a path that never fires it.
+**It is not a bug.** `clear_trigger.py` already owns that file: `:219` targets
+it, and `:503-506` unlink it on chain failure with the comment that it is
+*"SHARED with the compact-resume flow"*. The clear path is aware of it by
+design. Two further facts I had not checked also blunt it: the recorded
+directive points at a GLOB (`the newest agent-handoff-*.md`), so it self-corrects
+to whatever handoff is newest when read; and any intervening compaction
+overwrites the file via `state.atomic_write` on the same path.
 
-NOT measured, and NOT fixed blind. What would settle it: whether
-`post-compact-resume.py` validates the directive's freshness or session id
-before acting, and whether `clear_trigger.py`'s own resume path clears
-`resume-directive.txt`. Recorded here rather than acted on, because the
-plausible fixes (have the composer skip the directive when invoked from the
-clear path; have `clear_trigger.py` consume or clear it) each change a file
-with multiple readers, which is how this family of bug was created in the
-first place.
+**The lesson, which is the reason this stays on the card:** the fix here was one
+grep, and I wrote a paragraph instead. "Recorded, not fixed blind" is the right
+call when the choice between fixes genuinely needs a measurement — as it does
+for the concision-check finding above. It is a hedge when the question is
+answerable by reading one file, and using it there produces confident prose
+about a hazard that does not exist. If the prose explaining a finding would be
+longer than the check that settles it, run the check.
 
 ## Notes and lessons learned
