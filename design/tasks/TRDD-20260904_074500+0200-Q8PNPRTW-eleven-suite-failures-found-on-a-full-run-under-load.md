@@ -780,6 +780,22 @@ accepted as an artifact.
       waiver, which is a USER decision, not an agent's. An unattributed acceptance is exactly
       how a red test becomes permanent.
 
+## Approval log
+
+*(Empty — no ruling yet. The card never passed through `design/proposals/`, so this section
+did not exist until 12:40; without it a USER ruling would have landed with nowhere to record
+it. Append `- <ISO> — APPROVED|REFUSED by <approver>. <one-line rationale>.` when the waiver
+is decided.)*
+
+**On `min-approval-requirement: user` — the value is right, my stated reason was not.** Commit
+`27993500` justified it as "waiving a red test is inherently a USER call". On the tier tables
+that actually reads **Tier 2 (MANAGER)** — *"deviates from a standard baseline, or
+adds/loosens/removes a rule relative to the baseline"* — so that reasoning over-escalates by a
+rung. What carries `user` is different and stronger: **this card's own acceptance criterion
+names the USER as acceptor** (*"accepted by the USER. The acceptor is named deliberately"*),
+and a card's stated approver governs its closure. Additionally this project has no MANAGER
+session, so Tier 2 and Tier 3 resolve to the same person regardless.
+
 ## Notes
 
 - `TRDD-7NSRD8OV` is the card about saturating this shared 36-user box. These failures are
