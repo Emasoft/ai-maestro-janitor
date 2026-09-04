@@ -111,11 +111,12 @@ class _Bpl:
 
     # Named parameters, not `*_`: arity is the point. `*_` accepts any number of
     # arguments, so a snippet calling the content check with two instead of three would
-    # execute fine and pass. Named ones make a wrong-arity call raise TypeError.
-    # Arity is a property of the SIGNATURE, so nothing in the bodies is needed for it —
-    # three earlier versions of this comment argued about linters (two asserting a
-    # pyright mechanism nobody had run, one asserting the opposite), and carried `_ = ...`
-    # discard lines to satisfy a checker measured to be silent. All of that is gone.
+    # execute fine and pass. Named ones make a wrong-arity call raise TypeError, and that
+    # is a property of the SIGNATURE — nothing in the bodies contributes to it.
+    # On the unused-parameter warnings an editor may show here: the gate runs
+    # `uvx --with pyright pyright`, and that command reports these files clean. Both
+    # facts were run. Earlier versions of this comment went further and named a mechanism
+    # for the difference; three successive attempts did that and none had measured it.
     def detect_default_branch(self, slug):
         return "main"
 
