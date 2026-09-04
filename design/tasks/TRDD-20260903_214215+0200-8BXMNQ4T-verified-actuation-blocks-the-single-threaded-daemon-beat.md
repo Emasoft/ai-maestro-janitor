@@ -560,6 +560,7 @@ card sits in `todo` for a month.
   | **mis-selected** — real value, wrong ordering | `v3.4.10` from `git tag \| head`; `ls \| tail` | what would this print if the opposite were true? |
   | **over-extrapolated** — computed, then projected past its sample | 3.0 s/item × 262 | is the sample representative of the population? |
   | **inherited premise** — no number at all | "on comparable work" | did I ever test this assumption? |
+
   The two errors that most misled a peer were NOT fabrications: the restart retraction
   (mis-framed) reversed a claim that was correct, and `v3.4.10` (mis-selected) named
   the wrong release publicly.
