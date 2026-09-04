@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T11:34:00+0200
+updated: 2026-09-04T11:36:46+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -310,25 +310,45 @@ external-refs: [TRDD-7NSRD8OV]
   cause is genuinely UNKNOWN.** Report:
   `reports/suite-failures/20260904_113039+0200-fixture-fork-latency.md`. 50 trials of the
   exact fixture script via `Popen(start_new_session=True)`, on this box at load 14.8–21.2:
-  - **Load starvation — NOT REPRODUCED.** fork+write median 0.027–0.086 s, max **2.74 s once
-    in 50**, **0 timeouts at a 30 s poll**. The smallest real budget in the suite is ≈4 s
-    (row 2) / ≈5 s (row 1). So the `_deadline_slack` comment's premise — *"under this suite's
-    own load the fork/exec/write can outrun a fixed 3–5 s budget"* — **is false as stated on
-    this measurement.** That comment is a prior author's hypothesis, never a recorded
-    measurement, and it has now been tested. **Do NOT widen a timeout or touch
-    `timeout_scale()` to "fix" these two** — that lever is aimed at a mechanism that does not
-    occur.
-  - **`env={}` starving `PATH` — DEAD, twice over.** Empty-env timings are statistically
-    indistinguishable from inherited-env (median 0.030–0.086 s, max 0.325 s, 25/25 wrote the
-    file); macOS `sh` falls back to `confstr(_CS_PATH)` = `/usr/bin:/bin` when `PATH` is
-    unset. Independently confirmed by direct probe: `env -i /bin/sh -c 'sleep 600 & echo $! >
-    F'` writes `F`.
-  - **AND the mechanism could never have produced this symptom anyway** — this is shell
-    semantics, not a measurement, and it is the stronger half: `$!` is set at **fork**, so
-    `echo $! > PIDFILE` is executed by the shell itself and depends on neither `PATH` nor the
-    `exec` of `sleep` succeeding. A `sleep: not found` child still yields a written pid file.
-    An hypothesis that cannot generate the observed symptom was never a candidate; I should
-    have killed it by reading the script instead of by measuring it.
+  - **Load starvation — NOT REPRODUCED IN 50 STANDALONE TRIALS.** fork+write median
+    0.027–0.086 s, max **2.74 s once in 50**, **0 timeouts at a 30 s poll**; smallest real
+    budget ≈4 s (row 2) / ≈5 s (row 1). **This BOUNDS the mechanism's frequency; it does not
+    exclude it**, and an earlier version of this bullet said the `_deadline_slack` comment
+    was *"false as stated"*, which overreached on three counts: (a) 50 trials cannot exclude a
+    low-rate failure — at a true 5 %/invocation rate, P(0 in 50) ≈ 8 %; (b) the distribution
+    is **fat-tailed** (max 2.74 s vs median 0.03 s, ~90×), the exact shape where a rare
+    excursion past 5 s is plausible and 50 samples are thin; (c) **the harness is not the
+    system** — a bare `Popen` loop has no xdist workers, no collection pressure, no
+    `loadgroup` scheduling, and it **never reproduced the failure in either mode**, so it is
+    a negative from an instrument not shown able to produce a positive. The "cold-start"
+    reading of the 2.74 s outlier is the subagent's word *"likely"*, which I dropped.
+    **I have NOT verified these numbers first-hand** — they are a subagent's, and its Method
+    section visibly wobbles on its own trial count. Per `decide-on-facts` that makes them
+    evidence, not a decision.
+    **The operational conclusion survives the weaker claim anyway: do NOT widen a timeout or
+    touch `timeout_scale()` here** — scaling a budget nobody has shown to be exceeded is
+    unjustified in either direction.
+  - **`env={}` starving `PATH` — DEAD, but on ONE leg, not three.** The refutation is a
+    property of the fixture script, which I have now **read first-hand** at
+    `tests/test_capture_all_logins.py:265-270` (row 1) and `:311-316` (row 2) — both are
+    verbatim `#!/bin/sh` / `sleep 600 &` / `echo $! > {pid_file}` / `wait`. `$!` is assigned by
+    the shell at **fork**, so `echo $! > PIDFILE` is executed by the shell itself and depends
+    on neither `PATH` nor the `exec` of `sleep` succeeding: a `sleep: not found` child still
+    yields a written pid file. **The mechanism cannot generate the observed symptom**, so it
+    was never a candidate — and the way to kill it was always to read the script, not to
+    measure it.
+  - **THE TWO MEASUREMENTS I FIRST CITED FOR THAT ARE VOID — by the very argument above.**
+    Both probe A (`env -i /bin/sh -c 'sleep 600 & echo $! > F'` → wrote `F`) and the
+    subagent's 25 empty-env latency rows measure *whether the pid file gets written*, which
+    the `$!` argument says is **`PATH`-independent** — so they return the same result under
+    both hypotheses and **discriminate nothing**. The `confstr(_CS_PATH)` fallback note is
+    true but void as support for the same reason. I ran probe A, wrote its output line as
+    `"=> env={} does NOT break sleep resolution"` — a conclusion the instrument cannot
+    support, since it never tested resolution — and then published it in this card as
+    *"independently confirmed"* in the same breath as the argument that voids it. Recorded
+    rather than deleted because the failure is the reusable part: **I built the instrument
+    after forming the hypothesis and never asked what a negative result would have looked
+    like.** Nothing here would have looked different if `env={}` were the true cause.
 - **A NOTE ON HOW `db466c64` GOT HERE, because the pattern is the card's recurring one.**
   That commit inferred *"row 1 fails without `env={}`, therefore `env={}` is not row 2's
   cause"*. **That inference was invalid when I made it** — two tests, two spawn paths, and an
@@ -341,11 +361,29 @@ external-refs: [TRDD-7NSRD8OV]
   <0.35 s in isolation, yet the test reads it absent. So the live candidates are: the file is
   written somewhere the test does not look (tmp-path / per-worker fixture mismatch), it is
   removed before the read (cleanup ordering), or the script never starts (spawn failure
-  swallowed). **All three are guesses — none is written here as a finding.** A `lean-worker`
-  was dispatched 11:30 to capture the real state at failure (5 serial repeats + 1 `-n auto`,
-  `--showlocals`, the missing path verbatim, and an `ls` of the pytest tmp dir); it is
-  forbidden from fixing anything. `column: dev` is true on that dispatch and on nothing else
-  — **if it returns nothing, re-column to `todo`.**
+  swallowed). **All three are guesses — none is written here as a finding, and once the
+  worker's report lands, DELETE the ones it does not support instead of leaving them as a
+  standing menu.** A named mechanism in a STATE block is the memorable content; the
+  "these are guesses" clause is one line beside it, and this card already documents a claim
+  that was labelled unreliable and then leaned on anyway.
+  - **One candidate is ALREADY DEAD, killed by reading rather than by measuring.** Row 2
+    monkeypatches `cal.rotator.ROOT = tmp_path` and `grandchild.pid` lives in that same dir,
+    so "`capture_one`'s own cleanup deletes the file the test then reads" looks obvious. It
+    is false: `capture_one` has exactly one `unlink` (`scripts/capture_all_logins.py:163`),
+    it targets `rotator._bootstrap_pid_path(email)` — a different path — and only when that
+    file's content equals its own pid. It never touches `grandchild.pid`.
+  - **A `lean-worker` was dispatched 11:30** to capture the real state at failure (5 serial
+    repeats + 1 `-n auto`, `--showlocals`, the missing path verbatim, and a per-test `ls` of
+    the tmp dir); it is forbidden from fixing or diagnosing. **Known limit of that dispatch:**
+    `--showlocals` shows frame locals, which cannot separate *never written* from *written
+    then removed* — only the `ls` speaks to that, and only because pytest RETAINS the last 3
+    numbered `tmp_path` dirs rather than deleting them at teardown. **If steps 1–4 come back
+    inconclusive, the next measurement is not another traceback capture** — it is one
+    temporary line inside the poll loop recording whether the parent dir ever contained the
+    file, reverted after. The serial-vs-`-n auto` RATE from steps 1–5 narrows this more than
+    any traceback will.
+  - `column: dev` is true on that dispatch and on nothing else — **if it returns nothing,
+    re-column to `todo`.**
 
 ## The failures
 
