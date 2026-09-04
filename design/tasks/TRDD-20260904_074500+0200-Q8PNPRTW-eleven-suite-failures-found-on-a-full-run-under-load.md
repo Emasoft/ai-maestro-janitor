@@ -28,13 +28,41 @@ external-refs: [TRDD-7NSRD8OV]
   `/tmp/soak8.txt` and one session's conversation, both of which die with the session. A
   finding that is not on the board has not been recorded — it has been *noticed*. This card
   is the record; the `/tmp` paths below are evidence, not storage.
-- **⇒ NEXT ACTION (11:40, CURRENT — everything below this bullet is HISTORY, read it only
-  for the WHY).** A `lean-worker` dispatched 11:30 is capturing the real failure state of the
-  two `test_capture_all_logins.py` rows. When it returns: read its report, verify anything it
-  calls a defect FIRST-HAND (open the line it cites — a subagent's word is evidence, never a
-  decision), then delete whichever of the three candidate mechanisms it does not support.
-  **The other 10 failures have never been triaged** — no triage report exists (see the next
-  bullet), so they remain exactly as listed under "The failures" below.
+- **⇒ NEXT ACTION (11:45, CURRENT).** **Re-run the FULL suite under `-n auto`.** All 12
+  failures were triaged at 08:49 and four fixes landed in `5b5267a5`; the ONLY unmet
+  acceptance criterion is the full-suite green run, and no `-n auto` run has happened since
+  the fixes. Everything below this bullet is HISTORY — read it for the WHY, not for the state.
+- **⚠ RETRACTION (11:45) — "the other 10 have never been triaged" was FALSE, and I published
+  it here and to the USER.** The triage EXISTS:
+  `reports/suite-failures/20260904_084913+0200-12-failure-triage.md`, written 08:49 by the
+  08:11 re-dispatched worker. All 12 rows classified with quoted evidence, four fixes applied
+  and verified, **committed in `5b5267a5`**, working tree clean. I inferred the absence from
+  "the 07:44 worker died" and never ran the one `find` that would have checked — the same
+  fabricated-absence defect this card already documents for the `.git/index.lock` blocker,
+  where a made-up premise happened to reach a defensible conclusion. Here it reached a false
+  one.
+- **⚠ AND THE FRAMING OF MY WHOLE 11:00–11:45 INVESTIGATION WAS WRONG.** I described
+  `_deadline_slack`'s docstring as *"a prior author's hypothesis"* and built a 50-trial
+  campaign to refute it. **`_deadline_slack` was added to `tests/test_capture_all_logins.py`
+  by THIS session's own subagent at 08:49, in `5b5267a5`** — it is the rationale for a fix
+  this card commissioned, three hours old, not inherited from anyone. So I measured against a
+  claim I had generated, while the report explaining it sat unread in `reports/`.
+  Three consequences, all of which weaken what I wrote above:
+  - The 11 failures I was diagnosing are from the **07:14 PRE-FIX run**. Rows 1 and 2 were
+    already fixed at 08:49 (row 1 outright; row 2 with a documented residual race). "The cause
+    is genuinely UNKNOWN" was written about tests whose cause had been named and fixed.
+  - My trials ran at **load 14.8–21.2**. The worker observed row 2's residual failure at
+    **loadavg 45.52** — roughly 2–3× the load I tested at. A non-reproduction below the load
+    where the failure was actually seen is much weaker than I claimed, and this alone would
+    have blocked "false as stated" had I read the report first.
+  - **The `[[recall-first-then-verify]]` rule exists for exactly this** and I ran the whole
+    session without invoking it. `find reports/suite-failures -type f` is one command and it
+    was available at every point.
+- **THE REUSABLE LESSON, because it is not the one I kept writing.** I produced five
+  paragraphs of inference hygiene about instruments and sample sizes while the actual defect
+  was that **I never looked for the artifact my own predecessor was told to write.** Rigor
+  applied downstream of an unchecked premise manufactures confident work on the wrong
+  question. Check for the report before measuring anything.
   - **THIS HEAD WAS STALE FOR THREE HOURS AND ITS OWN MIDDLE CONTRADICTED IT.** Until this
     edit the block opened with *"A LEAN-WORKER IS TRIAGING THEM RIGHT NOW (dispatched 07:44)"*
     and *"NEXT ACTION — read that report"*, while the 08:07 bullet below records that that
