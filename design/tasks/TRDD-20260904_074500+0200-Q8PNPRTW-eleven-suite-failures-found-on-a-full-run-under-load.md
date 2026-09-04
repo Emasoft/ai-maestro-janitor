@@ -40,8 +40,15 @@ external-refs: [TRDD-7NSRD8OV]
 - **`column: dev` IS CONDITIONAL, AND HERE IS THE CONDITION.** A WORK column asserts someone
   is working the card right now. That is true only while the triage worker is alive, and a
   subagent cannot update this card, cannot commit, and vanishes when it returns. **If the
-  worker returns nothing, dies, or you are not continuing the triage yourself in that same
-  turn — re-column to `todo` immediately.** Do not leave it at `dev` with `current-owner:
+  worker returns nothing or dies — re-column to `todo` immediately.**
+  *(An earlier draft of this clause also fired on "or you are not continuing the triage
+  yourself in that same turn". That was too strong and I read past it once already: taken
+  literally it makes `dev` false whenever the work is CORRECTLY delegated, which would make
+  a delegated card unmaintainable. Replaced with the liveness test, which is what I meant
+  and — unlike the old clause — is CHECKABLE: `ls -lt /tmp/diag_*.txt` against `date`.
+  Liveness confirmed 07:55:37, last worker output 07:54, so `dev` is true as of this edit.
+  A `dev` column resting on an unchecked assumption is the failure; resting on a stale
+  check is only slightly better, so re-check it, do not inherit this line as a fact.)* Do not leave it at `dev` with `current-owner:
   janitor-main-session` and nobody working it; that is the 37-cards-in-`dev` failure the
   kanban rule was written from. (`current-owner` naming the main session is CORRECT — the
   subagent is not addressable, holds no resumable state, and owns nothing.)

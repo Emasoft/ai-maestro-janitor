@@ -71,6 +71,14 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
     NARROWS what the automated path may write to** (it removes the only variable that let
     the guard address a repo other than the project), which is the least dangerous class of
     change to ship unreviewed. If the USER wants a Fable verdict anyway, that is a new card.
+  - **"The rule released me" is the WEAKEST of the three reasons, and it is the one the
+    commit body leads with.** Recorded here because that shape of argument — citing an
+    exhausted-window clause — could retire any concern, which is exactly what I should be
+    suspicious of. The load-bearing reasons are the other two: **(a) the change STRICTLY
+    NARROWS the write surface** — there is no input under which the new code writes to more
+    repos than the old, and an advisor exists to catch the opposite; **(b) substantive review
+    DID happen** — five adversarial forks, several of which found real defects in this exact
+    change. What was missing was one specific *reviewer*, not review itself.
   - Two frontmatter fields died with the block, and both were defective anyway:
     `pre-block-column` briefly read `dev` — **FABRICATED**, this card was never in `dev` —
     and `unblock-when: [decision:…]` was written without checking the parser (it does match
@@ -81,12 +89,22 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
     `trdd-drift.py:331` does `target = trdd_common.pre_block_column(head) or "todo"` and
     restores the card to it on a drain pass; `trdd_common.py:685` parses it;
     `trdd-drift.py:238-240` clears it and `blocked-by:` on unblock. `blocked-by:` is read by
-    seven modules including `fleet_status.py`. So the fabricated `pre-block-column: dev`
-    would have **auto-restored this card into a WORK column** with nobody working it, and the
-    later `complete` value would have auto-restored it straight into a FROZEN terminal column
-    with no chance to append the waiver to `## Approval log` first. Both traps were real and
-    mechanical, and both are gone with the fields. **The lesson is the scope one:** two
-    unverified fields sat in the same frontmatter and I checked one.
+    seven modules including `fleet_status.py`.
+  - **BUT "it WOULD have auto-restored" was an OVERCLAIM — corrected after reading the
+    gating.** The restore at `:331` sits *after* the `unblock-when satisfied` checks; a
+    predicate that is not satisfied returns early and holds. Mine was `decision:`, the one
+    kind that **never auto-clears** — so nothing would ever have triggered the restore, and
+    the fabricated `pre-block-column` was in practice **inert**. The trap was armed and its
+    trigger was disconnected *by the other unverified field*. That is a more useful finding
+    than the one I first wrote: **two unverified fields interacted, and the interaction
+    happened to be protective.** Lucky twice in one frontmatter — and the luck runs out the
+    moment a `pre-block-column` sits beside a predicate that CAN auto-clear (`trdd:`,
+    `issue:`, `file:`, `date:`), which is the common case. Note `complete` IS in
+    `ALL_COLUMNS`, so it would have passed the legality guard at `:334` and restored a card
+    straight into a frozen terminal column, with no opportunity to append the waiver to
+    `## Approval log` first.
+  - **The lesson is the scope one:** two unverified fields sat in the same frontmatter and I
+    checked one — in the commit whose subject was about not asserting unchecked values.
 - **RESOLVED 2026-09-04 in `e4dd674d` — not by reordering, by DELETION.** Reading
   `detect_repo_slug` settles the question the NEXT ACTION posed: it resolves the slug **of
   the repo at the given root**, and the only root this guard may ever protect is the
