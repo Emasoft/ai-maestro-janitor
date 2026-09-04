@@ -97,8 +97,39 @@ external-refs: [TRDD-7NSRD8OV]
     three times (a `ps` still-photograph of an exited git, a zombie `os.kill(pid,0)` calls
     alive, an `lsof` that timed out under load). Provenance means knowing the creator and
     knowing it is dead; I have neither. Waiting out 1800 s costs nothing here.
-  Two card edits wait uncommitted in the working tree; commit once the guard says `removed`
-  or `absent` — re-run it, do not `rm`.
+  - **RESOLVED 08:14 — `verdict: removed`, via `clear_stale_index_lock(min_age_s=600)`.**
+    USER authorization, verbatim: *"there is no other claude code instance running in this
+    project folder. it must be some hung or zombie process. find it and kill it."*
+    **There was nothing to kill** — no fd on the lock, nothing open under `.git`, no `git`
+    process machine-wide, the only two processes with this repo as cwd were the janitor's own
+    `summarize_previous_session.py` started AFTER the lock, and the single zombie belonged to
+    an unrelated app and predated it by 16 h. A pure orphan FILE.
+  - **THE ORDER OF THE ARGUMENT MATTERS — do not copy the forensics-first pattern.** The
+    clear rests on exactly two grounds: **(1) the USER's statement**, an authority no probe
+    beats, which supplies identity-by-elimination; and **(2) the 0-byte size**, which the
+    wikimem page states as a PROOF the creator died before writing. The `lsof` and
+    process-table results are **corroboration only, and the page disqualifies both as primary
+    grounds** — lesson [3] calls lowering `min_age_s` *because* lsof was empty circular, and
+    lesson [1] names process-visibility as the signal that burned this subsystem three times.
+    My commit body and my report to the USER both LED with the disqualified two. A future
+    session copying that order copies the failing pattern.
+  - **IDENTITY WAS NEVER ESTABLISHED, and the card must not harden one hypothesis into
+    fact.** `357e5438`'s body asserts the creator was my own interrupted `git add` ("it
+    succeeded, then the index did not retain the staging"). That is ONE of at least three
+    readings: the `M ` → ` M` transition is actually *unexplained* by that story, since the
+    intervening `git add` FAILED and a failed add unstages nothing; the first porcelain read
+    may itself have been against a partially-written index. What IS now ruled out is the
+    janitor: `.janitor/logs/` shows the last heartbeat fire at **07:55:09** and nothing at
+    08:00. The USER's statement made identity moot — it did not supply it.
+  - **The `Exit code 2` on the clearing command was BENIGN and is explained**: `uv run python
+    -c` exits 0 (verified separately); the 2 came from the LAST command in the compound,
+    `ls -l .git/index.lock`, on a file that had just been removed. No defect in `git_utils`,
+    no trap for callers that branch on it — but note this is the same family as reading an
+    `fsck` exit through a pipe: a status attributed to the wrong command.
+  - **`git fsck` after the removal: exit 0, clean** (1103 dangling commits are ordinary
+    rebase residue). It first read as exit 0 through a `| head` — i.e. `head`'s status — and
+    the true value was **8**, from a pre-existing `.git/refs/.DS_Store` (Finder junk dated
+    Aug 26, unrelated to the lock) that git tried to parse as a ref. Removed; fsck clean.
 - **THE WORKER'S REPORT MAY BE MIXED-VINTAGE — do not read it as internally consistent.**
   It was dispatched under a wrong framing ("11 failures") and a confounded bucket-(c)
   predicate ("passes serially"), then corrected MID-FLIGHT by SendMessage to 12 tests and a
