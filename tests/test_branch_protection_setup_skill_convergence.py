@@ -109,40 +109,29 @@ class _Bpl:
         self._content = content
         self.applied = False
 
-    # Stubs keep their REAL parameter names and arity, and discard them with `_ = (...)`.
-    # The reason is ARITY, not lint: `*_` accepts any number of arguments, so a snippet
-    # calling the content check with two instead of three would have executed fine and
-    # passed. Named parameters make a wrong-arity call raise TypeError again.
-    # Two earlier versions of this comment gave a LINT justification. Both were wrong,
-    # and the second was wrong in the same way as the first — asserting a mechanism
-    # nobody had run. MEASURED: CLI pyright on a file with two unused NAMED parameters
-    # reports `0 errors, 0 warnings, 0 informations`. It does not flag them at any
-    # severity. The "is not accessed" hints come from the editor's language server
-    # (unreferenced-symbol hinting), which the gate never invokes. So neither `*_` nor
-    # named-and-discarded was ever a gate concern, and `pyrightconfig.json` sets no
-    # `typeCheckingMode` and does not configure `reportUnusedParameter` either.
-    # The arity argument is the ONLY reason this shape is here.
+    # Named parameters, not `*_`: arity is the point. `*_` accepts any number of
+    # arguments, so a snippet calling the content check with two instead of three would
+    # execute fine and pass. Named ones make a wrong-arity call raise TypeError.
+    # Arity is a property of the SIGNATURE, so nothing in the bodies is needed for it —
+    # three earlier versions of this comment argued about linters (two asserting a
+    # pyright mechanism nobody had run, one asserting the opposite), and carried `_ = ...`
+    # discard lines to satisfy a checker measured to be silent. All of that is gone.
     def detect_default_branch(self, slug):
-        _ = slug
         return "main"
 
     def gh_available(self):
         return True
 
     def viewer_is_admin(self, slug):
-        _ = slug
         return True
 
     def baselines_present(self, slug):
-        _ = slug
         return self._present
 
     def baselines_content_current(self, slug, default_branch, project_root):
-        _ = (slug, default_branch, project_root)
         return self._content
 
     def apply_baseline_rulesets(self, slug, default_branch, project_root):
-        _ = (slug, default_branch, project_root)
         self.applied = True
         return True, [("baseline-history-protect", True, "applied")], []
 
