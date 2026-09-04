@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:54:08+0200
+updated: 2026-09-04T10:55:47+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -162,20 +162,27 @@ Two of those are only *half* alive, which the row above is too coarse to show.
 Note WHICH observation kills each — a first draft here credited the wrong one
 in both cases, and the correct attribution is earlier and stronger:
 
-- **temp-copy** survives only in a git-UNAWARE form (`cp -r`, rsync). Killed by
-  **PROBE 1** — the earliest of the three, and on CONTENT rather than presence.
-  `git archive` has no working-tree mode at all; any git-aware export must
-  materialise some committed tree. Probe 1's file was tracked but DIRTY: the
-  defect was appended and never committed, so every committed tree carries the
-  CLEAN blob and a git-aware export would have shown markdownlint nothing to
-  report. It was reported. (Probes 2 and 3 also refute it, on the weaker
-  presence basis — an untracked file is absent from a tracked-only export — but
-  they are redundant here.)
+- **temp-copy** survives only in a fully git-UNAWARE form (`cp -r`, rsync with
+  no git filter). "Git-aware export" is not one thing, and **each probe kills a
+  different sub-variant** — no probe kills the family alone:
 
-  This attribution was wrong three times before it was right: credited to probe
-  3, corrected to probe 2, and only then traced to probe 1. Each correction
-  moved toward the newest evidence when the oldest already sufficed — which is
-  the failure the lesson below names, committed in the sentence that names it.
+  | export variant | probe 1 (tracked, DIRTY) | probe 2 (untracked) | probe 3 (gitignored) |
+  |---|---|---|---|
+  | materialises a committed tree (`git archive HEAD`, or the index) | **REFUTED** — carries the CLEAN blob, so nothing to report; it was reported | (also refuted) | (also refuted) |
+  | copies the working tree, filtered by `git ls-files` | consistent — tracked file, dirty content copied | **REFUTED** — untracked, so omitted | (also refuted) |
+  | copies the working tree, filtered by gitignore | consistent | consistent | **REFUTED** — ignored, so omitted |
+
+  Probe 1's contribution is the strongest in kind — it refutes on CONTENT, not
+  presence: `git archive` has no working-tree mode, so a committed-tree export
+  hands markdownlint the clean version of a tracked-but-dirty file. But a copier
+  that reads the working tree and consults git only for EXCLUSION is git-aware in
+  the sense this row means, carries the dirty defect, and probe 1 says nothing
+  about it. That one needs probe 2.
+
+  Attribution history, kept because it is the instructive part: credited to probe
+  3, corrected to probe 2, then to probe 1 alone ("2 and 3 redundant" — wrong),
+  and only then to this table. The first three answers each named ONE probe for a
+  question with three independent answers.
 - **manifest-listed directories** survives only if `design/` is on the manifest.
   A manifest without `design/` was refuted by the **ORIGINAL PUBLISH**, which
   reported three NITs in a `design/` card — before any probe existed. The
@@ -188,11 +195,13 @@ in both cases, and the correct attribution is earlier and stronger:
 So the surviving set is a family of families and two of its branches are already
 half-pruned. The lesson is NOT "the oldest evidence did the work" as a rule about
 evidence age. It is a rule about SEARCH ORDER: **check whether an earlier
-observation already discriminates before crediting the newest one.** Both
-branches here were killed by the earliest observation that could kill them — the
-publish for the manifest, probe 1 for temp-copy — and in both cases the first
-answer written down credited a later one. The check costs a minute and was
-skipped three times on a single bullet.
+observation already discriminates before crediting the newest one** — and, the
+harder half, **check whether the question has more than one answer.** The
+manifest branch has a single killer (the publish). Temp-copy has three, one per
+sub-variant, and four successive attempts each named exactly one because the
+question was read as "which probe killed it" rather than "what is *it*". A
+hypothesis that turns out to be a family needs an answer per member; naming one
+probe for a family is a category error no amount of re-attribution fixes.
 
 An attempt to eliminate one of them for free FAILED, and the failure is worth
 recording because the reasoning looked sound. The clean run's 47 findings do
