@@ -6,7 +6,7 @@ pre-block-column: todo
 unblock-when: [decision:user]
 min-approval-requirement: user
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T14:11:03+0200
+updated: 2026-09-04T14:16:34+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -154,31 +154,51 @@ not trip on this."* A stage-4 run at 13:36 on 2026-09-04 measured
 `NIT=20 → exit=4`: **19 LISTED MD056 findings in
 `TRDD-…-Q8PNPRTW-…md`** (lines 35–50 and 87–89), plus 1 from the deliberate
 probe defect planted for that run. **"19" is the truncated DISPLAY, not the
-count** — see the ceiling below; the file actually held **37**.
+count** — see the ceiling below; the file actually held **45**, MEASURED.
 
-**Why 19 + 18 legitimately compose to 37**, given the two were measured on
-different file states: the four regions are independent block structures (35–50,
-87–89, 221, 790–806), and a blank line inserted at line 35 cannot manufacture or
-mask a table defect 750 lines later. Both measurements are commensurable for
-MD056 specifically, which neither config disables, and the sets are disjoint.
-Consistency check — **and note what it does and does not show**: 19 Q8PNPRTW +
-1 planted probe = **exactly 20** = the cap, so CPV stopped precisely at the
-ceiling. That confirms the list was **cut**, not the **total**; it establishes
-that more existed, never how many.
+**⚠ 37 WAS ALSO WRONG. The real number is 45, and it is measured rather than
+derived.** The pre-fix blob is in git; `markdownlint-cli2` has no 20-finding cap,
+so linting it directly ends the arithmetic:
 
-**37 needs a lower AND an upper bound, and they come from different evidence.**
-Disjointness + structural independence give **at least** 37 — they say nothing
-about a 38th. The upper bound is the final run: after all four regions were
-repaired CPV reported **`NIT=0`**, which is *sub-cap and therefore a complete
-count*, so nothing remained. That is this card's own truncation rule doing real
-work. It also sidesteps a question the card never settled: whether regions A/B
-contributed *exactly* 19, or "19 before the cap bit", depends on the emitter's
-file/line ordering, which was never established. Argued as `19 + 18 + a final
-NIT=0`, the ordering is irrelevant; argued from disjointness alone, the 19 is
-itself a possibly-truncated figure.
-(This justification is stated because the earlier "stateful parser" story — the
-only reason the states might NOT have composed — was retracted, and removing it
-silently would have left a composed total with no composition argument.) The card predicted *"the **next** card
+```
+git show 595a3a9d^:design/tasks/TRDD-…-Q8PNPRTW-….md > $T/pre.md
+markdownlint-cli2 pre.md   →   45 × MD056
+```
+
+| region | lines | findings |
+|---|---|---|
+| A | 35–50 | 16 |
+| B | **87–97** | **11** |
+| C | 219 | 1 |
+| D | 788–804 | 17 |
+| | **total** | **45** |
+
+**Region B is 87–97, not 87–89 — the cap sliced it MID-REGION.** CPV's 20 slots
+went: 1 planted probe + 19 Q8PNPRTW, and Q8PNPRTW's 19th finding is line 89,
+inside region B. Lines 90–97 were violations too, never listed, and silently
+repaired by the same blank line. (The probe appearing at all proves it was
+emitted *before* Q8PNPRTW — had Q8PNPRTW gone first it would have consumed all
+20 slots.)
+
+**The retracted argument, and why it was seductive.** I wrote that `19 + 18`
+composes to 37, then that the final **`NIT=0`** run supplied the upper bound —
+*"sub-cap, therefore complete, therefore nothing remained"*. The last step is
+false: **a post-fix zero bounds the RESIDUAL, not the ORIGINAL.** The repairs
+were *region-wide* — one blank line kills every finding in its region, however
+many — so `NIT=0` afterwards is equally consistent with 37, 45 or 60 before it.
+I had reached for this card's own truncation rule and applied it to the wrong
+proposition.
+
+Worse, the same paragraph conceded *"whether regions A/B contributed exactly 19
+was never established"* while asserting *"the file actually held 37"* two
+sentences earlier — a truncated figure stated as a total, **one paragraph after
+the rule forbidding exactly that**. The rule was easier to write than to obey.
+
+**The lesson is procedural: when the exact number is one command away, do not
+build an argument for an estimate.** The pre-fix blob was in history the whole
+time. Two rounds of composition reasoning, a lower/upper-bound framework and two
+wrong totals were spent on a question `git show | markdownlint-cli2` answers
+outright. The card predicted *"the **next** card
 containing a markdown table will [trip it]"* — that card already existed and had
 been edited earlier the same day, so the prediction was about the present tense
 and nobody checked it. **A claim of "clean" that was never measured is the same
@@ -748,11 +768,13 @@ names only lever 1; that was an omission, not a distinction.
       reporting, and a checker could select via git and report on a superset
       without any probe noticing. `cpv-remote-validate plugin . --strict` runs
       standalone — no publish, no push — and is the harness for all of the above.
-- [x] `design/` lints clean — RE-ESTABLISHED 2026-09-04 after **37** MD056
-      findings were fixed in `TRDD-…-Q8PNPRTW-…md` across four regions. **Not
-      19** — 19 was the truncated display; the first draft of this very box said
-      "19 real", repeating the exact error the truncation rule below warns
-      against, two screens away from that rule. This box did not exist before
+- [x] `design/` lints clean — RE-ESTABLISHED 2026-09-04 after **45** MD056
+      findings were fixed in `TRDD-…-Q8PNPRTW-…md` across four regions
+      (16/11/1/17), MEASURED by linting the pre-fix blob out of git with an
+      uncapped `markdownlint-cli2`. **Neither 19 nor 37** — this box said "19
+      real" in its first draft and "37" in its second, both truncated or derived
+      figures asserted as counts, both within two screens of the rule forbidding
+      exactly that. This box did not exist before
       because the card asserted "lints clean" without measuring; it exists now
       so the next session re-measures rather than re-assumes.
 - [ ] A decision is recorded here on option 1, option 2, or option 3.
@@ -771,11 +793,16 @@ where an over-confident claim survives longest.** Commit `595a3a9d` says
 *"repairing 37 MD056 defects"* and *"cli2 has **never** supported
 `.markdownlintignore`"*. Both are **very likely** correct, and both are stated
 more firmly than the card behind them — **but they fail differently, and
-flattening that would repeat the error.** "37" is the right number with its
-derivation hidden (19 listed + 18 found after, plus a composition argument): a
-*phrasing* gap. "Never" quantifies over cli2's entire history from a probe of
-exactly one version: a *scope* gap, where calling it flatly "correct" would
-itself be the overconfidence under discussion. Neither
+flattening that would repeat the error.** "Never" quantifies over cli2's entire
+history from a probe of exactly one version: a **scope** gap, where calling it
+flatly "correct" would itself be the overconfidence under discussion.
+
+**"37" turned out to be a scope gap too, not the *phrasing* gap I filed it as.**
+I classified it as "the right number with its derivation hidden". It was not the
+right number — the measured total is **45** — so it was a truncated figure
+asserted as complete, the same failure as "never", one taxonomy slot away. The
+phrasing/scope distinction is sound and worth keeping; **my confidence that this
+example belonged in the mild half was itself the bias the lesson describes.** Neither
 is worth rewriting history for — the TRDD id in the subject leads to the
 qualified version, which is the mechanism working. But this is `d4e5f055`'s
 defect in miniature, committed by the very card that documents it: **write a
