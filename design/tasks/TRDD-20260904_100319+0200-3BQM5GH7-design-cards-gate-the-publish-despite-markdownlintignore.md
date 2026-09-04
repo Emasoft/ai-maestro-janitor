@@ -6,7 +6,7 @@ pre-block-column: todo
 unblock-when: [decision:user]
 min-approval-requirement: user
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T14:06:04+0200
+updated: 2026-09-04T14:08:26+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -161,8 +161,11 @@ different file states: the four regions are independent block structures (35–5
 87–89, 221, 790–806), and a blank line inserted at line 35 cannot manufacture or
 mask a table defect 750 lines later. Both measurements are commensurable for
 MD056 specifically, which neither config disables, and the sets are disjoint.
-Consistency check: 19 Q8PNPRTW + 1 planted probe = **exactly 20** = the cap, so
-CPV stopped precisely at the ceiling and the 18 are the suppressed remainder.
+Consistency check — **and note what it does and does not show**: 19 Q8PNPRTW +
+1 planted probe = **exactly 20** = the cap, so CPV stopped precisely at the
+ceiling. That confirms the list was **cut**, not the **total**; it establishes
+that more existed, never how many. The weight for 37 is carried entirely by
+disjointness and structural independence above.
 (This justification is stated because the earlier "stateful parser" story — the
 only reason the states might NOT have composed — was retracted, and removing it
 silently would have left a composed total with no composition argument.) The card predicted *"the **next** card
@@ -752,6 +755,20 @@ names only lever 1; that was an omission, not a distinction.
       promises an exclusion no tool has ever honoured.
 
 ## Notes and lessons learned
+
+**A COMMIT MESSAGE MUST CARRY THE SAME HEDGE THE CARD CARRIES — history is
+where an over-confident claim survives longest.** Commit `595a3a9d` says
+*"repairing 37 MD056 defects"* and *"cli2 has **never** supported
+`.markdownlintignore`"*. Both are correct, and both are stated more firmly than
+the card behind them: 37 is a **derived** total (19 listed + 18 found after,
+with a composition argument), and "never" quantifies over cli2's whole history
+from a probe of exactly one version, which the card explicitly caveats. Neither
+is worth rewriting history for — the TRDD id in the subject leads to the
+qualified version, which is the mechanism working. But this is `d4e5f055`'s
+defect in miniature, committed by the very card that documents it: **write a
+derived count as derived ("19 listed + 18 found after"), and if the card hedges,
+the message hedges.** A commit message is read by people who will never open the
+card.
 
 **IDENTIFY THE BINARY BEFORE PROBING ITS BEHAVIOUR.** The entire card — five
 candidate mechanisms, three probes, two of my own wrong verdicts — existed
