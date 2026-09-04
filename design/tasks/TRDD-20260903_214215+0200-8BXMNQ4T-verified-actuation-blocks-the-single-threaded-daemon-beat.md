@@ -174,11 +174,39 @@ sum EVERY foreground body (any duration) overlapping `[eligible, resumed)`:
 | `fleet-stop` | 04:17:50 | 90 s | **78%** | session-liveness 55 + oauth-rotator-tick 15 |
 | `gh-notify-inbox` | 04:18:26 | 184 s | **54%** | session-liveness 55 + cold-cache-clear 30 + oauth 15 |
 
-**Median coverage 93%; 11 of 12 at or above 78%; one outlier at 54%.** The residual
-is loop overhead (sleep granularity, dispatch). Crucially the contributors are
+**Median coverage 93%; 11 of 12 at or above 78%; one row at 54%.** Contributors are
 mostly **sub-60 s bodies stacking** — `fleet-stop`'s 04:17:50 stall is 55 s + 15 s,
 neither of which is a "long body". So a per-body deadline below 60 s would NOT have
 prevented these; the quantity that matters is total foreground work per beat.
+
+**THE CONTROL — this is what makes the 93% mean something.** Coverage would be a
+worthless metric if a normal beat were also ~90% covered (the loop is always doing
+*something*). Measured across every wait in the same snapshot:
+
+| wait size | n | median coverage |
+|---|---|---|
+| normal ≤15 s | 884 | **0.0%** |
+| mid 15–60 s | 73 | 12.5% |
+| **stall >60 s** | **12** | **92.7%** |
+
+A clean monotonic gradient, and normal beats are covered essentially **zero**
+percent. Cumulative foreground occupancy therefore *discriminates* stalls from
+healthy beats rather than merely describing them. Without this control the 93%
+proved nothing; it was suggested by review and it is now the strongest evidence
+on the card.
+
+**Caveat on independence:** the 12 rows are not 12 independent confirmations.
+`session-liveness` appears in 8 of them, so one body legitimately delays three tasks
+and is counted in three rows — correct physics, but the effective sample is ~5
+distinct blocking episodes viewed 12 times.
+
+**The unexplained mass is CLUSTERED, not a lone outlier.** The 54% row (184 s, the
+second-largest wait) and the 78% row sit adjacent at 04:17:50 and 04:18:26, while
+the 04:34–04:35 cluster runs 90–94%. So ~84 s of unaccounted loop occupancy
+concentrates in one ~3-minute window at 04:15–04:18. Cause unknown — and it is the
+same window the withdrawn host-load story was reaching for. That story was wrong on
+its evidence (it cited events postdating the stalls); the clustering it noticed is
+real and is currently explained by nothing.
 
 **Two rows the previous draft got wrong**, both found by review and confirmed here:
 `github-config-audit` is a **BACKGROUND** task (`starting (background pid …)`), so it
@@ -370,8 +398,16 @@ surface for a number nobody is waiting on.
       Bounding or backgrounding IT alone is the change the data points at — but it is the one
       task where backgrounding is most dangerous, so it needs a design decision, not a move.
       **The advisor must be consulted before any `scripts/daemon.py` scheduling change.**
-      Third tick, third un-tick, all optimistic. The tell each time was a counter-argument
-      written inside the ticked box.
+      **Half of this box CAN be closed now**, and the enumeration is not
+      exhaustive-or-nothing: the *"no action, cost is invisible at this fleet size"* branch is
+      **definitively ruled out** — 12 stalls, attributed, with a control showing normal beats
+      are 0% covered. What remains open is only which remedy, and that is a design question.
+      **Ticks 1 and 2 were optimistic; this un-tick is not.** Tick 1 was on "defer and
+      re-measure" (not an enumerated option) and tick 2 on a mechanism contradicted inside its
+      own box — both lapses. Un-tick 3 followed a *new finding* (cumulative, not single-body)
+      that invalidated both candidate remedies, which is evidence changing a decision. An
+      earlier draft of this note called all three "optimistic", which was itself a tidy
+      summary the detail does not support.
 - [ ] If a mechanism lands: a test pins the bound, and `oauth-rotator-tick` is shown still
       running on cadence with every pane wedged.
 
