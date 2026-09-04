@@ -729,6 +729,26 @@ accepted as an artifact.
 
 ## Acceptance criteria
 
+> **✅ 12:40 — THE CAUSE IS NOW NAMED, BY MEASUREMENT. The block below is SUPERSEDED: the
+> criterion can be SATISFIED rather than waived.** `-n auto --dist loadgroup` over
+> `test_branch_protection.py` + `test_branch_protection_guard.py` +
+> `test_token_usage_anomaly_detector.py`: **`88 passed in 19.05s`, exit 0, at load 14.83** —
+> like-for-like against soak9's START load of 15.53 (NOT its end-of-run 8.52; that mis-read is
+> retracted above).
+> **What this discriminates, which no earlier run could:** the serial pass ruled out `xdist`
+> but not load; this run holds `xdist` AND host load roughly constant and changes only the
+> SUITE SIZE. All ten pass. So the mechanism is **neither the host's background load nor
+> parallelism as such — it is the FULL SUITE'S OWN fan-out**: 14 workers over 16,403 tests for
+> 822 s starves these subprocess-heavy tests, where 14 workers over 88 tests for 19 s does not.
+> That is the documented `timeout_scale` fail-open with evidence behind it rather than a
+> matching signature, and it is a **named cause** — the thing criterion 1 and the final
+> criterion's second branch actually ask for.
+> **Still owed before closure:** this is one run per group; and #8 in particular has now
+> passed twice and failed twice, so its rate is not established. The ask to the USER is no
+> longer "waive the bar" but "accept this mechanism as named" — a materially different
+> question, and the one that should have been measured before it was ever escalated.
+>
+> *(SUPERSEDED 12:40 — kept as provenance for what was nearly asked of the USER:)*
 > **⚠⚠ THE WAIVER CANNOT BE GRANTED AS THESE CRITERIA STAND — read this before asking the USER.**
 > The final criterion's waiver branch requires *"every remaining red is a load artifact **with
 > its cause named** and accepted by the USER"*. **Not one of the 10 meets the "cause named"
