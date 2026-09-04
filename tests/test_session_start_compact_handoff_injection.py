@@ -122,8 +122,8 @@ def test_the_same_compaction_injects_only_once(tmp_path: Path) -> None:
     # Checked HERE, not at the end: the guard must suppress the REPEAT without consuming the
     # flag (injected context is passive and starts no turn, so the heartbeat stays the actuator
     # and is also what re-attaches background agents). Asserted before the once-only calls so a
-    # `0` from them means the STAMP — with the flag already gone, they would return early on the
-    # missing flag and pass for the wrong reason while this failed.
+    # `0` from them means the STAMP — they return early at the flag check, which sits ABOVE the
+    # stamp, so with the flag already gone they would pass on the missing flag instead.
     assert (sd / "resume-after-compact.flag").is_file(), "the injection consumed the flag"
     assert _injections(project, env) == 0
     assert _injections(project, env) == 0
@@ -160,7 +160,8 @@ def test_only_source_compact_injects(tmp_path: Path) -> None:
 
     The reset below is what makes these arms measure the GATE rather than the guard: without
     it, a control run's stamp makes a widened gate (`source in ("compact", "clear")`) return
-    early and the test passes anyway. Measured — do not delete.
+    early and the test passes anyway. Measured: with the reset removed, that widened gate
+    survives the whole module.
 
     `clear` is the DISCRIMINATING arm, the only source a plausible widening would admit;
     `startup`/`resume` are cheap cover against the gate being dropped entirely.
@@ -255,6 +256,10 @@ def test_an_empty_handoff_injects_nothing(tmp_path: Path) -> None:
     it — the stamp, the age bound, the body. The stamp is unlinked below; `_arm()` armed at
     `age_s=0`, so the 24 h bound is nowhere near; the flag is untouched. The control above
     ran against that same state and injected. One variable differs between the two runs.
+
+    AND that the silence is BY DESIGN, not a crash: `main()` swallows every exception from
+    the injection, so dropping `if body is None: return` (print(banner + None) → TypeError)
+    produces this same 0 — measured: the log assertion is then the ONLY failure.
     """
     project, env = _project(tmp_path)
     sd = _arm(project)
@@ -263,3 +268,8 @@ def test_an_empty_handoff_injects_nothing(tmp_path: Path) -> None:
     for handoff in sd.glob("agent-handoff-*.md"):
         handoff.write_text("   \n\n", encoding="utf-8")
     assert _injections(project, env) == 0
+    # No is_file() fallback ON PURPOSE: a missing log must RAISE, not read as a clean one.
+    log = project / ".janitor" / "logs" / "session-start.log"
+    assert "post-compact handoff injection failed" not in log.read_text(encoding="utf-8"), (
+        "the injection crashed — this silence is a swallowed exception, not an empty body"
+    )

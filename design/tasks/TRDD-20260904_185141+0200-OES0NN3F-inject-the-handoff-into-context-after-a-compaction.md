@@ -77,7 +77,8 @@ injection lands before the first turn and needs no nudge to have fired.
 
 - [x] A session that auto-compacts has the handoff text in its context at the next turn, with
       **no** heartbeat fire and **no** keystroke injection involved. — **COVERED BY
-      `tests/test_session_start_compact_handoff_injection.py`, 9 tests, all passing, and MUTATION-TESTED.** The
+      `tests/test_session_start_compact_handoff_injection.py`, the module's tests, all passing,
+      and MUTATION-TESTED.** The
       throwaway shell arms of earlier rounds are superseded: they were hand-run, uncounted, and
       twice produced a silence that was a FIXTURE bug rather than a working guard (a handoff
       filename outside `handoff_files`' pattern; a shell indirection that dropped an env var).
@@ -137,15 +138,38 @@ injection lands before the first turn and needs no nudge to have fired.
 
 ## Notes
 
-- **KNOWN, not covered: the empty-body path's silence is indistinguishable from a CRASH's
-  silence.** Drop `_handoff_body`'s `if body is None: return` and the caller does
-  `print(banner + None)` → `TypeError` → absorbed by `main()`'s `except Exception` → no output
-  and a `_slog` line nobody reads. `test_an_empty_handoff_injects_nothing` still passes: same
-  observable, opposite meaning. Catching it needs an assertion on `session-start.log`, which is
-  low value; recorded instead of tested.
-- **What the mutation tally actually claims.** Six mutations run, six caught — but they were
-  chosen AFTER the tests existed, and five correspond to bugs this feature actually had. So the
-  suite is calibrated against KNOWN failure modes, not proven against unknown ones.
+- **The empty-body path's silence is now DISTINGUISHED from a crash's silence** (was recorded as
+  "known, not covered, low value" — wrong: the gap swallows the whole feature for every
+  compacted session, and the test that needed it already existed).
+  `test_an_empty_handoff_injects_nothing` now also asserts `post-compact handoff injection
+  failed` is absent from `.janitor/logs/session-start.log`. **Measured 2026-09-04:** with
+  `if body is None: return` deleted, that assertion is the ONLY thing that fails —
+  `TypeError('can only concatenate str (not "NoneType") to str')` in the log and no banner on
+  stdout (the crash precedes the print — stdout is not empty, it still carries the hook's other
+  output; `_injections` counts BANNER occurrences), so the `== 0` above still passes. **One mutation generalizes because the assertion is coupled to
+  the SINK, not to the mutated line:** `_inject_post_compact_handoff` has exactly one call site,
+  inside `main()`'s lone `try`, so an exception raised anywhere beneath it — `_handoff_body`,
+  `sanitize_for_drift_line`, the `print` — unwinds to that one `except` and emits that one
+  string. Boundary: a crash AFTER the banner reaches stdout fails on the `== 0` count instead,
+  with a misleading message but no false pass.
+  **That probe is a PROXY, not the threat.** pyright rejects `str + str | None`, so the
+  guard-deletion mutation could not actually ship. The regression the assertion is for is the
+  type-CLEAN version of the same silence: `_handoff_body` refactored to return `""`, a
+  `body or ""` added to placate a type-checker, a caller reordered — all pass the gate, all
+  produce the same silent zero. A reader who notices pyright covers the probe and deletes the
+  assertion has deleted cover for the class pyright cannot see.
+  The generic form — asserting inside `_injections` that no injection ever crashed — is not
+  deferred for cost; it is **DECLINED**, and the reason is not the one that looks obvious.
+  `_injections` already captures stderr and merely discards it, so exposing it is one line —
+  but stderr is the WRONG oracle: `main()` absorbs the exception into the log, printing no
+  traceback. The generic check would therefore be this same log grep applied to every test in
+  the module, when only this one has the ambiguity — the rest either assert a positive count or
+  already isolate their zero's cause. Revisit only if a second injection path grows its own
+  exception sink.
+- **What the mutation tally actually claims.** Six mutations run, six caught; five of them
+  reproduce bugs this feature actually had, so the suite is regression-proofed against its own
+  history. They were chosen AFTER the tests existed, which makes this a measure of sensitivity
+  to those defects, not of blind coverage.
 
 - **`implementation-commits:` never contains the newest CODE-CARRYING commit, by construction, and that is accepted rather
   than re-noticed each round.** The card is edited in the same change as the code, so the hash
