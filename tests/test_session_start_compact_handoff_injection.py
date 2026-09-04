@@ -125,12 +125,21 @@ def test_the_same_compaction_injects_only_once(tmp_path: Path) -> None:
 
 def test_a_later_compaction_injects_again(tmp_path: Path) -> None:
     """The guard must stop REPEATS, not stop the feature: a genuinely new compaction
-    rewrites `resume-after-compact.ts` to a later epoch and must be delivered."""
+    rewrites `resume-after-compact.ts` to a later epoch and must be delivered.
+
+    BOTH timestamps are in the PAST, deliberately. An earlier version armed at `now` and
+    then wrote `now + 10`, which passed — but a FUTURE `.ts` is not an input production can
+    produce (`post-compact-resume.py:238` writes `str(int(time.time()))`, always now). That
+    test proved "a future timestamp injects" and left the real shape untested, because with
+    the first arm at `now` every "later but still past" value is `<= now` and the `>=`
+    comparison suppresses it. Back-dating the first compaction makes the second one later
+    AND past, which is what the production path actually looks like.
+    """
     project, env = _project(tmp_path)
-    sd = _arm(project)
+    sd = _arm(project, age_s=60)  # compaction #1, a minute ago
     assert _injections(project, env) == 1, "positive control failed — fixture is broken"
     assert _injections(project, env) == 0
-    (sd / "resume-after-compact.ts").write_text(str(int(time.time()) + 10), encoding="utf-8")
+    (sd / "resume-after-compact.ts").write_text(str(int(time.time()) - 30), encoding="utf-8")
     assert _injections(project, env) == 1
 
 
@@ -145,19 +154,20 @@ def test_no_flag_means_no_injection(tmp_path: Path) -> None:
 
 
 def test_only_source_compact_injects(tmp_path: Path) -> None:
-    """A startup/resume/clear entry must not consume the compaction's delivery."""
+    """A startup/resume/clear entry must not consume the compaction's delivery.
+
+    The control runs FIRST. An earlier version put it last, where a trailing `== 1` was
+    doing positive-control duty only by accident: if `_arm()` had produced nothing
+    injectable, all three `== 0` arms would have passed vacuously and the reader would have
+    had to reason backwards from the final line to know they meant anything.
+    """
     project, env = _project(tmp_path)
-    _arm(project)
+    sd = _arm(project)
+    assert _injections(project, env) == 1, "positive control failed — fixture is broken"
+    # Drop the control's stamp so each arm below is independent of guard state.
+    (sd / "compact-handoff-injected.ts").unlink()
     for source in ("startup", "resume", "clear"):
         assert _injections(project, env, source=source) == 0, f"{source} injected"
-    assert _injections(project, env) == 1, "compact still injects after the others"
-
-
-def test_a_stale_handoff_is_not_injected(tmp_path: Path) -> None:
-    """Past the age bound, silence beats resurrecting yesterday's plan."""
-    project, env = _project(tmp_path)
-    _arm(project, age_s=25 * 3600)
-    assert _injections(project, env) == 0
 
 
 def test_the_age_bound_still_covers_an_overnight_gap(tmp_path: Path) -> None:
@@ -173,11 +183,34 @@ def test_the_age_bound_still_covers_an_overnight_gap(tmp_path: Path) -> None:
     assert _injections(project, env) == 1
 
 
-def test_zero_disables_the_age_bound(tmp_path: Path) -> None:
-    """`MAX_AGE_S=0` = no upper bound, the usual `timeout=0` idiom and what the clear path
-    already does. Asserted because nothing else in the suite covers the disable case."""
+def test_the_age_bound_holds_and_zero_disables_it(tmp_path: Path) -> None:
+    """Past the bound, silence beats resurrecting yesterday's plan — and `MAX_AGE_S=0`
+    lifts the bound (the usual `timeout=0` idiom, matching the clear path).
+
+    ONE test, because the second assertion is the first one's positive control. A separate
+    stale-only test existed here and asserted nothing but silence, with no proof the fixture
+    could ever inject — the exact hole this module's docstring claims to have closed, in the
+    one test whose entire content is an absence. Nothing in the suite covered the disable
+    case for either injection path.
+    """
     project, env = _project(tmp_path)
     _arm(project, age_s=25 * 3600)
-    assert _injections(project, env) == 0, "positive control: bounded by default"
+    assert _injections(project, env) == 0, "a 25h-old handoff must not be injected"
     env = {**env, "CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S": "0"}
-    assert _injections(project, env) == 1
+    assert _injections(project, env) == 1, (
+        "0 must lift the bound — and this doubles as the control proving the silence "
+        "above was the guard, not a broken fixture"
+    )
+
+
+def test_an_empty_handoff_injects_nothing(tmp_path: Path) -> None:
+    """A handoff file that exists but is blank must produce silence, not a banner with
+    nothing under it. `_handoff_body` skips empty chunks and then returns None for an empty
+    group — a real branch, previously untested."""
+    project, env = _project(tmp_path)
+    sd = _arm(project)
+    assert _injections(project, env) == 1, "positive control failed — fixture is broken"
+    (sd / "compact-handoff-injected.ts").unlink()
+    for handoff in sd.glob("agent-handoff-*.md"):
+        handoff.write_text("   \n\n", encoding="utf-8")
+    assert _injections(project, env) == 0
