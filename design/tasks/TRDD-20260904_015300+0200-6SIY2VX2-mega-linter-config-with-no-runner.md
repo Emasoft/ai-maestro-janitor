@@ -35,8 +35,16 @@ implementation-commits: []
   `<SUB_LINTER>` parity)". Whether CPV PARSES this config or carries its own
   list is UNPROVEN and is precisely what the delete-vs-keep decision turns
   on.
-- Of the 11, shfmt/jsonlint/yamllint/markdownlint/cspell/checkov appear to
-  have no runner in this repo's own workflows.
+- REPO-INVARIANT: no workflow runs ANY of the 11. That is the fact the
+  delete-vs-keep decision rests on.
+- MACHINE-DEPENDENT, and do not restate it as a repo property: which of them
+  run AT ALL depends on what is installed, because CPV's preflight runs the
+  tools it finds on PATH and warns-then-passes for the rest. Measured on the
+  owner's laptop 2026-09-04: 8 ran, 3 skipped (cspell, checkov, trivy).
+  Install cspell and that split changes without the repo changing. jsonlint,
+  yamllint and markdownlint were not among the preflight's 11 reported checks
+  at all, so those three appear to have no runner on any machine — but that is
+  an absence in one run's output, not something positively verified.
 
 ## Acceptance criteria
 
