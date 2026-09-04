@@ -64,6 +64,13 @@ heartbeat's task-quarantine drift line.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
 
+**CLAUSE 2 SHOULD BE REWORDED before anyone tries to close it.** As written ("`plugin-update`
+no longer logging `deferred (marketplace lock held)`") it reads as *the string never appears*,
+which no fix to this task can deliver — any lock holder produces it. What the card always MEANT
+is refresh-caused starvation. Rewrite as: **"no `plugin-update deferred` line whose timestamp
+falls inside a `marketplace-refresh` run interval."** That is the condition measured below, and
+it is the one the fix is responsible for.
+
 **SUPERSEDED 2026-09-04 06:02 — the two facts this block waited on have both arrived.**
 `69feb820` IS published (v3.4.2 onward; `git tag --contains` is no longer empty), and
 `daemon.log` now carries five clean runs. Box 4 was measured today: **clause 1 PASSES,
