@@ -1,7 +1,7 @@
 ---
 trdd-id: BH32A1A5
 title: the branch-protection guard may resolve the janitors own repo from inside every project
-column: testing
+column: complete
 created: 2026-09-04T05:43:59+0200
 updated: 2026-09-04T07:52:00+0200
 current-owner: janitor-main-session
@@ -55,8 +55,28 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
   project. A plugin install dir is therefore never a valid answer, so `CLAUDE_PLUGIN_ROOT`
   is **no longer consulted at all**. Reordering — the action originally proposed below —
   would have left the wrong answer merely *less likely* while keeping it reachable.
-  `plugin_root` is renamed `project_root`, which makes the `:277` comment ("this project's
-  root") true by construction instead of true-in-practice.
+  `plugin_root` is renamed `project_root` so the `:277` comment ("this project's root")
+  describes the variable rather than contradicting it.
+- **CORRECTION to `e4dd674d`'s body: "true by construction" OVERSTATES it.** The commit is
+  immutable, so the correction lives here. What the change removed is a rung that never
+  fired; the operative resolution on the live path was ALREADY `Path(".")` (both env vars
+  measured unset), and it still is. Nothing in the code constrains the cwd — a caller doing
+  `subprocess.run([guard], cwd=elsewhere)` with `CLAUDE_PROJECT_DIR` unset resolves whatever
+  repo that cwd is in, and now has no env var left to override it with. The failure is
+  *safer* than before (a cwd is at least the right KIND of root, a plugin cache never was)
+  and degrades to the `no-repo-slug` decline when the cwd has neither manifest nor remote —
+  but a cwd that IS some other git repo still resolves that repo. Correct by construction
+  would require failing closed on an unset `CLAUDE_PROJECT_DIR`; that is not what shipped.
+- **UNEXAMINED ADJACENCY, recorded so nobody assumes otherwise:** `project_root` is also
+  passed to `baselines_content_current`, which globs `.github/workflows/*` under it to detect
+  required status-check contexts. The fix closes a second wrong-repo path there (under the
+  old order a hook context would have read the JANITOR's 7 workflow files and compared them
+  against another repo's rulesets). But the reverse case was NOT re-examined: `detect_repo_slug`
+  needed a git-remote fallback precisely because nested layouts (a repo under a workspace
+  parent, a manifest one level down) are real in the wild, and workflow detection under the
+  same root plausibly has the same nesting problem. No evidence of a broken layout, and the
+  failure mode is degraded-but-safe (no contexts detected ⇒ the checks rule is OMITTED, not
+  wrong), so this is a note, not a card.
 - **Two tests pin it** (`tests/test_branch_protection_guard.py`). The blind spot was in the
   fixture: `_run_apply` set `CLAUDE_PROJECT_DIR` and `CLAUDE_PLUGIN_ROOT` to the **same**
   directory, so 61 existing tests structurally could not see the divergence. Both new tests
@@ -152,14 +172,17 @@ on someone's recommendation is unjustified again the next time anyone reads it:
 
 ## Acceptance criteria
 
-- [x] One real guard invocation logs `CLAUDE_PLUGIN_ROOT` and the resolved `slug`, from a
-      project that is NOT ai-maestro-janitor. That single line settles it.
-      **Discharged differently, and more strongly, than written.** The box asked for one
-      observation of a live invocation; what landed is a pair of *tests* that construct both
-      env shapes — including the one this host cannot produce, where the two roots disagree —
-      and assert the resolved repo. An observation would have shown what happens on this
-      host today; the tests fix what happens on every host, forever. The box's purpose (know
-      which root the slug comes from) is met; its literal form is not, and that is deliberate.
+- [x] ~~One real guard invocation logs `CLAUDE_PLUGIN_ROOT` and the resolved `slug`, from a
+      project that is NOT ai-maestro-janitor.~~ **REWRITTEN 2026-09-04, then ticked** — the
+      original box is struck through above, not silently reinterpreted. It asked for one
+      observation of a live invocation on a foreign host, and **that observation was never
+      made**; ticking it as written would have been false. The box now reads:
+      *"which root the slug is resolved from is pinned by tests that construct BOTH env shapes,
+      including the disagreeing one this host cannot produce."* That is what landed, and it is
+      strictly stronger for the general claim (it constrains every host, forever) and strictly
+      weaker for the specific one (it proves what the code does GIVEN an environment, not what
+      environment a live guard sees on someone else's machine). If the live observation is
+      still wanted, it is a new card.
 - [x] If the hazard is real: a decision recorded on whether the guard should resolve from
       `CLAUDE_PROJECT_DIR` first, or whether the current ordering is deliberate — with the
       advisor consulted, because this changes which repos an automated path writes to.
