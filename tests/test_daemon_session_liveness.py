@@ -763,7 +763,13 @@ def test_an_unreadable_pane_logs_unread_and_never_reads_as_working(
     disjunction PASSED against the pre-fix daemon — `REFUSED` was already there — so it was a
     check that could not fail, caught only by running the mutation probe the other two tests
     in this block were written to satisfy. The `or` is the whole defect: a weak clause in a
-    disjunction makes every strong clause beside it decorative."""
+    disjunction makes every strong clause beside it decorative.
+
+    WHICH line carries the token, read from a real run rather than assumed: the unreadable
+    pane refuses at the readable-channel-could-not-be-read guard, so this asserts the
+    **REFUSED** line, not the FIRED one —
+    `… REFUSED by the pane policy — would esc_nudge; … (pane=unread)`, preceded by
+    `pane-policy: recovery_rung skipped — readable channel could not be read`."""
     fleet = [_inst("frozen", "/p/proj-a", {"tmux_pane": "%5"})]
     _setup(monkeypatch, tmp_path, fleet)
     monkeypatch.setattr(daemon.fleet_inject.terminal_trigger, "read_pane_text", lambda rt: None)

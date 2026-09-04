@@ -138,7 +138,11 @@ keystrokes.
       **7 days** of post-release log; if it is still 0 then, record that on this card and
       reassess whether the state is reachable at all, rather than leaving the box open
       indefinitely. Without that expiry this box inherits the first version's defect in mirror
-      form: never resolving instead of always passing.
+      form: never resolving instead of always passing. **7 days is a CHOSEN review interval,
+      not derived from anything** — any value in the days range serves; what matters is that
+      "not yet checkable" expires rather than persisting unexamined. Said plainly because this
+      card's sibling atom needed three rewrites after two invented derivations were published
+      for a number that never had one.
       (blocked on publishing — the daemon runs the installed plugin)
 
 **Box 6 was UNMEASURABLE as originally written and was rewritten 2026-09-04, not measured.**
@@ -156,15 +160,39 @@ line and the `REFUSED by the pane policy` line (`unread` when the pane could not
 distinct value, so an unreadable pane can never be mistaken for a working one). The box above
 now names a string the log will actually contain.
 
-**Half (a) IS reachable, and the state is live on this host right now — so the box is not a
-trap.** "Requires the bug to recur" reads alarming until you know it is recurring: `_at_working`
-is entered only at `StatusKind.WORKING`, the esc_nudge rung is ESC-only, and this card's law
-refuses ESC-prefixed sequences → empty step tuple → NOOP → the REFUSED line. So a working pane
-reaching that rung produces half (a) BY CONSTRUCTION. It reaches it whenever `diagnosis=frozen`
-coincides with a working screen — this card's whole premise, and the body documents the repaint
-path. `AgentlensPro` has been refused steadily since 01:10 today. Expect half (a) within hours
-of the release, not never. **A regression test pins the pair** —
-`test_a_working_pane_refuses_esc_nudge_and_the_refusal_names_pane_working`.
+**Half (a) IS reachable — OBSERVED, not argued.** "Requires the bug to recur" reads alarming
+until you know it is recurring. The mutation probe run against the pre-fix `daemon.py` printed
+the real line for the WORKING fixture:
+
+```text
+session-liveness: proj-a [frozen] attempt=0 REFUSED by the pane policy — would esc_nudge;
+the screen does not allow it right now
+```
+
+That is half (a) minus the field the same commit added. So the state exists, it is produced by
+the path box 6 greps, and `AgentlensPro` has been in it steadily since 01:10 today — expect
+half (a) within hours of the release, not never.
+
+**Which test pins WHAT — they are different claims, and conflating them lets a refactor drop
+the law with the new test still green:**
+
+- **the LAW** (an ESC-only rung must not land at a working pane) is pinned in
+  `test_pane_policy.py::test_working_refuses_an_esc_only_rung_because_esc_cancels_the_live_turn`,
+  at the layer the law lives in.
+- **its LOG OBSERVABILITY** (that the refusal is greppable as `pane=working`) is pinned by
+  `test_daemon_session_liveness.py::test_a_working_pane_refuses_esc_nudge_and_the_refusal_names_pane_working`.
+  That is what box 6 half (a) actually needs.
+
+**Both were mutation-probed, at their own layers, and the second probe was run because
+reasoning said it was unnecessary:** reverting `daemon.py` proved only FIELD sensitivity (the
+token did not exist, so any assertion naming it fails). So `_at_working`'s ESC carve-out was
+separately restored while keeping the field — and the daemon-layer test failed on
+`an ESC-only rung must never reach a working pane`, with the injected
+`['RUN','tmux','send-keys','-t','%5','Escape']` in the diff. It guards the law too, which the
+field probe alone could not have shown. **Residual, stated rather than glossed:** it catches
+THIS regression (the carve-out returning); a future `_at_working` that refuses for some
+different reason would keep it green while the ESC law was gone. The policy-layer test is what
+covers that.
 
 **The box has TWO halves for a reason — a purely absence-shaped criterion cannot fail.** The
 first rewrite said only "no `FIRED … pane=working` line appears", which passes vacuously if
