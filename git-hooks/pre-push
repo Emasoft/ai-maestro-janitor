@@ -16,8 +16,12 @@
 # that any fix here will be overwritten, which is exactly the belief that leaves
 # a bug unfixed. TRDD-CN62E66F.
 #
-# After editing, re-run `uv run scripts/publish.py --install-hook` to refresh the
-# copy in `.git/hooks/`.
+# AN EDIT HERE IS LIVE IMMEDIATELY — no install step. `install_hook` also sets
+# `core.hooksPath = git-hooks`, and with that set git executes THIS FILE directly;
+# the copy it makes at `.git/hooks/pre-push` is never run. `--install-hook` is
+# therefore only needed to (re)establish `core.hooksPath` on a fresh clone, not
+# after an edit. An earlier version of this note said to re-run it "to refresh the
+# copy", which is advice for a file nothing executes.
 set -u
 
 REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
