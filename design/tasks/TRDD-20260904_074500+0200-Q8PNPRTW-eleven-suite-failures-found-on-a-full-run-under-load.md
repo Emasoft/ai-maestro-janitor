@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T11:53:00+0200
+updated: 2026-09-04T12:02:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -28,6 +28,31 @@ external-refs: [TRDD-7NSRD8OV]
   `/tmp/soak8.txt` and one session's conversation, both of which die with the session. A
   finding that is not on the board has not been recorded — it has been *noticed*. This card
   is the record; the `/tmp` paths below are evidence, not storage.
+- **12:00 — THE SHELL NEVER RUNS. Marker probe, decisive.** A temporary first line
+  `echo started > {pid_file}.started` was added to row 2's script, run twice, then REVERTED
+  (`git status --porcelain` + `git diff` both empty; the git guard correctly blocked
+  `git checkout` and the revert was done with the Edit tool):
+  | run | script on disk | `.started` | `grandchild.pid` |
+  |---|---|---|---|
+  | pytest-1438 (PASSED) | 344 B | ✓ 8 B | ✓ 6 B |
+  | pytest-1439 (FAILED) | 344 B | **absent** | **absent** |
+  In the failing run `/bin/sh` never completed even its FIRST line — an 8-byte `echo` into the
+  same directory. **So it is not the fork, not `$!`, not the second redirect, not `PATH`, and
+  not a timing budget.** The child produces nothing at all.
+- **AND THE SPAWN IS GENUINE — `guarded_init` is EXONERATED, by reading it.**
+  `tests/sandbox_guard.py:727` calls `original_init(self, args, *a, **kw)` unmodified after
+  `_enforce_spawn`; it neither substitutes nor rewrites argv/cwd/env. So a real `Popen` runs a
+  real `/bin/sh` against a real +x script, and the child dies at or immediately after `exec`.
+  **That is where the remaining question sits, and no hypothesis is offered for it here.**
+- **`capture_one`'s 1.0 s IS scaled to 10 s — verified twice.** conftest `:812-884` wraps
+  `Popen.communicate`/`wait` to multiply an explicit numeric `timeout=`, and
+  `grep -n "no_timeout_scale" tests/test_capture_all_logins.py` returns NOTHING, so the test
+  does not opt out. **This kills the triage report's "residual kill-vs-fork race under extreme
+  contention"**: a 10 s ceiling losing to a fork measured at 2.74 s worst-of-50 is not a race.
+- **Row 2 is 6/6 MEASURED, not inferred.** 3/3 solo; and `/tmp/pair_2.txt`, `/tmp/pair_3.txt`
+  each name `test_capture_one_kills_the_whole_tree_and_reports_timeout` in their `FAILED`
+  line, so it also failed all 3 paired runs. Row 1 is 1/3 solo — **intermittent where row 2 is
+  near-deterministic, so the two still must not be assumed to share a cause.**
 - **11:52 — MEASURED failure state of rows 1 & 2.** Report:
   `reports/suite-failures/20260904_114209+0200-capture-all-logins-failure-state.md`.
   - `slack = 10.0` in every run, so the poll budget was **50 s** (row 1) / 30 s (row 2) — NOT
@@ -78,10 +103,28 @@ external-refs: [TRDD-7NSRD8OV]
   (`capture_one` times out leaving no orphan) with the race removed. **NOT applied yet** —
   rows 1 & 2's undetermined cause above must be settled first, since row 1 has no
   `capture_one` and no 1.0 s timeout, so this cannot be the whole story.
-- **⇒ NEXT ACTION (11:45, CURRENT).** **Re-run the FULL suite under `-n auto`.** All 12
-  failures were triaged at 08:49 and four fixes landed in `5b5267a5`; the ONLY unmet
-  acceptance criterion is the full-suite green run, and no `-n auto` run has happened since
-  the fixes. Everything below this bullet is HISTORY — read it for the WHY, not for the state.
+- **⇒ NEXT ACTION (12:00, CURRENT). The `-n auto` run is DONE and the suite is RED —
+  `11 failed, 16391 passed, 1 skipped` in 822.89 s** (`/tmp/soak9.txt`, `/tmp/soak9.meta`,
+  load 15.53 → 8.52). Same count as the 07:14 run, **different composition**:
+  | | 07:14 | 11:40 |
+  |---|---|---|
+  | `memory_librarian` ×3, `marketplace_refresh_scoped` ×2, `gh_reply_watch` ×3 | failed | **PASSED — the `5b5267a5` fixes held** |
+  | `capture_all_logins` row 1 | failed | passed |
+  | `capture_all_logins` row 2 | failed | **still failing** |
+  | `token_usage_anomaly` #8 | failed | **still failing** |
+  | `branch_protection*` ×9 | — | **NEW — not in the original 12** |
+  Three things follow, in priority order:
+  1. **#8's "load artifact" classification is CONTRADICTED.** It failed again at *lower* load
+     (8.52 vs the original run's) — "reran once, passed" was never sufficient and now has
+     counter-evidence. It needs a real mechanism or a USER waiver, not a re-run.
+  2. **The 9 `branch_protection` failures are NEW.** `e4dd674d` ("branch protection resolves
+     the repo from the PROJECT root only", TRDD-BH32A1A5) landed **07:37:27**; soak8 finished
+     **07:29** — so they could not have been in the original run, and that commit is the only
+     recent one touching those exact files. Signature is `assert 'BRPROT-001' in ''` — the
+     detector exits 0 with EMPTY stdout, which is ALSO the documented load fail-open shape, so
+     **this is not yet attributed.** A serial low-load run was started to discriminate.
+  3. Rows 1 & 2 remain open on the exec question above.
+  Everything below this bullet is HISTORY — read it for the WHY, not for the state.
 - **⚠ RETRACTION (11:45) — "the other 10 have never been triaged" was FALSE, and I published
   it here and to the USER.** The triage EXISTS:
   `reports/suite-failures/20260904_084913+0200-12-failure-triage.md`, written 08:49 by the
