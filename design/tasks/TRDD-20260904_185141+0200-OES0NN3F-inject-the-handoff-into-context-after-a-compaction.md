@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T19:34:00+0200
+updated: 2026-09-04T19:48:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [42a24e6f]
+implementation-commits: [42a24e6f, 0b4f72c3]
 external-refs: [TRDD-74AA4PAL, TRDD-PXP08ZQC]
 ---
 
@@ -77,8 +77,9 @@ injection lands before the first turn and needs no nudge to have fired.
 
 - [x] A session that auto-compacts has the handoff text in its context at the next turn, with
       **no** heartbeat fire and **no** keystroke injection involved. — **MEASURED 19:20**, three
-      arms against a temp project dir: `source=compact` + flag → injects, handoff body present in
-      stdout; `source=startup` + flag → silent; `source=compact` + no flag → silent.
+      arms against a temp project dir, **simulating the SessionStart payload only** (not the
+      real PostCompact→SessionStart sequence): `source=compact` + flag → injects, handoff body
+      present in stdout; `source=startup` + flag → silent; `source=compact` + no flag → silent.
 - [x] The flag is **not** consumed by the injection (it must stay for the heartbeat, which is
       the actuator and also re-attaches background agents). — **MEASURED**: flag still on disk
       after injection.
@@ -98,11 +99,15 @@ injection lands before the first turn and needs no nudge to have fired.
 - `_inject_post_compact_handoff(state)` — gated on `resume-after-compact.flag`, **no
   manual/auto distinction** (compaction has no discard case, unlike `/clear`), flag deliberately
   not consumed.
-- **Age bound: 3 h via `CLAUDE_PLUGIN_OPTION_RESUME_DIRECTIVE_MAX_AGE_S`.** The first shipped
-  version (42a24e6f) invented `..._COMPACT_RESUME_MAX_AGE_S` at 24 h and the card claimed it
-  matched dispatch. **It did not** — `dispatch.py:_DIRECTIVE_MAX_AGE_DEFAULT_S` is 10800, so at
-  a 4 h age dispatch dropped the directive as stale while this hook injected the handoff that
-  directive named. Now one env var governs both; a private constant is what let them disagree.
+- **Age bound: 24 h, shared with the CLEAR injection (`CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S`).**
+  This took two wrong turns. 42a24e6f invented a private `..._COMPACT_RESUME_MAX_AGE_S` (24 h,
+  right number, undiscoverable knob). 0b4f72c3 then adopted dispatch's 3 h directive bound to
+  'fix a disagreement' — **but there was no disagreement to fix.** Dispatch's 3 h gates an
+  ACTION (how long a resume directive keeps being re-cited to a live session); this gates
+  CONTEXT (how old a handoff may be before injecting it is worse than silence). A 6 h-old
+  compaction should restore context and NOT auto-resume the task, so the two differing is
+  correct. The 3 h bound broke the case the feature exists for — **measured: compact at 02:00,
+  open at 08:00 → nothing injected.** Now 1/6/12/23 h inject, 25 h does not.
 - **`compact-handoff-injected.ts` guard** — compaction PRESERVES what follows it (a `/clear`
   does not), so not-consuming the flag, safe on the clear path, compounds here: 22 KB then
   44 KB then 66 KB across repeat compactions, and auto-compaction fires *because* the window
