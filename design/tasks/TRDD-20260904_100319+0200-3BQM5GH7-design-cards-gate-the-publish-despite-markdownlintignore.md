@@ -1,9 +1,12 @@
 ---
 trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
-column: todo
+column: blocked
+pre-block-column: todo
+unblock-when: [decision:user]
+min-approval-requirement: user
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:58:54+0200
+updated: 2026-09-04T14:06:04+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -17,9 +20,119 @@ external-refs-note: local-only path (reports/ is gitignored) — the load-bearin
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
-**NEXT ACTION:** decide between the two candidate fixes in "Options" below. Both
-require a decision that is not the janitor's to make alone — one changes what
-gates this repo's publish, the other files an issue on a different project.
+**COLUMN — `blocked`, `unblock-when: [decision:user]`, `pre-block-column: todo`.**
+I first moved this card to `human_review` and that was **wrong**: the transition
+matrix admits `human_review` only from `ai_review`, and it is a WORK-group column
+asserting active review after tests and AI review passed. None of that is true
+here. `blocked` + a `decision:` predicate is this repo's established shape for a
+card waiting on a human, and `decision:` never auto-clears (`trdd-drift.py:192`
+returns `False` unconditionally — *"the ONLY human-only kind"*). Restore to
+`todo` when the decision lands.
+
+**On the apparent tension with the base rule** — `trdd-design-tasks.md` §6 says
+*"`blocked` applies whenever `blocked-by:` is non-empty"*, and this card has no
+`blocked-by:` at all. That is deliberate, not an omission: `trdd-drift.py:303,307`
+scopes `blocked-by:` to **TRDD-to-TRDD dependencies only**, so a wait on a human
+decision is literally inexpressible there, and `unblock-when: [decision:user]` is
+the form that exists for it. `pre-block-column: todo` names the last
+**legitimate** column — the column immediately prior was `human_review`, which
+was my own illegal move and is not something to restore into.
+
+**NEXT ACTION:** a USER decision on the Options table below, which the
+2026-09-04 source read has REWRITTEN. Option 1's only named lever is measured
+DEAD, and a third option — *the findings are real markdown defects, not false
+positives* — has displaced both originals as the recommendation.
+
+**MECHANISM — NARROWED 2026-09-04 from three-of-five to two, by READING THE
+PINNED SOURCE. Not closed.** At `v5.16.2` (uv git-cache checkout `9ef873ee6335afa1/c441703c`,
+`git describe` → `claude-plugins-validation--v5.16.2`, the exact ref
+`.cpv-version` pins):
+
+- `cpv_lint_engine.py::lint_markdown` builds `invocation = list(cmd)` and
+  extends it with `["--config", <abs path>]` and **nothing else**. No
+  `--ignore-path`, no `-p`, no `--ignore` is ever constructed — a grep of every
+  `.py` in the checkout for `markdownlintignore` / `ignore-path` / `ignorePath`
+  returns zero markdownlint-related hits (every `ignorePaths` hit belongs to
+  cSpell, an unrelated linter).
+- It then calls `_run_linter(invocation + file_paths, cwd=Path(_isolated_cwd))`
+  — an **explicit absolute file list**, from an isolated temp cwd.
+- Discovery is `detect_languages` → `collect("markdown", ["*.md", "*.mdx"])` →
+  `gi.rglob(pattern)` with `gi = GitignoreFilter(plugin_root)`; `lint_markdown`
+  then drops any path containing a `fixtures` segment.
+
+**The selection rule, in full: a gitignore-filtered `rglob` of `*.md`/`*.mdx`
+from the repo root, minus `fixtures` paths.** Nothing else.
+
+**THE ANSWER IS A SIXTH CANDIDATE THE CARD NEVER LISTED: `cmd =
+_resolve("markdownlint-cli2")` (`:1350`). `markdownlint-cli2` HAS NO
+`.markdownlintignore` SUPPORT AT ALL.** `.markdownlintignore` is a
+**markdownlint-cli (v1)** file. cli2 is a different tool: it takes exclusions as
+`!`-negated globs or an `ignores:` array in a `.markdownlint-cli2.*` config, and
+its `--help` lists no ignore-file flag of any kind (only `--no-globs`).
+
+Measured directly, under conditions maximally favourable to the ignore file
+being honoured — cwd = the file's own directory, relative wildcard glob.
+**Version caveat:** the probe ran `npx --yes markdownlint-cli2`, i.e. **latest**,
+while CPV calls `_resolve("markdownlint-cli2")`, which may return a pinned local
+install or a `bunx` resolution at another major. The verdict does not lean on
+the version — `.markdownlintignore` is a **cli v1** file, a tool boundary rather
+than a version-drift artifact — but the probe establishes *identity*, not
+*version*, and the lesson below asks for both:
+
+| `.markdownlintignore` content | result |
+|---|---|
+| *(absent — control)* | `Summary: 1 issue in 1 file` |
+| `*.md` (ignore everything) | `Summary: 1 issue in 1 file` — **zero effect** |
+
+| # | candidate | verdict |
+|---|---|---|
+| **6** | **CPV runs cli2, which never supported this file** | **✅ THE ANSWER** — measured above + `--help` |
+| 1 | different cwd, ignore file not discovered | **MOOT** — no cwd would honour it |
+| 1b | explicit absolute file list bypasses ignore matching | **MOOT** — same reason |
+| 2 | explicit `-p` / `--config` overrides it | `--config` IS passed *conditionally*, sets RULES not paths — not the cause |
+| 3 | markdownlint used as a LIBRARY | **FALSE** — a `markdownlint-cli2` subprocess |
+| 4 | lints a temp checkout or tarball | **FALSE** — absolute paths into this working tree |
+| 5 | reads the file and deliberately disregards it | **FALSE** — it never reads it |
+
+**Nobody was ever ignoring anything. The repo has been writing an ignore file
+for a tool it does not run.** Corroboration CPV hands you and this card walked
+past twice: its own comment at `:1395-1396` — *"the cwd governs ONLY module
+resolution, never WHICH files get linted"* — answers candidate 1 outright, and
+`_LANG_CONFIG_FILENAMES["markdown"]` (`:2230-2240`) omits `.markdownlintignore`,
+so editing it does not even bust CPV's lint cache.
+
+**⚠ THREE retracted claims of my own, all published here today, all from
+reasoning past the evidence.** (i) I wrote "1b is the cause, 1 is not operative"
+— unestablished. (ii) The probe meant to settle it (`markdownlint-cli2
+<ABSOLUTE path>` from two cwds) printed `Summary: 0 issues in 0 files` in
+**both** arms, which I read as "ignored in both" — wrong. (iii) I then retracted
+(ii) **with a wrong reason**, writing *"nothing matched the glob — an absolute
+path is not a glob cli2 resolves"*. That is also false: a later control proved
+an absolute path from a temp cwd returns `Linting: 1 file` / `1 issue in 1
+file`. Absolute paths resolve fine.
+
+**The actual reason both arms were degenerate: the target file had already been
+restored to CLEAN** by the perturbation worker's `git checkout --`. Both arms
+linted a defect-free file, so `0 issues in 0 files` meant *linted, nothing
+wrong*. The no-defect case discriminates nothing.
+
+**And the discriminator was on screen and I filtered it out.** `Summary: N
+issues in M files` counts files **with issues**, not files linted — the
+`Linting: K files` line carries that, and I had grepped `^Summary` only. **Do
+not filter a tool's output down to the field you already expect to reason
+about**; the dropped line is disproportionately often the one that would have
+stopped you. **(ii), (iii), and the spurious "independent behavioural
+confirmation" I reported to the USER all trace to that one habit — but (i) does
+NOT.** (i) was a reasoning error from the source read, asserted before any probe
+ran. Blaming it on output filtering would credit the habit with a failure it did
+not cause — sloppy attribution in a lesson about sloppy attribution.
+
+**The root error under all of it: I never checked WHICH BINARY was involved.**
+`markdownlint-cli` and `markdownlint-cli2` are different tools with different
+config surfaces, and one line of the source (`:1350`) names the one CPV runs.
+Three probes and two wrong verdicts were spent on a question the tool's identity
+answers for free. **Establish the identity and version of the binary under test
+before designing any probe of its behaviour.**
 
 **NO TESTED GIT STATE GATES REPORTING (3 probes, 2026-09-04):** three files in
 `design/tasks/` — one dirty-but-unchanged-vs-`origin/main`, one untracked, one
@@ -35,12 +148,66 @@ retired all five, which is wrong: they retire the git-based readings only, and
 3 and 4 are arguably now the leading candidates. Reading CPV's source or
 `--help` remains the way to pick among them.
 
-**Nothing is broken right now.** `design/` currently lints clean, so the next
-publish will not trip on this. The card exists because the *next* card
-containing a markdown table will, and because the mechanism is undiagnosed.
+**⚠ "Nothing is broken right now" was FALSE, and was false when written.** This
+line used to read *"`design/` currently lints clean, so the next publish will
+not trip on this."* A stage-4 run at 13:36 on 2026-09-04 measured
+`NIT=20 → exit=4`: **19 LISTED MD056 findings in
+`TRDD-…-Q8PNPRTW-…md`** (lines 35–50 and 87–89), plus 1 from the deliberate
+probe defect planted for that run. **"19" is the truncated DISPLAY, not the
+count** — see the ceiling below; the file actually held **37**.
 
-**Not yet done:** the CPV issue is NOT filed. The five candidate mechanisms are
-NOT distinguished.
+**Why 19 + 18 legitimately compose to 37**, given the two were measured on
+different file states: the four regions are independent block structures (35–50,
+87–89, 221, 790–806), and a blank line inserted at line 35 cannot manufacture or
+mask a table defect 750 lines later. Both measurements are commensurable for
+MD056 specifically, which neither config disables, and the sets are disjoint.
+Consistency check: 19 Q8PNPRTW + 1 planted probe = **exactly 20** = the cap, so
+CPV stopped precisely at the ceiling and the 18 are the suppressed remainder.
+(This justification is stated because the earlier "stateful parser" story — the
+only reason the states might NOT have composed — was retracted, and removing it
+silently would have left a composed total with no composition argument.) The card predicted *"the **next** card
+containing a markdown table will [trip it]"* — that card already existed and had
+been edited earlier the same day, so the prediction was about the present tense
+and nobody checked it. **A claim of "clean" that was never measured is the same
+defect this card keeps documenting in others.**
+
+All of them were the same defect as `d4e5f055`: a table whose last row is
+followed *immediately* by prose, so markdownlint reads each prose line as a
+1-cell row. **Fixed in this session** by one blank line at each site (a bare `>`
+inside a blockquote; a plain blank line in an indented list).
+
+**FOUR sites, not two — because `NIT=20` IS A TRUNCATION CEILING, NOT A COUNT.**
+CPV's run named 19 findings at two regions (35–50, 87–89); after fixing those, a
+local lint surfaced **18 more** at two further regions (221, 790–806). I first
+recorded that as an open loose end and guessed at a stateful parser. **It is
+neither open nor a parser artifact:** `cpv_lint_engine.py:1450-1457` reads
+`surfaced += 1; if surfaced >= 20: break`. The run reported **exactly** `NIT=20`,
+so the list was cut off at 20 and the remaining defects were simply never
+printed.
+
+> **⚠ OPERATIONAL RULE, and the most reusable thing on this card: a CPV run
+> reporting exactly `NIT=20` CANNOT BE RELIED ON as a complete list. Treat it as
+> "≥20, possibly truncated" and never as a work-list. Only a result strictly
+> BELOW 20 is a complete count.**
+>
+> **The implication runs one way only, and that is what makes it usable.**
+> `SUMMARY: NIT` aggregates every linter while the cap sits on markdownlint's
+> own loop, so: aggregate `< 20` ⟹ that loop never reached `break` ⟹ its list is
+> complete. The converse fails — an aggregate of exactly 20 could be 20 across
+> mixed linters with markdownlint at 5, uncapped. (In `phase1-baseline.txt` all
+> 20 happened to be markdownlint, so that one *was* capped; do not generalise
+> from it.)
+
+That is the sharp form of the softer lesson: **a re-run that goes green after a
+PARTIAL fix does not prove the fix is complete.** Here a second, independent
+linter pass caught the remainder — and the reason a second pass was needed was
+sitting as a hard-coded `break` in the very function this card claims to have
+read line by line. **Reading a function is not the same as reading the loop that
+emits its output.** Stage 4 was re-run standalone after all four repairs:
+`CRITICAL=0 MAJOR=0 MINOR=0 NIT=0 WARNING=47` — and `NIT=0`, being below the
+ceiling, is a trustworthy complete count.
+
+**Not yet done:** the CPV issue is NOT filed.
 
 **⚠ Commit `d4e5f055` carries a SUPERSEDED mechanism claim.** Its message says
 CPV "does NOT honor `.markdownlintignore`" and that all 435 design cards gate
@@ -143,11 +310,41 @@ restored from backup and `diff`-verified identical.
 |---|---|
 | HEAD vs `origin/main` | eliminated (probe 1) |
 | anything tracked-only | eliminated (probe 2 — untracked file reported) |
-| everything not gitignored | **eliminated (probe 3 — gitignored file reported)** |
+| everything not gitignored | ~~eliminated (probe 3)~~ — **RETRACTED 2026-09-04; probe 3 is void, and this rule is in fact CONFIRMED. See below.** |
 | **path-based selection** (hypothesis — every member of this family predicts "reported" for all three probes, so nothing run so far distinguishes them; it remains to be *tested*, not measured) | **the surviving FAMILY** |
 
-**CPV's markdownlint selects by path, not by git.** Precisely: git's *ignore
-rules*, *tracking*, and *diff-vs-origin* are each shown not to gate INCLUSION.
+**⚠ RETRACTION 2026-09-04 — probe 3 measured the wrong mechanism, and the
+conclusion drawn from it is backwards.** Probe 3 excluded its file via
+`.git/info/exclude`. CPV's `gitignore_filter.py` parses **`.gitignore` files
+only** — the root one plus every ancestor directory's own nested one (its
+issue #226) — with no reference anywhere to `.git/info/exclude`,
+`core.excludesFile`, or `git check-ignore`. So CPV **structurally cannot see**
+the exclusion probe 3 applied, and the probe could only ever have reported the
+file. It discriminates nothing.
+
+The truth is the opposite of what the row claimed: `.gitignore` **is** consulted,
+and it is the only **git-based** gate (there is a second, non-git one: the
+`fixtures`-segment filter in `lint_markdown`). Corroborated independently by the
+preserved publish log — `reports/` and `.trashcan/` are gitignored
+(`git check-ignore -v` → `.gitignore:91`, `.gitignore:97`), hold many `.md`
+files with tables, and contribute zero findings.
+
+**That corroboration is valid for a reason worth stating, because the same
+evidence from a different run would be worthless:** the publish log reported
+`NIT=3` — **below** the 20-finding ceiling — so its list is complete, and an
+absence in it is real evidence of absence. Had the same point been argued from
+`phase1-baseline.txt` (`NIT=20`, capped), it would prove nothing: **a truncated
+list cannot evidence an absence.** Check a report against its cap before
+reasoning from what is missing.
+
+So the earlier headline — *"CPV's markdownlint selects by path, not by git"* —
+is **overstated**. Selection is by path *within a gitignore-filtered walk*.
+Tracking and diff-vs-origin genuinely do not gate inclusion (probes 1 and 2
+stand); git's **ignore rules do**, via `.gitignore` proper. **The lesson is
+about the instrument, not the answer**: probe 3 substituted a mechanism that is
+equivalent *to git* (`info/exclude` vs `.gitignore`) for the one under test, and
+CPV never used git. Two probes were built and cleaned up carefully to measure
+nothing — the same "void instrument" failure logged on `TRDD-Q8PNPRTW`.
 That is narrower than "git is not consulted at any level" — an earlier draft
 said that, and no probe supports it; CPV may consult git for other purposes or
 for other checkers.
@@ -342,7 +539,16 @@ relevant phase is untested.** Precisely what is established, per the completed
 So Option 1 is probably dead, not certainly dead — and the same perturbation
 method settles it cheaply (see acceptance criteria).
 
-## Mechanism — NOT diagnosed, five candidates
+## Mechanism — NOT diagnosed, five candidates (⚠ SUPERSEDED 2026-09-04)
+
+> **SUPERSEDED — kept as provenance, do not read as current.** The mechanism IS
+> diagnosed: the answer is a sixth candidate this section never contemplated
+> (CPV runs `markdownlint-cli2`, which never supported `.markdownlintignore`).
+> The STATE block holds the current version. Everything below — including "five
+> hypotheses, one observation, zero discrimination" and "diagnosing this is the
+> first task on the card" — describes the state of knowledge at 10:03, not now.
+> The three-row selection table further up and the "two remain" text are
+> likewise superseded.
 
 An earlier draft of `d4e5f055`'s commit message asserted "CPV does not honor
 `.markdownlintignore`". That claim is **not established** and is the accusatory
@@ -379,57 +585,214 @@ even applicable.
 
 ## Options (a decision is required — do not pick one unilaterally)
 
-1. **Repo-side — no lever is known to work, and exactly one is cheap to test.**
-   The obvious candidate is adding `design/` to
-   `MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE` in `.mega-linter.yml`. That is
-   probably dead (the file is read by no workflow and not by CPV's preflight)
-   but **not proven dead for stage 4**, which is the phase that flags us. Test
-   it the same way `TRDD-6SIY2VX2` tested the preflight — perturb and re-run —
-   then restore the file byte-identically. If some other lever turns out to be
-   the real one, using it still **changes what gates this repo's publish**,
-   which is a governance change dressed as a lint tweak and needs sign-off, not
-   a drive-by edit.
+1. **Repo-side — ONE named lever is dead; TWO OTHERS WORK. ⚠ I recorded this
+   option as "MEASURED DEAD … no lever could have worked" and that
+   generalisation was FALSE — retracted 2026-09-04 after review.** What was
+   measured dead is the one candidate below. Two working levers exist:
 
-   **Other candidate levers were NOT surveyed** — "no lever is known" means only
-   that nobody looked, not that the space is empty. Unexamined: whether
-   `markdownlint-cli` honours a `.markdownlintignore` in a parent directory or
-   an env var; whether CPV reads a `.cpvignore` / `.cpvrc` / a `pyproject.toml`
-   or `plugin.json` key; whether `publish.py` passes anything through to CPV;
-   whether `--strict` has a NIT-severity or path-exclusion flag (checkable from
-   `cpv-remote-validate --help`). Start there.
+   | lever | measured |
+   |---|---|
+   | `.markdownlint-cli2.jsonc` at repo root with `{"ignores": ["**/design/**"]}` | **WORKS in CPV's exact shape** — abs path + isolated temp cwd → `0 issues`; control without it → `1 issue`. cli2 resolves `.markdownlint-cli2.*` by walking up from **each linted file's own directory**, which survives the temp cwd that defeats `.markdownlintignore` |
+   | inline `<!-- markdownlint-disable-next-line MD0xx -->` | **CPV uses it on its OWN TRDDs — 30 files** under the pinned checkout's `design/`, every one `<!-- markdownlint-disable-next-line MD025 -->` (counted here, 2026-09-04). That it is *in use by the tool's own author* is strong; that it *suppresses under CPV's invocation* is inferred, **not probed** |
+   | `MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE` in `.mega-linter.yml` | **DEAD** — see below |
+
+   Both were measured on a **synthetic** repo, in throwaway temp dirs, not on
+   this one. Confirm with one real `cpv-remote-validate` run before adopting
+   either. Adopting one is still a governance change — it alters what gates this
+   repo's publish — and needs sign-off, which is why they are listed here rather
+   than applied.
+
+   The dead one was tested exactly as `TRDD-6SIY2VX2` tested the preflight —
+   plant a known MD056 defect, run stage 4 standalone, apply the lever, re-run:
+
+   | phase | exit | SUMMARY |
+   |---|---|---|
+   | baseline (defect planted) | 4 | `CRITICAL=0 MAJOR=0 MINOR=0 NIT=20 WARNING=47` |
+   | lever applied | 4 | `CRITICAL=0 MAJOR=0 MINOR=0 NIT=20 WARNING=47` (unchanged) |
+
+   Byte-identical NIT count — **zero effect**. Both files restored via
+   `git checkout --` and verified against their recorded blob hashes, with
+   `git status --porcelain` silent. This also closes the narrower gap the Notes
+   flagged: `.mega-linter.yml` was previously only shown inert for the
+   *preflight*; it is now shown inert for **stage 4 markdownlint** too, which is
+   the phase that actually flags us.
+
+   **⚠ Caveat, from the truncation ceiling above: BOTH rows read `NIT=20`, which
+   is the cap — so both lists were cut off, and a lever with a PARTIAL effect
+   would look identical to one with none.** The conclusion survives only because
+   this particular lever is all-or-nothing (a path exclusion for `design/` would
+   have taken the count to ~0, not shaved it), and it did not move. A
+   perturbation test whose two arms both sit on a truncation ceiling is not
+   generally sound; this one is, for that specific reason, and the reason has to
+   be stated or the next reader will copy an unsound pattern.
+
+   A root `.markdownlint.json` is a **fourth, untested** lever and is the one to
+   avoid. CPV passes its own relaxed bundle via `--config` *only when the target
+   repo has none* (`:1377-1383`); adding one flips CPV to passing **no**
+   `--config`, and CPV's own comment at `:1373-1376` records what happened last
+   time that occurred — cli2 *"fell back to ITS defaults (MD013/MD012/MD032 all
+   enabled)"*. The risk direction is a repo-wide NIT **explosion**, not a quiet
+   MD056 disable. Note this repo **already has** a root `.markdownlint.json`, so
+   this branch is the one in force today.
+
+   **⚠ "The lever space is now SURVEYED, from source rather than guessed at" —
+   RETRACTED, it was wrong within hours.** The survey read CPV's argv and
+   concluded nothing else could participate. It missed **both** working levers
+   above, because both act on markdownlint-cli2's own per-file config discovery,
+   which never appears in CPV's argv at all. Reading the caller's argv does not
+   survey the callee's configuration surface — a fact the missed evidence makes
+   embarrassing: the pinned CPV checkout uses inline suppression on its own
+   TRDDs, so the counter-example was inside the tree being read.
+
+   What the argv read does establish, and this part stands: the argv is
+   `list(cmd)` plus at most `["--config", <abs>]`, so no env var and no
+   `.cpvignore` / `.cpvrc` / `pyproject.toml` / `plugin.json` key participates,
+   and `publish.py` passes nothing beyond `plugin . --strict`. Still unexamined:
+   whether `--strict` has a NIT-severity threshold flag — a blunter instrument
+   than either working lever, since it would suppress *all* NITs repo-wide.
 2. **Upstream.** File an issue on `Emasoft/claude-plugins-validation` (CPV is a
    DIFFERENT project — per `how-to-fix-issues-of-other-projects`, never edit its
    tree from here; issue first, PR only if asked). The reproducer is already in
    hand: the preserved publish log in `external-refs:`, lines 404–406 plus this repo's `.markdownlintignore`.
 
-These are not exclusive — 2 is right regardless if the mechanism turns out to be
-CPV-side, and 1 is a local mitigation either way.
+3. **Change nothing; keep `design/` cards clean. ← RECOMMENDED, on its own
+   merits.** **Every markdownlint finding this card has ever seen was a genuine
+   defect** — a table row followed immediately by prose, which renders wrong in
+   any viewer, not only under a linter. MD056 was correct every time it fired.
+   So for *markdownlint* the ignore file would have hidden a real defect rather
+   than spared a false one.
+
+   **That claim is scoped to markdownlint and must not be widened.** The card
+   also measured two **CRITICAL** *"Private path leaked"* findings on a
+   `design/` card. There, "a design note is not shipped content" remains a
+   perfectly defensible position, and this option does not settle it.
+
+   **⚠ COST — larger than first written, and this is the part that needs your
+   eyes.** I wrote *"one blank line after every table, forever"*. The true price
+   is that **every design card must satisfy CPV's entire `--strict` gate**,
+   including the path/secret scanner — so no verbatim tool output containing a
+   real home path may ever be pasted into a card. That constraint has already
+   bitten once, on THIS card, and it is far heavier than the table rule. Risk:
+   it recurs silently until the next publish; mitigated by running stage 4
+   standalone (cheap, no publish, no push) after editing a card.
+
+**Recommendation: 3, plus 2 as a courtesy — but note the argument changed.** I
+first recommended 3 *because* no lever existed. Two levers do exist, so that
+reasoning is struck; 3 now stands only on its own merit, which is that the
+findings were real. That is a weaker and more honest basis, and it is genuinely
+your call whether it outweighs adopting a `.markdownlint-cli2.jsonc`.
+
+Applying 3 needed no sign-off — inserting four blank lines changes nothing about
+what gates the publish. Adopting lever 1 **would**, which is why it is not
+applied.
+
+2 is still worth filing, with the framing corrected: CPV does not "disregard"
+`.markdownlintignore`; it runs `markdownlint-cli2`, which has never supported
+that file. The report is *"CPV's markdown lint silently does not honour
+`.markdownlintignore`, because cli2 uses `.markdownlint-cli2.*` `ignores`
+instead"* — a documentation/UX gap, not a bug.
+
+**What needs a USER decision:** (a) adopt lever 1, adopt inline suppression, or
+neither; (b) file 2 or not; (c) what to do about `.markdownlintignore` itself,
+which promises an exclusion **no tool MEASURED in this pipeline implements** —
+delete it, or convert it to a `.markdownlint-cli2.jsonc`. (Scoped deliberately:
+CPV's markdownlint is measured; mega-linter's markdownlint and whatever the
+pre-push hook runs are **not**. An unscoped "no tool has ever" would be the same
+universal-from-a-sample that "the lever space is now SURVEYED" already cost this
+card once today.)
+
+Note also that adopting **inline suppression** is a governance change of the same
+kind as lever 1 — it changes what gates the publish, per card rather than
+repo-wide — so it needs the same sign-off. The recommendation paragraph above
+names only lever 1; that was an omission, not a distinction.
 
 ## Acceptance criteria
 
-- [ ] The mechanism is narrowed to one of the five candidates, with evidence.
-- [ ] A decision is recorded here on option 1, option 2, or both.
+- [x] The mechanism is narrowed to one candidate, with evidence — **CLOSED
+      2026-09-04, and the answer was none of the five.** CPV runs
+      `markdownlint-cli2` (`:1350`), which has no `.markdownlintignore` support
+      at all — measured under maximally favourable conditions (zero effect) and
+      confirmed by its `--help`. #1 and #1b are moot, #3/#4/#5 false, #2
+      irrelevant. Two earlier verdicts of mine on this box were wrong; both are
+      retracted in the STATE block rather than deleted.
+- [x] WHICH path-based rule — DONE 2026-09-04, and it is not purely path-based:
+      a gitignore-filtered `rglob` of `*.md`/`*.mdx` from the repo root, minus
+      any path with a `fixtures` segment. The `design/`-scoped variant is
+      eliminated: nothing in the source names `design/`; the reason no finding
+      has ever landed outside it is that everything else is either gitignored or
+      already clean.
+- [x] Perturbation test on stage 4 — DONE 2026-09-04.
+      `MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE` produced an **identical**
+      `NIT=20 / exit=4` before and after. Both files restored via
+      `git checkout --`, blob hashes matched, `git status --porcelain` silent.
+      Option 1 is answered: dead.
+- [x] markdownlint **REPORTS** on a `design/` file regardless of git tracking or
+      git status — DONE 2026-09-04 by probes 1 and 2. **The original box said
+      "or gitignore" and that clause is RETRACTED**: probe 3 excluded via
+      `.git/info/exclude`, which CPV's `.gitignore`-only parser cannot see, so it
+      measured nothing. `.gitignore` proper DOES gate inclusion. Kept deliberately
+      narrow otherwise: every probe read the FINDINGS LIST, so it observes
+      reporting, and a checker could select via git and report on a superset
+      without any probe noticing. `cpv-remote-validate plugin . --strict` runs
+      standalone — no publish, no push — and is the harness for all of the above.
+- [x] `design/` lints clean — RE-ESTABLISHED 2026-09-04 after **37** MD056
+      findings were fixed in `TRDD-…-Q8PNPRTW-…md` across four regions. **Not
+      19** — 19 was the truncated display; the first draft of this very box said
+      "19 real", repeating the exact error the truncation rule below warns
+      against, two screens away from that rule. This box did not exist before
+      because the card asserted "lints clean" without measuring; it exists now
+      so the next session re-measures rather than re-assumes.
+- [ ] A decision is recorded here on option 1, option 2, or option 3.
+      **Option 3 is applied and recommended**; 1 is dead; 2 awaits the USER.
 - [ ] If option 2: the CPV issue is filed and its URL recorded in `external-refs:`.
-- [x] markdownlint **REPORTS** on a `design/` file regardless of git tracking,
-      git status, or gitignore — DONE 2026-09-04 by three probes. Deliberately
-      NOT phrased as "selection is git-independent": every probe read the
-      FINDINGS LIST, so it observes reporting, and a checker could select via
-      git and report on a superset (or the reverse) without any probe noticing.
-      The distinction is the card's own retained limit and a checked box must
-      not quietly widen past it. `cpv-remote-validate plugin . --strict` runs
-      standalone, so no publish and no push is needed — that is the harness for
-      everything below.
-- [ ] WHICH path-based rule — the surviving family is undistinguished, and the
-      `design/`-scoped variant is still fully alive (no markdownlint finding has
-      ever named a file outside `design/`). `--help` first, then the source.
-- [ ] Perturbation test on stage 4: add `design/` to
-      `MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE`, re-run stage 4 standalone,
-      record whether the NIT disappears — then restore the file byte-identically
-      and confirm a clean `git status`. This answers Option 1 outright.
 - [ ] A decision is recorded on which side of the mismatch is wrong — CPV
-      linting `design/`, or `.markdownlintignore` claiming it should not.
+      linting `design/`, or `.markdownlintignore` claiming it should not. The
+      evidence now favours **neither being "wrong" about linting**: the findings
+      were real defects. What IS wrong is the ignore file's comment, which
+      promises an exclusion no tool has ever honoured.
 
 ## Notes and lessons learned
+
+**IDENTIFY THE BINARY BEFORE PROBING ITS BEHAVIOUR.** The entire card — five
+candidate mechanisms, three probes, two of my own wrong verdicts — existed
+because nobody asked *which tool runs*. One line, `cmd =
+_resolve("markdownlint-cli2")`, answers it, and `markdownlint-cli2` simply has
+no `.markdownlintignore` support. `markdownlint-cli` (v1) and `markdownlint-cli2`
+are different programs with different config surfaces and different flags, and
+a probe run against the wrong one measures a different program than the one
+under test. **Establish identity and version first; it is one grep and it
+retires whole hypothesis families.**
+
+**Reading the CALLER's argv does not survey the CALLEE's configuration
+surface.** I read CPV's argv, found no ignore flag, and wrote "the lever space
+is now SURVEYED". Both working levers act on markdownlint-cli2's *own*
+per-file config discovery, which by definition never appears in CPV's argv.
+The counter-example was inside the tree I was reading: the pinned checkout uses
+inline `markdownlint-disable-next-line` on ~15 of its own TRDDs. **An absence
+in the caller is evidence about the caller only.**
+
+**Read the loop that EMITS the output, not just the function that computes it.**
+`NIT=20` was a hard `if surfaced >= 20: break`, so the finding list was
+truncated and 18 real defects were never printed. I had read `lint_markdown`
+and still recorded the short list as an unexplained "loose end". **Any capped
+or paginated report is "≥ N", never "N"** — and a report sitting exactly on a
+round number deserves a grep for the cap before any conclusion is drawn from
+its size.
+
+**Source reading is stronger than probing and is not sufficient.** Probes 1–3
+cost real effort and settled little; reading `cpv_lint_engine.py` retired three
+candidates in twenty minutes. But the same reading *also* produced two wrong
+verdicts and missed both working levers and the truncation cap. **Read the
+source first, then still probe the specific behaviour you intend to rely on** —
+the reading tells you where to point the probe, it does not replace it.
+
+**A probe is only evidence if it manipulates the variable it names.** Probe 3
+excluded a file with `.git/info/exclude` and concluded about `.gitignore`. Those
+are the same thing *to git* and different things to a hand-rolled parser — and
+the system under test never used git. The probe was well-run, cleanly reverted,
+and void, which is the dangerous combination: nothing about running it signals
+that it measured the wrong variable. **Before running a probe, state what a
+NEGATIVE result would look like and check the mechanism could produce one.**
 
 The last acceptance box matters more than it looks: the mismatch could equally
 be resolved by deciding the ignore file is wrong. Nobody has established which

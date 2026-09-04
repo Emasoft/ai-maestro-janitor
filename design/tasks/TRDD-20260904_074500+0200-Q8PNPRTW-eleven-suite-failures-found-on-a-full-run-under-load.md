@@ -32,6 +32,7 @@ external-refs: [TRDD-7NSRD8OV]
 > | soak8 | full | 11.39 | PASS |
 > | soak9 | full | 15.53 | FAIL |
 > | 12:40 | 88 tests | 14.83 | PASS |
+>
 > *They fail under the full suite at elevated host load; they pass under the full suite at
 > lower load, and under a small suite at comparable load. Consistent with contention. The
 > resource is NOT measured.*
@@ -84,6 +85,7 @@ external-refs: [TRDD-7NSRD8OV]
   |---|---|---|---|
   | pytest-1438 (PASSED) | 344 B | ✓ 8 B | ✓ 6 B |
   | pytest-1439 (FAILED) | 344 B | **absent** | **absent** |
+
   **WHAT THIS ESTABLISHES, EXACTLY: no write from the child ever landed** — not even an 8-byte
   `echo` into the same directory. So it is not the `sleep` fork, not `$!`, not the second
   redirect, not `PATH`, and not a timing budget.
@@ -216,6 +218,7 @@ external-refs: [TRDD-7NSRD8OV]
   | `capture_all_logins` row 2 | failed | **still failing** |
   | `token_usage_anomaly` #8 | failed | **still failing** |
   | `branch_protection*` ×9 | — | **NEW — not in the original 12** |
+
   Three things follow, in priority order:
   1. **#8 failed again — but this does NOT contradict its load-artifact label. ⚠ I claimed it
      did, in this card and to the USER, and the claim was FALSE.** I compared soak9's
@@ -785,6 +788,7 @@ accepted as an artifact.
 > | soak8 07:14 | full, 16,392 | **11.39** | **PASS** |
 > | soak9 11:40 | full, 16,403 | **15.53** | **FAIL** |
 > | 12:40 3-file | 88 | 14.83 | **PASS** |
+>
 > **soak8 vs soak9 hold suite size CONSTANT and differ in host load — and the outcome flips.**
 > Verified first-hand: all four `test_branch_protection.py` tests existed at `e4dd674d^` and do
 > not appear in soak8's FAILED list, and that file was never touched by `e4dd674d`, so for
