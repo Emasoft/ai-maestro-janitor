@@ -6,7 +6,7 @@ created: 2026-09-04T05:43:59+0200
 updated: 2026-09-04T05:43:59+0200
 current-owner: janitor-main-session
 task-type: audit
-priority: high
+priority: medium
 severity: medium
 scope: project
 project-id: ai-maestro-janitor

@@ -110,11 +110,14 @@ class _Bpl:
         self.applied = False
 
     # Stubs keep their REAL parameter names and arity, and discard them with `_ = (...)`.
-    # An earlier version used `*_` to silence pyright's unused-parameter check (this
-    # repo's gate runs pyright and fails closed). That traded a real behavioural check
-    # for a lint fix: `*_` accepts ANY arity, so a snippet calling the content check with
-    # two arguments instead of three would have executed fine and passed. Naming them and
-    # discarding them satisfies pyright AND keeps a wrong-arity call raising TypeError.
+    # The reason is ARITY, not lint: `*_` accepts any number of arguments, so a snippet
+    # calling the content check with two instead of three would have executed fine and
+    # passed. Named parameters make a wrong-arity call raise TypeError again.
+    # A first version justified this as "pyright fails closed on unused parameters" —
+    # that is probably FALSE and is not why this is here. `reportUnusedParameter` is an
+    # information-level diagnostic in pyright's basic mode, and informations do not
+    # produce a non-zero exit, so the `*_` version would have passed the gate too. The
+    # arity argument stands alone; the lint one was decoration.
     def detect_default_branch(self, slug):
         _ = slug
         return "main"
