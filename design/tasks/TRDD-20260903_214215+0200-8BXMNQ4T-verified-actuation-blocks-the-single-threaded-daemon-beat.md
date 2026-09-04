@@ -183,17 +183,28 @@ prevented these; the quantity that matters is total foreground work per beat.
 worthless metric if a normal beat were also ~90% covered (the loop is always doing
 *something*). Measured across every wait in the same snapshot:
 
-| wait size | n | median coverage |
-|---|---|---|
-| normal ≤15 s | 884 | **0.0%** |
-| mid 15–60 s | 73 | 12.5% |
-| **stall >60 s** | **12** | **92.7%** |
+| wait size | n | median | mean |
+|---|---|---|---|
+| normal ≤15 s | 884 | **0.0%** | 17.2% |
+| mid 15–60 s | 73 | 12.5% | 34.7% |
+| **stall >60 s** | **12** | **92.7%** | 88.1% |
 
-A clean monotonic gradient, and normal beats are covered essentially **zero**
-percent. Cumulative foreground occupancy therefore *discriminates* stalls from
-healthy beats rather than merely describing them. Without this control the 93%
-proved nothing; it was suggested by review and it is now the strongest evidence
-on the card.
+Both statistics are shown deliberately: an earlier draft printed the median column
+only, which is the more favourable one for normal beats (0.0% vs 17.2%). The
+gradient survives either way.
+
+**What this does and does not establish.** On a single-threaded loop "waited long"
+and "the loop was busy" are near-definitional, so the control does NOT independently
+prove causation. What it does is **exclude every rival hypothesis as a class** —
+machine sleep, scheduler jitter, backoff miscomputation, orphaned-run artifacts all
+predict LOW coverage on stalls, and stalls measure 92.7%. That is the honest claim;
+an earlier draft said the control shows occupancy "discriminates rather than merely
+describes", which overstates it.
+
+**The bucketing bias runs AGAINST the finding**, which is what makes it credible:
+coverage is `min(c,w)/w`, so a 5 s window needs only 5 body-seconds to reach 100%
+while a 184 s window needs 184. Short windows are mechanically *easier* to saturate
+and still measure 0.0%.
 
 **Caveat on independence:** the 12 rows are not 12 independent confirmations.
 `session-liveness` appears in 8 of them, so one body legitimately delays three tasks
