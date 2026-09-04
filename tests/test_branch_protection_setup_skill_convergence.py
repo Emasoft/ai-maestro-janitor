@@ -113,11 +113,15 @@ class _Bpl:
     # The reason is ARITY, not lint: `*_` accepts any number of arguments, so a snippet
     # calling the content check with two instead of three would have executed fine and
     # passed. Named parameters make a wrong-arity call raise TypeError again.
-    # A first version justified this as "pyright fails closed on unused parameters" —
-    # that is probably FALSE and is not why this is here. `reportUnusedParameter` is an
-    # information-level diagnostic in pyright's basic mode, and informations do not
-    # produce a non-zero exit, so the `*_` version would have passed the gate too. The
-    # arity argument stands alone; the lint one was decoration.
+    # Two earlier versions of this comment gave a LINT justification. Both were wrong,
+    # and the second was wrong in the same way as the first — asserting a mechanism
+    # nobody had run. MEASURED: CLI pyright on a file with two unused NAMED parameters
+    # reports `0 errors, 0 warnings, 0 informations`. It does not flag them at any
+    # severity. The "is not accessed" hints come from the editor's language server
+    # (unreferenced-symbol hinting), which the gate never invokes. So neither `*_` nor
+    # named-and-discarded was ever a gate concern, and `pyrightconfig.json` sets no
+    # `typeCheckingMode` and does not configure `reportUnusedParameter` either.
+    # The arity argument is the ONLY reason this shape is here.
     def detect_default_branch(self, slug):
         _ = slug
         return "main"
