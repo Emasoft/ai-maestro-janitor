@@ -8,7 +8,7 @@ current-owner: janitor-main-session
 task-type: refactor
 scope: project
 project-id: ai-maestro-janitor
-severity: low
+severity: medium
 min-approval-requirement: none
 blocked-by: []
 npt: []
@@ -56,9 +56,28 @@ by a human-style read of the log.
 blocker is still cross-repo readers (below), and #297's other half was fixed
 independently by TRDD-5EHBPH6G in v3.4.14 (per-item timeout + shared run deadline;
 verified live: 1935 s SIGKILL → ~100 s clean, 4/4). It DOES change the severity
-argument: `severity: low` was set when the harm was hypothetical. A failing chore
-that reads as healthy is a monitoring failure, and the next chore to fail this way
-will be hidden the same way — half 1 fixed *this* task, not the display.
+argument, and the field is now **`medium`** (was `low`, set when the harm was
+hypothetical). A failing chore that reads as healthy is a monitoring failure, and
+the next chore to fail this way will be hidden the same way — half 1 fixed *this*
+task, not the display. Not `high`: no data was lost and the present instance is gone.
+
+A first version of this entry left the field at `low`, on the reasoning that
+re-grading it in the same commit that records the incident would be "marking my own
+homework". That was wrong twice: marking one's own homework means judging one's own
+work, whereas this grade comes from an EXTERNALLY filed incident report — the
+outside evidence arriving is precisely when a severity should move; and it left the
+field contradicting the paragraph above it, so anything filtering `severity: low`
+would skip the card while the explanation of why it shouldn't be skipped went
+unread. That is *"nothing evaluates a condition written as prose"* — the same
+argument that un-ticked two checkboxes on TRDD-8BXMNQ4T — recurring one level up,
+in a metadata field instead of a checkbox.
+
+**Unverified, and load-bearing for this entry:** the "displayed as healthy" claim is
+an inference from the stamp-write site (`Task.poll_background` stamps at reap time
+regardless of exit code). Nobody read `last-run-marketplace-refresh.ts` against the
+failure times, or ran `identify_environment.py` / `fleet_status.py`, during the
+30 h window — and now that the chore succeeds, that observation can no longer be
+taken. The inference is sound; it is not a measurement.
 
 ## Why this is `backburner` — ONE reason, and it is not the one first written here
 

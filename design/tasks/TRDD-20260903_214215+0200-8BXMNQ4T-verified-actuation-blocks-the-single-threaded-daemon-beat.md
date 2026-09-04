@@ -139,7 +139,10 @@ log, so the correction is one subtraction:
 Bodies are small at the median, so the correction moves med 5→4 s and p90 15→12 s.
 **Use this table, not the one above it.**
 
-**STALLED BEATS: 12 stall events across 3 tasks, out of ~1023 task-beats (1.2%).**
+**STALLED BEATS: 12 stall events across 3 tasks, out of 1048 task-beats (1.1%).**
+Numbers below come from ONE snapshot of `daemon.log` copied before analysis. An
+earlier draft mixed three snapshots taken ~10 min apart (the log is live and grew
+~8 beats between them) and reported the rate to two significant figures anyway.
 A stall is `wait > 60 s` — one full cycle skipped, which is the only non-arbitrary
 line here (median wait is 4–5 s, so the loop is *always* slightly late). Per task:
 `fleet-stop` 5 of 345, `oauth-rotator-tick` 4 of 341, `gh-notify-inbox` 3 of 341.
@@ -150,25 +153,51 @@ cross-task deduplicated numerator by a single task's denominator.
 draft labelled each stall with the *preceding* run's start, which is `60 + body +
 wait` seconds too early, and then built a causal story on those wrong times.
 
-**CAUSE — every one of the 12 pairs with a named long FOREGROUND body.** All 12
-bodies >60 s in the window were listed and matched against the 12 stalls:
+**CAUSE — CUMULATIVE foreground occupancy, not "one long body".** The previous
+draft matched each stall to the nearest body >60 s and called all 12 explained.
+That was post-hoc: only 7 foreground bodies >60 s exist in the window, so with 12
+stalls every one was guaranteed a neighbour. Redone properly — for each stall,
+sum EVERY foreground body (any duration) overlapping `[eligible, resumed)`:
 
-| stall ends | tasks delayed | blocking body that ended there |
-|---|---|---|
-| 23:06:47–23:07:02 | all three | `session-liveness` 78 s, done 23:06:47 |
-| 03:51:47 | `fleet-stop` | `github-config-audit` 70 s (03:46:41) + `oauth-rotator-tick` 65 s (03:51:32) |
-| 04:17:50–04:20:24 | all three | `gh-notify-inbox` 70 s, done 04:19:39 |
-| 04:34:06 | `fleet-stop` | `session-liveness` 78 s, done 04:34:04 |
-| 04:35:46–04:35:54 | `gh-notify-inbox`, `oauth-rotator-tick` | `cold-cache-clear` 94 s, done 04:35:46 |
-| 04:48:43 | `oauth-rotator-tick` | `session-liveness` 77 s, done 04:47:49 |
+| task | resumed | wait | covered | by |
+|---|---|---|---|---|
+| `gh-notify-inbox` | 23:06:56 | 89 s | **98%** | session-liveness 78 + cold-cache-clear 9 |
+| `fleet-stop` | 03:51:47 | 67 s | **97%** | oauth-rotator-tick 52 + memory-guard 11 + session-liveness 2 |
+| `fleet-stop` | 23:06:47 | 94 s | **95%** | session-liveness 78 + memory-guard 11 |
+| `fleet-stop` | 04:34:06 | 78 s | **94%** | session-liveness 73 |
+| `oauth-rotator-tick` | 04:48:43 | 108 s | **94%** | session-liveness 53 + gh-notify-inbox 48 |
+| `gh-notify-inbox` | 04:35:46 | 150 s | **93%** | cold-cache-clear 94 + session-liveness 45 |
+| `oauth-rotator-tick` | 23:07:02 | 97 s | **93%** | session-liveness 78 + 3 others |
+| `oauth-rotator-tick` | 04:35:54 | 187 s | **90%** | cold-cache-clear 94 + session-liveness 74 |
+| `fleet-stop` | 04:20:24 | 94 s | **87%** | gh-notify-inbox 46 + 3 others |
+| `oauth-rotator-tick` | 04:20:11 | 145 s | **86%** | gh-notify-inbox 70 + cold-cache-clear 30 + supervisor 24 |
+| `fleet-stop` | 04:17:50 | 90 s | **78%** | session-liveness 55 + oauth-rotator-tick 15 |
+| `gh-notify-inbox` | 04:18:26 | 184 s | **54%** | session-liveness 55 + cold-cache-clear 30 + oauth 15 |
 
-**Bulk lane: EXCLUDED, by a stronger test than timestamps.** `marketplace-refresh`
-ran BACKGROUND bodies of **104 / 98 / 98 / 100 s** (01:21:40, 02:23:22, 03:25:02,
-04:26:44) and `fleet-plugins-update` 75 s — every one LONGER than several foreground
-bodies that did stall the loop — and **not one produced a stall.** That is the bulk
-lane working as designed, and it is the direct evidence for the remedy below. (An
-earlier draft excluded the lane by non-coincidence of spawn times, computed against
-the wrong stall instants.)
+**Median coverage 93%; 11 of 12 at or above 78%; one outlier at 54%.** The residual
+is loop overhead (sleep granularity, dispatch). Crucially the contributors are
+mostly **sub-60 s bodies stacking** — `fleet-stop`'s 04:17:50 stall is 55 s + 15 s,
+neither of which is a "long body". So a per-body deadline below 60 s would NOT have
+prevented these; the quantity that matters is total foreground work per beat.
+
+**Two rows the previous draft got wrong**, both found by review and confirmed here:
+`github-config-audit` is a **BACKGROUND** task (`starting (background pid …)`), so it
+can never block the loop — listing it as a blocker was wrong twice over, and it also
+ended 4 minutes before the task it was credited with delaying became eligible. And
+`gh-notify-inbox`'s 70 s body was credited with the stall that IS that same run —
+circular. Its legitimate contributions are to OTHER tasks (46 s and 70 s above).
+
+**Bulk lane: EXCLUDED — structurally, which is the argument that actually holds.**
+A `background=True` task runs in a detached `subprocess.Popen` child and
+`time_until_due()` returns `_BULK_RECHECK_SEC` while that child is unreaped, so it
+cannot occupy the loop by construction. The previous draft argued this from the log
+instead (four `marketplace-refresh` bodies of ~100 s with no nearby stall) — but
+three of those four fall inside a 4 h 44 m stretch with no stalls from any cause, so
+the effective sample was ~1. The structural fact was available and unused.
+**Unexamined confound:** `marketplace-refresh` pid 3276 ran 22:47:40 → SIGKILLed
+23:19:41 (1935 s, workload cap), and the 23:06–23:07 triple falls inside its
+lifetime. A detached child cannot block the loop, but it can starve it of CPU — so
+why `session-liveness` needed 78 s there is not established.
 
 **Machine sleep: excluded above 94 s only.** The largest gap between any two
 consecutive daemon events in 6 h 22 m is **94 s** — and it is exactly
@@ -185,13 +214,22 @@ spare past the 60 s line, producing exactly the one- and two-task pattern observ
 `session-liveness` 78 s (ends 04:34:04) then `cold-cache-clear` 94 s (ends
 04:35:46). The mechanism is a run of blocking bodies, not one.
 
-**VERDICT — the card's thesis is CONFIRMED, by different tasks than it named.** A
-foreground body longer than the 60 s interval blocks the single-threaded loop and
-skips a beat; 12 such skips in 6 h 22 m. The blockers are `session-liveness` (78 s
-max), `cold-cache-clear` (94 s), `gh-notify-inbox` (70 s), `github-config-audit`
-(70 s) — three of the four touch panes, which is the family this card suspects,
-but **none is rotation actuation**. Median 4–5 s and p90 12–15 s are healthy; the
-damage is confined to the tail.
+**VERDICT — the card's thesis is CONFIRMED in its general form, and SHARPENED.**
+Foreground work occupying the single-threaded loop for longer than the 60 s
+interval skips a beat; 12 such skips in 6 h 22 m, median 93% accounted for by
+summing the foreground bodies in each stall's own window. The contributors are
+`session-liveness` (78 s max, appears in 8 of 12 rows), `cold-cache-clear` (94 s),
+`gh-notify-inbox` (70 s), `oauth-rotator-tick`, `memory-guard`,
+`oauth-rotator-supervisor` — **all pane- or session-touching, which is the family
+this card suspects, and none is rotation actuation.** Median 4–5 s and p90 12–15 s
+are healthy; the damage is confined to the tail.
+
+**What is NOT established:** the 54% row (184 s, only 100 s accounted for), why
+`session-liveness` took 78 s at all, and whether the loop dispatches due tasks in
+registration order — which would explain why `fleet-stop`, whose own body is always
+0 s, stalls most often (it is registered immediately after `session-liveness`, the
+most frequent contributor). That last one is a hypothesis from the `started
+(pid=…, tasks=[…])` ordering, not a reading of the dispatch code.
 
 **Still ZERO samples of the condition the card exists for.** `grep -c 'rotation-esc'`
 is **0** — nothing above was measured while actuation verifies against wedged panes.
@@ -301,35 +339,39 @@ surface for a number nobody is waiting on.
       from — beats/minute during a rotation window vs. outside one, and the fleet size.
       — **TWO of three delivered; the box stays OPEN on the third.** OUTSIDE a rotation
       window: measured from the per-task `starting` markers, three tasks, 6 h 22 m window,
-      med 4–5 s / p90 12–15 s, with **12 stalls in ~1023 task-beats (1.2%)**, every one
-      paired to a named long foreground body (table above). Fleet: **15 projects carrying an
-      arm record** — not the same as currently armed, see the section above.
+      med 4–5 s / p90 12–15 s, with **12 stalls in 1048 task-beats (1.1%)**, median **93%**
+      of each stall accounted for by summing the foreground bodies in its own window (table
+      above). Fleet: **15 projects carrying an arm record** — not the same as currently
+      armed, see the section above.
       DURING one: still **zero samples** — `rotation-esc` is 0 on this host. This half is not
       obtainable by looking harder; it needs a rotation to occur.
       **The box was briefly ticked `[x]` with this same annotation; that was wrong** and the
       reviewer's argument for reverting it is my own sentence from TRDD-L46IG69Y — *"nothing
       evaluates a condition written as prose."* A future session greps `- [ ]` for open work,
       not the paragraph under it. A tick with a disclaimer is a closed box.
-- [x] A decision is recorded: either "no action, cost is invisible at this fleet size" (and this
+- [ ] A decision is recorded: either "no action, cost is invisible at this fleet size" (and this
       card closes) or a named mechanism with the measurement that justifies it.
-      — **[x] A NAMED MECHANISM, and the measurement that justifies it is in this card.**
-      **Mechanism: move the four measured loop-blockers to the existing bulk lane**
-      (`Task(..., background=True)`) — `session-liveness` (78 s), `cold-cache-clear` (94 s),
-      `gh-notify-inbox` (70 s), `github-config-audit` (70 s).
-      **Why this and not an internal deadline:** the bulk lane is *already proven* on this
-      exact data. `marketplace-refresh` ran background bodies of 104/98/98/100 s — longer
-      than every foreground blocker — and caused **zero** stalls, while foreground bodies of
-      70–94 s caused all 12. The remedy is not a new design, it is applying the one the
-      daemon already has to the tasks that need it.
-      **Caveats, stated so the implementer does not inherit an overclaim:** (a) each move
-      must respect why the task is foreground now — `task_gh_notify_inbox`'s docstring
-      explicitly argues *against* the bulk lane ("one bounded HTTP call … does not belong in
-      the bulk lane where a 20-minute workload could delay it"), so that one needs a bound on
-      its HTTP call instead; (b) the lane serialises, so four movers may queue behind each
-      other; (c) this is a `scripts/daemon.py` change touching scheduling — **the advisor must
-      be consulted before it is written**, per the standing rule.
-      This box was briefly ticked once before, on a "defer and re-measure" outcome that is
-      neither option it enumerates. This tick is the second option, on evidence.
+      — **UN-TICKED AGAIN, and this time the reason is that the mechanism I named does not
+      follow from the measurement.** I ticked this with "move the four blockers to the bulk
+      lane". Three objections, two of which I had written into the same paragraph:
+      (a) `task_gh_notify_inbox`'s docstring argues explicitly AGAINST the lane for itself —
+      recording that as a caveat *is* an admission the mechanism fails for a quarter of its
+      targets; (b) `session-liveness` is the pane-RECOVERY task, the lane SERIALISES, and it
+      just demonstrated a 1935 s occupant — moving it risks converting a 78 s beat delay into
+      a 20-minute recovery delay, which is the 2026-07-17 starvation incident the lane's own
+      docstring exists to record; (c) the lane would gain 4 contenders for one slot with no
+      measurement of queueing.
+      **And the per-row check killed the obvious alternative too.** "Bound each body below
+      60 s" does not follow either: the stalls are built from bodies of 55 + 30 + 15 s —
+      individually legal, cumulatively over the interval. The measurement names *total
+      foreground occupancy per beat*, and neither candidate remedy addresses that quantity.
+      **What the measurement DOES support**, and all this box can honestly carry today:
+      `session-liveness` appears in 8 of 12 stall rows and is the single largest contributor.
+      Bounding or backgrounding IT alone is the change the data points at — but it is the one
+      task where backgrounding is most dangerous, so it needs a design decision, not a move.
+      **The advisor must be consulted before any `scripts/daemon.py` scheduling change.**
+      Third tick, third un-tick, all optimistic. The tell each time was a counter-argument
+      written inside the ticked box.
 - [ ] If a mechanism lands: a test pins the bound, and `oauth-rotator-tick` is shown still
       running on cadence with every pane wedged.
 
