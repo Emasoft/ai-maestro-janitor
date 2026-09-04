@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-04T19:08:00+0200
+updated: 2026-09-05T01:31:36+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -38,6 +38,21 @@ external-refs: [TRDD-Q8PNPRTW]
   (`c54627f0`, `db466c64`): the identical `FileNotFoundError` shape discriminates nothing.
 
 ## What is MEASURED
+
+- **2026-09-05 00:5x–01:2x — BOTH ROWS PASSED IN TWO CONSECUTIVE FULL-SUITE RUNS.** 16416
+  passed / 1 skipped in 11m03s, then 16416 passed / 1 skipped in 13m02s (`pytest=0`). Neither
+  row carries a skip decorator and both appear in `--collect-only` (verified, not assumed), so
+  both ran in **the full-suite pytest process** — the configuration step 1a says was never
+  reproduced against, and the one soak9 failed in. The runs were incidental: they were
+  verifying TRDD-2640RYR5, not hunting this.
+  **What this is NOT: a load data point. Host load was never sampled during either run**, so
+  these two greens cannot be placed on the load axis that every other measurement here turns
+  on, and they license nothing about whether load is the discriminator. Recorded because the
+  configuration is the interesting variable and 2 in-config greens are cheap evidence nobody
+  had to spend a run on — not because they narrow the cause.
+  **The experiment this suggests, still NOT PERFORMED:** a full-suite loop that samples host
+  load throughout and preserves each run's output, so a failure is caught *in the config that
+  fails* with its load recorded. That is the shape step 1a's 2-test selection could not have.
 
 - **When they fail, the child produces ZERO filesystem effect.** A temporary marker line
   (`echo started > {pid_file}.started`) as the script's FIRST statement, run 8×, then reverted:
