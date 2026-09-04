@@ -108,8 +108,12 @@ level up.** Q8PNPRTW's `assert 'BRPROT-001' in ''` is a **detector subprocess ex
 empty stdout**, which has a DOCUMENTED, DESIGNED cause: `run_subprocess` fails open on timeout,
 returns None, the caller's `if x is None: return 0` fires. `timeout_scale`'s own docstring
 describes that exact scenario. **That is a TIMEOUT.** This card's zero-write measurement
-*refutes* timeouts — a timeout predicts a LATE write, and no write ever landed. The two cannot
-share a mechanism, and unifying them on "both look empty" is precisely "both raise
+*refutes* timeouts — a timeout predicts a LATE write, and no write ever landed. **Precisely:
+the two cannot share THE TIMEOUT MECHANISM, and no relation between them is established.**
+(Stating it as "cannot be related" — which I did — overreaches: a common upstream cause
+manifesting as a timeout on one path and a dead child on the other is excluded by nothing I
+measured, and both are load-gated and both spawn subprocesses.) Unifying them on "both look
+empty" is still precisely "both raise
 FileNotFoundError" at a higher abstraction, where it is harder to see rather than more
 defensible. **Risk if left standing: scaling Q8PNPRTW's timeouts and declaring this card
 solved.**
@@ -124,9 +128,25 @@ load ~9 → **6/6 PASSED**, so no failing run's child stderr was captured (the p
 run). Earlier today the same test failed **3/3 solo at load ~15**. Same test, same code, same
 day; the only variable that moved is host load.
 
-**What actually fits the data, and it is all that fits:** the child exec'd successfully, then
-produced no filesystem effect, and it happens far more at high host load. Cause unknown.
-Naming that "fd exhaustion" was a label, not a mechanism.
+**What actually fits the data:** the child exec'd successfully, then produced no filesystem
+effect, and it happens far more at high host load. Cause unknown for the FAMILY — but
+**⚠ I over-retracted, and one live sub-hypothesis went out with the dead one:**
+
+> **SURVIVING, UNTESTED: the child exec'd, then its own `open()` for the redirect failed.**
+> The errpipe argument only reaches the SPAWN. Once `sh` is running the parent's `Popen` has
+> already returned, and **nothing the child does afterwards can retroactively raise in the
+> parent.** So: `sh` execs (parent sees success), `> {pid_file}` fails, `sh` exits non-zero, no
+> file. That is live Popen + readable returncode + poll to exhaustion + zero write — **every
+> measured fact**, with no parent exception required.
+> Weaker than spawn-time exhaustion but NOT dead: ~1M fd headroom makes an *fd-specific*
+> failure implausible, yet a redirect can fail for non-fd reasons (tmpdir gone, ENOSPC, a
+> permissions/mtime race). **Its test is the stderr capture already owed above** — `sh` would
+> print `cannot create ...` to inherited stderr. I reasoned "the `-s` runs showed nothing"
+> while my own card records that **all six of those runs PASSED**, so a failing run's stderr
+> has still never been seen. I wrote that trap down and then walked into it one section later.
+
+Naming the family "fd exhaustion" was a label, not a mechanism — but "cause unknown" must not
+swallow the sub-hypothesis above, or a future session re-derives it from scratch.
 
 **THE MEASUREMENT STILL OWED — and note the trap:** capture a FAILING run's child stderr.
 Row 1/row 2 inherit the parent's stderr (no `stderr=` at `:274`), so `-s` would show anything
