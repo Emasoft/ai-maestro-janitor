@@ -174,15 +174,43 @@ external-refs: [TRDD-7NSRD8OV]
   started and was SIGKILLed before it forked", and no observation currently
   distinguishes them because the script emits nothing on entry.
 
-  **THE FIX IS INSTRUMENTATION, NOT A TIMEOUT.** Have the fake script record its own
-  entry — one `touch <tmp>/script_started` (or an echo) as its FIRST statement, before
-  the fork. Then:
-  - marker absent + pid absent ⇒ never scheduled (row 1's mechanism);
-  - marker present + pid absent ⇒ started, killed before the fork completed (the
-    kill-vs-fork race).
-  This is a test-instrumentation defect and fixing it costs one line. Do NOT widen the
-  1.0 s timeout to make row 2 pass — that destroys the very race the test exists to
-  exercise and converts a diagnosable failure into a hidden one.
+  **SUPERSEDED WITHIN THE HOUR — an entry marker would only DIAGNOSE, and row 2 does not
+  need diagnosing. READ THE SOURCE (`tests/test_capture_all_logins.py:260-334`).**
+
+  Both fake scripts are byte-identical in shape:
+
+  ```sh
+  #!/bin/sh
+  sleep 600 &          # the grandchild is forked FIRST
+  echo $! > pid_file   # its pid is written only AFTER
+  wait
+  ```
+
+  The two tests differ in ONE respect, and it is the whole bug:
+
+  | | polls for `pid_file` | kills the tree | order |
+  |---|---|---|---|
+  | ROW 1 `test_kill_process_group_…` | lines 276-280 | line 283 `_kill_process_group` | **poll, THEN kill** — correct |
+  | ROW 2 `test_capture_one_kills_…` | lines 325-329 | line 323 `capture_one(timeout=1.0)` | **kill, THEN poll** — broken |
+
+  Row 2 waits for a file whose only writer it has already SIGKILLed. If the kill beats
+  `sh`'s fork-plus-echo — which is exactly what load makes likely — `grandchild.pid` is
+  never created, and the 30-iteration poll loop at line 325 cannot succeed no matter how
+  long it runs, because nothing is left alive to write it. `int(pid_file.read_text())`
+  then raises the `FileNotFoundError` we have been treating as an undetermined race.
+
+  **So row 2's mechanism is NOT undetermined.** It is a structural ordering defect,
+  readable in the test source, and it needs no instrumentation to establish. The earlier
+  "two candidate mechanisms" framing on this card was looking for a race in the product
+  when the ordering error is in the test.
+
+  **The fix is not a timeout and not a marker — it is to obtain the grandchild pid before
+  the thing that kills it runs**, which is what row 1 already does. That is a real design
+  problem for row 2 (the test cannot poll during `capture_one`'s blocking call, and
+  `capture_one` owns the spawn), so the fix needs thought rather than a one-liner — but
+  the DIAGNOSIS is settled. Do NOT widen the 1.0 s timeout: it would mask the ordering
+  defect by making the writer usually win, leaving a test that passes for the wrong
+  reason and flakes forever under load.
 
   *(Evidence report: `reports/suite-failures/20260904_110119+0200-row2-mechanism-evidence.md`.)*
 
