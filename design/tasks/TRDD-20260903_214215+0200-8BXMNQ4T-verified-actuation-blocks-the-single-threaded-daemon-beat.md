@@ -139,49 +139,71 @@ log, so the correction is one subtraction:
 Bodies are small at the median, so the correction moves med 5→4 s and p90 15→12 s.
 **Use this table, not the one above it.**
 
-**STALLED BEATS: 9 distinct minutes out of ~339 beats (2.7%)** — a stall being
-`wait > 60 s`, i.e. a full cycle missed. Per task: `fleet-stop` 5, `oauth-rotator-tick`
-4, `gh-notify-inbox` 3, at 23:04 · 03:49 · 04:14 · 04:15 · 04:16 · 04:17 · 04:31 ·
-04:32 · 04:45.
+**STALLED BEATS: 12 stall events across 3 tasks, out of ~1023 task-beats (1.2%).**
+A stall is `wait > 60 s` — one full cycle skipped, which is the only non-arbitrary
+line here (median wait is 4–5 s, so the loop is *always* slightly late). Per task:
+`fleet-stop` 5 of 345, `oauth-rotator-tick` 4 of 341, `gh-notify-inbox` 3 of 341.
+An earlier draft said "9 distinct minutes / ~339 beats = 2.7%", which divided a
+cross-task deduplicated numerator by a single task's denominator.
 
-**CAUSE — two candidates eliminated from the same log, one supported.**
+**The instants below are the DELAYED START — when the stall ended.** An earlier
+draft labelled each stall with the *preceding* run's start, which is `60 + body +
+wait` seconds too early, and then built a causal story on those wrong times.
 
-- **Machine sleep: EXCLUDED.** Sleep stops every task at the same instant for the
-  same duration. Only **1 of the 9** stall minutes (23:04) hit all three tasks; the
-  rest are one- or two-task, and the maxima differ (94 / 187 / 184 s). A single
-  clean sleep window cannot produce that. This matters because the window is
-  overnight on a laptop, where sleep is the natural prior.
-- **Bulk lane: EXCLUDED.** `marketplace-refresh` spawned 6× (22:47, 23:38, 01:19,
-  02:21, 03:23, 04:25) and coincides with **none** of the 9 stall minutes.
-- **Long foreground body: SUPPORTED, and it is this card's own thesis.** The
-  largest gap between any two consecutive daemon events in 6 h 22 m is **95 s**, and
-  the biggest gaps sit INSIDE one task's execution:
-  `S cold-cache-clear 04:34:11 → D 04:35:46` (95 s), `S session-liveness → D` at
-  81 / 79 / 78 s. Durations agree: `cold-cache-clear` max 94 s, `session-liveness`
-  max 78 s. The max single-task body (94 s) equals the max beat wait (94 s), which
-  is what one long body blocking a single-threaded loop produces.
-- **Host load is the likely trigger, not the daemon.** 6 of the 9 stalls fall in
-  04:14–04:45 — the window in which this session ran a full compaction (~04:44) and
-  left a `.git/index.lock` (04:35). Evidence:
-  `reports/board-drain/20260904_045735+0200-8bxmnq4t-p99-attribution.md`.
+**CAUSE — every one of the 12 pairs with a named long FOREGROUND body.** All 12
+bodies >60 s in the window were listed and matched against the 12 stalls:
 
-**VERDICT — on cadence at the median; a real but load-correlated tail; NOT the
-condition the card is about.** The beat holds at med 4–5 s and p90 12–15 s against
-a 60 s ceiling. ~2.7% of beats miss a cycle, attributable to a long foreground body
-(`cold-cache-clear`, `session-liveness` — both pane-touching, which is the family
-this card suspects) under heavy host load. **An earlier draft said "p99 BREACHES the
-ceiling" as a property of the daemon while the body admitted the cause was unknown;
-that was cause-attribution ahead of the evidence, and it is withdrawn.**
+| stall ends | tasks delayed | blocking body that ended there |
+|---|---|---|
+| 23:06:47–23:07:02 | all three | `session-liveness` 78 s, done 23:06:47 |
+| 03:51:47 | `fleet-stop` | `github-config-audit` 70 s (03:46:41) + `oauth-rotator-tick` 65 s (03:51:32) |
+| 04:17:50–04:20:24 | all three | `gh-notify-inbox` 70 s, done 04:19:39 |
+| 04:34:06 | `fleet-stop` | `session-liveness` 78 s, done 04:34:04 |
+| 04:35:46–04:35:54 | `gh-notify-inbox`, `oauth-rotator-tick` | `cold-cache-clear` 94 s, done 04:35:46 |
+| 04:48:43 | `oauth-rotator-tick` | `session-liveness` 77 s, done 04:47:49 |
+
+**Bulk lane: EXCLUDED, by a stronger test than timestamps.** `marketplace-refresh`
+ran BACKGROUND bodies of **104 / 98 / 98 / 100 s** (01:21:40, 02:23:22, 03:25:02,
+04:26:44) and `fleet-plugins-update` 75 s — every one LONGER than several foreground
+bodies that did stall the loop — and **not one produced a stall.** That is the bulk
+lane working as designed, and it is the direct evidence for the remedy below. (An
+earlier draft excluded the lane by non-coincidence of spawn times, computed against
+the wrong stall instants.)
+
+**Machine sleep: excluded above 94 s only.** The largest gap between any two
+consecutive daemon events in 6 h 22 m is **94 s** — and it is exactly
+`cold-cache-clear`'s body, i.e. not silence at all. A sleeping machine logs nothing,
+so any sleep >94 s is excluded by direct observation. Shorter sleeps are untested;
+they are also unnecessary, since all 12 stalls are positively attributed. An earlier
+draft argued this from cross-task non-coincidence, which has **no power** below
+~120 s: a 90 s sleep delays all three tasks but pushes only those with <30 s to
+spare past the 60 s line, producing exactly the one- and two-task pattern observed.
+
+**Waits >94 s require ACCUMULATION, not one long body.** Max inter-event gap is
+94 s, yet waits reach 187 s — so no single body explains the worst ones.
+`oauth-rotator-tick`'s 187 s spans TWO consecutive long foreground bodies:
+`session-liveness` 78 s (ends 04:34:04) then `cold-cache-clear` 94 s (ends
+04:35:46). The mechanism is a run of blocking bodies, not one.
+
+**VERDICT — the card's thesis is CONFIRMED, by different tasks than it named.** A
+foreground body longer than the 60 s interval blocks the single-threaded loop and
+skips a beat; 12 such skips in 6 h 22 m. The blockers are `session-liveness` (78 s
+max), `cold-cache-clear` (94 s), `gh-notify-inbox` (70 s), `github-config-audit`
+(70 s) — three of the four touch panes, which is the family this card suspects,
+but **none is rotation actuation**. Median 4–5 s and p90 12–15 s are healthy; the
+damage is confined to the tail.
 
 **Still ZERO samples of the condition the card exists for.** `grep -c 'rotation-esc'`
 is **0** — nothing above was measured while actuation verifies against wedged panes.
-So this is a floor taken with the suspected cause absent, and it neither closes the
-card nor confirms its hypothesis.
+The mechanism is now demonstrated, so a rotation window would add load to a loop
+already shown to skip beats under it; that is an inference, not a measurement.
 
-**Fleet size: 15 armed projects** (`.janitor/state/armed*` under the workspace). An
-earlier draft recorded **9**, which was the count of `gh-issues-monitor/` registry
-dirs — a cumulative never-pruned set, not the armed fleet. The `Task` docstring's
-"40 armed projects" is a 2026-07-17 incident figure, not a current count.
+**Fleet: 15 projects with a `.janitor/state/armed-cadence.cron`** — one file each,
+so no double-count. **That file is the last ARM RECORD, not proof of current
+arming** (`armed.flag` lives in the control dir; `find ~/.claude/projects -name
+armed.flag` returned 0). Two earlier figures were worse: **9** counted cumulative
+`gh-issues-monitor/` registry dirs, and the `Task` docstring's **40** is a
+2026-07-17 incident figure.
 
 ## (SUPERSEDED — both numbers and premise wrong) attempt 2, via the published-line proxy
 
@@ -279,30 +301,35 @@ surface for a number nobody is waiting on.
       from — beats/minute during a rotation window vs. outside one, and the fleet size.
       — **TWO of three delivered; the box stays OPEN on the third.** OUTSIDE a rotation
       window: measured from the per-task `starting` markers, three tasks, 6 h 22 m window,
-      med 4–5 s / p90 12–15 s, with **9 stalled beats in ~339 (2.7%)** attributed to long
-      foreground bodies under host load (sleep and the bulk lane both eliminated from the
-      same log). Fleet size: **15 armed projects**.
-      DURING one: still **zero samples** — `rotation-esc` is 0 on this host, and that is the
-      condition the card exists for.
+      med 4–5 s / p90 12–15 s, with **12 stalls in ~1023 task-beats (1.2%)**, every one
+      paired to a named long foreground body (table above). Fleet: **15 projects carrying an
+      arm record** — not the same as currently armed, see the section above.
+      DURING one: still **zero samples** — `rotation-esc` is 0 on this host. This half is not
+      obtainable by looking harder; it needs a rotation to occur.
       **The box was briefly ticked `[x]` with this same annotation; that was wrong** and the
       reviewer's argument for reverting it is my own sentence from TRDD-L46IG69Y — *"nothing
       evaluates a condition written as prose."* A future session greps `- [ ]` for open work,
       not the paragraph under it. A tick with a disclaimer is a closed box.
-- [ ] A decision is recorded: either "no action, cost is invisible at this fleet size" (and this
+- [x] A decision is recorded: either "no action, cost is invisible at this fleet size" (and this
       card closes) or a named mechanism with the measurement that justifies it.
-      — **OPEN, and now for a specific reason.** The tail IS real (2.7% of beats miss a
-      cycle) and IS attributed (a long foreground body blocks the loop — this card's own
-      thesis, via `cold-cache-clear` / `session-liveness` rather than rotation actuation).
-      But it correlates with host load, and the condition the card exists for has never
-      occurred here. So neither enumerated branch is honest yet: "no action, cost is
-      invisible" is contradicted by 9 stalls, and "a named mechanism" would be chosen
-      against a trigger that has zero samples.
-      **Next action: bound the two blocking bodies** — `cold-cache-clear` (max 94 s) and
-      `session-liveness` (max 78 s) are the measured loop-blockers; either they move to the
-      bulk lane or they get an internal deadline. That is a decision the measurement now
-      supports, independent of whether a rotation window ever occurs.
-      This box was also briefly ticked, on a "defer and re-measure" outcome that is neither of
-      the two the box enumerates.
+      — **[x] A NAMED MECHANISM, and the measurement that justifies it is in this card.**
+      **Mechanism: move the four measured loop-blockers to the existing bulk lane**
+      (`Task(..., background=True)`) — `session-liveness` (78 s), `cold-cache-clear` (94 s),
+      `gh-notify-inbox` (70 s), `github-config-audit` (70 s).
+      **Why this and not an internal deadline:** the bulk lane is *already proven* on this
+      exact data. `marketplace-refresh` ran background bodies of 104/98/98/100 s — longer
+      than every foreground blocker — and caused **zero** stalls, while foreground bodies of
+      70–94 s caused all 12. The remedy is not a new design, it is applying the one the
+      daemon already has to the tasks that need it.
+      **Caveats, stated so the implementer does not inherit an overclaim:** (a) each move
+      must respect why the task is foreground now — `task_gh_notify_inbox`'s docstring
+      explicitly argues *against* the bulk lane ("one bounded HTTP call … does not belong in
+      the bulk lane where a 20-minute workload could delay it"), so that one needs a bound on
+      its HTTP call instead; (b) the lane serialises, so four movers may queue behind each
+      other; (c) this is a `scripts/daemon.py` change touching scheduling — **the advisor must
+      be consulted before it is written**, per the standing rule.
+      This box was briefly ticked once before, on a "defer and re-measure" outcome that is
+      neither option it enumerates. This tick is the second option, on evidence.
 - [ ] If a mechanism lands: a test pins the bound, and `oauth-rotator-tick` is shown still
       running on cadence with every pane wedged.
 
