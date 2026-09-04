@@ -787,6 +787,51 @@ def test_apply_skips_when_slug_missing(project_env: Path) -> None:
     assert r.stdout == "", f"expected silence, got {r.stdout!r}"
 
 
+def test_apply_never_resolves_the_slug_from_claude_plugin_root(project_env: Path) -> None:
+    """Gate 3 reads the PROJECT root only — a plugin-install root is never a protect target.
+
+    The regression this pins (TRDD-BH32A1A5): gate 3 used to prefer `CLAUDE_PLUGIN_ROOT`,
+    which in a plugin-hook context is the janitor's own install dir — whose manifest declares
+    `Emasoft/ai-maestro-janitor`. The guard would then have PATCHed branch protection on the
+    janitor's repo from inside an unrelated project. Here the project has no manifest and no
+    git remote, so the ONLY resolvable slug is the decoy's: silence proves it was not read.
+    """
+    decoy = project_env / "_plugin_cache"
+    decoy.mkdir()
+    _make_plugin_manifest(decoy, repo_url="https://github.com/Emasoft/ai-maestro-janitor")
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={"CLAUDE_PLUGIN_ROOT": str(decoy)},
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "", f"resolved a slug from CLAUDE_PLUGIN_ROOT: {r.stdout!r}"
+    log = project_env / ".janitor" / "logs" / "branch-protection-apply.log"
+    if log.is_file():
+        assert "ai-maestro-janitor" not in log.read_text(encoding="utf-8")
+
+
+def test_apply_uses_the_project_slug_when_plugin_root_names_another_repo(
+    project_env: Path,
+) -> None:
+    """With BOTH roots resolvable and disagreeing, the project's repo is the one acted on."""
+    _make_plugin_manifest(project_env)  # o/r — the project
+    decoy = project_env / "_plugin_cache"
+    decoy.mkdir()
+    _make_plugin_manifest(decoy, repo_url="https://github.com/Emasoft/ai-maestro-janitor")
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={
+            "CLAUDE_PLUGIN_ROOT": str(decoy),
+            "GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"}),
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "ai-maestro-janitor" not in r.stdout
+
+
 def test_apply_warns_when_gh_missing(project_env: Path) -> None:
     """Gate 4: no gh on PATH → loud announcement (so user can install gh)."""
     _make_plugin_manifest(project_env)

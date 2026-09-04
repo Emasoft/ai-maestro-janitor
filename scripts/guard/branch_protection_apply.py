@@ -159,14 +159,20 @@ def main() -> int:
         )
         return _decline("autofix-off")
 
-    # Gate 3: resolve repo slug from this project's plugin.json (if any).
-    plugin_root_env = os.environ.get("CLAUDE_PLUGIN_ROOT")
-    if not plugin_root_env:
-        # Fall back to project root when CLAUDE_PLUGIN_ROOT is unset
-        # (e.g. dispatch.py was invoked outside a plugin context).
-        plugin_root_env = os.environ.get("CLAUDE_PROJECT_DIR", "")
-    plugin_root = Path(plugin_root_env or ".")
-    slug = bpl.detect_repo_slug(plugin_root)
+    # Gate 3: resolve repo slug from THIS PROJECT's plugin.json / git remote.
+    #
+    # CLAUDE_PLUGIN_ROOT is deliberately NOT consulted (TRDD-BH32A1A5). It names the
+    # janitor's own install dir, and that dir's `.claude-plugin/plugin.json` declares
+    # `Emasoft/ai-maestro-janitor` — so preferring it, as this did, would make the guard
+    # PATCH branch protection on the JANITOR's repo from inside whatever unrelated project
+    # it happened to be running in. That never fired only because the guard's sole caller
+    # (dispatch.py) leaves the var unset: the right repo was incidental, not intentional,
+    # and any future hook-context caller would have reached the wrong one silently.
+    #
+    # The project root is the only root this guard may ever protect, so it is the only
+    # source read here. `.` is the cwd, which for the cron heartbeat IS the project.
+    project_root = Path(os.environ.get("CLAUDE_PROJECT_DIR", "") or ".")
+    slug = bpl.detect_repo_slug(project_root)
     if not slug:
         state.log_line(
             "branch-protection-apply",
@@ -188,12 +194,12 @@ def main() -> int:
         # (the remote fallback), so reaching here WITH a GitHub remote means something genuinely
         # unexpected: a URL git accepts that this cannot parse. That is worth a human's attention;
         # having no remote is not.
-        if _project_has_github_remote(plugin_root):
+        if _project_has_github_remote(project_root):
             try:
                 import issue_catalog  # noqa: PLC0415 - lazy: a missing lib must not kill the guard
 
                 issue_catalog.raise_issue(
-                    "BRPROT-003", where=str(plugin_root), slug=str(plugin_root),
+                    "BRPROT-003", where=str(project_root), slug=str(project_root),
                 )
             except Exception:  # noqa: BLE001 - reporting must never break the caller
                 pass
@@ -231,7 +237,7 @@ def main() -> int:
         )
         return _decline("ruleset-list-lookup-failed")
     if present:
-        verdict = bpl.baselines_content_current(slug, default_branch, plugin_root)
+        verdict = bpl.baselines_content_current(slug, default_branch, project_root)
         if verdict is None:
             state.log_line(
                 "branch-protection-apply",
@@ -274,9 +280,10 @@ def main() -> int:
     # (so required_status_checks gates on the repo's configured jobs even
     # before CI first runs) and returns the exact list it applied, which
     # we reuse for the announcement (one detection pass, no display/apply
-    # skew). `plugin_root` is this project's root (resolved above).
+    # skew). `project_root` is this project's root — true by construction now that gate 3
+    # reads only CLAUDE_PROJECT_DIR/cwd; it was merely true-in-practice before.
     all_ok, results, checks = bpl.apply_baseline_rulesets(
-        slug, default_branch, plugin_root,
+        slug, default_branch, project_root,
     )
     if not all_ok:
         # Surface the first failing step; the rest are in the audit log.
