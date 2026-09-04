@@ -48,6 +48,46 @@ missing evidence, and it is not — the card pre-committed to wall-clock as the 
 precisely so a fast green could not be spent as proof later. The artifacts are in
 `reports_dev/soak/soak-6.{txt,meta}` (gitignored).
 
+### ⏵ 2026-09-04 07:05 — this card names TWO DIFFERENT DECIDERS, and that is why it looked self-unblockable
+
+**Read this before concluding the card is yours to close.** Its own fields disagree:
+
+- `blocked-by: [owner-decision-soak-evidence-bar-and-env-propagation]` — says **owner**.
+- `unblock-when: [decision:janitor-main-session]` — names **this session's role**, which is
+  also the card's `current-owner:`.
+- The body says decision 1 *"is a USER call"* — **twice**, in two separate STATE blocks.
+
+A session scanning `unblock-when:` sees its own role and reads it as authorization. That is
+how this card was picked up on 2026-09-04, and the reading was wrong: two of the three signals
+say a human decides. **`decision:` predicates NEVER auto-clear** — verified in
+`scripts/detectors/trdd-drift.py:192-193` (*"the ONLY human-only kind — the attention cue
+surfaces it, never this"*) — so the token after the colon is an ATTENTION TARGET, not a grant.
+
+Splitting it correctly, because only one half was ever session-scoped:
+
+- **Whether the recorded green closes the card** — the owner/session may weigh that.
+- **Authorizing deliberate saturation of the shared 36-user box** (which also runs the janitor
+  daemon, the ai-maestro server and other Claude sessions) — **USER only.** That is what the
+  body means and it does not soften.
+
+### ⏵ PRE-REGISTERED before the 5th run landed — a green here proves nothing
+
+A full-suite run was started 2026-09-04 07:02 at **load average 14.50**, i.e. inside the range
+the four recorded runs already cover (13→27→39→44). **A PASS therefore adds NOTHING to
+decision 1** and must not be counted as a fifth data point on the load axis — this card
+pre-committed against exactly that ("a fast green could not be spent as proof later"), and the
+temptation is strongest for whoever is holding the result. Only a FAILURE is informative, and
+only for the narrower question it was actually started for: naming this session's unidentified
+flake. Written down BEFORE the outcome, so the interpretation cannot be chosen to fit it.
+
+**Correction to the evidence tally, stated falsifiably.** An earlier note here treated an
+unidentified failure as grounds to hold the card open. That objection is unfalsifiable — any
+card can be held forever by "something failed and I don't know why." The factual version: **the
+evidence base is 4 green out of 5 runs, not 4 out of 4.** One full-suite run in the 2026-09-04
+session returned `1 failed, 11759 passed` and its identity was lost to a `tail -2`. There is a
+named candidate that would make it a non-event — the `test_gh_reply_watch` category-C flake
+this card records as already fixed on 2026-09-02 — and it was never checked against.
+
 **The two decisions that would unblock it, unchanged:**
 1. Does the accumulated green evidence close the card, or does it need a run under deliberate
    external saturation of a shared box (which is why it was never done unilaterally)?
