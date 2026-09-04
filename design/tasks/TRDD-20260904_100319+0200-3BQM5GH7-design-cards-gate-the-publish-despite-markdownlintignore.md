@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:39:07+0200
+updated: 2026-09-04T10:41:03+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -156,13 +156,22 @@ three probes: a glob scoped to `design/`, a glob over the whole repo, a
 directory list from a manifest, everything-except-a-denylist, and CPV copying
 the tree to a temp dir and globbing there. Probes eliminate; they do not select.
 
-One of them falls out of data already collected, at no extra cost: the clean
-standalone run's findings span `skills/` (25), `scripts/` (8) and `agents/` (4)
-as well as `design/`, so **CPV's walk is repo-wide, not `design/`-scoped**.
-Caveat worth keeping — those findings come from several checkers, and every
-markdownlint NIT observed so far has been in `design/`. So the design-scoped
-glob is eliminated for CPV collectively; for markdownlint specifically it is
-merely unlikely.
+An attempt to eliminate one of them for free FAILED, and the failure is worth
+recording because the reasoning looked sound. The clean run's 47 findings do
+span many places — `skills/` 25, `scripts/` 8, `agents/` 4, plus ten naming
+`hooks/hooks.json`, `git-hooks/pre-push`, `cliff.toml`, `.mega-linter.yml`,
+`scripts/memgrep/build.rs` inline. That was read as "the walk is repo-wide, so
+the `design/`-scoped glob is out". **It does not follow.** Each of those
+findings comes from a checker that targets its directory BY NAME — a skill
+auditor reads `skills/`, an agent auditor reads `agents/`, a pipeline auditor
+reads named root files. That is CPV examining many directories on purpose, not
+evidence of any glob, and if anything it argues against one uniform walk.
+
+**Decisively: not one of the 47 is a markdownlint finding** (`NIT=0` in that
+run), and no markdownlint finding in any run so far has named a file outside
+`design/`. So markdownlint's scope beyond `design/` is not merely undetermined —
+there is no evidence for it at all, and the `design/`-scoped glob remains fully
+alive.
 
 **On `.markdownlintignore` specifically — still an INFERENCE, and a different
 file from the one probed.** The probes tested `.gitignore` semantics via
@@ -305,12 +314,14 @@ CPV-side, and 1 is a local mitigation either way.
 - [ ] The mechanism is narrowed to one of the five candidates, with evidence.
 - [ ] A decision is recorded here on option 1, option 2, or both.
 - [ ] If option 2: the CPV issue is filed and its URL recorded in `external-refs:`.
-- [ ] CPV's stage-4 file selection is determined — the changed set, or the whole
-      tree — and recorded here. This decides the blast radius and therefore
-      which option is proportionate. Do NOT test it by running a release with a
-      deliberately-broken card: `cpv-remote-validate plugin . --strict` can be
-      invoked standalone (see the `uvx --from git+…claude-plugins-validation@…`
-      line in the preserved log), so no publish and no push is needed.
+- [x] CPV's stage-4 file selection is **git-independent** — DONE 2026-09-04 by
+      three probes. Not the changed set, not tracked-only, not
+      not-gitignored. Selection is path-based. `cpv-remote-validate plugin .
+      --strict` runs standalone, so no publish and no push is needed to probe —
+      that is the harness for everything below.
+- [ ] WHICH path-based rule — the surviving family is undistinguished, and the
+      `design/`-scoped variant is still fully alive (no markdownlint finding has
+      ever named a file outside `design/`). `--help` first, then the source.
 - [ ] Perturbation test on stage 4: add `design/` to
       `MARKDOWN_MARKDOWNLINT_FILTER_REGEX_EXCLUDE`, re-run stage 4 standalone,
       record whether the NIT disappears — then restore the file byte-identically
