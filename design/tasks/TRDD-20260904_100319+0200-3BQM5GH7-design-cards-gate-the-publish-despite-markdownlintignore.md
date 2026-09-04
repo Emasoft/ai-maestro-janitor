@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:55:47+0200
+updated: 2026-09-04T10:57:40+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -179,10 +179,26 @@ in both cases, and the correct attribution is earlier and stronger:
   the sense this row means, carries the dirty defect, and probe 1 says nothing
   about it. That one needs probe 2.
 
+  **These three rows are common implementations, NOT a partition** — the third
+  table in this card to need that warning, so treat it as the card's standing
+  defect. At least one more shape exists: a copier filtered by
+  `git ls-files --others --exclude-standard` (tracked ∪ untracked-unignored),
+  which probe 1 and probe 2 are both consistent with and only probe 3 refutes.
+  Sparse-checkout is orthogonal to all three probes. The conclusion is unchanged
+  — every shape found so far is refuted by some probe — but the space is open.
+
+  And the refutations are **many-to-many, not a diagonal**: probe 3 refutes all
+  three rows, probe 2 refutes two, probe 1 refutes one. What is true, and is the
+  load-bearing part, is that two rows have exactly ONE refutation each, so no
+  probe is redundant. An earlier phrasing of "each probe kills exactly one" read
+  as a bijection and was wrong.
+
   Attribution history, kept because it is the instructive part: credited to probe
   3, corrected to probe 2, then to probe 1 alone ("2 and 3 redundant" — wrong),
-  and only then to this table. The first three answers each named ONE probe for a
-  question with three independent answers.
+  then to a diagonal table (also wrong), now to this. Five answers. Do NOT read
+  the latest as terminal — each previous one looked settled too, and every
+  correction moved toward newer evidence, which is a confirmation-order
+  signature rather than random error.
 - **manifest-listed directories** survives only if `design/` is on the manifest.
   A manifest without `design/` was refuted by the **ORIGINAL PUBLISH**, which
   reported three NITs in a `design/` card — before any probe existed. The
