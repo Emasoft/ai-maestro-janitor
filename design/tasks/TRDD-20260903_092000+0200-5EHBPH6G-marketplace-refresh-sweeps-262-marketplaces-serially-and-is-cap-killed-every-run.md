@@ -64,10 +64,20 @@ heartbeat's task-quarantine drift line.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
 
-**Board reconciliation (2026-09-03 11:09):** boxes 1-3 confirmed proven (unchanged). Box 4 stays
-open: implementing commit `69feb820` is UNPUBLISHED (`git tag --contains` empty) and
-`daemon.log`/`daemon.log.1` show no `marketplace-refresh` run since the last FAILED (`02:59:24`,
-consecutive=3, quarantined) — no rc=0 run to observe yet. `review-after: 2026-09-05` set.
+**SUPERSEDED 2026-09-04 06:02 — the two facts this block waited on have both arrived.**
+`69feb820` IS published (v3.4.2 onward; `git tag --contains` is no longer empty), and
+`daemon.log` now carries five clean runs. Box 4 was measured today: **clause 1 PASSES,
+clause 2 FAILS.** Read the box's own annotation for the numbers; do not re-derive them.
+The short version: refresh completes rc=0 in 95–100 s (was SIGKILLed at the 1920 s outer
+cap, 11 times running), but `plugin-update deferred (marketplace lock held)` still appears
+**211 times** in a 7 h window, landing inside the refresh runs. **The fix removed the cap
+kill, not the lock contention** — starvation went from ~32 min to ~100 s, a different
+severity rather than a different failure. Closing box 4 needs a shorter lock hold
+(per-item rather than per-run) or an explicit decision to reword clause 2.
+
+**Board reconciliation (2026-09-03 11:09) — HISTORICAL, both premises now false:** boxes
+1-3 confirmed proven (still true). Box 4 stays open: implementing commit `69feb820` is
+UNPUBLISHED and no rc=0 run exists to observe yet. `review-after: 2026-09-05` set.
 
 ## ⏵ PRIOR STATE — 2026-09-03
 
