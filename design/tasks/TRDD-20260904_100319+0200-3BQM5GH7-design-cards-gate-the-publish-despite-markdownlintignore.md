@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:32:54+0200
+updated: 2026-09-04T10:37:30+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -20,6 +20,14 @@ external-refs-note: local-only path (reports/ is gitignored) — the load-bearin
 **NEXT ACTION:** decide between the two candidate fixes in "Options" below. Both
 require a decision that is not the janitor's to make alone — one changes what
 gates this repo's publish, the other files an issue on a different project.
+
+**THE MECHANISM IS NOW DETERMINED (3 probes, 2026-09-04):** CPV's markdownlint
+**globs the filesystem** — every `.md` under `design/` is linted regardless of
+git tracking, git status, or gitignore. `.markdownlintignore` is therefore never
+in play rather than disregarded, which retires the five-candidate table further
+down (kept for the record of how it was narrowed). What remains open is only the
+DECISION about what to do, and whether CPV's other checkers share that file
+source.
 
 **Nothing is broken right now.** `design/` currently lints clean, so the next
 publish will not trip on this. The card exists because the *next* card
@@ -111,15 +119,46 @@ scanner and drift WARNINGs from a pipeline auditor); nothing here establishes
 they share one file-enumeration path, so "the mechanism" is singular only for
 markdownlint.
 
-Two limits on how far this generalises, both from what the probes did NOT do:
+**PROBE 3 — the gitignored case. SELECTION IS NOW DETERMINED.** An earlier draft
+here said this probe "needs a `.gitignore` entry under `design/`, i.e. a repo
+edit" and skipped it on that basis. **That was false**: `.git/info/exclude`
+applies gitignore patterns per-clone, is untracked, and needs no repo edit — the
+probe is a local one-liner. A card that invents an obstacle to its own next
+experiment is worse than one that just leaves it undone.
 
-- Both probes tested files **present on disk**. So presence is **sufficient**
-  for inclusion. Neither tested a file committed but absent from the worktree,
-  so presence is not shown **necessary** — "git state is irrelevant" would claim
-  both directions and only one is measured.
-- Neither tested a **gitignored** file present on disk. That is the probe that
-  would separate glob-over-everything from not-gitignored selection, and it
-  needs a `.gitignore` entry under `design/` to set up.
+Run: appended the probe path to `.git/info/exclude`, confirmed with
+`git check-ignore -v` and a silent `git status --porcelain -uall`, created
+`design/tasks/zz-gitignored-selection-probe.md` with the same MD056 defect, ran
+stage 4 standalone → `exit=4`, `NIT=1`, **the gitignored file reported once**.
+Cleanup: file into `.trashcan/` via `safe_delete.py`, `.git/info/exclude`
+restored from backup and `diff`-verified identical.
+
+| selection rule | status after 3 probes |
+|---|---|
+| HEAD vs `origin/main` | eliminated (probe 1) |
+| anything tracked-only | eliminated (probe 2 — untracked file reported) |
+| everything not gitignored | **eliminated (probe 3 — gitignored file reported)** |
+| **plain path glob over the tree** | **the only survivor** |
+
+**CPV's markdownlint globs the filesystem.** Git is not consulted at any level —
+not tracking, not status, not ignore rules. That also explains the root mismatch
+without needing any of the five "mechanism" candidates below: `.markdownlintignore`
+is not disregarded, it is never in play, because nothing is running
+`markdownlint-cli` from this repo's root with its ignore machinery.
+
+Two limits that remain, both from what the probes did NOT do:
+
+- All three probes used files **present on disk**, so presence is **sufficient**
+  for inclusion. None tested a file committed but absent from the worktree, so
+  presence is not shown **necessary**.
+- All three grepped the findings list for a filename, which shows which checker
+  **REPORTED**, never which **SCANNED**. A checker that opened the probe and had
+  nothing to say is indistinguishable from one that never opened it. So this is
+  markdownlint's file source; whether the secrets scanner and pipeline auditor
+  share it is undetermined. The cheap discriminator, for whoever runs the next
+  probe: give the probe file a home-path line ALONGSIDE the MD056 defect — the
+  path detector demonstrably fires on that pattern (it fired on this very card),
+  so one file and one run answer both questions.
 
 (a) and (c) cannot be separated this way, and possibly not at all by
 experiment: isolating (c) needs a defect in a file nobody has touched, which is
