@@ -1,9 +1,10 @@
 ---
 trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
-column: todo
+column: blocked
+pre-block-column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T12:02:00+0200
+updated: 2026-09-04T12:15:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -13,7 +14,8 @@ project-id: ai-maestro-janitor
 min-approval-requirement: none
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
-blocked-by: []
+blocked-by: [decision:user-accepts-load-artifacts]
+unblock-when: [decision:user-accepts-load-artifacts]
 npt: []
 eht: []
 implementation-commits: [5b5267a5]
@@ -115,7 +117,16 @@ external-refs: [TRDD-7NSRD8OV]
   (`capture_one` times out leaving no orphan) with the race removed. **NOT applied yet** —
   rows 1 & 2's undetermined cause above must be settled first, since row 1 has no
   `capture_one` and no 1.0 s timeout, so this cannot be the whole story.
-- **⇒ NEXT ACTION (12:00, CURRENT). The `-n auto` run is DONE and the suite is RED —
+- **12:15 — `dev` → `blocked`.** No worker is alive (the measurement worker returned), so `dev`
+  was false by this block's own standing condition. **I first set `todo`, which was also
+  wrong**: `todo` asserts "ready to work, nothing in the way", true of rows 1 & 2 and false of
+  the load-artifact bucket, which cannot advance without a decision only the USER can make.
+  `blocked-by: [decision:user-accepts-load-artifacts]` — the `decision:` predicate kind never
+  auto-clears, which is correct here. **Per rule 13 ("one atomic task per TRDD") rows 1 & 2
+  SHOULD be split into their own card** — they are blocked on nobody and are being parked
+  behind a human decision that has nothing to do with them. They sit here only because they
+  arrived in the same soak run, which is provenance, not atomicity. Not split yet.
+- **⇒ NEXT ACTION (12:15, CURRENT). The `-n auto` run is DONE and the suite is RED —
   `11 failed, 16391 passed, 1 skipped` in 822.89 s** (`/tmp/soak9.txt`, `/tmp/soak9.meta`,
   load 15.53 → 8.52). Same count as the 07:14 run, **different composition**:
   | | 07:14 | 11:40 |
@@ -155,12 +166,11 @@ external-refs: [TRDD-7NSRD8OV]
      - Independent of all that, the signature `assert 'BRPROT-001' in ''` (detector exits 0,
        EMPTY stdout) IS the documented `timeout_scale` fail-open shape — real evidence for the
        load-artifact class, and no evidence either way about the commit.
-     Note 583 s for 78 tests ≈ 7.5 s/test: these are heavy subprocess tests, exactly the
-     profile that fails open under a 14-worker `-n auto` fan-out on a loaded box, and the
-     signature (`assert 'BRPROT-001' in ''`, detector exits 0 with EMPTY stdout) is the
-     documented `timeout_scale` fail-open shape verbatim. They join #8–#11's bucket — and
-     inherit that bucket's unmet obligation: **a named cause and a USER waiver, not a re-run.**
-     *(Superseded analysis kept for provenance:)*
+     Note 583 s for 78 tests ≈ 7.5 s/test — heavy subprocess tests, the profile that fails
+     open under a 14-worker `-n auto` fan-out on a loaded box.
+     *(Superseded analysis below, kept for provenance — it asserted the SETTLED/exonerated
+     framing retracted above, and its "a serial low-load run was started to discriminate" is
+     stale: that run FINISHED, `78 passed`, result recorded above.)*
      ⚠ I first called them "NEW, not in the original 12" and implied `e4dd674d` caused them.
      That over-read the evidence:** soak8 ran with `-q`, which prints only FAILURES, and its
      ONLY `branch_protection` line (`:237`) is the sandbox's `[source-tree] CHANGED` warning,
