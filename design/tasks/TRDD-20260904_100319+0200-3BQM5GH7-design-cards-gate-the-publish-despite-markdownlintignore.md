@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:37:30+0200
+updated: 2026-09-04T10:39:07+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -21,13 +21,17 @@ external-refs-note: local-only path (reports/ is gitignored) — the load-bearin
 require a decision that is not the janitor's to make alone — one changes what
 gates this repo's publish, the other files an issue on a different project.
 
-**THE MECHANISM IS NOW DETERMINED (3 probes, 2026-09-04):** CPV's markdownlint
-**globs the filesystem** — every `.md` under `design/` is linted regardless of
-git tracking, git status, or gitignore. `.markdownlintignore` is therefore never
-in play rather than disregarded, which retires the five-candidate table further
-down (kept for the record of how it was narrowed). What remains open is only the
-DECISION about what to do, and whether CPV's other checkers share that file
-source.
+**SELECTION IS NARROWED TO PATH-BASED (3 probes, 2026-09-04):** CPV's
+markdownlint lints every `.md` under `design/` regardless of git tracking, git
+status, or gitignore — all three were probed and none gates inclusion. That is
+the actionable finding.
+
+It does NOT settle the five-candidate table further down. Candidates 3
+(markdownlint used as a LIBRARY) and 4 (CPV lints a temp checkout) are fully
+COMPATIBLE with path-based selection — an earlier draft claimed the probes
+retired all five, which is wrong: they retire the git-based readings only, and
+3 and 4 are arguably now the leading candidates. Reading CPV's source or
+`--help` remains the way to pick among them.
 
 **Nothing is broken right now.** `design/` currently lints clean, so the next
 publish will not trip on this. The card exists because the *next* card
@@ -138,13 +142,35 @@ restored from backup and `diff`-verified identical.
 | HEAD vs `origin/main` | eliminated (probe 1) |
 | anything tracked-only | eliminated (probe 2 — untracked file reported) |
 | everything not gitignored | **eliminated (probe 3 — gitignored file reported)** |
-| **plain path glob over the tree** | **the only survivor** |
+| **path-based selection** | **the surviving FAMILY** |
 
-**CPV's markdownlint globs the filesystem.** Git is not consulted at any level —
-not tracking, not status, not ignore rules. That also explains the root mismatch
-without needing any of the five "mechanism" candidates below: `.markdownlintignore`
-is not disregarded, it is never in play, because nothing is running
-`markdownlint-cli` from this repo's root with its ignore machinery.
+**CPV's markdownlint selects by path, not by git.** Precisely: git's *ignore
+rules*, *tracking*, and *diff-vs-origin* are each shown not to gate INCLUSION.
+That is narrower than "git is not consulted at any level" — an earlier draft
+said that, and no probe supports it; CPV may consult git for other purposes or
+for other checkers.
+
+**The surviving row is a FAMILY, not one rule**, and this table is no more
+exhaustive than the 3-row one it replaced. These all predict "reported" for all
+three probes: a glob scoped to `design/`, a glob over the whole repo, a
+directory list from a manifest, everything-except-a-denylist, and CPV copying
+the tree to a temp dir and globbing there. Probes eliminate; they do not select.
+
+One of them falls out of data already collected, at no extra cost: the clean
+standalone run's findings span `skills/` (25), `scripts/` (8) and `agents/` (4)
+as well as `design/`, so **CPV's walk is repo-wide, not `design/`-scoped**.
+Caveat worth keeping — those findings come from several checkers, and every
+markdownlint NIT observed so far has been in `design/`. So the design-scoped
+glob is eliminated for CPV collectively; for markdownlint specifically it is
+merely unlikely.
+
+**On `.markdownlintignore` specifically — still an INFERENCE, and a different
+file from the one probed.** The probes tested `.gitignore` semantics via
+`.git/info/exclude`. `.markdownlintignore` was never directly tested. What IS
+directly observed, and needs no inference, is the card's title claim: it lists
+`design/` and `design/` files are linted anyway. WHY remains open between "never
+discovered" and "disregarded" — probe 3 does not settle it, because gitignore
+and markdownlintignore are read by different machinery.
 
 Two limits that remain, both from what the probes did NOT do:
 
