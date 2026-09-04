@@ -1,7 +1,10 @@
 ---
 trdd-id: BH32A1A5
 title: the branch-protection guard may resolve the janitors own repo from inside every project
-column: complete
+column: blocked
+pre-block-column: dev
+blocked-by: [advisor-consultation-needs-a-fable-window]
+unblock-when: [decision:advisor-verdict-or-user-waiver]
 created: 2026-09-04T05:43:59+0200
 updated: 2026-09-04T07:52:00+0200
 current-owner: janitor-main-session
@@ -13,7 +16,6 @@ project-id: ai-maestro-janitor
 min-approval-requirement: none
 labels: [branch-protection, guard, fleet, env]
 relevant-rules: []
-blocked-by: []
 npt: []
 eht: []
 implementation-commits: [e4dd674d]
@@ -49,6 +51,17 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
   dir *does* carry both a manifest naming `Emasoft/ai-maestro-janitor` and 7 workflow
   files, so the wrong-repo resolution is reachable — it simply is not what happens on the
   path that actually runs today.
+- **COLUMN: `blocked`, and the reason is box 2.** This card was briefly `complete`
+  (2026-09-04 07:45). That was incoherent: `complete` is TERMINAL and FROZEN, while box 2
+  carries an explicit **re-open condition** (consult the advisor if a reviewer holds an
+  automated GitHub write path needs a verdict regardless of window state). A frozen card
+  cannot be re-opened — the rule's only escape is "new work = new TRDD" — so the card was
+  simultaneously instructing a future session to do something it had made impossible, in
+  the section that session is told to read first. It also froze the two open threads added
+  the same turn (the "true by construction" correction and the workflow-nesting adjacency).
+  `blocked` is the honest state: the code is done, tested and committed; ONE named external
+  condition is outstanding. **The code is NOT blocked — only the sign-off is.** Nothing here
+  needs re-doing if the waiver comes.
 - **RESOLVED 2026-09-04 in `e4dd674d` — not by reordering, by DELETION.** Reading
   `detect_repo_slug` settles the question the NEXT ACTION posed: it resolves the slug **of
   the repo at the given root**, and the only root this guard may ever protect is the

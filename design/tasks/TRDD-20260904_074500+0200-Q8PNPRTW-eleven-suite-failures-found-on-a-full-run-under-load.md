@@ -37,6 +37,20 @@ external-refs: [TRDD-7NSRD8OV]
 - **NEXT ACTION** — read that report, verify its classification FIRST-HAND for anything it
   calls a real defect (grep the line it cites; do not take a subagent's word for a defect),
   then commit its fixes and re-run the full suite.
+- **`column: dev` IS CONDITIONAL, AND HERE IS THE CONDITION.** A WORK column asserts someone
+  is working the card right now. That is true only while the triage worker is alive, and a
+  subagent cannot update this card, cannot commit, and vanishes when it returns. **If the
+  worker returns nothing, dies, or you are not continuing the triage yourself in that same
+  turn — re-column to `todo` immediately.** Do not leave it at `dev` with `current-owner:
+  janitor-main-session` and nobody working it; that is the 37-cards-in-`dev` failure the
+  kanban rule was written from. (`current-owner` naming the main session is CORRECT — the
+  subagent is not addressable, holds no resumable state, and owns nothing.)
+- **COMMIT THE WORKER'S FIXES THE TURN THEY LAND.** It was told to fix but not to commit
+  (a subagent must not land unreviewed code under this session's name). The cost is
+  uncommitted work in a tree where a peer Claude session also commits and where a
+  `.git/index.lock` collision already happened this session. Shorten the window: verify its
+  cited lines first-hand, then commit — do not read the report and leave the tree dirty
+  across turns.
 - **This is a publish gate.** The standing USER directive is *"bump and publish a new
   version, but only after you completed all TRDDs and fixed all issues."* Eleven red tests
   are issues. Nothing publishes until this card is terminal or every remaining failure is
@@ -76,10 +90,33 @@ capture cannot be counted, only re-run.
 
 ## Serial isolation — COMPLETE and labelled (`/tmp/isolate11.txt`, finished 07:41)
 
-`7 failed, 5 passed in 588.29s` running exactly these tests serially, `-p no:randomly`, no
-`-n`. (12 ran, not 11: `TestMemoryLibrarianReindex` expands to 4.)
+`7 failed, 5 passed in 588.29s`, serial, `-p no:randomly`, no `-n`.
 
-**Reproduce WITHOUT parallelism — not load artifacts:**
+**The 12-vs-11 arithmetic, settled by measurement — read this before trusting any list below.**
+`7 + 5 = 12` against what I first described as "11 dispatched ids" is a contradiction, and my
+first explanation of it (*"`TestMemoryLibrarianReindex` expands to 4"*) was a hypothesis
+invented to make the sum close, then written into the card and commit `0ff898c3` as a
+statement of fact. It has since been **measured** — `pytest <class> --collect-only -q` →
+`4 tests collected`, the fourth being `test_no_reindex_when_no_notes` — and the real error
+was in my own framing: I dispatched **9 selectors, not 11 ids** (8 single test ids + 1 bare
+class selector). 8 + 4 = 12 exactly, so the count is fully accounted for with nothing left
+over, which also excludes the competing explanations (a parametrized id expanding, a
+collection difference under `-p no:randomly`, a subtest, a mis-pasted argument).
+
+Because the total closes exactly, the pass-list below is **derived, not observed** — no
+`PASSED` line names those five — but it is now arithmetically determined rather than
+guessed: 12 collected − the 7 named `FAILED` = these 5, with no unaccounted row.
+
+> **THIS RUN RULES OUT `xdist`, NOT LOAD — do not read the heading below as "not load".**
+> A serial invocation is not an unloaded one. This run executed CONCURRENTLY with two other
+> pytest processes of mine (the branch-protection file, then the triage worker's) on a box
+> measured at load 11–14 with 25 users. A test that fails under contention fails whether the
+> contention comes from `-n auto` or from the neighbours. So what is established is:
+> *these 7 do not need pytest-xdist to fail.* Whether they need a loaded host is OPEN, and
+> it is the difference between "real product defects" and "this shared box cannot run this
+> suite cleanly" — which is the whole question the triage turns on.
+
+**Reproduce WITHOUT `-n auto` (contention not excluded — see the box above):**
 
 ```
 tests/test_capture_all_logins.py::test_kill_process_group_terminates_a_grandchild_too
@@ -101,15 +138,22 @@ accepted as an artifact.
 > body, asserted "several already reproduce serially" from an *unlabelled progress-dot
 > string* (`FF.F....FFF`) whose mapping to test ids was an inference from argument order.
 > The card said so explicitly and the commit message then leaned on it anyway. The claim has
-> since turned out TRUE — but it was stated before it was established, which is the same
-> defect (`ATOM-I13I-A52N`, "reading a check as establishing more than it did") this session
-> has now hit twice. The dot string is not evidence; this labelled run is.
+> since been confirmed by the labelled run — **but that is luck, not vindication.** The
+> method (reading unlabelled progress dots, mapping them to ids by argument order) is exactly
+> as unreliable as it was; being unfalsified on one trial is not validation. It was stated
+> before it was established, which is the defect (`ATOM-I13I-A52N`, "reading a check as
+> establishing more than it did"). The dot string is not evidence; the labelled run is — and
+> even the labelled run only names the 7 that FAILED.
 
 ## Acceptance criteria
 
-- [ ] Every one of the 11 is classified into exactly one bucket — product defect / test
-      defect / load-parallelism artifact / environment — each with the quoted assertion or
-      traceback line that justifies it. No bucket assigned by elimination.
+- [ ] Every one of the 12 (not 11 — see the arithmetic above) is classified into exactly one
+      bucket — product defect / test defect / load-parallelism artifact / environment — each
+      with the quoted assertion or traceback line that justifies it. *(The "no bucket assigned
+      by elimination" clause that was here is DROPPED: there is no artifact distinguishing a
+      bucket reached by evidence from one reached by exhaustion, so it was an unverifiable
+      intent test bolted onto a verifiable evidence test. The quote requirement is the
+      checkable form of the same demand.)*
 - [ ] Every product defect and test defect is FIXED, and the fix verified by running that
       file serially to green.
 - [ ] Any test classified as a load artifact says WHY in the card (tight timeout, shared tmp
@@ -120,8 +164,11 @@ accepted as an artifact.
 - [ ] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`
       and `uvx --with pyright pyright` all clean. **All three** — a clean run of any two
       proves nothing here.
-- [ ] A full `-n auto` suite run comes back green, or every remaining red is a documented,
-      accepted load artifact with its cause named.
+- [ ] A full `-n auto` suite run comes back green, or every remaining red is a load artifact
+      with its cause named **and accepted by the USER**. The acceptor is named deliberately:
+      accepting a permanently-red test inside a publish gate converts that gate into a
+      waiver, which is a USER decision, not an agent's. An unattributed acceptance is exactly
+      how a red test becomes permanent.
 
 ## Notes
 
