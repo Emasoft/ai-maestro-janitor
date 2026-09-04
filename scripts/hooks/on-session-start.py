@@ -382,6 +382,13 @@ def _handoff_body(state, sd: Path) -> str | None:  # noqa: ANN001 - local module
         if chunk:
             parts.append((path.name, chunk))
     if not parts:
+        # No CONFORMING handoff. A file in `sd` that fails handoff_files' name pattern
+        # (`agent-handoff-<key8>-<YYYYMMDD_HHMMSS±HHMM>-<pid>.md`, plus the legacy
+        # `agent-handoff.md`) is INVISIBLE here and looks identical to "nothing was ever
+        # written" — both land on this return. Check the filenames before concluding the
+        # composer never ran. Low production risk (both writers go through
+        # `handoff_files.write`, which owns the naming), high debugging risk: a hand-dropped
+        # or externally-copied file is exactly what a human adds while investigating.
         return None
     # Separated by a rule carrying the source filename: two handoffs concatenated with no seam
     # read as one document that contradicts itself, and the timestamp in the name is what tells
@@ -392,6 +399,21 @@ def _handoff_body(state, sd: Path) -> str | None:  # noqa: ANN001 - local module
     # defense, which never sees this path. dispatch.py:1099 defangs the directive for exactly
     # this reason; injecting the far larger handoff raw would reopen the hole it closed.
     return state.sanitize_for_drift_line(body)
+
+
+# Same 24 h rationale as the clear injection (`:343`): how old a handoff may be before injecting
+# it is worse than silence. Deliberately NOT `dispatch._DIRECTIVE_MAX_AGE_DEFAULT_S` (3 h) — that
+# gates an ACTION ("go pick this task back up"), this gates CONTEXT ("here is what you were
+# doing"), and a 6 h-old compaction wants the second without the first.
+#
+# A CONSTANT, not an env var, after two wrong turns: 42a24e6f invented a private
+# `..._COMPACT_RESUME_MAX_AGE_S` nobody could discover, and 2c852b51 then read the CLEAR path's
+# var from this compact-path function — where the name lies at the point of use, and where
+# someone tuning `/clear` would silently retune compaction with no warning at their edit site.
+# The cure for an undocumented option is to document it, not to alias onto a differently-named
+# one. There is no evidence anyone tunes these; if that changes, add
+# `CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S` here and document it beside its sibling.
+_COMPACT_HANDOFF_MAX_AGE_S = 86400
 
 
 def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module type
@@ -434,22 +456,10 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     flag = sd / "resume-after-compact.flag"
     if not flag.is_file():
         return
-    # THE SAME BOUND AS THE CLEAR INJECTION (`:343`), deliberately, and NOT dispatch's 3 h
-    # directive bound — the two answer different questions and SHOULD differ:
-    #   * `dispatch._DIRECTIVE_MAX_AGE_DEFAULT_S` (3 h) = how long a resume DIRECTIVE keeps
-    #     being cited by heartbeats. It gates an ACTION: "go pick this task back up."
-    #   * this (24 h) = how old a handoff may be before injecting it is worse than silence.
-    #     It gates CONTEXT: "here is what you were doing."
-    # A 6 h-old compaction should restore the context and NOT auto-resume the task, so the two
-    # reaching opposite verdicts is the correct outcome, not a bug.
-    # 0b4f72c3 "fixed" a non-existent disagreement by adopting the 3 h bound here, which broke
-    # exactly the case this feature exists for: compact at 02:00, open at 08:00, nothing
-    # injected. Measured at the time — 1 h/2 h injected, 4 h/6 h/10 h silent.
-    # Sharing the CLEAR path's var (rather than a private one, which 42a24e6f invented and
-    # nobody could discover) keeps both injections on one discoverable knob.
-    max_age = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S"), 86400
-    )
+    # See `_COMPACT_HANDOFF_MAX_AGE_S` above for why 24 h and why a constant. 0b4f72c3 briefly
+    # used dispatch's 3 h here and broke the case this feature exists for: compact at 02:00,
+    # open at 08:00, nothing injected (measured — 1 h/2 h injected, 4 h/6 h/10 h silent).
+    max_age = _COMPACT_HANDOFF_MAX_AGE_S
     ts = sd / "resume-after-compact.ts"
     written_at = (
         state.coerce_int(ts.read_text(encoding="utf-8"), 0) if ts.is_file() else 0
@@ -465,14 +475,20 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     if body is None:
         return
     # DELIVER FIRST, THEN RECORD THAT YOU DELIVERED. `body` is already built, so all that sits
-    # between here and the print is one write to stdout — the only ways to lose it are a SIGKILL
-    # in that window or a closed stdout, and the second means the harness is not reading us
-    # anyway. Stamping first (as 0b4f72c3 did) trades that near-impossible failure for the one
-    # this whole card exists to prevent: a compacted session with NOTHING injected, silently,
-    # leaving only a `_slog` line. Worse, the `except OSError` below is non-fatal, so a failed
-    # stamp under the old order printed anyway — guard skipped, compounding restored.
+    # between here and the print is one write to stdout: a SIGKILL in that window, or the write
+    # itself failing. Stamping first (as 0b4f72c3 did) trades that for the failure this whole
+    # card exists to prevent — a compacted session with NOTHING injected, silently, leaving only
+    # a `_slog` line. Worse, the `except OSError` below is non-fatal, so a failed stamp under
+    # the old order printed anyway: guard skipped, compounding restored.
     # The tolerable failure is "injected twice"; the intolerable one is "injected never",
     # because never is invisible.
+    # THE PRINT CAN RAISE, and the most plausible way is not a signal: the handoff is arbitrary
+    # prior-session text, so a stdout whose encoding is not UTF-8 (a hook spawned under
+    # `LC_ALL=C`, a stray `PYTHONIOENCODING`) raises `UnicodeEncodeError` on one non-ASCII byte.
+    # `main()`'s `except Exception` absorbs it and `_slog`s, so the stamp is skipped and the
+    # next re-entry retries — right for a transient fault, and for a permanent one it retries
+    # silently forever while printing nothing. Left as-is because the ordering above is still
+    # the correct trade; noted so the next reader does not mistake the silence for "no handoff".
     # ponytail: clear and compact stamp separately, so a clear→compact pair inside one process
     # injects twice (once per banner). Costs one handoff; a shared stamp would make a /clear
     # suppress the compact injection it should not.
