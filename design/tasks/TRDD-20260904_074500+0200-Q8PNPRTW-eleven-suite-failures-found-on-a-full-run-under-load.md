@@ -30,7 +30,18 @@ external-refs: [TRDD-7NSRD8OV]
   `/tmp/soak8.txt` and one session's conversation, both of which die with the session. A
   finding that is not on the board has not been recorded — it has been *noticed*. This card
   is the record; the `/tmp` paths below are evidence, not storage.
-- **12:00 — THE SHELL NEVER RUNS. Marker probe, decisive.** A temporary first line
+- **⇒ EVERYTHING BELOW ABOUT ROWS 1 & 2 IS A NON-AUTHORITATIVE COPY — `TRDD-K7WQ2NRB` OWNS IT.**
+  The split at 12:15 MOVED the scope but COPIED the text, and two current-tense copies of a
+  LIVE fact is not provenance, it is the head-drifts-from-body failure spread across two files
+  where no single reader sees both — and this card is `blocked` on a predicate that never
+  auto-clears, so nobody will be re-reading it to notice when K7WQ2NRB's next session
+  supersedes something here. **Read K7WQ2NRB for the current state of rows 1 & 2. Do not
+  update the text below; it is frozen as of 12:15.**
+  *The RETRACTIONS in these bullets DO stay here and are not copies* — they record errors
+  **this card** published, which is genuine provenance and belongs with the card that made
+  them. The distinction: a dated record of what was believed and superseded is provenance; a
+  second current-tense copy of an open question is duplication.
+- **12:00 — [COPY — see K7WQ2NRB] Marker probe.** A temporary first line
   `echo started > {pid_file}.started` was added to row 2's script, run twice, then REVERTED
   (`git status --porcelain` + `git diff` both empty; the git guard correctly blocked
   `git checkout` and the revert was done with the Edit tool):

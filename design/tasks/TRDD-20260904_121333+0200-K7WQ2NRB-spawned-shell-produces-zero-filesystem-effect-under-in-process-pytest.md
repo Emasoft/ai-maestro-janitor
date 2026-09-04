@@ -67,7 +67,7 @@ external-refs: [TRDD-Q8PNPRTW]
 | guard hardening the child env | `_harden_child_env` returns `child_env` UNCHANGED for a non-Python spawn (`:350-351`) |
 | `capture_one` cleanup deleting the pid file | its single `unlink` (`capture_all_logins.py:163`) targets `_bootstrap_pid_path(email)`, a different path, and only when the content matches its own pid |
 | parent signal disposition | `start_new_session=True` calls `setsid()`; `exec` resets handled signals; only `SIGCHLD=SIG_IGN` survives and that would break `wait` (line 4), not the line-2 write |
-| cross-test state in one process | row 2 fails 3/3 **solo**, in three separate processes |
+| cross-test state **within a process** | row 2 fails 3/3 **solo**, in three separate processes. **This does NOT exclude state that persists OUTSIDE the process across consecutive runs** — a stale lock file, a leaked `sleep 600` from a prior run, an OS-level resource. The solo runs were sequential in one shell, so cross-RUN state is untested. |
 
 ## What the marker CANNOT tell us
 
