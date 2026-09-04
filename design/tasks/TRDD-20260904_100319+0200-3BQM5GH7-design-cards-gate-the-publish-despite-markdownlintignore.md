@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:30:28+0200
+updated: 2026-09-04T10:32:13+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -120,7 +120,21 @@ source is the most authoritative route, not the only one.
 `design/` gates the release **as soon as it EXISTS ON DISK**. Not committed,
 not staged, not `git add`-ed. Both probes agree and probe 2 is decisive:
 someone drafting a card in an editor can break a release without touching git
-at all, and `git stash` will not save them — only removing the file will.
+at all.
+
+What clears it depends on where the defect lives, and an earlier draft of this
+line got it wrong by generalising from probe 2 — `git stash` DOES help in two
+of the three cases:
+
+| defect lives in | `git stash` | `git stash -u` |
+|---|---|---|
+| the committed card | survives, still gates | survives, still gates |
+| an uncommitted edit | removed, does not gate | removed, does not gate |
+| an untracked new file | survives, still gates | removed, does not gate |
+
+The only state nothing short of an edit or a revert clears is a defect already
+committed. (Reasoned from documented `git stash` semantics, not probed — the
+probes covered the untracked and dirty rows' PRESENCE, not stash's effect.)
 
 Blast radius is therefore **every markdown file present under `design/`**, not
 "the cards you committed". Do not assume a smaller one.
