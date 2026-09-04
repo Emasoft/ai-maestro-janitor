@@ -325,7 +325,44 @@ answerable by reading one file, and using it there produces confident prose
 about a hazard that does not exist. If the prose explaining a finding would be
 longer than the check that settles it, run the check.
 
-## THE BENEFIT IS ZERO ON THIS HOST UNTIL A RELEASE SHIPS
+## RETRACTED — "the benefit is zero on this host" was FALSE. Measured below.
+
+The section that follows was committed in `9df68b77` and is WRONG. Kept, because
+how it was wrong is the actual finding.
+
+**What I checked:** one file — `.../3.4.13/skills/janitor-write-handoff/SKILL.md`
+— found zero `compose_agent_handoff` refs, and generalised to "the installed
+cache predates the conversion; the benefit is zero here". I did that in a commit
+whose own stated lesson was *"check the loader, not the file."*
+
+**What the loader actually says** (`~/.claude/plugins/installed_plugins.json`,
+this project has no local-scope entry so it takes the USER-scope install):
+
+| | `janitor-write-handoff` | `janitor-handoff-and-clear` |
+|---|---|---|
+| **3.4.13** — what THIS SESSION loaded | 0 composer refs | 0 |
+| **3.4.14** — what is INSTALLED (user scope) | **2 refs — LIVE** | 0, still hand-authors |
+
+So box 2's conversion (`f9bf82ed`) SHIPPED in 3.4.14 and IS live on this host.
+Only box 3's — `janitor-handoff-and-clear`, converted this session — is
+unpublished. The benefit is HALF realised, not zero.
+
+**The real finding, which is the one worth keeping:** this session loaded
+**3.4.13** while **3.4.14** is installed. A session's skill text is fixed at
+start and does not follow an upgrade — so the hand-author instruction I obeyed
+came from a version already superseded on disk. That is the rollout-staleness
+family this repo already documents
+(`memgrep recall "the fix is published but the bug keeps happening"`).
+
+**Two lessons, and the second is sharper than the first:**
+1. "Installed" has THREE distinct values here — what is in the repo, what is in
+   the installed cache, and what THIS SESSION loaded. A claim about any one of
+   them says nothing about the others.
+2. I asserted a lesson and violated it in the same commit. Writing "check the
+   loader, not the file" does not constitute checking the loader; `installed_plugins.json`
+   is one read and settles which version a project resolves to.
+
+## THE ORIGINAL (WRONG) SECTION FOLLOWS — see the retraction above
 
 Measured 2026-09-04, one hour after the conversion landed: I invoked
 `/janitor-write-handoff` and it told me to author the prose myself, so I did —
