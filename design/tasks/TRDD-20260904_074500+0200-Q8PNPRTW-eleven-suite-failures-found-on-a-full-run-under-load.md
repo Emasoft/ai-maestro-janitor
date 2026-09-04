@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T11:36:46+0200
+updated: 2026-09-04T11:41:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -28,15 +28,26 @@ external-refs: [TRDD-7NSRD8OV]
   `/tmp/soak8.txt` and one session's conversation, both of which die with the session. A
   finding that is not on the board has not been recorded — it has been *noticed*. This card
   is the record; the `/tmp` paths below are evidence, not storage.
-- **A LEAN-WORKER IS TRIAGING THEM RIGHT NOW** (dispatched 07:44). It re-runs each file
-  serially, classifies all 11 into real-product-defect / real-test-defect / load-artifact /
-  environment, fixes the first two buckets, and writes
-  `reports/suite-failures/<ts>-11-failure-triage.md`. It is explicitly forbidden from
-  committing, from widening a timeout to "fix" a load artifact, and from touching
-  `branch_protection_apply.py` / its test file.
-- **NEXT ACTION** — read that report, verify its classification FIRST-HAND for anything it
-  calls a real defect (grep the line it cites; do not take a subagent's word for a defect),
-  then commit its fixes and re-run the full suite.
+- **⇒ NEXT ACTION (11:40, CURRENT — everything below this bullet is HISTORY, read it only
+  for the WHY).** A `lean-worker` dispatched 11:30 is capturing the real failure state of the
+  two `test_capture_all_logins.py` rows. When it returns: read its report, verify anything it
+  calls a defect FIRST-HAND (open the line it cites — a subagent's word is evidence, never a
+  decision), then delete whichever of the three candidate mechanisms it does not support.
+  **The other 10 failures have never been triaged** — no triage report exists (see the next
+  bullet), so they remain exactly as listed under "The failures" below.
+  - **THIS HEAD WAS STALE FOR THREE HOURS AND ITS OWN MIDDLE CONTRADICTED IT.** Until this
+    edit the block opened with *"A LEAN-WORKER IS TRIAGING THEM RIGHT NOW (dispatched 07:44)"*
+    and *"NEXT ACTION — read that report"*, while the 08:07 bullet below records that that
+    worker **died and its report was never written**. A session resuming top-down would have
+    gone looking for `reports/suite-failures/<ts>-11-failure-triage.md`, a file that does not
+    exist. This is precisely the failure the TRDD rule names — *"append-only growth surfaces
+    stale facts as current"* — and I caused it by appending a correction per turn while never
+    re-reading my own opening. **The STATE block is a CURRENT-STATE document, not a log.**
+    When you add a bullet here, re-read the head and fix it, or the head becomes the lie.
+- *(HISTORY, 07:44 — superseded.)* A first `lean-worker` was dispatched to triage all 11
+  serially into real-product-defect / real-test-defect / load-artifact / environment. **It
+  died at 08:07 without writing its report** (see below); its `/tmp/diag_*.txt` captures are
+  the only surviving output.
 - **`column: dev` IS CONDITIONAL, AND HERE IS THE CONDITION.** A WORK column asserts someone
   is working the card right now. That is true only while the triage worker is alive, and a
   subagent cannot update this card, cannot commit, and vanishes when it returns. **If the
