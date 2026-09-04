@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:41:03+0200
+updated: 2026-09-04T10:43:11+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -21,10 +21,11 @@ external-refs-note: local-only path (reports/ is gitignored) — the load-bearin
 require a decision that is not the janitor's to make alone — one changes what
 gates this repo's publish, the other files an issue on a different project.
 
-**SELECTION IS NARROWED TO PATH-BASED (3 probes, 2026-09-04):** CPV's
-markdownlint lints every `.md` under `design/` regardless of git tracking, git
-status, or gitignore — all three were probed and none gates inclusion. That is
-the actionable finding.
+**GIT DOES NOT GATE WHAT MARKDOWNLINT REPORTS (3 probes, 2026-09-04):** a
+`design/` file is reported regardless of git tracking, git status, or gitignore
+— all three probed, none gates it. That is the actionable finding. Note the
+verb: the probes read the FINDINGS LIST, so "selection" is a step further than
+they reach.
 
 It does NOT settle the five-candidate table further down. Candidates 3
 (markdownlint used as a LIBRARY) and 4 (CPV lints a temp checkout) are fully
@@ -167,11 +168,26 @@ auditor reads `skills/`, an agent auditor reads `agents/`, a pipeline auditor
 reads named root files. That is CPV examining many directories on purpose, not
 evidence of any glob, and if anything it argues against one uniform walk.
 
-**Decisively: not one of the 47 is a markdownlint finding** (`NIT=0` in that
-run), and no markdownlint finding in any run so far has named a file outside
-`design/`. So markdownlint's scope beyond `design/` is not merely undetermined —
-there is no evidence for it at all, and the `design/`-scoped glob remains fully
-alive.
+**Not one of the 47 is a markdownlint finding** (`NIT=0` in that run). Counting
+genuine findings by their `] markdownlint:` prefix across all seven runs on
+disk: 6 in total — 3 in the original publish, 1 from each probe — and every one
+names `design/`.
+
+**That last fact is nearly worthless as evidence, and it is worth saying why.**
+Every defect ever planted in these experiments was placed in `design/`. Finding
+no markdownlint report outside `design/` is an artifact of probe placement, not
+a measurement of scope. It is equally consistent with a `design/`-scoped glob
+and with a repo-wide one, because the repo's other markdown is simply clean.
+(A first attempt at this count also mis-measured: `grep 'markdownlint'` matched
+THIS CARD'S OWN FILENAME — `…-despite-markdownlintignore.md` — inside path-leak
+findings about it, inflating the count in runs that had none. Match the finding
+prefix, not the word.)
+
+**So the `design/`-scoped glob is fully alive**, and the probe that would settle
+it is the obvious one nobody has run: plant the same MD056 defect in a
+NON-`design/`, non-ignored location — `skills/`, or a repo-root `.md` — and see
+whether markdownlint reports it. Reported ⇒ scope is wider than `design/`; not
+reported ⇒ `design/`-scoped. One run, same standalone harness.
 
 **On `.markdownlintignore` specifically — still an INFERENCE, and a different
 file from the one probed.** The probes tested `.gitignore` semantics via
@@ -314,11 +330,15 @@ CPV-side, and 1 is a local mitigation either way.
 - [ ] The mechanism is narrowed to one of the five candidates, with evidence.
 - [ ] A decision is recorded here on option 1, option 2, or both.
 - [ ] If option 2: the CPV issue is filed and its URL recorded in `external-refs:`.
-- [x] CPV's stage-4 file selection is **git-independent** — DONE 2026-09-04 by
-      three probes. Not the changed set, not tracked-only, not
-      not-gitignored. Selection is path-based. `cpv-remote-validate plugin .
-      --strict` runs standalone, so no publish and no push is needed to probe —
-      that is the harness for everything below.
+- [x] markdownlint **REPORTS** on a `design/` file regardless of git tracking,
+      git status, or gitignore — DONE 2026-09-04 by three probes. Deliberately
+      NOT phrased as "selection is git-independent": every probe read the
+      FINDINGS LIST, so it observes reporting, and a checker could select via
+      git and report on a superset (or the reverse) without any probe noticing.
+      The distinction is the card's own retained limit and a checked box must
+      not quietly widen past it. `cpv-remote-validate plugin . --strict` runs
+      standalone, so no publish and no push is needed — that is the harness for
+      everything below.
 - [ ] WHICH path-based rule — the surviving family is undistinguished, and the
       `design/`-scoped variant is still fully alive (no markdownlint finding has
       ever named a file outside `design/`). `--help` first, then the source.
