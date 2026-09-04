@@ -212,6 +212,15 @@ audit, then the load-bearing negative re-checked by hand — report:
       run that predated part of what it claimed to cover. A gates box is only
       meaningful against a tree you can name.
 
+> **COLLAPSE THIS CARD when L46IG69Y closes and it returns to `complete`.** It now
+> carries five layers — why-blocked, what-was-traded, two retracted findings, and
+> acceptance boxes with their own embedded corrections — and a reader must
+> reconstruct four reversals to extract the three facts that matter: the second
+> skill is converted, it is unpublished, and a concision interaction is unresolved
+> (L46IG69Y). Collapsing NOW risks dropping a correction that is still
+> load-bearing; collapsing at the unblock is one clean pass. Do not add a sixth
+> layer instead.
+
 ## Why this card is `blocked`, not `complete` — the SAME rule violation, one card later
 
 Every acceptance box is closed. The card was moved to `complete` and archived
@@ -335,8 +344,15 @@ how it was wrong is the actual finding.
 cache predates the conversion; the benefit is zero here". I did that in a commit
 whose own stated lesson was *"check the loader, not the file."*
 
-**What the loader actually says** (`~/.claude/plugins/installed_plugins.json`,
-this project has no local-scope entry so it takes the USER-scope install):
+**TWO DIFFERENT KINDS OF EVIDENCE, kept apart on purpose** — conflating them is
+how the original error happened:
+
+*What the LOADER says* — `~/.claude/plugins/installed_plugins.json`: no
+local-scope entry names this project, one `user`-scope entry, version **3.4.14**.
+That is the resolution fact.
+
+*What the FILES contain* — grep counts below. That is a fact about contents, and
+it only matters once the loader fact tells you which version to grep:
 
 | | `janitor-write-handoff` | `janitor-handoff-and-clear` |
 |---|---|---|
