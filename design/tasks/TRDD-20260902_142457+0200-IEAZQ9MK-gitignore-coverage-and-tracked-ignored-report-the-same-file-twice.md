@@ -100,15 +100,33 @@ as *done* would have ticked two boxes on nothing.
       a test that does not exist yet. It is CODE-verifiable, so it stays open as
       real work rather than as a release wait.
 - [x] A tracked `.env` with no rule (criterion 2 of 6WM4BFKF) is still reported.
-      — VERIFIED 2026-09-04 by reading the ASSERTIONS, not the test name.
-      `tests/test_gitignore_coverage.py:74-75`:
-      `assert gc.uncovered_classes(lambda _: True) == []` (coverage perfect) and
-      `assert gc.tracked_offenders([".env"]) == [".env"]` (yet still an offender).
-      That second assertion IS this box's claim. Its docstring states why the box
-      exists: a `.gitignore` rule does not untrack an existing index entry, so a
-      repo can be fully covered and still be shipping the secret.
+      — VERIFIED 2026-09-04, on the SECOND attempt. Evidence:
+      `tests/test_gitignore_coverage.py:77`,
+      `test_a_tracked_file_in_an_uncovered_class_is_an_offender_even_with_no_rule`,
+      whose docstring is this box verbatim — *"Criterion 2 as WRITTEN: a `.env`
+      already tracked, no rule anywhere — still contamination"* — and which
+      asserts `gc.tracked_offenders(private + plain + protected) ==
+      sorted(private)` with `.env` in `private`.
+      Corroborated by the implementation: `scripts/lib/gitignore_coverage.py:154-157`
+      states *"ONE way in: `matches_private_class` — the file is in a private
+      class WHETHER OR NOT any `.gitignore` rule exists for it."* So the box holds
+      by construction, not only by fixture.
       Run on the tree at `72725c03`: `pytest tests/test_gitignore_coverage.py
       tests/test_tracked_ignored.py` → 17 passed.
+
+      **FIRST ATTEMPT WAS WRONG, and the way it was wrong is worth keeping.** I
+      cited `:74-75` — `assert gc.uncovered_classes(lambda _: True) == []` plus
+      `assert gc.tracked_offenders([".env"]) == [".env"]` — from
+      `test_a_rule_that_exists_does_not_clear_an_already_tracked_file`. Both
+      assertions are real, and the fixture premise is the OPPOSITE of this box:
+      `lambda _: True` means every class IS covered, i.e. a rule EXISTS. That
+      test proves *rule present → still an offender*; this box asks *no rule →
+      still reported*. Different antecedents.
+      I had deliberately avoided the name-trap by reading assertions instead of
+      the test's name, and then landed in the subtler version of it: the
+      assertion was right and its SETUP was for the adjacent claim. The test that
+      matches was 3 lines below, named for exactly this box. **Reading the
+      assertion is not enough — read what the fixture establishes.**
 - [ ] The fleet sweep command from 6WM4BFKF's STATE block shows the 47 rule-only offenders gone
       from `gitignore-coverage` (or deduped), and still present on `tracked-ignored`.
       — NOT satisfied. The audit called this CODE because the sweep is a

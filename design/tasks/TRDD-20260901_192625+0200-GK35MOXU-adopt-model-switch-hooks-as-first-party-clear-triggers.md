@@ -124,10 +124,17 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
       The specific regression this box was re-opened for was re-run on its own first:
       `tests/test_git_index_lock_e2e.py` → 5 passed, including
       `test_stale_orphaned_lock_is_removed_and_renamed_aside`.
+      SHA CONVENTION, so a reader need not infer it: the gates ran on `72725c03`;
+      this tick lands in the NEXT commit, which touches only card files
+      (`git show --stat` confirms). A commit cannot be tested before it exists, so
+      naming the tested tree plus what changed after it is the honest form.
       This box was reachable without a release all along — an adversarial re-audit of the
       `testing` column found it mis-bucketed as release-gated by PROXIMITY to the two
       genuine live-`/model`-switch boxes on the same card. A "re-run the gates" box is not
       a runtime-event box, and grouping it with its neighbours hid that for a day.
+      (Precisely: the audit's contribution was flagging it still OPEN. That it was
+      gate-runnable was already known — I un-ticked it myself earlier this session
+      for citing the wrong tree.)
       HISTORY, kept because it is the reason for the named-sha discipline:
       the 3.4.14 publish gate ran on commit `4326519d` (ruff clean, mypy clean over 504
       source files, 16351 passed / 1 skipped / 0 failed), three doc commits behind HEAD.
