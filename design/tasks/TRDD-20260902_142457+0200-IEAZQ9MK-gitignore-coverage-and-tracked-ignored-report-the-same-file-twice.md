@@ -79,11 +79,44 @@ which currently asserts the rule branch, and `test_tracked_ignored.py` for the o
 
 ## Acceptance criteria
 
+An adversarial re-audit of the `testing` column (2026-09-04) classed all three
+of these CODE — verifiable without a release. That is true and was NOT the same
+as satisfied: checking them showed one already met, one needing a cross-detector
+check no existing test makes, and one needing a command actually RUN. Recording
+that distinction because "CODE" in that audit means *reachable*, and reading it
+as *done* would have ticked two boxes on nothing.
+
 - [ ] A tracked file ignored by a repo rule but in NO private class is reported by exactly one
       detector per fire, with wording that does not call it a private class.
-- [ ] A tracked `.env` with no rule (criterion 2 of 6WM4BFKF) is still reported.
+      — NOT satisfied, and the audit's CODE label was optimistic here. The test
+      it pointed at (`test_a_rule_that_exists_does_not_clear_an_already_tracked_file`)
+      asserts the `.env` case, not this one — I read its assertions rather than
+      trusting its name. Nothing in `tests/test_gitignore_coverage.py` or
+      `tests/test_tracked_ignored.py` asserts the EXACTLY-ONE-detector property;
+      the only dedupe assertion is `test_unchanged_key_deduped`
+      (`test_tracked_ignored.py:98`), which is about `emit_once` keys across
+      fires, a different claim. This box needs a fixture where both detectors run
+      against the same tracked-but-rule-ignored file and exactly one reports —
+      a test that does not exist yet. It is CODE-verifiable, so it stays open as
+      real work rather than as a release wait.
+- [x] A tracked `.env` with no rule (criterion 2 of 6WM4BFKF) is still reported.
+      — VERIFIED 2026-09-04 by reading the ASSERTIONS, not the test name.
+      `tests/test_gitignore_coverage.py:74-75`:
+      `assert gc.uncovered_classes(lambda _: True) == []` (coverage perfect) and
+      `assert gc.tracked_offenders([".env"]) == [".env"]` (yet still an offender).
+      That second assertion IS this box's claim. Its docstring states why the box
+      exists: a `.gitignore` rule does not untrack an existing index entry, so a
+      repo can be fully covered and still be shipping the secret.
+      Run on the tree at `72725c03`: `pytest tests/test_gitignore_coverage.py
+      tests/test_tracked_ignored.py` → 17 passed.
 - [ ] The fleet sweep command from 6WM4BFKF's STATE block shows the 47 rule-only offenders gone
       from `gitignore-coverage` (or deduped), and still present on `tracked-ignored`.
+      — NOT satisfied. The audit called this CODE because the sweep is a
+      read-only scan over repos already on this machine, runnable now — correct,
+      and it means the box is not release-gated. But locating a runnable script
+      is not running it, and this box asserts a RESULT (47 offenders gone from
+      one detector, still present on the other). It needs the sweep executed and
+      its output compared against 6WM4BFKF's recorded baseline.
 
 ## Approval log
 
