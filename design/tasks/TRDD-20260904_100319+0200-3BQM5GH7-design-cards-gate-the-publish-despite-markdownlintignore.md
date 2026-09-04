@@ -64,8 +64,16 @@ All three NITs were `MD056/table-column-count` at 563:86, 564:84, 565:29 of
 So the repo's stated intent is that design cards **do not** gate the publish. At
 least one of them did.
 
-**How many are in scope is UNKNOWN.** CPV's stage-4 file selection was never
-determined — only that it included one `design/` card. Do not assume all 437.
+**`design/` IS in scope — MEASURED 2026-09-04, and it is worse than NITs.**
+Running stage 4 standalone (`uvx --from git+…claude-plugins-validation@v5.16.2
+--with pyyaml cpv-remote-validate plugin . --strict`, exit 1) reported three
+findings, all in `design/tasks/` — and two were **CRITICAL**, not NIT: *"Private
+path leaked: macOS private path with username"*. So a design card can block a
+release on the SECURITY gate, not merely the lint gate.
+
+Whether selection is the changed set or the whole tree is still undetermined:
+the only design file reported was the one edited in this session, which is
+consistent with both.
 
 `.mega-linter.yml` is **probably not a lever, but that is PHASE-SPECIFIC and the
 relevant phase is untested.** Precisely what is established, per the completed
@@ -98,8 +106,12 @@ despite the ignore file listing it.
 The strongest hint points at the mildest explanation. CPV's output reads:
 
 ```
-[NIT] markdownlint: ../../../../../../../Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design/tasks/…
+[NIT] markdownlint: ../../../../../../../<absolute repo path, redacted>/design/tasks/…
 ```
+
+The seven `../` are verbatim and are the whole point; the path after them is
+redacted because CPV's own security gate rates a leaked home path CRITICAL —
+see the lesson below, which this card learned the hard way.
 
 Seven `../` before the repo path means CPV runs from a working directory seven
 levels below — a `uvx`/venv temp dir, not the repo root. `markdownlint-cli`
@@ -171,6 +183,19 @@ The last acceptance box matters more than it looks: the mismatch could equally
 be resolved by deciding the ignore file is wrong. Nobody has established which
 side of the mismatch expresses the current intent — the comment in
 `.markdownlintignore` is from whenever it was written, not necessarily now.
+
+**Quoting tool output verbatim into a `design/` card can BLOCK THE RELEASE.**
+This card's first version pasted CPV's `[NIT] markdownlint:` line complete with
+the machine's real home path and username. A review had explicitly argued for
+keeping it verbatim,
+since the seven `../` is the load-bearing evidence and genericizing the path
+would destroy the argument. That reasoning was right about the evidence and
+wrong about the consequence: CPV's security gate rates a leaked home path
+**CRITICAL**, and CRITICAL blocks `--strict`. A card written to document a
+publish blocker became a worse one — two CRITICALs where the original was three
+NITs. **Redact the identifying part, keep the structural part**: the `../`
+prefix carries the whole argument and no username. Verified by re-running stage
+4 standalone, which is cheap and needs no publish.
 
 **I broke the speaking-vs-quoting rule in the same edit that added it.** Having
 caught the `# Only lint changed files` misread, I then took `.mega-linter.yml`'s
