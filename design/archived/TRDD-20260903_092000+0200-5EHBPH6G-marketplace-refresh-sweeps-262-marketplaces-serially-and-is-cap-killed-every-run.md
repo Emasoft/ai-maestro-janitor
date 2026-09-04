@@ -4,7 +4,6 @@ title: marketplace-refresh sweeps 262 registered marketplaces serially under bac
 column: complete
 created: 2026-09-03T09:20:00+0200
 updated: 2026-09-04T06:32:00+0200
-review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
