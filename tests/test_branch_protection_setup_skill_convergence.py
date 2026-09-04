@@ -94,26 +94,33 @@ class _Bpl:
         self._content = content
         self.applied = False
 
-    # Every stub takes *_ rather than named-but-unused parameters: the snippet calls
-    # these positionally, the values are irrelevant to what is being pinned, and named
-    # placeholders trip pyright's unused-parameter check — which this repo's gate runs
-    # and FAILS CLOSED on.
-    def detect_default_branch(self, *_):
+    # Stubs keep their REAL parameter names and arity, and discard them with `_ = (...)`.
+    # An earlier version used `*_` to silence pyright's unused-parameter check (this
+    # repo's gate runs pyright and fails closed). That traded a real behavioural check
+    # for a lint fix: `*_` accepts ANY arity, so a snippet calling the content check with
+    # two arguments instead of three would have executed fine and passed. Naming them and
+    # discarding them satisfies pyright AND keeps a wrong-arity call raising TypeError.
+    def detect_default_branch(self, slug):
+        _ = slug
         return "main"
 
-    def gh_available(self, *_):
+    def gh_available(self):
         return True
 
-    def viewer_is_admin(self, *_):
+    def viewer_is_admin(self, slug):
+        _ = slug
         return True
 
-    def baselines_present(self, *_):
+    def baselines_present(self, slug):
+        _ = slug
         return self._present
 
-    def baselines_content_current(self, *_):
+    def baselines_content_current(self, slug, default_branch, project_root):
+        _ = (slug, default_branch, project_root)
         return self._content
 
-    def apply_baseline_rulesets(self, *_):
+    def apply_baseline_rulesets(self, slug, default_branch, project_root):
+        _ = (slug, default_branch, project_root)
         self.applied = True
         return True, [("baseline-history-protect", True, "applied")], []
 
