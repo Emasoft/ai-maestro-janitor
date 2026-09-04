@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T19:22:00+0200
+updated: 2026-09-04T19:34:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [42a24e6f]
 external-refs: [TRDD-74AA4PAL, TRDD-PXP08ZQC]
 ---
 
@@ -95,9 +95,19 @@ injection lands before the first turn and needs no nudge to have fired.
 - `_handoff_body(state, sd)` — extracted from `_inject_post_clear_handoff` so both paths build
   the payload through ONE code path. Two paths assembling the same payload separately is how
   one of them silently loses the `sanitize_for_drift_line` defang.
-- `_inject_post_compact_handoff(state)` — gated on `resume-after-compact.flag`, same 24 h age
-  bound (`CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S`), **no manual/auto distinction**
-  (compaction has no discard case, unlike `/clear`), flag deliberately not consumed.
+- `_inject_post_compact_handoff(state)` — gated on `resume-after-compact.flag`, **no
+  manual/auto distinction** (compaction has no discard case, unlike `/clear`), flag deliberately
+  not consumed.
+- **Age bound: 3 h via `CLAUDE_PLUGIN_OPTION_RESUME_DIRECTIVE_MAX_AGE_S`.** The first shipped
+  version (42a24e6f) invented `..._COMPACT_RESUME_MAX_AGE_S` at 24 h and the card claimed it
+  matched dispatch. **It did not** — `dispatch.py:_DIRECTIVE_MAX_AGE_DEFAULT_S` is 10800, so at
+  a 4 h age dispatch dropped the directive as stale while this hook injected the handoff that
+  directive named. Now one env var governs both; a private constant is what let them disagree.
+- **`compact-handoff-injected.ts` guard** — compaction PRESERVES what follows it (a `/clear`
+  does not), so not-consuming the flag, safe on the clear path, compounds here: 22 KB then
+  44 KB then 66 KB across repeat compactions, and auto-compaction fires *because* the window
+  filled. Session `71542cad` compacted 5× on 2026-09-04. Stamp compares against `written_at`,
+  so a NEW compaction still injects.
 - Called from the `source == "compact"` branch in `main()`, wrapped so a fault can never break
   session start.
 

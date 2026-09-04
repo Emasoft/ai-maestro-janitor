@@ -418,13 +418,29 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     injected SessionStart context is PASSIVE and starts no turn. Consuming it would suppress the
     `[janitor-resume]` cue and leave the session idle with a perfect handoff in context — the
     very failure this fixes, reproduced by the fix. The heartbeat stays the actuator.
+
+    BUT NOT-CONSUMING ALONE IS A BUG HERE, WHERE IT IS SAFE ON THE CLEAR PATH — and the reason
+    does not transfer, so it gets its own guard. `/clear` DESTROYS the context, so re-injecting
+    is the only way the new session has anything at all. **Compaction PRESERVES what follows
+    it**, so a second compaction in the same session would land a byte-identical copy beside the
+    first: 22 KB, then 44 KB, then 66 KB. And auto-compaction fires *because the window filled*,
+    so each copy makes the next compaction likelier — a positive feedback loop on the exact
+    resource this feature protects. Not hypothetical: session `71542cad` compacted FIVE times on
+    2026-09-04. The `compact-handoff-injected.ts` stamp below compares against `written_at`, not
+    wall clock, so a genuinely NEW compaction (which rewrites `resume-after-compact.ts` to a
+    later value) still injects, while a re-entry for the same one does not.
     """
     sd = state.state_dir()
     flag = sd / "resume-after-compact.flag"
     if not flag.is_file():
         return
+    # SAME bound and SAME env var as `dispatch.py`'s resume directive (3 h,
+    # `_DIRECTIVE_MAX_AGE_DEFAULT_S`). They govern the same flag, so a private constant here
+    # would let them disagree: at a 4 h age with a 24 h bound (which this code shipped with in
+    # 42a24e6f) dispatch drops the directive as stale while this hook injects the handoff that
+    # directive names — two halves of one feature reaching opposite verdicts about one file.
     max_age = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S"), 86400
+        os.environ.get("CLAUDE_PLUGIN_OPTION_RESUME_DIRECTIVE_MAX_AGE_S"), 10800
     )
     ts = sd / "resume-after-compact.ts"
     written_at = (
@@ -432,10 +448,24 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     )
     age = int(time.time()) - (written_at or state.file_mtime(flag))
     if max_age > 0 and age > max_age:
-        return  # dispatch sweeps it; a day-old handoff is worse than silence
+        return  # dispatch sweeps it; a stale handoff is worse than silence
+    stamp = sd / "compact-handoff-injected.ts"
+    marker = written_at or state.file_mtime(flag)
+    if stamp.is_file() and state.coerce_int(stamp.read_text(encoding="utf-8"), 0) >= marker:
+        return  # already injected for THIS compaction
     body = _handoff_body(state, sd)
     if body is None:
         return
+    # Stamp BEFORE printing: a crash between the two costs one missed injection, whereas
+    # stamping after a successful print and crashing costs an unbounded repeat on every
+    # re-entry — the failure this guard exists to prevent.
+    # ponytail: clear and compact stamp separately, so a clear→compact pair inside one process
+    # injects twice (once per banner). Costs one handoff; a shared stamp would make a /clear
+    # suppress the compact injection it should not.
+    try:
+        state.atomic_write(stamp, str(marker))
+    except OSError as exc:
+        _slog(state, "session-start", f"compact-handoff stamp failed: {exc!r}")
     print(
         "[janitor-handoff] Post-compaction handoff, ALREADY IN CONTEXT below — the compaction "
         "just discarded the detail this restores, so read it before deciding what to do next. "
