@@ -188,6 +188,14 @@ audit, then the load-bearing negative re-checked by hand — report:
       the card exists to remove, and on the clear path it would be spent at the
       worst possible moment. The degradation is to the mechanical handoff, never
       to the model.
+      The table was VERIFIED against the script, not transcribed from the
+      sibling on faith (a review correctly flagged that I had copied it):
+      `compose_agent_handoff.py:69` prints `NO_TRANSCRIPT` and `:77` prints
+      `SUMMARY_FAILED {reason}`. What is NOT verified is the box's comparative
+      clause — "exactly as `external_handoff_clear.py` already does" — since I
+      did not read that script's absent-CLI path. The tick rests on the two
+      skills sharing one composer whose literals are now confirmed, not on a
+      comparison to `external_handoff_clear.py`.
 - [ ] `uv run pytest` green; `uv run ruff check scripts tests` and
       `uv run mypy scripts/ --ignore-missing-imports` clean.
       — deliberately NOT ticked. The audit was told not to run these (the tree
@@ -195,5 +203,77 @@ audit, then the load-bearing negative re-checked by hand — report:
       verification, and this session has already been caught twice citing a
       suite run that predated what it claimed to cover. Tick it only against a
       NAMED sha from a run that postdates the remaining work.
+
+## What the conversion TRADED AWAY, recorded because it is a real consequence
+
+The old step 2 imposed a shape by construction: link-never-inline, exhaustive by
+reference, no duplicated TRDD `## STATE` blocks, "a few hundred bytes to low KB".
+`compose_agent_handoff.py` imposes none of that — it is an `llm-ext` PROSE
+SUMMARY of the transcript. So the link-only contract is gone from this path, and
+that was not a stated goal of the card.
+
+**This skill is the first to put composer output in front of the concision
+check**, which makes it a NEW interaction rather than an inherited one: the
+already-converted `/janitor-write-handoff` feeds `/compact`, which checks
+nothing, whereas this skill's step 3 feeds `clear_trigger.py`, which does:
+
+- `_HANDOFF_MAX_BYTES = 4096` (`clear_trigger.py:124`)
+- `_REFERENCE_RE = re.compile(r"\[\[|ATOM-[A-Z0-9]|TRDD-[A-Za-z0-9]|memgrep|#\d+")`
+  (`:130`)
+
+Nothing in the composer emits those tokens BY CONSTRUCTION, and a prose summary
+can exceed 4 KB. So `no-references` and/or a bloat warning may now fire on every
+clear.
+
+**Not a blocker, and the reason is verified rather than assumed:**
+`clear_trigger.py:791` states the contract as *"ABSENCE IS FATAL; shape is
+WARN-only"* — an absent handoff REFUSES the clear (owner invariant 2026-08-28,
+after a session woke blank mid-migration), while a bloated or reference-free one
+still clears, because losing the session to enforce concision is the worse
+trade. So the failure mode is stderr noise, not a lost context.
+
+**It is still worth fixing, for a reason this repo already learned once:** a
+warning that fires on every run carries no information and trains its reader to
+ignore it (the same argument `stage_install_smoke` makes about its async-lag
+note). Either the composer should emit reference tokens, or the check should
+recognise composer-authored handoffs, or the constants should move. UNCERTAIN
+and not measured: an `llm-ext` summary of a session that discusses TRDD ids
+would likely reproduce them, so `_REFERENCE_RE` may match incidentally — which
+would make the warning INTERMITTENT, which is worse than always. Settling it
+needs one real `/janitor-handoff-and-clear` run with the composer's output fed
+to `check_handoff_concise`.
+
+Deliberately NOT fixed here: the card's boxes are about removing model
+authorship, this is a downstream shape contract, and guessing at a fix without
+the measurement above would be the same shape as the remedies this session had
+to retract.
+
+## A SECOND cross-path interaction, found while verifying the first
+
+`compose_agent_handoff.py:95` writes `.janitor/state/resume-directive.txt`
+(`state.atomic_write`). That file is the ONE-SHOT pointer the **PostCompact**
+hook (`post-compact-resume.py`) consumes.
+
+On the `/janitor-write-handoff` path that is exactly right — a compaction
+follows, and the hook consumes it. **On THIS skill's path there is no
+compaction**: step 3 fires `clear_trigger.py`, which carries its own
+`--directive` through the keystroke chain, a different mechanism with a
+different consumer. So the composer's `resume-directive.txt` is written and
+NOT consumed here, and sits on disk armed for whatever compaction happens next
+— potentially an unrelated one, hours later, pointing at a session that has
+already been cleared and resumed.
+
+The two directives do NOT clobber each other (different file, different
+consumer), so this is not a repeat of TRDD-5RXBI65T. It is the adjacent shape:
+a one-shot pointer left armed on a path that never fires it.
+
+NOT measured, and NOT fixed blind. What would settle it: whether
+`post-compact-resume.py` validates the directive's freshness or session id
+before acting, and whether `clear_trigger.py`'s own resume path clears
+`resume-directive.txt`. Recorded here rather than acted on, because the
+plausible fixes (have the composer skip the directive when invoked from the
+clear path; have `clear_trigger.py` consume or clear it) each change a file
+with multiple readers, which is how this family of bug was created in the
+first place.
 
 ## Notes and lessons learned
