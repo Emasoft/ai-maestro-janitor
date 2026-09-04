@@ -335,4 +335,18 @@ independent verdict was obtained by this session itself.
 
 ## Approval log
 
+- 2026-09-04 — **DISCLOSED EXCEPTION to clause 12, recorded here because this section is the
+  clause's own append-only exemption and the card is the canonical record.**
+  `implementation-commits:` was edited from `[]` to `[69feb820, 9a9408df]` AFTER the closing
+  edit, on a terminal (`column: complete`) card. Clause 12 permits only `updated:` (and
+  `superseded-by:` when superseding) to change — a **closed enumeration** that does not
+  include `implementation-commits:`. The edit was made anyway, deliberately: the field is the
+  primary machine-readable link from a bug back to the change that caused it, and leaving it
+  empty on an archived card breaks that chain permanently for anyone tracing this defect
+  later. **This is a judgement call against the rule, not permission granted by it, and it is
+  not precedent** — an intermediate note elsewhere claimed clause 12 "freezes the BODY, not
+  frontmatter"; that gloss is FALSE and appears nowhere in the rule. Without this entry the
+  populated field is indistinguishable from the permitted case (filled during the closing
+  edit), which is why the exception is written down rather than left to look legitimate.
+
 ## Notes and lessons learned

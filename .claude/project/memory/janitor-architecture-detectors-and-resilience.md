@@ -210,11 +210,13 @@ windows** — the scenario that produced the ~22 min pre-fix wait.
 from a plugin's first `plugin-update deferred (marketplace lock held)` to that same plugin's
 next `rc=0`. Observed post-fix waits were ~38 s and ~44 s. **Where 600 s came from is NOT
 recorded** — see the lesson below before writing a derivation for it; two have already been
-invented and both were false. The number works as a trigger without a pedigree.
+published here and NEITHER WAS TRACED (one was later disproved outright, the other was merely
+unsupported — the shared defect is that both were written without a command behind them). The
+number works as a trigger without a pedigree.
 
 **DO NOT reopen 5EHBPH6G if a post-fix wait exceeds that bound — it is terminal and frozen.
 DO file a NEW card, BECAUSE the bound it closed against was met by the evidence available,
-and new contradicting evidence is new work rather than a defect in that closure.** [^13]
+and new contradicting evidence is new work rather than a defect in that closure.**
 
 ## Governed by
 
