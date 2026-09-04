@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:25:43+0200
+updated: 2026-09-04T10:30:28+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -75,8 +75,15 @@ NIT this card was filed about.
 **SELECTION — one reading ELIMINATED by experiment 2026-09-04, two remain.**
 A card unchanged in git history but DIRTY in the working tree IS linted. Probe:
 appended a deliberate table-row-followed-by-prose block to
-`TRDD-…-ca754708-port-sentinel-rules.md` (one of the 413 design cards identical
-to `origin/main`; only 24 differ), ran stage 4 standalone → `exit=4`,
+`TRDD-…-ca754708-port-sentinel-rules.md` — a card byte-identical to
+`origin/main`, selected by `comm -23` of all `design/tasks/*.md` minus the
+`origin/main..HEAD` diff, which is what the experiment actually rests on. (No
+count is given on purpose: two attempts produced one refuted number and one that
+could not be justified. The `find` total and the diff total have different
+membership bases, and the diff lists BOTH ends of an archive `git mv` — measured:
+`grep -c 5EHBPH6G` on it returns 2, the `tasks/` and `archived/` paths of one
+card — so subtracting them double-counts.)
+Ran stage 4 standalone → `exit=4`,
 `SUMMARY: … NIT=1 …`, and `ca754708` reported once. File then restored by
 `git checkout` and verified byte-identical (blob `cb9058b4…`), tree clean.
 
@@ -86,15 +93,37 @@ to `origin/main`; only 24 differ), ran stage 4 standalone → `exit=4`,
 | (b) HEAD vs `origin/main` | NOT reported | **ELIMINATED** |
 | (c) whole tree, always | reported | **still live** |
 
+**This table is NOT exhaustive** — it is the three rules tabulated before probe
+1, and a probe only discriminates against rules predicting the outcome that did
+NOT occur. Rules predicting "reported" all survive it.
+
+**PROBE 2 — the untracked case, and it is the decisive one.** Wrote a NEW
+`design/tasks/zz-untracked-selection-probe.md` carrying the same deliberate
+MD056 defect, never `git add`-ed (`git status` showed it as `??`), and ran
+stage 4 standalone → `exit=4`, `NIT=1`, the probe file reported once. Then
+removed via the janitor's `safe_delete.py` into `.trashcan/`, tree clean.
+
+So **a file git has never heard of still gates the release.** That kills every
+"everything git tracks" style rule outright. What survives is path-based
+selection — a glob, or everything-not-gitignored, or the whole tree — under
+which **git state is irrelevant to the mechanism**, and the dirty-vs-committed
+framing above is answering a question CPV never asks.
+
 (a) and (c) cannot be separated this way, and possibly not at all by
 experiment: isolating (c) needs a defect in a file nobody has touched, which is
-self-contradictory when the defect has to be introduced. Read CPV's source
-instead.
+self-contradictory when the defect has to be introduced. Enumerate the rule
+instead of sampling it: try `cpv-remote-validate --help` first for a verbose or
+file-listing flag (seconds, and untried), then CPV's docs, then its source. The
+source is the most authoritative route, not the only one.
 
-**Practical consequence, and it is the same under both survivors:** a design
-card blocks the release once it is DIRTY OR COMMITTED — being absent from your
-pushed history does not protect it. Under (a) the blast radius is "cards you
-touch"; under (c) it is all 437. Do not assume the smaller one.
+**PRACTICAL CONSEQUENCE — the one thing to remember.** A markdown file under
+`design/` gates the release **as soon as it EXISTS ON DISK**. Not committed,
+not staged, not `git add`-ed. Both probes agree and probe 2 is decisive:
+someone drafting a card in an editor can break a release without touching git
+at all, and `git stash` will not save them — only removing the file will.
+
+Blast radius is therefore **every markdown file present under `design/`**, not
+"the cards you committed". Do not assume a smaller one.
 
 `.mega-linter.yml` is **probably not a lever, but that is PHASE-SPECIFIC and the
 relevant phase is untested.** Precisely what is established, per the completed
