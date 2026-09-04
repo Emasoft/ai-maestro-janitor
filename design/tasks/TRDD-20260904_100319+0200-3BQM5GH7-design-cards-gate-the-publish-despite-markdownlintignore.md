@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:57:40+0200
+updated: 2026-09-04T10:58:54+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -184,8 +184,15 @@ in both cases, and the correct attribution is earlier and stronger:
   defect. At least one more shape exists: a copier filtered by
   `git ls-files --others --exclude-standard` (tracked ∪ untracked-unignored),
   which probe 1 and probe 2 are both consistent with and only probe 3 refutes.
-  Sparse-checkout is orthogonal to all three probes. The conclusion is unchanged
-  — every shape found so far is refuted by some probe — but the space is open.
+  The conclusion is unchanged — every copier shape found so far is refuted by
+  some probe — but the space is open.
+
+  (A draft listed sparse-checkout here as a fourth shape "orthogonal to all
+  three probes", which was both a contradiction — an orthogonal shape is an
+  UNREFUTED one, against the sentence beside it — and a category error.
+  Sparse-checkout governs how the USER'S worktree was materialised, not how CPV
+  copies it; the probe files were demonstrably on disk regardless. It is not a
+  member of this family.)
 
   And the refutations are **many-to-many, not a diagonal**: probe 3 refutes all
   three rows, probe 2 refutes two, probe 1 refutes one. What is true, and is the
