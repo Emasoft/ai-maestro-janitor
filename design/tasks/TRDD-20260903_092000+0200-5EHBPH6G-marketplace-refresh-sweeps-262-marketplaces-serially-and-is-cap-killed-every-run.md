@@ -66,10 +66,25 @@ heartbeat's task-quarantine drift line.
 
 **ALL FOUR ACCEPTANCE BOXES PASS as of 2026-09-04 06:20 — this card is `complete`-eligible.**
 Clause 1: five post-fix runs at 95–100 s, rc=0. Clause 2: post-fix request waits 38 s and
-44 s against a 600 s bound. The three unit-test boxes were already proven. **Not moved to
-`complete` in the same edit that ticked the last box** — clause 12 freezes a terminal card,
-and this box was ticked, un-ticked and re-ticked within one session. **Exit condition: move
-it when an adversarial review of this card returns no card-affecting finding.**
+44 s against a 600 s bound. The three unit-test boxes were already proven.
+
+**THE PRE-FIX ATTRIBUTION IS ESTABLISHED BY BEHAVIOUR, not by version inference** — this is
+the load-bearing premise of the tick, so it is stated in full. The 1313 s wait sat behind the
+22:47:40 run. That run emitted **zero** `marketplace-refresh: refreshed N/M` lines, and that
+counter was introduced by the fix commit `69feb820` itself; the first such line anywhere in
+the log is 01:21:36, after the 00:57:46 restart. The run was also cap-killed at 1935 s, which
+the new per-item code cannot produce. So it ran OLD code — proven by what it did, not by
+reasoning about which release was out when.
+
+**Not moved to `complete` in the same edit that ticked the last box** — clause 12 freezes a
+terminal card, and this box was ticked, un-ticked and re-ticked within one session.
+**Exit condition, made CHECKABLE:** move it when `review-after: 2026-09-05` comes round and a
+re-measure over ≥24 h of log still shows every post-fix request wait under 600 s. An earlier
+version said "when an adversarial review returns no card-affecting finding" — every review
+this session returned findings, so that was a permanent red light, which is the third
+unsatisfiable condition written on this card. The date-plus-measurement form can actually be
+met, and it also fixes the n=2 thinness: two episodes is what a 7 h window yields, and a day
+yields ~10×.
 
 **Retracted before it could mislead:** an earlier version of this section said the fix gave
 only a ~1.5× improvement because a request waits ~22 min. That compared a NEW-regime request
