@@ -1,9 +1,9 @@
 ---
 trdd-id: MYQGMAQZ
 title: the publish gate lacks the pyright check CI enforces so a release can be tagged before CI rejects it
-column: testing
+column: complete
 created: 2026-09-04T01:12:30+0200
-updated: 2026-09-04T01:52:00+0200
+updated: 2026-09-04T03:16:00+0200
 current-owner: main-session
 task-type: infra
 min-approval-requirement: none

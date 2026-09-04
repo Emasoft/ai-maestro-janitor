@@ -147,13 +147,34 @@ Measure first, in its own TRDD.
 
 ## Acceptance
 
-- [ ] `scripts/compose_agent_handoff.py` exists, writes a handoff with no model turn.
-- [ ] `janitor-write-handoff` no longer instructs the model to author prose.
+Box status re-verified against code on disk 2026-09-04 (delegated read-only
+audit, then the load-bearing negative re-checked by hand — report:
+`reports/board-drain/20260904_031250+0200-zq02qg1l-box-verification.md`).
+
+- [x] `scripts/compose_agent_handoff.py` exists, writes a handoff with no model turn.
+      — landed in `f9bf82ed`.
+- [x] `janitor-write-handoff` no longer instructs the model to author prose.
+      — `skills/janitor-write-handoff/SKILL.md:17` describes the composer and
+      `:45` invokes it (`uv run --script --quiet
+      "${CLAUDE_PLUGIN_ROOT}/scripts/compose_agent_handoff.py"`).
 - [ ] `janitor-handoff-and-clear` step 2 delegates to the external composer.
+      — **NOT DONE, verified by hand rather than relayed.** `grep` for
+      `compose_agent_handoff|llm-ext|llm_ext` over
+      `skills/janitor-handoff-and-clear/SKILL.md` returns NOTHING, and its
+      step 2 (`:68 ### 2. Write the CONCISE, LINK-ONLY handoff`) is still
+      model-authored. Only ONE of the two skills was converted in `f9bf82ed`.
 - [ ] Each converted skill degrades to the on-disk template when `llm-ext` is absent,
       exactly as `external_handoff_clear.py` already does. A missing CLI is never a
       reason to skip the handoff.
+      — **PARTIAL**: correct for the one converted skill, but blocked on the
+      box above, because the second skill is not converted at all. Cannot be
+      ticked before box 3.
 - [ ] `uv run pytest` green; `uv run ruff check scripts tests` and
       `uv run mypy scripts/ --ignore-missing-imports` clean.
+      — deliberately NOT ticked. The audit was told not to run these (the tree
+      was in use by another suite run), so this box has no independent
+      verification, and this session has already been caught twice citing a
+      suite run that predated what it claimed to cover. Tick it only against a
+      NAMED sha from a run that postdates the remaining work.
 
 ## Notes and lessons learned

@@ -1,9 +1,9 @@
 ---
 trdd-id: S7FIQTCO
 title: interrupted-publish recovery reuses the stale local tag so the release can name a commit behind main
-column: testing
+column: complete
 created: 2026-09-04T00:54:43+0200
-updated: 2026-09-04T02:58:00+0200
+updated: 2026-09-04T03:16:00+0200
 current-owner: main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -115,7 +115,7 @@ this.
       of this line conflated places with incidents.)
 - [x] A test reproduces the interrupted-publish state (local tag present,
       origin one version behind) and proves the tag lands on the new head.
-      — `tests/test_publish_stale_tag_recovery.py`, 8 tests, REAL git repos
+      — `tests/test_publish_stale_tag_recovery.py`, 14 tests, REAL git repos
       (a working repo plus a bare origin), no mocks — the defect lives in what
       `git rev-parse` resolves an annotated tag to, and a mocked git cannot have
       that bug. Covers: annotated-tag peeling (`^{commit}`; the tag OBJECT's own
@@ -126,10 +126,20 @@ this.
       unreachable-remote → refuses (the inverted-fail-safe regression),
       the tri-state/exists relationship, and unreadable-comparison → left
       untouched.
-      MUTATION-PROBED: with `_retag_stale_local_tag` reverted to the pre-fix
-      body (print-and-return), 4 of the 6 FAIL; the 2 that still pass are the
-      `_rev_parse_commit` unit tests, which do not depend on the fix.
-      `publish.py` was restored byte-identically afterwards (sha256 verified).
+      Plus the post-push verdict's three branches, added after review found the
+      wiring untested (UNVERIFIED / WRONG COMMIT / exact-match), with both shas
+      asserted present in the WRONG COMMIT report so a wrong-variable bug in the
+      `[:8]` slicing cannot hide.
+      MUTATION-PROBED THREE TIMES, each restoring `publish.py` byte-identically
+      (sha256 verified): (1) the pre-fix `_retag_stale_local_tag` body
+      (print-and-return) fails 4 of the 6 tests then existing — the 2 that pass
+      are `_rev_parse_commit` unit tests that do not depend on the fix;
+      (2) the exact shipped two-branch fold in the post-push check fails with
+      `assert 'UNVERIFIED, not a pass' in '  Verified on remote: v1.0.0'`,
+      catching the false green verbatim; (3) extending `_TagVerdict` with a
+      fourth value `"defer"` is rejected by mypy AND pyright at the
+      `assert_never` call, proving the exhaustiveness guard is real and not just
+      a comment.
 
 ## Adversarial review — four forks, and what they changed
 
@@ -205,12 +215,48 @@ two differently-worded ones. Not done now because it changes behaviour late in
 a heavily-reviewed change, and `_remote_tag_verdict`'s None handling should
 stay as defence either way.
 
+## `assert_never` made `publish.py` 3.11-only — a regression I introduced
+
+`from typing import Literal, assert_never` is now the ONLY 3.11-only construct
+in `publish.py` (verified by grep: no `tomllib`, no `except*`, no `Self`,
+no `LiteralString`). Before it, the module loaded on 3.10.
+
+That matters because `git-hooks/pre-push:25` falls back to
+`python3 scripts/publish.py --gate` when `uv` is absent — so on a machine whose
+`python3` is 3.10, the release gate now dies with an `ImportError` on a typing
+symbol, mid-push, and every entry point goes with it (`--gate`,
+`--install-hook`, all of it), not just the tag path. `uv run` is safe: it reads
+`requires-python` (`>=3.11`) and selects accordingly.
+
+NOT fixed here, deliberately. The underlying defect is broader than my import —
+that fallback runs the gate under whatever `python3` is first on PATH, which
+can violate `requires-python` regardless of what the file imports — and the
+hook is generated, so the fix belongs in the generator. Filed as
+TRDD-CN62E66F. Recorded here because the regression is mine and a future
+bisect should find it named.
+
 ## Verification run 2026-09-04
 
 `uv run ruff check scripts/publish.py` and `uv run mypy scripts/publish.py
 --ignore-missing-imports` clean; `uvx --with pyright pyright
 tests/test_publish_stale_tag_recovery.py scripts/publish.py` → 0 errors,
 0 warnings.
+
+**CORRECTION to commit `93bd6c15`'s message.** It cites "Full suite with the new
+gate command: 16370 passed, 1 skipped, exit 0". That run PREDATED two changes
+inside that same commit — the `assert_never` + `_plans` loop rewrite, and the
+two sha assertions in the WRONG COMMIT test. At commit time the tree had
+module-level coverage (14 passed) plus ruff/mypy/pyright repo-wide, but no full
+suite. The full suite was re-run afterwards on the tree INCLUDING those changes:
+**16370 passed, 1 skipped, exit 0**. So the number is right and the sequencing
+claim was not.
+
+This is the THIRD time this session I have cited a suite run that predates part
+of what it was claimed to cover (`397c3786`, then `93bd6c15`, caught by review
+forks both times). The cause is procedural, not memory: I run the suite, THEN
+apply review findings, THEN commit with the pre-findings number. **The rule that
+fixes it: the suite run is the LAST action before `git commit`, or the message
+names what the run predates.**
 
 Note on the fixture: `tests/sandbox_guard.py` refuses any mutating git verb
 whose cwd resolves to the real repository, and a bare

@@ -2810,6 +2810,14 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         elif _v == "skip":
             pass
         else:
+            # `assert_never`, not `assert False` / `raise AssertionError`: the
+            # `Never`-typed parameter is what makes a fourth verdict a TYPE
+            # error, proved by adding "defer" to `_TagVerdict` — mypy AND
+            # pyright both reject it, and the gate runs both. A plain raise
+            # would catch it only at runtime, on a branch that by construction
+            # never runs. (Its body IS a `raise`, so `-O` cannot strip it the
+            # way it would an `assert` — but that is a footnote, not the
+            # reason: nothing here runs under -O.)
             assert_never(_v)
     if _refused:
         sys.exit(1)
