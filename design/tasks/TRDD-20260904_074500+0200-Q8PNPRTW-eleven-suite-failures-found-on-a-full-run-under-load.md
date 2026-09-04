@@ -735,14 +735,27 @@ accepted as an artifact.
 > `test_token_usage_anomaly_detector.py`: **`88 passed in 19.05s`, exit 0, at load 14.83** —
 > like-for-like against soak9's START load of 15.53 (NOT its end-of-run 8.52; that mis-read is
 > retracted above).
-> **What this discriminates, which no earlier run could:** the serial pass ruled out `xdist`
-> but not load; this run holds `xdist` AND host load roughly constant and changes only the
-> SUITE SIZE. All ten pass. So the mechanism is **neither the host's background load nor
-> parallelism as such — it is the FULL SUITE'S OWN fan-out**: 14 workers over 16,403 tests for
-> 822 s starves these subprocess-heavy tests, where 14 workers over 88 tests for 19 s does not.
-> That is the documented `timeout_scale` fail-open with evidence behind it rather than a
-> matching signature, and it is a **named cause** — the thing criterion 1 and the final
-> criterion's second branch actually ask for.
+> **⚠ RETRACTED WITHIN THE HOUR — I wrote "the mechanism is NEITHER the host's background load
+> NOR parallelism as such, it is the FULL SUITE'S OWN fan-out". The "not host load" half is
+> FALSE, and my own data refutes it.** Three points, two variables:
+> | run | suite | host load (START) | those 10 |
+> |---|---|---|---|
+> | soak8 07:14 | full, 16,392 | **11.39** | **PASS** |
+> | soak9 11:40 | full, 16,403 | **15.53** | **FAIL** |
+> | 12:40 3-file | 88 | 14.83 | **PASS** |
+> **soak8 vs soak9 hold suite size CONSTANT and differ in host load — and the outcome flips.**
+> Verified first-hand: all four `test_branch_protection.py` tests existed at `e4dd674d^` and do
+> not appear in soak8's FAILED list, and that file was never touched by `e4dd674d`, so for
+> those four the CODE is constant too and load is the only variable.
+> **The defensible mechanism is TOTAL OVERSUBSCRIPTION — the full suite's 14-worker fan-out ON
+> TOP OF elevated host load. Neither alone suffices**, which is what the original triage report
+> said before I "corrected" it into something narrower and wrong. My 3-file run varies BOTH
+> suite size and load relative to soak9, so it never isolated one; I read a single pass as
+> naming a cause, which is the same "reran once, passed" move I spent the session criticising
+> in the triage report, wearing better clothes.
+> **Still a NAMED and evidenced mechanism** — it predicts all three observations, unlike
+> either single-factor story — but it is a threshold effect with n=1 per cell, and no threshold
+> has been measured.
 > **Still owed before closure:** this is one run per group; and #8 in particular has now
 > passed twice and failed twice, so its rate is not established. The ask to the USER is no
 > longer "waive the bar" but "accept this mechanism as named" — a materially different

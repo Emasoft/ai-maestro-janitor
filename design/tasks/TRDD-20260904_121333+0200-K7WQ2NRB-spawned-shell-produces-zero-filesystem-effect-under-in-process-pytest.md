@@ -76,6 +76,40 @@ The evidence shows no write landed. It does **not** distinguish: (a) `exec` neve
 writes into that directory failed. Q8PNPRTW published "the shell never runs" and had to
 retract it — **do not repeat that.**
 
+## ⭐ THE LEADING HYPOTHESIS — per-worker fd / process-table exhaustion
+
+**This is the only candidate that explains BOTH this card and `TRDD-Q8PNPRTW`, and it is the
+first one that predicts the ZERO-WRITE signature instead of merely tolerating it.**
+
+A `fork()`/`Popen` that fails under fd or process-table pressure produces **no child at all**
+— or one that dies instantly at `exec`. That is exactly what the marker measured: not a late
+write, not a partial write, **no write**. Every timeout/latency story predicts a LATE write and
+is therefore refuted by the marker data, which is why four of them died on Q8PNPRTW.
+
+It also explains Q8PNPRTW's ten load-artifact failures, whose signature is
+`assert 'BRPROT-001' in ''` — a detector exiting 0 with **empty stdout**, which is what a
+failed spawn looks like to a caller that fails open. **Two cards, two "different" mechanisms,
+one possible resource bug.**
+
+Fits every observation on the table:
+
+| observation | explained? |
+|---|---|
+| fails in the FULL suite (each xdist worker runs ~1,170 tests, accumulating) | ✅ |
+| passes in an 88-test `-n auto` run (~6 tests/worker, nothing accumulates) | ✅ — **regardless of suite size or worker count**, so it survives the confounds that sank the fan-out story |
+| passes serially in fresh per-invocation processes | ✅ |
+| child produces ZERO filesystem effect, never a partial one | ✅ — uniquely |
+| worse at higher host load (soak8 11.39 PASS vs soak9 15.53 FAIL) | ✅ — a loaded box has fewer free fds/procs machine-wide |
+
+**Cheap tests, in order:** (1) do failures CLUSTER in the xdist workers that have run the most
+tests? (2) sample `lsof -p <worker>` count, or `ulimit -n` headroom, at intervals during a full
+suite run. (3) run the full suite at `-n 4` — fewer workers, each running MORE tests: the
+fan-out story predicts improvement, exhaustion predicts it gets WORSE or stays. **That third
+one is a genuine discriminating prediction and it is one run.**
+
+**Not yet tested. Recorded as the leading hypothesis, not a finding** — four have already died
+on Q8PNPRTW for being plausible.
+
 ## NEXT ACTION
 
 1. **Read `_enforce_spawn`** (`tests/sandbox_guard.py:726`, called before `original_init`). It
