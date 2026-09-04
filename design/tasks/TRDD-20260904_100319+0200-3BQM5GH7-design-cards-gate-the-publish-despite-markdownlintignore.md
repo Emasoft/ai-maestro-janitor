@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:32:13+0200
+updated: 2026-09-04T10:32:54+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -104,10 +104,22 @@ stage 4 standalone → `exit=4`, `NIT=1`, the probe file reported once. Then
 removed via the janitor's `safe_delete.py` into `.trashcan/`, tree clean.
 
 So **a file git has never heard of still gates the release.** That kills every
-"everything git tracks" style rule outright. What survives is path-based
-selection — a glob, or everything-not-gitignored, or the whole tree — under
-which **git state is irrelevant to the mechanism**, and the dirty-vs-committed
-framing above is answering a question CPV never asks.
+"everything git tracks" style rule for **the markdownlint check** — which is the
+one that blocked the publish, and the only one either probe exercised. CPV runs
+several checkers (the same run produced path-leak CRITICALs from a secrets
+scanner and drift WARNINGs from a pipeline auditor); nothing here establishes
+they share one file-enumeration path, so "the mechanism" is singular only for
+markdownlint.
+
+Two limits on how far this generalises, both from what the probes did NOT do:
+
+- Both probes tested files **present on disk**. So presence is **sufficient**
+  for inclusion. Neither tested a file committed but absent from the worktree,
+  so presence is not shown **necessary** — "git state is irrelevant" would claim
+  both directions and only one is measured.
+- Neither tested a **gitignored** file present on disk. That is the probe that
+  would separate glob-over-everything from not-gitignored selection, and it
+  needs a `.gitignore` entry under `design/` to set up.
 
 (a) and (c) cannot be separated this way, and possibly not at all by
 experiment: isolating (c) needs a defect in a file nobody has touched, which is
