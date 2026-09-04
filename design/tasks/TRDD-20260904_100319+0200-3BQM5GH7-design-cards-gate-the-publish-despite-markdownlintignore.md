@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:09:26+0200
+updated: 2026-09-04T10:25:43+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -72,14 +72,29 @@ macOS private path with username"* — in a `design/tasks/` card. That is
 unambiguous and it is the worse failure mode: strictly more blocking than the
 NIT this card was filed about.
 
-**HOW MANY cards are in scope remains UNKNOWN — do not read the above as
-"all 437".** The only design file ever reported, in either run, was the one
-edited in that same session. That is equally consistent with changed-set
-selection (blast radius: cards you touch in a given publish — a per-card
-discipline problem) and with whole-tree selection (blast radius: every card
-gates every release — needs a repo-side or upstream lever). The two readings
-call for different fixes, which is why the acceptance criteria settle selection
-before anything else.
+**SELECTION — one reading ELIMINATED by experiment 2026-09-04, two remain.**
+A card unchanged in git history but DIRTY in the working tree IS linted. Probe:
+appended a deliberate table-row-followed-by-prose block to
+`TRDD-…-ca754708-port-sentinel-rules.md` (one of the 413 design cards identical
+to `origin/main`; only 24 differ), ran stage 4 standalone → `exit=4`,
+`SUMMARY: … NIT=1 …`, and `ca754708` reported once. File then restored by
+`git checkout` and verified byte-identical (blob `cb9058b4…`), tree clean.
+
+| candidate rule | probe predicts | verdict |
+|---|---|---|
+| (a) working tree vs HEAD | reported | **still live** |
+| (b) HEAD vs `origin/main` | NOT reported | **ELIMINATED** |
+| (c) whole tree, always | reported | **still live** |
+
+(a) and (c) cannot be separated this way, and possibly not at all by
+experiment: isolating (c) needs a defect in a file nobody has touched, which is
+self-contradictory when the defect has to be introduced. Read CPV's source
+instead.
+
+**Practical consequence, and it is the same under both survivors:** a design
+card blocks the release once it is DIRTY OR COMMITTED — being absent from your
+pushed history does not protect it. Under (a) the blast radius is "cards you
+touch"; under (c) it is all 437. Do not assume the smaller one.
 
 `.mega-linter.yml` is **probably not a lever, but that is PHASE-SPECIFIC and the
 relevant phase is untested.** Precisely what is established, per the completed
