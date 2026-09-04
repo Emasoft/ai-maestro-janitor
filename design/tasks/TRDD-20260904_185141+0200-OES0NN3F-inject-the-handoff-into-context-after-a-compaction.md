@@ -3,14 +3,14 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: todo
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T18:51:41+0200
+updated: 2026-09-04T19:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
 severity: high
 scope: project
 project-id: ai-maestro-janitor
-min-approval-requirement: none
+min-approval-requirement: user
 labels: [continuity, hooks, compaction, handoff]
 relevant-rules: []
 blocked-by: []
@@ -25,10 +25,24 @@ external-refs: [TRDD-74AA4PAL, TRDD-PXP08ZQC]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-09-04
 
 **Split out of `TRDD-74AA4PAL`** (rule 13, one atomic task per TRDD). That card diagnosed TWO
-gaps and bundled two fixes, one of which needs an owner decision because it changes when the
-janitor types keystrokes. **This one needs no approval and is blocked on nobody** — it adds an
-injection that costs zero tokens and types nothing. Read 74AA4PAL for the evidence; it is not
-repeated here.
+gaps and bundled two fixes; the other one changes when the janitor types keystrokes. Read
+74AA4PAL for the evidence; it is not repeated here.
+
+**⚠ THIS CARD WAS FIRST FILED AS `min-approval-requirement: none`. THAT WAS AN
+UNDER-CLASSIFICATION, and it was the half I wanted to ship** — the tell was filing it as
+approval-free while simultaneously asking the owner "say the word and I implement it now". The
+frontmatter is what a future agent reads, so the two must not disagree. Raised to `user`,
+because the change is:
+- **fleet-wide** — the janitor is USER-scope, so this fires in **every** repo on the machine,
+  not just this one;
+- **not free, despite "zero tokens"** — that phrase means *no model turn composes the handoff*,
+  which is true and is NOT the same as costless. Today's handoff was **22,702 bytes**; injected
+  into a compacted session it is billed as input on that turn and rides forward at the
+  cache-read rate on every subsequent turn. On a machine where window burn is an active
+  concern, that is a real cost the owner should price;
+- **irreversible per occurrence** — text already in a context window cannot be recalled.
+"Types nothing" is true and answers a question nobody asked; the keystroke risk belonged to the
+*other* card. The risk here is context and cost.
 
 **THE ONE FACT THIS CARD RESTS ON** (measured, 74AA4PAL GAP 2): `_inject_post_clear_handoff`
 (`scripts/hooks/on-session-start.py:304`, called `:529`, gated on `resume-after-clear.flag`) is

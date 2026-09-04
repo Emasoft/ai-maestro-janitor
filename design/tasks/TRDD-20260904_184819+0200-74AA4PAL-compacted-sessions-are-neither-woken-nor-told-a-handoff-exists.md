@@ -5,7 +5,7 @@ column: blocked
 pre-block-column: todo
 unblock-when: [decision: owner approves or refuses the deferred-push change (it alters when the janitor types keystrokes into a live pane)]
 created: 2026-09-04T18:48:19+0200
-updated: 2026-09-04T18:53:00+0200
+updated: 2026-09-04T19:05:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,7 +15,7 @@ project-id: ai-maestro-janitor
 min-approval-requirement: user
 labels: [continuity, hooks, compaction, handoff, owner-reported]
 relevant-rules: []
-blocked-by: []
+blocked-by: [owner decision on the deferred-push keystroke-timing change]
 npt: []
 eht: []
 implementation-commits: []
@@ -49,14 +49,27 @@ external-refs: [TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
 `_user_recently_active` (`:302`) is true: a keystroke within `_PUSH_GRACE_DEFAULT_S = 20`s
 (`:258`) **or** a genuine prompt within `_PUSH_PROMPT_WINDOW_DEFAULT_S = 300`s (`:270`).
 
-**MEASURED 2026-09-04** by joining `post-compact-resume.log` to the nearest preceding
-`pre-compact-handoff.log` entry in the same session, ≤600 s — **115 push decisions
-(52 fired + 63 suppressed) across 19 sessions**:
+**MEASURED DIRECTLY — two greps, no join, no attribution: 63 of 115 push decisions were
+SUPPRESSIONS** (52 fired + 63 suppressed, across 19 distinct sessions in
+`post-compact-resume.log`). **That number alone motivates both cards** and depends on nothing
+below.
+
+**INDICATIVE ONLY — a trigger-attributed join** (each push line matched to the nearest
+preceding `pre-compact-handoff.log` entry in the same session, ≤600 s):
 
 | compaction trigger | push SUPPRESSED | push fired | suppression rate |
 |---|---|---|---|
 | **auto** | **45** | 23 | **66%** |
 | manual | 18 | 29 | 38% |
+
+**Why "indicative" and not "measured": the join's error may CORRELATE with the very variable it
+attributes.** The two logs do not pair 1:1 — a PreCompact hook timeout, or a compaction whose
+push line never landed, breaks the pairing and the join has no 1:1 check — and an
+auto-compaction firing mid-turn under load is precisely when a hook is most likely to time out.
+So both numerator and denominator can move, and not proportionally. An earlier version of this
+card called the ratio "the finding" while disowning the counts it is computed from; that was
+keeping a conclusion after discarding its inputs. **Neither fix depends on which trigger
+dominates**, so nothing is lost by labelling it honestly.
 
 **⚠ Numbers to trust, because the first committed version of this card got them wrong.**
 115 is *push decisions*, not compactions — `pre-compact-handoff.log` records **207** actual
@@ -82,17 +95,34 @@ them**)"*. **That fallback is unsound**, on one measured and one inherited groun
 is written to disk and the agent is left only `resume-after-compact.flag` — it learns a handoff
 exists ONLY if a nudge arrives telling it to read the file.
 
-**How this was established, because the first committed version had NOT earned it.** That
-version rested on one `grep … | head -25` of a single file — an unbounded negative from a
-truncated search, in a session that spent five review rounds proving absence-of-a-hit is not
-absence-of-a-thing. Re-run properly: `on-session-start.py` is **1035 lines** (the truncation hid
-97% of it); `grep -rnE "def _?inject|_inject_post" scripts/` finds
-`_inject_post_clear_handoff` as the **only** handoff-injection function in the entire tree; and
-every `resume-after-compact.flag` reference in `scripts/` either **writes** it
-(`post-compact-resume.py:238-239`), **consumes** it into a heartbeat cue
-(`dispatch.py:1198`, surfaced at `:3493`), or reports it **orphaned**
-(`lib/orphaned_resume.py:129`, `detectors/orphaned-resume-flag.py`). None injects at
-SessionStart.
+**How this was established — and it took THREE attempts, the first two of which tested the
+wrong thing.**
+- *Attempt 1 (unearned):* one `grep … | head -25` of a single file. An unbounded negative from a
+  truncated search — `on-session-start.py` is **1035 lines**, so the truncation hid 97% of it.
+- *Attempt 2 (still unearned):* `grep -rnE "def _?inject|_inject_post" scripts/`. **This tests a
+  NAMING CONVENTION, not the mechanism.** A SessionStart hook injects context by writing to
+  **stdout** (or `hookSpecificOutput.additionalContext`) — no function named `inject*` is
+  required. Proof in this session: `on-session-start-trdd-state.py` injected the in-progress-TRDD
+  banner with a bare `print(...)` at `:253`, and that file matches the pattern nowhere.
+- *Attempt 3 — by mechanism, and this one holds:*
+  1. **Flag reachability.** Every `resume-after-compact` reference in `scripts/` lives in
+     `dispatch.py`, `resume_trigger.py`, `hooks/pre-tool-token-budget.py`,
+     `hooks/post-compact-resume.py`, `hooks/on-session-end.py`, `lib/orphaned_resume.py`,
+     `lib/orphaned_memory_maint.py`, `detectors/orphaned-resume-flag.py`. **None of the four
+     `on-session-start*.py` files is in that list** — a SessionStart hook cannot gate on a flag
+     it never reads.
+  2. **Flag-free branch ruled out too** (the file already knows how to find a handoff without a
+     flag — `_emit_manual_clear_pointer:258` uses `handoff_files.newest_group`): `grep -n
+     "compact" scripts/hooks/on-session-start.py` over all 1035 lines returns **six hits, every
+     one a comment** (`:142`, `:463`, `:478`, `:928`, `:998`, `:1005`). No compact branch exists.
+  3. **All 12 `print()` sites in the file enumerated**; the only handoff one is the
+     `_inject_post_clear_handoff(state)` call at `:529`, inside the clear-flag branch.
+  The flag's other references **write** it (`post-compact-resume.py:238-239`), **consume** it
+  into a heartbeat cue (`dispatch.py:1198`, surfaced `:3493`), or report it **orphaned**
+  (`lib/orphaned_resume.py:129`).
+**And the fix is cheap because the hook ALREADY RUNS after a compaction** — `:998-1005` states
+it outright: *"`clear` and `compact` re-enter SessionStart inside the SAME process"*, measured
+there on 2026-08-11. Nothing needs to be newly wired; a branch needs to be added.
 *Precisely, then:* the compact path's ONLY delivery is the heartbeat **cue** — which does carry
 a pointer to the handoff file (this session received exactly such a cue at 18:05) — and that cue
 is gated behind GAP 1. Injection at SessionStart, which needs no nudge at all, exists only for
