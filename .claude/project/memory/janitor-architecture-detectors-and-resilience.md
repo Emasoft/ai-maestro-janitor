@@ -2,7 +2,7 @@
 name: janitor-architecture-detectors-and-resilience
 description: "which detector finds X / where are the pattern libs / full detector roster by function / what skills does the janitor ship / what are the resilience pillars / how does the janitor survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / why did the fleet sit idle overnight with keep-going off / why did the self-trigger refuse while the user was judged present in another pane / does a machine-global presence signal wrongly gate a per-session action"
 ocd: 2026-06-13
-lmd: 2026-09-03
+lmd: 2026-09-04
 metadata:
   node_type: memory
   type: project
@@ -179,6 +179,30 @@ either way". Only generating an independent value can. Revert the ONE condition,
 test, confirm it fails, restore. Here it failed with
 `Left contains one more item: Step(keys='ESC', label='recovery_rung ESC')` — the defect printed
 itself. Two Edits and two seconds, and it is the difference between a test and a decoration.
+
+
+^ATOM-PLJ6-NM0P [desc: "marketplace-refresh cap-kills are fixed but the close rests on 2 single-window samples — a post-fix plugin-update wait over 600s is a NEW card, not a reopen", keywords: marketplace-refresh_cap_killed plugin-update_deferred_marketplace_lock_held daemon_workload_cap_1920 plugin_update_waits_behind_refresh marketplace_lock_contention refreshed_31/32_marketplaces is_the_marketplace-refresh_fix_verified multi-window_deferral_miss 5EHBPH6G_closed post-fix_request_wait_over_600s, ocd: 2026-09-04, lmd: 2026-09-04]
+
+**`marketplace-refresh`'s cap-kill defect is FIXED and TRDD-5EHBPH6G is closed — but the
+closure rests on two samples, and the untested case is named here because the card is
+archived where no board query looks.**
+
+Fixed by `69feb820` + `9a9408df` (shipped v3.4.2): the task refreshes only installed-backing
+marketplaces (32, not the 262 registered) with a per-item timeout and a shared run deadline.
+Pre-fix it was SIGKILLed at the 1920 s outer cap (`_WORKLOAD_TIMEOUT_SEC` 1800 +
+`_BULK_CHILD_KILL_GRACE_SEC` 120) **11 consecutive times**; post-fix it completes
+`refreshed 31/32 marketplaces` in 95–104 s. The plan SIZE in that log line (32 vs 262) is
+what identifies which code ran — a timing change alone could be an environment recovery.
+
+**THE UNTESTED CASE.** Box 4 closed on **two** post-fix deferral episodes, both
+SINGLE-window: one `plugin-update` fire hits one ~95 s hold, waits 38–44 s, succeeds. **No
+post-fix observation exists of a request missing MULTIPLE consecutive refresh windows** —
+which is what produced the 1313 s (~22 min) pre-fix wait.
+
+**DO NOT reopen 5EHBPH6G if a long post-fix deferral appears — it is terminal and frozen.
+DO file a NEW card, BECAUSE the acceptance bound it closed against (600 s total wait, first
+deferral → next `rc=0`) was met by the evidence available, and new contradicting evidence is
+new work rather than a defect in that closure.**
 
 ## Governed by
 
