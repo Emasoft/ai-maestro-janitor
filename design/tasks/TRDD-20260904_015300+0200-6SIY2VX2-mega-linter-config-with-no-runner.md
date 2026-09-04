@@ -52,12 +52,20 @@ implementation-commits: []
   - **3 SKIPPED** because the tool was absent — cspell, checkov, trivy. This
     is MACHINE-DEPENDENT: install cspell and it moves to RAN with no change to
     the repo. Coverage that varies by publishing host is the sharper hazard.
-  - **3 NEVER APPEARED** — jsonlint, yamllint, markdownlint. Note CPV emits a
-    warning for a configured-but-missing tool (it did for the three above), and
-    emitted none for these, which argues they are not implemented in the
-    preflight rather than silently skipped. Still an inference from one run's
-    output, not positively verified; `ci-parity` (CIP-1..8) is opaque and could
-    in principle fold them in.
+  - **3 NEVER APPEARED** — jsonlint, yamllint, markdownlint. WHY is UNDETERMINED.
+    An earlier draft argued "CPV warns for a configured-but-missing tool, and
+    emitted no warning for these, so they are probably not implemented" — that
+    is CIRCULAR: CPV can only warn about tools it implements, so silence is
+    exactly what you would observe whether they are unimplemented OR merely
+    absent-and-unknown-to-it. The inference distinguishes nothing and is
+    withdrawn. What would settle it: install one of them (e.g. `npm i -g
+    jsonlint`) and re-run the preflight — if it appears, it is implemented and
+    was simply missing; if it still does not, it is not implemented.
+    `ci-parity` (CIP-1..8) is also opaque and could in principle fold them in.
+
+  The 12-count above is from a `yaml.safe_load` of the file, not a grep — the
+  original "11" came from a truncated `head -12`, and a `sed` bounded by a
+  blank line would have been the same class of error.
   - **1 elsewhere** — ruff runs in `stage_lint`, not the preflight.
 
 ## Acceptance criteria
