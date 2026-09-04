@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T07:45:00+0200
+updated: 2026-09-04T09:43:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -161,8 +161,11 @@ external-refs: [TRDD-7NSRD8OV]
   **Put the status-bearing command LAST, or read the captured exit from the file — never
   trust a compound's reported exit.**
 - **MECHANISM — row 1 CONFIRMED, row 2 STILL UNDETERMINED. Do not read one traceback as
-  proof of one cause.** `/tmp/verify.txt` carries two `E ` lines, both
-  `FileNotFoundError: … grandchild.pid`.
+  proof of one cause.** The two `E ` lines in `/tmp/verify.txt` both read
+  `FileNotFoundError: … grandchild.pid`. That is NOT the whole evidence: the
+  `Captured stdout/stderr` and `Captured log` sections for those failures were never
+  read, and whether they carry a detail discriminating the two mechanisms below is
+  unknown. `E ` lines are a symptom index, not a census.
   - For **row 1** (`test_kill_process_group_terminates_a_grandchild_too`) that IS the
     report's quoted evidence: the poll budget expires before the forked shell can
     fork/exec/write the pid file. Confirmed.
