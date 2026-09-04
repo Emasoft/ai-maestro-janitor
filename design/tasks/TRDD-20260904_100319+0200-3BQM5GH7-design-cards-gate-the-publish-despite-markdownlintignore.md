@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:45:12+0200
+updated: 2026-09-04T10:48:06+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -144,7 +144,7 @@ restored from backup and `diff`-verified identical.
 | HEAD vs `origin/main` | eliminated (probe 1) |
 | anything tracked-only | eliminated (probe 2 — untracked file reported) |
 | everything not gitignored | **eliminated (probe 3 — gitignored file reported)** |
-| **path-based selection** (hypothesis — the rows above were eliminated by REPORTING observations, so this row is what remains to be *tested*, not something measured) | **the surviving FAMILY** |
+| **path-based selection** (hypothesis — every member of this family predicts "reported" for all three probes, so nothing run so far distinguishes them; it remains to be *tested*, not measured) | **the surviving FAMILY** |
 
 **CPV's markdownlint selects by path, not by git.** Precisely: git's *ignore
 rules*, *tracking*, and *diff-vs-origin* are each shown not to gate INCLUSION.
@@ -153,10 +153,23 @@ said that, and no probe supports it; CPV may consult git for other purposes or
 for other checkers.
 
 **The surviving row is a FAMILY, not one rule**, and this table is no more
-exhaustive than the 3-row one it replaced. These all predict "reported" for all
-three probes: a glob scoped to `design/`, a glob over the whole repo, a
-directory list from a manifest, everything-except-a-denylist, and CPV copying
-the tree to a temp dir and globbing there. Probes eliminate; they do not select.
+exhaustive than the 3-row one it replaced. These predict "reported" for all three
+probes: a glob scoped to `design/`, a glob over the whole repo, a directory list
+from a manifest, everything-except-a-denylist, and CPV copying the tree to a
+temp dir and globbing there. Probes eliminate; they do not select.
+
+Two of those are only *half* alive, which the row above is too coarse to show —
+probe 3 (a GITIGNORED file, reported) already cuts inside them:
+
+- **temp-copy** survives only in a git-UNAWARE form (`cp -r`, rsync). A copy made
+  with `git archive` or any git-aware export omits gitignored files, so that
+  variant predicts "not reported" and is dead.
+- **manifest-listed directories** survives only if `design/` is on the manifest.
+  If it is not, that member predicts "not reported" for every probe and was
+  dead from probe 1.
+
+So the surviving set is a family of families, and the three probes have already
+pruned inside two of its branches.
 
 An attempt to eliminate one of them for free FAILED, and the failure is worth
 recording because the reasoning looked sound. The clean run's 47 findings do
