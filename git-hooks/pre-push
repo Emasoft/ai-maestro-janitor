@@ -19,16 +19,19 @@
 # WHICH FILE RUNS depends on `core.hooksPath`, and `install_hook` sets up BOTH
 # paths deliberately — it copies this file to `.git/hooks/pre-push` AND sets
 # `core.hooksPath = git-hooks`:
-#   * with `core.hooksPath` set (git >= 2.9, the normal case here) git executes
-#     THIS FILE directly, so an edit is live immediately, no install step;
-#   * on git < 2.9 the key is IGNORED SILENTLY, and on any clone where it is
-#     unset or overridden, the `.git/hooks/` copy is what runs.
+#   * with `core.hooksPath` set (which `--install-hook` does) git executes THIS
+#     FILE directly, so an edit is live immediately, no install step;
+#   * where it is unset or overridden — by a clone, a user, or a tool — git looks
+#     in `.git/hooks/`, and the copy is what runs.
 # So the copy is a fallback, not dead weight, and re-running `--install-hook`
-# after an edit still matters for those cases.
+# after an edit still matters.
 #
-# Two earlier versions of this note were each wrong in one direction: the first
-# said "auto-generated, do NOT edit by hand" (there is no generator), the second
-# said the copy "is never run" (true only for git >= 2.9 with the config intact).
+# Deliberately NO claim here about which git VERSIONS honour `core.hooksPath`.
+# Two earlier versions of this note were each wrong — "auto-generated, do NOT
+# edit by hand" (there is no generator) and "the copy is never run" (true only
+# with the config intact) — and a third draft leaned on when the key was
+# introduced, which is untestable with one git installed. The two bullets above
+# need no version premise, so they carry none.
 set -u
 
 REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
