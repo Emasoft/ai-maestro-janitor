@@ -3,7 +3,7 @@ trdd-id: 8BXMNQ4T
 title: verified actuation blocks the single-threaded daemon beat — measure the multiplier before choosing a mechanism
 column: todo
 created: 2026-09-03T21:42:15+0200
-updated: 2026-09-04T05:34:00+0200
+updated: 2026-09-04T05:35:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -15,20 +15,33 @@ labels: [daemon, pane-state, performance, session-liveness, oauth-rotator]
 relevant-rules: []
 blocked-by: []
 npt: []
-eht: []
+eht: [QJ5LP4W2]
 implementation-commits: []
 created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-03)
 ---
 
 # Verified actuation blocks the single-threaded daemon beat
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
-- **NOT STARTED.** Nothing is broken today that anyone has observed; this card exists because a
-  cost was introduced knowingly and its size was never measured.
-- **NEXT ACTION** — the measurement below, step 1. It is a read of data already on disk. **Do
-  not choose a mechanism before it.**
-- **SUPERSEDED — do NOT carry forward** — none.
+- **MEASURED. The mechanism is confirmed; the remedy is split out to TRDD-QJ5LP4W2.**
+  12 stalls (`wait > 60 s`) in 1048 task-beats over 6 h 22 m, every one explained by
+  **cumulative foreground occupancy** — median 92.7% of a stall's window is filled by
+  foreground bodies vs **0.0%** on a normal beat. Beat is healthy at med 4–5 s / p90 12–15 s.
+- **NEXT ACTION** — box 1's remaining half only: the *during-a-rotation-window* measurement.
+  It is **not obtainable on this host** (`grep -c 'rotation-esc'` = 0; no rotation has ever
+  occurred here), so it needs a rotation to happen, not more looking. Everything else on this
+  card is done or delegated.
+- **DO NOT re-derive the measurement.** It took three attempts and six adversarial reviews.
+  Read `## STEP 1 — MEASURED` and stop; the two sections below it are kept as lessons only.
+- **SUPERSEDED — do NOT carry forward:**
+  - "NOT STARTED / next action is the measurement" — this block said that until 2026-09-04
+    while five commits of measurement had landed. A STATE block that outlives its own card's
+    progress is worse than none: it is authoritative by rule, so a resuming session would
+    have re-run finished work.
+  - "fleet size 9" (in the first measurement block below) — it is **15**; 9 counted
+    cumulative `gh-issues-monitor/` registry dirs.
+  - The first two results tables below, and every conclusion drawn from them.
 
 ## What changed and why it costs
 
@@ -221,6 +234,35 @@ appears as several rows. Grouping stalls whose resume times fall within 120 s:
 3+1+4+3+1 = 12 stalls, **5 distinct blocking episodes**. An earlier draft wrote
 "~5" from eyeballing the timestamps and never derived it — the estimate happened to
 be right, which is not the same as having checked.
+
+**The 120 s threshold is not a tuned parameter — the data is bimodal.** The eleven
+gaps between consecutive stall resumes are:
+
+```
+6, 8, 9, 13, 36, 100, 105,  |  769, 822, 1563, 17085   (seconds)
+```
+
+A **7× jump** between 105 s and 769 s, and nothing in between. So every threshold in
+`[106, 768]` yields 5 — measured at 120/180/300/600 s, all 5. Below it the count
+fragments (90 s → 7, 30 s → 8) by splitting stalls *within* an episode; above 768 s
+it merges episodes (900 s → 3).
+
+**But 120 s was still picked without a reason, and the principled value gives a
+different answer.** The mechanism claim is "one blocking episode delays several tasks
+within the same stall window", and the natural scale for that is ONE BEAT INTERVAL,
+60 s — which yields **7**, not 5, because the two intra-episode gaps of 100 s and
+105 s then split. So the honest statement is:
+
+> **5 episodes at any threshold ≥106 s; 7 if episodes must fall within one 60 s beat
+> interval.**
+
+The count is stable across a wide band, but 120 s sits only 14% above the larger gap
+it must bridge, and the word *exactly* — with "3+1+4+3+1" arithmetic behind it —
+dressed a parameter choice as a derivation. **The independence caveat this number
+serves does not need the precision:** "12 rows are ~5–7 distinct episodes" carries the
+entire argument. Sharpening it cost a fabricated parameter and bought nothing, which
+is the same defect as the numbers this card retracts, committed in the act of
+retracting them.
 
 **The unexplained mass is CLUSTERED, not a lone outlier.** The 54% row (184 s, the
 second-largest wait) and the 78% row sit adjacent at 04:17:50 and 04:18:26, while
@@ -415,6 +457,12 @@ surface for a number nobody is waiting on.
       60 s" does not follow either: the stalls are built from bodies of 55 + 30 + 15 s —
       individually legal, cumulatively over the interval. The measurement names *total
       foreground occupancy per beat*, and neither candidate remedy addresses that quantity.
+      **SPLIT — the remedy is now TRDD-QJ5LP4W2.** This box asks a measurement card to
+      make a scheduling design decision, which is why it has been ticked and un-ticked
+      three times: it has no criteria for choosing. The design question, its rejected
+      candidates, its risk profile and its advisor gate now live on their own card. This
+      box closes as "mechanism identified, remedy delegated" once box 1's rotation half
+      is resolved or explicitly abandoned.
       **What the measurement DOES support**, and all this box can honestly carry today:
       `session-liveness` appears in 8 of 12 stall rows and is the single largest contributor.
       Bounding or backgrounding IT alone is the change the data points at — but it is the one
@@ -449,6 +497,22 @@ surface for a number nobody is waiting on.
   about a TAIL condition (panes wedged during rotation), the tail sample is the
   population of interest, not noise to trim — discarding it silently is how a card about
   rare stalls gets closed on its common case.
+- **THE DIAGNOSIS IS A FAMILY, NOT A SENTENCE — and compressing it to one line was
+  itself the defect.** A commit message here summarised everything as *"when a number
+  is needed and is not at hand, I produce a plausible value instead of stopping."*
+  Tested against the nine errors in this session's #297 thread and this card, only
+  ~4.5 fit. The rest are distinct failures with distinct checks, and a session
+  recalling only the one-liner will not think to look for them:
+  | kind | examples | the check |
+  |---|---|---|
+  | **fabricated** — no step produced it | "~1h behind you", "135 s reap lag", the 120 s threshold | which command produced this number? |
+  | **mis-framed** — right arithmetic, wrong units/frame | `Z` timestamp read as local ⇒ 11h44m and a retracted-but-correct claim | do both operands carry a visible frame? |
+  | **mis-selected** — real value, wrong ordering | `v3.4.10` from `git tag \| head`; `ls \| tail` | what would this print if the opposite were true? |
+  | **over-extrapolated** — computed, then projected past its sample | 3.0 s/item × 262 | is the sample representative of the population? |
+  | **inherited premise** — no number at all | "on comparable work" | did I ever test this assumption? |
+  The two errors that most misled a peer were NOT fabrications: the restart retraction
+  (mis-framed) reversed a claim that was correct, and `v3.4.10` (mis-selected) named
+  the wrong release publicly.
 - **The generator behind all three failed attempts is ONE habit, and it is not "wrong
   population".** Each attempt stated a claim at higher confidence than the step that
   produced it: attempt 1 read a grep's silence as proof no marker existed; attempt 2
