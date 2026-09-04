@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T11:21:46+0200
+updated: 2026-09-04T11:34:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -306,6 +306,46 @@ external-refs: [TRDD-7NSRD8OV]
   version, but only after you completed all TRDDs and fixed all issues."* Eleven red tests
   are issues. Nothing publishes until this card is terminal or every remaining failure is
   proven to be a load artifact of the shared 36-user host.
+- **11:30 — BOTH candidate mechanisms for rows 1 & 2 are now REFUTED BY MEASUREMENT, and the
+  cause is genuinely UNKNOWN.** Report:
+  `reports/suite-failures/20260904_113039+0200-fixture-fork-latency.md`. 50 trials of the
+  exact fixture script via `Popen(start_new_session=True)`, on this box at load 14.8–21.2:
+  - **Load starvation — NOT REPRODUCED.** fork+write median 0.027–0.086 s, max **2.74 s once
+    in 50**, **0 timeouts at a 30 s poll**. The smallest real budget in the suite is ≈4 s
+    (row 2) / ≈5 s (row 1). So the `_deadline_slack` comment's premise — *"under this suite's
+    own load the fork/exec/write can outrun a fixed 3–5 s budget"* — **is false as stated on
+    this measurement.** That comment is a prior author's hypothesis, never a recorded
+    measurement, and it has now been tested. **Do NOT widen a timeout or touch
+    `timeout_scale()` to "fix" these two** — that lever is aimed at a mechanism that does not
+    occur.
+  - **`env={}` starving `PATH` — DEAD, twice over.** Empty-env timings are statistically
+    indistinguishable from inherited-env (median 0.030–0.086 s, max 0.325 s, 25/25 wrote the
+    file); macOS `sh` falls back to `confstr(_CS_PATH)` = `/usr/bin:/bin` when `PATH` is
+    unset. Independently confirmed by direct probe: `env -i /bin/sh -c 'sleep 600 & echo $! >
+    F'` writes `F`.
+  - **AND the mechanism could never have produced this symptom anyway** — this is shell
+    semantics, not a measurement, and it is the stronger half: `$!` is set at **fork**, so
+    `echo $! > PIDFILE` is executed by the shell itself and depends on neither `PATH` nor the
+    `exec` of `sleep` succeeding. A `sleep: not found` child still yields a written pid file.
+    An hypothesis that cannot generate the observed symptom was never a candidate; I should
+    have killed it by reading the script instead of by measuring it.
+- **A NOTE ON HOW `db466c64` GOT HERE, because the pattern is the card's recurring one.**
+  That commit inferred *"row 1 fails without `env={}`, therefore `env={}` is not row 2's
+  cause"*. **That inference was invalid when I made it** — two tests, two spawn paths, and an
+  identical `FileNotFoundError` shape that (as this card already says of the `E ` census)
+  *"discriminates nothing"*. The conclusion it reached is now supported, but **by these
+  measurements, not by that argument**; being unfalsified is not vindication, exactly as the
+  progress-dot correction above already records. Same defect, third occurrence today.
+- **WHAT IS ACTUALLY OPEN.** Rows 1 & 2 reproduce **serially** (see the serial-isolation list
+  below), and neither load nor `env={}` explains them. The pid file is written reliably in
+  <0.35 s in isolation, yet the test reads it absent. So the live candidates are: the file is
+  written somewhere the test does not look (tmp-path / per-worker fixture mismatch), it is
+  removed before the read (cleanup ordering), or the script never starts (spawn failure
+  swallowed). **All three are guesses — none is written here as a finding.** A `lean-worker`
+  was dispatched 11:30 to capture the real state at failure (5 serial repeats + 1 `-n auto`,
+  `--showlocals`, the missing path verbatim, and an `ls` of the pytest tmp dir); it is
+  forbidden from fixing anything. `column: dev` is true on that dispatch and on nothing else
+  — **if it returns nothing, re-column to `todo`.**
 
 ## The failures
 
