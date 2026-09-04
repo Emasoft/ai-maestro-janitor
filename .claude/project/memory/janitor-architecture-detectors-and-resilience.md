@@ -208,16 +208,13 @@ windows** — the scenario that produced the ~22 min pre-fix wait.
 
 **THE BOUND, stated here so acting on this atom needs no lookup: ≤600 s total wait**, measured
 from a plugin's first `plugin-update deferred (marketplace lock held)` to that same plugin's
-next `rc=0`. **600 s is a THRESHOLD CHOSEN on the card, not a constant derived from the code**
-— an earlier version of this atom claimed it was the `plugin-update` fire interval, which is
-false: `plugin-update` is not an interval Task at all but a request-queue drain
-(`daemon.py:3147-3167`) that runs every daemon loop and RE-ENQUEUES on lock contention, so its
-retry cadence is the loop's, not a configured period. Observed post-fix waits were ~38 s and
-~44 s, so the threshold has an order of magnitude of headroom over anything measured.
+next `rc=0`. Observed post-fix waits were ~38 s and ~44 s. **Where 600 s came from is NOT
+recorded** — see the lesson below before writing a derivation for it; two have already been
+invented and both were false. The number works as a trigger without a pedigree.
 
 **DO NOT reopen 5EHBPH6G if a post-fix wait exceeds that bound — it is terminal and frozen.
 DO file a NEW card, BECAUSE the bound it closed against was met by the evidence available,
-and new contradicting evidence is new work rather than a defect in that closure.**
+and new contradicting evidence is new work rather than a defect in that closure.** [^13]
 
 ## Governed by
 
@@ -250,3 +247,4 @@ and new contradicting evidence is new work rather than a defect in that closure.
 
 
 [^12]: [id:ATOM-VYSD-YCS4, status:valid, desc:"the scope mismatch that stranded every unattended session on the host", keywords:"machine_global_signal_gating_a_per_session_action one_busy_pane_marked_every_pane_attended gate_scope_must_match_action_scope feature_never_fires_no_error_anywhere", ocd:2026-07-28, lmd:2026-07-28] DO NOT gate a PER-SESSION action on a MACHINE-GLOBAL signal, BECAUSE one active session then speaks for every session on the host and the other N-1 are silently starved — and the symptom reads as "the feature never fires", not as "a gate said no", so nobody looks at the gate. DO give every gate a signal at the SAME scope as the thing it gates.
+[^13]: [id: ATOM-AMDO-9KJZ, status: valid, desc: "the 600 s bound has no recorded derivation and two invented ones were published before this was noticed", keywords: "provenance_invented_for_a_threshold where_did_600s_come_from why_600_seconds plugin-update_is_not_an_interval_task plugin-update_fire_interval is_600s_a_config_constant because_clause_filled_without_a_command marketplace_lock_bound_derivation threshold_with_no_recorded_origin made_up_a_derivation_for_a_number _INTERVAL_VERSION_UPDATE_is_not_plugin-update deferred_marketplace_lock_held_bound", ocd: 2026-09-04, lmd: 2026-09-04] DO NOT write a derivation for the 600 s bound, BECAUSE two were published in one session and both were false: first "the plugin-update fire interval, a config constant" (`plugin-update` is not an interval Task at all — `daemon.py` drains a request queue every loop and re-enqueues on lock contention), then "a threshold chosen on the card" (no evidence of any such choice; and the same session's own notes record a ~10-minute post-fix success cadence, which is 600 s and would make it a host observation instead — a third candidate, also untraced). DO state the bound bare and say the derivation is unrecorded. The failure is not getting a constant wrong; it is that a sentence with a `because` clause pulls something plausible into the slot unless a command put it there.
