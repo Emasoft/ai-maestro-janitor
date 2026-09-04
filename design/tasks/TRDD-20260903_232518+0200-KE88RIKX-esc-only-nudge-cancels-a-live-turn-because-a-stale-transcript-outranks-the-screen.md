@@ -123,7 +123,10 @@ keystrokes.
 - [x] a refusal does not spend a recovery attempt
 - [x] mutation probe demonstrates the new test fails against the old condition
 - [x] ruff + mypy clean on the changed files; 128 policy-adjacent tests pass
-- [ ] LIVE: after the release, no `FIRED esc_nudge … pane=working` line appears in `daemon.log`
+- [ ] LIVE: after the release, `daemon.log` shows **BOTH** (a) at least one
+      `REFUSED by the pane policy — would esc_nudge … (pane=working)` line — the law observably
+      firing on the situation it exists for — **and** (b) zero
+      `FIRED esc_nudge … pane=working` lines. Both halves, or the box does not pass.
       (blocked on publishing — the daemon runs the installed plugin)
 
 **Box 6 was UNMEASURABLE as originally written and was rewritten 2026-09-04, not measured.**
@@ -141,11 +144,33 @@ line and the `REFUSED by the pane policy` line (`unread` when the pane could not
 distinct value, so an unreadable pane can never be mistaken for a working one). The box above
 now names a string the log will actually contain.
 
+**The box has TWO halves for a reason — a purely absence-shaped criterion cannot fail.** The
+first rewrite said only "no `FIRED … pane=working` line appears", which passes vacuously if
+`esc_nudge` never fires at all post-release, for reasons having nothing to do with this fix.
+Adding the required-presence half (a) means the box asserts the law was EXERCISED, not merely
+that a bad outcome was absent. Fixing the missing FIELD did not fix the missing FALSIFIER;
+those are two defects and the first rewrite only addressed one.
+
 **Do not tick this from the current log.** Every `FIRED esc_nudge` line in it predates the
 field, and the 10 `REFUSED by the pane policy` lines that follow them were emitted by the
 INSTALLED plugin — they do not establish that this card's `_at_working` law is what refused,
 because the installed build predates it and the line does not say which guard fired. That
 ambiguity is the same missing-field defect, one layer down.
+
+**Verified before shipping the field, so nobody re-derives it:**
+
+- **Nothing PARSES either changed line.** The only other mentions of `FIRE-FAILED` in the tree
+  are docstring prose in `fleet_inject.py` and `test_fleet_inject.py`.
+- **The `FLEET-DECLINE-STALL` escalation is NOT coupled to the log text.** `_decline` builds
+  its signature as `f"{outcome}:{rung or '-'}"` from its own arguments (`daemon.py:1666`) — the
+  log line is a separate `state.log_line` call. So changing the line reset no stall clock and
+  broke no escalation. This mattered enough to check rather than infer: AgentlensPro has been
+  steadily refused since 01:10, and a silently-restarted clock would have withheld exactly the
+  escalation that surfaces it to a human.
+- **No other card's criteria are invalidated.** Roughly ten cards cite `FIRED rearm → iterm`
+  and similar lines, all narratively; the new field is a SUFFIX, so every substring grep still
+  matches. A grep anchored to end-of-line would have broken — there is none anywhere in
+  `design/`, `scripts/` or `tests/`.
 
 ## Considered and DECLINED — do not re-litigate without new evidence
 
