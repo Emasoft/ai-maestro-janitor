@@ -18,6 +18,21 @@ is covered by no linter and no type-checker, so a NameError or a wrong keyword t
 ships silently and only fails in front of a user mid-repair. The block is extracted from
 the markdown, stubbed, and RUN — which is the only thing that proves the drifted path
 actually reaches the apply rather than exiting.
+
+SCOPE, stated so nobody reads more into a green run than it earns:
+
+- These tests exercise the TAIL of step 3. `slug` is injected, so slug RESOLUTION is not
+  covered — it is established above the extraction's anchor.
+- The extraction ends at the `sys.exit(0 if all_ok else 1)` marker. **Anything the skill
+  adds BELOW that line is outside these tests, permanently and with no signal.**
+- `bpl` is stubbed, so `baselines_content_current`'s own six-step body is not run here.
+  Its decisive step IS separately verified: `ruleset_content_drift(payload, live)` with
+  `live["rules"] == []` returns "missing rule pull_request" etc., which is the reported
+  input. Tracing the rest: a live ruleset with `rules: []` still carries a valid int `id`
+  and the baseline `name`, so it lands in `by_name`, `fetch_ruleset_detail` is called, and
+  the verified comparator runs. The only unexercised links are the two network calls —
+  I/O, not logic. An earlier note said the path was merely "likely" to hold; that
+  under-claimed, and under-claiming is a reporting error too.
 """
 
 from __future__ import annotations

@@ -32,6 +32,18 @@ external-refs: [janitor#294, TRDD-DD0M4QL7, TRDD-H8WRCW0I]
     `CLAUDE_PROJECT_DIR` are UNSET** (measured directly).
   - So `plugin_root_env` is `""` twice over and `plugin_root = Path("." )` — **the guard's
     cwd, which is the project**. It protects the right repo.
+  - **Every link in that chain is now checked, not assumed** (a first version measured only
+    the env vars, from an interactive shell rather than the guard's own process, which does
+    not by itself establish the guard sees the same environment):
+    - **No hook invokes this guard.** `branch_protection_apply` appears nowhere under
+      `hooks/` or `.claude/` except as documentation; `dispatch.py` is its only caller. So
+      the hook context — the one that *does* set `CLAUDE_PLUGIN_ROOT` — is never the path.
+    - **Neither the dispatcher stub nor `dispatch.py` sets `CLAUDE_PLUGIN_ROOT`.** Grepped
+      both; no assignment, no `setdefault`.
+    - **Nothing in the chain calls `os.chdir`** — not the stub, not `dispatch.py`, not the
+      guard. So the cwd `Path(".")` resolves against is the invoking shell's, which for the
+      cron heartbeat is the project directory. The "cwd = the project" step was an
+      assumption until this check.
 - **The hazard is therefore CONDITIONAL on a context that does set `CLAUDE_PLUGIN_ROOT`**
   (a plugin hook invocation, as opposed to the cron heartbeat). In that context the cache
   dir *does* carry both a manifest naming `Emasoft/ai-maestro-janitor` and 7 workflow
