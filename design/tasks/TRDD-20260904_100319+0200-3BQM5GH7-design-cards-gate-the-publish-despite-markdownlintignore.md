@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:49:18+0200
+updated: 2026-09-04T10:51:29+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -168,11 +168,21 @@ in both cases, and the correct attribution is earlier and stronger:
   was never needed for this one.
 - **manifest-listed directories** survives only if `design/` is on the manifest.
   A manifest without `design/` was refuted by the **ORIGINAL PUBLISH**, which
-  reported three NITs in a `design/` card — before any probe existed.
+  reported three NITs in a `design/` card — before any probe existed. The
+  refutation transfers because the publish and every probe ran the SAME pinned
+  `cpv-remote-validate@v5.16.2` and the same `plugin . --strict` subcommand; had
+  the versions or subcommands differed it would need re-testing. (The card's
+  stage-4 vs stage-4b distinction is not in play — 4b is `ci-preflight`, a
+  different subcommand, and no markdownlint finding ever came from it.)
 
-So the surviving set is a family of families, two of its branches are already
-half-pruned, and the pruning was done by the earliest evidence available rather
-than by the newest.
+So the surviving set is a family of families and two of its branches are already
+half-pruned. The lesson is NOT "the oldest evidence did the work" — that is true
+of the manifest branch only because the publish is the first observation in the
+record at all, while for temp-copy probe 2 is merely the earliest observation
+that COULD discriminate (probe 1's file was tracked, so a tracked-only export
+contains it and probe 1 separates nothing). The reusable form is narrower:
+**check whether an earlier observation already discriminates before crediting
+the newest one.**
 
 An attempt to eliminate one of them for free FAILED, and the failure is worth
 recording because the reasoning looked sound. The clean run's 47 findings do
