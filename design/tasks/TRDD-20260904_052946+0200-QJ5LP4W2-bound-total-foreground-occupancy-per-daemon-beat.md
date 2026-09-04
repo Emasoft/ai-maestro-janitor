@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-04T14:21:30+0200
+updated: 2026-09-04T14:23:51+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -123,14 +123,39 @@ bounds that **sum** — only individual subprocess workloads are capped
   the dispatch code, 2026-09-04 — and the answer carries a design precedent the card
   should use.**
 
-  `_run_due_pass` (`scripts/daemon.py:3080-3103`) is a plain `for task in tasks:` over
-  the list, with **no sort** on the foreground path. Registration order (`:2984-3006`)
-  puts `session-liveness` (`:2998`) immediately before `fleet-stop` (`:2999`), then
-  `cold-cache-clear` (`:3000`), then `gh-notify-inbox` (`:3001`) — i.e. the three tasks
-  that queue behind `session-liveness` are exactly the ones the measurement named as
-  stall contributors. **So the `fleet-stop` asymmetry is corroboration, as hypothesised:
-  a 0 s body stalls most often because it is dispatched directly after the largest
-  foreground body, every beat.**
+  **⚠ The first version of this answer cited `_run_due_pass`. NO SUCH FUNCTION EXISTS**
+  — the name was invented, and a reader grepping it finds nothing. The real one is
+  **`_run_due_tasks` (`scripts/daemon.py:3069-3105`)**, whose dispatch loop at `:3087`
+  is a plain `for task in tasks:` with **no sort** on the foreground path.
+
+  **The list is order-as-written at runtime, checked end to end** (the first version
+  asserted this from the loop alone, without reading where `tasks` comes from):
+  `_build_tasks` (`:2975`) `return`s a flat literal of 15 `Task(...)` entries ending at
+  `:3007`; `main` does `tasks = _build_tasks()` (`:3433`) and passes it straight to
+  `_run_due_tasks(tasks, yielded)` (`:3557`); `grep` for `tasks.sort` / `sorted(tasks)`
+  / `reverse` / `shuffle` finds **nothing**. The apparent gaps in the `Task(` line
+  numbers (3002–3004) are a comment block, not conditional registration.
+
+  Order: … `github-config-audit` (`:2996`), **`session-liveness` (`:2998`)**,
+  **`fleet-stop` (`:2999`)**, `cold-cache-clear` (`:3000`), `gh-notify-inbox` (`:3001`),
+  `integrity-repin`, `oauth-recovery`.
+
+  **⚠ AND THE ADJACENCY READING IS THE WRONG ONE — it tilts the very decision this card
+  exists to make.** I wrote that `fleet-stop` stalls "because it is dispatched directly
+  after the largest foreground body". That is under-determined: the measurement says
+  stalls are **cumulative across multiple bodies** ("one stall is 55 s + 15 s"; "the
+  blockers are NOT single long bodies"), and 78 s is `session-liveness`'s *max*, not its
+  typical. Meanwhile `cold-cache-clear` and `gh-notify-inbox` are registered *after*
+  `fleet-stop`, so they cannot contribute to its wait in the same pass at all.
+
+  **The position-in-chain reading is both better supported and points the other way:**
+  `fleet-stop` is **tenth of fifteen**, behind *every* named foreground contributor
+  (`oauth-rotator-tick`, `memory-guard`, `github-config-audit`, `session-liveness` …).
+  Its wait accumulates all nine predecessors' bodies. That explains a 0 s-body task
+  stalling most often **without needing `session-liveness` specifically** — and it is
+  evidence for **candidate 3** (a cumulative budget), whereas the adjacency story quietly
+  argues for **candidate 4** (cap `session-liveness` alone). The advisor consultation
+  chooses between exactly those two, so a slanted brief would have decided it in advance.
 
   **The precedent, and it is the useful half.** The BACKGROUND lane deliberately does
   NOT use list order: `_next_bulk_task` (`:3065-3066`) picks `min(due, key=_last_run)`
@@ -140,10 +165,29 @@ bounds that **sum** — only individual subprocess workloads are capped
 
   **The daemon therefore already classifies list-order dependence as a starvation bug,
   and has already fixed it — for the bulk lane only. The foreground loop still has the
-  identical dependence.** That matters for candidate 3, whose open sub-problem is "a
-  policy for which tasks may be deferred": a fairness rule for foreground deferral does
-  not need to be invented, it needs to be ported from `_next_bulk_task` fifteen lines
-  above it, including its rationale and the incident that produced it.
+  identical dependence.**
+
+  **⚠ But "the fix already exists, just port it" OVERSTATES — retracted.** The two are
+  not the same problem shape:
+
+  | | `_next_bulk_task` | a foreground budget |
+  |---|---|---|
+  | decides | which ONE due task **runs** | which due tasks are **deferred** |
+  | when | every pass, unconditionally | only once a budget is exceeded |
+  | need | prevent starvation of a lane | stop a beat overrunning its interval |
+  | survival tasks | none — every bulk chore is deferrable | **`oauth-rotator-tick` must NEVER be deferred** |
+
+  `min(due, key=_last_run)` is a pure **fairness** rule with no concept of a task exempt
+  from the policy. Ported verbatim it would cheerfully defer `oauth-rotator-tick`
+  whenever that task happened to be the most-recently-run — which is precisely the
+  2026-07-17 starvation class the comment above exists to prevent. The foreground policy
+  needs fairness **plus a priority floor**, and the floor has no precedent here.
+
+  **What IS directly transferable is the STRUCTURE, and it is the valuable half:**
+  *decide the budget/deferral set ONCE, before the loop*, so the outcome cannot depend on
+  where the loop happens to be. A budget computed mid-loop would reintroduce the exact
+  order dependence `_next_bulk_task` was written to cure. Take the shape and the
+  rationale; the policy still has to be designed.
 
   Read-only source reading; no `daemon.py` change written, so the advisor gate on the
   first acceptance box is untouched. This narrows what the advisor is asked, rather
