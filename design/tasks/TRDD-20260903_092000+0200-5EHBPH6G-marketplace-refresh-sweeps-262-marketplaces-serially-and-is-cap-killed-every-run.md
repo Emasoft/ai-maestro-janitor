@@ -196,10 +196,18 @@ independent verdict was obtained by this session itself.
            `plugin-update` fire logs `deferred` — the fleet stops updating" described the
            32-minute era. Today exactly one plugin is affected, so clause 2's failure is
            real but far narrower than the card's prose implies.
-        2. **A separate question this card did not ask: why is ONE plugin retried 211
-           times in 7 h?** ~30/hour is not a cadence any documented interval produces.
-           That may be a retry loop worth its own card, and it is NOT part of
-           TRDD-5EHBPH6G's fix. **Do not fold it in — scope it first.**
+        2. **~~A separate question: why is ONE plugin retried 211 times in 7 h? ~30/hour is
+           not a cadence any documented interval produces — possibly a retry loop worth its
+           own card.~~ SCOPED AND WITHDRAWN — there is no retry-loop defect.** Measured:
+           the request **succeeds** on its own cadence once the lock is free —
+           `plugin-update claude-menu-system@emasoft-plugins: no change (rc=0)` at 05:45:20,
+           05:55:16, 06:05:05, i.e. **~10-minute intervals**. Deferrals run 22:58:03 →
+           04:26:31 and then stop entirely. So 211 ≈ **33 fires × ~6 in-fire retries** (the
+           6-second spacing in the sample triplet is retries within ONE fire), all confined
+           to windows where `marketplace-refresh` held the lock. Normal cadence, bounded
+           retries, no pathology. **Deliberately NOT filed as a card** — the finding
+           dissolved when scoped, and filing it would have added an open card describing
+           healthy behaviour.
         This corrects my own rebuttal to a review: I claimed the daemon logs one deferral
         per PLUGIN (~40 per fire), reconciling 211 with 5 runs. False — it is one plugin,
         many retries. I inferred "per plugin" from three sample lines that all named the
