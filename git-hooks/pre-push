@@ -16,12 +16,19 @@
 # that any fix here will be overwritten, which is exactly the belief that leaves
 # a bug unfixed. TRDD-CN62E66F.
 #
-# AN EDIT HERE IS LIVE IMMEDIATELY — no install step. `install_hook` also sets
-# `core.hooksPath = git-hooks`, and with that set git executes THIS FILE directly;
-# the copy it makes at `.git/hooks/pre-push` is never run. `--install-hook` is
-# therefore only needed to (re)establish `core.hooksPath` on a fresh clone, not
-# after an edit. An earlier version of this note said to re-run it "to refresh the
-# copy", which is advice for a file nothing executes.
+# WHICH FILE RUNS depends on `core.hooksPath`, and `install_hook` sets up BOTH
+# paths deliberately — it copies this file to `.git/hooks/pre-push` AND sets
+# `core.hooksPath = git-hooks`:
+#   * with `core.hooksPath` set (git >= 2.9, the normal case here) git executes
+#     THIS FILE directly, so an edit is live immediately, no install step;
+#   * on git < 2.9 the key is IGNORED SILENTLY, and on any clone where it is
+#     unset or overridden, the `.git/hooks/` copy is what runs.
+# So the copy is a fallback, not dead weight, and re-running `--install-hook`
+# after an edit still matters for those cases.
+#
+# Two earlier versions of this note were each wrong in one direction: the first
+# said "auto-generated, do NOT edit by hand" (there is no generator), the second
+# said the copy "is never run" (true only for git >= 2.9 with the config intact).
 set -u
 
 REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
@@ -67,10 +74,8 @@ run_release_gate() {
         # problem, or a half-installed pyenv shim all reach here, and without this
         # clause the refusal would state a version fact it has not established —
         # the same defect as the message it replaced.
-        echo "  \`uv\` is not installed, and \`python3\` on PATH is older than 3.11" >&2
-        echo "  (or could not be run)," >&2
-        echo "  which this project requires (pyproject.toml: requires-python >=3.11)." >&2
-        echo "  Install uv (https://docs.astral.sh/uv/) or put a >=3.11 python3 on PATH." >&2
+        echo "  \`uv\` is not installed, and \`python3\` on PATH is older than 3.11 or could not be run (pyproject.toml: requires-python >=3.11)." >&2
+        echo "  Install uv (https://docs.astral.sh/uv/) or put a working >=3.11 python3 on PATH." >&2
         return 1
     fi
     python3 scripts/publish.py --gate
