@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:51:29+0200
+updated: 2026-09-04T10:54:08+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -163,9 +163,19 @@ Note WHICH observation kills each — a first draft here credited the wrong one
 in both cases, and the correct attribution is earlier and stronger:
 
 - **temp-copy** survives only in a git-UNAWARE form (`cp -r`, rsync). Killed by
-  **probe 2**, not probe 3: `git archive` and every git-aware export carry only
-  TRACKED content, and probe 2's file was untracked yet reported. Gitignored-ness
-  was never needed for this one.
+  **PROBE 1** — the earliest of the three, and on CONTENT rather than presence.
+  `git archive` has no working-tree mode at all; any git-aware export must
+  materialise some committed tree. Probe 1's file was tracked but DIRTY: the
+  defect was appended and never committed, so every committed tree carries the
+  CLEAN blob and a git-aware export would have shown markdownlint nothing to
+  report. It was reported. (Probes 2 and 3 also refute it, on the weaker
+  presence basis — an untracked file is absent from a tracked-only export — but
+  they are redundant here.)
+
+  This attribution was wrong three times before it was right: credited to probe
+  3, corrected to probe 2, and only then traced to probe 1. Each correction
+  moved toward the newest evidence when the oldest already sufficed — which is
+  the failure the lesson below names, committed in the sentence that names it.
 - **manifest-listed directories** survives only if `design/` is on the manifest.
   A manifest without `design/` was refuted by the **ORIGINAL PUBLISH**, which
   reported three NITs in a `design/` card — before any probe existed. The
@@ -176,13 +186,13 @@ in both cases, and the correct attribution is earlier and stronger:
   different subcommand, and no markdownlint finding ever came from it.)
 
 So the surviving set is a family of families and two of its branches are already
-half-pruned. The lesson is NOT "the oldest evidence did the work" — that is true
-of the manifest branch only because the publish is the first observation in the
-record at all, while for temp-copy probe 2 is merely the earliest observation
-that COULD discriminate (probe 1's file was tracked, so a tracked-only export
-contains it and probe 1 separates nothing). The reusable form is narrower:
-**check whether an earlier observation already discriminates before crediting
-the newest one.**
+half-pruned. The lesson is NOT "the oldest evidence did the work" as a rule about
+evidence age. It is a rule about SEARCH ORDER: **check whether an earlier
+observation already discriminates before crediting the newest one.** Both
+branches here were killed by the earliest observation that could kill them — the
+publish for the manifest, probe 1 for temp-copy — and in both cases the first
+answer written down credited a later one. The check costs a minute and was
+skipped three times on a single bullet.
 
 An attempt to eliminate one of them for free FAILED, and the failure is worth
 recording because the reasoning looked sound. The clean run's 47 findings do
