@@ -25,18 +25,41 @@ external-refs: [TRDD-7NSRD8OV]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
 > ### ⇒ THE USER DECISION, IN ONE LINE (everything else here is how we got to it)
-> **Accept the 10 remaining failures as load artifacts caused by TOTAL OVERSUBSCRIPTION — the
-> full suite's 14-worker fan-out on top of elevated host load, neither sufficient alone — or
-> refuse and require more measurement.** Accepting closes this card via the final criterion's
-> second branch. Refusing keeps the publish gate shut until a rate or threshold is measured.
+> **Accept the 10 remaining failures on a CHARACTERISATION rather than a mechanism, or refuse
+> and require the mechanism to be measured.** What is actually established, and all of it:
+> | run | suite | host load | result |
+> |---|---|---|---|
+> | soak8 | full | 11.39 | PASS |
+> | soak9 | full | 15.53 | FAIL |
+> | 12:40 | 88 tests | 14.83 | PASS |
+> *They fail under the full suite at elevated host load; they pass under the full suite at
+> lower load, and under a small suite at comparable load. Consistent with contention. The
+> resource is NOT measured.*
+> **⚠ I first wrote this line as "caused by TOTAL OVERSUBSCRIPTION … neither sufficient alone",
+> and that overstated it in exactly the way this card keeps catching:** "oversubscription" is a
+> mechanism-shaped word standing in for a quantity nobody measured — no run-queue depth, no
+> scheduling latency, no CPU-contention number exists anywhere in the evidence, which is the
+> same defect as "fd exhaustion". And **"neither sufficient alone" has NO supporting run**:
+> there is one sample per cell, no full-suite-at-low-load repeat and no small-suite above
+> 14.83 — on a card whose every n=1 cell has flipped on the second sample.
+> **This matters because the criterion demands a cause NAMED, so the strength of that word is
+> load-bearing in something a human signs.** Accepting means accepting a characterisation.
+> Refusing keeps the publish gate shut until a rate or threshold is measured.
 > *Read this line, not the archaeology below it: the ask went through three superseded framings
 > today (waive-the-criterion → cause-is-fan-out → the retraction) and each is marked, but the
 > current question is only the sentence above.*
 >
 > **Evidence, preserved off `/tmp`:** `reports/suite-failures/raw-captures-20260904/`
 > (37 files — soak8/soak9 + meta, the serial and low-load `-n auto` runs, every marker and
-> solo/paired capture). `/tmp` does not survive a reboot and this card's own opening lesson is
-> a soak run that was lost that way.
+> solo/paired capture).
+> **⚠ MACHINE-LOCAL, NOT A SOURCE OF TRUTH.** That dir is gitignored (deliberately — the logs
+> carry absolute `/Users/…` paths, which is why the project rule ignores `reports/`), so it is
+> invisible to any cloner and dies with `git clean -fdx`, a disk loss, or a migration. **Every
+> number these cards rely on is quoted in the cards themselves**; the raw files are a
+> convenience for a future session ON THIS MACHINE. Do not plan work assuming they exist.
+> *Moving them off `/tmp` REDUCES the reboot case — it does NOT "close" the evidence-loss
+> failure mode this card opened with, and my commit `59e2ce69` said "closes", which is a real
+> improvement described as a resolution.*
 
 - **WHY THIS CARD EXISTS AT ALL.** The failures were found at 07:29 and lived only in
   `/tmp/soak8.txt` and one session's conversation, both of which die with the session. A
