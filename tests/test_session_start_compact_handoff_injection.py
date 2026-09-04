@@ -160,12 +160,16 @@ def test_only_source_compact_injects(tmp_path: Path) -> None:
     doing positive-control duty only by accident: if `_arm()` had produced nothing
     injectable, all three `== 0` arms would have passed vacuously and the reader would have
     had to reason backwards from the final line to know they meant anything.
+
+    NO stamp reset between the control and the arms, deliberately. A version of this test
+    unlinked `compact-handoff-injected.ts` here "so each arm is independent of guard state"
+    — but these three sources never enter `_inject_post_compact_handoff` at all, so they
+    never read the stamp. The reset changed nothing and implied a dependency that does not
+    exist, in the one test whose whole point is that these sources never reach the guard.
     """
     project, env = _project(tmp_path)
-    sd = _arm(project)
+    _arm(project)
     assert _injections(project, env) == 1, "positive control failed — fixture is broken"
-    # Drop the control's stamp so each arm below is independent of guard state.
-    (sd / "compact-handoff-injected.ts").unlink()
     for source in ("startup", "resume", "clear"):
         assert _injections(project, env, source=source) == 0, f"{source} injected"
 
@@ -205,8 +209,15 @@ def test_the_age_bound_holds_and_zero_disables_it(tmp_path: Path) -> None:
 
 def test_an_empty_handoff_injects_nothing(tmp_path: Path) -> None:
     """A handoff file that exists but is blank must produce silence, not a banner with
-    nothing under it. `_handoff_body` skips empty chunks and then returns None for an empty
-    group — a real branch, previously untested."""
+    nothing under it. `"   \\n\\n".strip()` is falsy, so `_handoff_body` skips the chunk AND
+    then returns None for the now-empty group — both branches, in sequence, previously
+    untested.
+
+    WHAT ISOLATES THE EMPTY BODY as the cause of the trailing 0: three things could produce
+    it — the stamp, the age bound, the body. The stamp is unlinked below; `_arm()` armed at
+    `age_s=0`, so the 24 h bound is nowhere near; the flag is untouched. The control above
+    ran against that same state and injected. One variable differs between the two runs.
+    """
     project, env = _project(tmp_path)
     sd = _arm(project)
     assert _injections(project, env) == 1, "positive control failed — fixture is broken"

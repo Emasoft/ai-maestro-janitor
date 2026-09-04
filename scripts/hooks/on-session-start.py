@@ -487,9 +487,10 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     # injection it should not.
     # SILENT-FAILURE MODE, kept here rather than in the card because a reader debugging "the
     # second compaction injected nothing" is standing at the `>=` above, not reading a TRDD:
-    # two compactions in one second with an unreadable `.ts` both fall back to the flag's mtime,
-    # so `marker` TIES instead of advancing and the second is suppressed. (`handoff_files`
-    # solved the same-second collision with a pid in the filename.)
+    # if `.ts` is missing or garbage (`coerce_int` → 0) BOTH compactions fall back to the flag
+    # mtime, and `state.file_mtime` returns `int(st_mtime)` — epoch SECONDS, verified — so two
+    # inside one second TIE instead of advancing and the later one is suppressed.
+    # (`handoff_files` solved the same-second collision with a pid in the filename.)
     print(
         "[janitor-handoff] Post-compaction handoff, ALREADY IN CONTEXT below — the compaction "
         "just discarded the detail this restores, so read it before deciding what to do next. "
