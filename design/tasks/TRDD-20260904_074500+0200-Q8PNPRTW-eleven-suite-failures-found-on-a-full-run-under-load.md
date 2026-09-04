@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: human_review
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-04T12:15:00+0200
+updated: 2026-09-04T12:30:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
