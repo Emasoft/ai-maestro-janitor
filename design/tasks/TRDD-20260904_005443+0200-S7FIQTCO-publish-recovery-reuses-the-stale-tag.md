@@ -1,9 +1,9 @@
 ---
 trdd-id: S7FIQTCO
 title: interrupted-publish recovery reuses the stale local tag so the release can name a commit behind main
-column: complete
+column: testing
 created: 2026-09-04T00:54:43+0200
-updated: 2026-09-04T03:16:00+0200
+updated: 2026-09-04T03:26:00+0200
 current-owner: main-session
 task-type: bugfix
 min-approval-requirement: none
@@ -11,7 +11,7 @@ scope: project
 project-id: ai-maestro-janitor
 relevant-rules: []
 npt: []
-eht: []
+eht: [CN62E66F]
 implementation-commits: []
 ---
 
@@ -214,6 +214,28 @@ work, remove the race branch, and leave a single unverified message instead of
 two differently-worded ones. Not done now because it changes behaviour late in
 a heavily-reviewed change, and `_remote_tag_verdict`'s None handling should
 stay as defence either way.
+
+## Why this card is NOT `complete` despite every box being ticked
+
+It was moved to `complete` and archived on 2026-09-04, then moved back the same
+session. The acceptance boxes are all met — that part was right — but the card
+introduced a regression it names below, and `eht:` was `[]`.
+
+Per the TRDD rules, `eht:` is the Effects Handling Task field and **a parent
+cannot reach `complete` until every EHT is terminal**. A regression this card
+created, documented in its own body, is the textbook case. `eht: [CN62E66F]`
+now records it, and the column is back to `testing` until that card is
+terminal.
+
+The tempting counter-argument — "the defect is broader than my change, the
+fallback would misbehave under any interpreter" — is TRUE and does not help. A
+latent bug that MY change activated is still my change's post-condition. Both
+things hold: the hook was already wrong, and I am the one who made it bite.
+
+Recorded because the failure was mine and structural: I closed a card while its
+own body argued it had unfinished consequences, and the frontmatter field that
+exists to catch exactly that was empty. Ticking boxes is not the same as having
+no effects left to handle.
 
 ## `assert_never` made `publish.py` 3.11-only — a regression I introduced
 

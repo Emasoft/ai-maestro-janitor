@@ -46,19 +46,70 @@ would REFUSE a non-conforming interpreter. Settling it needs a host where the
 project venv is below the floor. The defect below stands either way, because it
 is about the branch that demonstrably performs no check at all.
 
-## Reachability — narrower than it first looks, and that sets the priority
+## Reachability — WIDER than the header comment implies
 
-`run_release_gate` is invoked only for a DEFAULT-BRANCH or TAG push; a
-feature-branch push takes the trufflehog path instead and never calls it. And
-pushing the default branch is supposed to go through `publish.py`, which
-CLAUDE.md documents as `uv run scripts/publish.py`. So the exposed path is:
-someone on a machine with no `uv` pushes main or a tag directly, and the gate
-then runs under an unchecked interpreter.
+An earlier draft of this section said the gate fires "only for a DEFAULT-BRANCH
+or TAG push", sourced from the hook's own header comment
+(`# default branch (main/master) or any tag -> full publish.py --gate`). That
+was inferring control flow from a comment. The dispatch (`git-hooks/pre-push`
+lines 62-88) is broader:
 
-That is narrow. It is not zero, and it is the case where the diagnostic is
-worst — an `ImportError` naming a `typing` symbol tells the operator nothing
-about interpreter version. Priority accordingly: real, low urgency, worth
-fixing when the generator is next touched rather than as its own errand.
+```sh
+case "$remoteref" in
+    refs/tags/*|refs/heads/main|refs/heads/master) release_push=1 ;;
+    refs/heads/*)  # default branch -> release_push=1, else feature -> scan
+    *)             release_push=1 ;;   # unknown ref shape — gate conservatively
+esac
+...
+if [ "$release_push" -eq 1 ] || [ "$saw_feature" -eq 0 ]; then
+    run_release_gate
+```
+
+So `run_release_gate` runs on FOUR classes, not one:
+
+1. a tag, `main`, `master`, or the resolved default branch;
+2. **any unknown ref shape** — the `*)` arm gates conservatively by design;
+3. **any push where nothing parsed as a feature branch** (`saw_feature -eq 0`),
+   which includes a push consisting only of ref DELETIONS: those hit
+   `[ "$localsha" = "$ZERO" ] && continue` before either flag is set, so both
+   stay 0 and the gate runs;
+4. a push whose refs could not be read at all, for the same reason.
+
+That is the correct design for a fail-safe — when the hook cannot classify a
+push, gating is the safe default. But it means the unchecked-interpreter path is
+NOT the narrow "someone pushes main directly" case. On a host without `uv`,
+deleting a remote branch is enough to run the full release gate under whatever
+`python3` is on PATH.
+
+## …but the CONSEQUENCE is milder than that makes it sound
+
+Two reviews reached opposite-sounding conclusions here and both are correct,
+because they are about different things: the set of pushes that CALL the gate
+is wide (above), while the damage when it fails is small (here). Recorded
+together so neither is inherited alone.
+
+Trace the normal path. The hook's gate runs `publish.py` in a CHILD process,
+but a release push is itself started by an OUTER `publish.py` that already
+loaded. If `uv` is absent, that outer invocation was also a bare `python3` —
+so it would have hit the identical `ImportError` first, and no push would ever
+have begun. The hook's call is therefore never the FIRST load on the supported
+path.
+
+The one case where it is first is a direct `git push origin main` bypassing
+`publish.py` — and that push is refused anyway, by the process-ancestry check
+inside the very gate that is failing to import. Same for the ref-deletion case
+above: the push was going to be refused; it now gets refused with a worse
+message.
+
+**So the defect is: an unsupported interpreter produces a misleading diagnostic
+on a path that already fails.** Not a new broken capability. `requires-python`
+says `>=3.11`, so 3.10 failing is CORRECT behaviour — only the message is
+wrong. Priority: LOW. Worth fixing when the generator is next touched; not
+worth an errand of its own.
+
+The card is kept rather than closed because the underlying property — a
+fallback branch that inherits none of the enforcing branch's guarantees — is
+real, greppable, and will outlive the `assert_never` that exposed it.
 
 ## How it surfaced, and why the trigger is a red herring
 
@@ -69,15 +120,39 @@ is 3.11+. A grep for the 3.11 additions I could name (`tomllib`,
 `assert_never`) matched only `assert_never`, so on that evidence the module
 loaded on 3.10 before the change and does not now.
 
-**That grep is a NAMED-FEATURE check, not a proven version floor**, and the
-difference matters to anyone re-deriving this. It would miss
-`asyncio.TaskGroup`, `enum.StrEnum`, `datetime.UTC`, `contextlib.chdir`,
-`typing.Never`/`assert_type`/`dataclass_transform`, `hashlib.file_digest`, the
-`re` atomic-group syntax, and all 3.12 syntax (PEP 695 `type` statements,
-nested f-string quotes). None is plausible in this file today, but the honest
-claim is "my grep found one", not "there is one". A real floor check —
-`vermin`, or `ruff` with `target-version` — is wired up nowhere in this repo,
-which is itself worth knowing.
+**That grep is a NAMED-FEATURE check, not a proven version floor.** What it
+misses splits two ways, and the split is the point:
+
+- **Importable names a longer grep COULD catch** — `asyncio.TaskGroup`,
+  `asyncio.timeout`, `enum.StrEnum`, `datetime.UTC`, `contextlib.chdir`,
+  `typing.Never`/`Required`/`NotRequired`/`assert_type`/`dataclass_transform`,
+  `hashlib.file_digest`, `BaseException.add_note`. Of these, `file_digest`
+  (this file has `_refresh_integrity_manifest`), `datetime.UTC` and
+  `contextlib.chdir` are the plausible ones.
+- **Pure SYNTAX that NO name-grep can ever find** — `except*`, `re` atomic
+  groups `(?>...)` and possessive quantifiers inside a pattern string, PEP 695
+  `type` statements, PEP 701 nested f-string quotes. These have no name in the
+  source. (`except*` was even in my pattern, which does not help: `*` is a
+  regex metacharacter, and `except *` with a space is legal.)
+
+So a longer grep does not close this — only an AST-based checker does. It also
+**checked one FILE, not the import closure**: any `scripts/lib/*` module
+imported at `publish.py`'s module scope breaks the load identically.
+
+**The remedy is `vermin`, NOT `ruff`.** An earlier draft of this line offered
+"`vermin`, or `ruff` with `target-version`" — the ruff half is wrong and was
+exactly the false-backstop shape this session spent its time deleting from
+`publish.py`'s skip warnings. `target-version` selects which lint rules apply
+and how autofixes are written; the relevant family (`UP`/pyupgrade) modernizes
+*toward* the target and does not reject constructs *newer* than it. With
+`target-version = "py310"`, ruff does NOT flag `from typing import
+assert_never` — no rule checks stdlib-symbol availability. `vermin` computes a
+minimum version from an AST walk and catches both halves of the split above.
+
+Neither is configured here. That claim rests on: no `.pre-commit-config.yaml`
+(established earlier this session), `.mega-linter.yml` dormant and running
+nothing, and ci.yml's five jobs enumerated by `yaml.safe_load` — none runs a
+version-floor check. Not exhaustively re-verified for a stray `vermin.ini`.
 
 On a 3.10 host with no `uv`, the gate therefore dies with an `ImportError` on a
 typing symbol, during a push, and takes EVERY entry point with it — `--gate`,
