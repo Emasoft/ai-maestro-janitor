@@ -107,10 +107,25 @@ as *done* would have ticked two boxes on nothing.
       already tracked, no rule anywhere — still contamination"* — and which
       asserts `gc.tracked_offenders(private + plain + protected) ==
       sorted(private)` with `.env` in `private`.
-      Corroborated by the implementation: `scripts/lib/gitignore_coverage.py:154-157`
-      states *"ONE way in: `matches_private_class` — the file is in a private
-      class WHETHER OR NOT any `.gitignore` rule exists for it."* So the box holds
-      by construction, not only by fixture.
+      Settled by the implementation's CODE BODY, not its docstring —
+      `scripts/lib/gitignore_coverage.py`, the return of `tracked_offenders`:
+
+          return sorted(
+              p for p in tracked
+              if not is_protected(p) and not is_negated(p) and matches_private_class(p)
+          )
+
+      Rule state is not an INPUT. The only predicates are `is_protected`,
+      `is_negated` and `matches_private_class`; there is no `is_ignored` call and
+      no `.gitignore` consultation anywhere in the expression. So "with no rule"
+      cannot change the verdict, and the box holds by construction rather than by
+      fixture — which also answers why the `:77` test does not need to construct
+      a rule-free repo to be evidence for it.
+      A first version of this line cited the DOCSTRING at `:154-157` ("the file is
+      in a private class whether or not any `.gitignore` rule exists for it") as
+      if it were the implementation. It says the right thing, and this session has
+      repeatedly found prose that no longer matched its code — including in this
+      very file's neighbours. Cite the expression.
       Run on the tree at `72725c03`: `pytest tests/test_gitignore_coverage.py
       tests/test_tracked_ignored.py` → 17 passed.
 
