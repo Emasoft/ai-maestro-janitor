@@ -625,7 +625,17 @@ def task_marketplace_refresh() -> None:
                 + "; ".join(f"{n} ({why})" for n, why in sorted(dropped.items())),
             )
         if not plan:
-            state.log_line("daemon", "  marketplace-refresh: refreshed 0/0 marketplaces (none installed)")
+            # "none installed" was true when the plan came straight from
+            # installed_plugins.json. It is NOT true any more: this return is now
+            # reached whenever the plan is empty AFTER filtering, so a host whose
+            # every installed plugin came from a local or unregistered marketplace
+            # would be told nothing is installed while plugins plainly are. Say
+            # which of the two it was — the `dropped` count is the discriminator.
+            state.log_line(
+                "daemon",
+                "  marketplace-refresh: refreshed 0/0 marketplaces "
+                + (f"(all {len(dropped)} skipped)" if dropped else "(none installed)"),
+            )
             return
         per_item_timeout = state.coerce_int(
             state.plugin_option("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S"), 60

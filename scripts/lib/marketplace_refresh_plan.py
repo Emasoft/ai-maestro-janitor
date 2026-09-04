@@ -64,6 +64,13 @@ def filter_refreshable(
 ) -> tuple[list[str], dict[str, str]]:
     """Split a plan into (refreshable, {dropped_name: reason}).
 
+    **`keep` and `dropped` PARTITION `names`: every input appears in exactly one,
+    and nothing is invented.** This is a load-bearing invariant, not a description
+    — `daemon.py`'s empty-plan message reports `(all N skipped)` where N is
+    `len(dropped)`, and that is only true because an empty `keep` implies every
+    input was dropped. A future edit that drops a name without recording a reason
+    (a bare `continue`) would keep the types valid and make that message lie.
+
     WHY (owner report 2026-09-04): `marketplace-refresh` logged
     `ai-maestro-local-marketplace exited rc=1` on EVERY hourly run — a permanent
     31/32 that never converged and never escalated. Two distinct defects fed it,

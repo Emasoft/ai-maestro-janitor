@@ -172,12 +172,89 @@ def test_a_partial_success_is_not_a_failed_run(
     isolated: tuple[Path, list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The fix's stated contract: the run fails ONLY when every item failed — one
-    success out of two is a successful task run, not a failure."""
+    success out of two is a successful task run, not a failure.
+
+    The per-item budget is SCALED, unlike the `no_timeout_scale` siblings above.
+    Those tests are ABOUT the timeout, so they need the real short ceiling. This one
+    is about the partial-success bookkeeping, and its budget is incidental
+    infrastructure: under host load a trivial `ok-mkt` subprocess spawn can exceed a
+    bare 5s, both items then "fail", and the run correctly counts FAILED — turning a
+    green test red for a reason that has nothing to do with its assertion. Observed
+    2026-09-04 at loadavg 21.85/35.64 on 14 cores (passes alone in 32s). Same
+    unscaled-ceiling class as the four sites fixed in the 12-failure triage, at a
+    fifth site: a test's OWN env-var budget rather than a subprocess call.
+    """
     cache_parent, _ = isolated
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S", "5")
+    monkeypatch.setenv(
+        "CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S",
+        str(int(5 * daemon.state.timeout_scale())),
+    )
     _write_installed(cache_parent, ["ok-mkt", _FAIL_MARKET])
 
     task = daemon.Task("marketplace-refresh", 3600, daemon.task_marketplace_refresh, background=False)
     task.run()
 
     assert task._failcount() == 0, "a partial success must not count as a FAILED run"
+
+
+def _write_known(cache_parent_dir: Path, sources: dict[str, str]) -> None:
+    """`known_marketplaces.json` — name -> source kind ("github" / "directory")."""
+    (cache_parent_dir / "known_marketplaces.json").write_text(
+        json.dumps({n: {"source": {"source": k}} for n, k in sources.items()}),
+        encoding="utf-8",
+    )
+
+
+def test_empty_plan_after_filtering_does_not_claim_none_installed(
+    isolated: tuple[Path, list[str]],
+) -> None:
+    """The empty-plan early return must not say "(none installed)" when plugins ARE
+    installed and were merely all filtered out.
+
+    That branch used to hardcode the string, and adding `filter_refreshable` made it
+    reachable a SECOND way: a host whose every installed plugin comes from a local or
+    unregistered marketplace now lands here with plugins plainly installed. Cannot
+    occur on the dev host (31 marketplaces survive the filter), so it is reachable only
+    through a test — which is why the defect was found by reading and is pinned here.
+    """
+    cache_parent, lines = isolated
+    _write_installed(cache_parent, ["local-one", "gone-from-registry"])
+    _write_known(cache_parent, {"local-one": "directory"})  # the other is unregistered
+
+    daemon.task_marketplace_refresh()  # must not raise
+
+    joined = "\n".join(lines)
+    assert "refreshed 0/0 marketplaces (all 2 skipped)" in joined
+    assert "none installed" not in joined
+    # The advisory names each drop WITH ITS REASON. Asserting the names alone would
+    # pass on any line that happens to mention them; the reasons are what make it
+    # actionable, and they are what the comment above claims is tested.
+    assert "local-one (local directory marketplace" in joined
+    assert "gone-from-registry (not registered" in joined
+
+
+def test_empty_plan_with_nothing_installed_still_says_none_installed(
+    isolated: tuple[Path, list[str]],
+) -> None:
+    """The original meaning survives: no install records at all -> "(none installed)",
+    not "(all 0 skipped)".
+
+    CHARACTERIZATION TEST, not a detector — mutation-probed: it passes unchanged
+    against the pre-fix hardcoded string, because that string was already correct for
+    THIS input. Its sibling above is the one that detects the fix (probe: 1 failed,
+    1 passed). Kept anyway, because it guards the other direction — a future edit that
+    makes the message unconditionally say "skipped" would break here and nowhere else.
+    """
+    cache_parent, lines = isolated
+    _write_installed(cache_parent, [])
+    _write_known(cache_parent, {})
+
+    daemon.task_marketplace_refresh()
+
+    joined = "\n".join(lines)
+    # The EXACT line, exactly once — not a positive plus a negative-substring guess.
+    # A negative assertion (`"skipped" not in joined`, `"(all" not in joined`) only
+    # catches the wrongness you thought of; asserting the whole line catches the
+    # message being wrong in any way, and needs no reachability argument about which
+    # other log lines might contain the substring.
+    assert joined.count("refreshed 0/0 marketplaces (none installed)") == 1
