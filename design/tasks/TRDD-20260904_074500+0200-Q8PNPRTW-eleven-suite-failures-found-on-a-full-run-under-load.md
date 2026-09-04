@@ -204,13 +204,63 @@ external-refs: [TRDD-7NSRD8OV]
   "two candidate mechanisms" framing on this card was looking for a race in the product
   when the ordering error is in the test.
 
-  **The fix is not a timeout and not a marker — it is to obtain the grandchild pid before
-  the thing that kills it runs**, which is what row 1 already does. That is a real design
-  problem for row 2 (the test cannot poll during `capture_one`'s blocking call, and
-  `capture_one` owns the spawn), so the fix needs thought rather than a one-liner — but
-  the DIAGNOSIS is settled. Do NOT widen the 1.0 s timeout: it would mask the ordering
-  defect by making the writer usually win, leaving a test that passes for the wrong
-  reason and flakes forever under load.
+  **THIRD CORRECTION, AND THE ONE THAT HOLDS — BOTH ROWS FAIL FOR ONE REASON, AND THE
+  CODE ALREADY DOCUMENTS IT.** Everything above this line hunted a difference between the
+  two tests. There isn't one that matters, because **ROW 1 FAILS TOO, on the same run**
+  (`/tmp/verify.txt:10-58`) — with a plain `Popen`, the INHERITED environment, CORRECT
+  poll-before-kill ordering, and a budget of `int(50 * slack)` × 0.1 s ≥ **5 s**. Five
+  seconds is ample for a `fork` plus a 6-byte write. So:
+
+  - the ordering story is dead — row 1 has the right ordering and fails anyway;
+  - the `env={}`/no-`PATH` story is dead — row 1 inherits a normal environment;
+  - the "1.0 s is too tight" story is dead — row 1's budget is 5× larger.
+
+  A zero-iteration-loop hypothesis (`int(50 * slack)` == 0) is also REFUTED, checked
+  rather than assumed: `_deadline_slack()` returns `max(_DEADLINE_SLACK=1.0,
+  timeout_scale())`, so slack ≥ 1.0 by construction and the loops always run ≥ 50 / ≥ 30
+  iterations.
+
+  **`_deadline_slack()`'s own docstring (tests/test_capture_all_logins.py:37-51) states
+  the mechanism outright**, and it predates this card:
+
+  > *Under this suite's own load the fork/exec/write can outrun a fixed 3-5s budget, so
+  > the fake process is presumed dead-on-arrival and the test fails on a missing pid file
+  > — a load artifact, not a hang in `_kill_process_group`.*
+
+  It also explains WHY the budget cannot be scaled the usual way: conftest's Popen-kwarg
+  patch "only stretches an explicit `timeout=` kwarg, never a raw
+  `for _ in range(N): time.sleep(0.1)` budget". `_deadline_slack()` exists precisely to
+  bridge that gap, reading `state.timeout_scale()` at call time.
+
+  **SO THE OPEN QUESTION IS NOW SHARP AND MEASURABLE:** does `state.timeout_scale()`
+  actually return > 1.0 during a full `-n auto` run? If it returns 1.0, `_deadline_slack()`
+  is inert, the budget stays at its fixed 5 s / 3 s, and both rows fail exactly as
+  observed. That is one print statement to settle, and it is the next step — not another
+  reading of the tests.
+
+  ---
+
+  *(SUPERSEDED — kept because the reasoning shows how three plausible stories each died.
+  Widening row 2's timeout was argued as the fix on these grounds:)* Read `scripts/capture_all_logins.py:115-166`. `capture_one` line 137
+  calls `_capture_cmd(email)`, which the test monkeypatches to the fake script, so the
+  script genuinely runs — `TimeoutExpired` was raised, so it ran for the full second.
+
+  The fake script sleeps **600 s**. So ANY timeout below 600 fires while the script is
+  still alive, and the test's assertion — *does `capture_one` kill the whole process
+  tree* — is completely insensitive to the value. **The 1.0 s bounds SETUP, not the
+  behaviour under test.** Under load 16-31, `Popen` + `sh` startup + `fork` + `echo` can
+  exceed 1.0 s, so the kill lands before the pid is ever written; that is the entire
+  failure.
+
+  Widening it to, say, 10.0 s therefore weakens NOTHING — the script still sleeps 600 s,
+  the timeout still fires, the process group is still killed, and the assertion still
+  tests exactly what it tested before. It just stops racing the fixture's own setup.
+
+  The earlier "do NOT widen the timeout" ruling applied a real principle to the wrong
+  test: a timeout that DEFINES the behaviour under test must not be widened, but one that
+  merely bounds setup must be when setup outgrows it. Row 2's is the second kind, and
+  distinguishing them requires reading what the assertion actually depends on — which the
+  first ruling did not do.
 
   *(Evidence report: `reports/suite-failures/20260904_110119+0200-row2-mechanism-evidence.md`.)*
 
