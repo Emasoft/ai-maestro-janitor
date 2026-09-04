@@ -64,16 +64,22 @@ All three NITs were `MD056/table-column-count` at 563:86, 564:84, 565:29 of
 So the repo's stated intent is that design cards **do not** gate the publish. At
 least one of them did.
 
-**`design/` IS in scope — MEASURED 2026-09-04, and it is worse than NITs.**
-Running stage 4 standalone (`uvx --from git+…claude-plugins-validation@v5.16.2
---with pyyaml cpv-remote-validate plugin . --strict`, exit 1) reported three
-findings, all in `design/tasks/` — and two were **CRITICAL**, not NIT: *"Private
-path leaked: macOS private path with username"*. So a design card can block a
-release on the SECURITY gate, not merely the lint gate.
+**A design card can block a release on the SECURITY gate, not merely the lint
+gate — MEASURED 2026-09-04.** Running stage 4 standalone (`uvx --from
+git+…claude-plugins-validation@v5.16.2 --with pyyaml cpv-remote-validate plugin
+. --strict`, exit 1) reported two **CRITICAL** findings — *"Private path leaked:
+macOS private path with username"* — in a `design/tasks/` card. That is
+unambiguous and it is the worse failure mode: strictly more blocking than the
+NIT this card was filed about.
 
-Whether selection is the changed set or the whole tree is still undetermined:
-the only design file reported was the one edited in this session, which is
-consistent with both.
+**HOW MANY cards are in scope remains UNKNOWN — do not read the above as
+"all 437".** The only design file ever reported, in either run, was the one
+edited in that same session. That is equally consistent with changed-set
+selection (blast radius: cards you touch in a given publish — a per-card
+discipline problem) and with whole-tree selection (blast radius: every card
+gates every release — needs a repo-side or upstream lever). The two readings
+call for different fixes, which is why the acceptance criteria settle selection
+before anything else.
 
 `.mega-linter.yml` is **probably not a lever, but that is PHASE-SPECIFIC and the
 relevant phase is untested.** Precisely what is established, per the completed
