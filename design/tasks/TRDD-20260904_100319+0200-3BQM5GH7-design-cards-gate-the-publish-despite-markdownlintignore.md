@@ -3,7 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: todo
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T10:43:11+0200
+updated: 2026-09-04T10:45:12+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -21,11 +21,12 @@ external-refs-note: local-only path (reports/ is gitignored) — the load-bearin
 require a decision that is not the janitor's to make alone — one changes what
 gates this repo's publish, the other files an issue on a different project.
 
-**GIT DOES NOT GATE WHAT MARKDOWNLINT REPORTS (3 probes, 2026-09-04):** a
-`design/` file is reported regardless of git tracking, git status, or gitignore
-— all three probed, none gates it. That is the actionable finding. Note the
-verb: the probes read the FINDINGS LIST, so "selection" is a step further than
-they reach.
+**NO TESTED GIT STATE GATES REPORTING (3 probes, 2026-09-04):** three files in
+`design/tasks/` — one dirty-but-unchanged-vs-`origin/main`, one untracked, one
+gitignored — were each reported. That is the actionable finding, and the
+headline claims exactly those three data points: not "git is irrelevant", not a
+general property of markdownlint. Note the verb too: the probes read the
+FINDINGS LIST, so "selection" is a step further than they reach.
 
 It does NOT settle the five-candidate table further down. Candidates 3
 (markdownlint used as a LIBRARY) and 4 (CPV lints a temp checkout) are fully
@@ -143,7 +144,7 @@ restored from backup and `diff`-verified identical.
 | HEAD vs `origin/main` | eliminated (probe 1) |
 | anything tracked-only | eliminated (probe 2 — untracked file reported) |
 | everything not gitignored | **eliminated (probe 3 — gitignored file reported)** |
-| **path-based selection** | **the surviving FAMILY** |
+| **path-based selection** (hypothesis — the rows above were eliminated by REPORTING observations, so this row is what remains to be *tested*, not something measured) | **the surviving FAMILY** |
 
 **CPV's markdownlint selects by path, not by git.** Precisely: git's *ignore
 rules*, *tracking*, and *diff-vs-origin* are each shown not to gate INCLUSION.
@@ -170,8 +171,19 @@ evidence of any glob, and if anything it argues against one uniform walk.
 
 **Not one of the 47 is a markdownlint finding** (`NIT=0` in that run). Counting
 genuine findings by their `] markdownlint:` prefix across all seven runs on
-disk: 6 in total — 3 in the original publish, 1 from each probe — and every one
-names `design/`.
+disk: **6 findings from 4 defects** — the publish's 3 are three prose lines of
+ONE malformed table, plus 1 from each probe — and every path names
+`design/tasks/`.
+
+Method note, because the card recommends a probe designed to produce a finding
+OUTSIDE `design/`: verify by printing the finding LINES
+(`grep -h '] markdownlint:' /tmp/*.txt`), never by matching paths against a
+directory alternation. A first pass here used
+`grep -oE '/(design|skills|…)/'`, which has no match for a repo-root file or
+for `hooks/`, `git-hooks/`, `.github/` — so a real finding outside the list
+would have rendered as an EMPTY directory field, visually near-identical to a
+run with no findings at all. The count column happened to make it detectable
+this time; that was luck, not design.
 
 **That last fact is nearly worthless as evidence, and it is worth saying why.**
 Every defect ever planted in these experiments was placed in `design/`. Finding
