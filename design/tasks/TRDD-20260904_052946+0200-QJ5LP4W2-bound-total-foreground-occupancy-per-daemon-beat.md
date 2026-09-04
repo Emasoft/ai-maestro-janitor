@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-04T14:30:41+0200
+updated: 2026-09-04T14:32:43+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -238,16 +238,39 @@ bounds that **sum** — only individual subprocess workloads are capped
   **The honest finding is that the port's semantics are UNDERSPECIFIED, and its effect
   on the survival beat is therefore undetermined in EITHER direction:**
 
-  | if the ported rule selects… | then `oauth-rotator-tick` is… |
-  |---|---|
-  | **who RUNS** (the bulk lane's meaning) | never selected → **starved** |
-  | **who is DEFERRED** (a budget's meaning) | never deferred → **protected** |
+  **⚠ FOURTH attempt at this paragraph, and the THIRD wrong mechanism — the prose above
+  states the underdetermination correctly and then a table smuggled a mechanism back
+  in.** The retracted table had two rows: *"selects who RUNS → never selected →
+  **starved**"* and *"selects who is DEFERRED → never deferred → **protected**"*. **Row
+  2 holds. Row 1 is false**, and the dispatch loop refutes it:
 
-  The bulk lane selects who *runs*; a foreground budget selects who is *deferred*. Those
-  are opposite polarities, and until the port fixes one, no claim about the survival
-  beat follows. **Two attempts here reached for a concrete failure mode the evidence
-  does not pin down** — the first a category error (`t.background` filters the beat out
-  entirely), the second this inversion, each presented as sharper than the last.
+  ```python
+  if task.background:
+      if bulk_busy or task is not bulk_next:
+          continue          # one bulk lane: defer
+      task.spawn_background()
+      continue
+  task.run()                # foreground: unconditional
+  ```
+
+  `bulk_next` gates **only** the `task.background` branch; a foreground task reaches
+  `task.run()` regardless. "Never selected" therefore means *nothing* for a foreground
+  task — that selection is not what decides whether it runs.
+
+  **And row 1 is not even a readable alternative.** The lane's rule is a **scarcity
+  allocator**: one lane, N due background tasks, pick one. The foreground loop has no
+  scarcity — *every* due foreground task runs, every pass. To port the rule as "who
+  runs" you must FIRST invent a foreground scarcity constraint that does not exist
+  today, and the starvation outcome would then follow from that invented constraint,
+  not from `min(due, key=_last_run)`. Presenting the two rows as symmetric made the
+  underdetermination look like a live 50/50 when only one row describes a policy anyone
+  would write here.
+
+  **So the polarity point stands, but only in one direction, and the honest form is
+  simply: the port's semantics are unspecified and nothing about the survival beat
+  follows from them.** Attempt 1 was a category error (`t.background` filters the beat
+  out entirely), attempt 2 an inversion, attempt 3 this table. Each was presented as
+  the sober correction of the last.
 
   **What stands without any of that, and is sufficient on its own:
   `min(due, key=_last_run)` has NO exemption concept.** A foreground policy needs
@@ -265,6 +288,28 @@ bounds that **sum** — only individual subprocess workloads are capped
   than pre-empting it.
 
 ## Notes and lessons learned
+
+**⚠ Correcting a claim in `4453f8b4`'s own commit message.** It says *"the mechanical
+corrections this session have all been right; **every** interpretive rewrite has
+failed."* Both halves are one notch too wide — the same defect the sentence was
+describing:
+
+- **"Every interpretive rewrite has failed" is refuted by the commit it appears in.**
+  The candidate-framing rewrite in `4453f8b4` is interpretive and it held. So is
+  `TRDD-3BQM5GH7`'s central narrative ("the ignore file is for a tool we do not run"),
+  which has survived every round since. The true claim is much narrower and still
+  striking: **every attempt to state a concrete mechanism for the `_next_bulk_task`
+  port has failed — four for four.**
+- **"The mechanical corrections have all been right" glosses one.** `_run_due_pass` was
+  an invented symbol — a mechanical error — and it landed in `738e5f67`. I caught it
+  myself before review, which is not the same as it never happening.
+
+**The lesson underneath is about the SHAPE of the failures, not their count.** The
+paragraph that kept failing is the one asking *"what would this policy do to a specific
+task?"* — a question the evidence cannot answer, because the policy does not exist yet.
+Each rewrite invented a slightly different policy in order to have something concrete to
+say about it. **When a question presupposes an artifact that has not been designed, the
+answer is not a better guess; it is naming the missing artifact.**
 
 - **A card whose title says "measure X" should not be the card that decides how to
   fix X.** 8BXMNQ4T's remedy box was ticked and un-ticked three times, and at least
