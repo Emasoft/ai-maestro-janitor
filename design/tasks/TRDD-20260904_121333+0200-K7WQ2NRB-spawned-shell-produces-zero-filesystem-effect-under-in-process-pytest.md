@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T01:31:36+0200
+updated: 2026-09-05T01:35:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -56,9 +56,11 @@ external-refs: [TRDD-Q8PNPRTW]
   later one. Both pass more often under `-n auto` than serially.
 - **2026-09-05, WEAK and in-config:** both rows passed in two consecutive full-suite runs
   (16416 passed, 11m03s / 13m02s), incidental to TRDD-2640RYR5. Host load unsampled, so
-  unplaceable on the load axis; the module runs 0 skips standalone, so the suite's 1 skip is
-  not these. Takes the full-suite cell from 2 points to 4 (soak8 PASS 11.39, soak9 FAIL 15.53);
-  cannot narrow the cause — only a captured failure can.
+  unplaceable on the load axis. Each run's `1 skipped` cannot be either row — **a skip is not a
+  pass, and both rows are inside `16416 passed`** (arithmetic, needing no run; a standalone
+  `-rs` gave 16 passed / 0 skipped, but that only excludes a DETERMINISTIC skip and this card's
+  subject is load-gated). Takes the full-suite cell from 2 points to 4 (soak8 PASS 11.39,
+  soak9 FAIL 15.53); cannot narrow the cause — only a captured failure can.
 
 ## Excluded BY READING SOURCE (not by inference)
 
@@ -221,16 +223,20 @@ on Q8PNPRTW for being plausible.
 
 ## NEXT ACTION — REORDERED 13:00; the old order is stale
 
-0. **THE EXPERIMENT STEP 1a's SHAPE CANNOT PRODUCE — a full-suite loop with load sampling.**
+0. **(ADDED 2026-09-05, ahead of the 13:00 order — not part of that reordering.)
+   THE EXPERIMENT STEP 1a's SHAPE CANNOT PRODUCE — a full-suite loop with load sampling.**
    Step 1a burned 14 runs on a 2-TEST SELECTION and proved only that that configuration does
    not fail at load ≤36. The failing observations (soak9) are IN-CONFIG, i.e. the rows running
    inside the full-suite pytest process. So the experiment is: loop the FULL suite, sample host
    load throughout each run, and preserve every run's output — then a failure is caught in the
    configuration that actually fails, with its load on the record. Expensive by construction
    (~12 min/iteration), which is exactly why the 4 in-config data points so far are worth
-   counting before spending more. Note this does NOT contradict step 1's "do not re-attempt by
-   re-running the tests": that forbids re-running the 2-test selection, which is the shape that
-   cannot reproduce.
+   counting before spending more.
+   **Why this does not violate step 1's "do not re-attempt by re-running the tests":** that
+   prohibition rests on (1a), and the card brackets (1a) to the 2-test selection in its own
+   words — *"licenses NOTHING about the full-suite configuration"*. Step 0 IS the configuration
+   (1a) excludes itself from. Citing the card against itself, not reconstructing what a prior
+   session meant.
 
 1. **⇒ CAPTURE A FAILING RUN'S CHILD STDERR — NOT PERFORMED. The step splits by row: for
    ROW 1 it was ANSWERED FROM THE ARCHIVE (1c); for ROW 2 it is UNREACHABLE as written (1b).
