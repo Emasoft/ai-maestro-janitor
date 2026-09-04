@@ -3,7 +3,7 @@ trdd-id: FFXGPZEI
 title: rename last-run stamps to last-attempt so the wrong inference cannot be spelled
 column: backburner
 created: 2026-08-30T02:18:14+0200
-updated: 2026-08-30T02:22:00+0200
+updated: 2026-09-04T05:19:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 scope: project
@@ -14,7 +14,7 @@ blocked-by: []
 npt: []
 eht: []
 relevant-rules: []
-external-refs: [TRDD-H8WRCW0I, TRDD-COQN6KVA]
+external-refs: [TRDD-H8WRCW0I, TRDD-COQN6KVA, TRDD-5EHBPH6G, janitor#297]
 ---
 
 # `last-run-*.ts` invites the one inference it cannot support
@@ -33,6 +33,32 @@ to spell**, whereas the note now sitting in TRDD-H8WRCW0I only protects readers 
 card. Two sessions spent most of an investigation on exactly this confusion on 2026-08-29/30 —
 78 imaginary days of a "dark lane" that turned out to be an abandoned state dir, and separately a
 "the guard ran 40 minutes ago" that was a decline at gate 3.
+
+## FIRST REAL-WORLD CONSEQUENCE — issue #297, reported by a peer agent (2026-09-04)
+
+Until now this card argued from principle: the name invites an inference it cannot
+support. Issue #297 is the first case where that inference was actually drawn and
+actually misled, so it is recorded here as the card's evidence.
+
+The `marketplace-refresh` daemon chore failed **11 consecutive times** over ~30 h on
+this host, each run SIGKILLed at ~1935 s by the workload cap. Throughout,
+`read_last_run("marketplace-refresh")` — the value `identify_environment.py` and
+`fleet_status.py` render as *"marketplace refreshed N ago"* — kept reporting fresh,
+because `Task.poll_background` stamps at REAP time regardless of exit code. **A chore
+that had not succeeded in a day and a half displayed as healthy**, and the streak was
+found only because a peer agent read the raw `daemon.log`.
+
+The reporter was the Claude of another project on this machine, which is the part
+worth noting: the misleading display survived every automated surface and was caught
+by a human-style read of the log.
+
+**What this does and does not change.** It does NOT unblock the card — the sole
+blocker is still cross-repo readers (below), and #297's other half was fixed
+independently by TRDD-5EHBPH6G in v3.4.14 (per-item timeout + shared run deadline;
+verified live: 1935 s SIGKILL → ~100 s clean, 4/4). It DOES change the severity
+argument: `severity: low` was set when the harm was hypothetical. A failing chore
+that reads as healthy is a monitoring failure, and the next chore to fail this way
+will be hidden the same way — half 1 fixed *this* task, not the display.
 
 ## Why this is `backburner` — ONE reason, and it is not the one first written here
 
