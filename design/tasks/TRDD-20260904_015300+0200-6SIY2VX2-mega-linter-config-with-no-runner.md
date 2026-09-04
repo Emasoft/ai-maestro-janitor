@@ -35,16 +35,30 @@ implementation-commits: []
   `<SUB_LINTER>` parity)". Whether CPV PARSES this config or carries its own
   list is UNPROVEN and is precisely what the delete-vs-keep decision turns
   on.
-- REPO-INVARIANT: no workflow runs ANY of the 11. That is the fact the
-  delete-vs-keep decision rests on.
-- MACHINE-DEPENDENT, and do not restate it as a repo property: which of them
-  run AT ALL depends on what is installed, because CPV's preflight runs the
-  tools it finds on PATH and warns-then-passes for the rest. Measured on the
-  owner's laptop 2026-09-04: 8 ran, 3 skipped (cspell, checkov, trivy).
-  Install cspell and that split changes without the repo changing. jsonlint,
-  yamllint and markdownlint were not among the preflight's 11 reported checks
-  at all, so those three appear to have no runner on any machine — but that is
-  an absence in one run's output, not something positively verified.
+- COUNT CORRECTION: `ENABLE_LINTERS` holds **12**, not 11. Earlier text here
+  said 11 because it was read from a truncated `head -12` that cut
+  `REPOSITORY_TRIVY` off the end. The full list is PYTHON_RUFF, PYTHON_MYPY,
+  PYTHON_BANDIT, BASH_SHELLCHECK, BASH_SHFMT, JSON_JSONLINT, YAML_YAMLLINT,
+  MARKDOWN_MARKDOWNLINT, SPELL_CSPELL, COPYPASTE_JSCPD, REPOSITORY_CHECKOV,
+  REPOSITORY_TRIVY.
+- REPO-INVARIANT: no workflow runs ANY of the 12. That is the fact the
+  delete-vs-keep decision rests on, and it holds on every machine.
+- DO NOT map the config onto the preflight by count — the two are different
+  sets that happened to both look like 11. CPV's preflight reported 11 CHECKS,
+  of which three (`actionlint`, `uv-sync-dev`, `ci-parity`) are CPV's own and
+  correspond to no configured linter at all.
+- The honest mapping, measured on the owner's laptop 2026-09-04:
+  - **5 RAN** in the preflight — mypy, bandit, shellcheck, shfmt, jscpd.
+  - **3 SKIPPED** because the tool was absent — cspell, checkov, trivy. This
+    is MACHINE-DEPENDENT: install cspell and it moves to RAN with no change to
+    the repo. Coverage that varies by publishing host is the sharper hazard.
+  - **3 NEVER APPEARED** — jsonlint, yamllint, markdownlint. Note CPV emits a
+    warning for a configured-but-missing tool (it did for the three above), and
+    emitted none for these, which argues they are not implemented in the
+    preflight rather than silently skipped. Still an inference from one run's
+    output, not positively verified; `ci-parity` (CIP-1..8) is opaque and could
+    in principle fold them in.
+  - **1 elsewhere** — ruff runs in `stage_lint`, not the preflight.
 
 ## Acceptance criteria
 
