@@ -3,7 +3,7 @@ trdd-id: 3VIXO8FA
 title: The keychain denied-latch treats a stalled security call as a denial and blinds rotation
 column: todo
 created: 2026-09-05T15:16:36+0200
-updated: 2026-09-05T15:33:00+0200
+updated: 2026-09-05T15:42:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -42,18 +42,26 @@ NOT observed" (slot reads). Every beat from then on read "no live credential / S
 hand at ~14:55 (the cap crossing is inferred — no 429 was recorded, the beat was blind). The
 only trigger is 97%.
 
-**Why `security` stalled is NOT established.** Host loadavg was 18–27 on 14 cores, and the
-server's independent tmux keychain watchdog logged eight `keychain_probe_timeout`s between
-13:59 and 15:08 — so `security` calls stalled machine-wide, from two instruments. At loadavg
+**Why `security` stalled is NOT established.** Host loadavg was 18–27 on 14 cores (a
+coincidence, not a measured cause). Separately, the server's tmux keychain watchdog logged
+eight `keychain_probe_timeout`s between 13:59 and 15:08 — a second process, same uid and
+same securityd, saw `security` hang in the same window (its onset 31 min earlier). At loadavg
 11 (15:22) a not-found attribute read on a different service took 0.01–0.02 s (which rules
 out nothing — different op, different condition). Load is a correlation; securityd contention
-is one other candidate; the set is not enumerated. The watchdog IS an independent
-instrument: `ps` ancestry shows pm2 and the tmux server are both direct children of launchd
-(two process trees, one window) — "machine-wide", as the 2c26db5b commit subject put it,
-was one step past that evidence. **Scope of this card:** it removes the false positive for
-isolated/transient stalls. For a persistently blocked keychain (every `-w` read hangs to
-budget) it delays the latch by two reads and changes nothing else — and there the latch is
-the right outcome, which the tests must PRESERVE (a third consecutive timeout still latches).
+is one other candidate; the set is not enumerated. `ps` ancestry shows pm2 and the tmux
+server are both direct children of launchd, which rules out only "the watchdog watched pm2
+itself" — "machine-wide", as the 2c26db5b commit subject put it, was one step past the
+evidence. **Scope of this card:** it removes the false positive for isolated/transient
+stalls. For a persistently blocked keychain (every `-w` read hangs to budget) it delays the
+latch by two reads and changes nothing else — there the latch is the correct ANTI-FLOOD
+behaviour and rotation stays blind (today's 14:30–15:09: probes re-latching every cooldown).
+The tests must PRESERVE the third-consecutive latch; the blindness under a persistent block
+is the alert path's defect, not this card's. **Behaviour change to name and bound:** a
+non-latching attribute-only timeout makes `_primary_last_modified` return None, which
+`beacon_needs_restamp` reads as "changed" → `write_live_identity_beacon` → a `-w` read in the
+same tick that the old latch would have short-circuited. Acceptable only because that `-w`
+read carries `may_prompt=True` and counts toward the threshold; the test must show an
+attribute-only timeout does not cascade into more than ONE `-w` attempt per tick.
 
 **The janitor's own python path is one step worse.** `safe_storage.run_security`'s
 `except subprocess.TimeoutExpired: set_keychain_denied(...)` branch (read at
@@ -117,6 +125,8 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
 - [ ] Every `run_security` call site passes `may_prompt` explicitly:
       `grep -rn 'run_security(' scripts | grep -v 'def run_security' | grep -vc 'may_prompt='` prints 0.
 - [ ] An attribute-only op whose stderr carries a denial marker still sets the latch (test).
+- [ ] A persistently blocked keychain still latches on the 3rd consecutive `-w` timeout (test).
+- [ ] An attribute-only timeout cascades into at most ONE `-w` attempt in the same tick (test).
 - [ ] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`,
       `uvx --with pyright pyright`, and `tests/test_safe_storage*.py` + `tests/test_oauth_rotator*.py` green.
 
