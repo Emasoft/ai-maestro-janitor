@@ -3,14 +3,14 @@ trdd-id: JDIJ76SW
 title: TRDD filename matcher drops v1-migrated bare TRDD-<8hex>-<slug> cards from detectors and the board count
 column: testing
 created: 2026-09-05T18:31:12+0200
-updated: 2026-09-05T18:49:00+0200
+updated: 2026-09-05T18:51:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
 min-approval-requirement: none
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [5ea63752]
 external-refs: [ai-maestro:D552QXOU, ai-maestro:UAP7ZEJL, ai-maestro:f6f4664e]
 relevant-rules: []
 ---
