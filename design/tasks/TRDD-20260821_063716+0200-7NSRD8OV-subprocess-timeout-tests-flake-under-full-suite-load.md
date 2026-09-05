@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-05T10:38:00+0200
+updated: 2026-09-05T13:18:49+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,6 +15,19 @@ eht: []
 ---
 
 # Subprocess-timeout tests flake under full-suite load
+
+## ⏵ 2026-09-05 13:18 — a full `-n auto` run landed RED: does NOT meet the ruling's bar
+
+`reports/suite-soak/20260905_103230+0200-full-nauto.txt` (1474 lines, read in full):
+**`38 failed, 16379 passed, 1 skipped, 8 subtests passed in 2513.09s (0:41:53)`, `exit=3`.**
+22 `TimeoutExpired` occurrences in tracebacks (category-D shape), plus a `REAL-STATE WRITE
+GUARD FAILED` block showing a test mutated `scripts/hooks/post-compact-resume.py` mid-run.
+**This does not satisfy the 2026-09-03 RULING's bar** ("ONE green publish test-gate... with
+zero category-D `TimeoutExpired` failures") — this run is the opposite of green. The
+RULING's own text only ever required one qualifying green run, not a repeat; this simply
+is not that run. Full triage, including per-test detail:
+`reports/board-drain/20260905_131849+0200-suite-run-triage-7NSRD8OV-Q8PNPRTW.md`. `column:`
+left at `testing` — the bar remains unmet.
 
 ## ⏵ RULING 2026-09-03 (janitor-main-session for USER)
 

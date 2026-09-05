@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-05T10:46:00+0200
+updated: 2026-09-05T13:18:49+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -24,6 +24,27 @@ external-refs: [TRDD-7NSRD8OV]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
+> ### ⏵ 2026-09-05 13:18 — a full `-n auto` run landed RED: 38 failed, exit=3, 8 of 11 recurred
+>
+> `reports/suite-soak/20260905_103230+0200-full-nauto.txt` (1474 lines, read in full):
+> **`38 failed, 16379 passed, 1 skipped, 8 subtests passed in 2513.09s (0:41:53)`, `exit=3`.**
+> No load-average/meta line accompanies this capture. Of this card's original 11 named
+> failures, **8 recurred** (both `capture_all_logins` rows, all 3 `gh_reply_watch` rows, 2
+> of 3 `memory_librarian` reindex rows, `token_usage_anomaly`); **3 passed**
+> (`marketplace_refresh_scoped` ×2, `memory_librarian::test_reindex_invoked_for_the_local_root`).
+> **27 more failures outside this card's original population also appeared** — 6
+> `daemon_integration`, 9 `test_branch_protection.py`, 9 `test_branch_protection_guard.py`,
+> `pkg_manager_guard`, `pre_push_python_floor` ×2, `self_scan_guard`, `github_issues_watch`
+> ×2, `launchd_keepalive`, `external_clear_retry` — most raw `TimeoutExpired` (22
+> occurrences in tracebacks). Also: a `REAL-STATE WRITE GUARD FAILED` block (lines 233-251)
+> shows the run mutated `scripts/hooks/post-compact-resume.py` mid-run — a test escaped
+> isolation, independent of the 38 red tests. Full triage:
+> `reports/board-drain/20260905_131849+0200-suite-run-triage-7NSRD8OV-Q8PNPRTW.md`.
+> **This run does NOT close this card's waiver question** — it is far redder than the
+> load-artifact framing this card had settled into, and most of the new failures have no
+> triage at all yet. `column:` left as-is pending a decision on whether to re-dispatch a
+> fresh triage worker or re-column to `todo` (no worker is currently alive on this card).
+>
 > ### ⇒ THE USER DECISION, IN ONE LINE (everything else here is how we got to it)
 > **Accept the 10 remaining failures on a CHARACTERISATION rather than a mechanism, or refuse
 > and require the mechanism to be measured.** What is actually established, and all of it:
