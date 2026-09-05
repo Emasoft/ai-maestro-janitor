@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-05T20:27:16+0200
+updated: 2026-09-05T20:42:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high

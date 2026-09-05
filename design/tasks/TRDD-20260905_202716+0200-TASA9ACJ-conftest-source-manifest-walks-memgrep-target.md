@@ -3,7 +3,7 @@ trdd-id: TASA9ACJ
 title: conftest source manifest walks and sorts the 100k-file memgrep target tree before filtering it out
 column: testing
 created: 2026-09-05T20:27:16+0200
-updated: 2026-09-05T20:36:00+0200
+updated: 2026-09-05T20:42:00+0200
 current-owner: janitor-main-session
 assignee: janitor-main-session
 task-type: bugfix
@@ -14,6 +14,7 @@ min-approval-requirement: none
 parent-trdd: 7NSRD8OV
 npt: []
 eht: []
+implementation-commits: [0f2edc79]
 ---
 
 ## Symptom
@@ -23,16 +24,17 @@ Every pytest invocation enumerates and sorts 103,910 filesystem entries twice �
 which tests are selected. On a host at loadavg 133 that walk took 8–22 s per call; a single
 cProfile run under external `cargo test` load attributed 54.6 s of a 63 s 19-test run to it
 (`reports/board-drain/20260905_200826+0200-LDSCQ0NU-duration-investigation.md`,
-`tests/conftest.py:549 _source_manifest`). The seconds are load-contaminated; the 200×
+`tests/conftest.py::_source_manifest`). The seconds are load-contaminated; the 200×
 entry ratio and the pruned walk's sub-second time under the same load are not.
 
 ## Mechanism (measured 2026-09-05)
 
-`tests/conftest.py:562` does `for p in sorted(root.rglob("*"))` and only at `:565` skips
-paths with `target` or `__pycache__` in their parts. `rglob` cannot prune a directory
-before descending, so the walk enumerates and stats every file under
-`scripts/memgrep/target/` (5.1 GB, 101,173 files today — the docstring at `:553-554` still
-says 1.4 GB / 15,285) and then sorts 103,910 `Path` objects, only to discard 99.5 % of them.
+Before this card, `tests/conftest.py::_source_manifest` did `for p in sorted(root.rglob("*"))`
+and only inside the loop skipped paths with `target` or `__pycache__` in their parts.
+`rglob` cannot prune a directory before descending, so the walk enumerated and stat'ed
+every file under `scripts/memgrep/target/` (5.1 GB, 101,173 files today — the docstring
+still said 1.4 GB / 15,285) and then sorted 103,910 `Path` objects, only to discard 99.5 %
+of them.
 
 | walk | entries | wall (2 runs, loaded host) |
 |---|---|---|
@@ -40,9 +42,9 @@ says 1.4 GB / 15,285) and then sorts 103,910 `Path` objects, only to discard 99.
 | `os.walk` pruning `target` + `__pycache__`, `*.py`/`*.sh` only | 511 | 0.13 s / 0.24 s |
 
 Source: `reports/board-drain/20260905_202532+0200-soak-compare-and-conftest-walk-cost.md`
-(Part B). The call is guarded by `hasattr(config, "workerinput")` at `:695`, so under xdist
-it runs once in the controller, not once per worker — the cost is per invocation, not per
-worker. It still lands on every targeted run an agent makes while draining the board, and on
+(Part B). The call sits inside `pytest_configure`'s `if not hasattr(config, "workerinput")`
+block (verified first-hand), so under xdist it runs once in the controller, not once per
+worker — the cost is per invocation, not per worker. It still lands on every targeted run an agent makes while draining the board, and on
 the publish gate's full run, and it competes for disk with whatever else the host is doing.
 
 ## Fix requirement
@@ -62,10 +64,12 @@ coordinator). Two tests in `tests/test_conftest_source_manifest.py`: hand-built-
 equality, and an `os.walk` spy proving no yielded dirpath falls under `target/` or
 `__pycache__/`. Worker's verbatim gate output in
 `reports/board-drain/20260905_203019+0200-TASA9ACJ-conftest-walk-prune.md`: `2 passed`,
-ruff clean, mypy `no issues found in 504 source files`, pyright `0 errors`. Targeted
-timing on `tests/test_dispatch_defang.py`: `19 passed in 20.39s` before, `1.83s` after
-(git-stash isolated on `tests/conftest.py` only; stash list and the other agents' diffs
-verified intact afterwards). Remaining box: the full suite, at the publish gate.
+ruff clean, mypy `no issues found in 504 source files`, pyright `0 errors` (re-run by the
+coordinator on the test file: `0 errors`). Targeted timing on `tests/test_dispatch_defang.py`:
+`19 passed in 20.39s` before, `1.83s` after — ONE run each on a host at loadavg 55–145
+with other pytest sessions live, so a direction, not a ratio (git-stash isolated on
+`tests/conftest.py` only; stash list and the other agents' diffs verified intact
+afterwards). Landed in `0f2edc79`. Remaining box: the full suite, at the publish gate.
 
 ## Acceptance criteria
 
