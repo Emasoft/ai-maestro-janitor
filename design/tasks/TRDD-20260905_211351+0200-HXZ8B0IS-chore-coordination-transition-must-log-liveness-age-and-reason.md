@@ -3,7 +3,7 @@ trdd-id: HXZ8B0IS
 title: A chore-coordination transition must log the liveness file's ts, age and the None reason so an ownership flap attributes itself
 column: todo
 created: 2026-09-05T21:13:51+0200
-updated: 2026-09-05T21:13:51+0200
+updated: 2026-09-05T21:52:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -44,11 +44,16 @@ and outside the window — the interleave, with no restart needed. One sample.
   `absent | malformed | stale(age=<s>) | read-error(<exc type>)` plus the raw `ts` and
   the computed age when the file parsed.
 - The transition log line at `daemon.py:3614-3621` appends that reason, `ts` and age on
-  BOTH directions (yield and resume), and the daemon also logs it once per tick while
-  the verdict stays "stale/absent" but the file is younger than 2× the window (the
-  edge zone), so a flap leaves a series, not just its endpoints.
+  BOTH directions (yield and resume). Transition-only — no per-tick logging in the edge
+  zone: a flap IS a series of transitions, and each transition line already carries
+  reason + ts + age, so the series is already recorded without it. Per-tick logging at
+  a 60s tick would emit ~1440 lines/day for as long as the file sits at 90-180s age —
+  exactly the state the transition-only design in `daemon.py` was written to keep quiet.
 - No behaviour change to the verdict itself: this card only makes the verdict explain
   itself. Fail-safe semantics (no server visible ⇒ run everything) stay.
+- `server_capabilities()` (or a sibling returning a small result) exposing the reason is
+  mandatory as specified above — changing its return type ripples through
+  `server_is_alive`/`server_runs_chores`/every caller, so do this once, correctly.
 
 ## Acceptance criteria
 

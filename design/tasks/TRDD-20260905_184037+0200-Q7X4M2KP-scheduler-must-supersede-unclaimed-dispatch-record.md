@@ -1,9 +1,9 @@
 ---
 trdd-id: Q7X4M2KP
 title: Scheduler must supersede its own unclaimed dispatch record for the same scope root and intervention instead of stacking a new one
-column: todo
+column: testing
 created: 2026-09-05T18:40:37+0200
-updated: 2026-09-05T21:15:00+0200
+updated: 2026-09-05T21:52:00+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -31,6 +31,10 @@ complete. This session (takeover) verified and finished it:
 
 Nothing left to write for this card. Verification below.
 
+**2026-09-05T21:52** — code and tests committed in af6340a5; moved to `testing`. The only
+remaining acceptance box is the full-suite run at the publish gate (deferred per the
+Gatekeeper-flake finding above, unrelated to this card's files).
+
 **Verification run (this session):**
 ```
 uv run pytest tests/test_memory_maintenance.py tests/test_memory_dispatch_claim.py -q -p no:cacheprovider
@@ -55,6 +59,16 @@ SAME combination minutes later reproduced the failure again — genuinely flaky,
 shared-state leak between the touched files. No fix applied — `tests/test_dispatch_defang.py` is
 out of this card's scope (owned by TRDD-LDSCQ0NU) and the root cause is an OS security-scan race,
 not a code defect in either file.
+
+**2026-09-05T21:52 — Gatekeeper hypothesis REFUTED, not confirmed.** A Python-written fresh
+tmp `.py` carries only `com.apple.provenance` (no `com.apple.quarantine` xattr) and executed
+in 0.08s real — not 32s. A first-exec Gatekeeper scan would also predict a uniform delay on
+every run, which contradicts the observed pass/fail pattern (same file, same combination,
+sometimes fast, sometimes 32s). The 32s wall / 0.03s CPU signature instead matches scheduler
+starvation on a loaded host (`sysctl -n vm.loadavg` read 20-144 during these runs) — TRDD-
+7NSRD8OV's category-D class, not an OS security scan. The hypothesis text above is kept for
+the record but is superseded by this measurement; treat the flake as load-induced timeout,
+not Gatekeeper.
 
 ## Symptom
 

@@ -74,6 +74,32 @@ def test_a_missing_binary_is_logged(tmp_path: Path, monkeypatch) -> None:
     assert "not in PATH" in _log_text("subprocess")
 
 
+@pytest.mark.no_timeout_scale
+def test_a_timeout_also_lands_on_stderr(tmp_path: Path, monkeypatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """TRDD-9EAQS97B: the log file is invisible outside the process — stderr must carry it too."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    state.init_state()
+
+    assert state.run_subprocess([sys.executable, "-c", "import time; time.sleep(5)"],
+                                timeout=0.1, detector_name="some-detector") is None
+
+    err = capfd.readouterr().err
+    assert "[run_subprocess] some-detector" in err
+    assert "timed out" in err
+
+
+def test_a_missing_binary_also_lands_on_stderr(tmp_path: Path, monkeypatch, capfd: pytest.CaptureFixture[str]) -> None:
+    """The FileNotFoundError branch gets the same stderr trace, with '-' when unnamed."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    state.init_state()
+
+    assert state.run_subprocess(["definitely-not-a-real-binary-xyzzy"]) is None
+
+    err = capfd.readouterr().err
+    assert "[run_subprocess] -" in err
+    assert "not in PATH" in err
+
+
 def test_an_unwritable_log_never_breaks_the_fail_open_contract(tmp_path: Path, monkeypatch) -> None:
     """The diagnostic must not become the thing that raises.
 

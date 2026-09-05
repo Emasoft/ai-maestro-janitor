@@ -12,6 +12,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Mapping
 from datetime import datetime
@@ -1202,12 +1203,26 @@ def _log_fail_open(detector_name: Optional[str], reason: str, cmd: list[str]) ->
     The `except OSError` is deliberate and narrow, against this repo's fail-fast default:
     `run_subprocess`'s documented contract is that it NEVER propagates, and a read-only
     diagnostic must not be the thing that breaks it on a host whose log dir is unwritable.
+
+    Also prints one `[run_subprocess] <detector> <reason>: <argv[0]>` line to `sys.stderr`
+    (TRDD-9EAQS97B) — the detector name so a heartbeat reader can tell which one skipped.
     """
     cmd_short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     try:
         log_line(detector_name or "subprocess", f"{reason}: {cmd_short}")
     except OSError:
-        return
+        pass
+    # TRDD-9EAQS97B: the log file above is only visible to someone who thinks to go read
+    # <detector>.log — a swallowed timeout otherwise reads, from outside this process,
+    # identically to "nothing to report". One line on the inherited stderr puts the same
+    # fact on the channel a human reading the heartbeat fire is already looking at. Never
+    # gate this on a test-only env var, and never let it raise (fail-open must stay silent
+    # to its CALLER, just not invisible to a human).
+    try:
+        print(f"[run_subprocess] {detector_name or '-'} {reason}: {cmd[0] if cmd else '?'}",
+              file=sys.stderr, flush=True)
+    except OSError:
+        pass
 
 
 _EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
