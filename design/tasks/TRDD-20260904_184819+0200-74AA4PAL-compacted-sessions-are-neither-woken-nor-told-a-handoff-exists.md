@@ -23,6 +23,16 @@ external-refs: [TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
+> **2026-09-05 13:28 — correction to ff6a7810's message, after reading `resume_trigger.py`
+> myself:** its only pre-fire check is flag presence (`:81`, `any(Path(p).is_file() …)`) plus
+> the pane `send_self_command` resolves; there is no session-identity check on EITHER path —
+> confirmed, not inherited from the worker. The residual "orphaned pusher" risk (a pane whose
+> session changed while its `resume-after-compact.flag` survives) is bounded by the NEXT
+> HEARTBEAT that consumes the flag (`dispatch.py:1198`) or reports it orphaned — NOT "by the
+> flag's lifetime" as the commit says: on an unarmed session no heartbeat fires and the flag
+> survives indefinitely, which is exactly the case GAP 1 above documents. Same risk on both
+> paths; unchanged by the deferred push.
+
 > **OWNER REPORT (2026-09-04, verbatim intent):** *"all claude code sessions were idle after
 > compaction, and I was forced to type the command to resume. and even so they were unaware of
 > any handoff."* The owner also recalled asking for the handoff to be fully scripted via
