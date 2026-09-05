@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:39:59+0200
+updated: 2026-09-05T05:42:42+0200
 review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
@@ -144,23 +144,60 @@ as *done* would have ticked two boxes on nothing.
       assertion is not enough — read what the fixture establishes.**
 - [x] **SATISFIED 2026-09-05 — swept, and the load-bearing number re-verified by hand.**
       Report: `reports/gitignore-fleet-sweep/20260905_053700+0200-sweep.md` (81 repos).
-      - **Structural, fleet-wide:** `gc_offenders ∩ rule_only` = **0 in all 81 repos, no
-        exception** — no rule-only file appears on `gitignore-coverage` anywhere.
-      - **The largest named component of the historical 47, re-run by the coordinator rather
-        than taken from the report** (`decide-on-facts`): on `Code/SVG_FBF_PROJECT/svg2fbf`,
-        `tracked-ignored` prints **41** tracked files, all `ccpm/*` — exactly the baseline's
-        named `ccpm/** ×41`; `gitignore-coverage` on the same repo prints only 2 *uncovered
-        private classes* (`private-key`, `node-modules`) and **none of the 41**. Gone from one
-        detector, still present on the other, which is precisely what this box asserts.
-        ANIME2SVG contributes 3 more the same way.
+      - **⚠ DO NOT CITE `bad_overlap = 0` AS EVIDENCE — it is a TAUTOLOGY, and a first version
+        of this tick did cite it** as "structural, fleet-wide, no exception". The report
+        defines `rule_only := ti_offenders − gc_offenders`, so
+        `bad_overlap = gc ∩ (ti − gc) = ∅` **by set algebra, for any input whatsoever**. A
+        check that cannot fail confirms nothing; the report's own line 84 calls it
+        "structurally always empty given the code above", which is the same admission stated
+        mildly. It is a sanity check on the harness, not a result.
+      - **What the fleet sweep DOES contribute** is the measured population, which is not
+        vacuous: `rule_only = 167` files across 81 repos (tracked ∧ ignored ∧ not
+        private-class), `gc_offenders = 229`, `ti_offenders = 206`.
+      - **THE EVIDENCE THE TICK RESTS ON — the largest named component of the historical 47,
+        re-run by the coordinator rather than taken from the report** (`decide-on-facts`), on
+        `Code/SVG_FBF_PROJECT/svg2fbf`:
+        - `gitignore-coverage` → **1 line, 249 bytes, ZERO `ccpm` matches** (full capture to a
+          file, `grep -c ccpm` = 0). Its whole output is a class-coverage statement naming
+          `private-key` and `node-modules`. *A first pass read this through `head -5`; re-run
+          with full capture because a 5-line window cannot support a "none of them" claim —
+          it happened to hide nothing, which is luck, not method.*
+        - `git ls-files --ignored --exclude-standard --cached` → **41 total, 41 under `ccpm/`,
+          zero non-`ccpm`** — exactly the baseline's named `ccpm/** ×41`. This is the plumbing
+          `tracked-ignored.py` itself reads (report §2), used because **the detector prints
+          NOTHING on a repeat scan** — it dedupes on HEAD SHA + ignore-file mtimes, and my
+          first run consumed that slot. *Measured: the re-run emitted 0 lines. That is the
+          fail-open-to-silence behaviour in the open, and it is why "all 41 are `ccpm`" is
+          asserted from plumbing rather than from a second detector run.*
+        So: **41 files that one detector reports and the other does not name at all** — an
+        observation about two real programs' outputs, not a definition. ANIME2SVG contributes
+        3 more the same way (from the report, not hand-checked).
+      - **The detectors are shown FIRING by the run above** (a real finding from one, 41 rows
+        from the other's source), which independently discharges what report §1's positive
+        control is for. §1 corroborates; it is not the proof, and citing a grep hit that says
+        "control fires as expected" would have been reading a claim, not verifying it.
       - **NOT reconciled to "47", deliberately.** The baseline was measured over 32 repos, this
         sweep over 81 — different populations, so "47" is not reproducible as a number and the
         worker was instructed not to adjust its set to reach it. 6 of the 47
         (`data/specimens/` etc.) are not identifiable from 6WM4BFKF's prose at all.
-      - **The control fired** (§1 of the report): a seeded repo with a tracked `.env` and no
-        `.gitignore` produced the coverage line. Load-bearing, because these detectors fail
-        OPEN to silence — an uncontrolled empty sweep would have ticked this box while proving
-        nothing.
+        **Why ticking on 44-of-47 is right rather than a paper-over:** the box asserts a
+        PROPERTY of a class of files ("rule-only offenders"), instantiated at 47 in one
+        historical population — not a headcount held in perpetuity. Its own **"(or deduped)"**
+        clause proves the author anticipated the fix might merge or suppress rather than
+        eliminate, so it was never a count. Leaving it open because 6 offenders cannot be
+        located from six-week-old prose would make it unsatisfiable by construction, which is
+        worse than a scoped tick.
+      - **Report §1's control corroborates** (a seeded repo with a tracked `.env` and no
+        `.gitignore` produced both the coverage line and a still-TRACKED line). Read in full,
+        not grepped — and it matters because these detectors fail OPEN to silence, so an
+        uncontrolled empty sweep would tick this box while proving nothing. The dedupe silence
+        measured above is that failure mode occurring for real.
+      - **The fleet numbers come from the REAL library, not a reimplementation** (report §2):
+        the worker imported `scripts/lib/gitignore_coverage.py` and used `git ls-files`
+        plumbing instead of invoking the two CLIs across 81 repos — because both call
+        `state.init_state()`, which WRITES `.janitor/state/` and `.janitor/logs/` into every
+        scanned project and would have violated the read-only mandate. Correct call, and it is
+        why the fleet figures and my hand-check agree.
       *(Original box text and its pre-sweep note, kept for the record — deliberately NOT left
       as a `- [ ]` checkbox, since a second unchecked marker would make this card read as
       having an open box it does not have:)*
