@@ -14,7 +14,7 @@ project-id: ai-maestro-janitor
 min-approval-requirement: user
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
-blocked-by: [decision:user-suite-failure-waiver]
+blocked-by: [user-decision-suite-failure-waiver]
 unblock-when: [decision:user]
 npt: []
 eht: []
