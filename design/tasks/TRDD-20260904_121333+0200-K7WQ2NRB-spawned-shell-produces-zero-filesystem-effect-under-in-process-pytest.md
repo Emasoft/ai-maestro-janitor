@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest �
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T03:56:23+0200
+updated: 2026-09-05T04:10:47+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -44,10 +44,14 @@ external-refs: [TRDD-Q8PNPRTW]
   likelihood of seeing 30 straight greens is **0.215 at a 5% rate, 0.042 at 10%, 0.001 at 20%**
   — so a 20% per-run rate is effectively excluded, while **5% is entirely consistent with what we
   saw**, and 5% still reddens a daily suite about once a week.
-  **⚠ THE BINOMIAL ASSUMES INDEPENDENT TRIALS, WHICH IS EXACTLY WHAT A LOAD-GATED FAILURE
-  VIOLATES.** If the failure needs a regime these 30 runs never entered, its per-run rate *within
-  that regime* is untouched by any of this arithmetic — the bound describes the runs I took, not
-  the population I could not sample. Treat the numbers as a ceiling on THIS regime, nothing more.
+  **⚠ THE BINOMIAL ASSUMPTION THAT FAILS HERE IS *IDENTICAL DISTRIBUTION*, NOT INDEPENDENCE.**
+  *(I first wrote "independence", which is wrong and self-contradicting: the census result one
+  bullet down — no leakage between runs — is evidence trials DO NOT influence each other, i.e.
+  evidence FOR independence.)* The runs spanned 89-187 s, so they sampled a SPREAD of machine
+  states; if failure probability is a function of that state there is no single `p` for a
+  binomial to estimate. What was computed is a ceiling on an average `p` across **an uncontrolled
+  mixture whose composition was set by whatever my foreground work happened to be doing** — not a
+  designed sample, and not one I can reproduce.
 - **THE ONE LIVE UNKNOWN: the 8.6× wall-clock gap to soak9 (822.89 s vs 89-187 s) is
   UNEXPLAINED.** Load is argued against, not refuted. The environments demonstrably DIFFER (both
   soak runs report a `subtests` counter no tracked revision ever declared) — but 8 subtests
@@ -109,10 +113,13 @@ external-refs: [TRDD-Q8PNPRTW]
   line 77.** They establish that **the loop's own iteration boundary is clean**: 30 consecutive
   runs, each starting into the box the previous one left, with zero orphaned workers and zero
   `sleep 600` survivors. That is direct evidence the harness does not leak on the HEALTHY path —
-  the live worry that `--kill-after=30` and the census were built for — and **it is what makes
-  the 30 greens interpretable at all.** Without it, a leak would mean run N+1 executed in polluted
-  state and no green could be read as "the code works" rather than "the pollution happened not to
-  bite". Narrow claim, real result; it is line 77's FAILURE-induced leakage that went untested.
+  the live worry that `--kill-after=30` and the census were built for. **What it buys is modest
+  and worth stating exactly:** it forecloses ONE alternative explanation for the run of greens —
+  that an early leak put later runs in a degraded state where the bug could not fire.
+  *(An earlier wording here said it is "what makes the 30 greens interpretable at all". That has
+  the POLARITY BACKWARDS: leakage would confound a RED result — was it the bug or the pollution? —
+  not a green one. A green run under leaked state is still a green run.)*
+  Narrow claim, real result; it is line 77's FAILURE-induced leakage that went untested.
   **Also true:** the census is armed and positive-controlled (14 live / 0 post-kill), so it will
   speak the first time a run does fail — exactly like row 2's stderr. It still cannot see the
   `/bin/sh …fake_capture.sh` parent.
