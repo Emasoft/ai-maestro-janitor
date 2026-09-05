@@ -28,7 +28,8 @@ TRDD-56d24c02 closed 2026-09-05 with the decision RETIRE (option 2), reversed fr
 "leave as-is" by adversarial review: rungs 6/7 — `build_force_restart` and `build_resurrect`
 in `scripts/lib/fleet_restart.py` — have been UNREACHABLE since TRDD-L32WC0H7 F1 capped
 `action_for("frozen")` at `esc_nudge`. That card traced the single call chain and found no
-alias via `git grep`. This repo's own directive is no dead code; a capability nothing can reach
+alias via `git grep` over scripts/ — a search that is scoped to scripts/ and says nothing about
+skills/, hooks/, commands/ or prose; the first acceptance box below is the wider sweep. This repo's own directive is no dead code; a capability nothing can reach
 is dead code with a safety story attached, which is the most misleading kind.
 
 The decision is 56d24c02's; this card is only the execution, split out because it touches the
@@ -42,9 +43,14 @@ daemon's recovery path and deserves its own gates rather than a closing edit on 
   scripts/` and `tldr impact build_resurrect scripts/` (fallback: `grep -rn` across scripts/,
   tests/, skills/, hooks/, commands/, docs — prose that names a deleted thing still fails at
   runtime).
-- The safety invariants 56d24c02 named must survive the deletion unchanged: the default-off
-  hard-restart flag, `is_killable`, the crash-loop cap. If any of them exists ONLY to guard the
-  deleted rungs, delete it with them and say so.
+- **Do NOT delete any of the three safety invariants 56d24c02 named** — the default-off
+  hard-restart flag, `is_killable`, the crash-loop cap — even if one LOOKS orphaned after the
+  rungs go. `is_killable` and the crash-loop cap are plausibly read by the `cron_dead`/`frozen`
+  diagnosis paths and by `session-liveness`'s GIVING-UP branch; the flag may be read by
+  `fleet_status`/`identify_environment` for display — readers a symbol-impact tool cannot see
+  (string lookups, status renderers). If one appears orphaned, FILE IT as its own card with the
+  grep evidence across scripts/, tests/, skills/, hooks/, commands/ and docs. Retiring the rungs
+  is in scope; retiring their guards is not.
 - The `frozen` diagnosis stays capped at `esc_nudge`; the docstring at `fleet_restart.py:10-12`
   that describes rungs 6/7 is rewritten to say they were retired and why (TRDD-56d24c02).
 

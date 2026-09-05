@@ -1,12 +1,9 @@
 ---
 trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
-column: blocked
-pre-block-column: todo
-blocked-by: [peer-decision-absorbed-version-update-lane]
-unblock-when: [decision:peer]
+column: dev
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-03T11:08:56+0200
+updated: 2026-09-05T10:50:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -196,7 +193,7 @@ So the fix is one of:
 
 ## Acceptance
 
-- [ ] A decision among the three above, recorded here.
+- [x] A decision among the three above, recorded here. **OPTION 4, 2026-09-05** — the peer's rule ('server owns detection-triggered updates when up, flag honoured within one 15-min poll, commit 9725bebf fixing ai-maestro#156; daemon owns them when liveness is stale >90 s') is exactly the card's option 4: absorbed lane + flag trigger, ≤15 min, 4 h cadence as the unconditional floor.
 
       **NARROWED 2026-08-26 by the USER, in their own words this session** — not by my
       inference, which matters because I would otherwise have been choosing among three
@@ -255,3 +252,7 @@ this, because each actor is behaving correctly by its own contract.
     latency) rather than the claim. Both projects already know this failure by name — the
     ai-maestro source calls it the TRDD-FXPV7L4D class and warns "never re-add the name here
     without restoring the work" — which is what made it findable.
+
+## Approval log
+
+- 2026-09-05T10:50:00+0200 — RULED option 4 by main-session on the peer's stated rule (ai-maestro hub session, 2026-09-05). Janitor work remaining: (1) the rider the card attached to option 4 — when no armed session exists to raise `version-update-requested.flag`, the lane's degradation to the 4 h floor must be SAID OUT LOUD by the janitor (a heartbeat/status line), not discovered later; (2) the asymmetry documented at the frozen `version-update.last-run.ts` (box 3); (3) a LIVE: measurement of publish→installed latency under the server (box 2). Column blocked -> dev.

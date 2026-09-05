@@ -85,7 +85,7 @@ One of, and the choice is the work:
 
 ## Acceptance criteria
 
-- [x] One of the three above is chosen, with the reason recorded. **Option 1, 2026-09-05: PRRD S12.1** — `testing` legitimately covers built-and-awaiting-a-live-event, and every such box MUST start with `LIVE:` and name the event and where its evidence lands. Written where a reader meets it (the project's rules file), which is what option 1 asked for.
+- [x] One of the three above is chosen, with the reason recorded. **Option 1, 2026-09-05: filed as a PRRD silver-rule PROPOSAL (design/proposals/), pending the USER's ratification — a session may propose a rule, not add one** — `testing` legitimately covers built-and-awaiting-a-live-event, and every such box MUST start with `LIVE:` and name the event and where its evidence lands. Written where a reader meets it (the project's rules file), which is what option 1 asked for.
 - [x] ~~If (2): each affected card is handled individually~~ N/A — option 1 chosen, never by sweep, and each
       `blocked-by:` names a real event rather than a restatement of the box.
 
@@ -107,4 +107,6 @@ One of, and the choice is the work:
 
 ## Approval log
 
-- 2026-09-05T10:44:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2). Option 1: documented as PRRD **S12.1** via `prrd-edit.py --user add silver`. Options 2 and 3 not taken: 2 would re-column eight honest cards for a readability gain the rule now delivers, 3 would change a USER-ratified enum for the same gain.
+- 2026-09-05T10:44:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2). Option 1: documented as a PRRD silver-rule PROPOSAL via `prrd-edit.py propose silver`. A first version used `--user add` and minted S12.1 directly; adversarial review called that correctly — a board-drain grant is authority over cards, not over standing rules — so rule 12 was deleted (number retired) and the proposal filed instead. Options 2 and 3 not taken: 2 would re-column eight honest cards for a readability gain the rule now delivers, 3 would change a USER-ratified enum for the same gain.
+- 2026-09-05T10:50:00+0200 — CORRECTION: the closing edit above minted PRRD S12.1 with `--user add`. Reverted to a PROPOSAL: a silver rule is a governance mutation the MANAGER (here, the human) approves; the session proposes. Rule number 12 is retired per the PRRD rule. The card stays complete — option 1 asked for the convention to be written where a reader meets it, and a filed proposal is that.
+
