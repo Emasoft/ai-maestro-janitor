@@ -5,8 +5,9 @@
 """Backing script for /janitor-compact-context (TRDD-31095269).
 
 Records the resume directive, then fires a DETACHED, delayed /compact at
-THIS session's own iTerm pane so the agent can compact its own context mid-session
-(native auto-compact is unreliable on the 1M window).
+THIS session's own pane (tmux or iTerm, via `terminal_trigger.send_self_command`)
+so the agent can compact its own context mid-session (native auto-compact is
+unreliable on the 1M window).
 
 Two steps:
   1. If a directive is supplied, write it to
@@ -15,41 +16,32 @@ Two steps:
      "[janitor-resume] <directive>", so the session auto-resumes exactly where it
      left off. (No directive -> the PostCompact hook falls back to the newest
      in-flight TRDD on the board.)
-  2. Launch a detached osascript that, after a short delay, types "/compact" to
-     the iTerm session whose id matches the UUID in $ITERM_SESSION_ID. SOFT is
+  2. `send_self_command` launches a detached, verified sender that, after a short
+     delay, types "/compact" into this session's own tmux/iTerm pane. SOFT is
      the default (TRDD-0GPQROC1): no ESC, so the command enqueues and runs when
      the current turn ends — no in-flight work lost. `--hard` sends ESC first
      (interrupt NOW) for emergencies like the >=85% enforcement hook.
 
 The delay + detach are load-bearing: the script must NOT be killed by the ESC it
 may send, so it returns immediately and the keystrokes fire ~delay seconds
-later (after the agent ends its turn). It targets ONLY the session whose UUID
-matches $ITERM_SESSION_ID — never other panes — so concurrent Claude instances
-are untouched.
+later (after the agent ends its turn). It targets ONLY this session's own pane
+— never other panes — so concurrent Claude instances are untouched.
 
-Outside iTerm ($ITERM_SESSION_ID unset) self-trigger isn't available: the script
-prints NO_ITERM and the skill asks the user to run /compact manually.
+When no channel can be driven (no tmux pane, no iTerm session id), self-trigger
+isn't available: the script prints NO_ITERM and the skill asks the user to run
+/compact manually.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import terminal_trigger  # noqa: E402
-
-# An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
-# `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we
-# MUST reject anything that isn't hex+dashes — an env var is attacker-settable,
-# and a value like `x:" then do shell script "rm -rf ~" --` would otherwise
-# inject AppleScript. A security plugin must not ship its own injection sink.
-_UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
 
 # The slash-commands the three modes type into the pane. These are FIXED module
 # constants (never user/env input), so interpolating them into the tmux/osascript
@@ -120,60 +112,6 @@ def _write_directive(directive: str) -> Path:
     return target
 
 
-def _build_osascript(
-    uuid: str, delay_s: float, *, commands: Sequence[str] = (COMPACT_CMD,), esc_first: bool = True
-) -> str:
-    """AppleScript that targets ONLY the session whose id == uuid, then (optionally) a
-    raw ESC followed by each command typed and submitted.
-
-    `esc_first=True` (default) writes a raw ESC byte first
-    (`write text (character id 27)`), interrupting an in-flight turn so the command runs
-    NOW — the HARD path. `esc_first=False` (SOFT) sends NO ESC, so the command is typed
-    while the agent is mid-turn and Claude Code enqueues it until the turn ends. Each
-    command in `commands` is typed via `write text "<cmd>"` (iTerm appends a return), so
-    a two-command list enqueues both in order. The commands are FIXED module constants
-    (never user/env input), so interpolating them is not an injection sink — unlike
-    `uuid`, which `_UUID_RE` validates before it reaches here.
-    """
-    lines = [
-        f"delay {delay_s}",
-        'tell application "iTerm2"',
-        "  repeat with w in windows",
-        "    repeat with t in tabs of w",
-        "      repeat with s in sessions of t",
-        f'        if (id of s) is "{uuid}" then',
-        "          tell s",
-    ]
-    if esc_first:
-        # TWO ESCs (terminal_trigger.HARD_INTERRUPT_ESC_COUNT): one clears a running tool,
-        # one ends the turn — else /compact enqueues behind the still-alive turn.
-        lines += terminal_trigger.iterm_esc_lines()
-    for i, command in enumerate(commands):
-        if i:
-            lines.append("            delay 0.4")  # let each enqueued command register
-        lines.append(f'            write text "{terminal_trigger.applescript_quote(command)}"')
-    lines += [
-        "          end tell",
-        "        end if",
-        "      end repeat",
-        "    end repeat",
-        "  end repeat",
-        "end tell",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def _fire(script: str) -> None:
-    """Launch osascript fully detached so the parent returns before its own ESC."""
-    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        ["osascript", "-e", script],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description="Record a resume directive then self-trigger /compact.")
     ap.add_argument(
@@ -235,9 +173,8 @@ def main() -> int:
     # context-enforcement hook passes it explicitly).
     commands, esc_first = plan_compact(soft=not args.hard, handoff=args.handoff)
 
-    # Prefer a non-iTerm automatable terminal (tmux) when detected via process
-    # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
-    # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a
+    # channel it cannot resolve at all falls through to NO_ITERM below.
     # NO PRESENCE CANCEL (owner directive 2026-08-02, migrated here 2026-08-13 — janitor#257).
     # A compact injection IS the most destructive of the four — which is an argument for waiting
     # until the field is empty, not for abandoning it. The pane-level injector does exactly that
@@ -253,33 +190,12 @@ def main() -> int:
         respect_user_presence=False,
         aimaestro_resolve_timeout_s=args.resolve_timeout,
     )
-    if sent != terminal_trigger.USE_ITERM_PATH:
-        if sent.startswith("FIRED:"):
-            print("COMPACT_FIRED")
-        elif sent.startswith("DRY_RUN:"):
-            print(f"DRY_RUN {sent.split(':', 1)[1]}")
-        else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; ask the human (legacy marker)
-            print("NO_ITERM")
-        return 0
-
-    iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
-    if not iterm:
+    if sent.startswith("FIRED:"):
+        print("COMPACT_FIRED")
+    elif sent.startswith("DRY_RUN:"):
+        print(f"DRY_RUN {sent.split(':', 1)[1]}")
+    else:  # no channel this module can drive, or a present user — can't auto-send; ask the human
         print("NO_ITERM")
-        return 0
-    uuid = iterm.split(":")[-1].strip()
-    if not _UUID_RE.match(uuid):
-        # Malformed / untrusted session id — refuse to build the osascript rather
-        # than risk AppleScript injection. The directive is still recorded above,
-        # so the skill can ask the user to /compact manually.
-        print(f"BAD_ITERM_ID {uuid[:32]}", file=sys.stderr)
-        print("NO_ITERM")
-        return 0
-    if args.dry_run:
-        plan = ("ESC->" if esc_first else "") + "->".join(commands)
-        print(f"DRY_RUN would fire {plan} at iTerm session {uuid} after {args.delay}s")
-        return 0
-    _fire(_build_osascript(uuid, args.delay, commands=commands, esc_first=esc_first))
-    print("COMPACT_FIRED")
     return 0
 
 

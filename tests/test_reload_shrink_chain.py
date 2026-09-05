@@ -193,7 +193,7 @@ def test_spawn_shrink_chain_refuses_an_unreadable_channel(monkeypatch) -> None:
     """A pane that cannot be read back cannot verify its own /clear, so spawn_shrink_chain
     reports (False, why) and the caller falls back to a direct reload. Clearing blind is the
     one unrecoverable failure in this system — an expensive reload is merely expensive."""
-    monkeypatch.setattr(ct, "_this_terminal", lambda: {"kind": "unknown"})
+    monkeypatch.setattr(terminal_trigger, "self_terminal", lambda *a, **kw: {"kind": "unknown"})
     monkeypatch.setattr(terminal_trigger, "channel_is_readable", lambda t: False)
     spawned_calls: list[dict] = []
     monkeypatch.setattr(ct, "_spawn_chain", lambda payload, **kw: spawned_calls.append(payload))
@@ -208,7 +208,9 @@ def test_spawn_shrink_chain_refuses_an_unreadable_channel(monkeypatch) -> None:
 def test_spawn_shrink_chain_passes_settle_and_then_through(monkeypatch, tmp_path) -> None:
     """The caller's `then` list and settle reach the chain payload unaltered — the chain is
     reused, not re-implemented, so its lock and gate still apply."""
-    monkeypatch.setattr(ct, "_this_terminal", lambda: {"kind": "tmux", "pane": "%1"})
+    monkeypatch.setattr(
+        terminal_trigger, "self_terminal", lambda *a, **kw: {"kind": "tmux", "pane": "%1"}
+    )
     monkeypatch.setattr(terminal_trigger, "channel_is_readable", lambda t: True)
     monkeypatch.setattr(ct, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(ct, "_read_handoff", lambda: "handoff citing TRDD-ABCD1234")

@@ -338,7 +338,8 @@ def _iterm_session_script(sid: str, inner: list[str]) -> str:
     """AppleScript that runs `inner` against ONLY the iTerm session whose id == `sid`.
 
     Iterates windows → tabs → sessions and matches `(id of s)`. This shape is copied from
-    the PROVEN `clear_trigger._build_osascript` / `fleet_inject.iterm_osascript`, and the
+    the PROVEN `fleet_inject.iterm_osascript` (and the trigger scripts' own osascript builders,
+    since retired 2026-09-05 — this function is what replaced them), and the
     reason is a live failure: the first version of these builders used
     `first window whose id is "<uuid>"`, which iTerm rejects with
 
@@ -1119,8 +1120,13 @@ def send_verified(
     sleeper=time.sleep,
     reader=None,
     is_typing=None,
+    still_wanted=None,
 ) -> tuple[bool, str]:
     """Type ONE command into `terminal` under the three ratified rules. Returns (sent, why).
+    `still_wanted` is forwarded to `inject_until_sent` — re-asked on EVERY iteration of the
+    field wait, so a caller whose command is only valid under a condition (the self-send's
+    type-time guard: "a resume flag still exists") is cancelled the moment it stops holding,
+    not only checked once before a wait that can last minutes.
 
     The single-command sibling of `run_chained_inject`, for callers that need a verified
     self-injection with no fresh-session gate: the model-fallback switch (TRDD-QE390SJA) and
@@ -1151,6 +1157,8 @@ def send_verified(
         extra["reader"] = reader
     if is_typing is not None:
         extra["is_typing"] = is_typing
+    if still_wanted is not None:
+        extra["still_wanted"] = still_wanted
     return inject_until_sent(
         terminal, command,
         type_fn=_runner(command), submit_fn=_submit, clear_fn=_clear,
@@ -1586,6 +1594,15 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
     stamps = sd / f"self-send.{target}.stamps.json"
     lock_path = sd / f"self-send.{target}.lock"
     esc_first = bool(data.get("esc_first"))
+    # The TYPE-TIME guard (TRDD-DXM75JB2): the blind sender checked these files after its sleep
+    # and typed within milliseconds, so one check was enough. The verified child can wait
+    # minutes for the lock and the field, so the guard is re-asked on every iteration of that
+    # wait — a resume flag the dispatcher consumed meanwhile must cancel the send, not land it.
+    guards = [str(g) for g in (data.get("abort_unless_any") or [])]
+    still_wanted = (
+        (lambda: (any(Path(g).is_file() for g in guards), "type-time guard — no guard file remains"))
+        if guards else None
+    )
     giveup_s = float(data.get("giveup_s") or _SELF_SEND_GIVEUP_S)
     deadline = clock() + giveup_s
     # Clock-independent bound on the lock wait, as `inject_until_sent` has on its own loop: a
@@ -1632,6 +1649,7 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
                 return 1
             sent, why = do_send(
                 terminal, command, esc_first=esc_first and i == 0, giveup_s=remaining,
+                still_wanted=still_wanted,
             )
             state.log_line(
                 "terminal_trigger",

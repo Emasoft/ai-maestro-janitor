@@ -67,36 +67,6 @@ def _run(
     )
 
 
-# ---------- pure helper -----------------------------------------------------
-
-def test_build_osascript_targets_uuid_and_types_resume() -> None:
-    """The osascript targets the specific session id and types /janitor-resume, SOFT."""
-    mod = _import()
-    osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE")
-    assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa, "must match the specific session id"
-    # SOFT only: a compaction already ended the turn — NO ESC byte is ever sent.
-    assert "character id 27" not in osa, "resume is SOFT-only; it must never send an ESC"
-    assert '"/janitor-resume"' in osa, "must type /janitor-resume"
-    assert '"/compact"' not in osa and '"/reload-plugins' not in osa, "wrong command"
-    # The delay deliberately moved OUT of the AppleScript (TRDD-DXM75JB2): no flag
-    # re-check can run inside AppleScript, so the sleep + type-time guard live in
-    # terminal_trigger's python child now. An in-script delay would reopen the race.
-    assert "delay" not in osa, "the sleep belongs to the guarded python child, not AppleScript"
-
-
-def test_uuid_regex_accepts_real_rejects_injection() -> None:
-    mod = _import()
-    assert mod._UUID_RE.match("789D8299-5AA2-48CF-9325-3BC972B9BEAE")
-    for bad in (
-        'x" then do shell script "touch /tmp/pwned" --',
-        'abc"; tell app "Finder"',
-        "id with spaces",
-        "",
-        "../../etc",
-    ):
-        assert not mod._UUID_RE.match(bad), f"{bad!r} must be rejected"
-
-
 # ---------- main() via subprocess, ALWAYS --dry-run -----------------------
 
 def test_dry_run_reports_plan_and_does_not_fire() -> None:

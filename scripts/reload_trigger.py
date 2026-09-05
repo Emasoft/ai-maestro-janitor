@@ -4,12 +4,13 @@
 # ///
 """Backing script for /janitor-reload-plugins (analogue of compact_trigger.py).
 
-Fires a DETACHED, delayed /reload-plugins at THIS session's own iTerm pane
-so the agent can pick up freshly auto-updated plugin hooks/skills WITHOUT the
-human typing the command. The heartbeat's `[janitor-reload]` marker asks the
-agent to "silently run /reload-plugins", but the Skill tool refuses built-in
-slash commands — so, exactly like the compact trigger, the only working path is
-to type the command into this session's own pane via osascript.
+Fires a DETACHED, delayed /reload-plugins at THIS session's own pane (tmux or
+iTerm, via `terminal_trigger.send_self_command`) so the agent can pick up
+freshly auto-updated plugin hooks/skills WITHOUT the human typing the command.
+The heartbeat's `[janitor-reload]` marker asks the agent to "silently run
+/reload-plugins", but the Skill tool refuses built-in slash commands — so,
+exactly like the compact trigger, the only working path is to type the
+command into this session's own pane.
 
 SOFT is the default (TRDD-0GPQROC1): the command is typed without ESC, so it
 ENQUEUES and runs after the current turn ends — a reload is never worth killing
@@ -21,20 +22,17 @@ be recorded for an auto-resume — the turn simply continues after the reload.
 
 The delay + detach are load-bearing: the script must NOT be killed by the ESC it
 may send, so it returns immediately and the keystrokes fire ~delay seconds
-later (after the agent ends its turn). It targets ONLY the session whose UUID
-matches $ITERM_SESSION_ID — never other panes — so concurrent Claude instances
-are untouched.
+later (after the agent ends its turn). It targets ONLY this session's own pane
+— never other panes — so concurrent Claude instances are untouched.
 
-Outside iTerm ($ITERM_SESSION_ID unset) self-trigger isn't available: the script
-prints NO_ITERM and the skill asks the user to run /reload-plugins manually.
+When no channel can be driven (no tmux pane, no iTerm session id), self-trigger
+isn't available: the script prints NO_ITERM and the skill asks the user to run
+/reload-plugins manually.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -56,63 +54,6 @@ SHRINK_MODES = reload_shrink.SHRINK_MODES
 RELOAD_SETTLE_S = reload_shrink.RELOAD_SETTLE_S
 should_shrink = reload_shrink.should_shrink
 shrink_threshold = reload_shrink.shrink_threshold
-
-# An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
-# `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we
-# MUST reject anything that isn't hex+dashes — an env var is attacker-settable,
-# and a value like `x:" then do shell script "rm -rf ~" --` would otherwise
-# inject AppleScript. A security plugin must not ship its own injection sink.
-_UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
-
-
-def _build_osascript(uuid: str, delay_s: float, *, esc_first: bool = True) -> str:
-    """AppleScript that targets ONLY the session whose id == uuid, then (optionally) a
-    raw ESC followed by /reload-plugins.
-
-    `esc_first=True` (default) writes a raw ESC byte first
-    (`write text (character id 27)`), clearing any half-typed input / interrupting an
-    in-flight turn so the reload runs NOW — the HARD path. `esc_first=False` (SOFT)
-    sends NO ESC, so `/reload-plugins` is typed while the agent is mid-turn and Claude
-    Code enqueues it until the turn ends (the reload then applies without cutting the
-    turn short). `write text "/reload-plugins"` types and submits the command (iTerm's
-    write text appends a return)."""
-    lines = [
-        f"delay {delay_s}",
-        'tell application "iTerm2"',
-        "  repeat with w in windows",
-        "    repeat with t in tabs of w",
-        "      repeat with s in sessions of t",
-        f'        if (id of s) is "{uuid}" then',
-        "          tell s",
-    ]
-    if esc_first:
-        # TWO ESCs (terminal_trigger.HARD_INTERRUPT_ESC_COUNT): one clears a running tool,
-        # one ends the turn — else /reload-plugins enqueues behind the still-alive turn.
-        lines += terminal_trigger.iterm_esc_lines()
-    # --force: without it a plugin whose code is mid-use can refuse the reload and
-    # stay on the old cached version (user directive 2026-07-10) — every janitor
-    # sender of /reload-plugins forces for this reason.
-    lines.append('            write text "/reload-plugins --force"')
-    lines += [
-        "          end tell",
-        "        end if",
-        "      end repeat",
-        "    end repeat",
-        "  end repeat",
-        "end tell",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def _fire(script: str) -> None:
-    """Launch osascript fully detached so the parent returns before its own ESC."""
-    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        ["osascript", "-e", script],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
 
 
 def _undeliverable(why: str) -> None:
@@ -222,9 +163,8 @@ def main() -> int:
         # recoverable, an unverifiable `/clear` is not.
         state.log_line("reload-trigger", f"shrink unavailable ({why}) — reloading directly")
 
-    # Prefer a non-iTerm automatable terminal (tmux) when detected via process
-    # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
-    # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a
+    # channel it cannot resolve at all falls through to `_undeliverable` below.
     # NO PRESENCE CANCEL (owner directive 2026-08-02, migrated here 2026-08-13 — janitor#257).
     # This used to gate on `user_intent.injection_allowed` and, on refusal, `print("USER_PRESENT")`
     # and return. That is the retired one-shot model: it handed the work back to the human it
@@ -239,32 +179,12 @@ def main() -> int:
         dry_run=args.dry_run,
         respect_user_presence=False,
     )
-    if sent != terminal_trigger.USE_ITERM_PATH:
-        if sent.startswith("FIRED:"):
-            print("RELOAD_FIRED")
-        elif sent.startswith("DRY_RUN:"):
-            print(f"DRY_RUN {sent.split(':', 1)[1]}")
-        else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; ask the human (legacy marker)
-            _undeliverable(f"no automatable terminal ({sent})")
-        return 0
-
-    iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
-    if not iterm:
-        _undeliverable("iTerm path chosen but $ITERM_SESSION_ID is unset")
-        return 0
-    uuid = iterm.split(":")[-1].strip()
-    if not _UUID_RE.match(uuid):
-        # Malformed / untrusted session id — refuse to build the osascript rather
-        # than risk AppleScript injection. The skill asks the user to reload manually.
-        print(f"BAD_ITERM_ID {uuid[:32]}", file=sys.stderr)
-        _undeliverable("iTerm session id is not a bare UUID")
-        return 0
-    if args.dry_run:
-        plan = ("ESC->" if esc_first else "") + "/reload-plugins --force"
-        print(f"DRY_RUN would fire {plan} at iTerm session {uuid} after {args.delay}s")
-        return 0
-    _fire(_build_osascript(uuid, args.delay, esc_first=esc_first))
-    print("RELOAD_FIRED")
+    if sent.startswith("FIRED:"):
+        print("RELOAD_FIRED")
+    elif sent.startswith("DRY_RUN:"):
+        print(f"DRY_RUN {sent.split(':', 1)[1]}")
+    else:  # no channel this module can drive, or a present user — can't auto-send; ask the human
+        _undeliverable(f"no automatable terminal ({sent})")
     return 0
 
 

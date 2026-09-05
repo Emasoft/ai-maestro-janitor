@@ -81,17 +81,32 @@ def test_the_idle_clear_phase_does_not_use_the_sentinel_returning_api_at_all():
     assert not calls, f"dispatch.py calls send_self_command at lines {[c.lineno for c in calls]}"
 
 
-def test_every_remaining_caller_handles_the_iterm_sentinel():
-    """A `send_self_command` caller that never mentions USE_ITERM_PATH is blind on iTerm."""
-    blind = []
-    for path in _py_files():
-        if path.name == "terminal_trigger.py":  # the definer + its own CLI demo
-            continue
-        if not _calls_named(path, "send_self_command"):
-            continue
-        if "USE_ITERM_PATH" not in path.read_text(encoding="utf-8"):
-            blind.append(str(path.relative_to(_ROOT)))
-    assert not blind, f"callers with no iTerm branch: {blind}"
+_SIBLING_TRIGGER_SCRIPTS = (
+    "compact_trigger.py",
+    "clear_trigger.py",
+    "reload_trigger.py",
+    "reload_skills_trigger.py",
+    "resume_trigger.py",
+)
+
+
+def test_no_script_reimplements_the_retired_osascript_fallback():
+    """Phase 2 of TRDD-HMLS5WE8: since `send_self_command` now drives iTerm itself and only
+    returns `USE_ITERM_PATH` when NO channel exists at all, every sibling trigger script's own
+    `_build_osascript` fallback (behind `if sent != USE_ITERM_PATH: …`) is dead code — and dead
+    code that types a slash-command via a second, unverified osascript sender is exactly the
+    shape of the original bug this file guards against, just moved one level down. Neither
+    `_build_osascript` nor a literal `USE_ITERM_PATH` check may reappear in any of the five
+    sibling triggers (other files — e.g. `dispatch.py`'s incident-record comments about the
+    measured 2026-08-06 sentinel, or `terminal_trigger.py` itself, the module that still
+    legitimately returns/defines it — are out of scope for this guard)."""
+    offenders = []
+    for name in _SIBLING_TRIGGER_SCRIPTS:
+        path = SCRIPTS / name
+        text = path.read_text(encoding="utf-8")
+        if "_build_osascript" in text or "USE_ITERM_PATH" in text:
+            offenders.append(str(path.relative_to(_ROOT)))
+    assert not offenders, f"resurrected osascript fallback / USE_ITERM_PATH check in: {offenders}"
 
 
 # --- the behavioural pin: the fix's premise, on the owner's terminal type ----

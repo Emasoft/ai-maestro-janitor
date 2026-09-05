@@ -1626,15 +1626,17 @@ def terminal_from_record(record: Mapping[str, str]) -> dict[str, str]:
 
     Two dict shapes for one concept exist in this codebase and they are NOT interchangeable:
     `session_liveness.capture_terminal_identity` / `fleet_restart.recorded_terminal` emit
-    `{iterm_session_id, tmux_pane}`, while `terminal_trigger` and `clear_trigger._this_terminal`
-    consume `{kind, pane|session_id}`. Handing the former straight to the latter yields
-    `kind=""`, which every builder treats as "unsupported channel" — a silent no-op.
+    `{iterm_session_id, tmux_pane}`, while `terminal_trigger.self_terminal` (used throughout the
+    trigger scripts) consumes `{kind, pane|session_id}`. Handing the former straight to the
+    latter yields `kind=""`, which every builder treats as "unsupported channel" — a silent
+    no-op.
 
-    tmux is preferred over iTerm for the same reason `_this_terminal()` prefers it: its pane can
-    be read back cheaply, which is what lets the chain VERIFY a command before submitting it.
+    tmux is preferred over iTerm for the same reason `terminal_trigger.self_terminal` prefers
+    it: its pane can be read back cheaply, which is what lets the chain VERIFY a command before
+    submitting it.
 
     `ITERM_SESSION_ID` is recorded verbatim and is `<tty>:<UUID>`; the UUID must be split off
-    here or `clear_trigger._UUID_RE` rejects the whole string and refuses to build the osascript.
+    here or `terminal_trigger.valid_iterm_session_id` rejects the whole string.
     """
     pane = (record.get("tmux_pane") or "").strip()
     if pane:

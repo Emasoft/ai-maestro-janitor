@@ -70,17 +70,9 @@ import handoff_files  # noqa: E402
 import state  # noqa: E402
 import terminal_trigger  # noqa: E402
 
-# An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
-# `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we MUST
-# reject anything that isn't hex+dashes — an env var is attacker-settable, and a
-# value like `x:" then do shell script "rm -rf ~" --` would otherwise inject
-# AppleScript. A security plugin must not ship its own injection sink. (Same guard
-# as compact_trigger / resume_trigger.)
-_UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
-
 # The slash-commands the phases type into the pane. FIXED module constants (never
-# user/env input), so interpolating them into the tmux/osascript send is not an
-# injection sink (unlike the UUID, which is validated above).
+# user/env input) — `terminal_trigger.send_self_command` is the sole sender and it
+# validates any pane/session id itself before interpolating anything.
 CLEAR_CMD = "/clear"
 ARM_CMD = "/janitor-arm"
 RESUME_CMD = "/janitor-resume"
@@ -107,7 +99,7 @@ __all__ = [
 
 # INPUT-SAFETY (wikimem `claude-code-esc-input-semantics`, id:ATOM-ESC-REWIND): every
 # phase here is SOFT — a text-then-Enter send with NO leading ESC (esc_first=False in
-# _fire_phase / _build_osascript) — and we NEVER send a bare Enter or Ctrl+C. WHY it is
+# _fire_phase) — and we NEVER send a bare Enter or Ctrl+C. WHY it is
 # safe despite "never type text+Enter into an unverified pane": the invoking skill ENDS
 # ITS TURN right after this fires, so the enqueued `/clear` lands on an IDLE prompt at
 # the turn boundary (a slash-command typed into a BUSY pane merely buffers/enqueues — it
@@ -278,56 +270,6 @@ def _read_handoff() -> str | None:
         return newest.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return None
-
-
-def _build_osascript(
-    uuid: str, delay_s: float, *, commands: Sequence[str], esc_first: bool = False
-) -> str:
-    """AppleScript that targets ONLY the session whose id == uuid, then types each
-    command (SOFT — no ESC by default, so the command enqueues rather than interrupting
-    the turn). Mirrors compact_trigger._build_osascript.
-
-    The commands are FIXED module constants (never user/env input), so interpolating
-    them is not an injection sink — unlike `uuid`, which `_UUID_RE` validates before it
-    reaches here. Each command is typed via `write text "<cmd>"` (iTerm appends a
-    return); a multi-command list types them back-to-back with a settle between, so the
-    bootstrap enqueues `/janitor-arm` then `/janitor-resume` in order.
-    """
-    lines = [
-        f"delay {delay_s}",
-        'tell application "iTerm2"',
-        "  repeat with w in windows",
-        "    repeat with t in tabs of w",
-        "      repeat with s in sessions of t",
-        f'        if (id of s) is "{uuid}" then',
-        "          tell s",
-    ]
-    if esc_first:
-        lines += terminal_trigger.iterm_esc_lines()
-    for i, command in enumerate(commands):
-        if i:
-            lines.append("            delay 0.4")  # let each enqueued command register
-        lines.append(f'            write text "{terminal_trigger.applescript_quote(command)}"')
-    lines += [
-        "          end tell",
-        "        end if",
-        "      end repeat",
-        "    end repeat",
-        "  end repeat",
-        "end tell",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def _fire(script: str) -> None:
-    """Launch osascript fully detached so the parent returns immediately."""
-    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        ["osascript", "-e", script],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
 
 
 # --- the CHAINED child (TRDD-0BVF4K7E phase 2) ------------------------------
@@ -613,7 +555,7 @@ def spawn_shrink_chain(
     its own non-shrinking path rather than clear blind — an unverifiable `/clear` is the one
     unrecoverable command in this system.
     """
-    terminal = _this_terminal()
+    terminal = terminal_trigger.self_terminal(os.environ)
     if not terminal_trigger.channel_is_readable(terminal):
         return False, f"channel {terminal.get('kind', '?')!r} cannot be read back"
 
@@ -653,9 +595,8 @@ _NO_ITERM = "NO_ITERM"
 
 
 def _fire_phase(commands: Sequence[str], *, delay: float, dry_run: bool) -> str:
-    """Fire ONE keystroke phase at THIS session's own pane via the same dual-path
-    compact_trigger uses: tmux / Linux-GUI / ai-maestro CLI via terminal_trigger, and
-    iTerm via our own osascript. Returns `_FIRED` / `_DRY` / `_NO_ITERM`.
+    """Fire ONE keystroke phase at THIS session's own pane via `terminal_trigger`
+    (tmux / iTerm / Linux-GUI / ai-maestro CLI). Returns `_FIRED` / `_DRY` / `_NO_ITERM`.
 
     Presence is NOT gated here — main() checks it ONCE up front and passes
     respect_user_presence=False, so the /clear phase and the re-arm phase are atomic:
@@ -669,41 +610,12 @@ def _fire_phase(commands: Sequence[str], *, delay: float, dry_run: bool) -> str:
         dry_run=dry_run,
         respect_user_presence=False,
     )
-    if sent != terminal_trigger.USE_ITERM_PATH:
-        if sent.startswith("FIRED:"):
-            return _FIRED
-        if sent.startswith("DRY_RUN:"):
-            return _DRY
-        # NO_AUTO_TERMINAL:<kind> — a delegated terminal whose target was unresolvable.
-        return _NO_ITERM
-    # iTerm path (or any terminal terminal_trigger doesn't automate → degrade).
-    iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
-    if not iterm:
-        return _NO_ITERM
-    uuid = iterm.split(":")[-1].strip()
-    if not _UUID_RE.match(uuid):
-        # Injection-shaped session id — refuse to build the osascript. The resume
-        # state is still recorded, so the skill can ask the user to clear manually.
-        print(f"BAD_ITERM_ID {uuid[:32]}", file=sys.stderr)
-        return _NO_ITERM
-    if dry_run:
+    if sent.startswith("FIRED:"):
+        return _FIRED
+    if sent.startswith("DRY_RUN:"):
         return _DRY
-    _fire(_build_osascript(uuid, delay, commands=commands))
-    return _FIRED
-
-
-def _this_terminal() -> dict[str, str]:
-    """THIS session's pane identity, for the read-back wait. tmux is preferred because it can
-    be captured cheaply; iTerm needs an osascript round-trip but is readable too. Anything
-    else resolves to a kind the reader returns None for — which the wait treats as
-    "cannot tell, proceed", never as a refusal."""
-    pane = os.environ.get("TMUX_PANE", "").strip()
-    if pane:
-        return {"kind": "tmux", "pane": pane}
-    iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
-    if iterm:
-        return {"kind": "iterm", "session_id": iterm.split(":")[-1].strip()}
-    return {"kind": "unknown"}
+    # No channel this module can drive (delegated but unresolvable, or none at all).
+    return _NO_ITERM
 
 
 # `_user_present()` was REMOVED here (owner directive 2026-08-02: *"the old system that
@@ -793,7 +705,9 @@ def main() -> int:
         # this spinning for up to an hour while the session looked hung. Two minutes is
         # enough for "finish the sentence you were typing"; past that, defer loudly and
         # let the user re-run — the detached child keeps the long-patience behavior.
-        free, why = terminal_trigger.wait_until_pane_free(_this_terminal(), giveup_s=120)
+        free, why = terminal_trigger.wait_until_pane_free(
+            terminal_trigger.self_terminal(os.environ), giveup_s=120
+        )
         if not free:
             print(f"DEFERRED {why}", file=sys.stderr)
             return 0
@@ -851,7 +765,7 @@ def main() -> int:
     #    at the turn boundary and the bootstrap lands on the fresh idle prompt.
     delay = args.delay
     settle = args.clear_settle
-    terminal = _this_terminal()
+    terminal = terminal_trigger.self_terminal(os.environ)
 
     if args.dry_run:
         boot = ", ".join(_BOOTSTRAP_CMDS)

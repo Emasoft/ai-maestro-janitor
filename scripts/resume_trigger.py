@@ -24,19 +24,17 @@ boundary.
 
 The delay + detach are load-bearing: the caller (the PostCompact hook) must return
 immediately, so the script returns at once and the keystrokes fire ~delay seconds
-later. It targets ONLY the session whose UUID matches $ITERM_SESSION_ID (or the tmux
-pane via process ancestry) — never other panes — so concurrent Claude instances are
-untouched.
+later. It targets ONLY this session's own pane (tmux via process ancestry, or iTerm
+via `terminal_trigger.send_self_command`) — never other panes — so concurrent Claude
+instances are untouched.
 
-Outside an automatable terminal ($ITERM_SESSION_ID unset and not tmux) self-trigger
+When no channel can be driven (no tmux pane, no iTerm session id), self-trigger
 isn't available: the script prints NO_ITERM and the cron path resumes as usual.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import re
 import sys
 from pathlib import Path
 
@@ -46,57 +44,6 @@ import terminal_trigger  # noqa: E402
 # The slash-command typed into the pane. A FIXED module constant (never user/env
 # input), so interpolating it into the tmux/osascript send is not an injection sink.
 RESUME_CMD = "/janitor-resume"
-
-# An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
-# `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we
-# MUST reject anything that isn't hex+dashes — an env var is attacker-settable,
-# and a value like `x:" then do shell script "rm -rf ~" --` would otherwise
-# inject AppleScript. A security plugin must not ship its own injection sink.
-_UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
-
-
-def _build_osascript(uuid: str) -> str:
-    """AppleScript that targets ONLY the session whose id == uuid, then types
-    `/janitor-resume` (SOFT — no ESC).
-
-    There is deliberately no `esc_first` here: a compaction already ended the turn,
-    so `/janitor-resume` is typed into the idle prompt and submitted (iTerm's
-    `write text` appends a return). The command is a FIXED module constant, so
-    interpolating it is not an injection sink — unlike `uuid`, which `_UUID_RE`
-    validates before it reaches here.
-
-    The DELAY deliberately lives OUTSIDE this script now (TRDD-DXM75JB2): it used to be
-    an AppleScript `delay` line, but no flag re-check can run inside AppleScript, so a
-    heartbeat fire consuming the pending flag during that delay still got the keystrokes.
-    The sleep + type-time guard both live in `terminal_trigger.fire_detached_argv`'s
-    python child instead.
-    """
-    lines = [
-        'tell application "iTerm2"',
-        "  repeat with w in windows",
-        "    repeat with t in tabs of w",
-        "      repeat with s in sessions of t",
-        f'        if (id of s) is "{uuid}" then',
-        "          tell s",
-        f'            write text "{terminal_trigger.applescript_quote(RESUME_CMD)}"',
-        "          end tell",
-        "        end if",
-        "      end repeat",
-        "    end repeat",
-        "  end repeat",
-        "end tell",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def _fire(script: str, delay_s: float, pending_flags: list[str]) -> None:
-    """Launch osascript through terminal_trigger's detached delayed child, with the
-    TYPE-TIME flag guard (TRDD-DXM75JB2): the child sleeps `delay_s`, re-checks the
-    pending flags, and aborts silently when a heartbeat fire consumed them during the
-    sleep — the keystrokes never land in a session that already resumed."""
-    terminal_trigger.fire_detached_argv(
-        delay_s, ["osascript", "-e", script], abort_unless_any=pending_flags
-    )
 
 
 def main() -> int:
@@ -137,9 +84,8 @@ def main() -> int:
     except Exception:  # noqa: BLE001 -- fail-open toward firing
         pending_flags = []  # unresolvable project dir ⇒ no guard either (fire unconditionally)
 
-    # Prefer a non-iTerm automatable terminal (tmux) when detected via process
-    # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
-    # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a
+    # channel it cannot resolve at all falls through to NO_ITERM below.
     # esc_first=False ALWAYS: SOFT is the only correct mode post-compaction.
     # `abort_unless_any` is the TYPE-TIME half of the self-cancel (TRDD-DXM75JB2): the
     # fire-time check above stays as the cheap no-subprocess early exit; the child
@@ -160,31 +106,12 @@ def main() -> int:
         abort_unless_any=pending_flags or None,
         respect_user_presence=False,
     )
-    if sent != terminal_trigger.USE_ITERM_PATH:
-        if sent.startswith("FIRED:"):
-            print("RESUME_FIRED")
-        elif sent.startswith("DRY_RUN:"):
-            print(f"DRY_RUN {sent.split(':', 1)[1]}")
-        else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; the cron path resumes instead
-            print("NO_ITERM")
-        return 0
-
-    iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
-    if not iterm:
+    if sent.startswith("FIRED:"):
+        print("RESUME_FIRED")
+    elif sent.startswith("DRY_RUN:"):
+        print(f"DRY_RUN {sent.split(':', 1)[1]}")
+    else:  # no channel this module can drive — can't auto-send; the cron path resumes instead
         print("NO_ITERM")
-        return 0
-    uuid = iterm.split(":")[-1].strip()
-    if not _UUID_RE.match(uuid):
-        # Malformed / untrusted session id — refuse to build the osascript rather
-        # than risk AppleScript injection. The cron path resumes instead.
-        print(f"BAD_ITERM_ID {uuid[:32]}", file=sys.stderr)
-        print("NO_ITERM")
-        return 0
-    if args.dry_run:
-        print(f"DRY_RUN would fire {RESUME_CMD} at iTerm session {uuid} after {args.delay}s")
-        return 0
-    _fire(_build_osascript(uuid), args.delay, pending_flags)
-    print("RESUME_FIRED")
     return 0
 
 

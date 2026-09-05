@@ -11,8 +11,9 @@ adds the last two; iTerm/tmux are unchanged):
 
 - **iTerm** → an osascript that targets ONLY the session whose ``id`` equals the
   stored UUID, sends ESC (interrupt the dead/stuck turn), then types the command.
-  Generalized from ``compact_trigger._build_osascript`` (which self-targets via
-  ``$ITERM_SESSION_ID``) so it can target an arbitrary pane by its stored UUID.
+  Generalized from the self-targeting iTerm osascript the trigger scripts used to
+  build themselves (retired 2026-09-05 — ``terminal_trigger.send_self_command``
+  drives iTerm directly now) so it can target an arbitrary pane by its stored UUID.
 - **tmux** → ``tmux send-keys`` steps (ESC, settle, the literal command, Enter),
   reusing ``terminal_trigger.build_tmux_steps``. tmux is preferred when present:
   an ai-maestro agent pane is automatable directly — no AppleScript, no focus

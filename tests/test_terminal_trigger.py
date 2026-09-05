@@ -208,7 +208,7 @@ def test_run_verified_send_dedupes_the_same_command_but_lands_a_different_one(tm
     is sent again."""
     calls: list[tuple[str, bool]] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
         calls.append((command, esc_first))
         return True, "verified; submitted"
 
@@ -228,7 +228,7 @@ def test_run_verified_send_dedupe_and_lock_are_per_pane_not_per_project(tmp_path
     stamp, and the two must not share a lock file."""
     calls: list[str] = []
 
-    def fake_send(terminal, command, *, esc_first, giveup_s):
+    def fake_send(terminal, command, *, esc_first, giveup_s, still_wanted=None):
         calls.append(terminal["pane"])
         return True, "verified; submitted"
 
@@ -248,7 +248,7 @@ def test_run_verified_send_refuses_to_type_once_the_ceiling_has_passed(tmp_path)
     acquired, then the clock reads t=901 — nothing is typed, the child reports failure."""
     calls: list[str] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
         calls.append(command)
         return True, "verified; submitted"
 
@@ -265,7 +265,7 @@ def test_run_verified_send_refuses_a_budget_too_small_for_the_esc_settles(tmp_pa
     Under the floor, nothing is sent at all."""
     calls: list[str] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
         calls.append(command)
         return True, "verified; submitted"
 
@@ -276,10 +276,31 @@ def test_run_verified_send_refuses_a_budget_too_small_for_the_esc_settles(tmp_pa
     assert calls == []
 
 
+def test_run_verified_send_re_asks_the_type_time_guard_during_the_wait(tmp_path):
+    """TRDD-DXM75JB2's guard, re-asked every iteration: the flag exists at launch, is consumed
+    while the child waits for the field, and the sender's `still_wanted` then says no."""
+    flag = tmp_path / "resume-after-compact.flag"
+    flag.write_text("1", encoding="utf-8")
+    seen: list[tuple[bool, str]] = []
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+        assert still_wanted is not None
+        seen.append(still_wanted())          # flag still there → wanted
+        flag.unlink()                        # the dispatcher consumes it mid-wait
+        seen.append(still_wanted())          # → no longer wanted
+        return (False, "cancelled — " + seen[-1][1]) if not seen[-1][0] else (True, "sent")
+
+    data = {"terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/janitor-resume"],
+            "esc_first": False, "state_dir": str(tmp_path), "abort_unless_any": [str(flag)]}
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 1
+    assert [w for w, _ in seen] == [True, False]
+    assert not (tmp_path / "self-send.%1.stamps.json").exists()
+
+
 def test_run_verified_send_stops_at_the_first_command_that_did_not_land(tmp_path):
     calls: list[str] = []
 
-    def fake_send(_terminal, command, *, esc_first, giveup_s):
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
         calls.append(command)
         return False, "gave up"
 

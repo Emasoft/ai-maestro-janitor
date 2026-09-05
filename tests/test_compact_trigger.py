@@ -107,15 +107,6 @@ def test_write_directive_path_and_content(monkeypatch, tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8").strip() == "continue TRDD-31095269 at P3"
 
 
-def test_build_osascript_targets_uuid_and_sends_esc_then_compact() -> None:
-    mod = _import()
-    osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0)
-    assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa, "must match the specific session id"
-    assert osa.count("character id 27") == 2, "a HARD interrupt sends TWO ESCs (tool + turn)"
-    assert '"/compact"' in osa, "must send /compact"
-    assert "delay 2.0" in osa, "must delay before firing so the parent returns first"
-
-
 def test_plan_compact_maps_the_four_modes() -> None:
     """(--soft, --handoff) → (commands, esc_first). The soft contract is esc_first=False."""
     mod = _import()
@@ -127,29 +118,6 @@ def test_plan_compact_maps_the_four_modes() -> None:
     assert mod.plan_compact(soft=False, handoff=True) == (["/janitor-write-handoff --then-compact"], True)
     # --handoff --soft: no interrupt, enqueue BOTH in order.
     assert mod.plan_compact(soft=True, handoff=True) == (["/janitor-write-handoff", "/compact"], False)
-
-
-def test_build_osascript_soft_omits_esc() -> None:
-    """SOFT: no raw ESC byte — the command enqueues instead of interrupting the turn."""
-    mod = _import()
-    osa = mod._build_osascript(
-        "789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0, commands=["/compact"], esc_first=False
-    )
-    assert "character id 27" not in osa, "soft mode must NOT send an ESC byte"
-    assert '"/compact"' in osa, "must still type /compact"
-
-
-def test_build_osascript_handoff_soft_types_both_no_esc() -> None:
-    """SOFT --handoff: both commands typed (no ESC), handoff before compact."""
-    mod = _import()
-    osa = mod._build_osascript(
-        "789D8299-5AA2-48CF-9325-3BC972B9BEAE",
-        2.0,
-        commands=["/janitor-write-handoff", "/compact"],
-        esc_first=False,
-    )
-    assert "character id 27" not in osa, "soft mode must NOT send an ESC byte"
-    assert osa.index('"/janitor-write-handoff"') < osa.index('"/compact"'), "handoff before compact"
 
 
 # ---------- main() via subprocess, ALWAYS --dry-run -----------------------
@@ -312,20 +280,6 @@ def test_no_directive_no_iterm_is_silent_noop(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert proc.stdout.strip() == "NO_ITERM"
     assert not (p / ".janitor" / "state" / "resume-directive.txt").exists()
-
-
-def test_uuid_regex_accepts_real_rejects_injection() -> None:
-    """The UUID guard accepts a real session id and rejects AppleScript-injection."""
-    mod = _import()
-    assert mod._UUID_RE.match("789D8299-5AA2-48CF-9325-3BC972B9BEAE")
-    for bad in (
-        'x" then do shell script "touch /tmp/pwned" --',
-        'abc"; tell app "Finder"',
-        "id with spaces",
-        "",
-        "../../etc",
-    ):
-        assert not mod._UUID_RE.match(bad), f"{bad!r} must be rejected"
 
 
 def test_malformed_iterm_id_refuses_to_fire(tmp_path: Path) -> None:

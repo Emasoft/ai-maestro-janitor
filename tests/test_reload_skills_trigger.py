@@ -128,40 +128,6 @@ def test_undeliverable_does_not_invent_a_skills_ack_file(tmp_path: Path) -> None
     assert not acked.exists()
 
 
-# ---------- pure helper -----------------------------------------------------
-
-def test_build_osascript_targets_uuid_and_sends_esc_then_reload_skills() -> None:
-    mod = _import()
-    osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0)
-    assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa, "must match the specific session id"
-    assert osa.count("character id 27") == 2, "a HARD interrupt sends TWO ESCs (tool + turn)"
-    assert '"/reload-skills"' in osa, "must send /reload-skills"
-    assert '"/reload-plugins"' not in osa, "must NOT send /reload-plugins (that is a different command)"
-    assert '"/compact"' not in osa, "must NOT send /compact"
-    assert "delay 2.0" in osa, "must delay before firing so the parent returns first"
-
-
-def test_build_osascript_soft_omits_esc() -> None:
-    """SOFT: no raw ESC byte — /reload-skills enqueues instead of interrupting the turn."""
-    mod = _import()
-    osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0, esc_first=False)
-    assert "character id 27" not in osa, "soft mode must NOT send an ESC byte"
-    assert '"/reload-skills"' in osa, "must still type /reload-skills"
-
-
-def test_uuid_regex_accepts_real_rejects_injection() -> None:
-    mod = _import()
-    assert mod._UUID_RE.match("789D8299-5AA2-48CF-9325-3BC972B9BEAE")
-    for bad in (
-        'x" then do shell script "touch /tmp/pwned" --',
-        'abc"; tell app "Finder"',
-        "id with spaces",
-        "",
-        "../../etc",
-    ):
-        assert not mod._UUID_RE.match(bad), f"{bad!r} must be rejected"
-
-
 # ---------- main() via subprocess, ALWAYS --dry-run -----------------------
 
 def test_dry_run_reports_plan_and_does_not_fire() -> None:

@@ -217,43 +217,6 @@ def test_the_exemption_needs_the_marker_at_the_top_not_merely_present() -> None:
     )
 
 
-def test_build_osascript_soft_clear_targets_uuid() -> None:
-    """iTerm osascript for /clear: targets the session id, SOFT (no ESC byte)."""
-    mod = _import()
-    osa = mod._build_osascript(
-        "789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0, commands=["/clear"]
-    )
-    assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa
-    assert '"/clear"' in osa
-    assert "character id 27" not in osa, "the /clear phase must be SOFT (no ESC)"
-
-
-def test_build_osascript_bootstrap_types_arm_then_resume() -> None:
-    """iTerm osascript for the bootstrap: /janitor-arm typed before /janitor-resume."""
-    mod = _import()
-    osa = mod._build_osascript(
-        "789D8299-5AA2-48CF-9325-3BC972B9BEAE",
-        10.0,
-        commands=["/janitor-arm", "/janitor-resume"],
-    )
-    assert osa.index('"/janitor-arm"') < osa.index('"/janitor-resume"'), "re-arm before resume"
-    assert "character id 27" not in osa, "bootstrap is SOFT (no ESC)"
-
-
-def test_uuid_regex_accepts_real_rejects_injection() -> None:
-    """The UUID guard accepts a real session id and rejects AppleScript-injection."""
-    mod = _import()
-    assert mod._UUID_RE.match("789D8299-5AA2-48CF-9325-3BC972B9BEAE")
-    for bad in (
-        'x" then do shell script "touch /tmp/pwned" --',
-        'abc"; tell app "Finder"',
-        "id with spaces",
-        "",
-        "../../etc",
-    ):
-        assert not mod._UUID_RE.match(bad), f"{bad!r} must be rejected"
-
-
 # ---------- main() via subprocess, ALWAYS --dry-run -----------------------
 
 def test_dry_run_shows_the_CHAINED_plan_and_writes_NOTHING(tmp_path: Path) -> None:
