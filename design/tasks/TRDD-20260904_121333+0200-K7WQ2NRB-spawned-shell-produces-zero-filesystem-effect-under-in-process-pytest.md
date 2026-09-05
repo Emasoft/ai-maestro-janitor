@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest �
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T03:03:52+0200
+updated: 2026-09-05T03:53:05+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -67,7 +67,22 @@ external-refs: [TRDD-Q8PNPRTW]
   2026-09-19, after which the card returns to where it already was. (`:615` exempts a
   `backburner` card carrying `blocked-by:`/`npt:`; this one has neither, which is why the field
   was needed at all.)
-- **A 30-RUN LOOP WAS RUNNING WHEN THIS CARD WAS BACKBURNERED** —
+- **⇒ THE LOOP FINISHED: 30/30 GREEN, AND THAT IS THE STEP-0 RESULT.** Zero non-zero exits, zero
+  entries in `unrelated.log`, `survivors.log` or `slow-runs.log`. Durations **89–187 s, mean
+  124 s**. Ledger: `reports/suite-failures/20260905_024917+0200-…/`.
+  **What it establishes:** the failure does NOT reproduce in this configuration — ~44 runs now
+  across two configurations (14 two-test at load 19.5–36.3, plus these 30 full-suite `-n auto`)
+  with **not one failure**. Brute force is exhausted; do not spend more on it.
+  **What it does NOT establish, and this is the sharper half:** every one of the 30 ran at
+  89–187 s, and **soak9 — the run that FAILED — took 822.89 s.** The loop never once entered the
+  regime the failure was observed in. So "the loop cannot reproduce soak9" now has 30 data
+  points behind it rather than 3, and the reason is still that these are not samples from that
+  population. The 8.6× remains UNEXPLAINED (see the load bullet above).
+  **Also negative, and worth recording:** the survivor census — the version with a positive
+  control — found **zero orphans after all 30 runs**. That is a real negative result for line
+  77's cross-run-state hypothesis, bounded by the known gap: it cannot see the
+  `/bin/sh …fake_capture.sh` parent shell.
+- **(Historic) A 30-RUN LOOP WAS RUNNING WHEN THIS CARD WAS BACKBURNERED** —
   `reports/suite-failures/20260905_024917+0200-…`, started 02:49:17, ~2 min/run, stopping on the
   first red run or at run 30. Recorded here because nothing outside a `reports/` dir said so.
   **Its ONLY trustworthy output is whether any run went red.** Its duration/load pairs are
