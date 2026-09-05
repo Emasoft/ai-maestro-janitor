@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest �
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T02:58:26+0200
+updated: 2026-09-05T03:01:05+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -34,9 +34,32 @@ external-refs: [TRDD-Q8PNPRTW]
   in `todo`, the column asserted the opposite of the content, the same metadata-vs-content
   defect as the stale STATE block corrected one commit earlier, made in the other direction.
   `blocked` was considered and does not fit: the kanban rule ties it to a non-empty
-  `blocked-by:`, and no TRDD blocks this — what it waits on is an EVENT. `backburner` is the
-  rule's own "deferred by design" column, exempt from the drain obligation, and `review-after:`
-  resurfaces it after the next soak cycle without anyone having to remember. **Brute force has been tried
+  `blocked-by:`, and no TRDD blocks this — what it waits on is an EVENT.
+  **⚠ `backburner` IS THE LEAST-WRONG OF THREE IMPERFECT COLUMNS, NOT A CLAIM THAT THIS WAS
+  DEFERRED BY DESIGN — do not cite this card as precedent for parking live work.** The
+  prosecution is real and worth stating against myself: this card's own founding paragraph
+  (below) split it OUT of Q8PNPRTW because *"parking live technical work behind a human
+  decision that has nothing to do with them would hide them"* — and an unreproducible failure
+  is the same SHAPE as a waiver: an external condition, unscheduled, possibly never. The drain
+  rule's only licence to sit still is `blocked` with a true `blocked-by:`; the honest reading of
+  "`blocked` does not fit" is *"this card has no licence to sit still"*, not *"so use the column
+  that needs none"*. `backburner` is also exempt from the drain obligation, so the one card with
+  four days of live investigation becomes the one the rule stops asking about.
+  **What makes it defensible is not the column, it is this block.** Q8PNPRTW's work was hidden
+  because its state gave no reader a way to see it; here the state is the loudest thing in the
+  file, dated, and carrying an explicit return.
+  **And `review-after:` SNOOZES — it does not resurface.** The card was ALREADY drift-eligible
+  (`backburner` is by default); the field SUPPRESSES that attention until 2026-09-19, after
+  which the card returns to the drift-eligible state it was already in. Describing the expiry as
+  an added mechanism, as my commit did, overstates what the field does.
+- **A 30-RUN LOOP WAS STILL RUNNING WHEN THIS CARD WAS BACKBURNERED**, and nothing outside a
+  `reports/` dir would otherwise say so — an unrecorded state, on a card whose whole point this
+  session was unrecorded states. `reports/suite-failures/20260905_024917+0200-…`, started
+  02:49:17, ~2 min/run, stops on the first red run or at run 30. **Its LOAD figures are
+  contaminated by this session's own foreground work** — by the argument two bullets down, they
+  measure the session, not the failure. **Its only trustworthy output is whether any run went
+  red.** If the ledger's last row is stale and no pytest is running, it finished or died; either
+  way nothing is watching it. **Brute force has been tried
   in two configurations and produced ZERO failures**: 14 runs of a 2-test selection at load
   19.5-36.3 (1a), and ~6 full-suite `-n auto` runs this session. The deliverable that did not
   need a reproduction is **landed** (`6268dbeb`): row 2 no longer discards the child's stderr,
@@ -733,6 +756,12 @@ on Q8PNPRTW for being plausible.
   `checkout --`; a committed, behaviour-neutral change is not in that class.)*
 - Evidence: `reports/suite-failures/20260904_114209+0200-capture-all-logins-failure-state.md`,
   `reports/suite-failures/20260904_113039+0200-fixture-fork-latency.md`.
+- **IF YOU STRIKE A REFUTED SENTENCE, THE PLAIN-TEXT MARKER CARRIES THE MEANING — the tildes
+  are decoration.** `~~…~~` is GFM: it renders on GitHub and NOWHERE ELSE these cards are
+  actually read — not in `cat`, `grep`, `less`, or an agent reading raw markdown, which is the
+  majority case for this corpus. Step 0's struck lead clause is safe only because
+  `**STRUCK — MEASURED FALSE**` sits beside it in plain prose. A strike-through without that
+  marker is invisible to every reader who is not on GitHub, which is worse than not striking.
 - **WHEN THE MECHANISM IS NAMED, COLLAPSE THIS CARD'S RETRACTION LAYERS** the way TRDD-34GB6XUI
   does for ZQ02QG1L — the load claim, the census, and the timeout scoping each carry three or
   four superseded readings now. **Not before then, and deliberately not as its own card yet:**
