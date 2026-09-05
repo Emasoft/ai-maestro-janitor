@@ -35,6 +35,16 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
   today, first-hand:
   - `global-state/rotation-success.ts` = `1788573479` = **2026-09-05T03:57:59** — a rotation
     SUCCEEDED on this host about an hour before this correction was written.
+    **What licenses the word "SUCCEEDED", since a stamp's NAME licenses nothing:** both
+    writers are rotation-only and fail-CLOSED. `rotator.py:1647` is inside `_switch_blob`,
+    *"the single chokepoint every successful switch passes through"*, after `write_live_blob`.
+    `rotator.py:932` fires only on an OBSERVED CHANGE of live identity (`old != new`) — its own
+    comment says it *"cannot fire without an observed change of live account — which is
+    required, because the consumer types into the user's pane"*, and explicitly refuses to
+    trust the beacon's `ts` because a re-stamp proves only that a re-stamp ran. So neither a
+    renew, an age-driven re-stamp, nor an optimistic self-heal can write this file. *(Scope: a
+    test calling `record_rotation_success` directly would also write it; what is verified is
+    that the two PRODUCTION callers are rotation-only.)*
   - `global-state/daemon.log.1` carries **2** `rotation-esc:` lines (2026-09-04T04:56:18 and
     04:57:13, both *"cannot read the pane for AgentlensPro — skipped"*). `_rotation_esc_pass`
     returns early unless `rotation_succeeded_within(_ROTATION_WAKE_WINDOW_S=600)`
@@ -50,16 +60,32 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
   entered the pane loop and neither reached actuation: every exit was the unreadable-pane skip
   (`:2238`) or the silent `continue` for a pane not in `RETRY_WEDGE` (`:2242`). The completed
   form (`rotation-esc: <STATUS> ESC → <channel>`, `:2302`) and the DRY form (`:2250`) appear
-  **0 times across both log files**. So the ~9 s/pane cost is still unpaid — not because
-  rotations do not happen, but because **no pane has been in `RETRY_WEDGE` at the moment of a
-  rotation window.** That is the condition to wait for, and it is not the one the card was
-  waiting for.
+  **0 times across both SURVIVING log segments** (`daemon.log`, `daemon.log.1`). *Deliberately
+  not "never": older segments have been pruned, and asserting a machine's whole history from
+  the files that happen to remain is the exact error this correction is about.* The grep is
+  sound within those two — `OutcomeStatus` is `done|failed|deferred|noop`
+  (`lib/pane_policy.py:394`), all single words, so `[A-Z]+ ESC` matches every status `:2302`
+  can emit; a multi-word value would have slipped through and there is none.
+  So the ~9 s/pane cost is still unpaid — not because rotations do not happen, but because
+  **no pane has been in `RETRY_WEDGE` at the moment of a rotation window.** That is the
+  condition to wait for, and it is not the one the card was waiting for.
+  **Both observed entries died on the SAME pane** — `AgentlensPro`, unreadable on both
+  attempts. Noted, not chased: that pane is the one that would have carried the measurement, so
+  if it is chronically unreadable this card could wait forever on a coincidence that a pane
+  defect, not rarity, is preventing. Worth one look before concluding "rare" next time.
 - **A partial bound now exists, and it is NOT a stall.** Inside the 600 s wake window after the
   03:57:59 rotation (esc pass running over the fleet, zero actuations): `oauth-rotator-tick`
-  bodies 13–22 s, `session-liveness` 8–21 s, no `wait > 60 s`. **Do not read this as "the pass
-  costs time"** — the control hour 02:50–03:50 already ranges 1–18 s (mode 10 s), so the ranges
-  overlap and the elevation is suggestive at best. Recorded so the next reader does not
-  re-derive it, and does not over-read it either.
+  bodies were `13 16 18 19 20 21 22` s (n=7), `session-liveness` 8–21 s, no `wait > 60 s`.
+  **Do not read this as "the pass costs time".** Control, `oauth-rotator-tick` over 02:50–03:50:
+  **n=42, min 1, max 40, p50 9, p90 14**. So the in-window values sit above the control median
+  and 5 of 7 above its p90 — but **every one is inside the control's own range**, on 7 points.
+  A shifted sample, not an established cost.
+  **⚠ The first version of this bullet cited the control as "1–18 s (mode 10 s)" — WRONG, and
+  wrong in the direction that flattered the hedge.** That came from `sort | uniq -c | sort -rn
+  | head`, which is the ten most FREQUENT values, not the range; `head` hid the 40 s max. A
+  truncated frequency table reported as a distribution is the same defect as reading one log
+  segment as a machine's history — committed one hour after writing that very lesson. When the
+  claim is about a range, sort NUMERICALLY and take the actual ends.
 - **The generalisation is a DEDUCTION, not a guess.** The measured mechanism is *any*
   foreground body occupying a single-threaded loop. Rotation actuation is foreground work
   with a known ~9 s/pane cost, so the prediction follows from the measured mechanism — it

@@ -42,9 +42,20 @@ external-refs: [TRDD-8BXMNQ4T]
   machine-wide daemon that owns OAuth survival. Enabling the plugin is a change to the USER's
   own `~/.claude/settings.json` and takes effect only after a restart, so it is the USER's
   call, not something to flip mid-session to unblock a chore.
-- **NEXT ACTION — one of, and it needs the USER:** (a) re-enable `fable-advisor` and restart,
-  then run the consult; or (b) the USER waives box 1 for this card. Nothing else on the card
-  is startable, because every remaining box is downstream of the mechanism choice box 1 gates.
+- **NEXT ACTION for the MECHANISM — one of, and it needs the USER:** (a) re-enable
+  `fable-advisor` and restart, then run the consult; or (b) the USER waives box 1 for this card.
+- **⚠ BUT WORK REMAINS THAT BOX 1 DOES NOT GATE — a first draft of this block said "nothing
+  else on the card is startable", which was FALSE and, sitting in a STATE block, would have
+  foreclosed it for every later reader.** Box 1 gates *writing a `scripts/daemon.py` scheduling
+  change*. It does not gate:
+  - **The two open questions below**, both pure read-only diagnosis: *why does `session-liveness`
+    need 78 s at all?* and *what is the ~84 s unaccounted at 04:15–04:18?* Either could
+    ELIMINATE a candidate and shrink what the advisor is asked — which is what this card says it
+    wants, and the precedent is already set here for ungated read-only source reading.
+  - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
+    pattern is not writing a scheduling change; only the bound it pins is.
+  Start with the `session-liveness` question — it is in 8 of 12 stall rows, so its answer moves
+  candidate 4 more than anything the advisor could say.
 - **The analysis is NOT the blocker — it is done.** Candidates 1 and 2 are rejected with
   reasons, 3 and 4 stand, and the transferable structure (decide the budget/deferral set ONCE
   before the loop) is settled below. The consult is for choosing between 3 and 4 and for
