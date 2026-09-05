@@ -240,8 +240,7 @@ bounds that **sum** — only individual subprocess workloads are capped
   both intervals default to 120 s (`harness_backend.py:105/109`, so normally due together —
   env-overridable, hence a claim about THIS host); and 886/886 beats attributed, 19 windows
   with >1 guard, exactly 1 with disagreeing candidates — **a 10 s beat, so all six long
-  beats are clean**; and 0 guards landed INSIDE a `session-liveness` body, as the
-  single-threaded loop requires. Limits: long arm n=6 (CI ≈12–88%), so only a near-universal
+  beats are clean**; and 0 guards landed INSIDE a `session-liveness` body. Limits: long arm n=6 (CI ≈12–88%), so only a near-universal
   association is excluded; and a RATE test bounds frequency, never MAGNITUDE. *(A 20–60 s
   band sits at 11/13 — n=13, a data-suggested boundary, not a lead. The 60 s split is the
   scheduler's own interval, which is why it is not the same kind of slice.)*
