@@ -40,37 +40,45 @@ automated clear, run `uv run scripts/handoff_clear_verify.py --phase after` in t
 right after its `post-clear resume cue`, before further turns run, and compare against that
 project's `before` snapshot.
 
-### ⛔ 2026-09-05 — "No code work remains" IS FALSE. Box 5 CANNOT tick on the automated path.
+### ⛔ 2026-09-05 — "No code work remains" IS FALSE. Box 5 cannot tick on the AUTOMATED path.
 
-**Nothing invokes `--phase after`, and nothing tells the resumed session to.** Verified:
+**The two clear paths compose DIFFERENT resume directives, and only the manual one asks for
+the after-phase.** That is the whole defect — it is a divergence, not a missing mechanism.
 
-- `external_handoff_clear.py:363` runs the harness with `["--phase", "before"]` and nothing
-  else. A repo-wide grep for `handoff_clear_verify` finds exactly two other hits, both prose.
-- The harness's own docstring (`handoff_clear_verify.py:37`) says the after-phase is *"run by
-  the resumed session, driven by the resume directive"* — but no code puts that instruction
-  into the automated resume directive.
-- The ONE place that hands a human the command (`handoff_clear_verify.py:576-584`) is inside
-  `if not before.get("resume_flag_present")` — it fires only when NO resume flag is present,
-  i.e. on the MANUAL path. On an automated clear the flag IS present, so that branch is
-  silent and nobody is ever told.
+| path | directive | asks for `--phase after`? |
+|---|---|---|
+| MANUAL — `/janitor-handoff-and-clear` | `skills/janitor-handoff-and-clear/SKILL.md:116` passes `clear_trigger.py --directive "run handoff_clear_verify.py --phase after FIRST, then read the newest …agent-handoff-*.md and continue …"` | **YES** |
+| AUTOMATED — the daemon fire | `external_handoff_clear.py:409-413` hard-codes *"read the injected SessionStart handoff summary FIRST … then resume your prior in-flight task."* | **NO** |
 
-So the 2026-09-03 cycle did not "forget" the after-phase; **there is no mechanism by which it
-could have run it.** Waiting for the next automated fire will produce the same `before`-only
-`handoff-clear-verify.json` forever.
+So the 2026-09-03 automated cycle did not "forget" the after-phase: **its directive never
+asked for it.** Every future automated fire will do the same, leaving a `before`-only
+`handoff-clear-verify.json` indefinitely, so box 5 cannot tick by waiting.
 
-**Box 5 therefore needs CODE before it can need a measurement** — emit the after-phase
-directive on the automated resume path (the natural home is beside the post-clear resume cue,
-where the resumed session is already being told what to do). Only then does the measurement
-become a live-event wait like box 4's was.
+**The fix is small and already has a reference implementation:** add the after-phase clause
+to the automated directive at `external_handoff_clear.py:409`, matching what the skill has
+done all along. Then box 5 becomes a live-event wait like box 4 was.
 
-*This block corrects the line below, which was written 2026-09-03 and is left in place so the
-correction is legible rather than silent.*
+**⚠ MY FIRST VERSION OF THIS BLOCK SAID "nothing tells the resumed session to", AND THAT WAS
+FALSE.** It rested on one `grep` of `scripts/` — a negative existence claim from a single
+search, which is exactly the failure the claim-verification rule names. The skill carries the
+instruction in markdown, which `scripts/`-only grep cannot see. Review caught it; a wider
+search (`skills/ hooks/ commands/ agents/ .claude/ *.md *.json` plus the installed plugin
+cache) found `SKILL.md:116` immediately. **Kept visible because the wrong version and the
+right one have DIFFERENT fixes** — "design a mechanism" versus "make two directives agree" —
+and the cheap one is only visible once you know the manual path already solved it.
+
+*Corrects the line below, from 2026-09-03, left in place so the correction is legible.*
 
 ~~No code work remains — the two open boxes are both measurements on future/next automated fires.
 Column moved `dev → testing` accordingly.~~
 
-**Column moved BACK `testing → dev` (2026-09-05).** `testing` asserts that the work is built
-and under test; box 5's mechanism is not built, so the column was claiming something untrue.
+**Column moved BACK `testing → dev` (2026-09-05).** `testing` asserts the work is built and
+under test; the automated directive's after-phase clause is not built.
+
+**Also verified in passing — TRDD-BDZG8Y8A looks DONE:** it was filed because "the daemon fire
+path takes no `--phase before` snapshot", and `external_handoff_clear.py:401` now calls
+`_snapshot_before(child_env)`, with the comment at `:400` citing BDZG8Y8A by name. Check that
+card rather than trusting this line.
 
 ### ⛔ 2026-09-02 05:15 — THE DRILL FIRED; the summary half is dark. Blocked on TRDD-QZVAEWQH
 
