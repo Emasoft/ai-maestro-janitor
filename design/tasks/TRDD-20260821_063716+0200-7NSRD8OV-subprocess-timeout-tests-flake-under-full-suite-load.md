@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-05T13:18:49+0200
+updated: 2026-09-05T20:27:16+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -11,10 +11,35 @@ approval-tier: 0
 scope: project
 implementation-commits: [de08aa15, 935daa7e, 1ea8b734, 2b88f67d, 8bdc8baa, 912f55a5, bf245a99, c5743567, ae2e5690, e6113577, c08b0112, 985f0965, 133f463d, 95f71cb1, 19b66a78, 99d2f7dd]
 npt: []
-eht: []
+eht: [TASA9ACJ]
 ---
 
 # Subprocess-timeout tests flake under full-suite load
+
+## ⏵ 2026-09-05 20:27 — unit-8 pair (`-n auto` then `-n 4`, sequential, quiet start) landed RED twice: bar still unmet
+
+`reports/suite-soak/20260905_133200+0200-{nauto,n4}.txt` (+ `.loadavg`, `.ps.txt`,
+`q8pnprtw-experiment.log`), compared in
+`reports/board-drain/20260905_202532+0200-soak-compare-and-conftest-walk-cost.md`:
+
+| run | start loadavg | summary | `TimeoutExpired` | exit |
+|---|---|---|---|---|
+| `-n auto` | 7.81 (waited for <8 for 2 min) | `17 failed, 16438 passed, 2 skipped … 2237.29s` | 7 | 3 |
+| `-n 4` | 17.90 (host not yet quiet after nauto) | `20 failed, 16445 passed, 2 skipped … 2967.91s` | 10 | 1 |
+
+**13 failures are common to both runs** (`test_branch_protection*`, `test_gh_reply_watch`,
+`test_github_issues_watch`, `test_capture_all_logins`, `test_inject_still_wanted`,
+`test_token_usage_anomaly_detector::test_alarm_enriched_with_agentlens`,
+`test_external_clear_retry::test_a_real_failing_binary_is_classified_not_swallowed`) — a
+stable set that a quiet start did not clear, so not the load-only category this card owns.
+`test_branch_protection_guard.py` fails a DIFFERENT sub-test each run (3+3, none shared).
+The `-n 4` run also carries a 300 s `dispatcher-stub.py --run-cold-cache-clear` timeout
+inside `test_cold_cache_clear_server_lane`. Neither run is the RULING's green; `column:`
+stays `testing`. The 13-common set wants its own triage (network/`gh`-auth-shaped names
+dominate) before the next soak, or the soak measures them, not load.
+
+EHT filed: TRDD-TASA9ACJ — `conftest.py::_source_manifest` walks + sorts the 101k-file
+`scripts/memgrep/target/` tree before filtering it (8–22 s, twice per run).
 
 ## ⏵ 2026-09-05 13:18 — a full `-n auto` run landed RED: does NOT meet the ruling's bar
 
