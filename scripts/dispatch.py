@@ -772,11 +772,15 @@ def _suppress_stale_memory_markers(text: str) -> str:
     own write milliseconds after making it, so it can never see a record a PEER
     session's agent claims minutes later (issue #300's fire-2: the marker printed
     again with no unclaimed record left, per the reporter's own read of
-    `global-state/`). The claim pool is machine-wide (`state.state_dir()` under the
-    project the dispatch fired in — the same directory every session's claim step
-    reads), so THIS process re-checking it right before the marker leaves the
-    heartbeat is the latest point any machine code can still catch the race, before
-    the session reading this stdout decides to spawn an agent.
+    `global-state/`). The claim pool is PER-PROJECT: `state.state_dir()` resolves
+    to `.janitor/state` under `$CLAUDE_PROJECT_DIR`, else `git rev-parse
+    --show-toplevel` from cwd, else plain cwd (`scripts/lib/state.py:117-136`) — a
+    claim step run from a DIFFERENT project than the one dispatch fired in reads a
+    different pool and this gate cannot see it (tracked as TRDD-N1CPV1QV). This
+    gate only covers the same-project peer-claimed race described above; THIS
+    process re-checking the same-project pool right before the marker leaves the
+    heartbeat is the latest point any machine code can still catch that race,
+    before the session reading this stdout decides to spawn an agent.
 
     Reuses `memory_dispatch_claim.candidates()` + `payload_matches_chore` — the
     EXACT predicate `claim_one` applies — never a re-implementation of "claimable".
@@ -810,6 +814,26 @@ def _suppress_stale_memory_markers(text: str) -> str:
                 "dispatch",
                 f"memory-dispatch: marker for {chore} suppressed — claim pool empty (janitor#300)",
             )
+            # SURFACE the disagreement too, not just the log line — a session reading
+            # heartbeat stdout never sees state.log_line, so without this the scheduler
+            # and the claim pool disagreeing is invisible outside /janitor-findings.
+            # Dedup by (chore, local day) — same day-bucket convention as
+            # `_phase_self_cost_alarm` / `_phase_heartbeat_renew` above: one record per
+            # chore per day, not one per fire (the heartbeat can fire every few minutes).
+            today = datetime.now().astimezone().strftime("%Y%m%d")
+            if dedupe.emit_once(
+                state.state_dir() / "memory-marker-suppressed-seen.txt",
+                f"{chore}@{today}",
+                chore,
+            ) is not None:
+                try:
+                    findings_ledger.record(
+                        sev="LOW", code="MEMORY-MARKER-SUPPRESSED", src="dispatch",
+                        msg=f"[janitor-memory-{chore}] suppressed — claim pool empty (janitor#300)",
+                        ref="",
+                    )
+                except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
+                    pass
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 

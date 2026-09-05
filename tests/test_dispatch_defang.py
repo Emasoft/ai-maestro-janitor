@@ -225,3 +225,33 @@ def test_marker_survives_when_the_dispatch_is_still_pending(tmp_path, monkeypatc
         assert out == "[janitor-memory-split]\n"
     finally:
         _clear_state_cache()
+
+
+def test_stale_marker_gate_is_scoped_to_memory_maintenance(tmp_path, monkeypatch):
+    """The claim-pool gate is applied by `_run_detector` only when
+    `name == "memory-maintenance"` — a bare `[janitor-memory-*]` line emitted by
+    ANY other detector must never be suppressed, even with an empty claim pool.
+    It is left to `_defang_foreign_markers`'s ordinary non-owner handling (the
+    marker is neutralized to `⟦…⟧`, not silently dropped)."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    _clear_state_cache()
+    try:
+        state.state_dir().mkdir(parents=True, exist_ok=True)  # empty claim pool
+        text = "[janitor-memory-split]\n"
+        # Mirror `_run_detector`'s composition: the suppression gate is only
+        # entered for the owner detector name, exactly as line ~971 does.
+        for name in ("memory-maintenance", "some-other-detector"):
+            out = text
+            if name == "memory-maintenance":
+                out = dispatch._suppress_stale_memory_markers(out)
+            out = dispatch._defang_foreign_markers(name, out)
+            if name == "memory-maintenance":
+                assert "[janitor-memory-split]" not in out, (
+                    "empty pool: owner detector's marker is suppressed"
+                )
+            else:
+                assert out == "⟦janitor-memory-split⟧\n", (
+                    "non-owner detector: never gated, only defanged (never dropped)"
+                )
+    finally:
+        _clear_state_cache()
