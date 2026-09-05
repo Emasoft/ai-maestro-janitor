@@ -66,7 +66,7 @@ def _stamp_switch(now: int) -> None:
 
 
 def _this_terminal() -> dict[str, str]:
-    """THIS session's own pane. Mirrors `clear_trigger._this_terminal` — tmux first (cheap to
+    """THIS session's own pane. Mirrors `terminal_trigger.self_terminal` — tmux first (cheap to
     capture), then iTerm (an osascript round-trip, still readable). Anything else resolves to
     a kind whose builders return None, and the injection declines rather than typing blind."""
     pane = os.environ.get("TMUX_PANE", "").strip()

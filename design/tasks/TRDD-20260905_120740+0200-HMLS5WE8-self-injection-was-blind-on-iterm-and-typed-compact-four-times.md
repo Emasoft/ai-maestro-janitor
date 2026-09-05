@@ -131,11 +131,14 @@ with scripts); the diff was reviewed line by line before commit and is exactly t
 **Phase-2 review fix:** `resume_trigger`'s type-time guard (TRDD-DXM75JB2) used to be checked
 milliseconds before the keystroke; the verified child can wait minutes for the lock and the field,
 so the guard is now a `still_wanted` predicate re-asked on every iteration of that wait
-(`send_verified` forwards it to `inject_until_sent`), plus the cheap pre-lock check.
+(`send_verified` forwards it to `inject_until_sent`), plus the cheap pre-lock check. Residual:
+the guard is not re-asked between the final verify and Enter (≤1 s); `pre_submit` could close
+that at the cost of a clear-on-abort path — not built.
 
-**Column:** `dev → human_review` directly — `testing` (the 12-file gate, 262 passed) and
-`ai_review` (fourteen adversarial review forks) happened in-session; the skip compresses steps
-that ran, it does not omit them.
+**Column:** `dev → human_review` directly. The card never sat in `testing` or `ai_review` as
+columns; the gates (12 files, 262 passed) and fifteen per-diff review rounds ran in-session and
+their findings are recorded above. The shortcut is covered by the standing autonomous-drain
+permission and is recorded here as a shortcut, not as two columns visited.
 
 **NEXT ACTION (owner):** ratify or veto the two deviations in items 2 and 4 above; then this card
 completes. Nothing else is outstanding except the two untested claims listed under Acceptance.

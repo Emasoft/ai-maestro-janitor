@@ -1257,6 +1257,20 @@ def test_after_enter_the_field_is_re_read_and_enter_is_pressed_again_while_it_st
     assert slept == [tt._SUBMIT_CONFIRM_INTERVAL_S]
 
 
+def test_send_verified_forwards_still_wanted_into_the_injector(monkeypatch) -> None:
+    """The half a refactor drops silently: `send_verified` must hand `still_wanted` to
+    `inject_until_sent`, or the self-send's type-time guard is a lambda nobody asks."""
+    ran: list[list[str]] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: ran.append(steps))
+    ok, why = tt.send_verified(
+        {"kind": "tmux", "pane": "%1"}, "/x",
+        still_wanted=lambda: (False, "gone"),
+        reader=lambda _t: _pane(""), is_typing=lambda _t: False, sleeper=lambda _s: None,
+    )
+    assert (ok, why) == (False, "cancelled — gone")
+    assert ran == [], "cancelled before any keystroke"
+
+
 def test_the_confirm_is_bounded_and_never_presses_enter_on_other_text() -> None:
     sent: list[str] = []
     ok, _ = tt.inject_until_sent(
