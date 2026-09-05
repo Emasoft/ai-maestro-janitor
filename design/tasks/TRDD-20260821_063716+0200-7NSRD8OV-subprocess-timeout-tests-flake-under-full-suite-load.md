@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-05T20:42:00+0200
+updated: 2026-09-05T21:12:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -11,10 +11,23 @@ approval-tier: 0
 scope: project
 implementation-commits: [de08aa15, 935daa7e, 1ea8b734, 2b88f67d, 8bdc8baa, 912f55a5, bf245a99, c5743567, ae2e5690, e6113577, c08b0112, 985f0965, 133f463d, 95f71cb1, 19b66a78, 99d2f7dd]
 npt: []
-eht: [TASA9ACJ]
+eht: [TASA9ACJ, 9EAQS97B]
 ---
 
 # Subprocess-timeout tests flake under full-suite load
+
+## ⏵ 2026-09-05 21:12 — the category-D count is a FLOOR: `run_subprocess` swallows timeouts into `stdout='' rc=0`
+
+Read from `scripts/lib/state.py::run_subprocess` (coordinator) and measured by the
+Q8PNPRTW discriminator (solo `test_gh_reply_watch.py` on a loaded host: 5/14 fail with
+`stdout='' rc=0`, including a first-fire test that no shared stamp could block): a
+`TimeoutExpired` inside a detector's subprocess hop is caught, logged to the detector's
+log file only, and returned as `None`, which every caller turns into a silent exit 0. So
+the unit-8 table's "raised `TimeoutExpired`: 1 / 2" counts only the timeouts that escaped
+as tracebacks; the five empty-stdout ids common to both runs are timeouts too. The
+RULING's "zero category-D" bar is unmeasurable until the swallowed ones leave a trace —
+EHT TRDD-9EAQS97B makes `_log_fail_open` write its one line to stderr. Re-read the next
+soak's `stderr` for `[run_subprocess]` lines before scoring it.
 
 ## ⏵ 2026-09-05 20:27 — unit-8 pair (`-n auto` then `-n 4`, sequential, quiet start) landed RED twice: bar still unmet
 

@@ -3,7 +3,7 @@ trdd-id: HMLS5WE8
 title: Self-injection was blind on iTerm and typed compact four times into one field
 column: human_review
 created: 2026-09-05T12:07:40+0200
-updated: 2026-09-05T21:08:00+0200
+updated: 2026-09-05T21:12:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -29,10 +29,11 @@ a snapshot-directory name collision measured the parent twice; corrected). So ph
 post-submit confirm (`_still_shows_ours`, two call sites) made a tmux injection read the
 pane 3 times instead of 2 on that path. TRDD-KS41G6AL updated the only test that pinned
 the old count (fixture side; `terminal_trigger.py` unchanged) and is `testing` with only
-the publish-gate box open. What this card's reviewer still has to decide: that the extra
-confirm read on the tmux path is intended by phase 1's design (the STATE above says the
-guard is re-asked during the verified wait), not a side effect — KS41G6AL took "intended"
-from that STATE text, not from the reviewer.
+the publish-gate box open. Facts a reviewer needs: KS41G6AL's "intended" rests on this
+card's own STATE sentence about the guard being re-asked during the wait (the phase-2
+re-ask), which is not a statement about phase 1's confirm read; nobody outside KS41G6AL
+has said the phase-1 read count on the tmux path is intended. All five bisect snapshots
+were hash-verified against `git show` before the table above was written.
 
 **Owner report (verbatim, 2026-09-05 11:45):** *"you made a mess.. the compaction script of the
 janitor injected 4 times the compact command, and the api gave error"* — the pane showed

@@ -4,7 +4,7 @@ title: eleven suite failures found on a full run under load — triage each as r
 column: blocked
 pre-block-column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-05T20:52:00+0200
+updated: 2026-09-05T21:12:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -26,6 +26,21 @@ external-refs: [TRDD-7NSRD8OV]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
+> ### ⏵ 2026-09-05 21:12 — empty-stdout cluster explained: a fail-OPEN `run_subprocess` timeout, not a stamp leak (hypothesis refuted by measurement)
+>
+> Discriminator (`reports/board-drain/20260905_210746+0200-Q8PNPRTW-gh-reply-watch-floor-stamp-discriminator.md`):
+> the floor stamp lives under `control_dir()` → the test's own per-test `HOME` (the test
+> builds the child env by hand, so it is isolated by construction — the shared-stamp
+> hypothesis is FALSE). A solo run of `tests/test_gh_reply_watch.py` on this loaded host
+> failed 5/14 with the same `stdout='' rc=0` signature, including the FIRST-fire test,
+> which has no stamp to collide with. Read from source by the coordinator:
+> `state.py::run_subprocess` catches `TimeoutExpired`, logs to the detector's LOG FILE
+> only, returns `None`; every caller turns `None` into `return 0` with nothing printed.
+> So the five "empty-stdout" ids are swallowed timeouts under load — category D in
+> disguise, owned by 7NSRD8OV; the unit-8 "1 and 2 raised" counts are a floor. EHT filed:
+> TRDD-9EAQS97B (`_log_fail_open` also writes one line to stderr, so the signature
+> becomes visible). The defang order-dependence below is a separate, still-unread carrier.
+>
 > ### ⏵ 2026-09-05 20:52 — the 13 tracebacks read: 12 fail with IDENTICAL text and site in both runs; `inject_still_wanted` ×2 also fail in isolation (a regression, not this card's)
 >
 > `reports/board-drain/20260905_203815+0200-common13-tracebacks.md` quotes every `E` line
