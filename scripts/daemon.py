@@ -3180,6 +3180,68 @@ def _report_foreign_era_daemon(self_pid: int, reported: set[int]) -> None:
             state.log_line("daemon", f"DAEMON-DOUBLE ledger write failed: {exc}")
 
 
+# 4 h is not a design default — it's the peer's own absorbed-beat cadence (the same 4 h
+# floor the card's directive names): "no session raised the flag within one full absorbed
+# beat" is that sentence made literal. TRDD-A70YJLXN.
+_VERSION_UPDATE_ABSORBED_BEAT_SEC = 4 * 3600.0
+
+
+def _floor_statement_due(
+    now: float,
+    server_owns_chore: bool,
+    last_raised: int | None,
+    logged_exists: bool,
+    logged_value: int | None,
+) -> bool:
+    """True iff the yielded-host floor-mechanism statement (TRDD-A70YJLXN) should log now.
+
+    Fires only when the server owns `version-update` AND no janitor session has raised
+    `version-update-requested.flag` within one absorbed beat (4 h) — `last_raised` is the
+    never-consumed sibling stamp (`global_state.version_update_last_raised`), not the flag
+    itself: the peer's server-side consumer clears the flag within one poll, so on a
+    perfectly healthy armed host "flag absent while yielded" is the NORMAL steady state
+    between raises, not evidence that nobody is watching. AND only when `last_raised`
+    differs from `(logged_exists, logged_value)` — the PERSISTED memory of which silence
+    was already reported (`global_state.version_update_floor_logged_for`, not a module
+    variable: a daemon restart must not repeat the line, and the corpus records a
+    crash-loop failure mode where the daemon restarts every heartbeat — a module-only
+    memory is exactly the state a restart erases) — so a permanently server-owned host
+    prints the line once, not once an hour forever, and NOT again on every restart."""
+    if not server_owns_chore:
+        return False
+    if last_raised is not None and (now - last_raised) < _VERSION_UPDATE_ABSORBED_BEAT_SEC:
+        return False
+    return not (logged_exists and logged_value == last_raised)
+
+
+def _maybe_log_version_update_floor_statement(server_owns_chore: bool, now: float | None = None) -> bool:
+    """Loop-side wrapper (TRDD-A70YJLXN): logs the floor statement via `_floor_statement_due`
+    and persists the "logged for" memory to control_dir(). Reads `last_raised` from
+    global-state itself (real epoch seconds — `now` must be the same clock, so both default
+    to `time.time()`, injectable together for tests). Returns whether it logged.
+
+    NOTE: can fire once during the ~90 s server-death liveness handover (the window before
+    `server_owns_chore` itself flips back to False) — true at the time it fires (the server
+    WAS the last confirmed owner and nobody had raised the flag), and harmless: the next
+    loop iteration's re-evaluation is what actually matters, this is not a state machine
+    that needs undoing."""
+    if now is None:
+        now = time.time()
+    last_raised = gs.version_update_last_raised()
+    logged_exists, logged_value = gs.version_update_floor_logged_for()
+    if not _floor_statement_due(now, server_owns_chore, last_raised, logged_exists, logged_value):
+        return False
+    gs.set_version_update_floor_logged_for(last_raised)
+    state.log_line(
+        "daemon",
+        "chore-coordination: version-update is server-owned on this host and no "
+        "janitor session has raised version-update-requested.flag in the last 4 h — "
+        "a newer release lands on the peer's 4 h absorbed beat until a session "
+        "raises it (TRDD-A70YJLXN)",
+    )
+    return True
+
+
 def _consume_version_update_request(tasks: list[Task]) -> bool:
     """Release-triggered self-update consume (TRDD-Y9KM5RCJ).
 
@@ -3570,6 +3632,12 @@ def main() -> int:
                 # branches above (each of which `break`s or `continue`s, so reaching here means
                 # the daemon is actively working) and BEFORE the due-loop.
                 _consume_version_update_request(tasks)
+            else:
+                # TRDD-A70YJLXN box 3: a no-armed-session host must not read a frozen
+                # version-update.last-run.ts as healthy or broken without being told which
+                # mechanism owns it. Runs every iteration (not budget/task-gated) so it
+                # fires regardless of which other tasks happen to be due this tick.
+                _maybe_log_version_update_floor_statement(server_owns_chore=True)
             # Universal per-plugin update (TRDD-YMTUPQER): consume USER-scope update requests
             # the plugin-updates detector enqueued and run them as the single writer (#7).
             # UNGATED since TRDD-E39YT9G6: the `user-plugins-update` sweep Task is retired,

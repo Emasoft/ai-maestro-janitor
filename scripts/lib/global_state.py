@@ -814,12 +814,78 @@ def version_update_requested_present() -> bool:
     return _flag_present_dual("version-update-requested.flag")
 
 
+def _version_update_last_raised_path() -> Path:
+    return _control_path("version-update-last-raised.ts")
+
+
+def version_update_last_raised() -> int | None:
+    """Epoch seconds of the most recent `request_version_update()` call, or None if never
+    raised. TRDD-A70YJLXN: the flag itself is a bad liveness signal for "has any session
+    raised it recently" — the peer's server-side consumer clears it within one poll, so on
+    an armed host `version_update_requested_present()` reads False as its NORMAL steady
+    state between raises, same as on a host with no session left to raise it at all. This
+    sibling stamp is never consumed (only ever overwritten by the next raise), so its age
+    survives past the clear and answers the question the flag can't."""
+    try:
+        return int(_version_update_last_raised_path().read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _version_update_floor_logged_for_path() -> Path:
+    return _control_path("version-update-floor-logged-for.ts")
+
+
+def version_update_floor_logged_for() -> tuple[bool, int | None]:
+    """The `last_raised` value the daemon's TRDD-A70YJLXN floor statement was last logged
+    FOR — persisted (not a module variable) so a daemon RESTART cannot repeat the line. A
+    module-level "already logged" flag is exactly the state a restart erases, and the
+    corpus records a crash-loop mode where the daemon restarts every heartbeat — a
+    module-only memory would print the line on every single restart in that mode.
+
+    Returns `(exists, value)`: `exists=False` means never logged (no file yet — read as
+    'do log'); `exists=True, value=None` means the last log was for "never raised";
+    `exists=True, value=<epoch>` means the last log was for that specific raise."""
+    path = _version_update_floor_logged_for_path()
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return (False, None)
+    if text == "none":
+        return (True, None)
+    try:
+        return (True, int(text))
+    except ValueError:
+        return (False, None)  # corrupt stamp — treat as never logged, fail toward re-logging
+
+
+def set_version_update_floor_logged_for(last_raised: int | None) -> None:
+    """Persist which `last_raised` value the floor statement was just logged for."""
+    try:
+        state.atomic_write(_version_update_floor_logged_for_path(), "none" if last_raised is None else str(last_raised))
+    except OSError:
+        pass  # best-effort — worst case the line repeats once, never lost data
+
+
 def request_version_update(reason: str = "") -> None:
     """Raise the release-triggered self-update request at control_dir() (ARCHITECTURE.md
     §7.1, TRDD-QK7M2B0X). Idempotent (re-writing the same flag is harmless; the daemon
     clears it on consume). Written atomically with a provenance body. Best-effort — a
     write failure just falls back to the 6 h beat (fail-open), so this never crashes the
-    read-only detector that calls it."""
+    read-only detector that calls it.
+
+    Stamps `version-update-last-raised.ts` (TRDD-A70YJLXN) FIRST, the flag SECOND — so a
+    reader can never observe the flag present without the stamp also present. If the stamp
+    write itself fails, the flag is NOT written either (skip flag write and log why): a
+    flag with no stamp behind it is exactly the ambiguity `version_update_last_raised`
+    exists to resolve, and the detector's own ~5 min re-fire cadence makes skipping this
+    one raise cheap. See `version_update_last_raised` for why the flag alone can't answer
+    "was this raised recently"."""
+    try:
+        state.atomic_write(_version_update_last_raised_path(), str(int(time.time())))
+    except OSError as exc:
+        state.log_line("global-state", f"request_version_update: stamp write failed, skipping flag too: {exc}")
+        return
     try:
         _write_flag_provenance(_version_update_request_path(), reason or "requested")
     except OSError:

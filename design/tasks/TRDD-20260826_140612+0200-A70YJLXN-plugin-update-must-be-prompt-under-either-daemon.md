@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: dev
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-05T17:21:12+0200
+updated: 2026-09-05T17:38:28+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -107,6 +107,61 @@ riding the 4h floor.
 plugin must be updated as soon as a new version is detected on the marketplace."*
 
 Today that holds for one of the two. Measured, not inferred.
+
+**2026-09-05 17:27 — box-3 daemon-side counterpart implemented. ⛔ SUPERSEDED twice by
+review before landing — see the 2026-09-05 17:50 entry below for what actually shipped.**
+The 17:16 detector-side line only fires inside an armed session; a no-armed-session host
+(daemon-only) had no statement at all. First cut keyed on flag-presence directly (wrong: the
+peer's server-side consumer clears the flag within one poll, so "flag absent while yielded" is
+the NORMAL steady state on a healthy armed host, not evidence nobody is watching). Second cut
+keyed on a fleet armed-instance count (also a proxy: `gather_fleet` enumerates only
+iTerm/tmux/ai-maestro panes, missing Terminal.app / headless `-p` / Claude Desktop sessions
+that can still raise the flag). Kept unedited below because each correction only makes sense
+against what it corrects.
+
+**2026-09-05 17:50 — the literal signal that actually shipped.** Added
+`global_state.py::version_update_last_raised()` reading a NEW never-consumed sibling stamp
+`version-update-last-raised.ts` (written by `request_version_update()` alongside the flag) —
+its age survives the flag's own clear-within-one-poll lifecycle, so it answers "was this
+raised recently" when the flag itself cannot. `scripts/daemon.py::_floor_statement_due` (pure
+predicate: due iff server owns the chore AND (`last_raised is None` OR stale past one 4 h
+absorbed beat) AND ≥1 h since last logged) + `_maybe_log_version_update_floor_statement`
+(loop-side wrapper, module-level `_VERSION_UPDATE_FLOOR_LAST_LOGGED` rate-limit clock, reads
+`gs.version_update_last_raised()` itself). Called from the main loop's `else` branch of
+`if "version-update" not in yielded:` — the original brief's location, runs every iteration
+regardless of task budget/yield set. Logs to `daemon.log`: `chore-coordination: version-update
+is server-owned on this host and no janitor session has raised version-update-requested.flag
+in the last 4 h — a newer release lands on the peer's 4 h absorbed beat until a session
+raises it (TRDD-A70YJLXN)`. Tests: `tests/test_daemon_version_update_floor_statement.py` — 5
+cases on the pure predicate (never-raised/1h-ago/5h-ago/not-owned/rate-limited), 1 on the
+stamp writer/reader round-trip, 2 on the real loop-side function with isolated global-state
+(logs once across two back-to-back gate evaluations; silent when raised within the last 4 h).
+
+**2026-09-05 18:05 — two more corrections, both from review, landing the final shape.**
+(a) a plain "≥1 h since last logged" timer re-prints the SAME silence hourly forever on a
+permanently server-owned host — replaced with memory keyed on the raise stamp itself
+(`_floor_statement_due`'s `logged_exists`/`logged_value` params: due iff `last_raised`
+differs from what was last logged for). (b) that memory was first a module variable —
+erased by a daemon restart, and the corpus records a crash-loop mode where the daemon
+restarts every heartbeat; a module-only memory would re-print on every restart in that mode.
+Replaced with a PERSISTED sibling stamp `version-update-floor-logged-for.ts`
+(`global_state.version_update_floor_logged_for` / `set_version_update_floor_logged_for`).
+Also reordered `request_version_update()` to stamp `last-raised.ts` BEFORE the flag (a
+reader can never observe the flag without the stamp), skipping the flag write entirely if
+the stamp write fails.
+
+**This satisfies the 2026-08-26 NEXT ACTION** ("implement the box-3 rider: a janitor
+status/heartbeat line that says out loud when a host has no armed session raising the flag
+and is therefore riding the 4h floor") **with the measurable substitute** "no session raised
+the flag within one absorbed beat (4 h)" — chosen after two rejected predicates: flag-absent
+(the peer's consumer `rmSync`s the flag within one poll, so absence is the NORMAL steady
+state on a healthy armed host) and armed-instance-count (`fleet_scan.gather_fleet`
+enumerates iTerm/tmux/ai-maestro-agent panes only, missing Terminal.app / headless `-p` /
+Claude Desktop sessions that can still raise the flag). Code comment in
+`_maybe_log_version_update_floor_statement` notes it can fire once during the ~90 s
+server-death liveness handover — true at the time, harmless (not a state machine needing
+undoing). Tests now 9: 6 on the pure predicate, 2 on the stamp round-trips (`last_raised`,
+`floor_logged_for`) + 1 on the stamp-before-flag ordering, 2 on the loop-side function.
 
 > ⛔ **THE NEXT TWO SECTIONS ARE SUPERSEDED — read '2026-08-26 14:20 — TWO CORRECTIONS'
 > below FIRST.** The mechanism table is WRONG (the server does run the update) and the
@@ -354,6 +409,11 @@ So the fix is one of:
       tests, all real, no mocking of the code under test. Re-ran: ruff/mypy/pyright clean;
       `pytest tests/test_version_update_floor_line.py tests/test_version_update_daemon.py` — 51
       passed.
+
+      Scope note 2026-09-05: the detector line fires only inside an armed session with the
+      release trigger opted out; the case where no janitor session has raised the flag within
+      one absorbed beat (4 h) is covered by the daemon-side statement below (commit to be
+      recorded by the coordinator).
 
 ## Notes and lessons learned
 
