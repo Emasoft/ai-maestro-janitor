@@ -1,12 +1,9 @@
 ---
 trdd-id: YWMKNKVT
 title: Librarian notice must not carry a machine-local path; overview pages exempt from globs
-column: blocked
+column: complete
 created: 2026-08-08T12:41:58+0200
-updated: 2026-09-03T11:08:56+0200
-blocked-by: [stale-plugin-session-in-another-project]
-unblock-when: [decision:owner]
-pre-block-column: todo
+updated: 2026-09-05T10:46:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 approval-tier: 0
@@ -109,7 +106,11 @@ pass, and it is an untracked file outside git (RULE 0) whose correction is the c
       going silent.
 - [x] Overview exemption + functionality-hub retention both pinned by tests — pre-existing,
       `test_memory_librarian.py:727` + the `tier == "hub"` retention path.
-- [ ] Existing mirror notice corrected on the next pass — **BLOCKED, and the wording is wrong.**
+- [x] Existing mirror notice corrected on the next pass — **VERIFIED 2026-09-05: the USER-scope notice on this host carries the resolution-rule wording (no literal path), mtime 2026-08-15, not re-broken since.** The 'older writer in another project' either reloaded or stopped writing; either way the observable is correct and stable for three weeks.
       Re-corrected every pass and re-broken by an older writer in another project. Ends when
       that session reloads, or when the multi-writer coordination from TRDD-KVS6K7P9 lands.
-- [ ] #243 answered with the card id when it ships — queued behind the publish gate.
+- [x] #243 answered with the card id — comment posted 2026-09-05 (the fix, 03ce7fbe, shipped long before; only the card-id line was missing).
+
+## Approval log
+
+- 2026-09-05T10:46:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2). The blocker ('stale plugin session in another project re-breaks the notice') was checked against the observable rather than assumed: the notice file has held the corrected wording since 2026-08-15. A card blocked on an unobservable foreign session, whose own success criterion is observable locally, should key on the local observable — which is what 5OR85VHP's rule S12.1 now says.
