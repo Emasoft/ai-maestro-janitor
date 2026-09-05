@@ -256,7 +256,8 @@ def main() -> int:
         origin = "--state-dir given" if args.state_dir is not None else "cwd-resolved, no --state-dir given"
         print(
             f"memory_dispatch_claim: no memory-maintenance state at all in {state_dir} "
-            f"({origin}) — probably the wrong project root",
+            f"({origin}) — probably the wrong project root, or this project has never "
+            "dispatched a memory pass",
             file=sys.stderr,
         )
         return 3

@@ -3,7 +3,7 @@ trdd-id: IB5B14QQ
 title: orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
 column: testing
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T22:04:40+0200
+updated: 2026-09-05T22:06:40+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -44,11 +44,13 @@ constraint (another agent owns git right now) — no commit was made.
 **2026-09-05T22:04 — committed in 028de468, column → testing. Measured against a COPY of
 the real pool** (14 `memory-maint-pending-*` records, 21 claimed): the new detector emits
 exactly ONE finding — `enrich` (LOCAL) dispatched 47.9h ago, cadence 24h, never re-fired —
-a genuine orphan the legacy-slot-only detector could not see. The other 13 pending records
-are NOT current (`pending_is_current` is false: a later dispatch of the same key was
-claimed and completed, advancing `last_run` past their `stamped_at`), so they are
-correctly not reported as "never re-fired" — they are pre-af6340a5 leftovers the
-supersede-by-rename now prevents at the source. Two facts the review fork raised, checked:
+a genuine orphan the legacy-slot-only detector could not see. The other 13, listed one by
+one (2026-09-05T22:05, real factors DEFAULT_FACTOR=3 / LOCAL_FACTOR=1): **9 are NOT
+current** (`pending_is_current` false — a later dispatch of the same key advanced
+`last_run` past their `stamped_at`; pre-af6340a5 leftovers the supersede-by-rename now
+prevents at the source) and **4 are current but below cadence × factor** (retro-lesson
+PROJECT 51.5h < 72h, repair PROJECT 19.5h, atomize PROJECT 6.4h, split PROJECT 1.7h).
+No record carries an unknown intervention name. Two facts the review fork raised, checked:
 `candidates()` is a bare `PENDING_PREFIX*.json` glob with no age/chore filter (no hidden
 records); the second `sys.path.insert` does not shadow `state`/`dedupe` (both resolve to
 `scripts/lib`). Known ceiling, not fixed: a `pool:<dispatch_id>` dedupe key that fired
