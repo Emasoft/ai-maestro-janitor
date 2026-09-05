@@ -158,6 +158,98 @@ def test_absent_probe_file_means_not_alive(
     assert hb.server_runs_chores() is False
 
 
+# --- server_liveness_probe: the reason behind a None (TRDD-HXZ8B0IS) --------------
+# `server_capabilities()` collapsed absent/malformed/stale/read-error to one None so a
+# chore-coordination flap could never explain itself. These pin the sibling that keeps
+# server_capabilities()'s own signature unchanged while exposing WHY.
+
+
+def test_probe_reports_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(tmp_path / "absent.json"))
+    probe = hb.server_liveness_probe()
+    assert probe.reason == "absent"
+    assert probe.ts is None and probe.age is None
+    assert probe.describe() == "absent"
+
+
+@pytest.mark.parametrize("content", [
+    '{"capabilities": ["family-a"]}',              # missing ts
+    '{"ts": true, "capabilities": ["family-a"]}',  # bool masquerading as ts
+    '{"ts": 1, "capabilities": "family-a"}',       # caps not a list
+])
+def test_probe_reports_malformed_for_a_wrong_shaped_but_valid_json_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
+) -> None:
+    """Valid JSON, wrong shape (missing/misstyped `ts` or `capabilities`) ⇒ "malformed" —
+    distinct from a file that fails to parse at all (see the read-error test below)."""
+    f = tmp_path / "liveness.json"
+    f.write_text(content, encoding="utf-8")
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    probe = hb.server_liveness_probe()
+    assert probe.reason == "malformed"
+    assert probe.describe() == "malformed"
+
+
+def test_probe_reports_read_error_for_a_partial_json_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A truncated/garbled file (what a partial read mid-non-atomic-rewrite looks like)
+    fails json.loads itself ⇒ "read-error", carrying the exception TYPE name."""
+    f = tmp_path / "liveness.json"
+    f.write_text('{"ts": 1, "capabilities": [', encoding="utf-8")  # truncated mid-write
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    probe = hb.server_liveness_probe()
+    assert probe.reason == "read-error"
+    assert probe.exc_type == "JSONDecodeError"
+    assert probe.describe() == "read-error(JSONDecodeError)"
+
+
+def test_probe_reports_stale_with_the_computed_age(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """91 s old — just past the 90 s window — ⇒ "stale", carrying `ts` and the age."""
+    f = tmp_path / "liveness.json"
+    now = time.time()
+    _write_liveness(f, ts=now - 91, caps=["family-a"])
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    probe = hb.server_liveness_probe(now=now)
+    assert probe.reason == "stale"
+    assert probe.ts == pytest.approx(now - 91)
+    assert probe.age == pytest.approx(91, abs=0.5)
+    assert probe.describe() == f"stale(age={probe.age:.1f})"
+    assert probe.capabilities is None
+
+
+def test_probe_reports_alive_with_ts_age_and_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """89 s old — just inside the 90 s window — ⇒ "alive", carrying `ts`, age, and caps."""
+    f = tmp_path / "liveness.json"
+    now = time.time()
+    _write_liveness(f, ts=now - 89, caps=["family-a"])
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    probe = hb.server_liveness_probe(now=now)
+    assert probe.reason == "alive"
+    assert probe.ts == pytest.approx(now - 89)
+    assert probe.age == pytest.approx(89, abs=0.5)
+    assert probe.describe() == "alive"
+    assert probe.capabilities == frozenset({"family-a"})
+
+
+def test_server_capabilities_still_delegates_and_keeps_its_signature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """server_capabilities()'s return type is unchanged: None on every non-alive reason,
+    the capability frozenset on alive — this is the delegation contract the fix requires."""
+    f = tmp_path / "liveness.json"
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    now = time.time()
+    _write_liveness(f, ts=now, caps=["family-a"])
+    assert hb.server_capabilities(now=now) == frozenset({"family-a"})
+    _write_liveness(f, ts=now - hb.LIVENESS_STALE_AFTER_S - 5, caps=["family-a"])
+    assert hb.server_capabilities(now=now) is None
+
+
 # --- continuity_cli: call-time feature detection ---------------------------------
 
 def _make_exec(path: Path) -> None:

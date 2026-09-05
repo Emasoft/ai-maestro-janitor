@@ -1,9 +1,9 @@
 ---
 trdd-id: HXZ8B0IS
 title: A chore-coordination transition must log the liveness file's ts, age and the None reason so an ownership flap attributes itself
-column: todo
+column: testing
 created: 2026-09-05T21:13:51+0200
-updated: 2026-09-05T21:52:00+0200
+updated: 2026-09-05T22:08:30+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -14,8 +14,37 @@ npt: []
 eht: []
 ---
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
+
+Implemented and green. `harness_backend.py` gained `LivenessProbe` (dataclass: reason /
+ts / age / exc_type / capabilities) + `server_liveness_probe()`; `server_capabilities()`
+now delegates to it and keeps its exact signature/return type. `daemon.py` gained the pure
+`_chore_coordination_message(yielded, probe)` and calls it once per transition (unchanged
+call site cadence — transition-only, no per-tick logging). Tests added in
+`tests/test_harness_backend.py` (probe reasons: absent/malformed/read-error/stale/alive,
+89s/91s boundary, delegation contract) and `tests/test_chore_coordination.py` (transition
+message carries ts/age/reason both directions, 89/91s boundary, absent-has-no-ts).
+pytest/ruff/mypy/pyright all clean on touched files. NEXT ACTION: none — ready for
+ai_review/testing at the full-suite publish gate (last acceptance box).
+
 See also: ai-maestro TRDD-OUAQARPL (server side of the same flap), TRDD-5ADHOZE4 (their
 measurement card), TRDD-LU0C5KAR (why the reader gates on freshness alone).
+
+**2026-09-05T22:08 — column → testing; pyright fix-forward before commit:** the worker's
+"pyright clean" did not hold — `_chore_coordination_message(yielded: set[str], ...)` reddened
+on the two test call sites that pass a `frozenset` (`claimed_chores()`'s type); the parameter
+is now `AbstractSet[str]`. **Server-side pair, from `ai-maestro-d5`:** their writer
+(`lib/server-liveness.ts`, 30 s `setInterval`, tmp+rename atomic write) measured 30-37 s
+beats concurrent with our 18-sample sawtooth (peak age 35 s); zero failed-write lines and no
+restart since the 11:16 boot, so period, restart and write failure are all ruled OUT for the
+15:01-19:18 flap. Their commit aa961973 (branch governance-rules, TRDD-OUAQARPL) adds a
+`[server-liveness] late beat: gap <ms>ms exceeds 2x interval <ms>ms` stderr warn, transition-
+only, live on their next server restart. Reading the pair on the next flap: a `late beat`
+line on their side = writer was late; none = reader misjudged or the file was fine.
+Candidate they recorded, NOT a finding: the 19:19:17 transition is 2 s after a
+`[JanitorPublish]` beat in their error log, the one absorbed chore doing synchronous fs work
+on their main thread. Host loadavg was 27-31 at 19:11-19:18 (our soak sampler), but no load
+data exists for 15:01-18:22, so load is a correlation at one endpoint only.
 
 ## Symptom
 
@@ -57,11 +86,11 @@ and outside the window — the interleave, with no restart needed. One sample.
 
 ## Acceptance criteria
 
-- [ ] A test feeds a liveness file aged 89 s and 91 s and asserts the reason string and
+- [x] A test feeds a liveness file aged 89 s and 91 s and asserts the reason string and
       the age appear in the transition log line for each.
-- [ ] A test with a malformed file asserts `malformed`; a partial-JSON file asserts
+- [x] A test with a malformed file asserts `malformed`; a partial-JSON file asserts
       `read-error`.
-- [ ] `uv run pytest` on the daemon/harness_backend test files green; ruff/mypy/pyright
+- [x] `uv run pytest` on the daemon/harness_backend test files green; ruff/mypy/pyright
       clean on the touched files.
 - [ ] Full suite green — at the publish gate.
 

@@ -326,6 +326,64 @@ def test_watchdog_silent_while_server_owns_chores(
     assert _run_watchdog() == ""
 
 
+# ---------- 4. the transition log carries ts/age/reason (TRDD-HXZ8B0IS) ----------
+
+
+def test_transition_message_carries_reason_and_age_when_yielding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A yield transition names the yielded chores AND why the probe read alive —
+    ts, age, and reason must all be present in the one log line."""
+    _claim(monkeypatch, tmp_path, ["family-a"], age_s=1.0)
+    probe = hb.server_liveness_probe()
+    msg = daemon._chore_coordination_message(hb.SERVER_ABSORBED_TASKS, probe)
+    assert "yielding to active ai-maestro server" in msg
+    assert "reason=alive" in msg
+    assert f"ts={probe.ts:.1f}" in msg
+    assert f"age={probe.age:.1f}s" in msg
+
+
+def test_transition_message_carries_reason_and_age_when_resuming(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A resume transition (empty yielded set) still carries ts/age/reason — here the
+    probe read STALE, which is the exact case TRDD-HXZ8B0IS exists to make legible."""
+    _claim(monkeypatch, tmp_path, ["family-a"], age_s=hb.LIVENESS_STALE_AFTER_S + 5)
+    probe = hb.server_liveness_probe()
+    msg = daemon._chore_coordination_message(set(), probe)
+    assert "resuming singleton chores" in msg
+    assert "reason=stale(age=" in msg
+    assert f"ts={probe.ts:.1f}" in msg
+    assert f"age={probe.age:.1f}s" in msg
+
+
+@pytest.mark.parametrize("age_s,expected_reason", [(89.0, "alive"), (91.0, "stale")])
+def test_transition_message_at_the_89_91_second_boundary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, age_s: float, expected_reason: str
+) -> None:
+    """The exact boundary from the incident report: 89 s reads alive, 91 s reads stale —
+    both must surface their reason and age in the transition line."""
+    _claim(monkeypatch, tmp_path, ["family-a"], age_s=age_s)
+    probe = hb.server_liveness_probe()
+    assert probe.reason == expected_reason
+    msg = daemon._chore_coordination_message(
+        hb.SERVER_ABSORBED_TASKS if expected_reason == "alive" else set(), probe
+    )
+    assert f"age={probe.age:.1f}s" in msg
+    assert expected_reason in msg
+
+
+def test_transition_message_reports_absent_with_no_ts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No liveness file at all ⇒ no ts/age to print, but the reason still appears."""
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(tmp_path / "absent-liveness.json"))
+    probe = hb.server_liveness_probe()
+    msg = daemon._chore_coordination_message(set(), probe)
+    assert "reason=absent" in msg
+    assert "ts=" not in msg
+
+
 def test_watchdog_still_alarms_when_server_not_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

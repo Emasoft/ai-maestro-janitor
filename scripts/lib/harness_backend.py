@@ -22,6 +22,7 @@ FAIL-SAFE DOCTRINE (load-bearing; do not weaken):
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import shutil
@@ -283,6 +284,70 @@ def _liveness_path() -> Path:
     return Path(home) / ".aimaestro" / "server-liveness.json"
 
 
+@dataclasses.dataclass(frozen=True)
+class LivenessProbe:
+    """One liveness-file read, WHY it came out that way, and the raw numbers behind it.
+
+    `server_capabilities()` collapsed four distinct outcomes to a single None (TRDD-HXZ8B0IS):
+    file absent, `ts`/`capabilities` malformed, stale beyond `LIVENESS_STALE_AFTER_S`, or ANY
+    exception mid-read (a partial read during the server's non-atomic 30 s rewrite lands here).
+    That collapse is why a chore-coordination flap could not explain itself. `reason` is one of
+    "alive" | "absent" | "malformed" | "stale" | "read-error"; `ts`/`age` are populated whenever
+    the file parsed far enough to compute them (i.e. not on "absent"/"read-error"); `exc_type` is
+    set only on "read-error"; `capabilities` is set only on "alive".
+    """
+
+    reason: str
+    ts: float | None = None
+    age: float | None = None
+    exc_type: str | None = None
+    capabilities: frozenset[str] | None = None
+
+    def describe(self) -> str:
+        """Render the reason per the fix requirement's grammar, for a log line."""
+        if self.reason == "read-error":
+            return f"read-error({self.exc_type})"
+        if self.reason == "stale":
+            return f"stale(age={self.age:.1f})"
+        return self.reason
+
+
+def server_liveness_probe(*, now: Optional[float] = None) -> LivenessProbe:
+    """Read the liveness file and report WHY it does or doesn't count as a live claim.
+
+    `server_capabilities()` is a thin filter over this (its return type is unchanged — only
+    this sibling exposes the reason, so no caller needed to change). NEVER raises: this runs
+    inside the daemon loop and per-session watchdogs.
+    """
+    import time  # noqa: PLC0415 -- stdlib, keep module import-light
+
+    path = _liveness_path()
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return LivenessProbe(reason="absent")
+    except Exception as exc:  # noqa: BLE001 -- unreadable file: not literally absent
+        return LivenessProbe(reason="read-error", exc_type=type(exc).__name__)
+    try:
+        data = json.loads(raw)
+        ts = data.get("ts")
+        caps = data.get("capabilities")
+        if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not isinstance(caps, list):
+            return LivenessProbe(reason="malformed")
+        t = time.time() if now is None else now
+        age = t - float(ts)
+        if age > LIVENESS_STALE_AFTER_S:
+            return LivenessProbe(reason="stale", ts=float(ts), age=age)
+        return LivenessProbe(
+            reason="alive",
+            ts=float(ts),
+            age=age,
+            capabilities=frozenset(c for c in caps if isinstance(c, str)),
+        )
+    except Exception as exc:  # noqa: BLE001 -- e.g. truncated JSON mid-rewrite
+        return LivenessProbe(reason="read-error", exc_type=type(exc).__name__)
+
+
 def server_capabilities(*, now: Optional[float] = None) -> frozenset[str] | None:
     """The LIVE server's advertised capability tokens, or None when there is no fresh claim.
 
@@ -292,22 +357,12 @@ def server_capabilities(*, now: Optional[float] = None) -> frozenset[str] | None
     Since ARCHITECTURE.md rev 4 (TRDD-LU0C5KAR) the TOKEN CONTENT is informational —
     the janitor gates on FILE FRESHNESS alone (`server_is_alive`); this stays the one
     validated probe reader both build on. NEVER raises: this runs inside the daemon
-    loop and per-session watchdogs.
+    loop and per-session watchdogs. Delegates to `server_liveness_probe()` (TRDD-HXZ8B0IS)
+    so the reason behind a None is available to callers that want it, without changing
+    this function's return type.
     """
-    try:
-        import time  # noqa: PLC0415 -- stdlib, keep module import-light
-
-        data = json.loads(_liveness_path().read_text(encoding="utf-8"))
-        ts = data.get("ts")
-        caps = data.get("capabilities")
-        if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not isinstance(caps, list):
-            return None
-        t = time.time() if now is None else now
-        if t - float(ts) > LIVENESS_STALE_AFTER_S:
-            return None
-        return frozenset(c for c in caps if isinstance(c, str))
-    except Exception:  # noqa: BLE001 -- no-claim beats a crashed daemon loop
-        return None
+    probe = server_liveness_probe(now=now)
+    return probe.capabilities if probe.reason == "alive" else None
 
 
 def server_is_alive(*, now: Optional[float] = None) -> bool:

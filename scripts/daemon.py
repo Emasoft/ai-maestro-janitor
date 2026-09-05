@@ -57,7 +57,7 @@ import sys
 import time
 from pathlib import Path
 from types import FrameType
-from typing import Callable, Optional
+from typing import AbstractSet, Callable, Optional
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
@@ -3032,6 +3032,26 @@ def _yielded_task_names(tasks: list[Task], server_runs_chores: bool) -> set[str]
     return {t.name for t in tasks if _task_yielded_to_server(t.name, server_runs_chores)}
 
 
+def _chore_coordination_message(
+    yielded: AbstractSet[str], probe: harness_backend.LivenessProbe
+) -> str:
+    # AbstractSet, not set: callers pass the frozenset `claimed_chores()` hands back as
+    # readily as the set `_yielded_task_names` builds — pyright reddened on the former.
+    """PURE: the transition-log line for a yield/resume flip (TRDD-HXZ8B0IS).
+
+    Carries the liveness probe's `ts`/`age`/reason on BOTH directions so a flap
+    attributes itself instead of leaving "why did this flip?" to a bare timestamp.
+    """
+    liveness = (
+        f"liveness ts={probe.ts:.1f} age={probe.age:.1f}s reason={probe.describe()}"
+        if probe.ts is not None
+        else f"liveness reason={probe.describe()}"
+    )
+    if yielded:
+        return f"chore-coordination: yielding to active ai-maestro server: {sorted(yielded)} ({liveness})"
+    return f"chore-coordination: server no longer confirmed active — resuming singleton chores ({liveness})"
+
+
 def _next_bulk_task(tasks: list[Task], yielded: set[str]) -> Task | None:
     """The due background task that gets the single bulk lane this pass — the
     LEAST-RECENTLY-RUN one, NOT the first in list order.
@@ -3611,14 +3631,12 @@ def main() -> int:
             yielded = _yielded_task_names(tasks, server_chores)
             if bool(yielded) != chores_yielded_last_loop:  # log transitions, not every tick
                 chores_yielded_last_loop = bool(yielded)
-                state.log_line(
-                    "daemon",
-                    (
-                        f"chore-coordination: yielding to active ai-maestro server: {sorted(yielded)}"
-                        if yielded
-                        else "chore-coordination: server no longer confirmed active — resuming singleton chores"
-                    ),
-                )
+                # TRDD-HXZ8B0IS: a flap between "yielded" and "resumed" used to log with no
+                # clue WHY the liveness read flipped. The probe's ts/age/reason turn that into
+                # a one-line diagnosis (e.g. "reason=stale(age=91.2)" pins it to the 90 s
+                # window rather than a restart). Still transition-only — no per-tick logging.
+                probe = harness_backend.server_liveness_probe()
+                state.log_line("daemon", _chore_coordination_message(yielded, probe))
 
             # The consume paths are cadence-bypass entrances to two absorbed tasks, so each
             # gates on ITS OWN task being yielded (not on "anything yielded" — that would
