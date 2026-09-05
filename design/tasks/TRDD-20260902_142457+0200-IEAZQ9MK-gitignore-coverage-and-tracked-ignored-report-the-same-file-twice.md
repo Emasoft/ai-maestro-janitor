@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:42:42+0200
+updated: 2026-09-05T05:44:26+0200
 review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
@@ -163,12 +163,20 @@ as *done* would have ticked two boxes on nothing.
           with full capture because a 5-line window cannot support a "none of them" claim —
           it happened to hide nothing, which is luck, not method.*
         - `git ls-files --ignored --exclude-standard --cached` → **41 total, 41 under `ccpm/`,
-          zero non-`ccpm`** — exactly the baseline's named `ccpm/** ×41`. This is the plumbing
-          `tracked-ignored.py` itself reads (report §2), used because **the detector prints
-          NOTHING on a repeat scan** — it dedupes on HEAD SHA + ignore-file mtimes, and my
-          first run consumed that slot. *Measured: the re-run emitted 0 lines. That is the
-          fail-open-to-silence behaviour in the open, and it is why "all 41 are `ccpm`" is
-          asserted from plumbing rather than from a second detector run.*
+          zero non-`ccpm`** — exactly the baseline's named `ccpm/** ×41`. **That this is the
+          detector's own source is read from the detector, not taken from the report:**
+          `scripts/detectors/tracked-ignored.py:98` runs
+          `["git","ls-files","--ignored","--exclude-standard","--cached"]` — the identical
+          argv. Used because **the detector prints NOTHING on a repeat scan**: it dedupes on
+          HEAD SHA + the mtimes of the two files `--exclude-standard` consumes (`:41-44`,
+          state at `:61-62`), and my first run consumed that slot. Measured: the re-run
+          emitted 0 lines.
+          *⚠ A first version called that silence "the fail-open behaviour met live". WRONG,
+          and the distinction is the point: the dedupe is DESIGNED suppression working
+          correctly, not a detector failing. What is true — and is why the control matters —
+          is that **a working dedupe and a broken detector produce the identical observable**,
+          so an empty run can never be read as "clean" without knowing which one you are
+          looking at. Conflating the two would have made a healthy design sound like a defect.*
         So: **41 files that one detector reports and the other does not name at all** — an
         observation about two real programs' outputs, not a definition. ANIME2SVG contributes
         3 more the same way (from the report, not hand-checked).
@@ -190,8 +198,15 @@ as *done* would have ticked two boxes on nothing.
       - **Report §1's control corroborates** (a seeded repo with a tracked `.env` and no
         `.gitignore` produced both the coverage line and a still-TRACKED line). Read in full,
         not grepped — and it matters because these detectors fail OPEN to silence, so an
-        uncontrolled empty sweep would tick this box while proving nothing. The dedupe silence
-        measured above is that failure mode occurring for real.
+        uncontrolled empty sweep would tick this box while proving nothing.
+      - **WHAT IS HAND-MEASURED vs REPORTED, since the tick should not blur them:**
+        HAND-MEASURED by the coordinator — svg2fbf's 41/41 `ccpm` via git plumbing;
+        `gitignore-coverage`'s full 1-line output with 0 `ccpm`; the detector's argv at
+        `tracked-ignored.py:98`; the dedupe returning 0 lines on re-run; the `bad_overlap`
+        set algebra. FROM THE REPORT, not independently checked — the 81-repo totals
+        (`rule_only=167`, `gc=229`, `ti=206`), ANIME2SVG's 3, §1's control, and §2's account
+        of why the CLIs were not run fleet-wide. **The tick rests on the hand-measured set;
+        the reported set only widens it.**
       - **The fleet numbers come from the REAL library, not a reimplementation** (report §2):
         the worker imported `scripts/lib/gitignore_coverage.py` and used `git ls-files`
         plumbing instead of invoking the two CLIs across 81 repos — because both call
