@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-03T11:09:13+0200
+updated: 2026-09-05T05:32:20+0200
 review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
@@ -150,6 +150,25 @@ as *done* would have ticked two boxes on nothing.
       is not running it, and this box asserts a RESULT (47 offenders gone from
       one detector, still present on the other). It needs the sweep executed and
       its output compared against 6WM4BFKF's recorded baseline.
+      **⚠ 2026-09-05 — "THE FLEET SWEEP COMMAND FROM 6WM4BFKF'S STATE BLOCK" DOES NOT EXIST.**
+      Went to fetch it; there is nothing to fetch. `6WM4BFKF` contains **zero fenced code
+      blocks** (`grep -n '^```' <that file>` → no output). What it has is a SINGLE-REPO
+      invocation quoted mid-prose at line 76 —
+      `CLAUDE_PROJECT_DIR=<root> uv run --script --quiet scripts/detectors/gitignore-coverage.py`
+      — plus prose *describing* a sweep performed once. **The fleet LOOP was never written
+      down.** This box therefore sent a reader to copy something that is not there, and the
+      note above ("locating a runnable script is not running it") was already too generous:
+      there was no script to locate.
+      **What a runner must supply, and neither is incidental:** the repo list (unwritten — the
+      `global-state/fleet-attribution.json` registry is `{ts, fleet}` with epoch-keyed entries,
+      not a list of roots), and **a positive control**, because 6WM4BFKF's own line 74 records
+      that *"the detector fails OPEN to silence and an empty run alone cannot tell CLEAN from
+      DID-NOT-RUN"*. An uncontrolled sweep that printed nothing would tick this box while
+      proving nothing — the worst available outcome.
+      **Same defect class as OES0NN3F's recipe:** a verification instruction naming an artifact
+      that is not at the named location, and both were found by trying to RUN the instruction
+      rather than by reading it. A sweep is now delegated with the control built in; this note
+      stands whatever it returns.
 
 ## Approval log
 
