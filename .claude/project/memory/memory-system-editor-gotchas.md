@@ -150,11 +150,9 @@ The wikimem editor runs SEVEN chores since TRDD-J3ZH3RSI (commit 009af29): split
 
 
 ^ATOM-NT0A-S97C [desc: "new-mem-topic --scope public-project on a name that already exists at the USER root REPLACES that file with a symlink to the new empty page — the old atoms are destroyed, not migrated", keywords: scope_move_destroyed_my_atoms new-mem-topic_public-project_overwrote_the_user_page migrate-mem-atom_says_no_atom_answering moving_a_page_from_USER_to_PROJECT_scope publish-globally_symlink_replaced_the_real_file atoms_not_migrated_on_scope_change how_to_change_a_memory_page's_scope_safely lost_a_wikimem_page_during_a_scope_move is_there_a_backup_after_a_memgrep_write transaction_resume_does_not_cover_a_scope_move same-named_page_at_a_wider_scope, ocd: 2026-09-05, lmd: 2026-09-05]
-
 **`new-mem-topic --scope public-project` with a name that ALREADY EXISTS at the USER root
 DESTROYS the USER page.** Reconciliation replaces that file with a SYMLINK to the new, empty
-project page. The old page's atoms are **not migrated — they are gone the instant the symlink
-lands.**
+project page. The old page's atoms are **not migrated — they are gone.**
 
 **The tell that you are already too late:** `migrate-mem-atom --from <user path> <ATOM-ID>` then
 fails with *"no atom answering `ATOM-…` on the --from page"* — because `--from` now resolves
@@ -164,10 +162,13 @@ only time you have.
 **CORRECT ORDER: author at the destination scope from the start, or migrate the atoms FIRST.**
 Never create a same-named page at a wider scope expecting the atoms to follow.
 
-**Do NOT expect the transaction core to save you.** Measured 2026-09-05: no mirror copy (the
-page postdated the last `~/.claude/ai-maestro-janitor-memory/` sync) and no transaction backup;
-`memory_txn_cli --op resume` reports clean because this path opens no transaction. Recovery was
-possible only because the three atom bodies were still in the authoring session's own context.
+**Do NOT assume something will save you.** MEASURED 2026-09-05 after the loss: no mirror copy
+(the page postdated the last `~/.claude/ai-maestro-janitor-memory/` sync), no backup file under
+that page's name, and `memory_txn_cli resume` reports **nothing pending in BOTH scopes** — i.e.
+there was nothing to roll back. *Whether that is because this path opens no transaction at all is
+INFERENCE — memgrep's reconciliation internals were not read.* What is established is the
+outcome: the transaction core did not hold a recoverable copy. Recovery here was possible only
+because the three atom bodies were still in the authoring session's own context.
 
 *This repo OWNS memgrep (`scripts/memgrep`), so if the symlink-replacement is unintended by its
 authors this is an in-repo fix, not a hazard anyone must live with forever.*
