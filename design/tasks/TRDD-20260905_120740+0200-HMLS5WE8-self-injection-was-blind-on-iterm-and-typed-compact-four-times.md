@@ -166,3 +166,10 @@ completes. Nothing else is outstanding except the two untested claims listed und
 - A sender that cannot read the screen cannot be made safe by timers or dedupe windows: the
   180 s hook dedupe was working exactly as written and still produced four copies, because the
   question "is my command already there?" can only be answered by looking.
+- 2026-09-05 20:50 (janitor-main-session, append-only pointer — read before approving this
+  card): phase 1 (`6803ade0`) introduced `_still_shows_ours` with both of its call sites in
+  the verified wait, and `tests/test_inject_still_wanted.py` (untouched since `11f176a4`)
+  now fails two tests in isolation with `StopIteration` — its two-read `_seq` fixture is
+  shorter than the wait's read count. The fix lives in TRDD-KS41G6AL (a derived card,
+  because `human_review → dev` is not this session's transition to make); this card's
+  `human_review` claim is not true until KS41G6AL is green.

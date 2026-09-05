@@ -41,10 +41,19 @@ external-refs: [TRDD-7NSRD8OV]
 > **`tests/test_inject_still_wanted.py` fails the same two tests in isolation**
 > (`2 failed, 3 passed in 0.48s`, `StopIteration` at `:51` via
 > `terminal_trigger.py::inject_until_sent → _still_shows_ours → reader(terminal)`), so
-> those two are a deterministic regression outside this card's "fails only inside the
-> full suite" population — filed separately. The empty-stdout-rc0 cluster (5 ids across
-> three detector subprocesses) is the shape to instrument next: a subprocess that exits 0
-> and prints nothing under the full suite but prints under isolation.
+> those two are deterministic (a fixture read-count mismatch on the test's stubbed reader:
+> no sleep, no subprocess between the stub and the raise, so one run settles it) and
+> outside this card's "fails only inside the full suite" population — owned by
+> TRDD-KS41G6AL (`_still_shows_ours` and both its call sites arrived in `6803ade0`,
+> HMLS5WE8 phase 1; the test file was last touched in `11f176a4`, three weeks earlier).
+> The empty-stdout-rc0 cluster (5 ids across three detector subprocesses, all with
+> `stderr=''`) has a nameable hypothesis, recorded as a hypothesis, not a disposition: a
+> dedupe or floor stamp NOT scoped to the test's fake `HOME` — leaking across tests on one
+> worker, or across workers; the floor-expiry test's assertion site moving between r1 and
+> r2 is consistent with either, and which path the watcher reads for its floor stamp is
+> unread. Discriminate first (`grep -n "floor\|stamp\|global_state" scripts/detectors/gh-reply-watch.py`),
+> then falsify by running the five ids under `-n 2` with a per-worker global-state dir.
+> Both are evidence collection — runnable now without the waiver, not yet run.
 >
 > ### ⏵ 2026-09-05 20:44 — `dev` → `blocked`; unit-8 pair adds a 13-id set that fails in BOTH full runs, 10 of them in the 38 and 3 new
 >
