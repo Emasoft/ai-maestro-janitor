@@ -223,6 +223,26 @@ def test_run_verified_send_dedupes_the_same_command_but_lands_a_different_one(tm
     assert calls == [("/compact", True), ("/janitor-arm", True), ("/compact", True)]
 
 
+def test_run_verified_send_dedupe_and_lock_are_per_pane_not_per_project(tmp_path):
+    """Two panes of ONE project: session B's `/compact` must not be suppressed by session A's
+    stamp, and the two must not share a lock file."""
+    calls: list[str] = []
+
+    def fake_send(terminal, command, *, esc_first, giveup_s):
+        calls.append(terminal["pane"])
+        return True, "verified; submitted"
+
+    a = {"terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/compact"],
+         "esc_first": False, "state_dir": str(tmp_path)}
+    b = {**a, "terminal": {"kind": "tmux", "pane": "%2"}}
+    assert tt.run_verified_send(a, send=fake_send, clock=lambda: 1000.0) == 0
+    assert tt.run_verified_send(b, send=fake_send, clock=lambda: 1001.0) == 0
+    assert calls == ["%1", "%2"]
+    for pane in ("%1", "%2"):  # separate lock AND separate stamp file per pane
+        assert (tmp_path / f"self-send.{pane}.lock").exists()
+        assert (tmp_path / f"self-send.{pane}.stamps.json").exists()
+
+
 def test_run_verified_send_refuses_to_type_once_the_ceiling_has_passed(tmp_path):
     """The ceiling bounds the SEND, not only the wait: deadline computed at t=0, the lock
     acquired, then the clock reads t=901 — nothing is typed, the child reports failure."""
@@ -267,7 +287,7 @@ def test_run_verified_send_stops_at_the_first_command_that_did_not_land(tmp_path
             "esc_first": False, "state_dir": str(tmp_path)}
     assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 1
     assert calls == ["/a"]
-    assert not (tmp_path / tt._SELF_SEND_STAMPS).exists()
+    assert not (tmp_path / "self-send.%1.stamps.json").exists()
 
 
 def test_unknown_returns_use_iterm_path(monkeypatch):

@@ -11,7 +11,7 @@ scope: project
 project-id: ai-maestro-janitor
 relevant-rules: []
 labels: [terminal-injection, compaction, continuity]
-implementation-commits: [6803ade0]
+implementation-commits: [6803ade0, 0c7037bc]
 ---
 
 # Self-injection was blind on iTerm and typed `/compact` four times into one field
@@ -52,9 +52,14 @@ make the script that gives commands smarter and aware of what there is on the sc
 1. `_DELEGATE_KINDS = {"tmux", "iterm"}`; `self_terminal(env, kind)` builds the pane dict from
    `$TMUX_PANE` / `$ITERM_SESSION_ID` (id only when it matches the detected kind, or when
    detection is `unknown`); `send_self_command` fires `_fire_detached_verified` — a detached
-   child (`--__send-verified`) that runs `send_verified` per command under a project-wide
-   exclusive lock (`.janitor/state/self-send.lock`) with a same-command dedupe stamp
-   (`self-send.stamps.json`, `_SELF_SEND_DEDUPE_S = 300`), the stamp read AFTER the lock.
+   child (`--__send-verified`) that runs `send_verified` per command under a PER-PANE
+   exclusive lock (`.janitor/state/self-send.<pane-or-session-id>.lock`) with a per-pane
+   same-command dedupe stamp file (`self-send.<id>.stamps.json`, `_SELF_SEND_DEDUPE_S = 300`),
+   the stamp read AFTER the lock. Per pane, not per project (review round 7): the lock exists
+   so two children never type into ONE field at once, and two panes of the same project must
+   neither serialise needlessly nor have one pane's `/compact` stamp suppress the other's.
+   (6803ade0/0c7037bc shipped the per-project form; their `self-send.lock` /
+   `self-send.stamps.json` are orphans nothing reads again.)
    Returns `FIRED:iterm` / `FIRED:tmux`. `USE_ITERM_PATH` is no longer returned for iTerm.
    **Residual (pre-existing, closed by phase 2):** a kind detected as some OTHER terminal
    (vscode, apple-terminal) with an inherited `ITERM_SESSION_ID` still reaches the callers'

@@ -1494,8 +1494,6 @@ def self_terminal(env: Mapping[str, str] | None = None, kind: str | None = None)
 # compaction takes longer than that to land: without this, child B finds the field empty again
 # right after child A's submit and queues a SECOND compaction of the same session.
 _SELF_SEND_DEDUPE_S = 300.0
-_SELF_SEND_LOCK = "self-send.lock"
-_SELF_SEND_STAMPS = "self-send.stamps.json"
 # ONE ceiling for the whole child — waiting for the lock AND waiting for an empty field. The
 # lock is held across the field wait, so an uncapped wait (the injector's own default is an
 # hour) would let one child deferring on a busy field starve every later child, including a
@@ -1576,15 +1574,24 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
     do_send = send_verified if send is None else send
     sd = Path(str(data.get("state_dir") or state.state_dir()))
     sd.mkdir(parents=True, exist_ok=True)
-    stamps = sd / _SELF_SEND_STAMPS
     terminal = dict(data.get("terminal") or {})
+    # Lock and stamps are keyed by the PANE, not the project: the lock exists so two children
+    # never type into one field at once, and two panes of the same project (the owner runs
+    # several) can type concurrently; a per-project stamp would let session A's `/compact`
+    # suppress session B's for 300 s while B sits over the wall. One stamp FILE per pane too,
+    # so two panes' read-modify-writes never race under their separate locks. The id is
+    # already validated (`%<n>` or a hex-dash UUID) before it reaches a payload, and both are
+    # filename-safe as-is.
+    target = terminal.get("pane") or terminal.get("session_id") or "unknown"
+    stamps = sd / f"self-send.{target}.stamps.json"
+    lock_path = sd / f"self-send.{target}.lock"
     esc_first = bool(data.get("esc_first"))
     giveup_s = float(data.get("giveup_s") or _SELF_SEND_GIVEUP_S)
     deadline = clock() + giveup_s
     # Clock-independent bound on the lock wait, as `inject_until_sent` has on its own loop: a
     # stalled clock must not turn "bounded by giveup_s" into a forever-poll.
     max_polls = int(giveup_s / _SELF_SEND_LOCK_POLL_S) + 16
-    with open(sd / _SELF_SEND_LOCK, "a+", encoding="utf-8") as lock:
+    with open(lock_path, "a+", encoding="utf-8") as lock:
         while True:
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
