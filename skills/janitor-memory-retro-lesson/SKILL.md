@@ -55,9 +55,16 @@ already in lesson form; only body ATOM markers count.
 
 ## Procedure
 
-0. **Scope.** CLAIM your dispatch — never read a shared file for it:
-   `: "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"`
-   `uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore retro-lesson --state-dir "$STATE_DIR"`.
+0. **Scope.** CLAIM your dispatch — never read a shared file for it. Your spawn prompt
+   carries a `STATE_DIR=<path>` line; put that exact value into the `export` below
+   before running the claim — the guard on the next line refuses to run without it:
+
+   ```bash
+   export STATE_DIR="<the absolute path from the STATE_DIR=<path> line of your spawn prompt>"
+   : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
+   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore retro-lesson --state-dir "$STATE_DIR"
+   ```
+
    `--chore` is not optional (janitor#275): without it the claim is FIFO-by-age and
    chore-BLIND, so this agent would consume another chore's assignment — orphaning that
    dispatch and leaving itself nothing it can perform. It prints the

@@ -3,7 +3,7 @@ trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
 column: testing
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T21:51:00+0200
+updated: 2026-09-05T21:56:00+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -35,6 +35,16 @@ earlier session (commit af6340a5). This session closed the remainder:
   every claim-calling memory-skill passes `--state-dir`, (ii) each guards an unset
   `$STATE_DIR`, (iii) the heartbeat rule's spawn row carries the `STATE_DIR=<path>` placeholder
   and the abort-on-unresolvable instruction.
+
+**2026-09-05T21:56 — fix-forward (review fork finding):** all 8 SKILL.md guard blocks
+(`: "${STATE_DIR:?...}"`) checked whether `$STATE_DIR` was set but nothing told the spawned
+agent to PUT the spawn prompt's `STATE_DIR=<path>` value into its own fresh shell first — so
+every single spawn hit the guard and abstained. Fixed by adding `export STATE_DIR="<...>"`
+immediately above the guard in all 8 skills (retro-lesson's inline-backtick claim step was
+also converted to the same fenced ```bash form as the other 7). Test
+`tests/test_memory_skill_state_dir_guard.py` extended with
+`test_every_memory_chore_skill_exports_state_dir_before_the_guard` (line-order check) and
+`test_retro_lesson_claim_step_uses_a_fenced_code_block`.
 
 This card's scope is now fully implemented. The only unchecked acceptance box is the full
 `uv run pytest` suite (last run per the prior session's note referenced a sibling card's

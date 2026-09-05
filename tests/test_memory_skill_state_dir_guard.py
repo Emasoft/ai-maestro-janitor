@@ -69,6 +69,38 @@ def test_every_memory_chore_skill_guards_an_unset_state_dir():
     assert not missing, f"missing the ${{STATE_DIR:?...}} guard in: {missing}"
 
 
+def test_every_memory_chore_skill_exports_state_dir_before_the_guard():
+    """A `${STATE_DIR:?...}` guard with no prior `export STATE_DIR=` is a guaranteed
+    abstain: the spawned agent's fresh shell never has the spawn prompt's STATE_DIR=<path>
+    value in its environment, so the guard fires on every single invocation (found by the
+    review fork on TRDD-N1CPV1QV). Each claim-calling skill must carry an
+    `export STATE_DIR=` line strictly before its `${STATE_DIR:?` guard line."""
+    for p in _claim_skill_paths():
+        lines = p.read_text(encoding="utf-8").splitlines()
+        export_line = next(
+            (i for i, ln in enumerate(lines) if "export STATE_DIR=" in ln), None
+        )
+        guard_line = next((i for i, ln in enumerate(lines) if "STATE_DIR:?" in ln), None)
+        assert export_line is not None, f"missing 'export STATE_DIR=' in: {p}"
+        assert guard_line is not None, f"missing the STATE_DIR guard in: {p}"
+        assert export_line < guard_line, (
+            f"'export STATE_DIR=' must precede the '${{STATE_DIR:?...}}' guard in: {p}"
+        )
+
+
+def test_retro_lesson_claim_step_uses_a_fenced_code_block():
+    """retro-lesson previously carried the claim invocation as inline backticked text on
+    separate lines, unlike the other 7 chores' fenced ```bash blocks — bring it in line so
+    all 8 are the same shape."""
+    p = _SKILLS_DIR / "janitor-memory-retro-lesson" / "SKILL.md"
+    text = p.read_text(encoding="utf-8")
+    assert "```bash" in text, "retro-lesson's claim step must use a fenced ```bash block"
+    fenced_block = text.split("```bash", 1)[1].split("```", 1)[0]
+    assert "export STATE_DIR=" in fenced_block
+    assert "STATE_DIR:?" in fenced_block
+    assert "memory_dispatch_claim.py" in fenced_block
+
+
 def test_heartbeat_rule_spawn_prompt_carries_the_state_dir_placeholder():
     """The spawning session must compose STATE_DIR and hand it to the spawned agent INSIDE
     the prompt text — never as a stdout payload line (the heartbeat "no unsolicited paths"

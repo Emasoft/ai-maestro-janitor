@@ -69,7 +69,12 @@ and the agent prompts live in the references (Resources).
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — stop.
 2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
 
+   Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
+   `export` below before running the claim — the guard on the next line refuses to run
+   without it.
+
    ```bash
+   export STATE_DIR="<the absolute path from the STATE_DIR=<path> line of your spawn prompt>"
    : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
    uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore conflict --state-dir "$STATE_DIR"
    ```

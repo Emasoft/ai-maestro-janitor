@@ -69,7 +69,12 @@ stage+commit into the PROJECT root and it rides the next publish, never pushed b
 
 Process exactly **ONE scope this run**, and CLAIM it before you touch anything:
 
+Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
+`export` below before running the claim — the guard on the next line refuses to run
+without it.
+
 ```bash
+export STATE_DIR="<the absolute path from the STATE_DIR=<path> line of your spawn prompt>"
 : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
 uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore split --state-dir "$STATE_DIR"
 ```
