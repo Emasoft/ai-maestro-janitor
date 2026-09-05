@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T02:49:53+0200
+updated: 2026-09-05T02:55:05+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -22,8 +22,41 @@ external-refs: [TRDD-Q8PNPRTW]
 
 # A spawned shell produces zero filesystem effect under in-process pytest
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
+- **⇒ WHERE THIS ACTUALLY STANDS (2026-09-05): INSTRUMENTED, AND WAITING FOR A FAILURE THAT
+  CANNOT BE PRODUCED ON DEMAND.** Nothing external blocks it, so it stays `todo` — but do not
+  resume it expecting to make progress by running the tests again. **Brute force has been tried
+  in two configurations and produced ZERO failures**: 14 runs of a 2-test selection at load
+  19.5-36.3 (1a), and ~6 full-suite `-n auto` runs this session. The deliverable that did not
+  need a reproduction is **landed** (`6268dbeb`): row 2 no longer discards the child's stderr,
+  so the next real failure — here, or in someone else's soak — keeps its own evidence.
+- **THE FIVE FACTS TODAY ADDED** (details in step 0/1 of NEXT ACTION, ~200 lines below):
+  1. A green `-n auto` full suite is **77-150 s** here, not the "~12 min" this card's step 0
+     assumed — that figure was the SERIAL shape.
+  2. **The 8.6× gap to soak9 (822.89 s) is UNEXPLAINED.** Load is argued against, not refuted
+     (start-vs-start: 22.79 → 95.50 s vs 15.53 → 822.89 s). The environments demonstrably
+     DIFFER (both soak runs report a `subtests` counter no tracked revision has ever declared),
+     but 8 subtests cannot make 727 s. **Do not read the plugin finding as closure.**
+  3. Row 2's instrumentation covers **only the `FileNotFoundError` shape** — the prints sit
+     after the `raises` block, so the predicted hang shape reaches them never. Row 1 has none
+     and needs none (inherited fds; `--capture=fd` already reports its child).
+  4. The loop stops on **classification**, not on exit code or output format; unrelated flakes
+     log and continue; `RUN_TIMEOUT=1200`; exit 124 is a result, not an accident.
+  5. The survivor census now has a **positive control** (14 live / 0 post-kill). Its first two
+     versions could not see what they counted; the current one has a known gap — see below.
+- **KNOWN GAP, deliberately not fixed, so nobody reads a 0 as clean:** the census matches an
+  xdist worker and a bare `sleep 600`, but **not the `/bin/sh …fake_capture.sh` parent shell**.
+  In the hang shape the card predicts, that shell can outlive its `sleep`. Add
+  `|/bin/sh .*fake_capture\.sh` **on the next launch** — it was not applied mid-run because a
+  sixth relaunch to improve the instrument costs more than it buys (see the next bullet).
+- **⚠ THE HARNESS CHURN IS THE FAILURE MODE NOW.** Five commits, ~6 green runs, five launches
+  each discarded to fix the harness, and **zero observations of the actual failure**. Each fix
+  caught a real defect that would have produced false data — but the pattern meets the
+  "two failed attempts → stop and rethink" bar. There is also a structural reason it cannot
+  converge here: **a load-sensitive experiment cannot be run on a box while a session does
+  foreground work on it, and this session's work IS the load.** Do not relaunch the loop to
+  improve it. Let it run out or die.
 - **WHY THIS CARD EXISTS.** Split out of `TRDD-Q8PNPRTW` (rule 13, one atomic task per TRDD).
   That card is `blocked` on a USER waiver for a bucket of load artifacts. **These two failures
   are blocked on nobody** — they are live technical work, and parking them behind a human
@@ -400,8 +433,16 @@ on Q8PNPRTW for being plausible.
    protection theatre — an orphan is reparented to init, so its PPID is 1, never this script's.
    **POSITIVE CONTROL, which is what makes the zero meaningful:** the new pattern finds
    **14** in a snapshot taken *while* a suite was running, and **0** in the 45 s probe's
-   post-kill snapshot. The old pattern returns 0 for BOTH. Until that control existed, "zero
-   survivors" was a statement about the instrument, not about the box.
+   post-kill snapshot. Until that control existed, "zero survivors" was a statement about the
+   instrument, not about the box.
+   **⚠ AND THE OTHER HALF OF THAT CONTROL WAS INFERRED, STATED AS MEASURED, AND WRONG.** I
+   wrote "the old pattern returns 0 for BOTH" without running it against the 14-worker
+   snapshot. Run: it returns **1** — and the 1 is not a worker at all, it is the `zsh -c`
+   wrapper whose argv quotes the pattern. So the old census would not merely have missed 14
+   live workers; it would have **reported one survivor that did not exist**, and a session
+   reading that count would have had false support for the cross-run-state hypothesis on a
+   perfectly clean box. Silent blindness on the real thing, a phantom on the fake one, from
+   the same regex.
    Row 2's instrumentation was landed FIRST, on purpose: a failure caught by a loop started
    before it would have thrown its evidence away exactly as every failure so far has.
    **⚠ SCOPE — the loop's stop condition is WIDER than the instrumentation's reach.** It stops
@@ -669,3 +710,11 @@ on Q8PNPRTW for being plausible.
   `checkout --`; a committed, behaviour-neutral change is not in that class.)*
 - Evidence: `reports/suite-failures/20260904_114209+0200-capture-all-logins-failure-state.md`,
   `reports/suite-failures/20260904_113039+0200-fixture-fork-latency.md`.
+- **WHEN THE MECHANISM IS NAMED, COLLAPSE THIS CARD'S RETRACTION LAYERS** the way TRDD-34GB6XUI
+  does for ZQ02QG1L — the load claim, the census, and the timeout scoping each carry three or
+  four superseded readings now. **Not before then, and deliberately not as its own card yet:**
+  34GB6XUI exists because ZQ02QG1L's layers were collapsed *after* the work settled, and here
+  the same claims are still moving (the census changed twice in one session). Collapsing now
+  would destroy the reasoning that catches the next wrong fix, and would be a rewrite of text
+  that may need another. A second collapse TRDD before the first has run is speculative
+  machinery.
