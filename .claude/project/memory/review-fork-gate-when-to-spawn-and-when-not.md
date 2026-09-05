@@ -76,22 +76,25 @@ have to squint at is being used as a rationalisation.
 
 ^ATOM-04A3-Y4N5 [desc: "measured across a 4-fork chain 2026-09-05: 3 of 4 forks found their sharpest defect in the PREVIOUS fork's remediation, not in the original work", keywords: should_I_spawn_another_review_fork the_chain_keeps_finding_things_is_it_worth_continuing my_fix_introduced_a_new_defect the_correction_repeated_the_error_it_was_correcting when_do_review_rounds_hit_diminishing_returns remediation_is_written_faster_than_the_original the_second_fork_found_a_bug_in_my_first_fix how_many_adversarial_reviews_are_enough findings_migrated_from_false_to_overstated a_correction_commit_needs_its_own_review, ocd: 2026-09-05, lmd: 2026-09-05]
 **Remediation is the least-reviewed work in any correction chain, and measurably the buggiest.**
-Across six adversarial review forks on one session (2026-09-05), **all four forks that HAD a
-prior remediation to review found their sharpest defect IN it** rather than in the original
-work — a timestamp fabricated while fixing a truthfulness finding; a "pruned" mechanism
+Across one session's review chain (2026-09-05), **every fork that HAD a prior remediation to
+review found its sharpest defect IN it** rather than in the original work — 4 of 4, listing the
+members: a timestamp fabricated while fixing a truthfulness finding; a "pruned" mechanism
 asserted while fixing a claim-from-absence; a card called unassessed in the same turn its own
 edit assessed it; a review-chain sequence fabricated while correcting a fabricated count.
-(Fork 1 had no remediation to review, so **4 of 4 is the maximum possible** — the denominator
-is what makes the claim strong, not a hedge.)
+(Fork 1 had no remediation to review, so 4 of 4 is the maximum possible — the denominator is
+what makes the claim strong, not a hedge.)
 
 The mechanism, stated because it is actionable: remediation is written fast, under the
 assumption that the hard thinking already happened upstream — a finding READS like a
 specification, so the fix gets typed rather than reasoned.
 
-**The remedy is NOT another fork.** Every round produced exactly one new instance of the class
-being remediated, so review does not converge here. What would have caught all of them costs
-one re-read: **before committing a correction, enumerate every number and named fact in it and
-mark each MEASURED (with the command that produced it) or ESTIMATED.**
+**The remedy is NOT another fork.** Every round produced one new instance of the class being
+remediated, so review does not converge here. What catches it costs one re-read: **before
+committing a correction, enumerate every number and named fact and mark each MEASURED (with the
+command that produced it) or ESTIMATED — and for any COUNT, list its members. A count without
+its members is an estimate wearing a number.** That last clause is not decoration: the pass's
+first real use produced an enumerated list that still bundled two separate acts into one item,
+and listing the members is what forces the question.
 
 
 ^ATOM-C2PG-1WP3 [desc: "the stopping signal for a review chain is the KIND of finding, not the count — measured 4-8-5-4-3 as of fork 5, a count that stayed flat while the findings weakened", keywords: when_do_I_stop_spawning_review_forks is_this_review_chain_converging the_fork_count_is_going_down_does_that_mean_stop findings_are_getting_weaker_not_fewer this_claim_is_false_versus_this_claim_is_overstated how_do_I_know_the_review_loop_is_done the_chain_found_fewer_things_this_round should_I_run_one_more_adversarial_review diminishing_returns_on_adversarial_review stopping_criterion_for_a_correction_chain, ocd: 2026-09-05, lmd: 2026-09-05]
@@ -102,15 +105,16 @@ sits flat — so the count cannot be the criterion. What converged was KIND: fro
 FALSE"* through *"this claim rests on evidence you did not read"* to *"this claim is TRUE but
 framed one notch too strongly."*
 
-Stop when the sharpest remaining finding would change only how a sentence is hedged; keep going
-while one would still change what a reader DOES. **But when the chain will not converge, the
-lever is not another fork** — see this page's remediation atom for why, and for the one-re-read
-pass that replaces it.
+**The real terminus is a change of subject:** the chain ends when a round stops finding defects
+in the WORK and starts finding them in the PROCESS — at that point the next round would review
+the review, which does not converge. Stop when the sharpest remaining finding would change only
+how a sentence is hedged, or when the findings have become findings about reviewing.
 
-*⚠ This atom first published `4 → 8 → 5 → 1`, then `4 → 8 → 5 → 4`. The `1` was FABRICATED —
-fork 4's RECOMMENDATION ("stop after fixing finding 1") misread as its COUNT. The truncation
-then omitted fork 5 entirely, which was both the fork that CAUGHT the fabrication and the
-sequence's smallest genuine count — discarding the atom's own best supporting datum. Two
-errors, one atom, both about its central number.*
+Stop when the sharpest remaining finding would change only how a sentence is hedged; keep going
+while one would still change what a reader DOES. When a chain will not converge, the lever is
+not another fork — see this page's remediation atom.
+
+*(The sequence above was twice published wrong: a recommendation misread as a count, then a
+truncation that dropped the correcting fork. Detail in commit `f370b46a`.)*
 
 ## Notes and lessons learned
