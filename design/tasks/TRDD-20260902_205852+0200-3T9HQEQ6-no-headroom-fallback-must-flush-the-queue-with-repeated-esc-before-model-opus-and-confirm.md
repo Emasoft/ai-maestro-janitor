@@ -3,7 +3,7 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-05T05:26:11+0200
+updated: 2026-09-05T05:28:26+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -150,7 +150,16 @@ this card still flushes whatever is already queued.
       | installed `3.4.14/…` | `f92494d80373` |
       Installed 3.4.13 carries the **pre-fix file byte-for-byte**. (3.4.14 differs from
       `e0c328c4` because `fb25366f`/`1533ccc9` touched the file after it — consistent, not a
-      discrepancy.) Git agrees at the tag level:
+      discrepancy.)
+      **One file is enough here, and that is checked rather than assumed:** `e0c328c4`'s only
+      non-test, non-doc file IS `scripts/lib/terminal_trigger.py`
+      (`git show --name-only e0c328c4` → that plus two `tests/` files and this TRDD), so the
+      commit's entire runtime surface is the file compared. And since the installed plugin
+      **does** ship `tests/`, those were checked too — all three shipped files match the
+      PARENT: `terminal_trigger.py` `ca2999f0f1de`, `test_terminal_trigger.py` `9d97f0428e9b`,
+      `test_terminal_trigger_readback.py` `f9d1ed60c033`. Nothing of `e0c328c4` is in installed
+      3.4.13.
+      Git agrees at the tag level:
       `git merge-base --is-ancestor e0c328c4 v3.4.13` → **false**, `git tag --contains
       e0c328c4` → **only `v3.4.14`**. So the fix was never in 3.4.13; all three commits shipped
       together in v3.4.14 — which is why "publish first" was right on 2026-09-03, wrong now.
