@@ -1,9 +1,9 @@
 ---
 trdd-id: 3VIXO8FA
-title: The keychain denied-latch treats a load-induced security timeout as a denial and blinds rotation
+title: The keychain denied-latch treats a stalled security call as a denial and blinds rotation
 column: todo
 created: 2026-09-05T15:16:36+0200
-updated: 2026-09-05T15:16:36+0200
+updated: 2026-09-05T15:26:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -17,10 +17,10 @@ blocked-by: []
 npt: []
 eht: []
 implementation-commits: []
-external-refs: [TRDD-EQJPPZ2L, TRDD-K3WQ7XM9, TRDD-FQXBURNR, ai-maestro TRDD-MFTDMSJY]
+external-refs: [TRDD-EQJPPZ2L, TRDD-K3WQ7XM9, TRDD-FQXBURNR, ai-maestro TRDD-MFTDMSJY, ai-maestro TRDD-RA2ZSTOF]
 ---
 
-# The keychain denied-latch treats a load-induced `security` timeout as a denial
+# The keychain denied-latch treats a stalled `security` call as a denial
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
@@ -35,23 +35,33 @@ The owner had to `/login` by hand at ~14:55 after the live account hit its 5h ca
 rotator that owned the beat was the ai-maestro server's TypeScript port (the janitor daemon
 had correctly yielded `oauth-rotator-tick` at 09:45:43), ticking every ~60 s. At 14:30:36 its
 `safe-storage` latched the machine: "3 consecutive `security` ops TIMED OUT past 5s — cause
-NOT observed" (slot reads, host loadavg 18–27 on 14 cores). Every beat from then on read
-"no live credential / STUCK"; a 14:45 probe recovered, three more 5001–5003 ms timeouts
-re-latched at 14:48:50, the 14:59:13 half-open probe timed out at 5004 ms and re-latched
-again. Rotation was blind 14:30 → 15:09 — the window in which the live account went from 82%
-to the cap (slope ≈0.8 %/min; the only trigger is 97%).
+NOT observed" (slot reads). Every beat from then on read "no live credential / STUCK"; a
+14:45 probe recovered (2851 ms), three more 5001–5003 ms timeouts re-latched at 14:48:50, the
+14:59:13 half-open probe timed out at 5004 ms and re-latched again. Rotation was blind
+14:30 → 15:09; the live account's last reading was 82% at 14:30 and the owner re-logged in by
+hand at ~14:55 (the cap crossing is inferred — no 429 was recorded, the beat was blind). The
+only trigger is 97%.
 
-**The janitor's own python path is one step worse.** `safe_storage.run_security`
-(`scripts/oauth_rotator/safe_storage.py:303-305`) sets the latch on a SINGLE
-`subprocess.TimeoutExpired`, while the TS port already requires 3 consecutive
-(TRDD-MFTDMSJY, measured 2026-08-28: 26 of 29 slow ops recovered). Outside the harness —
-the standalone daemon this repo must keep alive on its own — one slow read under load
-blinds rotation for a 600 s cooldown, and a half-open probe that is itself a 5 s `-w` read
-re-latches under the same load.
+**Why `security` stalled is NOT established.** Host loadavg was 18–27 on 14 cores, and the
+server's independent tmux keychain watchdog logged eight `keychain_probe_timeout`s between
+13:59 and 15:08 — so `security` calls stalled machine-wide, from two instruments. At loadavg
+11 (15:22) the same not-found attribute read took 0.01–0.02 s. Load is a correlation; securityd
+contention from many concurrent callers is the other candidate; this card does not depend
+on which — it fixes the POLICY that turns any stall into a denial.
+
+**The janitor's own python path is one step worse.** `safe_storage.run_security`'s
+`except subprocess.TimeoutExpired: set_keychain_denied(...)` branch (read at
+`scripts/oauth_rotator/safe_storage.py:303-305`) sets the latch on a SINGLE timeout, while the
+TS port already requires 3 consecutive (TRDD-MFTDMSJY, measured 2026-08-28: 26 of 29 slow ops
+recovered). Outside the harness — the standalone daemon this repo must keep alive on its own —
+one stalled read blinds rotation for a 600 s cooldown, and a half-open probe that is itself a
+5 s `-w` read re-latches under the same stall.
 
 A timeout on an ATTRIBUTE-ONLY read (`find-generic-password` without `-w`) can never be a
 prompt hang — the code's own comments on `_primary_last_modified` / `_primary_live_item_absent`
-say those reads never prompt — yet they route through the same latch-on-timeout gate.
+say those reads never prompt — yet they route through the same latch-on-timeout branch. The
+exemption is for the TIMEOUT branch only: a denial MARKER (`_is_denial` — a locked keychain
+answers attribute reads with "interaction not allowed") must keep latching on every op.
 
 ## What
 
@@ -63,8 +73,9 @@ In `scripts/oauth_rotator/safe_storage.py` (python side only; the TS port is the
    consecutive-timeout counter and latch only when the count reaches
    `_TIMEOUT_LATCH_THRESHOLD = 3` (same value and same per-process semantics as the TS port's
    `TIMEOUT_LATCH_THRESHOLD`; an answered op resets the count). Denial markers
-   (`_is_denial`) still latch immediately. The half-open probe path is unchanged except that
-   a probe that times out re-stamps only when `may_prompt` is True.
+   (`_is_denial`) still latch immediately ON EVERY OP, `may_prompt` or not. The half-open
+   probe path is unchanged except that a probe that times out re-stamps only when
+   `may_prompt` is True.
 2. Callers classified by argv shape, verified at each site: `-w` reads
    (`_read_primary_macos_keychain`, `_slot_keychain_read`) and writes/deletes
    (`_security_add_password_via_stdin`, `_slot_keychain_delete`) → `may_prompt=True`;
@@ -78,6 +89,15 @@ In `scripts/oauth_rotator/safe_storage.py` (python side only; the TS port is the
    denial marker latches at once; the half-open probe on a non-prompting op does not
    re-stamp on timeout. Drive `subprocess.run` through a seam — no real `security`.
 
+**Shared contract (peer requirement, ai-maestro TRDD-RA2ZSTOF, 15:20):** the threshold and
+the exemption rule must be ONE contract across `safe-storage.ts` and `safe_storage.py`, or the
+two rotators disagree under the same load. This card's side of it: threshold `3`, and the
+exemption expressed as an argv PREDICATE, not a call-site list — `find-generic-password` /
+`list-keychains` WITHOUT `-w` cannot prompt (`may_prompt=False`); anything with `-w`, and
+every `add-`/`delete-generic-password`, can (`may_prompt=True`). Encode the predicate as a
+named helper the TS side can mirror line for line; the shared config file, if the USER wants
+one, is the peer proposal's decision and not built here.
+
 Out of scope (recorded so it is not lost): raising the 5 s slot-read timeout to the
 module's 10 s default. Three timeouts sat at 5001–5004 ms (killed at the budget) so their
 true duration is unknown; decide after item 3 has produced a distribution. The burn-gate
@@ -88,12 +108,18 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
 
 - [ ] An attribute-only `security` timeout leaves `keychain-denied.latch` absent (test).
 - [ ] A `-w` read latches on the 3rd consecutive timeout, not the 1st; an answered op resets (test).
-- [ ] Every `run_security` call site passes `may_prompt` explicitly (grep: zero calls without it).
+- [ ] Every `run_security` call site passes `may_prompt` explicitly:
+      `grep -rn 'run_security(' scripts | grep -v 'def run_security' | grep -vc 'may_prompt='` prints 0.
+- [ ] An attribute-only op whose stderr carries a denial marker still sets the latch (test).
 - [ ] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`,
       `uvx --with pyright pyright`, and `tests/test_safe_storage*.py` + `tests/test_oauth_rotator*.py` green.
 
 ## Notes and lessons learned
 
 - A timeout is not a denial. The latch's text already admitted it ("cause NOT observed"); the
-  policy still acted on it. Under host load a 5 s `security` call is routine, and the breaker
-  built to stop a prompt flood became the thing that stopped rotation.
+  policy still acted on it. When `security` stalls machine-wide, the breaker built to stop a
+  prompt flood becomes the thing that stops rotation.
+- The first version of this card named "load" as the cause from a loadavg correlation, with
+  the server's own keychain-blind watchdog lines sitting unexplained in the same log excerpt.
+  Caught by review; the settling read (0.01–0.02 s at loadavg 11) only shows `security` is
+  fast when the host is quieter, not why it stalled.
