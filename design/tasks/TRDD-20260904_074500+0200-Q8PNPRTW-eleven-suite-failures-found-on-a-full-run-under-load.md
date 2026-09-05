@@ -78,7 +78,11 @@ external-refs: [TRDD-7NSRD8OV]
 > the mechanism is worker oversubscription under an already-loaded host (loadavg 22.7 measured
 > at 13:25 with several agents running), and the FIX is a worker cap in the publish gate
 > (`publish.py` uses `-n auto`). **Not launched now**: the host is at load 22 with the owner
-> present; a full-suite storm is the failing condition itself. Run when loadavg < 8.
+> present; a full-suite storm is the failing condition itself. Run when loadavg < 8 — a
+> load-gated runner is ARMED for exactly that (13:26, detached `nohup`, machine-local and
+> gitignored: `scripts_dev/q8pnprtw_nauto_vs_n4.sh`); it waits for two quiet minutes, then
+> writes `reports/suite-soak/<ts>-q8pnprtw-experiment.log`, `<ts>-nauto.txt`/`.loadavg` and
+> `<ts>-n4.txt`/`.loadavg`. Read those before re-running anything.
 >
 > ### ⇒ THE USER DECISION, IN ONE LINE (everything else here is how we got to it)
 > **Accept the 10 remaining failures on a CHARACTERISATION rather than a mechanism, or refuse
