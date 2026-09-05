@@ -76,31 +76,35 @@ have to squint at is being used as a rationalisation.
 
 ^ATOM-04A3-Y4N5 [desc: "measured across a 4-fork chain 2026-09-05: 3 of 4 forks found their sharpest defect in the PREVIOUS fork's remediation, not in the original work", keywords: should_I_spawn_another_review_fork the_chain_keeps_finding_things_is_it_worth_continuing my_fix_introduced_a_new_defect the_correction_repeated_the_error_it_was_correcting when_do_review_rounds_hit_diminishing_returns remediation_is_written_faster_than_the_original the_second_fork_found_a_bug_in_my_first_fix how_many_adversarial_reviews_are_enough findings_migrated_from_false_to_overstated a_correction_commit_needs_its_own_review, ocd: 2026-09-05, lmd: 2026-09-05]
 **Remediation is the least-reviewed work in any correction chain, and measurably the buggiest.**
-Across four adversarial review forks on one session (2026-09-05), **three found their sharpest
-defect in the PREVIOUS fork's remediation rather than in the original work** — a timestamp
-fabricated while fixing a truthfulness finding; a "pruned" mechanism asserted while fixing a
-claim-from-absence; a card called unassessed in the same turn its own edit assessed it.
+Across five adversarial review forks on one session (2026-09-05), **three of the three forks
+that HAD a prior remediation to review found their sharpest defect in it** rather than in the
+original work — a timestamp fabricated while fixing a truthfulness finding; a "pruned"
+mechanism asserted while fixing a claim-from-absence; a card called unassessed in the same turn
+its own edit assessed it. (Fork 1 had no remediation to review, so 3 of 3 is the maximum
+possible, not 3 of 5 — the denominator is what makes the claim strong rather than a hedge.)
 
 The mechanism, stated because it is actionable: remediation is written fast, under the
 assumption that the hard thinking already happened upstream — a finding READS like a
 specification, so the fix gets typed rather than reasoned. **Consequence: a correction commit
 earns a review as much as the original did.** "I am only applying the findings" is the belief
-that produces this, not a reason to skip one. See [[review-fork-gate-when-to-spawn-and-when-not]]'s
-stopping-signal atom for when to end the chain.
+that produces this, not a reason to skip one.
 
 
-^ATOM-C2PG-1WP3 [desc: "the stopping signal for a review chain is the KIND of finding, not the count — convergence looks like findings getting weaker, not fewer", keywords: when_do_I_stop_spawning_review_forks is_this_review_chain_converging the_fork_count_is_going_down_does_that_mean_stop findings_are_getting_weaker_not_fewer this_claim_is_false_versus_this_claim_is_overstated how_do_I_know_the_review_loop_is_done the_chain_found_fewer_things_this_round should_I_run_one_more_adversarial_review diminishing_returns_on_adversarial_review stopping_criterion_for_a_correction_chain, ocd: 2026-09-05, lmd: 2026-09-05]
-
+^ATOM-C2PG-1WP3 [desc: "the stopping signal for a review chain is the KIND of finding, not the count — measured 4-8-5-4, a count that stayed flat while the findings weakened", keywords: when_do_I_stop_spawning_review_forks is_this_review_chain_converging the_fork_count_is_going_down_does_that_mean_stop findings_are_getting_weaker_not_fewer this_claim_is_false_versus_this_claim_is_overstated how_do_I_know_the_review_loop_is_done the_chain_found_fewer_things_this_round should_I_run_one_more_adversarial_review diminishing_returns_on_adversarial_review stopping_criterion_for_a_correction_chain, ocd: 2026-09-05, lmd: 2026-09-05]
 **The stopping signal for an adversarial review chain is the KIND of finding, not the count.**
-Measured on a 4-fork chain (2026-09-05) whose per-fork substantive findings ran **4 → 8 → 5 → 1**
-— a count that is not monotonic and so cannot be the criterion. The reliable tell was the
-migration in KIND: from *"this claim is FALSE"* through *"this claim rests on evidence you did
+Measured on a 5-fork chain (2026-09-05): substantive findings per fork ran **4 → 8 → 5 → 4**,
+a count that rises, falls and then *stays flat* — so it cannot be the criterion. What actually
+converged was KIND: from *"this claim is FALSE"* through *"this claim rests on evidence you did
 not read"* to *"this claim is TRUE but framed one notch too strongly."*
 
-Convergence looks like findings getting **weaker**, not merely fewer. Stop when the sharpest
-remaining finding would change only how a sentence is hedged; keep going while one would still
-change what a reader DOES. A count can drop because a fork got unlucky or was asked a narrower
-question — the kind cannot. Related: [[review-fork-gate-when-to-spawn-and-when-not]]'s
-remediation atom, which is why a *late* chain still finds real defects at all.
+Stop when the sharpest remaining finding would change only how a sentence is hedged; keep going
+while one would still change what a reader DOES.
+
+*⚠ This atom first published the sequence as `4 → 8 → 5 → 1`. The final `1` was FABRICATED — it
+took fork 4's RECOMMENDATION ("stop after fixing finding 1") as its COUNT, when fork 4 raised
+four. The flat 4 is the stronger evidence for the thesis, so the error cost the argument rather
+than helping it — and it is the same defect as
+[[debugging-methodology-verify-before-concluding-scope-and-verification-checks]]'s
+substitution lesson, committed in the same turn that lesson's sibling atom was written.*
 
 ## Notes and lessons learned
