@@ -20,6 +20,24 @@ relevant-rules: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-16
 
+> **⏵ 2026-09-05 — `unblock-when: [trdd:OZNG3N2D terminal]` ADDED, and here is what it does to
+> you.** The card previously declared no machine-checkable release condition, so when OZNG3N2D
+> finishes, nothing would have re-examined this card — it would have sat `blocked` behind a
+> blocker that was already done. That exact stall was measured on TRDD-ZQ02QG1L this day: two
+> days silently blocked by a `complete` card, because nothing re-asks a question whose answer
+> changed. Of the 15 blocked cards, this was the only other one naming a TRDD-id blocker with no
+> predicate to clear it.
+> **WHEN IT FIRES, THIS CARD LANDS BACK IN `todo`** (`pre-block-column: todo`) — a pull queue
+> that advertises "available to work". **It has been blocked since 2026-08-29 and its findings
+> predate that: RE-READ IT BEFORE PULLING IT.** The restore target is deliberately not softened;
+> `pre-block-column` records a judgment already made, and rewriting it to arrange a gentler
+> landing would falsify the record to pre-empt a decision that is not this edit's to make.
+> *Note the predicate uses the WIDE terminal set* — `trdd_common.TERMINAL_COLUMNS` =
+> `{published, complete, live, failed, superseded, cancelled, refused}` — so a blocker that
+> `failed` or was `cancelled` also releases this card. That is deliberate upstream
+> (`trdd_common.py:338-352`): none of those blockers will ever unblock a dependent by
+> completing, so a human should look either way.
+
 > **⏵ 2026-08-29 — BLOCKED, and the block is honest.** Every remaining finding needs someone
 > other than a janitor session, so the card moved `todo` → `blocked` (`blocked-by: [OZNG3N2D]`)
 > rather than sitting in a column that claims it is workable. Of the ten findings, **F7 closed
