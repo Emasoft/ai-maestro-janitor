@@ -331,12 +331,26 @@ def test_refuses_when_state_dir_unresolved_and_no_pool(tmp_path):
     assert "no memory-maintenance state at all" in proc.stderr
 
 
-def test_explicit_state_dir_with_no_pool_keeps_ordinary_exit_2(tmp_path):
-    """The same empty directory, but reached via an EXPLICIT --state-dir, must
-    stay the pre-existing 'nothing claimable' exit 2 — the new code in (d) fires
-    only on cwd resolution."""
+def test_explicit_state_dir_with_no_pool_also_exits_3(tmp_path):
+    """The same empty directory, reached via an EXPLICIT --state-dir, must ALSO
+    exit 3 (part (e)) — a scheduler always writes its record before emitting the
+    marker, so a state dir with zero memory-maint-* files is wrong however it was
+    obtained. Previously this silently returned the ordinary 'nothing claimable'
+    exit 2, which is exactly the code a verbatim-placeholder --state-dir produced
+    (TRDD-N1CPV1QV part (e)) — a wrong path must never look like a correct abstain."""
     proc = _run_cli(["--state-dir", str(tmp_path)])
-    assert proc.returncode == 2, proc.stderr
+    assert proc.returncode == 3, proc.stderr
+    assert "--state-dir given" in proc.stderr
+
+
+def test_explicit_placeholder_like_state_dir_exits_3_not_2():
+    """A skill that pasted its literal spawn-prompt placeholder verbatim as
+    --state-dir must exit 3, not the 'nothing claimable' exit 2 every skill
+    treats as a correct abstain."""
+    placeholder = "<the absolute path from the STATE_DIR=<path> line of your spawn prompt>"
+    proc = _run_cli(["--state-dir", placeholder])
+    assert proc.returncode == 3, proc.stderr
+    assert "--state-dir given" in proc.stderr
 
 
 def test_claim_one_refuses_a_foreign_state_dir(tmp_path):

@@ -45,7 +45,7 @@ split / consolidate / conflict / repair / harvest.
    without it.
 
    ```bash
-   export STATE_DIR="<the absolute path from the STATE_DIR=<path> line of your spawn prompt>"
+   export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
    : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
    uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore atomize --state-dir "$STATE_DIR"
    ```

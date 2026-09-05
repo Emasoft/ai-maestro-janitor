@@ -3,7 +3,7 @@ trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
 column: testing
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T21:56:00+0200
+updated: 2026-09-05T22:02:26+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -45,6 +45,25 @@ also converted to the same fenced ```bash form as the other 7). Test
 `tests/test_memory_skill_state_dir_guard.py` extended with
 `test_every_memory_chore_skill_exports_state_dir_before_the_guard` (line-order check) and
 `test_retro_lesson_claim_step_uses_a_fenced_code_block`.
+
+**2026-09-05T22:02 — fix-forward (verbatim-placeholder finding):** defect measured — an
+`--state-dir` set to the skills' own fenced placeholder text (a verbatim paste of
+`<the absolute path from the STATE_DIR=<path> line of your spawn prompt>`) exited 2, the
+"nothing claimable" code every skill treats as a correct abstain, because the part-(d)
+empty-pool check ran only when `args.state_dir is None`. Fixed:
+`scripts/memory_dispatch_claim.py::main()`'s "no memory-maint-* files at all" check now runs
+for BOTH the explicit `--state-dir` and cwd-resolved cases (exit 3 either way; stderr names
+which case fired) — a state dir with zero `memory-maint-*` files is wrong however it was
+obtained, since the scheduler always writes its record before emitting the marker. All 8
+`janitor-memory-*/SKILL.md` placeholder lines changed from
+`export STATE_DIR="<the absolute path …>"` to `export STATE_DIR=""` (a comment carries the
+paste instruction) so a verbatim paste now hits the `:?` guard and dies loud instead of
+silently passing the placeholder string as a real path. Tests: renamed
+`test_explicit_state_dir_with_no_pool_keeps_ordinary_exit_2` →
+`test_explicit_state_dir_with_no_pool_also_exits_3` (now expects 3) and added
+`test_explicit_placeholder_like_state_dir_exits_3_not_2`; tightened
+`test_every_memory_chore_skill_exports_state_dir_before_the_guard` to require the export and
+guard lines share one fenced ```bash block, not merely file order.
 
 This card's scope is now fully implemented. The only unchecked acceptance box is the full
 `uv run pytest` suite (last run per the prior session's note referenced a sibling card's

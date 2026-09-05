@@ -244,17 +244,22 @@ def main() -> int:
     state_dir = Path(args.state_dir) if args.state_dir else state.state_dir()
     expected_state_dir = state_dir.expanduser().resolve()
 
-    if args.state_dir is None:
-        # TRDD-N1CPV1QV part (d): cwd resolution found NOTHING at all (no pending, no
-        # claimed) — most likely resolved the wrong project root entirely. Distinct from
-        # the ordinary "pool present but nothing claimable" exit 2 below.
-        if not any(state_dir.glob("memory-maint-*")):
-            print(
-                f"memory_dispatch_claim: no memory-maintenance state at all in {state_dir} "
-                "(cwd-resolved, no --state-dir given) — probably the wrong project root",
-                file=sys.stderr,
-            )
-            return 3
+    # TRDD-N1CPV1QV part (e): a dir with NO memory-maint-* files at all is a wrong dir,
+    # however it was obtained. The scheduler writes its record BEFORE emitting the marker,
+    # so a correct state dir always holds at least one memory-maint-* file — an explicit
+    # --state-dir with none is just as wrong as a cwd-resolved one (e.g. a skill that pasted
+    # its literal "<the absolute path from the STATE_DIR=<path> line ...>" placeholder
+    # verbatim used to exit 2 here, the "nothing claimable" code every skill treats as a
+    # correct abstain, so the wrong path was silent). Distinct from the ordinary "pool
+    # present but nothing claimable" exit 2 below.
+    if not any(state_dir.glob("memory-maint-*")):
+        origin = "--state-dir given" if args.state_dir is not None else "cwd-resolved, no --state-dir given"
+        print(
+            f"memory_dispatch_claim: no memory-maintenance state at all in {state_dir} "
+            f"({origin}) — probably the wrong project root",
+            file=sys.stderr,
+        )
+        return 3
 
     if args.peek:
         nxt = candidates(state_dir)

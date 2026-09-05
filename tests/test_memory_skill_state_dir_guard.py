@@ -74,16 +74,20 @@ def test_every_memory_chore_skill_exports_state_dir_before_the_guard():
     abstain: the spawned agent's fresh shell never has the spawn prompt's STATE_DIR=<path>
     value in its environment, so the guard fires on every single invocation (found by the
     review fork on TRDD-N1CPV1QV). Each claim-calling skill must carry an
-    `export STATE_DIR=` line strictly before its `${STATE_DIR:?` guard line."""
+    `export STATE_DIR=` line strictly before its `${STATE_DIR:?` guard line, AND both lines
+    must sit inside the SAME fenced ```bash block — file-order alone would also pass a doc
+    that mentions `export STATE_DIR=` in prose above an unrelated later fence."""
     for p in _claim_skill_paths():
-        lines = p.read_text(encoding="utf-8").splitlines()
-        export_line = next(
-            (i for i, ln in enumerate(lines) if "export STATE_DIR=" in ln), None
+        text = p.read_text(encoding="utf-8")
+        fences = text.split("```")[1::2]  # every odd segment is one fenced block's body
+        block = next(
+            (f for f in fences if "export STATE_DIR=" in f and "STATE_DIR:?" in f), None
         )
-        guard_line = next((i for i, ln in enumerate(lines) if "STATE_DIR:?" in ln), None)
-        assert export_line is not None, f"missing 'export STATE_DIR=' in: {p}"
-        assert guard_line is not None, f"missing the STATE_DIR guard in: {p}"
-        assert export_line < guard_line, (
+        assert block is not None, (
+            f"no single ```…``` fence in {p} carries both 'export STATE_DIR=' and "
+            "'${STATE_DIR:?...}' — they must not be split across fences or file prose"
+        )
+        assert block.index("export STATE_DIR=") < block.index("STATE_DIR:?"), (
             f"'export STATE_DIR=' must precede the '${{STATE_DIR:?...}}' guard in: {p}"
         )
 
