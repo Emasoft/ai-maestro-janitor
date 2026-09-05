@@ -36,7 +36,7 @@ wait for the daemon's beat (or accept it lands at next SessionStart's natural up
 after a `[janitor-reload]` fires — verify the cache version first (`ls <cache>/…/ | sort -V |
 tail -1` and `claude plugin list`). A `[janitor-reload]` can fire on a stale/premature
 `reload-needed.flag` while the cache is unchanged, so the reload is a no-op on the OLD version
-and the running hooks are still the old ones. Reload ≠ update. See [[janitor-publish-pipeline]]
+and the running hooks are still the old ones. Reload ≠ update. See [[janitor-publish-pipeline-gate-sequence]]
 for the release-gate half (CPV, pre-push hook, version/branch recheck). [^1]
 
 ## Notes and lessons learned
