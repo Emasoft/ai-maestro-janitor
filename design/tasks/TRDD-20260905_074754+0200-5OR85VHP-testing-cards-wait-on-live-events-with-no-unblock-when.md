@@ -3,7 +3,7 @@ trdd-id: 5OR85VHP
 title: most testing cards are waiting on a live event with no machine-checkable wait condition
 column: todo
 created: 2026-09-05T07:47:54+0200
-updated: 2026-09-05T07:47:54+0200
+updated: 2026-09-05T10:36:05+0200
 current-owner: main-session
 task-type: docs
 priority: low
@@ -24,11 +24,31 @@ implementation-commits: []
 ## The observation
 
 Measured 2026-09-05 across the 11 cards then in `testing`: every one had 1–3 unticked
-boxes and **none was done-but-unclosed**, so the column is not a graveyard. But of those
-remaining boxes, roughly eight are **live-event waits** — *"Live: the next scoped-only
-wall…"*, *"one observed end-to-end unattended cycle"*, *"verified from a REAL compaction's
-logs"*, *"the next scoped wall rotates automatically"*. Nobody can do them. They happen, or
-they do not.
+boxes and **none was done-but-unclosed**, so the column is not a graveyard. But most of
+those boxes are **live-event waits** — *"Live: the next scoped-only wall…"*, *"one observed
+end-to-end unattended cycle"*, *"verified from a REAL compaction's logs"*. Nobody can do
+them. They happen, or they do not.
+
+**The count, with its predicate, so it is reproducible rather than eyeballed:**
+
+```bash
+grep -h '^- \[ \]' <card> | grep -ciE '\blive\b|observed|real compaction|next (scoped|automated)|in the wild|after the release'
+```
+
+**8 of 11 cards** have at least one box matching: PXP08ZQC, X6I04SAO, Q0Y4M1TF, N954KWUC,
+L32WC0H7, 3T9HQEQ6, KE88RIKX, OES0NN3F. Three do not: 1QJIZFFW, 2F3I2P18, GK35MOXU.
+
+**That predicate is a HEURISTIC over box PROSE, not a classification** — it is stated so a
+reader can re-run it or disagree, which an eyeballed "roughly eight" does not allow. It is
+known to under-count: 2F3I2P18's box ends *"— awaits…"*, plainly a wait, and matches no
+keyword. So 8 is a floor.
+
+**One case the count exposes, worth its own line:** 1QJIZFFW scores 0 because its box says
+*"Cross-`/clear` verification via the existing `handoff_clear_verify.py` harness"* — which
+READ as runnable work and was the reason this investigation started. It is now a live-event
+wait (the mechanism shipped 2026-09-05), and the box text never changed to say so. **A box
+whose text describes the work rather than the wait is how a live-event wait hides**, and it
+is the same defect this card is about, one level down.
 
 `testing` asserts *built and under test*. That is TRUE of these — the code shipped, the
 gates ran. What the column cannot express is *"built, and now waiting for the world to
