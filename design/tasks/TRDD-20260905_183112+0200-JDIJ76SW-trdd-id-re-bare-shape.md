@@ -3,7 +3,7 @@ trdd-id: JDIJ76SW
 title: TRDD filename matcher drops v1-migrated bare TRDD-<8hex>-<slug> cards from detectors and the board count
 column: todo
 created: 2026-09-05T18:31:12+0200
-updated: 2026-09-05T18:31:12+0200
+updated: 2026-09-05T18:42:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -11,9 +11,8 @@ min-approval-requirement: none
 npt: []
 eht: []
 implementation-commits: []
-external-refs: [ai-maestro:TRDD-D552QXOU, ai-maestro:TRDD-UAP7ZEJL, ai-maestro:f6f4664e]
+external-refs: [ai-maestro:D552QXOU, ai-maestro:UAP7ZEJL, ai-maestro:f6f4664e]
 relevant-rules: []
-governing-spec: trdd-design-tasks.md step 2 (filename recipe)
 ---
 
 ## Symptom
@@ -25,6 +24,10 @@ two dropped legacy-named cards plus one counted LOCAL-scope card cancelled out t
 `f6f4664e`) so their own symptom is gone. The filename matcher that dropped them lives in
 THIS repo (`ai-maestro-janitor`), shared by every consumer below, so the defect is ours to
 fix even though the peer's instance of it is already worked around.
+
+The net −1 was measured by an earlier ai-maestro-side session (card TRDD-UAP7ZEJL,
+2026-09-05 03:13-04:58) — not by the hub session, which verified only the installed 3.4.14
+cache regex.
 
 ## Root cause
 
@@ -68,6 +71,8 @@ gets `None` back for a bare-shape filename, which each caller treats as "not a T
 likely to visibly under-count; `dispatch.py` and `ticket_proposal.py` route work by uid, so
 a dropped uid there means the card is never dispatched or reconciled at all, not merely
 undercounted.
+
+Governing spec: the filename recipe in `~/.claude/rules/trdd-design-tasks.md` step 2.
 
 ## Test coverage gap
 

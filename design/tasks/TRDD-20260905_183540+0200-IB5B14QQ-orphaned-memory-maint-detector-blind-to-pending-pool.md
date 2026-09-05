@@ -3,7 +3,7 @@ trdd-id: IB5B14QQ
 title: orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
 column: todo
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T18:35:40+0200
+updated: 2026-09-05T18:42:00+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -17,6 +17,9 @@ external-refs: [github:Emasoft/ai-maestro-janitor#300]
 # orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
 
 ## Symptom
+
+See also TRDD-Q7X4M2KP — this card makes the pile of unclaimed per-dispatch records
+visible; Q7X4M2KP stops the scheduler from growing that pile in the first place.
 
 `scripts/detectors/orphaned-memory-maint.py:63` reads ONLY the legacy
 single-slot file `memory-maint-pending.json` (`omm.read_pending`,
