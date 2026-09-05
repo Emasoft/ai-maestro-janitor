@@ -3,7 +3,7 @@ trdd-id: 3VIXO8FA
 title: The keychain denied-latch treats a stalled security call as a denial and blinds rotation
 column: todo
 created: 2026-09-05T15:16:36+0200
-updated: 2026-09-05T15:48:00+0200
+updated: 2026-09-05T15:52:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -133,9 +133,13 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
       `grep -rn 'run_security(' scripts | grep -v 'def run_security' | grep -vc 'may_prompt='` prints 0.
 - [ ] An attribute-only op whose stderr carries a denial marker still sets the latch (test).
 - [ ] A persistently blocked keychain still latches on the 3rd consecutive `-w` timeout (test).
-- [ ] After an attribute-only timeout: under `JANITOR_ROTATOR_HEADLESS=1` (the daemon)
-      `write_live_identity_beacon` makes ZERO `-w` attempts; on the session path
-      (`refresh_beacon_if_stale`, two callers) exactly ONE per call (tests, spawn-counting seam).
+- [ ] Asserted on the `run_security` seam only (argv containing `-w`; never on `subprocess.run`
+      — the `secret-tool` fallback in `_read_live_primary` is a plain spawn): under
+      `JANITOR_ROTATOR_HEADLESS=1` `_read_primary_macos_keychain` returns None without calling
+      `run_security`; on the session path, in the STALL case (attribute read timed out AND the
+      `-w` primary read timed out) `run_security` saw exactly one `-w` argv — the slot loop in
+      `write_live_identity_beacon` is not reached when `prim` is None. (On the success path the
+      slot loop legitimately issues one or two `-w` reads per configured slot; not asserted.)
 - [ ] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`,
       `uvx --with pyright pyright`, and `tests/test_safe_storage*.py` + `tests/test_oauth_rotator*.py` green.
 
