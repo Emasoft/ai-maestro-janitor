@@ -1,9 +1,9 @@
 ---
 trdd-id: KI0H9C8N
 title: claudemd_slim cannot read metadata.topic so hub grouping degenerates to a flat list
-column: backburner
+column: testing
 created: 2026-09-05T16:05:01+0200
-updated: 2026-09-05T16:05:01+0200
+updated: 2026-09-05T17:57:32+0200
 current-owner: main-session
 task-type: refactor
 priority: low
@@ -56,10 +56,37 @@ failure mode.
 
 ## Acceptance criteria
 
-- [ ] A corpus where every page's `metadata.topic:` is absent renders
+- [x] A corpus where every page's `metadata.topic:` is absent renders
       byte-identically to the current output.
-- [ ] A corpus with `metadata.topic:` set on pages groups the rendered index
+      `test_render_index_no_topic_anywhere_is_byte_identical_to_hub_grouping`
+- [x] A corpus with `metadata.topic:` set on pages groups the rendered index
       by topic instead of by hub, with untopiced pages under "Other topics".
-- [ ] The overview page still renders first in both grouping modes.
+      `test_render_index_groups_by_topic_when_present`
+- [x] The overview page still renders first in both grouping modes.
+      `test_render_index_overview_first_in_both_grouping_modes`
+
+## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-09-05T17:57:32+0200
+
+Implemented: `PageInfo.topic` (parsed from nested `metadata.topic:`, same line-based
+parser that already read `tier`), `_render_by_hub`/`_render_by_topic` split out of
+`_render_body`, dispatched by `any(p.topic for p in pages if not p.is_overview)`.
+Also added `_digest_of` (coordinator addition, review of 46048355) so `render_index`
+and `corpus_digest` compute the sha256 prefix through one function instead of two
+inline copies.
+
+**Digest consequence (coordinator addition):** because `corpus_digest` hashes
+`_render_body`'s own output (TRDD-Q3WSQ9M5), the flip is exactly as wide as the
+change: a project whose pages carry `metadata.topic:` gets its index body changed
+once, so the CLAUDE.md digest flips exactly once at the next regeneration
+(intended, `test_corpus_digest_flips_once_when_topic_is_added`). A project with no
+`topic:` anywhere (this repo, today) renders byte-identically to before this card
+(`test_render_index_no_topic_anywhere_is_byte_identical_to_hub_grouping`), so its
+digest does NOT flip — verified live against this repo's own 69-page PROJECT
+corpus in the report below. Use this to distinguish an intended flip (a project
+that just adopted `metadata.topic:`) from a regression (digest moves with no
+topic anywhere).
+
+Tests: 20/20 pass (`tests/test_claudemd_slim.py`). ruff/mypy/pyright all clean.
+Nothing left open on this card.
 
 ## Notes and lessons learned

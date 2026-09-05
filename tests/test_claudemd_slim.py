@@ -8,6 +8,7 @@ a lossy one — the negative case is the whole point of the oracle).
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import time
@@ -27,11 +28,14 @@ from repomap.renderer import FENCE_START as MAP_START  # noqa: E402
 _CLI = _PROJECT_ROOT / "scripts" / "claudemd_slim.py"
 
 
-def _page(memdir: Path, name: str, *, tier: str, desc: str, body: str = "", lmd: str = "2026-08-01") -> None:
+def _page(
+    memdir: Path, name: str, *, tier: str, desc: str, body: str = "", lmd: str = "2026-08-01", topic: str = ""
+) -> None:
     memdir.mkdir(parents=True, exist_ok=True)
+    topic_line = f"\n  topic: {topic}" if topic else ""
     (memdir / f"{name}.md").write_text(
         f'---\nname: {name}\ndescription: "{desc}"\nocd: 2026-08-01\nlmd: {lmd}\n'
-        f"metadata:\n  node_type: memory\n  type: project\n  tier: {tier}\n---\n{body}\n",
+        f"metadata:\n  node_type: memory\n  type: project\n  tier: {tier}{topic_line}\n---\n{body}\n",
         encoding="utf-8",
     )
 
@@ -150,6 +154,104 @@ def test_corpus_digest_stable_across_noop_regeneration(tmp_path: Path) -> None:
     d1 = cs.corpus_digest(pages)
     d2 = cs.corpus_digest(cs.scan_pages(memdir))
     assert d1 == d2
+
+
+def test_render_index_no_topic_anywhere_is_byte_identical_to_hub_grouping(tmp_path: Path) -> None:
+    """TRDD-KI0H9C8N / janitor#299 acceptance box 1: a corpus where no page carries
+    `metadata.topic:` must render EXACTLY what the pre-change hub grouping produced —
+    calling `_render_by_hub` directly (the old code path, still reachable) and comparing
+    against `render_index`'s dispatched output proves the fallback is truly a no-op."""
+    memdir = _corpus(tmp_path)
+    pages = cs.scan_pages(memdir)
+    assert all(p.topic == "" for p in pages), "fixture must carry no topic for this to test the fallback"
+    dispatched = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
+    overview = next(p for p in pages if p.is_overview)
+    hand_built_body = "\n".join(
+        [
+            "## Wikimem index (PROJECT scope) — recall by symptom, read on demand",
+            "",
+            'Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.',
+            "",
+            cs._entry(overview, ".claude/project/memory"),
+            "",
+            *cs._render_by_hub(pages, ".claude/project/memory", overview),
+        ]
+    ).rstrip("\n")
+    assert cs._render_body(pages, ".claude/project/memory") == hand_built_body
+    assert "digest=" + cs.corpus_digest(pages) in dispatched
+
+
+def test_render_index_groups_by_topic_when_present(tmp_path: Path) -> None:
+    """TRDD-KI0H9C8N / janitor#299 acceptance box 2: pages carrying `metadata.topic:`
+    render under a topic heading instead of the hub grouping; an untopiced page still
+    falls under "Other topics"."""
+    memdir = _corpus(tmp_path)
+    _page(memdir, "arch-hub", tier="hub", desc="architecture topics", topic="architecture",
+          body="Links: [[daemon-page]].")
+    _page(memdir, "daemon-page", tier="component", desc="how the daemon works", topic="architecture")
+    # orphan-page and proj-overview keep no topic — orphan must land under Other topics,
+    # never lost, and the overview must never be double-listed under its own topic.
+    pages = cs.scan_pages(memdir)
+    body = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
+    lines = body.splitlines()
+    topic_heading = next(i for i, ln in enumerate(lines) if ln == "**architecture**")
+    hub_line = next(i for i, ln in enumerate(lines) if "[arch-hub]" in ln)
+    daemon_line = next(i for i, ln in enumerate(lines) if "[daemon-page]" in ln)
+    other = next(i for i, ln in enumerate(lines) if ln == "**Other topics**")
+    orphan = next(i for i, ln in enumerate(lines) if "orphan-page" in ln)
+    assert topic_heading < hub_line < daemon_line < other < orphan
+    # The old hub/wikilink grouping heading must not appear — topic mode fully replaces it.
+    assert not any(ln.startswith("**arch-hub**") for ln in lines)
+    assert lines.count("**Other topics**") == 1
+    assert lines.count("proj-overview") <= 1  # never double-listed under a topic group
+
+
+def test_render_index_overview_first_in_both_grouping_modes(tmp_path: Path) -> None:
+    """TRDD-KI0H9C8N / janitor#299 acceptance box 3: the overview entry is the first
+    non-header line of the rendered body whether the corpus has topics or not."""
+    memdir = _corpus(tmp_path)
+    pages_no_topic = cs.scan_pages(memdir)
+    body_no_topic = cs._render_body(pages_no_topic, ".claude/project/memory")
+    first_entry_no_topic = next(ln for ln in body_no_topic.splitlines() if ln.startswith("- "))
+    assert "proj-overview" in first_entry_no_topic
+
+    _page(memdir, "arch-hub", tier="hub", desc="architecture topics", topic="architecture",
+          body="Links: [[daemon-page]].")
+    pages_topic = cs.scan_pages(memdir)
+    body_topic = cs._render_body(pages_topic, ".claude/project/memory")
+    first_entry_topic = next(ln for ln in body_topic.splitlines() if ln.startswith("- "))
+    assert "proj-overview" in first_entry_topic
+
+
+def test_corpus_digest_flips_once_when_topic_is_added(tmp_path: Path) -> None:
+    """TRDD-Q3WSQ9M5's property, exercised by this card's own change: because the digest
+    hashes `_render_body`'s output, adding `metadata.topic:` (which changes the rendered
+    body from hub grouping to topic grouping) flips the digest with zero separate digest
+    maintenance — there is no field list to remember to extend for `topic`."""
+    memdir = _corpus(tmp_path)
+    d1 = cs.corpus_digest(cs.scan_pages(memdir))
+    _page(memdir, "arch-hub", tier="hub", desc="architecture topics / more symptoms", topic="architecture",
+          body="Links: [[daemon-page]] and [[missing-page]].")
+    d2 = cs.corpus_digest(cs.scan_pages(memdir))
+    assert d2 != d1
+    # Idempotent: regenerating again with the same (now-topiced) corpus is stable.
+    assert cs.corpus_digest(cs.scan_pages(memdir)) == d2
+
+
+def test_render_index_header_digest_matches_corpus_digest(tmp_path: Path) -> None:
+    """Coordinator addition (review of 46048355): `render_index` and `corpus_digest` used
+    to compute `hashlib.sha256(...).hexdigest()[:12]` as two separate inline copies of the
+    same expression — the exact drift class TRDD-Q3WSQ9M5 fixed one level down, at
+    `_render_body` vs the digest's input. Both now delegate to `_digest_of`; this test
+    pins them together by parsing the spliced header's `digest=` and asserting it equals
+    `corpus_digest(pages)` computed independently."""
+    memdir = _corpus(tmp_path)
+    pages = cs.scan_pages(memdir)
+    block = cs.render_index(pages, generated_iso="2026-08-02T18:00:00+0200")
+    header = block.splitlines()[0]
+    m = re.search(r"digest=([0-9a-f]{12})", header)
+    assert m is not None
+    assert m.group(1) == cs.corpus_digest(pages)
 
 
 def test_both_fences_coexist_and_neither_eats_the_other(tmp_path: Path) -> None:

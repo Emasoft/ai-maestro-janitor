@@ -69,6 +69,10 @@ class PageInfo:
     tier: str  # hub | aspect | component | "" when undeclared
     lmd: str
     wikilinks: list[str] = field(default_factory=list)
+    # TRDD-KI0H9C8N / janitor#299: `metadata.topic:` — a flat, closed vocabulary a page
+    # opts into independently of the hub/wikilink graph. "" when undeclared (the hub
+    # grouping stays the fallback — see `_render_body`).
+    topic: str = ""
 
     @property
     def is_overview(self) -> bool:
@@ -133,9 +137,17 @@ def scan_pages(memdir: Path) -> list[PageInfo]:
                 tier=fields.get("tier", ""),
                 lmd=fields.get("lmd", ""),
                 wikilinks=links,
+                topic=fields.get("topic", ""),
             )
         )
     return pages
+
+
+def _digest_of(body: str) -> str:
+    """12-hex sha256 prefix of a rendered index BODY — the one place `render_index` and
+    `corpus_digest` compute the digest, so they cannot drift apart the way the
+    hand-picked-field digest drifted from `_render_body` before TRDD-Q3WSQ9M5."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
 
 
 def corpus_digest(pages: list[PageInfo], memdir_rel: str = ".claude/project/memory") -> str:
@@ -151,7 +163,7 @@ def corpus_digest(pages: list[PageInfo], memdir_rel: str = ".claude/project/memo
     returns True again). Hashing `_render_body`'s own output makes drift between the
     digest and the renderer structurally impossible instead of a maintained field list."""
     body = _render_body(pages, memdir_rel)
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+    return _digest_of(body)
 
 
 def _short_desc(desc: str) -> str:
@@ -169,21 +181,14 @@ def _entry(page: PageInfo, memdir_rel: str) -> str:
     return f"- {link} — {desc}" if desc else f"- {link}"
 
 
-def _render_body(pages: list[PageInfo], memdir_rel: str) -> str:
-    """The index body — everything between the fence header and `WIKIMEM_FENCE_END` — as
-    its own function so `corpus_digest` can hash exactly what gets rendered instead of a
-    hand-picked field subset (TRDD-Q3WSQ9M5). `render_index` calls this once and embeds
-    `corpus_digest`'s hash of the SAME output in its header; hashing `render_index`'s own
-    output would be circular since the header embeds the digest.
-
-    Topic order: the overview first (the entry point), then each HUB as a topic group
-    listing the pages its body `[[links]]` to, then everything unclaimed under "Other".
-    A page linked by two hubs appears under the FIRST (alphabetical) hub only — the
-    index is a table of contents, not the link graph; the full graph lives in the wiki
-    itself.
-    """
+def _render_by_hub(pages: list[PageInfo], memdir_rel: str, overview: PageInfo | None) -> list[str]:
+    """The pre-KI0H9C8N grouping: each HUB is a topic group listing the pages its body
+    `[[links]]` to, everything unclaimed falls under "Other topics". A page linked by two
+    hubs appears under the FIRST (alphabetical) hub only — the index is a table of
+    contents, not the link graph; the full graph lives in the wiki itself. This is the
+    fallback used whenever no page in the corpus carries `metadata.topic:` (janitor#299
+    acceptance box 1: byte-identical to the pre-change output)."""
     by_name = {p.name: p for p in pages}
-    overview = next((p for p in sorted(pages, key=lambda p: p.name) if p.is_overview), None)
     hubs = sorted((p for p in pages if p.tier == "hub" and not p.is_overview), key=lambda p: p.name)
 
     claimed: set[str] = set()
@@ -193,13 +198,6 @@ def _render_body(pages: list[PageInfo], memdir_rel: str) -> str:
         claimed.add(h.name)
 
     lines: list[str] = []
-    lines.append("## Wikimem index (PROJECT scope) — recall by symptom, read on demand")
-    lines.append("")
-    lines.append(f"Deep knowledge lives in these pages, not in this file. Search: `memgrep recall \"<symptom>\" {memdir_rel}`.")
-    lines.append("")
-    if overview:
-        lines.append(_entry(overview, memdir_rel))
-        lines.append("")
     for h in hubs:
         lines.append(f"**{h.name}** — {_short_desc(h.description)}" if h.description else f"**{h.name}**")
         lines.append(_entry(h, memdir_rel))
@@ -216,13 +214,71 @@ def _render_body(pages: list[PageInfo], memdir_rel: str) -> str:
         for p in others:
             lines.append(_entry(p, memdir_rel))
         lines.append("")
+    return lines
+
+
+def _render_by_topic(pages: list[PageInfo], memdir_rel: str, overview: PageInfo | None) -> list[str]:
+    """TRDD-KI0H9C8N / janitor#299: group by `metadata.topic:` instead of the hub/wikilink
+    graph. `topic` is a flat, closed vocabulary a page opts into independently, so unlike
+    hub count it does not degenerate to a near-flat list as the corpus grows. Untopiced
+    pages fall under the same "Other topics" heading the hub grouping uses. Groups sort
+    alphabetically by topic name; pages within a group sort by name."""
+    claimed: set[str] = set()
+    if overview:
+        claimed.add(overview.name)
+    groups: dict[str, list[PageInfo]] = {}
+    for p in pages:
+        if p.name in claimed or not p.topic:
+            continue
+        groups.setdefault(p.topic, []).append(p)
+
+    lines: list[str] = []
+    for topic in sorted(groups):
+        lines.append(f"**{topic}**")
+        for p in sorted(groups[topic], key=lambda p: p.name):
+            lines.append(_entry(p, memdir_rel))
+            claimed.add(p.name)
+        lines.append("")
+    others = sorted((p for p in pages if p.name not in claimed), key=lambda p: p.name)
+    if others:
+        lines.append("**Other topics**")
+        for p in others:
+            lines.append(_entry(p, memdir_rel))
+        lines.append("")
+    return lines
+
+
+def _render_body(pages: list[PageInfo], memdir_rel: str) -> str:
+    """The index body — everything between the fence header and `WIKIMEM_FENCE_END` — as
+    its own function so `corpus_digest` can hash exactly what gets rendered instead of a
+    hand-picked field subset (TRDD-Q3WSQ9M5). `render_index` calls this once and embeds
+    `corpus_digest`'s hash of the SAME output in its header; hashing `render_index`'s own
+    output would be circular since the header embeds the digest.
+
+    Grouping mode (TRDD-KI0H9C8N / janitor#299): if any non-overview page carries
+    `metadata.topic:`, group by topic (`_render_by_topic`); otherwise fall back to the
+    hub/wikilink grouping (`_render_by_hub`) so a corpus with no `topic:` anywhere renders
+    byte-identically to the pre-change output. The overview page is always first.
+    """
+    overview = next((p for p in sorted(pages, key=lambda p: p.name) if p.is_overview), None)
+    has_topics = any(p.topic for p in pages if not p.is_overview)
+
+    lines: list[str] = []
+    lines.append("## Wikimem index (PROJECT scope) — recall by symptom, read on demand")
+    lines.append("")
+    lines.append(f"Deep knowledge lives in these pages, not in this file. Search: `memgrep recall \"<symptom>\" {memdir_rel}`.")
+    lines.append("")
+    if overview:
+        lines.append(_entry(overview, memdir_rel))
+        lines.append("")
+    lines.extend(_render_by_topic(pages, memdir_rel, overview) if has_topics else _render_by_hub(pages, memdir_rel, overview))
     return "\n".join(lines).rstrip("\n")
 
 
 def render_index(pages: list[PageInfo], *, generated_iso: str, memdir_rel: str = ".claude/project/memory") -> str:
     """The full fenced index block, trailing newline included."""
     body = _render_body(pages, memdir_rel)
-    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+    digest = _digest_of(body)
     start = f"{WIKIMEM_FENCE_START} {_SCHEMA} digest={digest} generated={generated_iso}"
     return f"{start}\n{body}\n{WIKIMEM_FENCE_END}\n"
 
