@@ -1,9 +1,9 @@
 ---
 trdd-id: 3VIXO8FA
 title: The keychain denied-latch treats a stalled security call as a denial and blinds rotation
-column: todo
+column: complete
 created: 2026-09-05T15:16:36+0200
-updated: 2026-09-05T16:01:44+0200
+updated: 2026-09-05T16:21:17+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [2be78271]
 external-refs: [TRDD-EQJPPZ2L, TRDD-K3WQ7XM9, TRDD-FQXBURNR, ai-maestro TRDD-MFTDMSJY, ai-maestro TRDD-RA2ZSTOF]
 ---
 
@@ -28,6 +28,12 @@ Filed from the incident report `reports/oauth-rotator/20260905_151600+0200-rotat
 (machine-local, gitignored — the numbers that matter are repeated here). Column `todo`; the
 implementation is to be delegated to one worker with the spec below. NEXT ACTION: implement
 in `scripts/oauth_rotator/safe_storage.py` + tests, gates, commit.
+
+Closed 2026-09-05T16:21:17+0200: the python-side fix landed as 2be78271 (gates + 168 tests,
+coordinator-verified). SCOPE OF THIS CLOSE: rotation on a host where the ai-maestro server is
+alive runs through the TS port, which yields the janitor's oauth-rotator-tick — that path is
+NOT fixed by this card; its contract is ai-maestro TRDD-RA2ZSTOF, which the USER decides. The
+blindness the title names stays live on such hosts until RA2ZSTOF lands.
 
 ## Why (measured 2026-09-05)
 
@@ -127,15 +133,22 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
 
 ## Acceptance criteria
 
-- [ ] An attribute-only `security` timeout leaves `keychain-denied.latch` absent (test).
-- [ ] A `-w` read latches on the 3rd consecutive timeout, not the 1st; an answered op resets (test).
-- [ ] Every `run_security` call site passes `may_prompt` explicitly, enforced by signature (a
+- [x] An attribute-only `security` timeout leaves `keychain-denied.latch` absent (test).
+      Confirmed: `tests/test_safe_storage.py::test_attribute_only_timeout_never_latches` exists.
+- [x] A `-w` read latches on the 3rd consecutive timeout, not the 1st; an answered op resets (test).
+      Confirmed: `tests/test_safe_storage.py::test_w_read_timeout_latches_on_third_consecutive_not_first`
+      and `::test_answered_op_resets_the_consecutive_timeout_count` exist.
+- [x] Every `run_security` call site passes `may_prompt` explicitly, enforced by signature (a
       call missing the required `may_prompt` keyword is a pyright `reportCallIssue` error), not
       by a duplicated same-line comment: `uvx --with pyright pyright` reports 0 errors AND
       `grep -rn --exclude-dir=memgrep --exclude-dir=__pycache__ 'run_security(.*# may_prompt' scripts | wc -l` prints 0.
-- [ ] An attribute-only op whose stderr carries a denial marker still sets the latch (test).
-- [ ] A persistently blocked keychain still latches on the 3rd consecutive `-w` timeout (test).
-- [ ] Asserted on the `run_security` seam only (argv containing `-w`; never on `subprocess.run`
+      Confirmed: `grep -n 'def run_security' scripts/oauth_rotator/safe_storage.py` shows
+      `may_prompt: bool` keyword-only with no default; the exclusion grep prints 0.
+- [x] An attribute-only op whose stderr carries a denial marker still sets the latch (test).
+      Confirmed: `tests/test_safe_storage.py::test_denial_marker_latches_on_attribute_only_op_preserved_behaviour` exists.
+- [x] A persistently blocked keychain still latches on the 3rd consecutive `-w` timeout (test).
+      Confirmed: `tests/test_safe_storage.py::test_persistent_block_still_latches_on_third_consecutive_timeout` exists.
+- [x] Asserted on the `run_security` seam only (argv containing `-w`; never on `subprocess.run`
       — the `secret-tool` fallback in `_read_live_primary` is a plain spawn): under
       `JANITOR_ROTATOR_HEADLESS=1` `_read_primary_macos_keychain` returns None without calling
       `run_security`; on the session path, in the STALL case (attribute read timed out AND the
@@ -145,8 +158,11 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
       instead, so this is required to fail on unfixed code — the slot loop in
       `write_live_identity_beacon` is not reached when `prim` is None. (On the success path the
       slot loop legitimately issues one or two `-w` reads per configured slot; not asserted.)
-- [ ] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`,
+      Confirmed: `tests/test_oauth_rotator.py::test_stall_cascades_to_exactly_one_w_run_security_call`
+      and `::test_headless_read_primary_macos_keychain_never_calls_run_security` exist.
+- [x] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`,
       `uvx --with pyright pyright`, and `tests/test_safe_storage*.py` + `tests/test_oauth_rotator*.py` green.
+      Verified by coordinator 2026-09-05 16:00: ruff clean, mypy 504 files clean, pyright 0/0/0, 168 passed.
 
 ## Notes and lessons learned
 
@@ -164,3 +180,10 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
   the server's own keychain-blind watchdog lines sitting unexplained in the same log excerpt.
   Caught by review; the settling read (0.01–0.02 s at loadavg 11) only shows `security` is
   fast when the host is quieter, not why it stalled.
+
+## Approval log
+
+- 2026-09-05T16:21:17+0200 — COMPLETED by main-session under the standing autonomous-drain
+  permission (LOCAL memory ATOM-CCRI-ZRT2). Implementation 2be78271; acceptance boxes verified
+  against the named tests and the coordinator's 16:00 gate run; the TS-port half is out of this
+  card's scope (see STATE).

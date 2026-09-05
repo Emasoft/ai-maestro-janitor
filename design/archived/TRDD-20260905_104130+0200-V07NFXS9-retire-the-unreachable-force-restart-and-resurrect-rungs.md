@@ -1,9 +1,9 @@
 ---
 trdd-id: V07NFXS9
 title: retire the unreachable force_restart and resurrect rungs and their tests
-column: testing
+column: complete
 created: 2026-09-05T10:41:30+0200
-updated: 2026-09-05T16:05:00+0200
+updated: 2026-09-05T16:21:17+0200
 current-owner: main-session
 task-type: refactor
 priority: low
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [d9b74bb0]
 external-refs: [TRDD-56d24c02, TRDD-L32WC0H7, TRDD-FB84YUGT, TRDD-PP4YS4GQ]
 ---
 
@@ -47,7 +47,10 @@ showed 60+ green dots, no red). Not re-run given the focused gate already covers
 every file this card touches.
 
 Report: `reports/board-drain/20260905_142900+0200-V07NFXS9-retire-rungs.md`.
-Next action: none — ready for review/close.
+Closed 2026-09-05T16:21:17+0200: landed as d9b74bb0; follow-up TRDD-PP4YS4GQ filed for the
+now-uncalled is_killable. Both frozen guards exist by name:
+test_frozen_exhausted_stays_esc_nudge_then_crash_loop (soft ladder) and
+test_frozen_never_reaches_the_hard_restart_plan (hard plan is None).
 
 ## Why
 
@@ -129,3 +132,9 @@ card" instruction.
 - **"Lowest cost" is the reason the no-dead-code rule exists to override.** 56d24c02 was
   first closed as "leave the rungs in place, exhaustion alerts a human" — cheaper today, and a
   permanent invitation to the next reader to believe a recovery path exists that does not.
+
+## Approval log
+
+- 2026-09-05T16:21:17+0200 — COMPLETED by main-session under the standing autonomous-drain
+  permission (LOCAL memory ATOM-CCRI-ZRT2). Implementation d9b74bb0; three acceptance boxes
+  verified by the closeout worker and re-run by the coordinator (170 passed).
