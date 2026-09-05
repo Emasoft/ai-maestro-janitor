@@ -1,9 +1,9 @@
 ---
 trdd-id: 34GB6XUI
 title: collapse TRDD-ZQ02QG1L's five correction layers into its surviving facts
-column: todo
+column: cancelled
 created: 2026-09-04T20:18:32+0200
-updated: 2026-09-05T03:24:14+0200
+updated: 2026-09-05T10:31:00+0200
 current-owner: main-session
 task-type: docs
 min-approval-requirement: none
@@ -113,6 +113,8 @@ gate precisely so ZQ02QG1L would not hang on a documentation preference; reverti
 would reinstate, by side-effect, the exact dependency a human deliberately removed. The restore
 was also mechanical — `pre-block-column: complete` recorded a judgment made 2026-09-04, before
 this card was a live consideration.
+- 2026-09-05T10:31:00+0200 — CANCELLED by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2, 2026-09-03). Ruling: option 4 on the card — the task EVAPORATED. ZQ02QG1L is `complete` and frozen (rule 12); nobody must work FROM it again; its correction layers are the audit trail rule 12 exists to preserve. The readability cost is paid only by whoever chooses to read a closed card. Nothing waited on this (the USER dropped its gate 2026-09-05).
+
 
 ## Acceptance criteria
 

@@ -1,10 +1,10 @@
 ---
 trdd-id: ZVZAFQY6
 title: session-liveness reads the same pane up to three times per instance on the field-busy path
-column: human_review
+column: complete
 created: 2026-09-05T06:55:34+0200
-updated: 2026-09-05T10:22:41+0200
-current-owner: user
+updated: 2026-09-05T10:31:00+0200
+current-owner: main-session
 task-type: docs
 priority: low
 severity: low
@@ -158,3 +158,7 @@ Full analysis: `reports/zvzafqy6-pane-read-staleness/20260905_071916+0200-stalen
   in `daemon.py` long before they find this card, and will re-derive the same wrong fix. That
   is why an acceptance box now asks for a one-line why at the guard — a card nobody opens
   cannot defend an invariant.
+
+## Approval log
+
+- 2026-09-05T10:31:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2). Ruling on the one question routed to review: the REFUSAL IS RIGHT. Reads 2 and 3 each have an unsafe stale direction (dialog opened since; a human typed over our command) and `pane_policy._submit` re-checks nothing, so a shared capture widens an irreducible race for ~15 s of osascript. Both live boxes ticked; both dedup boxes struck as REFUSED; refusal written at the guard in daemon.py (60a999ee, 32628559).

@@ -1,10 +1,10 @@
 ---
 trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
-column: human_review
+column: complete
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T06:02:48+0200
-current-owner: user
+updated: 2026-09-05T10:31:00+0200
+current-owner: main-session
 task-type: bugfix
 scope: project
 severity: low
@@ -355,5 +355,7 @@ as *done* would have ticked two boxes on nothing.
       A sweep is now delegated with the control built in; this note stands whatever it returns.
 
 ## Approval log
+- 2026-09-05T10:31:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2, which explicitly covers human_review rulings). Ruling on the question routed here — does adversarial self-review clear the bar — YES for this card: the fix is released (v3.4.14 contains bd3af652) and the installed artifact is byte-identical to it; 3 of 3 acceptance boxes are ticked; the fork findings (fixture ordering, invocation asymmetry, crash-path false-pass, xdist order-dependence) were applied in 17aa502d and re-verified. The card's own honesty about self-certification stands as its record; no separate ai_review role exists in a mono-agent repo, and the standing permission is precisely the USER's answer to that gap.
+
 
 ## Notes and lessons learned
