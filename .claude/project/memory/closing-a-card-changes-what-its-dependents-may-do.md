@@ -35,7 +35,6 @@ coupling a human removed by decision.
 
 
 ^ATOM-FRF1-8340 [desc: "Incident 2026-09-05: closing ZQ02QG1L (mechanically correct) FORECLOSED 34GB6XUI's task as written — the card is not dead, it has four paths, and the consequence was deductive not measured", keywords: the_incident_that_produced_this_page ZQ02QG1L_close_foreclosed_34GB6XUI closing_a_card_with_an_undeclared_dependent_worked_example pre-block-column_restore_was_mechanical the_card_is_not_dead_only_its_task_as_written four_options_after_a_task_is_foreclosed cancel_re-scope_exception_or_evaporated was_the_close_premature_because_work_remained chore_about_the_card_versus_work_of_the_card deduction_is_not_a_measurement, trdd: TRDD-34GB6XUI, ocd: 2026-09-05, lmd: 2026-09-05]
-
 **THE INCIDENT, 2026-09-05.** I closed TRDD-ZQ02QG1L `blocked` → `complete`: its blocker had
 gone terminal, so `pre-block-column: complete` was restored MECHANICALLY — replaying a
 completeness judgment made a day earlier, before the dependent was a live consideration. That
@@ -54,6 +53,10 @@ that `grep -rl ZQ02QG1L design/tasks/` lists 34GB6XUI.
 **The objection a reader will raise, answered:** *"`complete` means done; the chore was
 outstanding work; so the close was premature."* It fails because the chore is ABOUT the card, not
 work OF it — the card's own text calls it "an UNGATED chore" and says "Nothing waits on this".
+
+See also [[trdd-state-block-staleness-vs-implementation-commits]] — the SIBLING failure, and the
+distinction is what stops the two pages being re-merged: there, a card's BODY disagrees with
+reality; here, a card's COLUMN changes what other cards may do.
 
 
 ^ATOM-6ES3-OVTV [desc: "Two traps after a close breaks a dependent: reverting the close falsifies board state, and rule 7's mechanical-repair carve-out does NOT license a body edit on a frozen card", keywords: can_I_revert_a_close_to_unblock_a_chore un-closing_a_card_to_make_a_chore_executable is_a_readability_collapse_a_mechanical_repair rule_7_mechanical_repair_on_a_terminal_card fact-preserving_edit_on_a_frozen_card new_work_equals_new_TRDD_remedy leave_the_old_card_pointing_at_the_new_one superseded-by_versus_external-refs the_pointer_is_itself_a_body_edit why_are_rule_12_exceptions_enumerated does_preserving_facts_make_an_edit_allowed re-coupling_work_a_human_de-coupled, trdd: TRDD-34GB6XUI, ocd: 2026-09-05, lmd: 2026-09-05]

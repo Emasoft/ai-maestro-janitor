@@ -2,7 +2,7 @@
 name: memory-system-editor-gotchas
 description: "add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / can I raise the atom budget knob / memgrep refused my write because the atom is too big / no memory chore runs on PROJECT scope by default / edit_project_scope / why did the repair chore skip my project page / does memgrep ever refuse a write outright / publish-globally-missing never drains / should I add publish-globally to repair_defect / scope=None suppresses a finding in a fail-open module / an argument whose failure mode has zero live instances / code implements a variant nothing exercises / memgrep binary is stale on this host / cargo install does not roll forward with a plugin update / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached"
 ocd: 2026-06-13
-lmd: 2026-09-04
+lmd: 2026-09-05
 metadata:
   node_type: memory
   type: project
@@ -147,6 +147,30 @@ no-op for any non-user-mem prompt; never crashes the session.
 The wikimem editor runs SEVEN chores since TRDD-J3ZH3RSI (commit 009af29): split, repair, atomize, harvest, RETRO-LESSON, consolidate, conflict — retro-lesson backfills the lesson form (DO NOT X, BECAUSE why, DO Y instead) onto atoms that were superseded BEFORE the update-invariant existed. Its precheck signature is an atom marker with `status:superseded` but NO `superseded-by:` pointer (the exact pair `add-lesson --supersedes --retire-atom` stamps together); cadence key `retro_lesson_per_day`, default 1/day (ON, conservative cap — owner directive 2026-08-11 superseded the earlier 0=OFF default) like every pass. Two load-bearing rules: the WHY comes ONLY from the commit/TRDD provenance chain — unsourceable ⇒ FLAG for a human, never invented — and the skill must complete the `superseded-by:` pointer itself via the repair-op txn, because memgrep's `--retire-atom` is idempotent-SKIPPED when a `status:` prop already exists (precisely the retro case); without that step the precheck re-fires on the same atom forever. [^7]
 
 
+
+
+^ATOM-NT0A-S97C [desc: "new-mem-topic --scope public-project on a name that already exists at the USER root REPLACES that file with a symlink to the new empty page — the old atoms are destroyed, not migrated", keywords: scope_move_destroyed_my_atoms new-mem-topic_public-project_overwrote_the_user_page migrate-mem-atom_says_no_atom_answering moving_a_page_from_USER_to_PROJECT_scope publish-globally_symlink_replaced_the_real_file atoms_not_migrated_on_scope_change how_to_change_a_memory_page's_scope_safely lost_a_wikimem_page_during_a_scope_move is_there_a_backup_after_a_memgrep_write transaction_resume_does_not_cover_a_scope_move same-named_page_at_a_wider_scope, ocd: 2026-09-05, lmd: 2026-09-05]
+
+**`new-mem-topic --scope public-project` with a name that ALREADY EXISTS at the USER root
+DESTROYS the USER page.** Reconciliation replaces that file with a SYMLINK to the new, empty
+project page. The old page's atoms are **not migrated — they are gone the instant the symlink
+lands.**
+
+**The tell that you are already too late:** `migrate-mem-atom --from <user path> <ATOM-ID>` then
+fails with *"no atom answering `ATOM-…` on the --from page"* — because `--from` now resolves
+THROUGH the symlink to the empty destination. Reading that as "wrong id" and retrying wastes the
+only time you have.
+
+**CORRECT ORDER: author at the destination scope from the start, or migrate the atoms FIRST.**
+Never create a same-named page at a wider scope expecting the atoms to follow.
+
+**Do NOT expect the transaction core to save you.** Measured 2026-09-05: no mirror copy (the
+page postdated the last `~/.claude/ai-maestro-janitor-memory/` sync) and no transaction backup;
+`memory_txn_cli --op resume` reports clean because this path opens no transaction. Recovery was
+possible only because the three atom bodies were still in the authoring session's own context.
+
+*This repo OWNS memgrep (`scripts/memgrep`), so if the symlink-replacement is unintended by its
+authors this is an in-repo fix, not a hazard anyone must live with forever.*
 
 ## Governed by
 
