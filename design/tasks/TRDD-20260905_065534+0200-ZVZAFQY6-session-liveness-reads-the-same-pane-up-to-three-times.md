@@ -35,18 +35,20 @@ iteration:
 | 3 | `daemon.py:2041` | `fleet_inject.field_holds_our_queued_command` → its own read at `fleet_inject.py:489` |
 
 Neither helper accepts already-read text; each resolves the terminal and reads again.
-`read_pane_text` costs up to 10 s on the tmux channel and **15 s on the iTerm/osascript
-channel** (`terminal_trigger.py:485` / `:498`), so the worst case is ~45 s **per
-instance**, and the loop at `daemon.py:1652` is a plain `for` with no concurrency —
-the cost is additive across every instance that lands on this branch in the same beat.
+`read_pane_text` is capped at 10 s on the tmux branch and **15 s on the iTerm/osascript
+branch** (`terminal_trigger.py:485` / `:498`), so three reads are **up to ~45 s per
+instance on osascript (~30 s on tmux)** — the headline number is channel-specific, not
+universal. The loop at `daemon.py:1652` is a plain `for` with no concurrency, so the
+cost is additive across every instance that lands on this branch in the same beat.
 
-**The comment directly above read #1 asserts the opposite.** `daemon.py:1995` says
-routing every keystroke through the policy table "costs no extra osascript (Proposal
-§5)". That is true of the path it was written about — `pane_actuate.act` at
-`daemon.py:2104` passes `state=pane`, so `pane_actuate.py:174`'s `if state is None and
-read_pane:` guard is false and it adds no read. It is not true of the field-busy guard
-added later beside it. A comment claiming an invariant the neighbouring code breaks is
-worse than no comment: it is what stops the next reader from checking.
+**The comment above read #1 is true of the code it describes and was overtaken by a
+guard added beside it.** `daemon.py:1995` says routing every keystroke through the
+policy table "costs no extra osascript (Proposal §5)" — correct for `pane_actuate.act`
+at `daemon.py:2104`, which passes `state=pane`, so `pane_actuate.py:174`'s `if state is
+None and read_pane:` guard is false and it adds no read. The field-busy guard at
+`:2033`/`:2041` came later and does add reads, and the comment's scope was never
+narrowed. Not a false comment; a comment whose scope a reader will over-apply, which
+is the thing that stops them checking.
 
 ## What this card is NOT
 

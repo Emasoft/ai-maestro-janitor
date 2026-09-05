@@ -4,7 +4,7 @@ title: verified actuation blocks the single-threaded daemon beat — measure the
 column: backburner
 review-after: 2026-10-05
 created: 2026-09-03T21:42:15+0200
-updated: 2026-09-05T05:17:15+0200
+updated: 2026-09-05T07:05:12+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -312,6 +312,15 @@ sum EVERY foreground body (any duration) overlapping `[eligible, resumed)`:
 mostly **sub-60 s bodies stacking** — `fleet-stop`'s 04:17:50 stall is 55 s + 15 s,
 neither of which is a "long body". So a per-body deadline below 60 s would NOT have
 prevented these; the quantity that matters is total foreground work per beat.
+
+> **⚠ NARROWED 2026-09-05 by work on TRDD-QJ5LP4W2 — this snapshot's window hid the
+> larger bodies.** A wider read of the same instrument (`daemon.log` + `.log.1`,
+> 2026-09-03T22:32 → 2026-09-05T06:57, ~32 h) found single `session-liveness` bodies of
+> **102 s, 137 s and 191 s**. Genuinely long single bodies therefore DO occur; this
+> snapshot simply did not contain one. The conclusion above stands **for the 12 stalls
+> measured here** — do not carry "no per-body deadline would help" forward as a general
+> finding about the daemon. Cause of the 100 s+ bodies: unidentified. See QJ5LP4W2's
+> "Open questions" for the measurement and for an attribution attempt that failed.
 
 **THE CONTROL — this is what makes the 93% mean something.** Coverage would be a
 worthless metric if a normal beat were also ~90% covered (the loop is always doing

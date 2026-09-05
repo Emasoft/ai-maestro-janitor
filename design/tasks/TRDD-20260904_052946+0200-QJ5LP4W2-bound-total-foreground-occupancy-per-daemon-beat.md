@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T06:55:34+0200
+updated: 2026-09-05T07:05:12+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -48,24 +48,32 @@ external-refs: [TRDD-8BXMNQ4T]
   else on the card is startable", which was FALSE and, sitting in a STATE block, would have
   foreclosed it for every later reader.** Box 1 gates *writing a `scripts/daemon.py` scheduling
   change*. It does not gate:
-  - ~~**The two open questions below**~~ — **the FIRST is now ANSWERED (2026-09-05, see
-    "Open questions" below): the 78 s is `probe_iterm_sessions`' escalating 15/30/45 s retry
-    ladder (`fleet_scan.py:1234/1237`), a FIXED once-per-beat host-level cost that does not
-    scale with fleet size.** Do not re-derive it. **STILL OPEN and still ungated:** *what is
-    the ~84 s unaccounted at 04:15–04:18?* Read-only diagnosis; it could ELIMINATE a candidate
-    and shrink what the advisor is asked, and the precedent is set here for ungated read-only
-    source reading.
+  - **The two open questions below — the FIRST is PARTLY answered (2026-09-05), the second
+    is untouched.** On the first: a fixed ~78 s component is REAL and measured (a 78/78/77 s
+    cluster across ~32 h of `daemon.log`), and `probe_iterm_sessions`' escalating 15/30/45 s
+    ladder (`fleet_scan.py:1234/1237`) is **the only known mechanism on this path whose
+    ceiling brackets it — an UNCONFIRMED attribution, not a finding.** ⚠ **And the same logs
+    show beats of 102 s, 137 s and 191 s, ABOVE that ladder's 96 s ceiling, so a larger
+    unidentified cost also exists.** Do not re-derive the measurement; DO treat the
+    attribution as open. **STILL OPEN and still ungated:** *what is the ~84 s unaccounted at
+    04:15–04:18?* — and it now has a bigger sibling in those 191 s beats. Read-only
+    diagnosis; the precedent is set here for ungated read-only source reading.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
     pattern is not writing a scheduling change; only the bound it pins is.
   *(A first wording of this bullet added "…more than anything the advisor could say": a
   confident comparative about an advisor nobody has reached, unfalsifiable, and sitting in a
   block that is authoritative by rule.)*
-- **⚠ THE ANSWER CHANGED WHAT THE ADVISOR SHOULD BE ASKED — do not carry the old framing into
-  the consult.** The card was built on "stalls are cumulative across many bodies, so no
-  per-body deadline helps". That is still true of the 55+15 stall and is now KNOWN FALSE of the
-  78 s row, which is one body and one call. Whether that shrinks the mechanism to a per-body
-  deadline plus a fix at the ladder, or leaves candidates 3/4 standing, is exactly the design
-  judgment box 1 reserves — so it is a question FOR the consult, not one to settle here.
+- **⚠ A REFRAMING FOR THE CONSULT — CONDITIONAL, and written BEFORE the advisor was reached.**
+  The card was built on "stalls are cumulative across many bodies, so no per-body deadline
+  helps". That stands for the 55+15 stall. It is doubtful for the 78 s row, which is one body
+  — **but only a per-body deadline *below 78 s* would have caught it, and whether one call
+  inside that body accounts for the time is UNCONFIRMED (above).** The 191 s beat is the
+  stronger case that single bodies matter, and it has no attributed cause at all.
+  **Give the advisor BOTH framings — the original cumulative one and this one — and the
+  measurement; do not hand over only the narrowed question.** This bullet eliminates no
+  candidate: 3 and 4 both stand. Choosing between them is the design judgment box 1 reserves.
+  *(Written into an authoritative STATE block pre-consult, which is how a framing becomes the
+  only framing a later reader sees; flagged here rather than trusted.)*
 - **A SEPARATE defect surfaced during this diagnosis and is NOT this card's work:** the
   per-instance path reads the SAME pane up to three times (`daemon.py:1999`, and independent
   `read_pane_text` calls inside `fleet_inject.command_plan_field_busy` at `fleet_inject.py:430`
@@ -170,34 +178,56 @@ bounds that **sum** — only individual subprocess workloads are capped
 
 ## Open questions inherited from the measurement
 
-- ~~**Why does `session-liveness` need 78 s at all?**~~ **ANSWERED from the source,
-  2026-09-05: it does not need 78 s of WORK. 78 s is one fixed retry ladder, and it
-  is not the body's own code at all.**
+- **Why does `session-liveness` need 78 s at all?** **PARTLY ANSWERED, 2026-09-05 —
+  and NOT by the mechanism I first named. Read the correction; the first version of
+  this entry is wrong in a way worth keeping.**
 
-  `task_session_liveness` (`daemon.py:1544`) calls `fleet_scan.gather_fleet` once
-  (`daemon.py:1593`), which calls `probe_iterm_sessions` once (`fleet_scan.py:1417`),
-  gated only on `iterm_running` (`:1413`). That probe retries the iTerm enumeration
-  **three times with ESCALATING deadlines — `_ITERM_PROBE_TIMEOUTS = (15.0, 30.0,
-  45.0)` (`fleet_scan.py:1234`) plus `_ITERM_PROBE_BACKOFF_S = (2.0, 4.0)`
-  (`:1237`)** — so full exhaustion is 96 s and a partial third attempt
-  (15+2+30+4+≈27) is 78 s. The ladder was deliberate (2026-08-28, contention not
-  denial); nobody costed it against the 60 s beat.
+  **THE CANDIDATE, from source.** `task_session_liveness` (`daemon.py:1544`) calls
+  `fleet_scan.gather_fleet` once (`daemon.py:1593`), which calls
+  `probe_iterm_sessions` once (`fleet_scan.py:1417`), gated only on `iterm_running`
+  (`:1413`). That probe retries the iTerm enumeration **three times with ESCALATING
+  deadlines — `_ITERM_PROBE_TIMEOUTS = (15.0, 30.0, 45.0)` (`fleet_scan.py:1234`)
+  plus `_ITERM_PROBE_BACKOFF_S = (2.0, 4.0)` (`:1237`)** — 51 s for two exhausted
+  attempts and backoff, 96 s for full exhaustion. The ladder was deliberate
+  (2026-08-28, contention not denial); nobody costed it against the 60 s beat.
 
-  **Two consequences that change what this card must decide:**
-  1. **It is a FIXED cost, not a per-instance one.** It does not scale with fleet
-     size, and it fires whenever iTerm.app is up regardless of how many instances
-     exist or what any of them is doing. So `session-liveness` appearing in 8 of 12
-     stall rows does **not** support "the fleet loop is expensive" — one host-level
-     ladder reaches 78 s alone.
-  2. **A per-body deadline WOULD have caught this one.** The measurement's finding
-     that "the blockers are NOT single long bodies" stands for the 55+15 stall; it
-     does not generalise to the 78 s row, which IS a single body and a single call
-     inside it. That narrows what a mechanism has to cover.
+  **⚠ I FIRST WROTE THAT THIS *IS* THE 78 s, on the strength of 15+2+30+4+≈27 ≈ 78.
+  That was an arithmetic FIT presented as a finding — the 27 is not measured, it is
+  whatever residual makes the sum land on the number, and ANY ladder with a ceiling
+  above 78 admits such a fit.** Recorded rather than deleted because it shipped into
+  a STATE block, which is authoritative by rule: the failure mode is not the wrong
+  guess, it is that a fit written there is indistinguishable from an observation.
 
-  **What this does NOT establish, stated so it is not read as more than it is:** it
-  explains the 78 s MAX, not the typical `session-liveness` body, and it says nothing
-  about the ~84 s unaccounted below. The detached-bulk-child CPU-starvation confound
-  named by the original question is untested and stays open.
+  **THE ACTUAL MEASUREMENT** (`global-state/daemon.log` + `.log.1`, 2026-09-03T22:32
+  → 2026-09-05T06:57, ~32 h, every `task 'session-liveness' done in Ns` line):
+
+  - **The body is cheap almost always:** 375 beats at 2 s, 194 at 3 s, 84 at 4 s.
+    The long beats are rare and episodic, not a standing cost.
+  - **A tight cluster at the top: 78 s, 78 s, 77 s** (2026-09-03T23:06,
+    2026-09-04T04:34, 04:47). Three values within 1 s is quantized, which is what a
+    fixed ceiling looks like — this is the real support for a fixed component, and
+    it is much better evidence than the arithmetic was.
+  - **But beats of 102 s, 137 s and 191 s also occur** (2026-09-04T15:36, 21:49,
+    17:18). **Those EXCEED the ladder's 96 s ceiling, so the ladder cannot be the
+    whole cost of a `session-liveness` beat.** Whatever produces them is unidentified
+    and is a better target than the 78 s cluster, being twice the size.
+
+  **So the honest status:** a fixed ~78 s component is real and the ladder is the only
+  known mechanism on this path whose ceiling brackets it; the attribution is
+  UNCONFIRMED, and at least one other unidentified cost exists that is larger.
+
+  **THE FALSIFIER THAT DOES NOT WORK — do not run it and read silence as
+  confirmation.** The obvious check is `gather_fleet`'s attempt count, which suffixes
+  the outcome `(after N attempts)` when N>1. It only fires when `probe_outcome` is
+  non-empty (`fleet_scan.py:1439`), and `probe_outcome` is `""` unless `blocked`
+  (iTerm up AND zero sessions enumerated). **A probe that retries and then SUCCEEDS
+  leaves no trace at all** — and indeed the ~32 h of logs contain zero such suffixes,
+  which refutes nothing. Confirming the ladder needs a timestamp around the probe,
+  i.e. an instrumentation change, not a log read.
+
+  **What this does NOT establish:** it says nothing about the typical body, nothing
+  about the ~84 s unaccounted below, and the detached-bulk-child CPU-starvation
+  confound named by the original question is untested and stays open.
 
   Inventory of every blocking call on the path, with timeouts and per-beat vs
   per-instance attribution: `reports/qj5lp4w2-session-liveness/20260905_120000+0200-session-liveness-blocking-inventory.md`
