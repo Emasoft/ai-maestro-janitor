@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: dev
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-05T10:50:00+0200
+updated: 2026-09-05T13:32:07+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -18,6 +18,66 @@ relevant-rules: []
 ---
 
 # The two daemons update the plugin by DIFFERENT mechanisms, and only one is prompt
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
+
+**Q1 — who RAISES `version-update-requested.flag`?** The janitor's own per-session
+`version-update` detector, and nothing else in this repo. Writer:
+`scripts/detectors/version-update.py:115` — `gs.request_version_update(f"{latest_installed}->{latest_published}")`,
+inside the `auto_enabled` branch, gated on `CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER`
+(default true). It calls `request_version_update()`, defined at
+`scripts/lib/global_state.py:817-825`, which writes the flag file at the path returned by
+`_version_update_request_path()` (`global_state.py:806-807`) — canonical
+`~/.claude/janitor-control/version-update-requested.flag`. **The janitor's own detection of a
+new marketplace version DOES raise the flag** — it is not only an external caller, though
+`global_state.py:802` notes the flag design leaves room for "the ai-maestro server, not only
+the daemon" to also raise it; no such second writer exists in this repo today (confirmed by
+`grep -rn "request_version_update(" scripts/` — one call site only). Readers/clearers:
+`version_update_requested_present()` (`global_state.py:810-814`) and
+`clear_version_update_request()` (`global_state.py:827-831`), both consumed by the daemon.
+
+**Q2 — what does the janitor still do while the server owns `version-update`?**
+`scripts/daemon.py:3559-3569`: each loop resolves `yielded = _yielded_task_names(tasks,
+harness_backend.server_runs_chores())` (per-chore claim via `harness_backend.claimed_chores()`,
+`daemon.py:3046-3052`), then gates the fast-path consumer explicitly:
+`if "version-update" not in yielded: _consume_version_update_request(tasks)`
+(`daemon.py:3560-3569`). **While `"version-update"` IS in `yielded` (server claims it, which is
+the case on this host per the re-verification below), the daemon does NOT call
+`_consume_version_update_request` at all** — `task_version_update()` (`daemon.py:771-...`)
+never runs, so the janitor never invokes `claude plugin update` for itself. The flag raised by
+Q1's detector is left QUEUED, unconsumed (comment at `daemon.py:3558-3559`: "the requests stay
+QUEUED, not consumed — so the moment the server drops, the takeover starts from the pending
+queue"). So under the harness the janitor does **nothing** for its own update beyond raising
+and holding that flag; the sole remaining janitor-side action is `task_integrity_repin`
+(the C3 re-pin CLAUDE.md already documents) — it re-certifies the last-known-good version
+pointer AFTER a version change has already landed by some other mechanism; it performs no
+update itself.
+
+**RIDER (the card's own ask):** the worst-case update delay under the current server-owned
+chore is **not independently confirmable from this repo's own source** — `ABSORBED_DUTY_INTERVAL_MS`
+and the 15-min poll live in the peer (`ai-maestro`) project, not here. What IS knowable from
+this repo is the card's own Approval log (2026-09-05, RULED option 4): the peer's stated rule
+is "server owns detection-triggered updates when up, flag honoured within one 15-min poll
+(commit 9725bebf, ai-maestro#156); daemon owns them when liveness is stale >90 s" — i.e. the
+**common case is ≤15 min** once the peer's fix lands, with a **4-hour unconditional cadence
+floor** as the worst case if the flag path is somehow missed (per the card's own "What
+actually survives" analysis, box `ABSORBED_DUTY_INTERVAL_MS` = 4h). Confirms, does not
+correct, the card's existing 4-hour figure — this session found no janitor-repo evidence
+narrowing or widening it.
+
+**Boxes 2/3 remain open** (unchanged by this pass): box 2 needs a LIVE measurement of
+publish→installed latency under the server with option 4 actually deployed peer-side (not yet
+observable — nothing to measure until the peer ships commit 9725bebf's consuming logic and a
+real release cycles through it); box 3 (the "SAID OUT LOUD" rider — the lane's degradation to
+the 4h floor when no armed session raises the flag) is not yet implemented on the janitor side
+per this session's grep of `scripts/` (no heartbeat/status line found announcing it).
+
+**NEXT ACTION:** wait for/verify the peer's option-4 landing (ai-maestro#156, commit
+9725bebf), then take a LIVE publish→installed latency measurement (box 2) using the install
+registry method already validated in this card's body (`installed_plugins.json` `lastUpdated`
+vs GitHub publish timestamp). Separately, implement the box-3 rider: a janitor status/heartbeat
+line that says out loud when a host has no armed session raising the flag and is therefore
+riding the 4h floor.
 
 **USER directive, 2026-08-26:** *"No matter what daemon of the two is running, the ai-maestro
 plugin must be updated as soon as a new version is detected on the marketplace."*
