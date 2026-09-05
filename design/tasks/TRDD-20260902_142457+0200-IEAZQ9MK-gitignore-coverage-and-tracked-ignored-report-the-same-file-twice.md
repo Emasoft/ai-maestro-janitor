@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:46:08+0200
+updated: 2026-09-05T05:47:57+0200
 review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
@@ -25,12 +25,19 @@ and the installed artifact agrees: `3.4.14/scripts/lib/gitignore_coverage.py` is
 **byte-identical to `bd3af652`'s version** (`ed60e60b091f`), not to its parent
 (`02bf145ec508`). So the fix is released AND installed, the live fleet check CAN run — and it
 did: the sweep box below is now ticked on it. `review-after: 2026-09-05` has also expired.
-*Third card this session carrying a decayed "unreleased, wait" claim (cf. TRDD-3T9HQEQ6): the
-claim is true when written and nothing re-checks it when a release lands underneath. Record
-the SHA and let a reader ask git — never a snapshot word like "unreleased".*
+*SECOND card this session carrying a decayed "unreleased, wait" claim, and the members are
+named because a count without them is an estimate: **3T9HQEQ6** ("publish first" about
+`fb25366f`/`1533ccc9`, both already in v3.4.14) and **this card**. A first version said
+"third" — wrong. The candidate third, **OES0NN3F**, is NOT one: its `0f00fd60` is in **no
+tag at all**, so its "blocked on a release" is still TRUE, not decayed. The distinction is the
+whole point — a claim that is still true is not an instance of claims going stale.*
+*The shared mechanism: true when written, a release lands underneath, nothing re-checks.
+Record the SHA and let a reader ask git — never a snapshot word like "unreleased".*
 
-**Board reconciliation (2026-09-03 11:09) — SUPERSEDED IN PART, kept for the record:** all 3
-boxes stay open, correctly — code is
+**Board reconciliation (2026-09-03 11:09) — SUPERSEDED, kept verbatim for the record. Its
+"all 3 boxes stay open" is NOW FALSE: the count is 1 open / 2 done** (the `.env`-with-no-rule
+box, ticked 2026-09-04; the fleet-sweep box, ticked 2026-09-05). Said explicitly rather than
+left to the header, because a reader acting on "all 3 open" would re-do a sweep that has run:
 implemented (`bd3af652`) and re-verified (`uv run pytest tests/test_gitignore_coverage.py
 tests/test_tracked_ignored.py -q` → 17 passed), but `git tag --contains bd3af652` is empty
 (UNRELEASED, not in installed 3.4.13) — the live fleet check cannot run yet.
