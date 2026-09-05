@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:34:35+0200
+updated: 2026-09-05T05:39:59+0200
 review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
@@ -142,9 +142,31 @@ as *done* would have ticked two boxes on nothing.
       assertion was right and its SETUP was for the adjacent claim. The test that
       matches was 3 lines below, named for exactly this box. **Reading the
       assertion is not enough — read what the fixture establishes.**
-- [ ] The fleet sweep command from 6WM4BFKF's STATE block shows the 47 rule-only offenders gone
-      from `gitignore-coverage` (or deduped), and still present on `tracked-ignored`.
-      — NOT satisfied. The audit called this CODE because the sweep is a
+- [x] **SATISFIED 2026-09-05 — swept, and the load-bearing number re-verified by hand.**
+      Report: `reports/gitignore-fleet-sweep/20260905_053700+0200-sweep.md` (81 repos).
+      - **Structural, fleet-wide:** `gc_offenders ∩ rule_only` = **0 in all 81 repos, no
+        exception** — no rule-only file appears on `gitignore-coverage` anywhere.
+      - **The largest named component of the historical 47, re-run by the coordinator rather
+        than taken from the report** (`decide-on-facts`): on `Code/SVG_FBF_PROJECT/svg2fbf`,
+        `tracked-ignored` prints **41** tracked files, all `ccpm/*` — exactly the baseline's
+        named `ccpm/** ×41`; `gitignore-coverage` on the same repo prints only 2 *uncovered
+        private classes* (`private-key`, `node-modules`) and **none of the 41**. Gone from one
+        detector, still present on the other, which is precisely what this box asserts.
+        ANIME2SVG contributes 3 more the same way.
+      - **NOT reconciled to "47", deliberately.** The baseline was measured over 32 repos, this
+        sweep over 81 — different populations, so "47" is not reproducible as a number and the
+        worker was instructed not to adjust its set to reach it. 6 of the 47
+        (`data/specimens/` etc.) are not identifiable from 6WM4BFKF's prose at all.
+      - **The control fired** (§1 of the report): a seeded repo with a tracked `.env` and no
+        `.gitignore` produced the coverage line. Load-bearing, because these detectors fail
+        OPEN to silence — an uncontrolled empty sweep would have ticked this box while proving
+        nothing.
+      *(Original box text and its pre-sweep note, kept for the record — deliberately NOT left
+      as a `- [ ]` checkbox, since a second unchecked marker would make this card read as
+      having an open box it does not have:)*
+      > The fleet sweep command from 6WM4BFKF's STATE block shows the 47 rule-only offenders
+      > gone from `gitignore-coverage` (or deduped), and still present on `tracked-ignored`.
+      > — NOT satisfied. The audit called this CODE because the sweep is a
       read-only scan over repos already on this machine, runnable now — correct,
       and it means the box is not release-gated. But locating a runnable script
       is not running it, and this box asserts a RESULT (47 offenders gone from
