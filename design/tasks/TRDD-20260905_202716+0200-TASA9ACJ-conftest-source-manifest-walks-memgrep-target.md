@@ -1,11 +1,11 @@
 ---
 trdd-id: TASA9ACJ
 title: conftest source manifest walks and sorts the 100k-file memgrep target tree before filtering it out
-column: dev
+column: testing
 created: 2026-09-05T20:27:16+0200
-updated: 2026-09-05T20:27:16+0200
+updated: 2026-09-05T20:36:00+0200
 current-owner: janitor-main-session
-assignee: lean-worker
+assignee: janitor-main-session
 task-type: bugfix
 priority: medium
 scope: project
@@ -53,16 +53,30 @@ and `__pycache__` from `dirnames` in place before descending, collecting only `*
 relpaths, same hashes, same sorted order of insertion) — this card changes cost, not
 content. Update the docstring's stale size numbers or drop them.
 
+## ⏵ STATE — 2026-09-05 20:36 — fix landed, targeted checks green, full-suite box waits for the publish gate
+
+`tests/conftest.py::_source_manifest` now walks with `os.walk`, pruning `target` and
+`__pycache__` from `dirnames` in place, collects `*.py`/`*.sh` and sorts the candidates
+once (same keys, same hashes, same insertion order as before — diff read in full by the
+coordinator). Two tests in `tests/test_conftest_source_manifest.py`: hand-built-dict
+equality, and an `os.walk` spy proving no yielded dirpath falls under `target/` or
+`__pycache__/`. Worker's verbatim gate output in
+`reports/board-drain/20260905_203019+0200-TASA9ACJ-conftest-walk-prune.md`: `2 passed`,
+ruff clean, mypy `no issues found in 504 source files`, pyright `0 errors`. Targeted
+timing on `tests/test_dispatch_defang.py`: `19 passed in 20.39s` before, `1.83s` after
+(git-stash isolated on `tests/conftest.py` only; stash list and the other agents' diffs
+verified intact afterwards). Remaining box: the full suite, at the publish gate.
+
 ## Acceptance criteria
 
-- [ ] `_source_manifest` no longer descends into any directory named `target` or
+- [x] `_source_manifest` no longer descends into any directory named `target` or
       `__pycache__` (os.walk with in-place `dirnames` pruning, or equivalent).
-- [ ] A test asserts the pruned walk never visits a path under a `target` directory (e.g. a
+- [x] A test asserts the pruned walk never visits a path under a `target` directory (e.g. a
       tmp tree with `target/deep/x.py` and `src/y.py` — the manifest contains `src/y.py`
       only, and a walk spy or a marker file inside `target/` proves it was not read).
-- [ ] A test asserts the manifest for a fixture tree is identical (keys and values) to a
+- [x] A test asserts the manifest for a fixture tree is identical (keys and values) to a
       hand-built dict of the expected relpath → sha256.
-- [ ] Targeted run green: the test file that covers `_source_manifest`, plus
+- [x] Targeted run green: the test file that covers `_source_manifest`, plus
       `uv run ruff check tests/conftest.py`, `uv run mypy scripts/ --ignore-missing-imports`,
       `uvx --with pyright pyright tests/conftest.py`.
 - [ ] Full suite green — deferred to the publish gate (host loadavg was 87–144 while this

@@ -551,19 +551,26 @@ def _source_manifest(root: Path) -> dict[str, str]:
     damage: ``*.py`` and ``*.sh``.
 
     Deliberately NOT `_manifest`: that walks every file, and `scripts/memgrep/target/` is
-    1.4 GB of gitignored Rust build artifacts (15,285 files — 97% of the tree). Hashing
-    them would make session start slow AND make the guard false-positive the moment anyone
-    runs `cargo build` mid-suite. The thing the clobber destroyed was source, so source is
-    what we guard.
+    5.1 GB of gitignored Rust build artifacts (101,173 files today). Hashing them would
+    make session start slow AND make the guard false-positive the moment anyone runs
+    `cargo build` mid-suite. The thing the clobber destroyed was source, so source is what
+    we guard.
+
+    Uses `os.walk` and prunes `dirnames` in place (rather than `Path.rglob` + a post-hoc
+    filter) because `rglob` cannot skip a directory before descending into it — it would
+    still enumerate and stat all 101k files under `target/` only to discard them.
     """
-    out: dict[str, str] = {}
     if not root.is_dir():
-        return out
-    for p in sorted(root.rglob("*")):
-        if not p.is_file() or p.suffix not in (".py", ".sh"):
-            continue
-        if "__pycache__" in p.parts or "target" in p.parts:
-            continue
+        return {}
+    candidates: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ("target", "__pycache__")]
+        for name in filenames:
+            p = Path(dirpath) / name
+            if p.suffix in (".py", ".sh"):
+                candidates.append(p)
+    out: dict[str, str] = {}
+    for p in sorted(candidates):
         try:
             out[p.relative_to(root).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
         except OSError:
