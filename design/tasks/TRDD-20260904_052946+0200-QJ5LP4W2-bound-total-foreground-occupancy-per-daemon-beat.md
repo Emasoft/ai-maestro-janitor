@@ -289,10 +289,21 @@ bounds that **sum** — only individual subprocess workloads are capped
 
   *Check 2, from the CODE — the independent one:* `_build_tasks` (`daemon.py:2975-3007`)
   registers **`memory-guard` 9th and `session-liveness` 14th**, and the dispatch loop is a
-  plain `for` with no sort (established earlier on this card). So the guard precedes
-  `session-liveness` in every pass **by construction**, not by log coincidence. This is
-  what check 1 could only be consistent with: both checks read the same event stream, so
-  agreement between them is not independent evidence — the registration list is.
+  plain `for` with no sort (established earlier on this card). This is what check 1 could
+  only be consistent with: both log checks read the same event stream, so their agreement
+  is consistency, never independent evidence — the registration list is.
+
+  **⚠ Registration order gives DISPATCH order only for tasks due in the SAME pass, so the
+  intervals matter and were checked too:** `harness_backend.py:105/109` — `memory-guard`
+  and `session-liveness` both default to **120 s**. Equal cadence, so they are normally
+  due together and the guard goes first. **The honest scope:** both are env-overridable
+  (`CLAUDE_PLUGIN_OPTION_DAEMON_{MEMORY_GUARD,SESSION_LIVENESS}_INTERVAL`), and equal
+  intervals can still drift when a body overruns, so this is a claim about THIS host's
+  config, not a structural guarantee. The 886/886 log result is what shows no drift
+  actually occurred.
+
+  So the three legs are: registration order (code), equal intervals (code), and
+  886/886 with 1 ambiguous row (log). Same numbers under all of it.
 
   Same numbers under both: **3/6 long, 482/880 normal.**
 
