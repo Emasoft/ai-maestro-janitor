@@ -133,9 +133,8 @@ answer) — a session may state what review actually happened, and must not grad
 
 **The same trap sits one level up:** `ai_review → human_review` is NON-EXEMPT and needs MANAGER
 approval, and no MANAGER exists here either. Moving the card yourself routes TOWARD the human
-and announces itself; leaving it in `ai_review` asserts a review nobody will perform. **Both
-are irregular.** Say which you did and that it was unilateral — the USER rules on whether it
-was acceptable.
+and announces itself. Leaving it in `ai_review` asserts a review nobody will perform. Say
+which you did and that it was unilateral — the USER rules on whether it was acceptable.
 *(A first version of this atom called moving it "defensible". That was itself a ruling on the
 governance question this atom says belongs to the USER — and worse here than on a card, because
 memory is recalled by symptom and outlives the case. An atom about not minting resolutions must
