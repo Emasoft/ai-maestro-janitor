@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T07:38:20+0200
+updated: 2026-09-05T07:52:44+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -256,19 +256,36 @@ bounds that **sum** — only individual subprocess workloads are capped
 
   | beat length | preceded by pressure |
   |---|---|
-  | **> 60 s** | **3 / 6 = 50.0%** |
-  | ≤ 60 s | 482 / 881 = 54.7% |
+  | **> 60 s** | **3 / 6** |
+  | ≤ 60 s | 482 / 881 (≈55%) |
 
-  **No effect.** The long-beat rate is if anything BELOW the background rate. And the
-  "three for three" that started this dissolves under the correct per-beat attribution:
-  it was three of the *100 s+ subset*, a slice chosen after seeing it — of all six long
-  beats, only half had pressure.
+  **No signal.** The long-beat rate is if anything BELOW background. And the "three for
+  three" that started this dissolves: it was three of the *100 s+ subset*, a slice chosen
+  after seeing it — of all six long beats, only half had pressure.
 
-  **What this does and does not license.** The long arm is n=6, so a modest effect could
-  hide; what is excluded is an effect large enough to explain a 3× beat. Do not revive
-  this without a materially larger long-beat sample. *(A `20–60 s` band sits at 11/13 =
-  85%, above background — n=13 and another post-hoc slice, i.e. exactly the shape of the
-  thing this paragraph just killed. Noted so it is not "discovered" later; not a lead.)*
+  **Why the 60 s split is not itself a fishing expedition**, since the 20–60 s band below
+  is dismissed for being one: **60 s is the boundary the SCHEDULER defines** (the beat
+  interval a long body overruns), not a boundary the data suggested. A split the system
+  already draws is principled; a split chosen because a bump appeared there is not.
+
+  **THE ATTRIBUTION WAS THE THING THAT COULD HAVE MADE THIS WRONG, SO IT WAS CHECKED.**
+  The first pass carried a `pressure` flag forward while walking the log, which is a
+  correlation with *the last guard run anywhere*, not with *this beat's guard run* — if
+  `memory-guard` ever ran AFTER `session-liveness` in a pass, or skipped a pass, rows
+  would silently carry a stale reading and a real effect would wash out into a null.
+  Re-run attributing each beat only to a guard whose `done` falls between the PREVIOUS
+  beat's end and this beat's start: **887 of 887 beats attributed, 0 discarded** — the
+  guard does run every pass, ahead of `session-liveness`. Same numbers. The carry-forward
+  was correct here, and that is now measured rather than assumed.
+
+  **What this does and does NOT license.** The long arm is **n=6** — a 3/6 has a
+  confidence interval spanning roughly 12–88%, so this excludes only a near-universal
+  association. It says nothing about MAGNITUDE: pressure could still triple a beat
+  whenever it coincides with something else, and this test would not see it, because it
+  measures how OFTEN pressure precedes a long beat, never how much time pressure costs.
+  Do not revive it without a materially larger long-beat sample. *(A `20–60 s` band sits
+  at 11/13, above background — n=13, a data-suggested boundary, and exactly the shape of
+  the thing this paragraph killed. Noted so it is not "discovered" later; not a lead.)*
 
   **The methodology lesson, which is the durable part.** The first version of this entry
   recorded the hypothesis as dead on `0.55³ ≈ p 0.17` — a post-hoc statistic on a
