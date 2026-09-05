@@ -417,8 +417,29 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str
         # llm-externalizer, 2026-09-03 — TRDD-1QJIZFFW box 5 could not tick by waiting). So this
         # does not ADD a cost; it stops discarding one already paid. The manual path has asked
         # for it all along — the two directives had simply diverged.
+        #
+        # THE PATH IS INTERPOLATED ABSOLUTE, and every part of that matters. This lane fires
+        # FLEET-WIDE, so the resumed session's cwd is the CLEARED project — never this repo. A
+        # repo-relative `scripts/...` (the first version of this clause) names a file that does
+        # not exist there, and `${CLAUDE_PLUGIN_ROOT}` would only move the dependency to a
+        # variable that may not be set in a plain Bash call. The daemon already knows the answer
+        # — `_SCRIPTS` is resolved from this module's own location, the same way the `before`
+        # call at `_snapshot_before` gets it — so the target session is told, not asked. Note the
+        # project context is still correct: the JSON lives in the CLEARED project's
+        # `.janitor/state/`, which is where cwd already points; only the SCRIPT is elsewhere.
+        #
+        # `--script` runs it as a self-contained PEP-723 script instead of resolving against the
+        # foreign project's own environment; `--quiet` keeps the pane clean. NO BACKTICKS — this
+        # string is TYPED INTO A LIVE PANE, and a backtick is command substitution on any layer
+        # that reaches a shell.
+        #
+        # The skip-on-failure clause restores FAIL-OPEN at the layer that now needs it. The
+        # harness is fail-open internally, but that covers the SCRIPT, not a model told to run
+        # it: handed a failing FIRST instruction, a model retries, hunts for the file, or asks —
+        # and that is the resume path, whose entire purpose is getting straight back to work.
         "directive": (
-            "run `uv run scripts/handoff_clear_verify.py --phase after` FIRST, then "
+            f'run: uv run --script --quiet "{_SCRIPTS / "handoff_clear_verify.py"}" '
+            "--phase after   (a diagnostic — if it fails, skip it and carry on), then "
             "read the injected SessionStart handoff summary (auto-composed with no "
             "model turn — follow its wikimem/TRDD links via memgrep recall on demand), "
             "then resume your prior in-flight task."

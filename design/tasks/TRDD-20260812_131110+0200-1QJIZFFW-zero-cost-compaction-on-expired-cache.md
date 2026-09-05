@@ -55,13 +55,31 @@ asked for it.** Every future automated fire will do the same, leaving a `before`
 `handoff-clear-verify.json` indefinitely, so box 5 cannot tick by waiting.
 
 **✅ FIXED 2026-09-05 — the automated directive now asks for the after-phase**
-(`external_handoff_clear.py`, the `"directive"` key of the `_spawn_chain` payload), worded
-after the skill's. Pinned by a test on the spawn payload
-(`tests/test_external_handoff_clear.py`) that asserts the WHOLE invocation
-`handoff_clear_verify.py --phase after` — not the bare `--phase after` substring, which prose
-could satisfy — and that it precedes the handoff-summary clause, because every check it runs
-is a property of the fresh session that a turn of real work destroys. 22 + 18 tests pass,
-ruff/mypy/pyright clean.
+(`external_handoff_clear.py`, the `"directive"` key of the `_spawn_chain` payload).
+
+**⚠ THE FIRST VERSION OF THE FIX WAS BROKEN FLEET-WIDE, which is the interesting part.** It
+copied the skill's wording but not the part that makes it portable: a repo-relative
+`scripts/handoff_clear_verify.py`. This lane fires on EVERY project, so the resumed session's
+cwd is the CLEARED project — never this repo — and that path names a file which is not there.
+The daemon has always known better: its own `before` call resolves the harness from
+`_SCRIPTS`, an absolute path off the module's location. The directive now interpolates that
+same absolute path at compose time, so the target session is TOLD rather than asked (a
+`${CLAUDE_PLUGIN_ROOT}` would only move the dependency onto a variable that may be unset in a
+plain Bash call). Three further defects came with it, each fixed: bare `uv run` instead of
+`uv run --script` (would resolve against the foreign project's environment); BACKTICKS in a
+string that is TYPED INTO A LIVE PANE, where they are command substitution on any layer that
+reaches a shell; and no escape hatch — the harness is fail-open internally, but that covers
+the SCRIPT, not a model handed a failing FIRST instruction, which retries or asks and stalls
+the very resume the lane exists to make fast. The directive now says
+*"a diagnostic — if it fails, skip it and carry on"*.
+
+Pinned by a test on the spawn payload
+(`tests/test_external_handoff_clear.py`) that asserts the PROPERTIES rather than the literal
+— the harness path parses out of the directive and is ABSOLUTE and RESOLVES on disk, the
+invocation carries `uv run --script`, there are no backticks, the skip-on-failure clause is
+present, and the after-phase precedes the handoff-summary clause. Pinning the property is what
+the first version got wrong: a test asserting the string I had just written would have passed
+against the broken relative path. 22 + 18 tests pass, ruff/mypy/pyright clean.
 
 **This does not ADD a cost.** `_snapshot_before` is unconditional, so the `before` half was
 already being paid on every fire and thrown away. Box 5 is now what it was always described

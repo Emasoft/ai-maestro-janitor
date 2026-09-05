@@ -7,6 +7,7 @@ about the disk, and only the disk can settle it.
 """
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -345,12 +346,30 @@ def test_fire_takes_a_verify_before_snapshot_before_spawning_the_chain(tmp_path,
     # The `before` snapshot above is UNCONDITIONAL, so without an after-phase in the resume
     # directive every fire writes a snapshot nothing ever compares against — measured on
     # llm-externalizer 2026-09-03, where handoff-clear-verify.json held only a `before` key
-    # (TRDD-1QJIZFFW box 5). Assert the WHOLE invocation, not just the `--phase after`
-    # substring, so a directive that merely mentions the phase in prose cannot pass.
-    assert "handoff_clear_verify.py --phase after" in seen["directive"], seen["directive"]
+    # (TRDD-1QJIZFFW box 5).
+    directive = seen["directive"]
+    assert "--phase after" in directive, directive
+    # THE PROPERTY, not the literal: this lane fires fleet-wide, so the resumed session's cwd is
+    # the CLEARED project and a repo-relative `scripts/...` names a file that is not there. Pin
+    # that the harness is addressed by ABSOLUTE path — the first version of this clause shipped
+    # relative and would have failed on every project but this one.
+    m = re.search(r'"(\S*handoff_clear_verify\.py)"', directive)
+    assert m, f"harness not invoked by a quoted path: {directive}"
+    assert Path(m.group(1)).is_absolute(), f"harness path must be absolute: {m.group(1)}"
+    assert Path(m.group(1)).is_file(), f"harness path does not resolve: {m.group(1)}"
+    # `--script` makes it a self-contained PEP-723 run instead of resolving against the foreign
+    # project's environment.
+    assert "uv run --script" in directive, directive
+    # NO BACKTICKS: this string is typed into a live pane, where a backtick is command
+    # substitution on any layer that reaches a shell.
+    assert "`" not in directive, directive
+    # FAIL-OPEN at the model layer — the harness is fail-open internally, but a model handed a
+    # failing FIRST instruction retries or asks, and that is the resume path.
+    assert "skip it" in directive, directive
     # FIRST, because every check it runs (context size, cron id, resume-flag consumption) is a
-    # property of the fresh session that a turn of real work destroys.
-    assert seen["directive"].index("--phase after") < seen["directive"].index("handoff summary")
+    # property of the fresh session that a turn of real work destroys. `find` not `index` so a
+    # reworded summary clause fails as an assertion, not a ValueError.
+    assert directive.find("--phase after") < directive.find("handoff summary"), directive
     before = json.loads(verify.read_text(encoding="utf-8"))["before"]
     assert before["cron_id"] == "abc12345"
     assert t0 <= before["ts"] <= t0 + ehc._VERIFY_BEFORE_TIMEOUT_S
