@@ -110,9 +110,8 @@ in the WORK and starts finding them in the PROCESS — at that point the next ro
 the review, which does not converge. Stop when the sharpest remaining finding would change only
 how a sentence is hedged, or when the findings have become findings about reviewing.
 
-Stop when the sharpest remaining finding would change only how a sentence is hedged; keep going
-while one would still change what a reader DOES. When a chain will not converge, the lever is
-not another fork — see this page's remediation atom.
+Keep going while a finding would still change what a reader DOES. When a chain will not
+converge, the lever is not another fork — see this page's remediation atom.
 
 *(The sequence above was twice published wrong: a recommendation misread as a count, then a
 truncation that dropped the correcting fork. Detail in commit `f370b46a`.)*
