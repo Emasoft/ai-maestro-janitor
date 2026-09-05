@@ -3,7 +3,7 @@ trdd-id: IB5B14QQ
 title: orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
 column: testing
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T22:01:48+0200
+updated: 2026-09-05T22:04:40+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -40,6 +40,21 @@ Verified: `uv run pytest tests/test_orphaned_memory_maint.py -q` — 26 passed. 
 check`, `mypy scripts/ --ignore-missing-imports`, `pyright` on touched files — all
 clean. Left at `column: dev` (not `testing`/`complete`) per this session's git-lock
 constraint (another agent owns git right now) — no commit was made.
+
+**2026-09-05T22:04 — committed in 028de468, column → testing. Measured against a COPY of
+the real pool** (14 `memory-maint-pending-*` records, 21 claimed): the new detector emits
+exactly ONE finding — `enrich` (LOCAL) dispatched 47.9h ago, cadence 24h, never re-fired —
+a genuine orphan the legacy-slot-only detector could not see. The other 13 pending records
+are NOT current (`pending_is_current` is false: a later dispatch of the same key was
+claimed and completed, advancing `last_run` past their `stamped_at`), so they are
+correctly not reported as "never re-fired" — they are pre-af6340a5 leftovers the
+supersede-by-rename now prevents at the source. Two facts the review fork raised, checked:
+`candidates()` is a bare `PENDING_PREFIX*.json` glob with no age/chore filter (no hidden
+records); the second `sys.path.insert` does not shadow `state`/`dedupe` (both resolve to
+`scripts/lib`). Known ceiling, not fixed: a `pool:<dispatch_id>` dedupe key that fired
+is only forgotten when its record is read healthy again, which never happens once the
+record is claimed or pruned — the seen file keeps one dead line per past orphan, bounded
+by dispatch volume.
 
 ## Symptom
 
