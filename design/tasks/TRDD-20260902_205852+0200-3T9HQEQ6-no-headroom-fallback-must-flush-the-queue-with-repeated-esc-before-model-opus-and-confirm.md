@@ -3,7 +3,7 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-05T05:23:58+0200
+updated: 2026-09-05T05:26:11+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -139,11 +139,26 @@ this card still flushes whatever is already queued.
       `v3.4.14` **2026-09-04 00:38:38**, so 3.4.13 was indeed newest that day — dated, not
       assumed). A release then landed under it and nothing re-checked.*
       **⚠ AND THE SAME LINE'S OTHER HALF IS ALSO FALSE:** it says *"the core fix `e0c328c4` is
-      in installed 3.4.13"*. **Proved by reachability, not by dates:**
-      `git merge-base --is-ancestor e0c328c4 v3.4.13` → **false**, and
-      `git tag --contains e0c328c4` returns **only `v3.4.14`**. It was never in 3.4.13; all
-      three commits shipped together in v3.4.14 — which is why "publish first" was right on
-      2026-09-03 and is wrong now.
+      in installed 3.4.13"*. **Proved against the INSTALLED ARTIFACT, which is what the line
+      actually claims** — `e0c328c4` touches `scripts/lib/terminal_trigger.py`, so compare that
+      file's sha256 (first 12):
+      | tree | sha |
+      |---|---|
+      | installed `3.4.13/scripts/lib/terminal_trigger.py` | `ca2999f0f1de` |
+      | **`e0c328c4~1`** (the commit's PARENT) | **`ca2999f0f1de`** |
+      | `e0c328c4` itself | `0adb87ffc4a4` |
+      | installed `3.4.14/…` | `f92494d80373` |
+      Installed 3.4.13 carries the **pre-fix file byte-for-byte**. (3.4.14 differs from
+      `e0c328c4` because `fb25366f`/`1533ccc9` touched the file after it — consistent, not a
+      discrepancy.) Git agrees at the tag level:
+      `git merge-base --is-ancestor e0c328c4 v3.4.13` → **false**, `git tag --contains
+      e0c328c4` → **only `v3.4.14`**. So the fix was never in 3.4.13; all three commits shipped
+      together in v3.4.14 — which is why "publish first" was right on 2026-09-03, wrong now.
+      *(Two superseded arguments, both weaker than the table, kept as a warning: **dates** —
+      `e0c328c4` 22:35:00 vs `v3.4.13` 22:16:50 — do not establish membership at all, since a
+      cherry-pick, rebase or moved tag breaks the ordering; and **tag reachability** answers a
+      question about the REPOSITORY when the line was about an INSTALLED TREE, which can be cut
+      from a different ref. Prove the claim that was made, against the artifact it names.)*
       *(The date ordering — `e0c328c4` 22:35:00 vs `v3.4.13` 22:16:50 — agrees, but it is NOT
       what settles it and must not be cited as if it were: a commit date can precede a tag it
       is absent from, and follow one it is present in, after a cherry-pick, a rebase, or a
