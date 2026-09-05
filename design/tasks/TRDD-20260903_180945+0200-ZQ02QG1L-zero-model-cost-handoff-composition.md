@@ -50,7 +50,14 @@ reason it could not self-restore.** `trdd-drift.py` can auto-clear a `blocked` c
 `evaluate_unblock_when`, but only against predicates the card declares. With none, no detector
 had anything to evaluate, so a blocker completing was an event nothing was watching for. **A
 `blocked` card whose release condition is machine-checkable should say so** — here,
-`unblock-when: [trdd:L46IG69Y]` would have cleared it automatically two days ago.
+`unblock-when: [trdd:L46IG69Y terminal]` would have cleared it automatically two days ago.
+**⚠ THE ` terminal` SUFFIX IS REQUIRED AND I FIRST WROTE THIS EXAMPLE WITHOUT IT.** The parser
+is `_PRED_TRDD_RE = ^trdd:([0-9A-Za-z]{8})\s+terminal$` (`trdd-drift.py:85`), and
+`evaluate_unblock_when` **fails OPEN toward STAYING BLOCKED** on a malformed predicate — its
+docstring says the failure mode to avoid is "unblocking a card on a typo". So the bare
+`trdd:<id>` form I first recommended would never have fired, and would have looked exactly like
+the silence it was meant to fix: a card sitting blocked with a release condition that reads
+correct and is inert. Copy the shape from the regex, not from prose.
 
 **⚠ AND THE `attention:` CLAUSE DID NOT FIND THIS CARD — I did, and the distinction matters.**
 The clause named it correctly, hours earlier: `1 unblockable: TRDD-ZQ02QG1L`. I surfaced that

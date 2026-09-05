@@ -4,7 +4,7 @@ title: ai-maestro harness preparedness — fleet-injection/presence/recovery gap
 column: blocked
 pre-block-column: todo
 created: 2026-07-16T10:27:20+0200
-updated: 2026-08-29T07:58:00+0200
+updated: 2026-09-05T03:14:46+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
@@ -12,6 +12,7 @@ severity: major
 labels: [ai-maestro, fleet-inject, fleet-stop, fleet-recovery, presence, user-intent, terminal-trigger, cross-project]
 implementation-commits: [eb9faa1, e65ced5f]
 blocked-by: [OZNG3N2D]
+unblock-when: [trdd:OZNG3N2D terminal]
 relevant-rules: []
 ---
 
