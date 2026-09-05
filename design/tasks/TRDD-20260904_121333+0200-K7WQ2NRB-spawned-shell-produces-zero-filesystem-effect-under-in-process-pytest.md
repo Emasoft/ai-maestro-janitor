@@ -1,9 +1,10 @@
 ---
 trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
-column: todo
+column: backburner
+review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T02:55:05+0200
+updated: 2026-09-05T02:58:26+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -25,8 +26,17 @@ external-refs: [TRDD-Q8PNPRTW]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
 - **⇒ WHERE THIS ACTUALLY STANDS (2026-09-05): INSTRUMENTED, AND WAITING FOR A FAILURE THAT
-  CANNOT BE PRODUCED ON DEMAND.** Nothing external blocks it, so it stays `todo` — but do not
-  resume it expecting to make progress by running the tests again. **Brute force has been tried
+  CANNOT BE PRODUCED ON DEMAND.** Do not resume it expecting to make progress by running the
+  tests again.
+  **MOVED `todo` → `backburner` (`review-after: 2026-09-19`) for that reason.** `todo` is the
+  PULL QUEUE: it advertises "available to work", which is the exact invitation this block spends
+  thirty lines arguing against, and the board view — not the card — is what anyone scans. Held
+  in `todo`, the column asserted the opposite of the content, the same metadata-vs-content
+  defect as the stale STATE block corrected one commit earlier, made in the other direction.
+  `blocked` was considered and does not fit: the kanban rule ties it to a non-empty
+  `blocked-by:`, and no TRDD blocks this — what it waits on is an EVENT. `backburner` is the
+  rule's own "deferred by design" column, exempt from the drain obligation, and `review-after:`
+  resurfaces it after the next soak cycle without anyone having to remember. **Brute force has been tried
   in two configurations and produced ZERO failures**: 14 runs of a 2-test selection at load
   19.5-36.3 (1a), and ~6 full-suite `-n auto` runs this session. The deliverable that did not
   need a reproduction is **landed** (`6268dbeb`): row 2 no longer discards the child's stderr,
@@ -50,6 +60,14 @@ external-refs: [TRDD-Q8PNPRTW]
   In the hang shape the card predicts, that shell can outlive its `sleep`. Add
   `|/bin/sh .*fake_capture\.sh` **on the next launch** — it was not applied mid-run because a
   sixth relaunch to improve the instrument costs more than it buys (see the next bullet).
+  **UNTIL IT IS APPLIED, READ A 0 IN `survivors.log` THIS NARROWLY: it excludes an orphaned
+  xdist worker and a bare `sleep 600`, and it excludes NOTHING about the parent shell.** That
+  is a constraint on the reader, not a note to the author — the whole point of the positive
+  control was that an uninterpretable zero is a statement about the instrument. The loop keeps
+  running anyway because its PRIMARY signal does not touch the census: it stops on the exit-code
+  classification, and the census is a secondary observation attached to line 77's cross-run
+  hypothesis. Stopping a working primary to fix a secondary is the churn this card just
+  decided against.
 - **⚠ THE HARNESS CHURN IS THE FAILURE MODE NOW.** Five commits, ~6 green runs, five launches
   each discarded to fix the harness, and **zero observations of the actual failure**. Each fix
   caught a real defect that would have produced false data — but the pattern meets the
@@ -262,9 +280,14 @@ on Q8PNPRTW for being plausible.
    not fail at load ≤36. The failing observations (soak9) are IN-CONFIG, i.e. the rows running
    inside the full-suite pytest process. So the experiment is: loop the FULL suite, sample host
    load throughout each run, and preserve every run's output — then a failure is caught in the
-   configuration that actually fails, with its load on the record. Expensive by construction
+   configuration that actually fails, with its load on the record. ~~Expensive by construction
    (~12 min/iteration), which is exactly why the 4 in-config data points so far are worth
-   counting before spending more.
+   counting before spending more.~~ **STRUCK — MEASURED FALSE, see immediately below.** Kept
+   visible rather than deleted (it is the premise a later reader would otherwise reconstruct),
+   but STRUCK rather than merely annotated: it argues for a DECISION — "worth counting before
+   spending more" — in its own imperative voice, and a refuted premise leading a step is how
+   the same misreading gets made a fourth time. A correction should not have to out-argue the
+   sentence above it.
    **⚠ THE STEP'S OWN COST ESTIMATE ABOVE IS WRONG, AND THAT IS THE FIRST RESULT.
    MEASURED 2026-09-05T02:28: a green `-n auto` full suite is 77.53 s here — `16416 passed,
    1 skipped`, host load 5.35 → 14.34.** Not "~12 min/iteration": that figure is the SERIAL
