@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest �
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T03:53:05+0200
+updated: 2026-09-05T03:53:28+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -31,9 +31,10 @@ external-refs: [TRDD-Q8PNPRTW]
   that twice).
 - **STATUS: INSTRUMENTED; NOT REPRODUCIBLE ON DEMAND.** `6268dbeb` landed the deliverable that
   never needed a reproduction — row 2 keeps its child's stderr instead of discarding it, so the
-  next real failure carries its own evidence. **~20 runs across two configurations produced
-  ZERO failures** (14 of a 2-test selection at load 19.5-36.3; ~6 full-suite `-n auto`).
-- **THE ONE LIVE UNKNOWN: the 8.6× wall-clock gap to soak9 (822.89 s vs 77-150 s) is
+  next real failure carries its own evidence. **~44 runs across two configurations produced ZERO
+  failures** (14 of a 2-test selection at load 19.5-36.3; **30 full-suite `-n auto`, 30/30 green,
+  89-187 s**). **Brute force is EXHAUSTED — do not spend more on it.**
+- **THE ONE LIVE UNKNOWN: the 8.6× wall-clock gap to soak9 (822.89 s vs 89-187 s) is
   UNEXPLAINED.** Load is argued against, not refuted. The environments demonstrably DIFFER (both
   soak runs report a `subtests` counter no tracked revision ever declared) — but 8 subtests
   cannot make 727 s. **Do not read the plugin finding as closure.**
@@ -44,8 +45,10 @@ external-refs: [TRDD-Q8PNPRTW]
   - A 0 in `survivors.log` excludes an orphaned xdist worker and a bare `sleep 600`, and
     excludes **NOTHING about the `/bin/sh …fake_capture.sh` parent shell** — the census does not
     match it. Add `|/bin/sh .*fake_capture\.sh` on the next launch.
-- **DO NOT re-run the suite hoping for a failure.** That is ~20 runs of precedent, and a
-  load-sensitive experiment cannot be run on a box while a session does foreground work on it.
+- **DO NOT re-run the suite hoping for a failure.** That is ~44 runs of precedent, and every one
+  of the 30 full-suite runs finished in 89-187 s while the run that FAILED took 822.89 s — the
+  loop never entered that regime, so more iterations of it sample the wrong population. A
+  load-sensitive experiment also cannot be run on a box while a session does foreground work.
 
 ## Process notes and card history (background — not the first thing to read)
 
