@@ -30,18 +30,22 @@ source). Each read is fresh for a reason, and two of the three have an UNSAFE di
 
 | read | drives | stale in the unsafe direction ⇒ |
 |---|---|---|
-| 1 · `daemon.py:1999` | the RETRY_WEDGE decline (`:2000-2011`) and `state=` into `pane_actuate.act` (`:2052`, `:2107`) | wedge appears after the read ⇒ `plan()` branches on a screen it never saw — **covered**, because read 2 runs strictly later and refuses |
-| 2 · `fleet_inject.py:430` | whether the field is non-empty RIGHT NOW, gating the whole fire path | **empty → busy**: a permission dialog opens between read and keystroke and we type into it. **This is the 2026-07-17 incident class the guard exists to close** (`fleet_inject.py:404-411`). It must be taken as LATE as possible |
+| 1 · `daemon.py:1999` | the RETRY_WEDGE decline (`:2000-2011`) and `state=` into `pane_actuate.act` (`:2052`, `:2107`) | wedge appears after the read ⇒ `plan()` branches on a screen it never saw — **covered ON THIS BRANCH ONLY**, because read 2 runs strictly later and refuses. On the field-EMPTY branch read 2 returns `False`, read 3 never runs, and read 1's staleness is unmitigated |
+| 2 · `fleet_inject.py:430` | whether the field is non-empty RIGHT NOW, gating the whole fire path | **empty → busy**: a permission dialog opens between read and keystroke and we type into it — the 2026-07-17 incident class (`fleet_inject.py:404-411`). **That race is IRREDUCIBLE and freshness does not close it; what dedup does is WIDEN it** by everything between read 1 and read 2. Hence: as late as possible |
 | 3 · `fleet_inject.py:489` | whose text occupies an already-busy field | **ours → a human's**: reusing read 2's text still matches our vocabulary, so `ours` is wrongly truthy and `act(OWN_COMMAND_UNSUBMITTED)` fires a bare `Enter` — **onto the human's line** |
 
 **Read 3 is the decisive one, and the reason is that nothing downstream re-checks.**
 `pane_policy._submit` (`pane_policy.py:235-245`) tests ONLY
 `state.input_field.kind == InputFieldKind.EMPTY` before emitting the `Enter`; it never
 re-verifies the content is still ours. So read 3's freshness is the *sole* thing standing
-between the janitor and submitting a human's unrelated input. Verified first-hand at both
-sites, plus the exact-match rule in `field_holds_our_command` (`fleet_inject.py:470-475`).
+between the janitor and submitting a human's unrelated input. **Read first-hand at exactly two
+sites** — `_submit`, and `field_holds_our_command`'s exact-match rule
+(`fleet_inject.py:470-475`). `pane_policy.plan()`'s dispatch arm was NOT read: the argument
+there is structural — `plan()` receives only a `PaneState`, whose `input_field.kind` is an
+EMPTY/non-EMPTY classification and carries no ownership information, so the check could not
+live there. Strong, but reasoned rather than observed.
 
-**The code already anticipated this refactor and rejected it.** That function's own
+**The code already anticipated this CLASS of refactor and rejected it.** That function's own
 docstring (`fleet_inject.py:459-468`) argues against caching the field content as a second
 source of truth, naming *"staleness and pane-reuse questions"* — i.e. this card — and
 concluding *"the field content is already the record."*
@@ -99,6 +103,15 @@ Only the comment. `daemon.py:1995` says routing every keystroke through the poli
 "costs no extra osascript (Proposal §5)" — true of `pane_actuate.act`, which receives
 `state=pane` and skips its own read (`pane_actuate.py:174`), and NOT true of the field-busy
 guard added beside it. Narrow its scope so a reader does not carry the claim onto the guard.
+
+**The ~45 s/instance cost is left UNADDRESSED, and that is deliberate.** If it ever becomes
+worth attacking, the directions are a cheaper `read_pane_text` or a rarer field-busy path —
+**never a shared capture**. File then, with a measurement; there is nothing to scope today,
+and a speculative card would just sit in `todo`.
+
+*Noted and NOT opened as a card: read 1's staleness on the field-EMPTY branch is a narrow,
+unmeasured gap in the wedge guard. Unrelated to dedup, unchanged by this card's disposition,
+and an unmeasured hazard does not deserve a card — but somebody should know it exists.*
 
 Full analysis: `reports/zvzafqy6-pane-read-staleness/20260905_071916+0200-staleness-safety-per-call-site.md` (gitignored).
 
