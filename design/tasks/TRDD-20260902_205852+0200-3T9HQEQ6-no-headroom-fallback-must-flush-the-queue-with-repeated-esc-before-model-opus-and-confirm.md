@@ -3,7 +3,7 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-03T11:09:13+0200
+updated: 2026-09-05T05:18:15+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -129,6 +129,16 @@ this card still flushes whatever is already queued.
       `queue clear after` lines; the core fix `e0c328c4` is in installed 3.4.13, but the
       review-fork follow-ups `fb25366f`/`1533ccc9` are UNPUBLISHED — publish first, then wait
       for a genuine no-headroom Fable wall.
+      **⚠ THE "UNPUBLISHED" HALF IS NOW FALSE — corrected 2026-09-05, and acting on it would
+      have meant publishing for no reason.** All three commits predate the release:
+      `e0c328c4` 2026-09-02 22:35:00, `fb25366f` 2026-09-02 22:36:56, `1533ccc9`
+      2026-09-02 22:40:36, against `v3.4.14` tagged **2026-09-04 00:38:38**. The whole fix
+      ships in the installed 3.4.14, so **this box is NOT release-gated** — it waits only on a
+      genuine no-headroom Fable wall, a live event.
+      *It was true when written (2026-09-03, when the newest release was 3.4.13). A release
+      then landed under it and nothing re-checked — the general hazard of writing "unpublished"
+      into a card at all: it decays silently on someone else's schedule. Record the SHAs and
+      the version they need, so a reader can re-evaluate instead of trusting a snapshot.*
 
 ## Approval log
 

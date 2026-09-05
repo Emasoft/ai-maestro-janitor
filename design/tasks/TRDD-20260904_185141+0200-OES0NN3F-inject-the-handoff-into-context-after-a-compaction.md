@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-05T05:24:00+0200
+updated: 2026-09-05T05:18:15+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -123,6 +123,14 @@ injection lands before the first turn and needs no nudge to have fired.
       FIX:
       - installed `…/ai-maestro-janitor/3.4.14/scripts/hooks/on-session-start.py` →
         `grep -c _inject_post_compact_handoff` = **0**; repo HEAD = **2**.
+        **That 3.4.14 tree IS what the session loaded** — its own `entered` line says so:
+        `[2026-09-05T04:44:39+0200] [s:58951a2c] entered
+        (plugin_root=/Users/…/ai-maestro-janitor/3.4.14)`. Cited because the corrected recipe
+        below tells the next reader to run exactly this check, and a card that teaches a check
+        without showing its result makes them redo the work to trust the conclusion.
+        *(“Could it live in 3.4.14 under another name?” — ruled out independently of naming:
+        no `compact-handoff-injected.ts` stamp and no injection log line, so the BEHAVIOUR is
+        absent however it might have been spelled.)*
       - `v3.4.14` was tagged **2026-09-04 00:38:38**; the fix landed **2026-09-04 19:57:37**
         (`0f00fd60`) — about 19 h AFTER the release. So no session on 3.4.14 can exercise it.
       - Consistent with that: no `.janitor/state/compact-handoff-injected.ts` stamp exists, and

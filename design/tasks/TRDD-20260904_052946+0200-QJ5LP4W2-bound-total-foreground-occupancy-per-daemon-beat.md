@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T05:32:00+0200
+updated: 2026-09-05T05:17:15+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium

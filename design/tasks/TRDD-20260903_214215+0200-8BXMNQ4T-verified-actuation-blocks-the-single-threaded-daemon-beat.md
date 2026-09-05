@@ -4,7 +4,7 @@ title: verified actuation blocks the single-threaded daemon beat — measure the
 column: backburner
 review-after: 2026-10-05
 created: 2026-09-03T21:42:15+0200
-updated: 2026-09-05T05:32:00+0200
+updated: 2026-09-05T05:17:15+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -90,9 +90,16 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
   rotation stamp is 03:57:59, so that body *contains the rotation itself* — it measures a
   different event than the esc-pass-only sample this bullet claims to be.
   **Do not read this as "the pass costs time".** Control, `oauth-rotator-tick` over 02:50–03:50:
-  **n=42, min 1, max 40, p50 9, p90 14**. So the in-window values sit above the control median
-  and **5 of 6** above its p90 — but **every one is inside the control's own range**, on 6
-  points. A shifted sample, not an established cost.
+  **n=42, min 1, max 40, p50 9, p90 14**. Every in-window body is inside the control's own
+  range. A shifted sample, not an established cost.
+  **⚠ NO PERCENTILE COMPARISON BELONGS HERE, and an earlier version of this bullet published
+  one ("5 of 6 above p90").** Those six bodies are six CONSECUTIVE measurements from one
+  contiguous 10-minute episode — one observation of an episode, not six independent draws — so
+  counting how many clear a percentile treats autocorrelated points as trials and reads as a
+  test result the data cannot support. The prose hedge was right and the number quietly
+  undercut it. **Also unchecked:** the exclusion criterion was applied only to the body that
+  brackets the stamp; post-rotation work (credential reload, fleet rescan, `oauth-recovery`)
+  plausibly overlaps the next one or two bodies too, and nobody looked.
   **⚠ The control is NOT verified clean, and calling it "control" oversells it.**
   `_ROTATION_WAKE_WINDOW_S` is 600 s and `rotation-success.ts` holds only the LATEST epoch
   (overwritten), so it cannot say whether 02:50–03:50 contained its own wake windows. Absence
