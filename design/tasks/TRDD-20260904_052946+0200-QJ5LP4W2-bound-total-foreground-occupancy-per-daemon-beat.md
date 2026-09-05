@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T07:14:40+0200
+updated: 2026-09-05T07:26:03+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -60,7 +60,9 @@ external-refs: [TRDD-8BXMNQ4T]
     at 04:15–04:18?* — now with bigger siblings. Read-only diagnosis; the precedent is set
     here for ungated read-only source reading.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
-    pattern is not writing a scheduling change; only the bound it pins is.
+    pattern is not writing a scheduling change; only the bound it pins is. **⚠ Replay the 32 h
+    maximum (191 s), NOT 8BXMNQ4T's snapshot maximum (~78 s) — box 3 said "one log snapshot"
+    and that premise is retracted; see the box, now annotated.**
   *(A first wording of this bullet added "…more than anything the advisor could say": a
   confident comparative about an advisor nobody has reached, unfalsifiable, and sitting in a
   block that is authoritative by rule.)*
@@ -98,9 +100,11 @@ remedy box, because **the remedy is a scheduling design decision and the card wa
 measurement card**. Splitting it lets a finished measurement be finished and puts the
 design question where its risk is visible.
 
-Do **not** re-derive the measurement here. It is complete and its corrections are on
-8BXMNQ4T; the load-bearing results are restated below only so this card is
-self-contained.
+Do **not** re-derive 8BXMNQ4T's stall analysis here; its corrections live on that card
+and the load-bearing results are restated below so this card is self-contained.
+**⚠ But it is no longer "complete" (2026-09-05): its snapshot window contained no body
+above ~78 s, and a wider read found 102/137/191 s ones. The BODY-DURATION measurement now
+lives HERE, in "Open questions" — 8BXMNQ4T carries the narrowing and points back.**
 
 **Why this card is INDEPENDENT — not 8BXMNQ4T's EHT, and carrying no `parent-trdd:`.**
 Two decisions, both deliberate:
@@ -176,8 +180,16 @@ bounds that **sum** — only individual subprocess workloads are capped
       candidates above stay rejected (or what new evidence revives one).
 - [ ] A test pins the bound, and `oauth-rotator-tick` is shown still firing on
       cadence with the worst measured occupancy pattern replayed.
+      **⚠ "WORST MEASURED" MEANS THE 32 h WINDOW, NOT 8BXMNQ4T's SNAPSHOT (2026-09-05).**
+      That snapshot's largest `session-liveness` body is ~78 s; the wider window contains
+      **191 s**. A harness built to the snapshot pins a bound 2.4× too low and then PASSES
+      on a daemon that still skips cycles — the worst kind of green. These boxes were
+      written before the wider measurement and were not revisited when the STATE was
+      corrected; that is how a retracted premise survives, in the section nobody re-reads.
 - [ ] Re-measure after the change with the same method (per-task `starting` markers,
-      body subtracted, one log snapshot) and show the stall count falling.
+      body subtracted) and show the stall count falling. **NOT "one log snapshot"** — same
+      reason as above: one snapshot is what hid the 100 s+ bodies in the first place. Use a
+      window wide enough to contain them, and say which window.
 
 ## Open questions inherited from the measurement
 
@@ -223,6 +235,19 @@ bounds that **sum** — only individual subprocess workloads are capped
   **So the honest status:** a bounded ~78 s component is real and the ladder is the only
   known mechanism on this path whose ceiling brackets it; the attribution is
   UNCONFIRMED, and the 100 s+ beats are unexplained by it either way.
+
+  **A CANDIDATE EXAMINED AND NOT SUPPORTED — recorded so nobody spends the round again.**
+  All three 100 s+ beats are immediately preceded by a `memory-guard` pressure line
+  (`free 616MB` before the 191 s, `823MB` before the 137 s, a 16 s memory-guard body
+  before the 102 s), and two of the three ~78 s beats are preceded by `memory-guard done
+  in 0s` — no pressure. That looked like a clean discriminator and like the
+  CPU/memory-starvation confound the original question named. **It is not, because the
+  BASE RATE kills it: `memory-guard` reports pressure on 497 of 906 runs — 55% of beats.**
+  Three-for-three at a 55% base rate is p≈0.17, which is nothing. Suggestive, unproven,
+  and it would have been reported as a finding if the base rate had not been checked
+  — the same defect this entry already records twice. **If someone revisits it, the
+  design is a comparison of pressure rates on long vs normal beats, not a look at what
+  precedes the long ones.**
 
   **WHAT WOULD SETTLE IT, so this is a takeable task and not a re-litigation:** a
   timestamp either side of the `probe_iterm_sessions` call in `gather_fleet`
