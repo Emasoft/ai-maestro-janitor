@@ -47,4 +47,25 @@ reviewing this card's prose" is not "stop reviewing". Do the fixes it names, the
 subject regardless of what a further review would say; rescoping to a different subject is
 legitimate and is not defiance.
 
+
+^ATOM-D8ML-JZ6R [desc: "The corrected rule reduces to 'fork unless the turn is MECHANICAL or purely SUBTRACTIVE' — its value is a checkable reason to decline, not a large exemption; if you cannot name which clause fires, spa", keywords: does_the_criterion_exempt_anything_at_all is_clause_c_too_broad what_turn_correctly_gets_no_fork fork_unless_mechanical_or_subtractive how_much_does_the_rule_actually_suppress can_I_decline_the_gate_honestly using_the_rule_as_a_rationalisation if_you_cannot_name_which_clause_fires examples_of_turns_needing_no_review the_criterion's_real_yield, ocd: 2026-09-05, lmd: 2026-09-05]
+
+**BE HONEST ABOUT HOW MUCH THIS EXEMPTS: not much.** With clause (c) in place the rule reduces
+to **"fork unless the turn is MECHANICAL or purely SUBTRACTIVE"** — because TRDD and memory prose
+is *mostly* evidence characterisation. Measured on the session that produced it: roughly FOUR
+forks correctly suppressed, not the large saving the first version implied.
+
+**What genuinely gets no fork** — turns making no claim about evidence at all: a timestamp or
+frontmatter bump; a pure formatting or link repair; correcting a false sentence in an earlier
+commit message (that REMOVES a claim rather than making one); relaying another agent's report
+without endorsing it.
+
+**The value is not the exemption — it is having a CHECKABLE REASON to decline**, so declining is
+a judgment you can defend rather than fatigue wearing a rule as a costume. That distinction is
+the whole point, given this rule was first written by the agent it exempts, at the end of a long
+session, and had to be corrected for exactly that bias.
+
+**⇒ IF YOU CANNOT NAME WHICH OF (a), (b) OR (c) FIRES, THAT IS THE ANSWER: SPAWN.** A rule you
+have to squint at is being used as a rationalisation.
+
 ## Notes and lessons learned
