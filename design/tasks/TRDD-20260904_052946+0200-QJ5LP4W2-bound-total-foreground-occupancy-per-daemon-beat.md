@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T05:17:15+0200
+updated: 2026-09-05T06:55:34+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -48,16 +48,32 @@ external-refs: [TRDD-8BXMNQ4T]
   else on the card is startable", which was FALSE and, sitting in a STATE block, would have
   foreclosed it for every later reader.** Box 1 gates *writing a `scripts/daemon.py` scheduling
   change*. It does not gate:
-  - **The two open questions below**, both pure read-only diagnosis: *why does `session-liveness`
-    need 78 s at all?* and *what is the ~84 s unaccounted at 04:15–04:18?* Either could
-    ELIMINATE a candidate and shrink what the advisor is asked — which is what this card says it
-    wants, and the precedent is already set here for ungated read-only source reading.
+  - ~~**The two open questions below**~~ — **the FIRST is now ANSWERED (2026-09-05, see
+    "Open questions" below): the 78 s is `probe_iterm_sessions`' escalating 15/30/45 s retry
+    ladder (`fleet_scan.py:1234/1237`), a FIXED once-per-beat host-level cost that does not
+    scale with fleet size.** Do not re-derive it. **STILL OPEN and still ungated:** *what is
+    the ~84 s unaccounted at 04:15–04:18?* Read-only diagnosis; it could ELIMINATE a candidate
+    and shrink what the advisor is asked, and the precedent is set here for ungated read-only
+    source reading.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
     pattern is not writing a scheduling change; only the bound it pins is.
-  Start with the `session-liveness` question — it is in 8 of 12 stall rows. *(A first wording
-  added "…more than anything the advisor could say": a confident comparative about an advisor
-  nobody has reached, unfalsifiable, and sitting in a block that is authoritative by rule. The
-  8-of-12 carries the whole point without it.)*
+  *(A first wording of this bullet added "…more than anything the advisor could say": a
+  confident comparative about an advisor nobody has reached, unfalsifiable, and sitting in a
+  block that is authoritative by rule.)*
+- **⚠ THE ANSWER CHANGED WHAT THE ADVISOR SHOULD BE ASKED — do not carry the old framing into
+  the consult.** The card was built on "stalls are cumulative across many bodies, so no
+  per-body deadline helps". That is still true of the 55+15 stall and is now KNOWN FALSE of the
+  78 s row, which is one body and one call. Whether that shrinks the mechanism to a per-body
+  deadline plus a fix at the ladder, or leaves candidates 3/4 standing, is exactly the design
+  judgment box 1 reserves — so it is a question FOR the consult, not one to settle here.
+- **A SEPARATE defect surfaced during this diagnosis and is NOT this card's work:** the
+  per-instance path reads the SAME pane up to three times (`daemon.py:1999`, and independent
+  `read_pane_text` calls inside `fleet_inject.command_plan_field_busy` at `fleet_inject.py:430`
+  and `field_holds_our_queued_command` at `:489`), against a comment at `daemon.py:1995`
+  asserting the policy table "costs no extra osascript". Filed as its own card per TRDD clause
+  13 rather than absorbed here — this card is a scheduling-bound decision, that one is a
+  redundant-IO fix, and merging them would gate a cheap fix behind an advisor consult it does
+  not need.
 - **The analysis is NOT the blocker — it is done.** Candidates 1 and 2 are rejected with
   reasons, 3 and 4 stand, and the transferable structure (decide the budget/deferral set ONCE
   before the loop) is settled below. The consult is for choosing between 3 and 4 and for
@@ -154,9 +170,40 @@ bounds that **sum** — only individual subprocess workloads are capped
 
 ## Open questions inherited from the measurement
 
-- **Why does `session-liveness` need 78 s at all?** Never established. A detached
-  bulk child cannot block the loop but can starve it of CPU, and a 1920 s
-  `marketplace-refresh` child overlapped the 23:06 episode. Unexamined confound.
+- ~~**Why does `session-liveness` need 78 s at all?**~~ **ANSWERED from the source,
+  2026-09-05: it does not need 78 s of WORK. 78 s is one fixed retry ladder, and it
+  is not the body's own code at all.**
+
+  `task_session_liveness` (`daemon.py:1544`) calls `fleet_scan.gather_fleet` once
+  (`daemon.py:1593`), which calls `probe_iterm_sessions` once (`fleet_scan.py:1417`),
+  gated only on `iterm_running` (`:1413`). That probe retries the iTerm enumeration
+  **three times with ESCALATING deadlines — `_ITERM_PROBE_TIMEOUTS = (15.0, 30.0,
+  45.0)` (`fleet_scan.py:1234`) plus `_ITERM_PROBE_BACKOFF_S = (2.0, 4.0)`
+  (`:1237`)** — so full exhaustion is 96 s and a partial third attempt
+  (15+2+30+4+≈27) is 78 s. The ladder was deliberate (2026-08-28, contention not
+  denial); nobody costed it against the 60 s beat.
+
+  **Two consequences that change what this card must decide:**
+  1. **It is a FIXED cost, not a per-instance one.** It does not scale with fleet
+     size, and it fires whenever iTerm.app is up regardless of how many instances
+     exist or what any of them is doing. So `session-liveness` appearing in 8 of 12
+     stall rows does **not** support "the fleet loop is expensive" — one host-level
+     ladder reaches 78 s alone.
+  2. **A per-body deadline WOULD have caught this one.** The measurement's finding
+     that "the blockers are NOT single long bodies" stands for the 55+15 stall; it
+     does not generalise to the 78 s row, which IS a single body and a single call
+     inside it. That narrows what a mechanism has to cover.
+
+  **What this does NOT establish, stated so it is not read as more than it is:** it
+  explains the 78 s MAX, not the typical `session-liveness` body, and it says nothing
+  about the ~84 s unaccounted below. The detached-bulk-child CPU-starvation confound
+  named by the original question is untested and stays open.
+
+  Inventory of every blocking call on the path, with timeouts and per-beat vs
+  per-instance attribution: `reports/qj5lp4w2-session-liveness/20260905_120000+0200-session-liveness-blocking-inventory.md`
+  (gitignored). Its two load-bearing claims were re-verified against source before
+  being written here; two call sites in it are marked UNDETERMINED and were not
+  traced (`_rotation_esc_pass` `daemon.py:2195`, `_resume_wake_pass` `:2307`).
 - **~84 s of one episode is unaccounted for** (the 54% row, 04:18:26, a 184 s wait).
   The unexplained mass clusters at 04:15–04:18 rather than spreading evenly, which
   is the signature of one unmodelled event.
