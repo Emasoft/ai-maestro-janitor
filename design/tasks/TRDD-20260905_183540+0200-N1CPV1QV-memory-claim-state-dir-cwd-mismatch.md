@@ -3,7 +3,7 @@ trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
 column: todo
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T18:42:00+0200
+updated: 2026-09-05T18:48:20+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -64,12 +64,27 @@ pending→claimed (never the reverse), so both were already in the pool
   `~/.claude/rules/janitor-heartbeat-protocol.md`'s memory row and the
   `janitor-memory-subconscious-agent` spawn instructions pass
   `<project-root>/.janitor/state` (or the resolved USER/LOCAL scope
-  equivalent) directly in the text the spawning session hands the agent —
-  the spawning session already knows its own project root, so no new
-  channel is needed.
+  equivalent) directly in the text the spawning session hands the agent.
+  The SPAWNING session resolves that path itself at spawn time —
+  `$CLAUDE_PROJECT_DIR/.janitor/state` when `$CLAUDE_PROJECT_DIR` is set,
+  else `$(git -C "$PWD" rev-parse --show-toplevel)/.janitor/state` —
+  do not rely on unverified assumptions about the spawning session's cwd:
+  whether an ai-maestro-harness agent's Bash cwd equals its registered
+  workdir is unverified (`$CLAUDE_PROJECT_DIR` is empty in at least one
+  observed session). If that resolution fails (git rev-parse errors and
+  `$CLAUDE_PROJECT_DIR` is unset), the spawning session MUST NOT spawn
+  the memory agent — it reports one line instead and aborts the spawn.
 - (c) All 8 `janitor-memory-*` SKILL.md files run the claim step with
   `--state-dir "$STATE_DIR"`, where `$STATE_DIR` is the path from (b),
-  never resolved from the agent's own cwd.
+  never resolved from the agent's own cwd. Each SKILL.md's command block
+  fails loudly, before invoking the claim step, when `$STATE_DIR` is
+  unset or empty: `: "${STATE_DIR:?janitor: STATE_DIR not provided by
+  the spawn prompt}"`. `memory_dispatch_claim.py` itself also rejects an
+  EMPTY `--state-dir` argument as an error distinct from "absent"
+  (`scripts/memory_dispatch_claim.py:200` currently treats `args.state_dir`
+  falsy — including `""` — the same as "not given", silently falling back
+  to cwd resolution; that must become an explicit failure, not a silent
+  fallback).
 - (d) `memory_dispatch_claim.py` gets a DISTINCT exit code (not 0 or 2 —
   read `main()` for the codes already in use before picking one) for "no
   pool at all" — zero `memory-maint-*` files, pending OR claimed, in the
@@ -115,4 +130,13 @@ failure: the claiming agent looking in the wrong directory entirely.
       resolved directory holds no `memory-maint-*` files at all (verified
       by a new test in `tests/test_memory_dispatch_claim.py`, e.g.
       `test_refuses_when_state_dir_unresolved_and_no_pool`).
+- [ ] `memory_dispatch_claim.py` rejects an EMPTY `--state-dir` argument
+      with a distinct error message (never silently falls back to cwd
+      resolution), verified by a new test, e.g.
+      `test_rejects_empty_state_dir_argument`.
+- [ ] Each `janitor-memory-*` SKILL.md's command block aborts before
+      invoking the claim step when `$STATE_DIR` is unset or empty,
+      verified by a test that sources the skill's command block with
+      `STATE_DIR` unset and asserts non-zero exit (e.g.
+      `tests/test_memory_skill_state_dir_guard.py`).
 - [ ] `uv run pytest` full suite still green.

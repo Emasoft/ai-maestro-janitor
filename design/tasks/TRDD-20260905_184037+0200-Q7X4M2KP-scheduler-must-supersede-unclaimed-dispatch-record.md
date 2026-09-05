@@ -3,7 +3,7 @@ trdd-id: Q7X4M2KP
 title: Scheduler must supersede its own unclaimed dispatch record for the same scope root and intervention instead of stacking a new one
 column: todo
 created: 2026-09-05T18:40:37+0200
-updated: 2026-09-05T18:40:37+0200
+updated: 2026-09-05T18:48:20+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -25,14 +25,33 @@ fire's record joins the pile while agents work the stalest dispatch first.
 Measured on this host 2026-09-05: 4 unclaimed `split` records for the SAME PROJECT root
 (10, 15, 34, 46 h old) and 2 unclaimed records for the USER root (34, 46 h old).
 
+## Mechanism
+
+This is NOT a missing dedupe of independently-arriving duplicate requests. It is what
+happens when `global_state.memory_root_inflight()` (`scripts/lib/global_state.py:1114`,
+`MEMORY_INFLIGHT_TTL_S = 30 * 60`, fail-open) times out without ever being claimed: the
+30-minute in-flight stamp lapses, the scheduler's next pass (`memory-maintenance.py:592-599`
+returns early only while the stamp is live) writes a fresh pending record for the same key,
+and the old one is left behind because `_write_pending` never looks for it. Card N1CPV1QV
+(agent-side state-dir mismatch) explains why a spawned agent can fail to claim the record at
+all; card IB5B14QQ makes the resulting pile visible to the scheduler. This card is the third
+leg: even once an agent looks in the right directory and the pile is visible, the pile keeps
+growing on every lapsed TTL unless the scheduler stops stacking a duplicate record per lapse.
+
 ## Fix requirement
 
 At `_write_pending` time, before writing the new record: find any unclaimed record with the
 same `(scope, root, intervention)` key already in the pool and remove it from the pending
-pool (rename with a `memory-maint-superseded-<id>.json` prefix, or unlink — pick one and say
-why in the implementation commit) before the new record lands. This bounds the pool to at
-most one pending record per key, so `claim_one`'s oldest-first pick can no longer hand out
+pool by RENAMING it to a `memory-maint-superseded-<id>.json` prefix (never unlink — keep the
+superseded record inspectable for audit) before the new record lands. This bounds the pool to
+at most one pending record per key, so `claim_one`'s oldest-first pick can no longer hand out
 stale, duplicate work for a key that has since been re-dispatched.
+
+The rename-based supersede is race-safe against a peer claiming the record concurrently:
+`memory_dispatch_claim.py::claim_one` (`scripts/memory_dispatch_claim.py:110`) wraps its own
+`os.rename(path, target)` claim attempt in `try … except OSError: continue`, so a peer that
+loses the race to the scheduler's supersede-rename simply moves on to the next candidate
+instead of erroring. Do not remove or narrow that except clause.
 
 This also restores the intent of TRDD-LDSCQ0NU's relay-suppression gate: with duplicates
 present in the pool, that gate always finds *some* match for the key and never actually
@@ -48,6 +67,8 @@ suppresses a redundant relay; with at most one record per key it becomes meaning
       and asserts exactly one pending record for that key remains afterward.
 - [ ] A new test asserts a CLAIMED record for the same key is left untouched (only unclaimed
       records are superseded).
+- [ ] A new test pins the `claim_one` `except OSError: continue` behavior against a record
+      concurrently renamed out from under it by a supersede (the peer-claim race stays benign).
 - [ ] `uv run pytest tests/test_memory_maintenance.py -k supersede` passes.
 - [ ] Full suite still green: `uv run pytest`.
 
