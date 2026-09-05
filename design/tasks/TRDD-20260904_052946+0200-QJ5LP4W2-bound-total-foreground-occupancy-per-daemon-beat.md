@@ -1,9 +1,9 @@
 ---
 trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
-column: dev
+column: testing
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T10:40:00+0200
+updated: 2026-09-05T17:01:55+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -15,8 +15,8 @@ labels: [daemon, scheduling, performance, session-liveness]
 relevant-rules: []
 blocked-by: []
 npt: []
-eht: []
-implementation-commits: []
+eht: [9FONCK33]
+implementation-commits: [5f7f3dba]
 external-refs: [TRDD-8BXMNQ4T]
 ---
 
@@ -24,6 +24,46 @@ external-refs: [TRDD-8BXMNQ4T]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
+- **CANDIDATE 3 IMPLEMENTED 2026-09-05T16:50 — column `dev` → `testing`.** `scripts/daemon.py`
+  now carries a per-beat foreground budget (`_FOREGROUND_BUDGET_SEC`, env-tunable, default
+  30s) + survival floor (`_FOREGROUND_FLOOR = {oauth-rotator-tick, fleet-stop,
+  oauth-rotator-supervisor, oauth-recovery}`), following the draft's §D patch with one
+  addition the draft flagged as its own §F risk 1 and left unresolved: **non-floor dispatch
+  order is now oldest-`_last_run()`-first** (`_run_due_tasks` sorts the whole `tasks` list once
+  before the dispatch loop, mirroring `_next_bulk_task`'s own `min(due, key=_last_run)`), so a
+  task near the tail of the fixed 15-item registration order is no longer structurally the one
+  that always pays for an over-budget beat. Floor tasks bypass the budget check outright, so
+  their position in that sort is immaterial to whether they run. `Task.run()` now returns the
+  measured `dt` (int seconds) instead of `None`, which the loop accumulates into `budget_used`.
+  New test `tests/test_daemon_foreground_budget.py` (5 tests, all real `Task` objects, no
+  mocks): floor-runs-despite-exhausted-budget, non-floor-deferred-and-stays-due,
+  transition-log-line-once, **oldest-last-run-first dispatch (list order deliberately reversed
+  from age order — a pass-by-position implementation fails this test)**, and
+  0-budget-defers-everything. All 5 pass; `ruff`/`mypy`/`pyright` all clean on the whole repo;
+  `tests/test_daemon_foreground_budget.py` + `tests/test_daemon_integration.py` green except
+  one PRE-EXISTING, UNRELATED flake in `test_daemon_does_not_write_reload_flag_when_nothing_updated`
+  (a stub-spawn timing assertion, no foreground-budget code in its path); full
+  `tests/test_daemon*.py` run separately, see next bullet or the impl report for the count.
+- **NEXT ACTION (2026-09-05T17:01:55+0200):** box 4 — after the next janitor publish,
+  re-measure from `daemon.log` over ≥24 h (stall count, beat lengths, any
+  `foreground budget … exceeded` lines) and record the numbers here; box 3 — the replay
+  harness is TRDD-9FONCK33 (an EHT of this card: this card cannot reach `complete` until
+  it is terminal). Column stays `testing` until both boxes are answered. Landed as
+  5f7f3dba; coordinator-verified gates (ruff, mypy, pyright 0/0/0, budget+integration
+  16 passed).
+- **§F risks, resolved per coordinator ruling (not re-litigated here):** risk 1 (starvation by
+  list position) — fixed by the oldest-last-run-first sort above, as a one-line addition inside
+  `_run_due_tasks` rather than a shared helper with `_next_bulk_task` (kept the two functions
+  independent per instruction). Risk 2 (yield interaction) — left as-is; no floor-vs-yield
+  logic added. Risk 3 (replay harness for box 3) — explicitly OUT OF SCOPE; box 3 stays
+  unticked, follow-up work. **Risk 4 (30s budget default) — this is a DESIGN DEFAULT WITH NO
+  ADVISOR SIGN-OFF AND NO MEASUREMENT BEHIND IT.** It halves the 60s survival cadence for
+  headroom; nothing in the card's data says 30s is right over e.g. 20s or 40s, only that some
+  bound beats none. The advisor was unavailable when this was drafted (plugin disabled,
+  verified at `~/.claude/settings.json:412`; no built-in advisor tool) and the coordinator
+  ruled under the standing autonomous-drain permission (ATOM-CCRI-ZRT2), not as an advisor
+  verdict — recorded here so the next reader does not inherit 30s as settled.
+- *(Superseded — kept for history, no longer the next action:)*
 - **BOX 1 RULED 2026-09-05 — the advisor gate is SATISFIED by the standing rule's own exemption, and the card is in `dev`.** Both advisor paths failed (`fable-advisor@z13z4ck-plugins` is `false` at `~/.claude/settings.json:412`; no built-in advisor tool), and the advisor rule says that when both fail the session proceeds on its own analysis and states so — which the ticked box now does. Ruled by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2), not by enabling the plugin (that is the USER's settings file and needs a restart).
 - **NEXT ACTION: candidate 3 (per-beat foreground budget + survival floor) is being drafted as a REVIEWABLE PATCH with tests before anything touches `daemon.py`**; candidate 4 (cap `session-liveness` alone) is the fallback because the 100 s+ beats it would truncate are still unexplained. An adversarial review fork is a second reader — a weaker one than the advisor, since a fork inherits the author's context — and is stated as such, not as equivalent.
   *(Superseded bullets, kept in git history: "BLOCKED ON ACCEPTANCE BOX 1 … working as intended", the disabled-plugin diagnosis, and "NEXT ACTION needs the USER: (a) re-enable … or (b) waive" — all true until 10:40 today.)*
@@ -156,10 +196,23 @@ bounds that **sum** — only individual subprocess workloads are capped
 - [x] The fable advisor is consulted before any `scripts/daemon.py` scheduling change
       is written. **Ruled 2026-09-05: SATISFIED BY THE RULE'S OWN EXEMPTION.** Both advisor paths failed (plugin disabled at `~/.claude/settings.json:412`; no built-in advisor tool) and the advisor rule states that when both paths fail the session proceeds on its own analysis and SAYS SO — which this box now does. The consult was wanted for choosing between candidates 3 and 4 and for the priority floor; that judgment is made on this card by the main session, with the adversarial review fork as the second reader. This is a scheduling change to a machine-wide singleton that owns
       OAuth survival — the standing rule applies with force, not as a formality.
-- [ ] A mechanism is chosen with the reason recorded, INCLUDING why the rejected
+- [x] A mechanism is chosen with the reason recorded, INCLUDING why the rejected
       candidates above stay rejected (or what new evidence revives one).
+      **DONE 2026-09-05: candidate 3 implemented in `scripts/daemon.py`** (per-beat
+      foreground budget + survival floor + oldest-last-run-first non-floor dispatch, see the
+      STATE block above). Candidates 1/2 stay rejected for the reasons already recorded in
+      "Candidate mechanisms" (bulk lane serialisation risk; sub-60s bodies defeat a per-body
+      deadline). Candidate 4 stays the documented fallback, not revived — no new evidence.
+      Evidence: `tests/test_daemon_foreground_budget.py::test_floor_task_runs_even_after_budget_exhausted`,
+      `::test_deferrable_task_past_budget_is_skipped_and_stays_due`,
+      `::test_non_floor_dispatch_is_oldest_last_run_first_not_list_position`.
 - [ ] A test pins the bound, and `oauth-rotator-tick` is shown still firing on
       cadence with the worst measured occupancy pattern replayed.
+      **NOT DONE 2026-09-05 — explicitly OUT OF SCOPE per coordinator ruling.** The synthetic
+      tests above pin the mechanism (budget/floor/ordering) with short controlled durations,
+      not the worst-measured occupancy pattern. The replay harness itself (reading the pattern
+      as a parameter from the widest available log window, per the box's own annotation below)
+      is separate follow-up work — building it is not part of this box-1-gated patch.
       **⚠ THE OCCUPANCY PATTERN IS A PARAMETER, NOT A CONSTANT (2026-09-05).** Take it
       from the WIDEST window available when the harness runs. 8BXMNQ4T's snapshot maxes at
       ~78 s and the 32 h window at **191 s**, so a harness built to the snapshot pins a
