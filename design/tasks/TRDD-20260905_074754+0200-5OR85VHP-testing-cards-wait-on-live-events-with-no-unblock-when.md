@@ -3,7 +3,7 @@ trdd-id: 5OR85VHP
 title: most testing cards are waiting on a live event with no machine-checkable wait condition
 column: todo
 created: 2026-09-05T07:47:54+0200
-updated: 2026-09-05T10:47:12+0200
+updated: 2026-09-05T10:58:30+0200
 current-owner: main-session
 task-type: docs
 priority: low
@@ -59,30 +59,6 @@ gates ran. What the column cannot express is *"built, and now waiting for the wo
 produce the event that proves it"*, so a reader cannot tell an actively-tested card from
 one that has been waiting a week for a rate-limit wall.
 
-## ⚠ CORRECTION — option 2 is NOT constrained the way this card first said
-
-The first version of this section argued that `blocked` was awkward because *"`blocked-by:`
-must name what blocks it, and 'a rate-limit wall has not happened yet' is not another
-card."* **That is false, and it is false in the direction that made my preferred option look
-better** — a card presenting a fake constraint against one of its own choices is steering,
-not offering.
-
-`blocked-by:` on THIS board does not name cards. Values read from it the same day:
-`[user-present-supervised-hard-restart-trial]` (56d24c02),
-`[user-decision-exempt-subset-applier]` (WP7TCRME), `[peer-repo-hub-lane-wiring]`
-(9ZPU69UC) — all prose labels naming a CONDITION. I filed 3BQM5GH7's own `blocked-by:`
-following exactly that convention hours earlier, then wrote a paragraph claiming it was not
-allowed.
-
-So **option 2 is fully available**: `blocked-by: [next-scoped-rate-limit-wall]` plus
-`unblock-when: [log:...]`, where `blocked-by:` is the human-readable label and
-`unblock-when:` carries the machine-checkable predicate `trdd-drift.py` auto-restores on.
-
-**This is a vocabulary question, not a bookkeeping one**, which is why it is its own card
-and not a sweep. TRDD-QJ5LP4W2's notes already recorded the sibling gap — *"the 22-column
-vocabulary has no state for 'this card's work is DONE and it waits only on an EHT'"*. This
-is the same shape with a different waiter: done, waiting on an EVENT.
-
 ## Do NOT mass-edit the board to close this
 
 The kanban rule is explicit that a stalled board is repaired per-card, not by script: each
@@ -99,10 +75,13 @@ One of, and the choice is the work:
    down where a reader meets it, so the ambiguity is documented rather than discovered.
 2. **Give the waiting cards an `unblock-when:` with a `log:` predicate** and accept the
    `blocked` column with a `blocked-by:` naming the event. Machine-checkable, and
-   `trdd-drift` already implements the auto-restore.
+   `trdd-drift` already implements the auto-restore. **This is well-formed on this board:
+   `blocked-by:` here names a CONDITION, not a card** — live values include
+   `[user-present-supervised-hard-restart-trial]` and `[peer-repo-hub-lane-wiring]` — so
+   `blocked-by: [next-scoped-rate-limit-wall]` + `unblock-when: [log:...]` fits the existing
+   convention, with `blocked-by:` the human label and `unblock-when:` the predicate.
 3. **Propose a vocabulary addition.** The 22 columns are USER-ratified (`PRRD G2.1`), so
-   this is a proposal, not a change — and it must clear the bar of being worth a column
-   rather than a field.
+   this is a proposal, not a change.
 
 ## Acceptance criteria
 
@@ -111,6 +90,15 @@ One of, and the choice is the work:
       `blocked-by:` names a real event rather than a restatement of the box.
 
 ## Notes and lessons learned
+
+- **I argued a FAKE CONSTRAINT against one of this card's own options, and the disproof was
+  in my own session.** The first version carried a section explaining why `blocked` was
+  awkward: *"`blocked-by:` must name what blocks it, and 'a rate-limit wall has not happened
+  yet' is not another card."* False — I had read three condition-naming `blocked-by:` values
+  off this board two hours earlier, and filed one myself in that convention. **A card that
+  presents a fake constraint against one of its choices is steering, not offering**, and the
+  tell is that the error ran in the direction that favoured the option I preferred. Check
+  every objection embedded in an option you are not recommending.
 
 - **An honest column can still be an uninformative one.** These cards are not lying —
   `testing` is defensible for every one of them. The defect is that the column collapses
