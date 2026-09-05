@@ -2,7 +2,7 @@
 name: janitor-gh-reply-monitor
 description: "how does the janitor notice a reply to a github thread it opened / why did the standalone github-issues-monitor skill die on restart / gh-reply-watch vs github-issues-watch difference / where does the gh issues monitor registry live / why is gh_register_hook a plugin hook not a settings.json hook / a hook cannot call the Monitor tool / how does the janitor avoid replaying every old thread as new / how is a GitHub reply injection defended against / what does sanitize_for_drift_line do / how does the registry know which threads this project opened / why does the poller run as uv run --script not chmod +x / where does registry.json and state.json actually live / does moving a checkout orphan the gh-reply registry / why did the standalone skill's hook die after a plugin update / does gh-reply-watch work outside the ai-maestro harness / how often does the gh reply poller run / what triggers a baseline-only first fire for gh-reply-watch"
 ocd: 2026-08-02
-lmd: 2026-08-02
+lmd: 2026-09-05
 metadata:
   node_type: memory
   type: project
@@ -75,7 +75,7 @@ The poller is NOT `chmod +x`; run it as `uv run --script`, never by path.
 
 ## See also
 
-- [[janitor-detector-and-hook-roster]] — the `github-issues-watch` detector this page
+- [[janitor-detector-and-hook-roster-list]] — the `github-issues-watch` detector this page
   is distinct from (new issues on THIS repo, vs replies to threads this project opened).
 
 ## Notes and lessons learned

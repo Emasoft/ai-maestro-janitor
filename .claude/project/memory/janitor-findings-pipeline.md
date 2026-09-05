@@ -2,7 +2,7 @@
 name: janitor-findings-pipeline
 description: "where do janitor findings/drift lines actually get recorded / what is the findings ledger / where does a sev>=HIGH finding get pushed to a human / what does janitor-findings show / findings-ledger.ndjsonl format / notify.py human channel gates / how does SessionStart surface unread findings / the lint count jumped and the corpus looks like it is rotting / are two findings counts even comparable / a checker printed nothing did it even run / silence cannot distinguish clean from did-not-look / a detector reported zero findings and I assumed it was clean / how many detectors ran and over what scope / stale binary reported old counts after a fix / did the memory corpus actually decay / how to compare a lint count across linter versions / memgrep --version carries the build commit / what does findings_ledger.record do / the alert file was updated minutes ago so I trusted its numbers / mtime is fresh but the message inside is stale / I quoted a stored alert message as a current measurement / I relayed a remedy that did not apply on this host"
 ocd: 2026-08-02
-lmd: 2026-08-29
+lmd: 2026-09-05
 metadata:
   node_type: memory
   type: project
@@ -65,7 +65,8 @@ So a finding count is not enough on its own: emit the SCOPE too (`0 finding(s) �
 
 ## See also
 
-- [[janitor-detector-and-hook-roster]] — the detectors that raise the findings this pipeline records.
+- [[janitor-detector-and-hook-roster-findings]] — the detector-effectiveness findings that
+  cite this pipeline as where their reports land.
 
 ## Notes and lessons learned
 
