@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T02:41:22+0200
+updated: 2026-09-05T02:46:22+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -253,33 +253,70 @@ on Q8PNPRTW for being plausible.
    - **The worker-count confound is CLOSED, in the direction that strengthens comparability:**
      soak9's tracebacks name `gw0…gw13`, i.e. 14 workers; `hw.ncpu` is 14 and today's run
      header says `created: 14/14 workers`. Same width.
-   - **LOAD IS REFUTED as the explanation for the wall clock — on this card's own
-     start-vs-start rule.** Our run at start load **22.79 took 95.50 s**; soak9 at start load
-     **15.53 took 822.89 s**. Higher ambient load, **8.6× faster**. Whatever made the soak runs
-     take a quarter of an hour, it was not the number in the load average.
+   - **LOAD ARGUES AGAINST ITSELF HERE, BUT IS *NOT* REFUTED — and my first wording of this
+     bullet was the same error a THIRD time.** I wrote "LOAD IS REFUTED … higher **ambient**
+     load, 8.6× faster" from our 22.79-start / 95.50 s run vs soak9's 15.53-start / 822.89 s.
+     **"Ambient" is the word that was carrying the claim, and it is false.** The 1-minute
+     average is a decaying 60 s window and this loop starts runs back-to-back, so a run's
+     `load_start` IS the tail of the previous run's 14 workers — visible in the ledger, where
+     run 1's `load_end` 18.43 is run 2's `load_start` **verbatim**. soak9's figure is the
+     opposite kind of number: `/tmp/soak9.meta` reads `load averages: 15.53 16.00 15.44` —
+     flat across 1 m/5 m/15 m, with 25 users logged in, i.e. genuinely sustained. Comparing a
+     self-generated transient against sustained foreign load is exactly the apples-to-oranges
+     move Q8PNPRTW `:224-226` was retracted for, inverted.
+     *What survives:* a suite that started under a 22.79 instantaneous reading still finished
+     in 95 s, which argues against a naive "high load ⇒ slow suite" story. Nothing is refuted.
+     **The harness now records all three averages** (`1m/5m/15m` per ledger cell) so the next
+     comparison has the figure that tells a tail from sustained load. Free — `uptime` already
+     printed them.
+     *Corroborating, and it cuts the other way:* three green runs at 95.50 / 118.99 / 149.04 s
+     as the box got busier. Load clearly moves the wall clock **within this environment** — it
+     just does not reach 822 s.
    - **⇒ WHAT DID DIFFER, AND IT IS AN ENVIRONMENT DIFFERENCE, NOT A LOAD ONE: both soak runs
      report `8 subtests passed`.** That counter comes from `pytest-subtests`. It is NOT
      installed here (`pytest`, `pytest-timeout`, `pytest-xdist`), and the string `subtests`
      appears nowhere in `tests/`, `scripts/`, `pyproject.toml` or `uv.lock` **in any revision**
      (`git log -S`) — only in TRDD prose. So the soak-era plugin set is **not reproducible from
      this repo**, and the collected counts differ too (16403 then, 16417 now).
-   - *Not established, and deliberately not asserted:* whether that plugin difference explains
-     the 8.6×, and whether slowness relates to the failure at all. What IS established is that
-     a wall-clock comparison across that boundary compares two environments, so the honest
-     status of "the loop may be unable to reproduce soak9" is **open**, not shown.
+     **⚠ That `git log -S` had an unverified premise, since checked:** it proves nothing if
+     `uv.lock` is untracked — an empty result and a vacuous search look identical, the same
+     trap (1c) documents for the exit-2 collection run. **Verified 2026-09-05:
+     `git ls-files --error-unmatch uv.lock` succeeds (TRACKED) and `grep -c subtests uv.lock`
+     is 0**, so the search was real. Also checked: **no `subtests` dist-info in `.venv`** now.
+     The residual explanation is an out-of-band `uv pip install` later wiped by a `uv sync`,
+     which by construction leaves no git trace — consistent with everything observed, and
+     neither confirmed nor excluded.
+   - **⚠ THE PLUGIN FINDING IS NOT A CANDIDATE MECHANISM FOR THE 8.6×, AND MUST NOT BE READ AS
+     ONE.** It sits directly after the load bullet, which invites exactly that reading — but
+     `8 subtests passed` means eight subtests ran somewhere in 16 000, and no arrangement of
+     that explains **727 seconds**. It establishes only that the two environments **differ**.
+     **The cause of the wall-clock gap is UNIDENTIFIED.** Do not stop looking here.
+     *Speculation, labelled:* a clean ~8-10× multiplier at identical worker count is the
+     signature of per-bytecode instrumentation (coverage, a tracer), not of contention —
+     contention shows up as variance and stalls, not a uniform factor. No evidence for it; it
+     is simply the hypothesis this data most resembles.
+   - *Not established, and deliberately not asserted:* whether slowness relates to the failure
+     at all. What IS established is that a wall-clock comparison across that boundary compares
+     two environments, so the honest status of "the loop may be unable to reproduce soak9" is
+     **open**, not shown.
 
    Duration stays in the ledger as a cheap per-run regime proxy, and a PASSING run over
    `SLOW_RUN_S=250` now gets its own `slow-runs.log` line — a 400 s green run would be the
    first real evidence here and would otherwise read as an unremarkable row.
 
-   **STARTED 2026-09-05T02:40:41+0200** (a start event, not a state — see the check below) —
+   **STARTED 2026-09-05T02:45:29+0200** (a start event, not a state — see the check below) —
    `scripts_dev/k7wq2nrb_full_suite_load_loop.sh` (gitignored; the harness is scratch, the
    numbers are the record). `uv run pytest -n auto`, `MAX_RUNS=30`, `RUN_TIMEOUT=1200`,
    `SLOW_RUN_S=250`, load sampled every 15 s, every run's full output plus a per-run `ps`
    snapshot kept under
-   `reports/suite-failures/20260905_024041+0200-k7wq2nrb-full-suite-loop/`, with `ledger.tsv`
-   (run/exit/load-start/load-end/duration/summary) and, when they have content,
-   `unrelated.log`, `slow-runs.log`, `survivors.log`.
+   `reports/suite-failures/20260905_024529+0200-k7wq2nrb-full-suite-loop/`, with `ledger.tsv`
+   (run/exit/load-start/load-end/duration/summary — each load cell is now **`1m/5m/15m`**, see
+   the load bullet above) and, when they have content, `unrelated.log`, `slow-runs.log`,
+   `survivors.log`. **Read `unrelated.log` with `sort | uniq -c`, not by scanning** — over 30
+   runs the same known flake repeats and only a NEW name is worth noticing, which is why each
+   line names its failing tests rather than only a run number and exit code.
+   **Sibling dir `…024041` = third launch, superseded harness, one green run (149.04 s at
+   34.46).**
    **The sibling dirs, named absolutely so this stays true however many loops follow:**
    `…022821` = first launch, superseded harness, ONE green run at 77.53 s (the measurement
    above). `…023245` = deliberate `RUN_TIMEOUT=5` smoke test — its `exit 124` is THE CAP
@@ -310,17 +347,30 @@ on Q8PNPRTW for being plausible.
    branch (exit 124 → correct classification → break) and **no more** — it killed pytest during
    collection, where there is nothing to orphan, so calling that "end-to-end" (my previous
    commit's word) covered only the control flow. A second probe at **`RUN_TIMEOUT=45`,
-   mid-suite with all 14 workers live**: after `timeout --kill-after=30`, the per-run `ps`
-   snapshot showed **zero surviving `execnet` / `popen-gw` / `sleep 600` processes**. The chain
-   `uv` → pytest → 14 execnet workers → `/bin/sh` → `sleep 600` does get reaped.
+   mid-suite with all 14 workers live**: the per-run `ps` snapshot showed **zero surviving
+   `execnet` / `popen-gw` / `sleep 600` processes**. The chain `uv` → pytest → 14 execnet
+   workers → `/bin/sh` → `sleep 600` does get reaped.
+   **⚠ BY *TERM*, NOT BY THE `--kill-after` BACKSTOP — the ledger says so.** That probe's
+   `duration_s` is **45**, the TERM deadline exactly; had the KILL been needed, `timeout` would
+   not have returned until 75. So `--kill-after=30` contributed **nothing** to this
+   observation and remains **untested insurance**. Crediting it (my previous wording) would
+   tell a reader the backstop was exercised when it never ran.
    *Still NOT proven:* propagation when a worker is genuinely wedged draining a pipe — which is
    the case the cap exists for. A healthy worker is killable by construction.
    **⚠ AND THE CENSUS'S FIRST ANSWER WAS A FALSE POSITIVE — worth recording because it would
    have invented evidence.** It reported exactly one survivor: the `zsh -c` wrapper running the
    census, whose argv carries the search pattern. Snapshotting `ps` to a file defeats *grep's*
-   self-match but not the *invoker's*. The census now drops `shell-snapshots` / the loop's own
-   name before counting. Uncorrected, it would have produced a standing non-zero survivor count
-   — i.e. manufactured support for line 77's cross-run-state hypothesis out of its own shell.
+   self-match but not the *invoker's*. Uncorrected, it would have produced a standing non-zero
+   survivor count — manufactured support for line 77's cross-run-state hypothesis, out of its
+   own shell.
+   **⚠ AND THE FIRST FIX WAS WORSE THAN THE BUG, WHICH IS THE PART WORTH REMEMBERING.** It
+   filtered argv TEXT (`shell-snapshots|k7wq2nrb_full_suite`), trading a **loud** false
+   positive for a **silent** false negative: any real orphan whose argv happened to carry the
+   repo path would be dropped and the census would confidently print 0. A census that fails
+   silently is worse than no census. It now discriminates on **identity and executable** —
+   `awk` drops this script's own pid and its parent's, then the pattern anchors on
+   `.venv/bin/python3` (which a `zsh -c` wrapper cannot match however it quotes) or a command
+   field that IS `sleep 600`. Re-run against the 45 s probe's stored snapshot: still 0.
    Row 2's instrumentation was landed FIRST, on purpose: a failure caught by a loop started
    before it would have thrown its evidence away exactly as every failure so far has.
    **⚠ SCOPE — the loop's stop condition is WIDER than the instrumentation's reach.** It stops
