@@ -3,7 +3,7 @@ trdd-id: ZVZAFQY6
 title: session-liveness reads the same pane up to three times per instance on the field-busy path
 column: todo
 created: 2026-09-05T06:55:34+0200
-updated: 2026-09-05T08:41:57+0200
+updated: 2026-09-05T10:04:18+0200
 current-owner: main-session
 task-type: docs
 priority: low
@@ -117,10 +117,15 @@ Full analysis: `reports/zvzafqy6-pane-read-staleness/20260905_071916+0200-stalen
 
 ## Acceptance criteria
 
-- [ ] `daemon.py:1995`'s comment names which paths it covers.
-- [ ] A comment at the field-busy guard records WHY the two reads are independent — the
-      unsafe direction of each, in one line — so the next person to notice the redundancy
-      finds the answer at the code rather than re-deriving it here.
+- [x] `daemon.py:1995`'s comment names which paths it covers. **Done 2026-09-05:** a SCOPE
+      paragraph says "no extra osascript" is true of the POLICY TABLE (`act()` gets `state=`
+      and skips its own read) and is NOT a claim about the beat, since the guard below takes
+      two more captures and the comment predates it.
+- [x] A comment at the field-busy guard records WHY the two reads are independent.
+      **Done 2026-09-05:** both unsafe directions named at the guard (stale EMPTY ⇒ type into
+      a dialog; stale OURS ⇒ Enter on a human's line, with `pane_policy._submit` testing only
+      `EMPTY` and never whose text it is), plus the rule that the cheaper design must make the
+      READ cheaper or the path rarer, never share a capture.
 - [ ] ~~At most one `read_pane_text` per instance per beat~~ **REFUSED, see STATE.**
 - [ ] ~~A test pins the read count~~ **REFUSED — it would pin the unsafe design.** If
       anything is pinned it is the opposite: that reads 2 and 3 each take their OWN capture.

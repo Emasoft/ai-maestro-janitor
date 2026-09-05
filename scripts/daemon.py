@@ -1990,12 +1990,16 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # frame itself here, once, right before typing. An unreadable pane stays permissive
         # (same contract as `command_plan_field_busy`).
         #
-        # TRDD-N954KWUC P3: this read is now the ONE capture this beat takes of this pane —
-        # it feeds both the decline below AND `pane_actuate.act` at the bottom (passed as
-        # `state=`), so routing every keystroke through the policy table costs no extra
-        # osascript (Proposal §5). `pane_state.parse` is a superset of the raw
-        # `retry_wedge_attempt_at_tail` probe it replaces: same anchors, same attempt number,
-        # plus the queued-command count the flush law needs.
+        # TRDD-N954KWUC P3: this capture feeds both the decline below AND `pane_actuate.act`
+        # at the bottom (passed as `state=`), so routing every keystroke through the policy
+        # table costs no extra osascript (Proposal §5). `pane_state.parse` is a superset of the
+        # raw `retry_wedge_attempt_at_tail` probe it replaces: same anchors, same attempt
+        # number, plus the queued-command count the flush law needs.
+        #
+        # SCOPE (TRDD-ZVZAFQY6, 2026-09-05): "no extra osascript" is true of THE POLICY TABLE
+        # — `act()` receives `state=` and skips its own read (`pane_actuate.py:174`). It is NOT
+        # a claim about the beat: the field-busy guard below takes TWO more captures of this
+        # same pane, deliberately, and this comment predates it. Read on for why they must.
         pane = pane_state.read(inst.terminal)
         if (
             pane is not None
@@ -2030,6 +2034,19 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # exact failure that happened that day. Read the target's OWN input field back
         # first; refuse ONLY when it is confirmed non-empty on a readable channel — see
         # `command_plan_field_busy` for why an unreadable channel stays permissive.
+        #
+        # THE NEXT TWO CALLS EACH TAKE THEIR OWN CAPTURE OF THIS PANE, AND THAT IS THE POINT
+        # (TRDD-ZVZAFQY6 investigated deduplicating them and REFUSED). Both have an UNSAFE
+        # direction, so a shared capture buys ~15 s of osascript by widening a race:
+        #   · `command_plan_field_busy` — stale EMPTY ⇒ a dialog opened since and we type into
+        #     it. That race is irreducible; reading LATE is what keeps the window small, and
+        #     reusing an older capture is what widens it.
+        #   · `field_holds_our_queued_command` — stale OURS ⇒ a human typed over our command,
+        #     the cached text still matches our vocabulary, and `act(OWN_COMMAND_UNSUBMITTED)`
+        #     presses Enter on THEIR line. Nothing downstream re-checks: `pane_policy._submit`
+        #     tests only `input_field.kind == EMPTY`, never whose text it is.
+        # So the cost here is the price of the guard. Make the READ cheaper or this path
+        # rarer; never share a capture.
         if fleet_inject.command_plan_field_busy(inst.terminal, plan):
             # janitor#261: BEFORE declining, ask WHOSE text is in the field. The busy check
             # answers only "non-empty", and this log used to assert a cause it never tested —
