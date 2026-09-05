@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-04T14:32:43+0200
+updated: 2026-09-05T05:09:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -21,6 +21,34 @@ external-refs: [TRDD-8BXMNQ4T]
 ---
 
 # Bound total foreground occupancy per daemon beat
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
+
+- **BLOCKED ON ACCEPTANCE BOX 1, WHICH IS THIS CARD'S OWN GATE, AND IT IS WORKING AS
+  INTENDED.** Box 1 requires the fable advisor before any `scripts/daemon.py` scheduling
+  change is *written*. Attempted 2026-09-05: `Agent(subagent_type: "fable-advisor:advisor")`
+  → **"Agent type not found"**.
+- **CAUSE — diagnosed, single, and NOT a defect:** `~/.claude/settings.json:412` carries
+  `"fable-advisor@z13z4ck-plugins": false`. The plugin is installed and COMPLETE (cache
+  `z13z4ck-plugins/fable-advisor/{1.4.0,1.5.0,1.6.0,1.6.1}`, and **1.6.1 does ship
+  `agents/advisor.md`**) — it is simply DISABLED, so the agent never registers. There is also
+  no built-in advisor tool in this session, so **both advisor paths named by the standing rule
+  failed**, which that rule requires be stated explicitly rather than silently skipped.
+  - *An earlier reading of this — "1.6.1 ships an empty `agents/` dir" — was WRONG*, an `ls`
+    misread corrected by `find … -type f | wc -l` = 1 before it reached any commit. Do not
+    resurrect it; there is nothing wrong with the install.
+- **DO NOT write the scheduling change to satisfy the card without the consult.** This card's
+  own box says the rule applies here *"with force, not as a formality"* — a single-threaded
+  machine-wide daemon that owns OAuth survival. Enabling the plugin is a change to the USER's
+  own `~/.claude/settings.json` and takes effect only after a restart, so it is the USER's
+  call, not something to flip mid-session to unblock a chore.
+- **NEXT ACTION — one of, and it needs the USER:** (a) re-enable `fable-advisor` and restart,
+  then run the consult; or (b) the USER waives box 1 for this card. Nothing else on the card
+  is startable, because every remaining box is downstream of the mechanism choice box 1 gates.
+- **The analysis is NOT the blocker — it is done.** Candidates 1 and 2 are rejected with
+  reasons, 3 and 4 stand, and the transferable structure (decide the budget/deferral set ONCE
+  before the loop) is settled below. The consult is for choosing between 3 and 4 and for
+  designing the priority floor, which has no precedent in `daemon.py`.
 
 ## Why this exists — the measurement is done, the decision is not
 
