@@ -81,7 +81,19 @@ failure is benign and self-signalling: the skip clause keeps the resume moving, 
 an `after` key to APPEAR, so a skipped run leaves the box unticked rather than falsely ticked.
 The path-free fix — hand the resumed session a slash command, which resolves through the live
 plugin registry and cannot go stale — needs a command that does not exist yet.
-`${CLAUDE_PLUGIN_ROOT}` is NOT a substitute: verified unset in a plain Bash call.
+`${CLAUDE_PLUGIN_ROOT}` is NOT a substitute for a reason that does NOT rest on an observation:
+it points at the same `cache/<version>/` directory, so it would RELOCATE this limit, not remove
+it. *(It was also unset in a plain Bash call in the session that wrote this — one environment,
+not the resumed session's. Do not carry that forward as a general fact; the version-pinning
+argument is the load-bearing one.)*
+
+**IF BOX 5 IS STILL UNTICKED IN A WEEK, here is the discriminator, so nobody re-derives it:**
+a missing `after` key means only *"the after-phase did not run"* — it does not say why. The
+causes are distinguishable: the harness's own stderr/exit separates "file not found" (the
+stale-version case) from "ran and failed", and the resumed session's transcript shows whether
+the command was attempted at all (directive ignored / keystrokes never landed / never resumed).
+The failure is self-SIGNALLING, not self-DIAGNOSING, and that difference is why this note
+exists.
 
 Pinned by a test on the spawn payload
 (`tests/test_external_handoff_clear.py`) that asserts the PROPERTIES rather than the literal

@@ -446,8 +446,11 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str
         # clause below keeps the resume moving, and box 5 needs an `after` key to appear in the
         # JSON, so a skipped run leaves the box unticked rather than falsely ticked. The
         # path-free fix (hand the session a slash command, which resolves through the live plugin
-        # registry) needs a command that does not exist yet; `${CLAUDE_PLUGIN_ROOT}` is NOT a
-        # substitute — verified unset in a plain Bash call.
+        # registry) needs a command that does not exist yet. `${CLAUDE_PLUGIN_ROOT}` is NOT a
+        # substitute for a reason that does NOT depend on an observation: it points at the same
+        # `cache/<version>/` directory, so it would relocate this limit, not remove it. (It was
+        # also unset in a plain Bash call in the session that wrote this — but that is ONE
+        # environment, not the resumed session's, so do not read it as a general fact.)
         "directive": (
             f'run: uv run --script --quiet "{_SCRIPTS / "handoff_clear_verify.py"}" '
             "--phase after (a diagnostic - if that command fails, skip it and continue with "
