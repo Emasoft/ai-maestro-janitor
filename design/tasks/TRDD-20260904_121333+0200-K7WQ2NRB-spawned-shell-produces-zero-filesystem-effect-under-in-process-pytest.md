@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest �
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T03:53:28+0200
+updated: 2026-09-05T03:54:57+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -31,9 +31,16 @@ external-refs: [TRDD-Q8PNPRTW]
   that twice).
 - **STATUS: INSTRUMENTED; NOT REPRODUCIBLE ON DEMAND.** `6268dbeb` landed the deliverable that
   never needed a reproduction — row 2 keeps its child's stderr instead of discarding it, so the
-  next real failure carries its own evidence. **~44 runs across two configurations produced ZERO
-  failures** (14 of a 2-test selection at load 19.5-36.3; **30 full-suite `-n auto`, 30/30 green,
-  89-187 s**). **Brute force is EXHAUSTED — do not spend more on it.**
+  next real failure carries its own evidence. **Reported APART, because they are different
+  populations and this card has retracted config-confounded aggregates twice:** 14/14 in a
+  2-test selection at load 19.5-36.3, and 30/30 full-suite `-n auto` at 89-187 s. **Neither
+  reached soak9's regime.** *A summed "~44 runs" would only sound more conclusive than either
+  half.*
+  **BRUTE FORCE IS EXHAUSTED — as a SPEND, not as a finding.** 30 runs bought zero information
+  and the marginal run buys the same. What the 30 bound is the failure's RATE in this regime;
+  they do not show non-reproduction — these rows are known-intermittent (row 1: 1/3 solo in one
+  batch, 0/4 in another), so 30 greens are consistent with a per-run rate under 10%, which would
+  still redden a suite every few days.
 - **THE ONE LIVE UNKNOWN: the 8.6× wall-clock gap to soak9 (822.89 s vs 89-187 s) is
   UNEXPLAINED.** Load is argued against, not refuted. The environments demonstrably DIFFER (both
   soak runs report a `subtests` counter no tracked revision ever declared) — but 8 subtests
@@ -73,18 +80,28 @@ external-refs: [TRDD-Q8PNPRTW]
 - **⇒ THE LOOP FINISHED: 30/30 GREEN, AND THAT IS THE STEP-0 RESULT.** Zero non-zero exits, zero
   entries in `unrelated.log`, `survivors.log` or `slow-runs.log`. Durations **89–187 s, mean
   124 s**. Ledger: `reports/suite-failures/20260905_024917+0200-…/`.
-  **What it establishes:** the failure does NOT reproduce in this configuration — ~44 runs now
-  across two configurations (14 two-test at load 19.5–36.3, plus these 30 full-suite `-n auto`)
-  with **not one failure**. Brute force is exhausted; do not spend more on it.
+  **What it establishes:** the failure did not reproduce in **30 attempts at 89–187 s**, which
+  BOUNDS ITS RATE in this regime. *It does not show non-reproduction* — these rows are
+  known-intermittent, so 30 greens are consistent with a rate under 10%. Brute force is exhausted
+  as a SPEND. **Kept apart from the earlier 14/14 two-test runs on purpose:** summing them into
+  "~44" re-merges the two populations this card spent three commits separating.
   **What it does NOT establish, and this is the sharper half:** every one of the 30 ran at
   89–187 s, and **soak9 — the run that FAILED — took 822.89 s.** The loop never once entered the
   regime the failure was observed in. So "the loop cannot reproduce soak9" now has 30 data
   points behind it rather than 3, and the reason is still that these are not samples from that
   population. The 8.6× remains UNEXPLAINED (see the load bullet above).
-  **Also negative, and worth recording:** the survivor census — the version with a positive
-  control — found **zero orphans after all 30 runs**. That is a real negative result for line
-  77's cross-run-state hypothesis, bounded by the known gap: it cannot see the
-  `/bin/sh …fake_capture.sh` parent shell.
+  **⚠ THE CENSUS RESULT IS NOT EVIDENCE ABOUT LINE 77, AND I FIRST WROTE THAT IT WAS.** I called
+  "zero orphans after all 30 runs" a real negative result for the cross-run-state hypothesis. It
+  is not. That hypothesis predicts leftover state from a FAILING or TIMED-OUT run — a `sleep 600`
+  whose parent died mid-`communicate()`, a worker orphaned by a wedge. **All 30 runs exited 0 and
+  reaped their own children by construction**, so the census observed that healthy runs clean up,
+  which nobody doubted. The hypothesis was never in a position to be tested. Reading a passing
+  run's silence as information is the same error this card corrects at (1c) — absence of a
+  section is absence of output only for a run that FAILED.
+  **What is true, and is worth as much:** the census is armed and positive-controlled (14 live /
+  0 post-kill), so it will speak the first time a run does fail — exactly like row 2's stderr.
+  It has simply not been exercised yet, and it still cannot see the `/bin/sh …fake_capture.sh`
+  parent.
 - **(Historic) A 30-RUN LOOP WAS RUNNING WHEN THIS CARD WAS BACKBURNERED** —
   `reports/suite-failures/20260905_024917+0200-…`, started 02:49:17, ~2 min/run, stopping on the
   first red run or at run 30. Recorded here because nothing outside a `reports/` dir said so.
