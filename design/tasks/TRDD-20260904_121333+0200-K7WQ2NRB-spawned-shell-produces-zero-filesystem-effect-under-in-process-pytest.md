@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest �
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T03:54:57+0200
+updated: 2026-09-05T03:56:23+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -39,8 +39,15 @@ external-refs: [TRDD-Q8PNPRTW]
   **BRUTE FORCE IS EXHAUSTED — as a SPEND, not as a finding.** 30 runs bought zero information
   and the marginal run buys the same. What the 30 bound is the failure's RATE in this regime;
   they do not show non-reproduction — these rows are known-intermittent (row 1: 1/3 solo in one
-  batch, 0/4 in another), so 30 greens are consistent with a per-run rate under 10%, which would
-  still redden a suite every few days.
+  batch, 0/4 in another). **The bound, computed rather than asserted:** 0 failures in 30 trials
+  gives a one-sided 95% upper bound of **9.50%** (rule of three: 10%). More usefully, the
+  likelihood of seeing 30 straight greens is **0.215 at a 5% rate, 0.042 at 10%, 0.001 at 20%**
+  — so a 20% per-run rate is effectively excluded, while **5% is entirely consistent with what we
+  saw**, and 5% still reddens a daily suite about once a week.
+  **⚠ THE BINOMIAL ASSUMES INDEPENDENT TRIALS, WHICH IS EXACTLY WHAT A LOAD-GATED FAILURE
+  VIOLATES.** If the failure needs a regime these 30 runs never entered, its per-run rate *within
+  that regime* is untouched by any of this arithmetic — the bound describes the runs I took, not
+  the population I could not sample. Treat the numbers as a ceiling on THIS regime, nothing more.
 - **THE ONE LIVE UNKNOWN: the 8.6× wall-clock gap to soak9 (822.89 s vs 89-187 s) is
   UNEXPLAINED.** Load is argued against, not refuted. The environments demonstrably DIFFER (both
   soak runs report a `subtests` counter no tracked revision ever declared) — but 8 subtests
@@ -98,10 +105,17 @@ external-refs: [TRDD-Q8PNPRTW]
   which nobody doubted. The hypothesis was never in a position to be tested. Reading a passing
   run's silence as information is the same error this card corrects at (1c) — absence of a
   section is absence of output only for a run that FAILED.
-  **What is true, and is worth as much:** the census is armed and positive-controlled (14 live /
-  0 post-kill), so it will speak the first time a run does fail — exactly like row 2's stderr.
-  It has simply not been exercised yet, and it still cannot see the `/bin/sh …fake_capture.sh`
-  parent.
+  **⚠ BUT THE WITHDRAWAL ITSELF OVER-CORRECTED — the 30 runs DID establish something, just not
+  line 77.** They establish that **the loop's own iteration boundary is clean**: 30 consecutive
+  runs, each starting into the box the previous one left, with zero orphaned workers and zero
+  `sleep 600` survivors. That is direct evidence the harness does not leak on the HEALTHY path —
+  the live worry that `--kill-after=30` and the census were built for — and **it is what makes
+  the 30 greens interpretable at all.** Without it, a leak would mean run N+1 executed in polluted
+  state and no green could be read as "the code works" rather than "the pollution happened not to
+  bite". Narrow claim, real result; it is line 77's FAILURE-induced leakage that went untested.
+  **Also true:** the census is armed and positive-controlled (14 live / 0 post-kill), so it will
+  speak the first time a run does fail — exactly like row 2's stderr. It still cannot see the
+  `/bin/sh …fake_capture.sh` parent.
 - **(Historic) A 30-RUN LOOP WAS RUNNING WHEN THIS CARD WAS BACKBURNERED** —
   `reports/suite-failures/20260905_024917+0200-…`, started 02:49:17, ~2 min/run, stopping on the
   first red run or at run 30. Recorded here because nothing outside a `reports/` dir said so.
