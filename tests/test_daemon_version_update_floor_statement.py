@@ -56,6 +56,10 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     proj = tmp_path / "proj"
     (proj / ".janitor").mkdir(parents=True)
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gsd))
+    # The two stamps this module exercises live under control_dir(); pin it to tmp so a
+    # test run can never leave a last-raised / logged-for stamp in the real control dir
+    # (which would silence the production statement on this host for 4 h).
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "control"))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
     for fn in (state.project_root, state.janitor_root, state.state_dir, state.log_dir):
         fn.cache_clear()

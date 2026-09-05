@@ -1,9 +1,9 @@
 ---
 trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
-column: dev
+column: testing
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-05T17:42:40+0200
+updated: 2026-09-05T17:45:30+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -20,6 +20,14 @@ relevant-rules: []
 # The two daemons update the plugin by DIFFERENT mechanisms, and only one is prompt
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
+
+**2026-09-05 17:45 — column `dev` → `testing`.** Nothing further is developable on this card: box 3
+landed in two halves (detector line 3903ca44, daemon statement ab381b19); box 2 is a LIVE
+measurement (publish→installed latency under the server with option 4 in effect on this host) that
+becomes possible only at the next janitor release. `dev` would assert active work; `testing` with a
+named live event is the shape the testing-column triage already accepts. Post-review touch-ups in
+the same commit as this line: the daemon passes the gate's own membership test instead of a
+constant, and a failed logged-for write now logs its cause instead of being swallowed.
 
 **2026-09-05 16:38 — the peer's option-4 commit `9725bebf` is in the running server's checkout on
 this host, and is NOT on GitHub.** Measured read-only: `gh api repos/Emasoft/ai-maestro/commits/9725bebf`

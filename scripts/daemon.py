@@ -3636,8 +3636,12 @@ def main() -> int:
                 # TRDD-A70YJLXN box 3: a no-armed-session host must not read a frozen
                 # version-update.last-run.ts as healthy or broken without being told which
                 # mechanism owns it. Runs every iteration (not budget/task-gated) so it
-                # fires regardless of which other tasks happen to be due this tick.
-                _maybe_log_version_update_floor_statement(server_owns_chore=True)
+                # fires regardless of which other tasks happen to be due this tick. The
+                # ownership argument is the gate's own membership test, not a constant, so
+                # if `yielded` ever gains a second reason the helper's contract still holds.
+                _maybe_log_version_update_floor_statement(
+                    server_owns_chore="version-update" in yielded
+                )
             # Universal per-plugin update (TRDD-YMTUPQER): consume USER-scope update requests
             # the plugin-updates detector enqueued and run them as the single writer (#7).
             # UNGATED since TRDD-E39YT9G6: the `user-plugins-update` sweep Task is retired,

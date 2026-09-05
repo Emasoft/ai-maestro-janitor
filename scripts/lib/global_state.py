@@ -863,8 +863,10 @@ def set_version_update_floor_logged_for(last_raised: int | None) -> None:
     """Persist which `last_raised` value the floor statement was just logged for."""
     try:
         state.atomic_write(_version_update_floor_logged_for_path(), "none" if last_raised is None else str(last_raised))
-    except OSError:
-        pass  # best-effort — worst case the line repeats once, never lost data
+    except OSError as exc:
+        # Not silent: while this dir is unwritable the statement repeats every loop
+        # iteration (the memory never lands), so each repeat must name its cause.
+        state.log_line("global-state", f"floor-statement memory write failed — the line repeats until this is writable: {exc}")
 
 
 def request_version_update(reason: str = "") -> None:
