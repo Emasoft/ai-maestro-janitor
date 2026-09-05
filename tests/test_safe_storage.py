@@ -238,23 +238,136 @@ def test_run_security_latch_short_circuits_without_spawning(monkeypatch: pytest.
     monkeypatch.setattr(ss.subprocess, "run", _landmine)
     ss.set_keychain_denied("test-trip")
     assert ss.keychain_denied_latched() is True
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)
     assert run.spawned is False and run.denied is True and run.ok is False
     assert ss.clear_keychain_denied() is True  # and the human clear-path removes it
 
 
-def test_run_security_timeout_trips_the_latch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """(P1.a/d) A real TimeoutExpired from the `security` subprocess bounds the call AND trips
-    the persistent latch — the flood-stopping trigger (a hung `-w` read can recur at most once)."""
+# ---------------------------------------------------------------------------
+# TRDD-3VIXO8FA — a `security` TIMEOUT is not a denial: a `may_prompt=False` (attribute-only)
+# timeout must never touch the latch, and a `may_prompt=True` timeout latches only on the
+# 3rd CONSECUTIVE occurrence (an answered op resets the count).
+# ---------------------------------------------------------------------------
+def _reset_consecutive_timeouts() -> None:
+    ss._consecutive_timeouts = 0
+
+
+def test_attribute_only_timeout_never_latches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An attribute-only (`may_prompt=False`) `security` op that times out is host load, not a
+    denial — it must leave `keychain-denied.latch` absent, even on repeated timeouts."""
     ss.clear_keychain_denied()
+    _reset_consecutive_timeouts()
 
     def _boom(*a, **k):  # type: ignore[no-untyped-def]
         raise subprocess.TimeoutExpired(cmd="security", timeout=1)
     monkeypatch.setattr(ss.subprocess, "run", _boom)
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1)
-    assert run.denied is True and run.spawned is True
-    assert ss.keychain_denied_latched() is True
+    for _ in range(5):  # well past the 3-timeout threshold that WOULD latch a may_prompt=True op
+        run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y"], timeout=1, may_prompt=False)
+        assert run.spawned is True and run.denied is False and run.ok is False
+    assert ss.keychain_denied_latched() is False, "an attribute-only timeout must never latch"
+
+
+def test_w_read_timeout_latches_on_third_consecutive_not_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `may_prompt=True` (`-w`) read latches on the 3rd CONSECUTIVE timeout, not the 1st —
+    a single transient (measured: 26 of 29 recovered) must not blind rotation."""
     ss.clear_keychain_denied()
+    _reset_consecutive_timeouts()
+
+    def _boom(*a, **k):  # type: ignore[no-untyped-def]
+        raise subprocess.TimeoutExpired(cmd="security", timeout=1)
+    monkeypatch.setattr(ss.subprocess, "run", _boom)
+
+    run1 = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    assert run1.spawned is True and run1.denied is False
+    assert ss.keychain_denied_latched() is False, "the 1st consecutive timeout must not latch"
+
+    run2 = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    assert run2.denied is False
+    assert ss.keychain_denied_latched() is False, "the 2nd consecutive timeout must not latch"
+
+    run3 = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    assert run3.denied is True and run3.spawned is True
+    assert ss.keychain_denied_latched() is True, "the 3rd consecutive timeout must latch"
+    ss.clear_keychain_denied()
+
+
+def test_answered_op_resets_the_consecutive_timeout_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An answered op between two timeouts resets the consecutive count, so 2 timeouts + an
+    answer + 2 more timeouts must NOT latch (the run of timeouts was broken)."""
+    ss.clear_keychain_denied()
+    _reset_consecutive_timeouts()
+
+    def _boom(*a, **k):  # type: ignore[no-untyped-def]
+        raise subprocess.TimeoutExpired(cmd="security", timeout=1)
+
+    class _Ok:
+        returncode = 0
+        stdout = "secret"
+        stderr = ""
+
+    monkeypatch.setattr(ss.subprocess, "run", _boom)
+    ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    assert ss.keychain_denied_latched() is False
+
+    monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _Ok())
+    ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)  # resets the count
+    assert ss._consecutive_timeouts == 0
+
+    monkeypatch.setattr(ss.subprocess, "run", _boom)
+    ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    assert ss.keychain_denied_latched() is False, "the reset run of 2 must not reach the 3-timeout threshold"
+
+
+def test_persistent_block_still_latches_on_third_consecutive_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PRESERVED behaviour: a persistently blocked keychain (every `-w` read times out) still
+    latches — that is the case the latch exists for. This card only removes the false positive
+    for an isolated/transient stall; a genuine, sustained block still trips the breaker, just
+    2 reads later than the old single-timeout trigger (3rd consecutive vs 1st)."""
+    ss.clear_keychain_denied()
+    _reset_consecutive_timeouts()
+
+    def _boom(*a, **k):  # type: ignore[no-untyped-def]
+        raise subprocess.TimeoutExpired(cmd="security", timeout=1)
+    monkeypatch.setattr(ss.subprocess, "run", _boom)
+    for _ in range(10):  # a sustained block — every op times out, no answer ever breaks the run
+        ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], timeout=1, may_prompt=True)
+    assert ss.keychain_denied_latched() is True, "a persistently blocked keychain must still latch"
+    ss.clear_keychain_denied()
+
+
+def test_denial_marker_latches_on_attribute_only_op_preserved_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PRESERVED behaviour (not a new production shape): `may_prompt` gates ONLY the
+    TimeoutExpired branch. A denial-marker stderr on a `may_prompt=False` op still latches
+    immediately, unchanged from before this card — this pins that the denial branch was left
+    untouched, not an assertion that attribute reads can produce this stderr in practice."""
+    ss.clear_keychain_denied()
+
+    class _Denied:
+        returncode = 51
+        stdout = ""
+        stderr = "SecKeychain: errSecAuthFailed / -25293 authorization denied"
+    monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _Denied())
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y"], may_prompt=False)
+    assert run.denied is True and ss.keychain_denied_latched() is True
+    ss.clear_keychain_denied()
+
+
+def test_half_open_probe_on_non_prompting_op_does_not_restamp_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A half-open probe on a `may_prompt=False` op that times out must NOT re-stamp the latch
+    (it stays at the age set by the half-open entry, and the probe's own TimeoutExpired branch
+    takes no latch action at all) — a non-prompting probe can never be evidence of a real block."""
+    ss.clear_keychain_denied()
+    ss.set_keychain_denied("old transient")
+    _backdate_latch_past_cooldown()
+
+    def _boom(*a, **k):  # type: ignore[no-untyped-def]
+        raise subprocess.TimeoutExpired(cmd="security", timeout=1)
+    monkeypatch.setattr(ss.subprocess, "run", _boom)
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y"], timeout=1, may_prompt=False)
+    assert run.spawned is True and run.denied is False
+    assert ss.keychain_denied_latched() is True, "the latch stays set (half-open entry already stamped it)"
 
 
 def test_run_security_latches_on_denial_not_on_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -267,7 +380,7 @@ def test_run_security_latches_on_denial_not_on_not_found(monkeypatch: pytest.Mon
         stdout = ""
         stderr = "SecKeychain: errSecAuthFailed / -25293 authorization denied"
     monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _Denied())
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)
     assert run.denied is True and ss.keychain_denied_latched() is True
 
     ss.clear_keychain_denied()
@@ -277,7 +390,7 @@ def test_run_security_latches_on_denial_not_on_not_found(monkeypatch: pytest.Mon
         stdout = ""
         stderr = "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain."
     monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _NotFound())
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)
     assert run.denied is False and ss.keychain_denied_latched() is False
 
 
@@ -306,7 +419,7 @@ def test_half_open_probe_recovers_latch_on_silent_success(monkeypatch: pytest.Mo
         stdout = "secret"
         stderr = ""
     monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _Ok())
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)
     assert run.spawned is True and run.ok is True and run.denied is False
     assert ss.keychain_denied_latched() is False, "a silent probe must CLEAR the latch (recovered)"
 
@@ -324,7 +437,7 @@ def test_half_open_probe_recovers_on_benign_not_found(monkeypatch: pytest.Monkey
         stdout = ""
         stderr = "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain."
     monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _NotFound())
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y"], may_prompt=False)
     assert run.spawned is True and run.denied is False and run.ok is False  # not-found, but healthy
     assert ss.keychain_denied_latched() is False, "a reachable-but-not-found probe recovers the latch"
 
@@ -342,7 +455,7 @@ def test_half_open_probe_backs_off_on_repeat_denial(monkeypatch: pytest.MonkeyPa
         stdout = ""
         stderr = "SecKeychain: errSecAuthFailed / -25293 authorization denied"
     monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _Denied())
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)
     assert run.denied is True
     assert ss.keychain_denied_latched() is True, "a re-denial must keep the latch set"
     age = ss._latch_age_seconds()
@@ -359,7 +472,7 @@ def test_fresh_latch_stays_closed_no_half_open(monkeypatch: pytest.MonkeyPatch) 
         raise AssertionError("run_security spawned during the CLOSED (fresh-latch) window")
     monkeypatch.setattr(ss.subprocess, "run", _landmine)
     ss.set_keychain_denied("fresh-trip")  # age ~0 << 600s cooldown
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)
     assert run.spawned is False and run.denied is True
     ss.clear_keychain_denied()
 
@@ -376,7 +489,7 @@ def test_cooldown_zero_disables_auto_recovery(monkeypatch: pytest.MonkeyPatch) -
     def _landmine(*a, **k):  # type: ignore[no-untyped-def]
         raise AssertionError("run_security probed while auto-recovery was disabled (cooldown<=0)")
     monkeypatch.setattr(ss.subprocess, "run", _landmine)
-    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"], may_prompt=True)
     assert run.spawned is False and run.denied is True
     ss.clear_keychain_denied()
 

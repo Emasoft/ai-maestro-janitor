@@ -47,7 +47,7 @@ DETECTOR = "keychain-health"
 
 def _probe_search_list() -> tuple[bool, str, list[str]]:
     """`security list-keychains` → (ok, stderr, paths). No secret, no prompt."""
-    run = safe_storage.run_security(["security", "list-keychains"], timeout=5)
+    run = safe_storage.run_security(["security", "list-keychains"], timeout=5, may_prompt=False)  # attribute-only, never prompts
     if not run.spawned:
         # Not macOS (no `security`), or the denied-latch is set. Either way: say nothing.
         return True, "", []
@@ -65,6 +65,7 @@ def _credential_findable() -> bool | None:
     run = safe_storage.run_security(
         ["security", "find-generic-password", "-s", kh.CLAUDE_CREDENTIAL_SERVICE],
         timeout=5,
+        may_prompt=False,
     )
     if not run.spawned:
         return None

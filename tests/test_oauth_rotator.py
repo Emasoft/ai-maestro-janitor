@@ -1886,7 +1886,7 @@ def test_slot_keychain_write_sets_acl_only_when_item_is_new(monkeypatch: pytest.
     captured: dict[str, list[str]] = {}
     state = {"exists": False}
 
-    def _fake_run(argv: list[str], *, timeout: float = 5.0):  # noqa: ARG001
+    def _fake_run(argv: list[str], *, timeout: float = 5.0, may_prompt: bool = True):  # noqa: ARG001
         if "find-generic-password" in argv:  # the silent existence probe
             if state["exists"]:
                 return SR(ok=True, stdout="", stderr="", spawned=True, denied=False, returncode=0)
@@ -2223,7 +2223,7 @@ def test_primary_last_modified_never_reads_the_secret(monkeypatch: pytest.Monkey
     TRDD-EQJPPZ2L and TRDD-K3WQ7XM9 FIX B2 all exist to prevent."""
     seen: dict = {}
 
-    def fake_run_security(argv, timeout=None):
+    def fake_run_security(argv, timeout=None, may_prompt=None):  # noqa: ARG001
         seen["argv"] = list(argv)
         return rotator.safe_storage.SecurityRun(
             ok=True, stdout=_mdat_line(), stderr="", spawned=True, denied=False, returncode=0
@@ -2241,7 +2241,7 @@ def test_primary_last_modified_unknown_when_probe_fails(monkeypatch: pytest.Monk
     monkeypatch.setenv("USER", "someone")
     monkeypatch.setattr(
         rotator.safe_storage, "run_security",
-        lambda argv, timeout=None: rotator.safe_storage.SecurityRun(
+        lambda argv, timeout=None, may_prompt=None: rotator.safe_storage.SecurityRun(
             ok=False, stdout="", stderr="", spawned=False, denied=True, returncode=None),
     )
     monkeypatch.setattr(rotator.Path, "home", staticmethod(lambda: Path("/nonexistent-home-xyz")))
@@ -2286,6 +2286,104 @@ def test_refresh_beacon_if_stale_is_free_when_credential_unchanged(
         rotator, "_read_live_primary",
         lambda: pytest.fail("the secret must NOT be read when the credential is unchanged"))
     assert rotator.refresh_beacon_if_stale(now=1000.0) is False
+
+
+def test_stall_cascades_to_exactly_one_w_run_security_call(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-3VIXO8FA, SESSION-PATH STALL CASE (the only case "one `-w` attempt per call" is
+    true — do NOT generalize past it): the attribute-only freshness probe
+    (`_primary_last_modified`, `may_prompt=False`) times out -> returns None (unknowable) ->
+    `beacon_needs_restamp` fails OPEN ("changed") -> `write_live_identity_beacon` is invoked,
+    whose PRIMARY read (`_read_live_primary` -> `_read_primary_macos_keychain`) ALSO times out
+    (`may_prompt=True` — this one DOES count toward the 3-consecutive-timeout latch) -> `prim`
+    is None -> `write_live_identity_beacon` returns False BEFORE its per-slot `read_slot` loop
+    (each iteration of which is its own `-w` `run_security` call — on a SUCCESS primary read the
+    slot loop legitimately issues one-or-more `-w` reads, so "one per call" does NOT hold there;
+    this test is scoped to the stall case only). Pinned on the `run_security` seam itself, not
+    `subprocess.run` (which the Linux `secret-tool` fallback also calls, unrelated to this gate)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "a@x", "live_fp": "deadbeef", "slots": {"b@x": {}, "c@x": {}}})
+    monkeypatch.setenv("USER", "someone")
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    rotator.safe_storage.clear_keychain_denied()
+    rotator.safe_storage._consecutive_timeouts = 0
+
+    calls = {"w": 0, "attr": 0}
+    w_runs: list = []
+
+    def _spawn(argv, **kwargs):  # type: ignore[no-untyped-def]
+        # Drives the REAL run_security (below), not a stub of it — so this test actually
+        # exercises the fix's latch/threshold logic and would FAIL on pre-fix code (where a
+        # single timeout latches unconditionally: the attribute-only timeout would set the
+        # latch, and the -w call would then short-circuit CLOSED with spawned=False instead
+        # of genuinely spawning). Only `security` is timed out; a non-macOS fallback tool
+        # (`secret-tool`, absent here) is unrelated to this gate and must no-op benignly —
+        # `subprocess.run` is the SAME module object for both rotator.py and safe_storage.py.
+        if argv and argv[0] == "security":
+            if "-w" in argv:
+                calls["w"] += 1
+            else:
+                calls["attr"] += 1
+            raise rotator.subprocess.TimeoutExpired(cmd="security", timeout=1)
+        raise FileNotFoundError
+
+    monkeypatch.setattr(rotator.subprocess, "run", _spawn)  # same object as safe_storage.subprocess
+
+    real_run_security = rotator.safe_storage.run_security
+
+    def _capture_w(*a, **k):  # type: ignore[no-untyped-def]
+        run = real_run_security(*a, **k)
+        if "-w" in a[0]:
+            w_runs.append(run)
+        return run
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _capture_w)
+    # A landmine: if the beacon path ever reached the per-slot loop, this would fire — proving
+    # the `prim is None` short-circuit is what actually bounds the stall case to one `-w` call.
+    monkeypatch.setattr(
+        rotator, "read_slot",
+        lambda e: pytest.fail("read_slot must never run: prim is None short-circuits first"))
+
+    assert rotator.refresh_beacon_if_stale(now=1000.0) is False
+    assert calls["attr"] >= 1, "the freshness probe (attribute-only) must have timed out"
+    assert calls["w"] == 1, "the STALL case: exactly ONE -w run_security call, then short-circuit"
+    assert len(w_runs) == 1
+    assert w_runs[0].spawned is True, (
+        "the -w call must have genuinely SPAWNED `security` (sub-threshold, not latch-closed) — "
+        "on pre-fix code the preceding attribute-only timeout would have latched the machine "
+        "and this call would short-circuit with spawned=False instead"
+    )
+    assert w_runs[0].denied is False, "the 1st -w timeout (sub-threshold) must not itself deny"
+    rotator.safe_storage.clear_keychain_denied()
+
+
+def test_headless_read_primary_macos_keychain_never_calls_run_security(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-3VIXO8FA (daemon-path correction): under `JANITOR_ROTATOR_HEADLESS=1`,
+    `_read_primary_macos_keychain` returns None WITHOUT ever calling `run_security` at all
+    (`_primary_secret_read_permitted()` is False) — `task_oauth_rotator_tick` calls
+    `write_live_identity_beacon()` UNCONDITIONALLY (not through `beacon_needs_restamp`), so a
+    timed-out attribute read is not even in this path's picture. Pinned on the `run_security`
+    seam ONLY, argv containing `-w` — NOT on `subprocess.run`, which the Linux `secret-tool`
+    fallback (rotator.py's `_read_live_primary`, absent on macOS) also calls and would make a
+    bare spawn-counter read 1 for an unrelated reason."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "a@x", "live_fp": "deadbeef", "slots": {}})
+    monkeypatch.setenv("USER", "someone")
+    monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
+    monkeypatch.setattr(rotator.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError))
+    rotator.safe_storage.clear_keychain_denied()
+
+    w_calls = {"n": 0}
+
+    def _landmine(argv, **kwargs):  # type: ignore[no-untyped-def]
+        if "-w" in argv:
+            w_calls["n"] += 1
+        raise AssertionError("headless must never call run_security for the primary -w read")
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _landmine)
+    assert rotator.write_live_identity_beacon(now=1000.0) is False  # prim is None (headless-skipped)
+    assert w_calls["n"] == 0, "headless must make ZERO run_security calls with -w in argv"
 
 
 def test_refresh_beacon_restamps_after_a_manual_login(

@@ -477,7 +477,7 @@ def _security_add_password_via_stdin(service: str, account: str, data: str, *, a
     # Routed through the Safe Keychain Protocol choke-point (TRDD-K3WQ7XM9 P1): latch
     # short-circuit → hard timeout → latch-on-denial. Preserve this fn's historical
     # exception contract so `_slot_keychain_write` still fails CLOSED on any failure.
-    run = safe_storage.run_security(_add_password_argv(service, account, data, allow_any=allow_any, set_acl=set_acl), timeout=5)
+    run = safe_storage.run_security(_add_password_argv(service, account, data, allow_any=allow_any, set_acl=set_acl), timeout=5, may_prompt=True)  # add-generic-password -w write
     if not run.spawned and not run.denied:
         raise FileNotFoundError("`security` not found")  # not macOS → caller tries secret-tool
     if not run.ok:
@@ -550,6 +550,7 @@ def _keychain_item_exists(service: str, account: str) -> bool:
     run = safe_storage.run_security(
         ["security", "find-generic-password", "-s", service, "-a", account, *safe_storage.keychain_scope_args()],
         timeout=5,
+        may_prompt=False,
     )
     if run.ok:
         return True  # rc 0 → the item exists
@@ -592,6 +593,7 @@ def _read_primary_macos_keychain(acct: str) -> dict | None:
     run = safe_storage.run_security(
         ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w", *safe_storage.keychain_scope_args()],
         timeout=10,
+        may_prompt=True,
     )
     if run.ok and run.stdout.strip():
         try:
@@ -650,6 +652,7 @@ def _primary_last_modified() -> float | None:
         run = safe_storage.run_security(
             ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, *safe_storage.keychain_scope_args()],
             timeout=5,
+            may_prompt=False,
         )
         # The attribute dump goes to STDOUT (verified on macOS 15: stderr is empty on rc 0);
         # stderr is still scanned so a future/older `security` that splits them still parses.
@@ -732,6 +735,7 @@ def _primary_live_item_absent() -> bool:
     run = safe_storage.run_security(
         ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, *safe_storage.keychain_scope_args()],
         timeout=10,
+        may_prompt=False,
     )
     if not run.spawned and not run.denied:
         # Not macOS (no `security`) — the primary is the credentials file; absent means absent.
@@ -1111,6 +1115,7 @@ def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dic
     run = safe_storage.run_security(
         ["security", "find-generic-password", "-s", service, "-a", email, "-w", *safe_storage.keychain_scope_args()],
         timeout=5,
+        may_prompt=True,
     )
     if run.ok and run.stdout.strip():
         try:
@@ -1191,6 +1196,7 @@ def _slot_keychain_delete(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> N
     safe_storage.run_security(
         ["security", "delete-generic-password", "-s", service, "-a", email, *safe_storage.keychain_scope_args()],
         timeout=5,
+        may_prompt=True,
     )
     try:
         subprocess.run(

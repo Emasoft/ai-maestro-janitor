@@ -75,6 +75,26 @@ _CLI_TIMEOUT_S = 10.0
 # pre-EQJPPZ2L behaviour — a hand `clear-keychain-latch` is then the only exit).
 _LATCH_COOLDOWN_DEFAULT_S = 600.0
 
+# TRDD-3VIXO8FA: how many CONSECUTIVE `security` timeouts (on a PROMPT-CAPABLE op) before one
+# latches the machine. Same value and same per-process semantics as the TS port's
+# TIMEOUT_LATCH_THRESHOLD (TRDD-MFTDMSJY, measured 2026-08-28: 26 of 29 slow ops recovered).
+# A single timeout is a transient under host load, not a denial — latching on it is exactly
+# what blinded rotation for 600s at a time while the account it should have protected kept
+# climbing toward its cap.
+_TIMEOUT_LATCH_THRESHOLD = 3
+
+# TRDD-3VIXO8FA: log any `security` call at or past this duration (including a timeout) so
+# the python side is measurable the way the TS port's SLOW_SECURITY_LOG_MS made the server
+# side today. Never logs the account or secret — verb + service only.
+_SLOW_SECURITY_LOG_MS = 2500.0
+
+# The consecutive-timeout count, PER PROCESS (mirrors the TS port's `consecutiveTimeouts`).
+# A one-shot CLI invocation can never reach the threshold — that is the behaviour we want; one
+# CLI timeout must not blind the machine. Only timeouts on a `may_prompt=True` op are counted
+# (see `run_security`) — an attribute-only op can never hang on a prompt, so its timeout is
+# host load, not evidence of a broken keychain, and must never touch this counter or the latch.
+_consecutive_timeouts = 0
+
 
 # ==========================================================================
 # THE SAFE KEYCHAIN PROTOCOL (TRDD-K3WQ7XM9 P1) — one choke-point every `security`
@@ -269,12 +289,55 @@ def _latch_cooldown_s() -> float:
     return _LATCH_COOLDOWN_DEFAULT_S
 
 
-def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S) -> SecurityRun:
+def _describe_security_argv(argv: list[str]) -> str:
+    """Log-safe one-liner for a `security` argv: verb + service ONLY — never the account or
+    the secret (this module never logs a secret value; the account is PII on some services)."""
+    verb = argv[1] if len(argv) > 1 else "<none>"
+    service = None
+    if "-s" in argv:
+        i = argv.index("-s")
+        if i + 1 < len(argv):
+            service = argv[i + 1]
+    return f"verb={verb}" + (f" service={service}" if service else "")
+
+
+def _log_if_slow(elapsed_ms: float, timeout: float, argv: list[str], *, half_open: bool, timed_out: bool) -> None:
+    """TRDD-3VIXO8FA: log any `security` call at or past `_SLOW_SECURITY_LOG_MS` (including a
+    timeout) so a slow/blocked call is measurable — mirrors the TS port's SLOW_SECURITY_LOG_MS
+    logging. Never raises (a logging failure must not escape the credential path)."""
+    if elapsed_ms < _SLOW_SECURITY_LOG_MS:
+        return
+    try:
+        print(
+            "[safe-storage] SLOW `security` op: %.0fms (timeout %gs%s%s) %s"
+            % (
+                elapsed_ms, timeout,
+                ", TIMED OUT" if timed_out else "",
+                ", half-open probe" if half_open else "",
+                _describe_security_argv(argv),
+            ),
+            file=sys.stderr, flush=True,
+        )
+    except Exception:  # noqa: BLE001  -- never let logging escape the credential path
+        pass
+
+
+def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S, may_prompt: bool) -> SecurityRun:
     """THE single gate EVERY `security` invocation (safe_storage AND rotator) routes through.
 
     Enforces the protocol in order: (b) denied-latch short-circuit BEFORE spawning →
     (a) hard timeout → (d) latch-on-denial. Never raises. When the latch is unset and no
     denial occurs, this is byte-identical to a plain ``subprocess.run(argv, timeout=...)``.
+
+    ``may_prompt`` is REQUIRED (no default) so every call site states, explicitly, whether
+    ``argv`` can ever raise a GUI keychain prompt (a `-w` secret read, or a write/delete) or is
+    attribute-only (TRDD-3VIXO8FA — a bare `find-generic-password` / `list-keychains` can never
+    prompt, per the callers' own comments). A TIMEOUT on a ``may_prompt=False`` call is host
+    load, not a denial: it returns ``spawned=True, denied=False, returncode=None`` and NEVER
+    touches the latch or the consecutive-timeout counter. A TIMEOUT on a ``may_prompt=True``
+    call is counted in a PER-PROCESS consecutive-timeout counter and latches the machine only
+    once that count reaches ``_TIMEOUT_LATCH_THRESHOLD`` (an answered op — success OR a benign
+    not-found — resets the count; a denial marker still latches immediately, unconditionally).
 
     (c) HALF-OPEN AUTO-RECOVERY (TRDD-EQJPPZ2L): the latch is no longer a permanent kill. While
     it is set AND younger than the cooldown the op still short-circuits (CLOSED — no spawn, no
@@ -283,7 +346,9 @@ def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S) -> Securit
     stay closed — at most one probe per cooldown machine-wide), then spawns the op once. If the
     keychain answers WITHOUT prompting (spawned and not denied — even a benign not-found proves
     it is reachable and silent) the latch is CLEARED (recovered). If it hangs or denies again,
-    the timeout/denial branch re-stamps the latch and it backs off another cooldown."""
+    the timeout/denial branch re-stamps the latch (unless the probe itself was `may_prompt=False`
+    and merely timed out, per the paragraph above) and it backs off another cooldown."""
+    global _consecutive_timeouts
     half_open = False
     if keychain_denied_latched():
         cooldown = _latch_cooldown_s()
@@ -295,20 +360,53 @@ def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S) -> Securit
         # a young latch and short-circuits — bounding the machine to one probe per cooldown.
         half_open = True
         set_keychain_denied("keychain-denied latch: half-open probe (auto-recovery, TRDD-EQJPPZ2L)", quiet=True)
+    t0 = time.monotonic()
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
         # `security` absent → not really macOS. NOT a denial; caller may try another backend.
         return SecurityRun(ok=False, stdout="", stderr="", spawned=False, denied=False, returncode=None)
     except subprocess.TimeoutExpired:
-        set_keychain_denied(f"a `security` op hung past {timeout:g}s (a keychain unlock/ACL prompt)")
-        return SecurityRun(ok=False, stdout="", stderr="", spawned=True, denied=True, returncode=None)
+        elapsed_ms = (time.monotonic() - t0) * 1000.0
+        _log_if_slow(elapsed_ms, timeout, argv, half_open=half_open, timed_out=True)
+        if not may_prompt:
+            # An attribute-only op can never hang on a GUI prompt (the callers' own comments:
+            # _keychain_item_exists / _primary_last_modified / _primary_live_item_absent /
+            # keychain-health's probes are all `find-generic-password` without `-w`, or
+            # `list-keychains`) — a timeout here is host load, and must never blind rotation
+            # for ops that could not have caused the thing the latch exists to stop.
+            return SecurityRun(ok=False, stdout="", stderr="", spawned=True, denied=False, returncode=None)
+        _consecutive_timeouts += 1
+        if _consecutive_timeouts >= _TIMEOUT_LATCH_THRESHOLD:
+            n = _consecutive_timeouts
+            _consecutive_timeouts = 0
+            set_keychain_denied(
+                f"{n} consecutive `security` ops TIMED OUT past {timeout:g}s — cause NOT "
+                "observed (a timeout cannot tell a hung prompt from a blocked keychain)"
+            )
+            return SecurityRun(ok=False, stdout="", stderr="", spawned=True, denied=True, returncode=None)
+        # Sub-threshold: a failed op, NOT a denial — the latch stays untouched.
+        return SecurityRun(ok=False, stdout="", stderr="", spawned=True, denied=False, returncode=None)
+    elapsed_ms = (time.monotonic() - t0) * 1000.0
+    _log_if_slow(elapsed_ms, timeout, argv, half_open=half_open, timed_out=False)
     stderr = proc.stderr or ""
     if proc.returncode != 0 and _is_denial(stderr):
+        # `may_prompt` does NOT gate this branch — it only exempts the TimeoutExpired branch
+        # above. A denial MARKER latches immediately on EVERY op regardless of `may_prompt`,
+        # UNCHANGED from the pre-TRDD-3VIXO8FA behaviour: this card narrows only the timeout
+        # path (the false positive it fixes is an isolated/transient timeout, never a real
+        # denial string), so the pre-existing denial-latches-immediately branch is preserved
+        # as-is rather than re-scoped to `may_prompt=True` ops.
+        # NOT resetting `_consecutive_timeouts` here is deliberate (mirrors the TS port): a
+        # denial is the keychain refusing, not answering, so it is no evidence a run of
+        # timeouts is over.
         set_keychain_denied("`security` returned an ACL/auth/user-canceled denial")
         return SecurityRun(ok=False, stdout=proc.stdout or "", stderr=stderr, spawned=True, denied=True, returncode=proc.returncode)
-    # Spawned and NOT denied → the keychain answered without prompting. If this was the half-open
-    # probe, the transient has cleared: drop the latch so normal ops resume (TRDD-EQJPPZ2L).
+    # Spawned and NOT denied → the keychain answered without prompting. The keychain answered,
+    # so any run of timeouts is broken — reset the counter (a benign not-found counts too).
+    _consecutive_timeouts = 0
+    # If this was the half-open probe, the transient has cleared: drop the latch so normal ops
+    # resume (TRDD-EQJPPZ2L).
     if half_open:
         clear_keychain_denied()
     return SecurityRun(ok=(proc.returncode == 0), stdout=proc.stdout or "", stderr=stderr,
@@ -489,7 +587,7 @@ def secret_tool_delete_argv(service: str, account: str) -> list[str]:
 def _macos_store(service: str, account: str, secret: str) -> StoreResult:
     # Value on argv (NOT stdin) — the stdin form truncates at 128 bytes via getpass()
     # (TRDD-5539cd6e). Routed through the protocol choke-point (latch/timeout/latch-on-deny).
-    run = run_security(macos_store_argv(service, account, secret))
+    run = run_security(macos_store_argv(service, account, secret), may_prompt=True)  # add-generic-password -w write
     if not run.spawned and not run.denied:
         return StoreResult.NO_BACKEND   # `security` absent → not really macOS
     if not run.ok:
@@ -498,7 +596,7 @@ def _macos_store(service: str, account: str, secret: str) -> StoreResult:
 
 
 def _macos_retrieve(service: str, account: str) -> str | None:
-    run = run_security(macos_retrieve_argv(service, account))
+    run = run_security(macos_retrieve_argv(service, account), may_prompt=True)  # find-generic-password -w read
     if not run.ok:
         return None                     # absent / latched / hung / denied / not-found
     # `security -w` prints the secret + a trailing newline; strip ONLY the trailing
@@ -508,7 +606,7 @@ def _macos_retrieve(service: str, account: str) -> str | None:
 
 
 def _macos_delete(service: str, account: str) -> None:
-    run_security(macos_delete_argv(service, account))  # best-effort; latch/timeout enforced
+    run_security(macos_delete_argv(service, account), may_prompt=True)  # delete-generic-password; best-effort; latch/timeout enforced
 
 
 # --------------------------------------------------------------------------

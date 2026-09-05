@@ -3,7 +3,7 @@ trdd-id: 3VIXO8FA
 title: The keychain denied-latch treats a stalled security call as a denial and blinds rotation
 column: todo
 created: 2026-09-05T15:16:36+0200
-updated: 2026-09-05T15:52:00+0200
+updated: 2026-09-05T16:01:44+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -129,15 +129,20 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
 
 - [ ] An attribute-only `security` timeout leaves `keychain-denied.latch` absent (test).
 - [ ] A `-w` read latches on the 3rd consecutive timeout, not the 1st; an answered op resets (test).
-- [ ] Every `run_security` call site passes `may_prompt` explicitly:
-      `grep -rn 'run_security(' scripts | grep -v 'def run_security' | grep -vc 'may_prompt='` prints 0.
+- [ ] Every `run_security` call site passes `may_prompt` explicitly, enforced by signature (a
+      call missing the required `may_prompt` keyword is a pyright `reportCallIssue` error), not
+      by a duplicated same-line comment: `uvx --with pyright pyright` reports 0 errors AND
+      `grep -rn --exclude-dir=memgrep --exclude-dir=__pycache__ 'run_security(.*# may_prompt' scripts | wc -l` prints 0.
 - [ ] An attribute-only op whose stderr carries a denial marker still sets the latch (test).
 - [ ] A persistently blocked keychain still latches on the 3rd consecutive `-w` timeout (test).
 - [ ] Asserted on the `run_security` seam only (argv containing `-w`; never on `subprocess.run`
       — the `secret-tool` fallback in `_read_live_primary` is a plain spawn): under
       `JANITOR_ROTATOR_HEADLESS=1` `_read_primary_macos_keychain` returns None without calling
       `run_security`; on the session path, in the STALL case (attribute read timed out AND the
-      `-w` primary read timed out) `run_security` saw exactly one `-w` argv — the slot loop in
+      `-w` primary read timed out) `run_security` saw exactly one `-w` argv, AND that call
+      spawned (`spawned=True`) — the pre-fix code would have latched on the preceding
+      attribute-only timeout and made the `-w` call short-circuit CLOSED with `spawned=False`
+      instead, so this is required to fail on unfixed code — the slot loop in
       `write_live_identity_beacon` is not reached when `prim` is None. (On the success path the
       slot loop legitimately issues one or two `-w` reads per configured slot; not asserted.)
 - [ ] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports`,
