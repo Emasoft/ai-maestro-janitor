@@ -1,7 +1,8 @@
 ---
 trdd-id: 8BXMNQ4T
 title: verified actuation blocks the single-threaded daemon beat — measure the multiplier before choosing a mechanism
-column: todo
+column: backburner
+review-after: 2026-10-05
 created: 2026-09-03T21:42:15+0200
 updated: 2026-09-05T05:00:55+0200
 current-owner: janitor-main-session
@@ -85,6 +86,15 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
   host has never done. Everything else on this card is done or delegated.
   **Do not park this card for "a rotation to happen"** — that was the old, false reading and it
   would park it forever against a condition already satisfied.
+- **COLUMN 2026-09-05: `todo` → `backburner` (`review-after: 2026-10-05`).** `todo` asserts a
+  card can be pulled, and nobody can pull this one: its only remaining action waits on a
+  coincidence (a pane in `RETRY_WEDGE` while a rotation window is open) that no session can
+  arrange on demand. Not `blocked` — that requires a `blocked-by:` naming another card, and
+  nothing here waits on a card. `backburner` is the resting state the drain rule exempts, and
+  the `review-after:` is a snooze, not a mute: it re-enters drift review in a month whether or
+  not the coincidence has occurred. **Re-column to `todo` the moment a completed
+  `rotation-esc: <STATUS> ESC →` line appears in any daemon log segment** — that line IS the
+  measurement this card is waiting for.
 - **DO NOT re-derive the measurement.** It took three attempts and six adversarial reviews.
   Read `## STEP 1 — MEASURED` and stop; the two sections below it are kept as lessons only.
 - **SUPERSEDED — do NOT carry forward:**
