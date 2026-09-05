@@ -4,7 +4,7 @@ title: a spawned shell produces zero filesystem effect under in-process pytest �
 column: backburner
 review-after: 2026-09-19
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T03:01:05+0200
+updated: 2026-09-05T03:03:52+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -25,79 +25,61 @@ external-refs: [TRDD-Q8PNPRTW]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
-- **⇒ WHERE THIS ACTUALLY STANDS (2026-09-05): INSTRUMENTED, AND WAITING FOR A FAILURE THAT
-  CANNOT BE PRODUCED ON DEMAND.** Do not resume it expecting to make progress by running the
-  tests again.
-  **MOVED `todo` → `backburner` (`review-after: 2026-09-19`) for that reason.** `todo` is the
-  PULL QUEUE: it advertises "available to work", which is the exact invitation this block spends
-  thirty lines arguing against, and the board view — not the card — is what anyone scans. Held
-  in `todo`, the column asserted the opposite of the content, the same metadata-vs-content
-  defect as the stale STATE block corrected one commit earlier, made in the other direction.
-  `blocked` was considered and does not fit: the kanban rule ties it to a non-empty
-  `blocked-by:`, and no TRDD blocks this — what it waits on is an EVENT.
-  **⚠ `backburner` IS THE LEAST-WRONG OF THREE IMPERFECT COLUMNS, NOT A CLAIM THAT THIS WAS
-  DEFERRED BY DESIGN — do not cite this card as precedent for parking live work.** The
-  prosecution is real and worth stating against myself: this card's own founding paragraph
-  (below) split it OUT of Q8PNPRTW because *"parking live technical work behind a human
-  decision that has nothing to do with them would hide them"* — and an unreproducible failure
-  is the same SHAPE as a waiver: an external condition, unscheduled, possibly never. The drain
-  rule's only licence to sit still is `blocked` with a true `blocked-by:`; the honest reading of
-  "`blocked` does not fit" is *"this card has no licence to sit still"*, not *"so use the column
-  that needs none"*. `backburner` is also exempt from the drain obligation, so the one card with
-  four days of live investigation becomes the one the rule stops asking about.
-  **What makes it defensible is not the column, it is this block.** Q8PNPRTW's work was hidden
-  because its state gave no reader a way to see it; here the state is the loudest thing in the
-  file, dated, and carrying an explicit return.
-  **And `review-after:` SNOOZES — it does not resurface.** The card was ALREADY drift-eligible
-  (`backburner` is by default); the field SUPPRESSES that attention until 2026-09-19, after
-  which the card returns to the drift-eligible state it was already in. Describing the expiry as
-  an added mechanism, as my commit did, overstates what the field does.
-- **A 30-RUN LOOP WAS STILL RUNNING WHEN THIS CARD WAS BACKBURNERED**, and nothing outside a
-  `reports/` dir would otherwise say so — an unrecorded state, on a card whose whole point this
-  session was unrecorded states. `reports/suite-failures/20260905_024917+0200-…`, started
-  02:49:17, ~2 min/run, stops on the first red run or at run 30. **Its LOAD figures are
-  contaminated by this session's own foreground work** — by the argument two bullets down, they
-  measure the session, not the failure. **Its only trustworthy output is whether any run went
-  red.** If the ledger's last row is stale and no pytest is running, it finished or died; either
-  way nothing is watching it. **Brute force has been tried
-  in two configurations and produced ZERO failures**: 14 runs of a 2-test selection at load
-  19.5-36.3 (1a), and ~6 full-suite `-n auto` runs this session. The deliverable that did not
-  need a reproduction is **landed** (`6268dbeb`): row 2 no longer discards the child's stderr,
-  so the next real failure — here, or in someone else's soak — keeps its own evidence.
-- **THE FIVE FACTS TODAY ADDED** (details in step 0/1 of NEXT ACTION, ~200 lines below):
-  1. A green `-n auto` full suite is **77-150 s** here, not the "~12 min" this card's step 0
-     assumed — that figure was the SERIAL shape.
-  2. **The 8.6× gap to soak9 (822.89 s) is UNEXPLAINED.** Load is argued against, not refuted
-     (start-vs-start: 22.79 → 95.50 s vs 15.53 → 822.89 s). The environments demonstrably
-     DIFFER (both soak runs report a `subtests` counter no tracked revision has ever declared),
-     but 8 subtests cannot make 727 s. **Do not read the plugin finding as closure.**
-  3. Row 2's instrumentation covers **only the `FileNotFoundError` shape** — the prints sit
-     after the `raises` block, so the predicted hang shape reaches them never. Row 1 has none
-     and needs none (inherited fds; `--capture=fd` already reports its child).
-  4. The loop stops on **classification**, not on exit code or output format; unrelated flakes
-     log and continue; `RUN_TIMEOUT=1200`; exit 124 is a result, not an accident.
-  5. The survivor census now has a **positive control** (14 live / 0 post-kill). Its first two
-     versions could not see what they counted; the current one has a known gap — see below.
-- **KNOWN GAP, deliberately not fixed, so nobody reads a 0 as clean:** the census matches an
-  xdist worker and a bare `sleep 600`, but **not the `/bin/sh …fake_capture.sh` parent shell**.
-  In the hang shape the card predicts, that shell can outlive its `sleep`. Add
-  `|/bin/sh .*fake_capture\.sh` **on the next launch** — it was not applied mid-run because a
-  sixth relaunch to improve the instrument costs more than it buys (see the next bullet).
-  **UNTIL IT IS APPLIED, READ A 0 IN `survivors.log` THIS NARROWLY: it excludes an orphaned
-  xdist worker and a bare `sleep 600`, and it excludes NOTHING about the parent shell.** That
-  is a constraint on the reader, not a note to the author — the whole point of the positive
-  control was that an uninterpretable zero is a statement about the instrument. The loop keeps
-  running anyway because its PRIMARY signal does not touch the census: it stops on the exit-code
-  classification, and the census is a secondary observation attached to line 77's cross-run
-  hypothesis. Stopping a working primary to fix a secondary is the churn this card just
-  decided against.
-- **⚠ THE HARNESS CHURN IS THE FAILURE MODE NOW.** Five commits, ~6 green runs, five launches
-  each discarded to fix the harness, and **zero observations of the actual failure**. Each fix
-  caught a real defect that would have produced false data — but the pattern meets the
-  "two failed attempts → stop and rethink" bar. There is also a structural reason it cannot
-  converge here: **a load-sensitive experiment cannot be run on a box while a session does
-  foreground work on it, and this session's work IS the load.** Do not relaunch the loop to
-  improve it. Let it run out or die.
+- **THE BUG.** Two tests in `tests/test_capture_all_logins.py` — `test_kill_process_group_…`
+  (row 1) and `test_capture_one_kills_the_whole_tree_…` (row 2). When they fail, the child
+  produces **zero filesystem effect**. **Do NOT assume they share a cause** (Q8PNPRTW retracted
+  that twice).
+- **STATUS: INSTRUMENTED; NOT REPRODUCIBLE ON DEMAND.** `6268dbeb` landed the deliverable that
+  never needed a reproduction — row 2 keeps its child's stderr instead of discarding it, so the
+  next real failure carries its own evidence. **~20 runs across two configurations produced
+  ZERO failures** (14 of a 2-test selection at load 19.5-36.3; ~6 full-suite `-n auto`).
+- **THE ONE LIVE UNKNOWN: the 8.6× wall-clock gap to soak9 (822.89 s vs 77-150 s) is
+  UNEXPLAINED.** Load is argued against, not refuted. The environments demonstrably DIFFER (both
+  soak runs report a `subtests` counter no tracked revision ever declared) — but 8 subtests
+  cannot make 727 s. **Do not read the plugin finding as closure.**
+- **TWO CONSTRAINTS ON READING THE EVIDENCE.**
+  - Row 2's instrumentation covers the `FileNotFoundError` shape ONLY. Its prints sit after the
+    `raises` block, so the predicted hang shape never reaches them. Row 1 has none and needs
+    none (inherited fds; `--capture=fd` already reports its child).
+  - A 0 in `survivors.log` excludes an orphaned xdist worker and a bare `sleep 600`, and
+    excludes **NOTHING about the `/bin/sh …fake_capture.sh` parent shell** — the census does not
+    match it. Add `|/bin/sh .*fake_capture\.sh` on the next launch.
+- **DO NOT re-run the suite hoping for a failure.** That is ~20 runs of precedent, and a
+  load-sensitive experiment cannot be run on a box while a session does foreground work on it.
+
+## Process notes and card history (background — not the first thing to read)
+
+- **WHY `backburner` AND NOT `todo`.** `todo` is the PULL QUEUE — it advertises "available to
+  work", and the board view, not the card, is what anyone scans; held there, the column asserted
+  the opposite of this block. **⚠ `backburner` IS THE LEAST-WRONG OF THREE IMPERFECT COLUMNS,
+  NOT A CLAIM THIS WAS DEFERRED BY DESIGN — do not cite this card as precedent for parking live
+  work.** The case against it: this card was split OUT of Q8PNPRTW because *"parking live
+  technical work behind a human decision that has nothing to do with them would hide them"*, and
+  an unreproducible failure is the same SHAPE as a waiver. The drain rule's only licence to sit
+  still is `blocked` with a true `blocked-by:` — which no TRDD provides here — so the honest
+  reading is *"this card has no licence to sit still"*, not *"use the column that needs none"*.
+  What makes it defensible is not the column but this block: Q8PNPRTW's work was hidden because
+  its state gave no reader a way to see it.
+- **`review-after:` SNOOZES; it does not resurface.** VERIFIED in the implementation, not just
+  the rule text: `scripts/detectors/trdd-drift.py:56` says a `backburner` TRDD is drift-eligible
+  *on purpose*, and `review_after_epoch` (`:605`) skips the card only while `now < review_after`
+  — its docstring calls it "a SNOOZE, not a mute". So the field SUPPRESSES attention until
+  2026-09-19, after which the card returns to where it already was. (`:615` exempts a
+  `backburner` card carrying `blocked-by:`/`npt:`; this one has neither, which is why the field
+  was needed at all.)
+- **A 30-RUN LOOP WAS RUNNING WHEN THIS CARD WAS BACKBURNERED** —
+  `reports/suite-failures/20260905_024917+0200-…`, started 02:49:17, ~2 min/run, stopping on the
+  first red run or at run 30. Recorded here because nothing outside a `reports/` dir said so.
+  **Its ONLY trustworthy output is whether any run went red.** Its duration/load pairs are
+  **UNINTERPRETABLE — not "contaminated", which is more than I can show**: `load_start` is
+  dominated by the previous run's decaying tail, so the loop's own load and this session's
+  foreground work are not separated. (Runs 1-5 in fact span 107-136 s across loads 15.7-26.6,
+  with the FASTEST run at nearly the highest load — read straight, that is weak load-duration
+  coupling, not a visible confound.)
+- **THE HARNESS CHURN WAS THE FAILURE MODE.** Five commits, ~6 green runs, five launches each
+  discarded to fix the harness, zero observations of the actual failure. Each fix caught a real
+  defect that would have produced false data — but the pattern met the "two failed attempts →
+  stop and rethink" bar. Do not relaunch the loop to improve it.
 - **WHY THIS CARD EXISTS.** Split out of `TRDD-Q8PNPRTW` (rule 13, one atomic task per TRDD).
   That card is `blocked` on a USER waiver for a bucket of load artifacts. **These two failures
   are blocked on nobody** — they are live technical work, and parking them behind a human
