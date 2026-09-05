@@ -11,8 +11,9 @@ min-approval-requirement: none
 npt: []
 eht: []
 implementation-commits: []
-external-refs: [ai-maestro TRDD-D552QXOU, ai-maestro TRDD-UAP7ZEJL, ai-maestro f6f4664e]
+external-refs: [ai-maestro:TRDD-D552QXOU, ai-maestro:TRDD-UAP7ZEJL, ai-maestro:f6f4664e]
 relevant-rules: []
+governing-spec: trdd-design-tasks.md step 2 (filename recipe)
 ---
 
 ## Symptom

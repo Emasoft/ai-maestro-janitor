@@ -3,7 +3,7 @@ trdd-id: LDSCQ0NU
 title: janitor-memory-split marker fires against an empty claim pool costing a full agent spawn to abstain
 column: testing
 created: 2026-09-05T16:05:02+0200
-updated: 2026-09-05T18:30:30+0200
+updated: 2026-09-05T18:35:40+0200
 current-owner: main-session
 task-type: bugfix
 priority: low
@@ -14,14 +14,46 @@ labels: [janitor-heartbeat, memory-dispatch, cost]
 relevant-rules: []
 blocked-by: []
 npt: []
-eht: []
+eht: [N1CPV1QV]
 implementation-commits: [9681eb7c]
 external-refs: [janitor#300]
 ---
 
 # janitor-memory-split marker fires against an empty claim pool costing a full agent spawn to abstain
 
-## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-09-05T18:11:33+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T18:35:40+0200
+
+Landed: commit 9681eb7c, both gates below (write-time `is_claimable`,
+relay-time `_suppress_stale_memory_markers`) — correct fix for the
+peer-claimed-first race.
+
+**Correction to the round-3 STATE block below.** First-hand recheck of this
+project's `.janitor/state` (2026-09-05T18:34) found 14 unclaimed
+`memory-maint-pending-<id>.json` records (6 `split`, 10-46h old) beside 20
+claimed ones — the pool was NOT empty. The sentence below "Conclusion: no
+directory-mismatch bug exists in the code" is WITHDRAWN as an overclaim: it
+only ruled out the same-cwd case (writer and a same-session claimer sharing
+`CLAUDE_PROJECT_DIR`). It never ruled out an agent-side state-dir mismatch —
+a spawned memory agent's cwd is not guaranteed to be the project root (see
+`~/.claude/rules/janitor-heartbeat-protocol.md`), so it can resolve
+`state.state_dir()` to a different directory than the scheduler that wrote
+the record. That is the open, unverified hypothesis, now tracked and
+handled by EHT **TRDD-N1CPV1QV**. A second, independent gap — the
+orphaned-memory-maint detector never seeing the per-dispatch pool at all —
+is tracked separately as TRDD-IB5B14QQ (no `eht:`/`parent-trdd:` link; it
+is not required for THIS TRDD to reach `complete`).
+
+**Reaches the running host** only at the next plugin update on that host
+(see "Deployment note" below) — testing here proves the code, not the live
+heartbeat.
+
+**NEXT ACTION:** stay in `testing` until TRDD-N1CPV1QV lands and one live
+fire on this host shows a memory agent actually claiming a pending record
+(not just abstaining cleanly). Do not move to `complete` before that.
+
+---
+
+## ⏵ STATE (round 3, superseded above) — 2026-09-05T18:11:33+0200
 
 Directory-mismatch hypothesis (coordinator, round 3) CHECKED AND REJECTED, by
 reading, not reasoning:
