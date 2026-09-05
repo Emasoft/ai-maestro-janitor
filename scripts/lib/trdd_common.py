@@ -187,14 +187,23 @@ def ensure_local_design(project_dir: str | None = None) -> Path:
 #       → group(1) = the 8-char base36 id (case preserved)
 #   * legacy filename:        TRDD-<full-UUID>-<slug>.md
 #       → group(2) = the 36-char UUID
+#   * bare v1-migrated:       TRDD-<id8>-<slug>.md (no timestamp prefix)
+#       → group(3) = the 8-char base36 id (case preserved)
 # Anchored to exactly 8 id chars + the mandatory `-<slug>.md`, so a stray
 # `TRDD-deadbeef.md` (no slug) does NOT match; the timestamp and UUID branches
 # are mutually exclusive (a `_` in the timestamp can't appear in a UUID).
+# The bare branch MUST be tried after the legacy UUID branch: a UUID's 9th
+# char is also `-` (8-4-4-4-12 grouping), so if bare were tried first it
+# would match on just the UUID's first 8 hex chars and mis-capture a legacy
+# id (TRDD-JDIJ76SW: peer measured the board count off-by-one because this
+# bare shape — the v1-migrated form — wasn't matched at all; adding it
+# ordered last keeps the legacy UUID capture correct).
 _TRDD_ID_RE = re.compile(
     r"^TRDD-"
     r"(?:"
     r"\d{8}_\d{6}[+-]\d{4}-([0-9A-Za-z]{8})"  # current: <timestamp>-<id8 base36>
     r"|([0-9a-fA-F-]{36})"                     # legacy:  <full-uuid>
+    r"|([0-9A-Za-z]{8})"                       # bare:    <id8> (v1-migrated, no timestamp)
     r")"
     r"-.+\.md$"
 )
@@ -204,15 +213,16 @@ def extract_uid(filename: str) -> str | None:
     """Return a TRDD filename's id (UPPERCASE base36 OR legacy UUID), or None.
 
     This is the SINGLE id matcher every TRDD detector uses. It accepts the
-    modern 8-char UPPERCASE base36 id (`A-Z` + `0-9`) the current TRDD spec uses
-    AND the legacy lowercase-hex/UUID id, preserving the id's case exactly as
-    written so `git log --grep TRDD-<id>` and `git tag --contains` can match it.
-    Returns None for a non-TRDD filename.
+    modern 8-char UPPERCASE base36 id (`A-Z` + `0-9`) the current TRDD spec uses,
+    the legacy lowercase-hex/UUID id, and the bare v1-migrated
+    `TRDD-<id8>-<slug>.md` shape (no timestamp prefix), preserving the id's
+    case exactly as written so `git log --grep TRDD-<id>` and
+    `git tag --contains` can match it. Returns None for a non-TRDD filename.
     """
     m = _TRDD_ID_RE.match(filename)
     if not m:
         return None
-    return m.group(1) or m.group(2)
+    return m.group(1) or m.group(2) or m.group(3)
 
 
 # ── Frontmatter parsing ──────────────────────────────────────────────────────

@@ -59,6 +59,26 @@ def test_extract_uid_catches_uppercase_and_lowercase_ids():
     assert tc.extract_uid(lower) == "3b9b2040"
 
 
+def test_extract_uid_bare_v1_migrated_shape():
+    """TRDD-JDIJ76SW: a bare v1-migrated `TRDD-<id8>-<slug>.md` (no timestamp
+    prefix) is extracted — the gap the peer board-count-off-by-one measured."""
+    name = "TRDD-15ECPBSA-some-old-slug.md"
+    assert tc.extract_uid(name) == "15ECPBSA"
+
+
+def test_extract_uid_bare_shape_does_not_shadow_legacy_uuid():
+    """A legacy UUID filename still yields the full UUID, not just its first 8
+    hex chars — the bare branch is ordered AFTER the legacy branch so it can't
+    steal the match (a UUID's 9th char is also `-`)."""
+    name = "TRDD-deadbeef-0000-0000-0000-000000000000-slug.md"
+    assert tc.extract_uid(name) == "deadbeef-0000-0000-0000-000000000000"
+
+
+def test_extract_uid_rejects_short_id():
+    """A 7-char id (one short of any valid shape) still returns None."""
+    assert tc.extract_uid("TRDD-1234567-slug.md") is None
+
+
 # ── frontmatter state parsing ────────────────────────────────────────────────
 
 
@@ -1033,3 +1053,25 @@ def test_reconcile_defaults_commit_at_head_to_never_fires():
     v = tc.reconcile(rec, _in_tag(_tagmap()), _column_of({}))
     assert not v.fires
     assert v.shipped_unreleased is False
+
+
+# ── TRDD-JDIJ76SW: the bare shape must reach the board count, not just extract_uid ──
+
+
+def test_bare_shape_card_is_counted_by_the_board(tmp_path):
+    """A bare v1-migrated `TRDD-<id8>-<slug>.md` card in a real tasks dir is picked up by
+    `dispatch._all_folders_columns` — the actual board-count helper the peer's off-by-one
+    was measured against, not just the id-matcher it depends on."""
+    sys.path.insert(0, str(_HERE.parent / "scripts"))
+    import dispatch  # noqa: PLC0415
+
+    tasks_dir = tmp_path / "design" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    (tasks_dir / "TRDD-15ECPBSA-bare-shape-card.md").write_text(
+        "---\ntrdd-id: 15ECPBSA\ntitle: bare shape card\ncolumn: todo\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    columns, _heads = dispatch._all_folders_columns(str(tmp_path), tc)
+
+    assert columns.get("15ECPBSA") == "todo"

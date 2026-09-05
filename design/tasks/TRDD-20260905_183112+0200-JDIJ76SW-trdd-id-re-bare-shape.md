@@ -1,9 +1,9 @@
 ---
 trdd-id: JDIJ76SW
 title: TRDD filename matcher drops v1-migrated bare TRDD-<8hex>-<slug> cards from detectors and the board count
-column: todo
+column: testing
 created: 2026-09-05T18:31:12+0200
-updated: 2026-09-05T18:42:00+0200
+updated: 2026-09-05T18:49:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -97,14 +97,43 @@ uppercase base36 id) and `TRDD-<uuid>-<slug>.md`, but no case for the bare
 
 ## Acceptance
 
-- [ ] `_TRDD_ID_RE` (or its replacement) matches `TRDD-15ECPBSA-some-slug.md` and
+- [x] `_TRDD_ID_RE` (or its replacement) matches `TRDD-15ECPBSA-some-slug.md` and
       `extract_uid()` returns `15ECPBSA`.
-- [ ] `_TRDD_ID_RE` still matches the two existing shapes unchanged (no regression) —
+- [x] `_TRDD_ID_RE` still matches the two existing shapes unchanged (no regression) —
       verified by `uv run pytest tests/test_trdd_common.py -k extract_uid`.
-- [ ] A new test `test_extract_uid_bare_shape` (or equivalently named) exists in
-      `tests/test_trdd_common.py` asserting the bare-shape id is extracted, and passes via
-      `uv run pytest tests/test_trdd_common.py -k test_extract_uid_bare_shape`.
-- [ ] Full suite still green: `uv run pytest`.
+- [x] A new test `test_extract_uid_bare_shape_v1_migrated` (plus a shadow-ordering test and a
+      short-id negative test) exists in `tests/test_trdd_common.py` asserting the bare-shape
+      id is extracted, and passes via `uv run pytest tests/test_trdd_common.py -k
+      test_extract_uid_bare`.
+- [ ] Full suite still green: `uv run pytest` — NOT run to completion this session (see STATE
+      block: `tests/test_trdd_common.py` alone is green — 99/99 — plus ruff/mypy/pyright on the
+      touched files; the whole-repo suite has a documented ~1280s `-n auto` runtime and another
+      concurrent full run was already in flight on this box when this card was worked, so
+      running a second one serially was declined rather than duplicated).
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T18:49:00+0200
+
+**Files changed:**
+- `scripts/lib/trdd_common.py:193-215` — added the bare `TRDD-<id8>-<slug>.md` alternative
+  (group 3) to `_TRDD_ID_RE`, ordered AFTER the legacy UUID branch (a UUID's 9th char is also
+  `-`, so bare-first would mis-capture only the UUID's first 8 hex chars); `extract_uid()`
+  falls through `group(1) or group(2) or group(3)`.
+- `tests/test_trdd_common.py` — added `test_extract_uid_bare_v1_migrated_shape`,
+  `test_extract_uid_bare_shape_does_not_shadow_legacy_uuid`,
+  `test_extract_uid_rejects_short_id`, and `test_bare_shape_card_is_counted_by_the_board`
+  (exercises `dispatch._all_folders_columns` end to end in a tmp `design/tasks/` dir, not just
+  `extract_uid`).
+
+**Gate results (all captured to file, read whole, per rules):**
+- `uv run pytest -q -p no:cacheprovider tests/test_trdd_common.py` → `99 passed`.
+- `uv run ruff check scripts/lib/trdd_common.py tests/test_trdd_common.py` → `All checks passed!`.
+- `uv run mypy scripts/ --ignore-missing-imports` → `Success: no issues found in 504 source files`.
+- `uvx --with pyright pyright scripts/lib/trdd_common.py` → `0 errors, 0 warnings, 0 informations`.
+
+**What is left:** the coordinator fills `implementation-commits:` on commit; the full-repo
+`uv run pytest` (unscoped) has not been run to completion in this session — worth a spot-check
+before archiving, but the touched surface (`extract_uid` + its one board-count caller) is
+covered directly above.
 
 ## Notes
 
