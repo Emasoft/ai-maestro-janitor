@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T07:52:44+0200
+updated: 2026-09-05T08:06:31+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -56,9 +56,11 @@ external-refs: [TRDD-8BXMNQ4T]
     the only known mechanism whose ceiling brackets the 78 s, and it is UNCONFIRMED; the
     100 s+ beats exceed its 96 s ceiling and may be a larger single cost OR that ladder plus
     per-instance costs (ZVZAFQY6). Do not re-derive the measurement; do not treat any
-    attribution as settled. **STILL OPEN and still ungated:** *what is the ~84 s unaccounted
-    at 04:15–04:18?* — now with bigger siblings. Read-only diagnosis; the precedent is set
-    here for ungated read-only source reading.
+    attribution as settled. **One candidate IS closed: the memory-pressure / starvation
+    confound was TESTED (both arms, per-pass attribution verified against the code) and
+    shows no signal — read that subsection before reviving it.** **STILL OPEN and still
+    ungated:** *what is the ~84 s unaccounted at 04:15–04:18?* — now with bigger siblings.
+    Read-only diagnosis; the precedent is set here for ungated read-only source reading.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
     pattern is not writing a scheduling change; only the bound it pins is. **⚠ Take the pattern
     as a PARAMETER from the widest window available when it runs — NOT 8BXMNQ4T's snapshot
@@ -93,7 +95,7 @@ external-refs: [TRDD-8BXMNQ4T]
   before the loop) is settled below. The consult is for choosing between 3 and 4 and for
   designing the priority floor, which has no precedent in `daemon.py`.
 
-## Why this exists — the measurement is done, the decision is not
+## Why this exists — a measurement exists, the decision does not
 
 TRDD-8BXMNQ4T asked *"measure the multiplier before choosing a mechanism"*. It did, within
 its window.
@@ -257,7 +259,7 @@ bounds that **sum** — only individual subprocess workloads are capped
   | beat length | preceded by pressure |
   |---|---|
   | **> 60 s** | **3 / 6** |
-  | ≤ 60 s | 482 / 881 (≈55%) |
+  | ≤ 60 s | 482 / 880 (≈55%) |
 
   **No signal.** The long-beat rate is if anything BELOW background. And the "three for
   three" that started this dissolves: it was three of the *100 s+ subset*, a slice chosen
@@ -268,15 +270,31 @@ bounds that **sum** — only individual subprocess workloads are capped
   interval a long body overruns), not a boundary the data suggested. A split the system
   already draws is principled; a split chosen because a bump appeared there is not.
 
-  **THE ATTRIBUTION WAS THE THING THAT COULD HAVE MADE THIS WRONG, SO IT WAS CHECKED.**
-  The first pass carried a `pressure` flag forward while walking the log, which is a
-  correlation with *the last guard run anywhere*, not with *this beat's guard run* — if
-  `memory-guard` ever ran AFTER `session-liveness` in a pass, or skipped a pass, rows
-  would silently carry a stale reading and a real effect would wash out into a null.
-  Re-run attributing each beat only to a guard whose `done` falls between the PREVIOUS
-  beat's end and this beat's start: **887 of 887 beats attributed, 0 discarded** — the
-  guard does run every pass, ahead of `session-liveness`. Same numbers. The carry-forward
-  was correct here, and that is now measured rather than assumed.
+  **THE ATTRIBUTION WAS THE THING THAT COULD HAVE MADE THIS WRONG, SO IT WAS CHECKED —
+  TWICE, AND THE SECOND CHECK IS THE ONE THAT COUNTS.**
+
+  The first pass carried a `pressure` flag forward while walking the log: a correlation
+  with *the last guard run anywhere*, not with *this beat's guard*. Had `memory-guard`
+  ever run AFTER `session-liveness` in a pass, or skipped one, every row would carry a
+  stale reading and a real effect would wash into a null.
+
+  *Check 1, from the log:* attribute each beat only to a guard whose `done` falls between
+  the PREVIOUS beat's end and this beat's start. 886 of 887 attributed (row 1 skipped —
+  no previous end; no synthetic bound). **But "0 discarded" only proves every beat had
+  AT LEAST ONE guard in its window, not that the right one was picked** — taking the last
+  candidate hides ties. Tallied: **19 windows held more than one guard, and in exactly 1
+  of those 19 did the candidates DISAGREE**, so at most one row of 886 is ambiguous.
+  Also **0 guards landed inside a `session-liveness` body**, as the single-threaded loop
+  requires.
+
+  *Check 2, from the CODE — the independent one:* `_build_tasks` (`daemon.py:2975-3007`)
+  registers **`memory-guard` 9th and `session-liveness` 14th**, and the dispatch loop is a
+  plain `for` with no sort (established earlier on this card). So the guard precedes
+  `session-liveness` in every pass **by construction**, not by log coincidence. This is
+  what check 1 could only be consistent with: both checks read the same event stream, so
+  agreement between them is not independent evidence — the registration list is.
+
+  Same numbers under both: **3/6 long, 482/880 normal.**
 
   **What this does and does NOT license.** The long arm is **n=6** — a 3/6 has a
   confidence interval spanning roughly 12–88%, so this excludes only a near-universal
