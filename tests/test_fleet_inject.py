@@ -36,8 +36,6 @@ def test_action_to_command_only_typing_rungs() -> None:
     assert fi.action_to_command("update") == "/janitor-arm"
     assert fi.action_to_command("esc_nudge") is None
     assert fi.action_to_command("relaunch") is None
-    assert fi.action_to_command("force_restart") is None
-    assert fi.action_to_command("resurrect") is None
     assert fi.action_to_command("nonsense") is None
 
 
@@ -132,13 +130,13 @@ def test_build_injection_iterm_fallback_strips_tty_prefix() -> None:
     assert 'write text "/reload-plugins --force"' in plan["osascript"]
 
 
-def test_build_injection_declines_unreachable_and_hard_rungs() -> None:
-    """No tmux pane + no valid UUID → no plan (don't fire blind). A hard-restart rung types no
-    command and is not ESC-only → no plan even with a good terminal (the daemon owns those)."""
+def test_build_injection_declines_unreachable_and_unknown_actions() -> None:
+    """No tmux pane + no valid UUID → no plan (don't fire blind). An action this module
+    does not know how to type → no plan even with a good terminal (the daemon owns
+    hard-restart actions, this module owns only the gentle command-typing ones)."""
     assert fi.build_injection({}, "rearm") is None
     assert fi.build_injection({"iterm_session_id": "not a uuid !!"}, "rearm") is None
-    assert fi.build_injection({"tmux_pane": "%9"}, "resurrect") is None
-    assert fi.build_injection({"tmux_pane": "%9"}, "force_restart") is None
+    assert fi.build_injection({"tmux_pane": "%9"}, "nonsense") is None
 
 
 def test_build_injection_esc_nudge_builds_an_esc_only_plan() -> None:
@@ -281,8 +279,8 @@ def test_fire_wtype_and_xdotool_use_detached_steps(monkeypatch) -> None:
 # Gentle/hard rung reachability parity — the severity inversion.
 #
 # `build_injection` (gentle rungs: rearm/reload/update) used to stop after the
-# iterm channel, while `fleet_restart._command_plan` (hard rungs: relaunch /
-# force_restart) already walked tmux -> iterm -> aimaestro -> linux-gui. So an
+# iterm channel, while `fleet_restart._command_plan` (the hard rung, relaunch)
+# already walked tmux -> iterm -> aimaestro -> linux-gui. So an
 # ai-maestro agent reachable ONLY via the CLI channel, and any Linux GUI
 # terminal, was reported UNREACHABLE for a harmless `/janitor-arm`, kept
 # escalating, and eventually met a rung that KILLS it. The gentle fix was
@@ -342,10 +340,9 @@ def test_build_injection_still_none_when_no_channel() -> None:
     assert fi.build_injection({"linux_gui_channel": "bogus"}, "rearm") is None
 
 
-def test_build_injection_declines_hard_rungs() -> None:
-    """The hard rungs type no command and are not ESC-only -> still None, even with a live
-    channel resolved (the daemon executes those behind its crash-loop guard)."""
-    assert fi.build_injection(_AIMAESTRO_TERMINAL, "force_restart") is None
+def test_build_injection_declines_the_hard_rung() -> None:
+    """The hard rung (relaunch) types no command and is not ESC-only -> still None, even
+    with a live channel resolved (the daemon executes it behind its crash-loop guard)."""
     assert fi.build_injection(_AIMAESTRO_TERMINAL, "relaunch") is None
 
 

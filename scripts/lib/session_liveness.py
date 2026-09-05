@@ -290,7 +290,7 @@ def rate_limit_flag_is_stale(flag_mtime: int | None, now: int, max_age_s: int) -
     A project whose cron died therefore can NEVER clear its own flag — the loop is closed
     by construction, and 17 of 35 projects on this machine held one, up to 50 days old
     (janitor#77 item 4). A stale flag makes `diagnose_instance` read a merely-quiet session
-    as `frozen`, which walks the ladder toward rung 6 `force_restart` (a kill) instead of
+    as `frozen`, which used to walk the ladder toward a kill rung (since retired) instead of
     the gentle `rearm` that `cron_dead` earns.
 
     Age is the flag's own mtime because the StopFailure hook `touch()`es it on EVERY
@@ -327,47 +327,16 @@ def escalation_tier(attempts: int) -> int:
     return min(1 + attempts // 2, 3)
 
 
-# The recovery ladder (TRDD-324223a6): gentlest → hard-restart. Each successive FAILED
-# wake escalates one rung; a rung that succeeds (the session makes progress)
-# resets the count to 0. "1 is not enough" — ESC+nudge is only the FIRST rung; a
-# hard freeze (dead process, corrupted config) needs the heavier rungs.
-RECOVERY_LADDER: tuple[str, ...] = (
-    "esc_nudge",      # 1 — inject ESC (dismiss any modal) + kick a fresh turn
-    "rearm",          # 2 — /janitor-arm: restore the heartbeat cron
-    "reload",         # 3 — /reload-plugins: pick up an auto-update's new hooks
-    "update",         # 4 — ensure latest plugin version, then nudge again
-    "relaunch",       # 5 — claude --continue in the SAME pane (resume transcript)
-    "force_restart",  # 6 — external kill of the stuck pid + claude --continue
-    "resurrect",      # 7 — background claude that kills+relaunches the stuck one
-)
-
 # Rungs that kill/replace the claude process — bounded by the crash-loop guard so
-# the guardian can never enter a restart storm.
-HARD_RUNGS: frozenset[str] = frozenset({"relaunch", "force_restart", "resurrect"})
-
-
-def recovery_action_for(attempt: int) -> str:
-    """The recovery action for the Nth (0-based) consecutive failed wake. Walks
-    ``RECOVERY_LADDER`` and CLAMPS to the last rung, so sustained failure stays at
-    the hard-restart option (bounded by ``crash_loop_tripped``) rather than wrapping
-    back to a gentle no-op that would never recover a hard freeze.
-
-    **NOT THE LIVE LADDER — it has NO production caller.** `git grep recovery_action_for`
-    finds only this definition, the `"frozen": "ladder"` comment above, and its own tests.
-    The routing the daemon actually runs is ``fleet_recovery.action_for``, whose single
-    caller is ``daemon.py``'s session-liveness pass, and which since TRDD-L32WC0H7 F1 caps
-    `frozen` at ``esc_nudge`` and returns a kill rung for NO diagnosis.
-
-    So this function and the live one now DISAGREE, and this one's tests still assert
-    ``force_restart``/``resurrect`` and still pass — which is exactly how a reader concludes
-    the escalation is live when it is not. Kept rather than deleted only because it is the
-    written record of the intended 7-rung ORDER, which TRDD-56d24c02 needs if the USER ever
-    authorizes the janitor to kill a session (that card is blocked on `decision:user`). If
-    that decision comes back "never kill", delete this, ``RECOVERY_LADDER``, ``HARD_RUNGS``
-    and their tests together — one version of the routing must exist, not two."""
-    if attempt < 0:
-        attempt = 0
-    return RECOVERY_LADDER[min(attempt, len(RECOVERY_LADDER) - 1)]
+# the guardian can never enter a restart storm. `relaunch` is the only survivor:
+# `force_restart`/`resurrect` (the two rungs that actually kill a pid) were RETIRED
+# (TRDD-56d24c02, executed by TRDD-V07NFXS9) — `fleet_recovery.action_for` had capped
+# `frozen` at `esc_nudge` unconditionally since TRDD-L32WC0H7 F1, so nothing could ever
+# route to them; a capability nothing can reach is dead code with a safety story
+# attached. The written-record ladder (`RECOVERY_LADDER` / `recovery_action_for`) that
+# used to carry the retired rungs' intended order is deleted with them, per USER decision
+# "RETIRE" — one version of the routing exists now, not two.
+HARD_RUNGS: frozenset[str] = frozenset({"relaunch"})
 
 
 def is_hard_rung(action: str) -> bool:
@@ -409,20 +378,16 @@ _DIAGNOSIS_RECOVERY: dict[str, str | None] = {
     "server_owned": None,          # the ai-maestro server owns this agent's continuity — hands off
     "healthy": None,
     "retry_wedged": "esc_retry",   # OWN esc-only recovery (TRDD-WKTD5JTC advisor #1) — NEVER "ladder":
-                                    # "ladder" walks to force_restart (a KILL) at attempts>=3 under
-                                    # include_hard=True, and a retry-wedge must never kill at any
-                                    # attempt count. fleet_recovery.action_for maps this to esc_nudge
+                                    # a retry-wedge must never reach a kill rung at any attempt
+                                    # count. fleet_recovery.action_for maps this to esc_nudge
                                     # UNCONDITIONALLY (see there) — this string is only the "is this
                                     # diagnosis actionable at all" marker, never invoked directly.
     "frozen": "ladder",            # STALE LABEL — see below. Like `retry_wedged` above, this
                                     # string is only the "is this diagnosis actionable at all"
                                     # marker; the live routing is fleet_recovery.action_for, which
                                     # since TRDD-L32WC0H7 F1 maps `frozen` to esc_nudge
-                                    # UNCONDITIONALLY and never reaches a kill rung.
-                                    # `recovery_action_for()` — the 7-rung escalation this once
-                                    # named — has NO production caller (`git grep` finds only its
-                                    # own definition, this comment, and its tests). Do not read it,
-                                    # or its passing tests, as evidence that the escalation is live.
+                                    # UNCONDITIONALLY. The kill rungs it once could have escalated
+                                    # to were RETIRED (TRDD-56d24c02 / TRDD-V07NFXS9) as unreachable.
     "version_mismatch": "reload",  # inject /reload-plugins (+ ensure update)
     "cron_dead": "rearm",          # inject /janitor-arm to restore the heartbeat
     "dead": "relaunch",            # gated hard-restart: claude --continue in the pane

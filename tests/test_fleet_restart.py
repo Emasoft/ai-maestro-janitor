@@ -1,11 +1,11 @@
-"""Tests for the hard-restart recovery rungs (TRDD-56d24c02 / A5).
+"""Tests for the hard-restart recovery rung (TRDD-56d24c02 / A5).
 
-These rungs KILL and RESPAWN processes, so the tests are written so that NONE of
-them can ever touch a real process: every kill goes through an injected recorder,
-every spawn through an injected recorder, and the keystroke `fleet_inject.fire` is
-monkeypatched. What is proven here is the SAFETY CONTROL FLOW — default-off dry-run,
-the is_killable refusals, and that a kill happens only when both the opt-in and the
-guard agree.
+The two kill rungs (force_restart, resurrect) were RETIRED — TRDD-56d24c02, executed by
+TRDD-V07NFXS9 — leaving `relaunch` as the sole hard-restart rung. It never kills a
+process, so the keystroke `fleet_inject.fire` is monkeypatched and no real process is ever
+touched. What is proven here is the SAFETY CONTROL FLOW — default-off dry-run, and
+`is_killable`'s own refusal gate (kept per TRDD-56d24c02's decision even though this
+module no longer calls it).
 
 The channel-resolution tests (TRDD-ME8V2YJF follow-up) prove `_command_plan`'s
 fallback order for the two NEW channels (ai-maestro CLI, Linux GUI wtype/xdotool)
@@ -203,202 +203,45 @@ def test_relaunch_command_ladder_live_then_recorded_then_fallback(
     assert fn.relaunch_command(0, str(tmp_path)) == "claude --continue"
 
 
-def test_builders_stay_pure_and_fall_back_on_an_empty_command(tmp_path: Path) -> None:
-    """Every `build_*` takes the command as DATA and defaults to the safe minimum.
+def test_build_relaunch_stays_pure_and_falls_back_on_an_empty_command() -> None:
+    """`build_relaunch` takes the command as DATA and defaults to the safe minimum.
 
     Purity is the module contract — a plan must be inspectable and dry-runnable. Resolving
-    the argv inside a builder would mean a `ps` call fires merely from BUILDING a plan,
-    including in `--dry-run`; the same mistake `session` already documents for `tmux`.
+    the argv inside the builder would mean a `ps` call fires merely from BUILDING a plan,
+    including in `--dry-run`.
     """
     relaunch = fn.build_relaunch({"tmux_pane": "%7"})
     assert relaunch is not None and "claude --continue" in relaunch["command"]
-
-    forced = fn.build_force_restart(9988, {"tmux_pane": "%7"}, command="   ")
-    assert forced is not None and "claude --continue" in forced["relaunch"]["command"]
-
-    resurrect = fn.build_resurrect(9988, str(tmp_path))
-    assert "claude --continue" in resurrect["spawn"][-1]
-
-    mirrored = fn.build_resurrect(9988, str(tmp_path), command="claude --model opus -c")
-    assert "claude --model opus -c" in mirrored["spawn"][-1]
-
-
-def test_build_force_restart_carries_kill_then_relaunch() -> None:
-    """force_restart describes the kill target + an in-pane relaunch; None with no pane
-    (the caller then escalates to resurrect)."""
-    plan = fn.build_force_restart(9988, {"tmux_pane": "%3"})
-    assert plan is not None and plan["rung"] == "force_restart"
-    assert plan["kill_pid"] == 9988 and plan["relaunch"]["rung"] == "relaunch"
-    assert fn.build_force_restart(9988, {}) is None
-
-
-def test_resurrect_prefers_a_TAB_in_an_existing_session() -> None:
-    """With a session available, resurrect opens a tmux WINDOW (a tab), not a new session.
-
-    Under iTerm2's tmux control mode the mapping is fixed — a tmux SESSION surfaces as an
-    iTerm WINDOW and a tmux WINDOW as a TAB — so `new-session` necessarily spawned a whole
-    window. `-d` creates the tab without switching to it, so a 3am resurrect is visible in
-    the tab bar without yanking the user's view away mid-task.
-    """
-    plan = fn.build_resurrect(555, "/work", session="$0")
-    argv = plan["spawn"]
-
-    assert argv[:2] == ["tmux", "new-window"]
-    assert "-d" in argv and "-t" in argv and "$0" in argv
-    assert "new-session" not in argv
-    assert "janitor-resurrect-555" in argv
-
-
-def test_resurrect_falls_back_to_a_session_when_none_exists() -> None:
-    """No tmux session → `new-session`. This rung must ALWAYS produce a plan.
-
-    It is the last resort for the no-channel case, so losing the fallback would mean a
-    wedged session with no reachable pane simply never gets recovered.
-    """
-    plan = fn.build_resurrect(555, "/work", session="")
-    argv = plan["spawn"]
-
-    assert argv[:3] == ["tmux", "new-session", "-d"]
-    assert "janitor-resurrect-555" in argv
-
-
-def test_resurrect_unusable_session_id_degrades_to_the_fallback() -> None:
-    """An empty OR whitespace-only session id must take the fallback, not build a bad target.
-
-    Whitespace is the trap: `"   "` is TRUTHY, so an unstripped id would build
-    `new-window -t "   "` — a target tmux cannot resolve — turning "no session" into a
-    silently failing spawn instead of the working fallback.
-    """
-    for bogus in ("", "   ", "\n"):
-        assert fn.build_resurrect(7, None, session=bogus)["spawn"][1] == "new-session"
-
-
-def test_build_resurrect_always_builds_and_quotes_cwd() -> None:
-    """resurrect is the no-channel last resort: it always builds a detached-spawn plan,
-    and shlex-quotes the cwd so a crafted project path can't break the command."""
-    # `session` passed explicitly: the builder is PURE, so the branch is chosen by the
-    # argument rather than by whether the machine running the suite has a tmux server up.
-    plan = fn.build_resurrect(555, "/tmp/weird; rm -rf x", session="")
-    assert plan["rung"] == "resurrect" and plan["kill_pid"] == 555
-    assert plan["spawn"][:3] == ["tmux", "new-session", "-d"]
-    inner = plan["spawn"][-1]
-    assert "kill 555" in inner
-    assert "'/tmp/weird; rm -rf x'" in inner          # the cwd is single-quoted as ONE arg
-    assert "claude --continue" in inner
-    # the cwd quoting is branch-independent — it lives in `inner`, which both spawn
-    # shapes carry verbatim
-    tab = fn.build_resurrect(555, "/tmp/weird; rm -rf x", session="$0")
-    assert tab["spawn"][-1] == inner
-    # no project root → falls back to $HOME, still a valid plan
-    assert fn.build_resurrect(5, None, session="")["spawn"][-1].startswith("kill 5")
+    assert fn.build_relaunch({}) is None
 
 
 def test_fire_restart_dry_run_when_disabled_touches_nothing(monkeypatch) -> None:
-    """With the opt-in OFF, fire_restart executes NOTHING — no kill, no spawn, no
-    keystroke — and reports DRY_RUN. This is the default production posture."""
-    killed: list = []
-    spawned: list = []
-    def _fire(p):  # list.append() returns None; a def keeps the fire spy truthy cleanly
-        spawned.append(p)
-        return True
-    monkeypatch.setattr(fn.fleet_inject, "fire", _fire)
-    plan = fn.build_force_restart(123, {"tmux_pane": "%1"})
-    out = fn.fire_restart(plan, enabled=False, killable=True,
-                          killer=lambda *a: killed.append(a), spawner=lambda a: spawned.append(a))
-    assert out == "DRY_RUN:force_restart"
-    assert killed == [] and spawned == []      # absolutely nothing fired
+    """With the opt-in OFF, fire_restart types NOTHING and reports DRY_RUN. This is the
+    default production posture."""
+    fired: list = []
+    monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: fired.append(p) or True)
+    plan = fn.build_relaunch({"tmux_pane": "%1"})
+    out = fn.fire_restart(plan, enabled=False)
+    assert out == "DRY_RUN:relaunch"
+    assert fired == []      # absolutely nothing fired
 
 
-def test_fire_restart_relaunch_needs_no_kill(monkeypatch) -> None:
-    """relaunch (dead pane, no live pid) fires the keystroke and never kills."""
-    killed: list = []
+def test_fire_restart_relaunch_fires_the_keystroke(monkeypatch) -> None:
+    """relaunch (dead pane, no live pid) fires the keystroke plan when enabled."""
     monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: True)
     plan = fn.build_relaunch({"tmux_pane": "%2"})
-    out = fn.fire_restart(plan, enabled=True, killable=False, killer=lambda *a: killed.append(a))
-    assert out == "FIRED:relaunch" and killed == []   # killable irrelevant for relaunch
-
-
-def test_fire_restart_force_restart_kills_only_when_killable(monkeypatch) -> None:
-    """force_restart kills the pid (injected recorder) then relaunches — but ONLY when
-    killable; a not-killable verdict refuses without touching the process."""
-    monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: True)
-    killed: list = []
-    plan = fn.build_force_restart(777, {"tmux_pane": "%9"})
-    still_claude = lambda pid: "claude --continue"  # noqa: E731 - the pid is still ours at kill time
-    # killable → kills 777 then relaunches
-    out = fn.fire_restart(plan, enabled=True, killable=True,
-                          killer=lambda pid, sig: killed.append(pid),
-                          cmdline_reader=still_claude)
-    assert out == "FIRED:force_restart" and killed == [777]
-    # NOT killable → refuse, never kill
-    killed.clear()
-    out = fn.fire_restart(plan, enabled=True, killable=False,
-                          killer=lambda pid, sig: killed.append(pid),
-                          cmdline_reader=still_claude)
-    assert out == "REFUSED:not-killable:force_restart" and killed == []
-
-
-def test_fire_restart_resurrect_kills_then_spawns() -> None:
-    """resurrect kills the stuck pid then spawns the detached background claude (both
-    injected); refuses entirely when not killable."""
-    killed: list = []
-    spawned: list = []
-    plan = fn.build_resurrect(888, "/proj")
-    def _spawn(argv):  # list.append() returns None; a def keeps the spawner spy truthy cleanly
-        spawned.append(argv)
-        return True
-    still_claude = lambda pid: "claude --continue"  # noqa: E731 - the pid is still ours at kill time
-    out = fn.fire_restart(plan, enabled=True, killable=True,
-                          killer=lambda pid, sig: killed.append(pid),
-                          spawner=_spawn, cmdline_reader=still_claude)
-    assert out == "FIRED:resurrect" and killed == [888] and len(spawned) == 1
-    killed.clear()
-    spawned.clear()
-    out = fn.fire_restart(plan, enabled=True, killable=False,
-                          killer=lambda pid, sig: killed.append(pid),
-                          spawner=lambda argv: spawned.append(argv),
-                          cmdline_reader=still_claude)
-    assert out == "REFUSED:not-killable:resurrect" and killed == [] and spawned == []
-
-
-def test_fire_restart_refuses_a_recycled_pid() -> None:
-    """TOCTOU GUARD. `is_killable` is computed from a process-table SNAPSHOT taken during the
-    fleet scan; the kill happens later. In that window the wedged claude can exit and the OS
-    can hand its pid NUMBER to an unrelated process — pids are recycled integers, not handles.
-    Signalling on the stale verdict would SIGTERM an innocent process. So the pid's cmdline is
-    re-read at the instant of the kill and must STILL be a claude."""
-    killed: list = []
-    spawned: list = []
-    plan = fn.build_force_restart(999, {"tmux_pane": "%1"})
-
-    # The pid now belongs to something else entirely → refuse, and never signal it.
-    out = fn.fire_restart(plan, enabled=True, killable=True,
-                          killer=lambda pid, sig: killed.append(pid),
-                          cmdline_reader=lambda pid: "/usr/bin/postgres -D /var/db")
-    assert out == "REFUSED:pid-recycled:force_restart"
-    assert killed == [], "an unrelated process that merely inherited the pid must never be killed"
-
-    # Cannot read the cmdline (ps missing/blocked) ⇒ cannot confirm ⇒ REFUSE, never guess.
-    out = fn.fire_restart(plan, enabled=True, killable=True,
-                          killer=lambda pid, sig: killed.append(pid),
-                          cmdline_reader=lambda pid: "")
-    assert out == "REFUSED:pid-recycled:force_restart"
-    assert killed == []
-
-    # Same guard on the resurrect rung — and it must not spawn either.
-    rplan = fn.build_resurrect(999, "/proj")
-    out = fn.fire_restart(rplan, enabled=True, killable=True,
-                          killer=lambda pid, sig: killed.append(pid),
-                          spawner=lambda argv: spawned.append(argv),
-                          cmdline_reader=lambda pid: "vim notes.md")
-    assert out == "REFUSED:pid-recycled:resurrect"
-    assert killed == [] and spawned == []
+    out = fn.fire_restart(plan, enabled=True)
+    assert out == "FIRED:relaunch"
 
 
 def test_fire_restart_safe_on_none_and_unknown() -> None:
-    """A None plan or an unknown rung is a safe no-op string, never an exception."""
-    assert fn.fire_restart(None, enabled=True, killable=True) == "NO_PLAN"
-    assert fn.fire_restart({"rung": "bogus"}, enabled=True, killable=True) == "UNKNOWN_RUNG:bogus"
+    """A None plan or an unknown rung is a safe no-op string, never an exception. The two
+    former kill rungs (force_restart, resurrect) were RETIRED — TRDD-56d24c02, executed by
+    TRDD-V07NFXS9 — so a plan naming either now surfaces as an unknown rung, never fires."""
+    assert fn.fire_restart(None, enabled=True) == "NO_PLAN"
+    assert fn.fire_restart({"rung": "bogus"}, enabled=True) == "UNKNOWN_RUNG:bogus"
+    assert fn.fire_restart({"rung": "force_restart"}, enabled=True) == "UNKNOWN_RUNG:force_restart"
+    assert fn.fire_restart({"rung": "resurrect"}, enabled=True) == "UNKNOWN_RUNG:resurrect"
 
 
 def test_command_plan_prefers_tmux_then_iterm_then_aimaestro_then_linux_gui() -> None:

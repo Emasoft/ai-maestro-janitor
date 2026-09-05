@@ -47,8 +47,8 @@ Everything here is PURE / dry-run-able: build the payload, inspect it, THEN fire
 This module covers the gentle rungs: the command-TYPING rungs (rearm/reload/update)
 AND ``esc_nudge`` — an ESC-ONLY injection that types NO command (``build_esc_plan``,
 the flood-safe recovery for a rate-limited session, TRDD-P7WU40G9). The hard-restart
-rungs (relaunch/force_restart/resurrect) kill/spawn processes and live in the daemon
-task behind the crash-loop guard, not here.
+rung (relaunch) types into another process's pane and lives in the daemon task behind
+the crash-loop guard, not here.
 """
 
 from __future__ import annotations

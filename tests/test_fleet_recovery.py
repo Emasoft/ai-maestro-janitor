@@ -59,7 +59,8 @@ def test_crash_loop_wins_over_cooldown() -> None:
 def test_include_hard_frozen_never_escalates_past_esc_nudge() -> None:
     """include_hard (TRDD-56d24c02 increment 2 + TRDD-P7WU40G9, capped by TRDD-L32WC0H7 / F1
     derived 1): frozen is ESC-ONLY (no typed command, so no flood) at EVERY attempt, with or
-    without include_hard — it never escalates to force_restart, because a `frozen` diagnosis
+    without include_hard — it never escalates to a kill rung (both retired), because a
+    `frozen` diagnosis
     is a stall whose cause is unsettled (indistinguishable from a static retry-watchdog frame).
     dead→relaunch (an unrelated diagnosis, unaffected); healthy/unarmed stay None at ANY attempt."""
     for attempt in (0, 1, 2, 3, 4, 99):
@@ -102,8 +103,9 @@ def test_action_for_retry_wedged_never_escalates_to_hard_restart() -> None:
     """TRDD-WKTD5JTC advisor correction #1 — the guardrail this whole feature exists to
     hold: retry_wedged is ESC-only (esc_nudge) at EVERY attempt count, with OR without
     include_hard, and never becomes a hard/kill rung. This is the test that would go RED
-    if retry_wedged were (mis)mapped through frozen's 'ladder' escalation, which reaches
-    force_restart at attempts>=_FROZEN_GENTLE_ATTEMPTS under include_hard=True."""
+    if retry_wedged were (mis)mapped through frozen's 'ladder' escalation, which used to
+    reach a kill rung (since retired) at attempts>=_FROZEN_GENTLE_ATTEMPTS under
+    include_hard=True."""
     for attempt in (0, 1, 2, 3, 4, 99):
         for include_hard in (False, True):
             action = fr.action_for("retry_wedged", attempt, include_hard=include_hard)

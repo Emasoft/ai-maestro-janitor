@@ -54,49 +54,17 @@ def test_capture_terminal_identity_omits_absent_and_blank() -> None:
     assert sl.capture_terminal_identity({"TMUX_PANE": "%3"}) == {"tmux_pane": "%3"}
 
 
-def test_dead_ladder_records_the_intended_rung_order() -> None:
-    """The ladder escalates gentlest→hard-restart — rung 1 (ESC+nudge) is NOT the whole
-    thing ('1 is not enough'): re-arm, reload, update, relaunch, force_restart,
-    resurrect follow.
-
-    THIS TEST DOES NOT DESCRIBE LIVE BEHAVIOUR, and a green run here is not evidence that
-    the janitor escalates to a kill. `recovery_action_for` has no production caller; the
-    routing the daemon runs is `fleet_recovery.action_for`, which since TRDD-L32WC0H7 F1
-    caps `frozen` at `esc_nudge` and returns a kill rung for NO diagnosis. What this pins is
-    the intended rung ORDER, kept as the written record TRDD-56d24c02 needs if the USER ever
-    authorizes the janitor to kill a session. Retire this together with the function if that
-    decision comes back "never kill".
-    """
-    assert sl.recovery_action_for(0) == "esc_nudge"
-    assert sl.recovery_action_for(1) == "rearm"
-    assert sl.recovery_action_for(2) == "reload"
-    assert sl.recovery_action_for(3) == "update"
-    assert sl.recovery_action_for(4) == "relaunch"
-    assert sl.recovery_action_for(5) == "force_restart"
-    assert sl.recovery_action_for(6) == "resurrect"
-
-
-def test_dead_ladder_clamps_to_the_last_rung() -> None:
-    """Sustained failure stays at the hard-restart rung, never wraps to a gentle no-op
-    that could never recover a hard freeze.
-
-    Same caveat as `test_dead_ladder_records_the_intended_rung_order` above: this pins the DEAD
-    ladder's clamp, not live behaviour — nothing routes to `recovery_action_for` any more.
-    """
-    assert sl.recovery_action_for(7) == "resurrect"
-    assert sl.recovery_action_for(99) == "resurrect"
-    assert sl.recovery_action_for(-1) == "esc_nudge"
-
-
 def test_hard_rung_classification() -> None:
-    """Only the process-killing/replacing rungs are hard-restart (guard-bounded)."""
+    """Only `relaunch` is hard-restart (guard-bounded). The two kill rungs
+    (force_restart, resurrect) were RETIRED — TRDD-56d24c02, executed by
+    TRDD-V07NFXS9 — so they no longer classify as anything at all."""
     assert not sl.is_hard_rung("esc_nudge")
     assert not sl.is_hard_rung("rearm")
     assert not sl.is_hard_rung("reload")
     assert not sl.is_hard_rung("update")
     assert sl.is_hard_rung("relaunch")
-    assert sl.is_hard_rung("force_restart")
-    assert sl.is_hard_rung("resurrect")
+    assert not sl.is_hard_rung("force_restart")
+    assert not sl.is_hard_rung("resurrect")
 
 
 def test_crash_loop_guard() -> None:
@@ -264,8 +232,8 @@ def test_diagnose_instance_retry_wedged_ranks_above_frozen() -> None:
 
 def test_retry_wedged_recovery_is_not_ladder() -> None:
     """Advisor correction #1: retry_wedged gets its OWN entry, never 'ladder' — 'ladder'
-    is frozen's 7-rung escalation and eventually reaches force_restart (a kill), which a
-    retry-wedge (never a crashed process) must never reach."""
+    is frozen's escalation label, which historically could reach a kill rung (now
+    retired) — a retry-wedge (never a crashed process) must never reach one."""
     assert sl.recovery_for_diagnosis("retry_wedged") is not None  # actionable
     assert sl.recovery_for_diagnosis("retry_wedged") != "ladder"
     assert sl.recovery_for_diagnosis("retry_wedged") == "esc_retry"

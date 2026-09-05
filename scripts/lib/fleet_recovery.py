@@ -5,13 +5,13 @@ now (cooldown + crash-loop bounds). No I/O, no firing, no process control.
 
 The daemon walks a COMMAND-TYPING ladder for a stuck session — each action's
 injection (``fleet_inject``) sends ESC first, then types the slash-command, so a
-bare ESC-nudge is subsumed by ``rearm``. The genuinely-dangerous hard-restart rungs
-(relaunch / force_restart / resurrect — killing and respawning a process) are A5
-(TRDD-56d24c02): this POLICY names them only when the caller passes
+bare ESC-nudge is subsumed by ``rearm``. The one hard-restart rung, ``relaunch`` (A5,
+TRDD-56d24c02 — the two kill rungs beside it were retired by TRDD-V07NFXS9 as
+unreachable), is named by this POLICY only when the caller passes
 ``include_hard=True`` (increment 2, USER-approved 2026-07-08); EXECUTION stays in
-the daemon behind ``fleet_restart.hard_restart_enabled()`` + ``is_killable`` — this
-module still never fires anything. Without ``include_hard`` the gentle ladder is
-the whole ladder and exhaustion alerts a human, exactly as before.
+the daemon behind ``fleet_restart.hard_restart_enabled()`` — this module still never
+fires anything. Without ``include_hard`` the gentle ladder is the whole ladder and
+exhaustion alerts a human, exactly as before.
 
 All three gentle rungs are IDEMPOTENT and harmless even if mis-fired on a merely
 idle (non-working) session: ESC on a session with no in-flight turn is a no-op, and
@@ -49,7 +49,7 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
       (``/janitor-arm/janitor-arm/janitor-arm…``), and when the wait finally breaks the buffer
       flushes into a flood that blocks the session and burns tokens. ESC breaks the retry-wait
       and the session's OWN ``rate-limited.flag → [janitor-resume]`` resumes the work — with NO
-      command to accumulate. It NEVER escalates to ``force_restart``: the `frozen` shape is
+      command to accumulate. It NEVER escalates to a kill rung: the `frozen` shape is
       indistinguishable from a static CC retry-watchdog frame (`attempt 1/5` unchanged for
       hours — see ``retry_wedged`` below), so a stall whose cause is unsettled must never reach
       a kill rung. On exhaustion (``gate()`` → ``crash_loop``) the daemon alerts a human, never
@@ -81,7 +81,7 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
         # diagnosis is a STALL whose cause is UNSETTLED — it fires on the exact same shape
         # as a static CC retry-watchdog frame (`attempt 1/5` unchanged for hours), which
         # `retry_wedged` above already declines to escalate for the same reason. Escalating
-        # to `force_restart` here was reachable via `crash_loop_tripped`'s own budget
+        # to a kill rung here was reachable via `crash_loop_tripped`'s own budget
         # (attempt 3 < MAX_ATTEMPTS=4) BEFORE the give-up alert ever fired, i.e. a kill could
         # happen on a session no human had been told about yet. Never kill a session whose
         # stall shape has not been confirmed distinct from a benign retry wait; on exhaustion

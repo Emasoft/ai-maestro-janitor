@@ -6,11 +6,9 @@ that can never clear it. The circle is closed by construction, and on this machi
 projects held a flag, the oldest 50 days old.
 
 A stale flag is not harmless: `diagnose_instance` reads it before it reaches `cron_dead`, so
-a merely-quiet session is classified `frozen`, and `frozen` walks the recovery ladder toward
-rung 6 `force_restart` — a kill — instead of the gentle `rearm` that `cron_dead` earns. The
-hard rungs are default-off today, so this is latent rather than live; anyone who enables them
-inherits a fleet where 17 quiet projects sit one ladder-walk from being killed on the strength
-of a 50-day-old file.
+a merely-quiet session is classified `frozen` — which, before TRDD-L32WC0H7 F1 capped it at
+`esc_nudge`, walked the recovery ladder toward a kill rung (since retired, TRDD-56d24c02 /
+TRDD-V07NFXS9) instead of the gentle `rearm` that `cron_dead` earns.
 
 The daemon is alive when the cron is not. That is the whole reason the sweep lives there.
 """

@@ -1,38 +1,37 @@
-"""Hard-restart recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
-KILL and RESPAWN a claude process when the gentle command-typing rungs
+"""Hard-restart recovery rung (TRDD-56d24c02 / TRDD-324223a6 A5) — the rung that
+resumes a claude process in place when the gentle command-typing rungs
 (rearm/reload/update) cannot revive a session.
 
-THREE rungs, escalating:
+ONE rung remains:
 
 - **relaunch** — the pid is GONE (`dead`) but the pane lives → type
   ``claude --continue`` into the pane to resume the session IN PLACE. No kill;
   ``--continue`` preserves the transcript, so this is not data loss.
-- **force_restart** — the pid is alive but HARD-WEDGED (`frozen`, gentle ladder
-  exhausted) → ``os.kill`` the stuck pid, then ``claude --continue`` in the pane.
-- **resurrect** — the pane itself is unreachable → spawn a background ``claude``
-  (``tmux new-window -d`` in an existing session — a TAB; ``new-session`` only when no
-  session exists) that kills + relaunches the stuck one. The "launch a background claude
-  to kill+restart a stuck one" the user demanded.
 
-THE SAFETY MODEL (this module kills processes, so it is gated three ways):
+The two former kill rungs — **force_restart** (kill a hard-wedged `frozen` pid,
+then relaunch) and **resurrect** (spawn a background claude to kill+relaunch an
+unreachable one) — were RETIRED (TRDD-56d24c02, executed by TRDD-V07NFXS9):
+TRDD-L32WC0H7 F1 capped the `frozen` diagnosis at `esc_nudge` unconditionally, so
+nothing could ever route to them; a capability nothing can reach is dead code
+with a safety story attached. ``hard_restart_enabled()`` and ``is_killable`` are
+KEPT as-is per that decision (their own guard value, independent of the retired
+rungs) even though this module no longer calls ``is_killable`` itself.
+
+THE SAFETY MODEL for the remaining rung:
 
 1. **DEFAULT-OFF.** ``hard_restart_enabled()`` is false unless the user opts in with
    ``CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1``. Until then ``fire_restart``
    builds + returns a ``DRY_RUN`` marker and executes NOTHING.
-2. **NEVER the user's working session.** ``is_killable`` refuses unless the pid is a
-   real ``claude`` process, the instance is NOT ``active`` (transcript advancing),
-   the diagnosis is the genuinely-wedged ``frozen``, and the pid is neither this
-   process nor the daemon. ``diagnose_instance`` upstream already guarantees an
-   active session is ``healthy`` (never ``frozen``/``dead``), so this is the second
-   independent gate, not the only one.
+2. **NEVER the user's working session.** ``diagnose_instance`` upstream already
+   guarantees an active (transcript-advancing) session is ``healthy``, never `dead`,
+   so relaunch is never typed into a session the user is actively working in.
 3. **BOUNDED.** The caller wraps every hard-restart attempt in the crash-loop guard
    (``session_liveness.crash_loop_tripped``) so a persistent fault pages a human
-   instead of entering a kill/respawn storm.
+   instead of retrying forever.
 
-PURE where it can be: every ``build_*`` returns a plan dict you can inspect/dry-run;
-``fire_restart`` takes injectable ``killer``/``spawner`` so tests never touch a real
-process. This module is INTENTIONALLY not yet wired into the daemon's live loop
-(TRDD-56d24c02 increment 2 does that, behind the opt-in) — it ships tested + inert.
+PURE where it can be: ``build_relaunch`` returns a plan dict you can inspect/dry-run;
+``fire_restart`` is the only thing here that touches a pane. The daemon wires exactly
+one path — `dead` → relaunch (TRDD-56d24c02 increment 2) — behind the opt-in above.
 """
 
 from __future__ import annotations
@@ -96,9 +95,9 @@ def relaunch_command(pid: int = 0, project_root: str | None = None) -> str:
         where the pid is already gone and there is nothing left to read;
       * `claude --continue` — better than refusing to recover.
 
-    Every rung is guarded so it can only ever relaunch something that IS claude
-    (`is_killable`, and the `argv_is_claude` filter here), so a recycled pid cannot make this
-    replay an unrelated command line.
+    The replay is guarded so it can only ever relaunch something that IS claude (the
+    `argv_is_claude` filter here), so a recycled pid cannot make this replay an unrelated
+    command line.
     """
     if pid > 0:
         live = live_cmdline(pid)
@@ -128,11 +127,13 @@ def argv_is_claude(argv: str) -> bool:
 
 
 def hard_restart_enabled() -> bool:
-    """Master opt-in for the process-killing rungs. DEFAULT-OFF — these rungs kill and
-    respawn processes, so they stay dry-run-only until the user deliberately enables
-    them with CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1 (the documented true
-    spellings). Unlike the gentle rungs (idempotent, on by default), the irreversible
-    rungs are opt-in."""
+    """Master opt-in for the hard-restart rung (relaunch). DEFAULT-OFF — it types a
+    relaunch line into another session's pane, so it stays dry-run-only until the user
+    deliberately enables it with CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1 (the
+    documented true spellings). Unlike the gentle rungs (idempotent, on by default),
+    typing into a pane the scanner called dead is opt-in. One of the three invariants
+    TRDD-56d24c02 named; kept as the gate when the kill rungs were retired
+    (TRDD-V07NFXS9)."""
     raw = os.environ.get("CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED", "0").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
@@ -140,7 +141,10 @@ def hard_restart_enabled() -> bool:
 def is_killable(
     *, pid: int, command: str, active: bool, diagnosis: str, self_pid: int, daemon_pid: int | None
 ) -> bool:
-    """The hard gate before any ``os.kill``. True ONLY when killing this pid is safe:
+    """The hard gate before any ``os.kill``. UNCALLED since TRDD-V07NFXS9 retired the two
+    kill rungs (nothing under ``scripts/`` signals a pid any more); kept because it is one
+    of the three invariants TRDD-56d24c02 named — its fate is TRDD-PP4YS4GQ, not a quiet
+    deletion. True ONLY when killing this pid is safe:
 
     - ``pid > 0`` and is neither this process nor the daemon (never kill the guardian),
     - the instance is NOT ``active`` — a transcript-advancing session is the user's
@@ -191,11 +195,11 @@ def build_relaunch(terminal: dict, *, command: str = "") -> dict | None:
     still-living pane. No ESC (a dead pane sits at a shell prompt, no modal). None when
     the pane/UUID can't be safely targeted.
 
-    ``command`` is DATA, exactly like ``session`` on ``build_resurrect``: resolving it here
-    would mean calling ``relaunch_command`` → ``live_cmdline`` → ``ps`` from inside a
-    ``build_*``, breaking the module's purity contract (and tripping the suite's sandbox
-    guard). The caller with I/O rights passes ``relaunch_command(pid, project_root)``.
-    Empty falls back to the minimum that resumes a transcript.
+    ``command`` is DATA: resolving it here would mean calling ``relaunch_command`` →
+    ``live_cmdline`` → ``ps`` from inside a ``build_*``, breaking the module's purity
+    contract (and tripping the suite's sandbox guard). The caller with I/O rights passes
+    ``relaunch_command(pid, project_root)``. Empty falls back to the minimum that resumes
+    a transcript.
     """
     cmd = _command_plan(
         terminal, (command or "").strip() or _FALLBACK_RELAUNCH_CMD, esc_first=False
@@ -205,54 +209,18 @@ def build_relaunch(terminal: dict, *, command: str = "") -> dict | None:
     return {"rung": "relaunch", **cmd}
 
 
-def build_force_restart(pid: int, terminal: dict, *, command: str = "") -> dict | None:
-    """rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
-    DESCRIBES the kill (``kill_pid``) + the relaunch; ``fire_restart`` performs the
-    kill ONLY after ``is_killable`` passes. None when no pane resolves (then the caller
-    escalates to resurrect). ``command`` is passed through to ``build_relaunch``."""
-    relaunch = build_relaunch(terminal, command=command)
-    if relaunch is None:
-        return None
-    return {"rung": "force_restart", "kill_pid": pid, "relaunch": relaunch}
-
-
-def live_tmux_session() -> str:
-    """The id of an existing tmux session to hang a resurrect window on, or "" if none.
-
-    Session ID (``$3``) rather than name: a name may contain ``:``, which tmux parses as
-    ``session:window`` in a ``-t`` target, so a user session called ``work:api`` would
-    silently retarget. IDs have no such syntax. "" on any failure — the caller then falls
-    back to creating its own session.
-    """
-    try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["tmux", "list-sessions", "-F", "#{session_id}"],
-            capture_output=True, text=True, check=False, timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    if proc.returncode != 0:
-        return ""
-    for line in (proc.stdout or "").splitlines():
-        sid = line.strip()
-        if sid.startswith("$"):
-            return sid
-    return ""
-
-
 def recorded_terminal(project_root: str | None) -> dict[str, str]:
     """The pane identity the SESSION recorded at start, or {} when there is none.
 
-    THE POINT (owner directive 2026-07-29 — "restart in the same original tab"). Rungs 5
-    and 6 already restart in place; rung 7 is the only one that creates a surface, and it
-    fires exactly when no channel resolved. But ``fleet_scan`` resolves the terminal from
-    the LIVE TTY and deliberately never from a recorded id — correct, because that is what
-    lets it reach a zombie instance whose janitor predates ``terminal-identity.json``. The
-    gap is that live resolution can fail on a pane that is perfectly reachable: the known
-    case is iTerm automation denied by TCC, which the scanner itself flags
-    (``fleet_scan.iterm_automation_blocked`` — "iTerm is UP but the osascript enumerated
-    ZERO sessions"). Then a healthy tab reads as unreachable and we open one the user never
-    needed.
+    THE POINT (owner directive 2026-07-29 — "restart in the same original tab"). The
+    surviving relaunch rung already restarts in place. But ``fleet_scan`` resolves the
+    terminal from the LIVE TTY and deliberately never from a recorded id — correct,
+    because that is what lets it reach a zombie instance whose janitor predates
+    ``terminal-identity.json``. The gap is that live resolution can fail on a pane that is
+    perfectly reachable: the known case is iTerm automation denied by TCC, which the
+    scanner itself flags (``fleet_scan.iterm_automation_blocked`` — "iTerm is UP but the
+    osascript enumerated ZERO sessions"). Then a healthy tab reads as unreachable and a
+    relaunch attempt would find no channel where one existed.
 
     So: try live first (unchanged), and consult this only when live found nothing. Returns
     ONLY the two injection keys — ``term_program`` is recorded for diagnostics and is not an
@@ -260,7 +228,7 @@ def recorded_terminal(project_root: str | None) -> dict[str, str]:
     dict that callers test for truthiness.
 
     Never raises: a missing/garbage file is simply "no recorded pane", and the caller
-    escalates to rung 7 exactly as before.
+    falls back to logging the instance as unreachable exactly as before.
     """
     if not project_root:
         return {}
@@ -303,49 +271,6 @@ def recorded_argv(project_root: str | None) -> str:
     return argv.strip() if isinstance(argv, str) else ""
 
 
-def build_resurrect(
-    pid: int, project_root: str | None, *, session: str = "", command: str = ""
-) -> dict:
-    """rung 7 — the pane is unreachable: spawn a background ``claude`` that, on launch,
-    kills the stuck pid and resumes. The plan carries the kill target + the spawn argv;
-    ``fire_restart`` runs it only when enabled AND ``is_killable`` passes. Always builds a
-    plan (no pane needed) — it is the last resort precisely for the no-channel case.
-
-    A WINDOW (i.e. a tab) in an existing session is preferred over a whole new session
-    (owner directive 2026-07-29). A detached ``new-session`` is INVISIBLE: it does not
-    appear in any tab bar, so a 3am resurrect leaves a running claude the user can only
-    find by knowing to run ``tmux attach -t janitor-resurrect-<pid>``. As a tab it shows up
-    where they are already looking, next to the session it replaced.
-
-    ``-d`` on ``new-window`` creates the tab WITHOUT switching to it — visible, but it does
-    not yank the user's current view away mid-task.
-
-    ``new-session`` remains the fallback for when no session exists at all, because this
-    rung must never fail to produce a plan.
-
-    ``session`` and ``command`` are DATA, not lookups: this function stays PURE (the module
-    contract — every ``build_*`` returns a plan you can inspect and dry-run). Resolving them
-    here by shelling out to ``tmux``/``ps`` would put invisible machine-touching calls inside
-    a builder, which is exactly what the suite's sandbox guard exists to surface. The caller
-    with I/O rights (the daemon) passes ``live_tmux_session()`` and
-    ``relaunch_command(pid, project_root)``.
-    """
-    cwd = project_root or os.path.expanduser("~")
-    relaunch = (command or "").strip() or _FALLBACK_RELAUNCH_CMD
-    # shlex-quoted so a crafted cwd cannot break out of the single command string.
-    inner = f"kill {int(pid)} 2>/dev/null; cd {shlex.quote(cwd)} && {relaunch}"
-    name = f"janitor-resurrect-{int(pid)}"
-    # .strip(): a whitespace-only id is TRUTHY, so an unstripped value would build
-    # `new-window -t "   "` — a target tmux cannot resolve, turning "no session" into a
-    # silently failing spawn instead of the working fallback.
-    target = (session or "").strip()
-    if target:
-        argv = ["tmux", "new-window", "-d", "-t", target, "-n", name, "sh", "-c", inner]
-    else:
-        argv = ["tmux", "new-session", "-d", "-s", name, "sh", "-c", inner]
-    return {"rung": "resurrect", "kill_pid": pid, "cwd": cwd, "spawn": argv}
-
-
 def live_cmdline(pid: int) -> str:
     """The pid's CURRENT command line, read fresh (`ps -p PID -o args=`, POSIX-portable).
 
@@ -365,30 +290,22 @@ def live_cmdline(pid: int) -> str:
     return (proc.stdout or "").strip()
 
 
-def _fire_relaunch(
-    plan: dict, terminal: dict | None, project_dir: str | None, *, read_pane: bool
-) -> bool:
+def _fire_relaunch(plan: dict, terminal: dict | None, project_dir: str | None) -> bool:
     """Type the relaunch line through the policy table (TRDD-N954KWUC P3), never a bare
     `fleet_inject.fire`. Returns True iff it landed.
 
-    ``read_pane`` is TRUE only for rung 5 (``relaunch``), whose target is a pid that died on
-    its own: its frame carries no Claude chrome and classifies ``UNKNOWN``, which is exactly
-    what the ``RELAUNCH`` row expects. That read buys the check this rung never had — if the
-    pane in fact shows a LIVE claude (the human restarted it, or the scan raced), the table
-    refuses instead of typing ``claude --continue`` into that session's input field.
-
-    It is FALSE for rung 6 (``force_restart``), and that is deliberate, not an omission: we
-    have just SIGTERMed the pid microseconds ago, so the pane is still painting the dying
-    session's chrome and would classify as a live claude. Reading it there would refuse our
-    own relaunch and burn a recovery attempt on a session we ourselves just killed. The kill
-    IS the evidence; the screen has not caught up with it yet.
+    Always reads the pane first: the relaunch target is a pid that died on its own, so its
+    frame carries no Claude chrome and classifies ``UNKNOWN``, which is exactly what the
+    ``RELAUNCH`` row expects. That read buys a check this rung would not otherwise have — if
+    the pane in fact shows a LIVE claude (the human restarted it, or the scan raced), the
+    table refuses instead of typing ``claude --continue`` into that session's input field.
     """
     import pane_actuate  # noqa: PLC0415 -- local: fleet_inject/pane_state cycle at module load
 
     outcome = pane_actuate.act(
         terminal or {},
         pane_actuate.Event.RELAUNCH,
-        read_pane=read_pane and terminal is not None,
+        read_pane=terminal is not None,
         command=str(plan.get("command") or ""),
         command_plan=plan,
         project_dir=project_dir,
@@ -400,37 +317,18 @@ def fire_restart(
     plan: dict | None,
     *,
     enabled: bool,
-    killable: bool,
-    killer=os.kill,
-    spawner=None,
-    cmdline_reader=live_cmdline,
     terminal: dict | None = None,
     project_dir: str | None = None,
 ) -> str:
-    """Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
-    rung that kills, ``killable`` (the ``is_killable`` verdict the caller computed) AND the
-    pid is STILL a claude process at the instant we signal it.
-    Returns a short status string for the daemon log; never raises.
+    """Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in). Returns a short
+    status string for the daemon log; never raises.
 
     - not ``enabled`` → ``DRY_RUN:<rung>`` (build everything, execute nothing).
-    - ``relaunch`` → fire the keystroke plan (no kill; ``killable`` not required).
-    - ``force_restart``/``resurrect`` → refuse with ``REFUSED:not-killable`` unless
-      ``killable``, and ``REFUSED:pid-recycled`` unless the live cmdline re-check passes;
-      otherwise kill the pid (injectable ``killer``) then relaunch/spawn (injectable
-      ``spawner``).
-
-    THE RE-CHECK IS NOT REDUNDANT WITH ``is_killable``. That verdict is computed from a
-    process-table SNAPSHOT taken during the fleet scan; the kill happens later, after a
-    diagnosis, a cooldown gate and a plan build. In that window the wedged claude can exit
-    and the OS can hand its pid number to something else — pids are recycled integers, not
-    handles. Signalling on the stale verdict would then SIGTERM an innocent process that did
-    nothing but inherit a number. So we re-read the pid's cmdline at the last possible moment
-    and require it to still be a claude; if we cannot read it, we REFUSE rather than guess,
-    because failing to restart a wedged session costs one more cooldown, while killing the
-    user's editor or build costs their work.
-
-    ``killer``/``spawner``/``cmdline_reader`` are injected so tests prove the control flow
-    without touching a real process."""
+    - ``relaunch`` → fire the keystroke plan. No kill involved — a `dead` pid has nothing
+      left to signal, it types ``claude --continue`` into the surviving pane.
+    - anything else → ``UNKNOWN_RUNG:<rung>`` (defensive; ``relaunch`` is the only rung a
+      caller can currently build a plan for).
+    """
     if not plan:
         return "NO_PLAN"
     rung = plan.get("rung", "?")
@@ -439,40 +337,7 @@ def fire_restart(
     if rung == "relaunch":
         return (
             "FIRED:relaunch"
-            if _fire_relaunch(plan, terminal, project_dir, read_pane=True)
+            if _fire_relaunch(plan, terminal, project_dir)
             else "FIRE_FAILED:relaunch"
         )
-    if rung in ("force_restart", "resurrect"):
-        if not killable:
-            return f"REFUSED:not-killable:{rung}"
-        kill_pid = int(plan["kill_pid"])
-        if "claude" not in cmdline_reader(kill_pid):
-            # Either the pid is gone (nothing to kill — the wedge resolved itself) or it now
-            # belongs to an unrelated process (recycled). Both mean: do NOT signal it.
-            return f"REFUSED:pid-recycled:{rung}"
-        try:
-            killer(kill_pid, 15)  # SIGTERM the stuck pid
-        except (OSError, ProcessLookupError):
-            pass  # already gone is success for our purposes
-        if rung == "force_restart":
-            # read_pane=False: we SIGTERMed this pid microseconds ago, so the pane still
-            # paints the dying session's chrome — see `_fire_relaunch`.
-            return "FIRED:force_restart" if _fire_relaunch(
-                plan["relaunch"], terminal, project_dir, read_pane=False
-            ) else "FIRE_FAILED:force_restart"
-        # resurrect: spawn the detached background claude
-        run = spawner if spawner is not None else _default_spawn
-        return "FIRED:resurrect" if run(plan["spawn"]) else "FIRE_FAILED:resurrect"
     return f"UNKNOWN_RUNG:{rung}"
-
-
-def _default_spawn(argv: list[str]) -> bool:
-    """Spawn the resurrect argv fully detached; True iff launched. Best-effort."""
-    try:
-        subprocess.Popen(  # noqa: S603 - fixed argv (tmux new-window/new-session), no shell
-            argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, start_new_session=True,
-        )
-        return True
-    except (OSError, subprocess.SubprocessError):
-        return False

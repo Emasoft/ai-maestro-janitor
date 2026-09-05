@@ -1247,103 +1247,60 @@ def _write_recovery_state(path: Path, st: dict) -> None:
 
 
 def _hard_restart_plan(inst) -> dict | None:
-    """Build the hard-restart plan for a `dead`/`frozen`-exhausted instance
-    (TRDD-56d24c02 increment 2). PURE dict building — nothing fires here.
+    """Build the hard-restart plan for a `dead` instance (TRDD-56d24c02 increment 2).
+    PURE dict building — nothing fires here.
 
-    - `dead` (pid gone) → rung 5 `relaunch`: type ``claude --continue`` into the
-      surviving pane. No kill, so no resurrect fallback — resurrect KILLS, and
-      ``is_killable`` is frozen-only by design (a dead instance has no live pid
-      worth killing); an unreachable dead pane is logged, never force-handled.
-    - `frozen` (ladder exhausted) → rung 6 `force_restart` (kill the wedged pid +
-      relaunch in its pane); when NO pane channel resolves, fall back to rung 7
-      `resurrect` (detached background claude that kills + relaunches) — the
-      documented no-channel escalation on ``build_force_restart``.
+    `dead` (pid gone) → rung 5 `relaunch`: type ``claude --continue`` into the surviving
+    pane. No kill involved — a dead instance has no live pid worth killing; an unreachable
+    dead pane is logged, never force-handled.
 
-      **UNREACHABLE AS OF TRDD-L32WC0H7 F1 — read this before trusting the line above.**
-      THE INVARIANT: nothing routes here with a kill rung. `_run_hard_restart` (this
-      function's only caller) has exactly ONE call site, gated on `sl.is_hard_rung(action)`,
-      and `fleet_recovery.action_for` — which produces that `action` — caps `frozen` at
-      `esc_nudge` unconditionally, leaving `dead → relaunch` as its only hard return. A
-      `dead` instance is answered by the `diagnosis == "dead"` branch above, so neither kill
-      builder below is ever evaluated. Rungs 6 and 7 are live code nothing can reach;
-      exhaustion alerts a human (`HEARTBEAT-FIRES-STALL`) instead.
+    The two former kill rungs — `force_restart` (kill a hard-wedged `frozen` pid, then
+    relaunch) and `resurrect` (detached background claude that kills + relaunches) — were
+    RETIRED (TRDD-56d24c02, executed by TRDD-V07NFXS9): `fleet_recovery.action_for` caps
+    `frozen` at `esc_nudge` unconditionally since TRDD-L32WC0H7 F1, so nothing ever routed
+    to them — a capability nothing can reach is dead code with a safety story attached.
+    `dead → relaunch` is the only diagnosis this function now needs to answer; anything
+    else returns None and the caller logs it unreachable.
 
-      Re-check it by reading `action_for`'s returns, not this comment. The pin on that
-      invariant (no diagnosis returns a kill rung at any attempt count) lives in
-      `tests/test_daemon_hard_restart.py`; if you are changing routing here and find no such
-      test, WRITE IT rather than assuming the invariant is enforced.
-      NOT covered: an ai-maestro server recovering its own `server_owned` instances, which is
-      out of this repo and never was the janitor's to do.
-      The capability is DELIBERATELY KEPT, not dead code to clean up — TRDD-56d24c02 owns it
-      and is blocked on `decision:user`; that card's head block states the choice in full.
-      The reason is on `action_for`'s own branch — a `frozen` stall is shape-identical to a
-      benign retry wait, and a kill was reachable inside the crash-loop budget BEFORE any
-      human had been told. Do not re-route a diagnosis here to make an old test pass.
-
-    RESTART IN THE ORIGINAL TAB WHEREVER POSSIBLE (owner directive 2026-07-29). Rungs 5/6
-    already do — they type into the existing pane and create nothing. Before escalating to
-    the only rung that opens a new surface, retry with the pane the session RECORDED at
-    start (``fleet_restart.recorded_terminal``): live TTY resolution can fail on a pane that
-    is perfectly reachable (notably iTerm automation denied by TCC, which
+    RESTART IN THE ORIGINAL TAB WHEREVER POSSIBLE (owner directive 2026-07-29). Relaunch
+    types into the existing pane and creates nothing. Retry with the pane the session
+    RECORDED at start (``fleet_restart.recorded_terminal``): live TTY resolution can fail
+    on a pane that is perfectly reachable (notably iTerm automation denied by TCC, which
     ``fleet_scan.iterm_automation_blocked`` already detects), and without this retry that
-    healthy tab reads as unreachable and rung 7 opens one nobody needed.
+    healthy tab reads as unreachable.
     """
+    if inst.diagnosis != "dead":
+        return None
     recorded = fleet_restart.recorded_terminal(inst.project_root)
     # MIRROR the original launch line (owner directive 2026-07-29) — resolved HERE, not in
-    # the builders, which are pure by contract. A `dead` instance's pid is gone, so this
-    # falls through to the argv the session recorded at start; a `frozen` one is still
-    # running, so its LIVE argv wins. Preserves every user flag (--model, --add-dir,
+    # the builder, which is pure by contract. The pid is gone, so this falls through to the
+    # argv the session recorded at start. Preserves every user flag (--model, --add-dir,
     # --mcp-config, a permission mode) instead of guessing a line and silently relaunching
     # a DIFFERENT session.
     command = fleet_restart.relaunch_command(inst.pid, inst.project_root)
-    if inst.diagnosis == "dead":
-        # `or`: the recorded pane is a FALLBACK, never a substitute — live wins when it
-        # resolves, so a moved/recycled pane is still preferred over a stale recording.
-        return fleet_restart.build_relaunch(
-            inst.terminal, command=command
-        ) or fleet_restart.build_relaunch(recorded, command=command)
-    plan = fleet_restart.build_force_restart(inst.pid, inst.terminal, command=command)
-    if plan is None and recorded:
-        plan = fleet_restart.build_force_restart(inst.pid, recorded, command=command)
-    if plan is None:
-        # The session id is resolved HERE, not inside the builder: `build_*` are pure by
-        # contract. A live session makes resurrect open a tmux WINDOW — a TAB under iTerm2's
-        # control mode, where a tmux SESSION would instead surface as a whole new WINDOW
-        # (owner directive 2026-07-29). "" falls back to a new session, so the rung still
-        # always produces a plan.
-        plan = fleet_restart.build_resurrect(
-            inst.pid,
-            inst.project_root,
-            session=fleet_restart.live_tmux_session(),
-            command=command,
-        )
-    return plan
+    # `or`: the recorded pane is a FALLBACK, never a substitute — live wins when it
+    # resolves, so a moved/recycled pane is still preferred over a stale recording.
+    return fleet_restart.build_relaunch(
+        inst.terminal, command=command
+    ) or fleet_restart.build_relaunch(recorded, command=command)
 
 
 def _hard_restart_channel(plan: dict) -> str:
-    """The audit-facing channel of a hard-restart plan: relaunch carries it at the
-    top level, force_restart nests it under its relaunch sub-plan, resurrect has no
-    keystroke channel (it spawns a detached process)."""
-    ch = plan.get("channel") or plan.get("relaunch", {}).get("channel")
+    """The audit-facing keystroke channel of a hard-restart (relaunch) plan."""
+    ch = plan.get("channel")
     return str(ch) if ch else "spawn"
 
 
 def _run_hard_restart(inst, *, tag, fire, attempts, identity, sf, now, audit, decline) -> None:
-    """ONE hard-restart attempt (rungs 5-7) for a dead/frozen-exhausted instance
-    (TRDD-56d24c02 increment 2). All kill-path gates live HERE, in order — each
-    independently sufficient to stop a kill:
+    """ONE hard-restart attempt (rung 5, `relaunch`) for a `dead` instance
+    (TRDD-56d24c02 increment 2).
 
-    1. plan build — relaunch/force_restart need a validated pane channel
-       (tampered identities never reach argv/osascript); no channel on `dead`
-       → log + audit, touch nothing.
+    1. plan build — relaunch needs a validated pane channel (tampered identities
+       never reach argv/osascript); no channel → log + audit, touch nothing.
     2. ``enabled`` — the beat's fire flag AND the DEFAULT-OFF opt-in
        ``fleet_restart.hard_restart_enabled()``. Off → ``fire_restart`` returns
        ``DRY_RUN:<rung>`` and executes NOTHING (the plan was still built, so the
        log shows exactly what WOULD happen).
-    3. ``killable`` — ``fleet_restart.is_killable`` recomputed HERE from the live
-       Instance facts (real claude cmdline, NOT ``active``, not this daemon,
-       frozen-only): the second independent gate under ``diagnose_instance``'s
-       guarantee that a transcript-advancing session is never frozen/dead.
 
     The attempt is consumed on DRY_RUN and FIRED alike — WHY: a permanently
     disabled or failing hard rung must still walk the 4-attempt budget to the
@@ -1364,20 +1321,11 @@ def _run_hard_restart(inst, *, tag, fire, attempts, identity, sf, now, audit, de
         decline("unreachable", "relaunch", None)  # plan is None only on `dead`
         return
     enabled = fire and fleet_restart.hard_restart_enabled()
-    killable = fleet_restart.is_killable(
-        pid=inst.pid,
-        command=inst.command,
-        active=inst.active,
-        diagnosis=inst.diagnosis,
-        self_pid=os.getpid(),
-        daemon_pid=gs.daemon_pid(),
-    )
     # TRDD-N954KWUC P3: hand the pane identity down so the relaunch keystroke goes through
     # the policy table (it refuses to type a relaunch line into a pane that still shows a
     # LIVE claude) instead of firing blind.
     outcome = fleet_restart.fire_restart(
-        plan, enabled=enabled, killable=killable,
-        terminal=inst.terminal, project_dir=inst.project_root,
+        plan, enabled=enabled, terminal=inst.terminal, project_dir=inst.project_root,
     )
     _write_recovery_state(sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity})
     rung = str(plan.get("rung", "?"))
@@ -1556,17 +1504,14 @@ def task_session_liveness(fleet: list | None = None) -> None:
     re-establish the heartbeat). Per-instance cooldown + a crash-loop guard bound
     it; on the guard trip a human is alerted ONCE.
 
-    HARD-RESTART rungs (A5, TRDD-56d24c02 increment 2 — USER-approved 2026-07-08):
-    a `dead` instance gets rung 5 `relaunch`. Rungs 6 `force_restart` / 7 `resurrect`
-    are UNREACHABLE since TRDD-L32WC0H7 F1 — the invariant and the reason live on
-    ``_hard_restart_plan``; do not restate them here, two prose copies of one
-    mechanism drift apart and the drifted one is what gets read. Rung 5
+    HARD-RESTART rung (A5, TRDD-56d24c02 increment 2 — USER-approved 2026-07-08):
+    a `dead` instance gets rung 5 `relaunch`. The two former kill rungs were RETIRED
+    (TRDD-56d24c02, executed by TRDD-V07NFXS9) — the reason lives on
+    ``_hard_restart_plan``; do not restate it here, two prose copies of one mechanism
+    drift apart and the drifted one is what gets read. Rung 5
     EXECUTES only when BOTH the beat's fire flag AND
     the separate DEFAULT-OFF opt-in CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1
-    hold; otherwise the built plan is dry-run-logged. Every kill path re-checks
-    ``fleet_restart.is_killable`` (real claude cmdline, not `active`, not
-    self/daemon, frozen-only) — the second gate under ``diagnose_instance``'s
-    guarantee that a transcript-advancing session is never frozen/dead. A dry-run
+    hold; otherwise the built plan is dry-run-logged. A dry-run
     or fired hard attempt still consumes an attempt from the same 4-attempt budget,
     so a disabled or failing hard rung walks to the crash-loop human alert instead
     of logging forever.
@@ -1586,7 +1531,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
     # janitor#77 item C: only dispatch.py clears a rate-limited.flag, and dispatch needs a
     # live cron — so a cron-dead project can never clear its own. The daemon is alive when
     # the cron is not. Sweeping here (0 disables) restores the honest `cron_dead` diagnosis,
-    # and with it the gentle `rearm` rung instead of `frozen`'s walk toward a force_restart.
+    # and with it the gentle `rearm` rung instead of `frozen`'s esc_nudge stall.
     sweep_s = 3600 * _env_interval("CLAUDE_PLUGIN_OPTION_RATE_LIMIT_FLAG_MAX_AGE_HOURS", 24)
     if fleet is None:
         try:
@@ -1699,7 +1644,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
             iTerm, i.e. a very common setup), an unwired diagnosis, or a dry run — never
             tripped the cooldown. It was re-decided and RE-AUDITED every 120 s beat,
             forever: ~720 identical records/day/instance, which then drove the 1 MB audit
-            trim to evict the real fired/force_restart history it exists to preserve, and
+            trim to evict the real fired/hard-restart history it exists to preserve, and
             made every append re-read the whole megabyte to hash it. It also broke this
             project's own S3/S4 boundedness invariant ("a self-heal that can run every
             tick MUST dedupe/back-off on an unchanged input").
@@ -1825,7 +1770,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # PLACEMENT + BUDGET are both load-bearing (2026-08-02 review finding): this
         # guard must run BEFORE the hard-rung dispatch below — placed after it, a
         # frozen+awaiting session collected declined soft nudges until action_for
-        # escalated to force_restart, which dispatched without ever reaching this
+        # escalated to a kill rung (since retired), which dispatched without ever reaching this
         # check, SIGKILLing a session that was merely waiting on the human. And it
         # must NOT spend attempts++ — spending budget for an action never tried is
         # what walked the ladder to the hard rung in the first place (the same

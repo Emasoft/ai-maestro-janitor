@@ -323,7 +323,7 @@ def test_own_command_unsubmitted_refuses_an_already_empty_field(monkeypatch) -> 
 
 
 # ---------------------------------------------------------------------------------------
-# Site: fleet_restart.fire_restart relaunch / force_restart  (Event.RELAUNCH)
+# Site: fleet_restart.fire_restart relaunch  (Event.RELAUNCH)
 # ---------------------------------------------------------------------------------------
 
 
