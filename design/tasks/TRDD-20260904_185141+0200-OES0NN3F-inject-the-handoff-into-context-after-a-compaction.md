@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-04T21:20:00+0200
+updated: 2026-09-05T03:18:54+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -109,6 +109,21 @@ injection lands before the first turn and needs no nudge to have fired.
       clean on the changed file; `pytest -k "session_start or hooks_execute"` → **73 passed**.
 - [ ] **Verified from a REAL compaction's logs, not only the simulated payload.** This is the
       one criterion still open — it needs an actual compaction to occur in a live session.
+      **CHECKED 2026-09-05 AND STILL OPEN — with the exact recipe, so the next session spends
+      one command instead of re-deriving it.** `.janitor/logs/session-start.log` records the
+      trigger as `source=compact`. Every such line predates this fix: the last two are
+      `2026-09-04T06:37:02` and `2026-09-04T13:22:32`, while the implementation landed that
+      evening (`0f00fd60`, 19:57:37). So **no compaction has occurred since the code shipped**,
+      and `.janitor/state/resume-after-compact.flag` is absent right now.
+      **The check:** `grep "source=compact" .janitor/logs/session-start.log` — any entry after
+      2026-09-04T19:57 is the evidence this box wants; then confirm the handoff text actually
+      reached that session's context.
+      **⚠ A `/clear` DOES NOT COUNT and must not be mistaken for one.** This very session
+      resumed from a post-CLEAR injection (`post-clear resume cue emitted (age 877s)`), which
+      exercises `_inject_post_clear_handoff` — a DIFFERENT path from the
+      `resume-after-compact.flag`-gated `_inject_post_compact_handoff` this box is about.
+      Reading the clear as satisfying this box is the easy mistake here, and it would tick the
+      one criterion that exists precisely because the simulated payload already passes.
 
 ## Implementation
 
