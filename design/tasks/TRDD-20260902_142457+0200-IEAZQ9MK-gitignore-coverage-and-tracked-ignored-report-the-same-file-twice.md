@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: human_review
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T06:00:51+0200
+updated: 2026-09-05T06:02:48+0200
 current-owner: user
 task-type: bugfix
 scope: project
@@ -16,6 +16,11 @@ eht: []
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — last updated 2026-09-05T05:53:00+0200; contains material from 2026-09-03 and 2026-09-02, each dated inline
+
+> **STATUS — work COMPLETE.** 3/3 acceptance boxes ticked; the guarding test is
+> mutation-verified (reinstating the defect makes it fail); full suite green under xdist.
+> **Awaiting a USER ruling on whether adversarial self-review suffices for the `ai_review`
+> gate.** Everything below this line is provenance — stop here unless you need it.
 
 **NO INDEPENDENT `ai_review` HAPPENED, AND THIS CARD MUST NOT CLAIM ONE.** This repo is
 mono-agent: there is no separate AI-reviewer role, so nothing here can perform an independent

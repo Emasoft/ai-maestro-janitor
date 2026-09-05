@@ -118,7 +118,6 @@ truncation that dropped the correcting fork. Detail in commit `f370b46a`.)*
 
 
 ^ATOM-A277-V7XE [desc: "this repo is mono-agent, so the ai_review column has NO independent performer — a structural fact, and the resolution is a USER ruling, not something a session may define for itself", keywords: who_performs_ai_review_in_this_repo can_I_move_my_own_card_out_of_ai_review is_a_review_fork_an_independent_review I_reviewed_my_own_work_and_called_it_the_gate ai_review_has_no_reviewer_here mono-agent_repo_has_no_separate_reviewer_role can_I_self-certify_a_review_gate the_card_sat_in_ai_review_owned_by_its_author testing_to_ai_review_to_human_review_with_no_reviewer who_approves_a_non-exempt_transition_when_no_MANAGER_exists, ocd: 2026-09-05, lmd: 2026-09-05]
-
 **The `ai_review` column has NO independent performer in this repo, and that is a structural
 fact — not a licence to redefine the gate.** This project is mono-agent: one Claude authors the
 code, spawns any review forks, writes their interrogation lists, and chooses which findings to
@@ -133,8 +132,13 @@ suffices for the gate is a USER ruling** (a PRRD proposal, decided while no card
 answer) — a session may state what review actually happened, and must not grade it.
 
 **The same trap sits one level up:** `ai_review → human_review` is NON-EXEMPT and needs MANAGER
-approval, and no MANAGER exists here either. Moving the card yourself is defensible because it
-routes TOWARD the human and announces itself — but say it was unilateral. "No approver exists"
-is never itself the approval.
+approval, and no MANAGER exists here either. Moving the card yourself routes TOWARD the human
+and announces itself; leaving it in `ai_review` asserts a review nobody will perform. **Both
+are irregular.** Say which you did and that it was unilateral — the USER rules on whether it
+was acceptable.
+*(A first version of this atom called moving it "defensible". That was itself a ruling on the
+governance question this atom says belongs to the USER — and worse here than on a card, because
+memory is recalled by symptom and outlives the case. An atom about not minting resolutions must
+not mint one.)*
 
 ## Notes and lessons learned
