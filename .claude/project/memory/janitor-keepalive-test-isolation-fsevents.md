@@ -118,21 +118,6 @@ fires rather than trusting its docstring):
   attack on the real `design/` (it failed 68 innocent tests). Skip fd-relative calls and guard
   `rmtree` at its ENTRY POINT instead, which is what actually bounds the recursive delete.
 
-## See also
-
-- [[janitor-architecture]] — the L0–L3 immortality layers this component lives in.
-- [[macos-keychain]] — the 2026-07-09 keychain-flood RECURRENCE: this keepalive had STAGED the
-  pre-fix 0.31.0 flooder into DATA and kept relaunching it, so a published+cached fix never
-  reached the running daemon until the staged closure was force-restaged + byte-verified (that
-  page's root-cause #5 / lesson `[^2]`).
-- Same keepalive subsystem, related seam: the hub's TRDD-KEEPQRTN lesson (`[^3]`) —
-  "a self-healing gate must be consulted by EVERY respawn path." Both are keepalive
-  restage/respawn bugs that looked correct per-path but broke at the whole-surface
-  seam.
-- [[feedback-a-launcher-is-not-the-process]] — the general rule behind the escapee atom
-  below: the suite launches the daemon through `uv run`, so the handle it holds is the
-  LAUNCHER; signalling that handle orphans the real child. Kill the process GROUP.
-
 ^control-dir-ignores-the-isolation-lever [desc: fixed_path_defeats_env_isolation, keywords: a_test_wrote_the_live_control_plane JANITOR_GLOBAL_STATE_DIR_did_not_move_it a_kill-switch_leaked_from_a_test autouse__isolate_control_dir_fixture control_dir_is_a_literal_fixed_path_with_no_ladder does_JANITOR_GLOBAL_STATE_DIR_cover_the_control_dir a_leaked_kill-switch.flag_disarms_the_whole_fleet three_test_files_were_writing_the_live_control_plane why_does_control_dir_ignore_env_isolation do_not_simplify_the_autouse_fixture_to_per-file_setenv the_established_isolation_lever_silently_misses_this_flag control_dir_can_be_hardcoded_by_a_foreign_reader, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
 `control_dir()` (the `~/.claude/janitor-control/` control plane, TRDD-QK7M2B0X) is
 deliberately a LITERAL fixed path with no resolution ladder — that is its whole purpose, so
@@ -143,7 +128,6 @@ Three test files were writing the LIVE control plane before this was noticed; a 
 `kill-switch.flag` disarms the whole fleet. The fix is the **autouse `_isolate_control_dir`
 fixture in `tests/conftest.py`** — autouse, not per-file `setenv`, because the failure mode
 is a test nobody remembered to opt in. Do not remove it or "simplify" it back to per-file. [^4]
-
 
 ^ATOM-ODTM-LOI0 [desc:"the suite spawns REAL daemon processes that can outlive it — identify an escapee by its sandbox env, never by its argv, which names the repo script the real daemon also runs", keywords: found_a_daemon_py_running_from_a_temp_directory is_this_the_real_janitor_daemon_or_a_test_leftover orphaned_daemon_from_the_test_suite daemon_process_alive_for_days_with_no_cpu janitor_test_session_temp_home ps_shows_two_daemons_but_daemon_pid_is_absent daemon_ignored_sigterm_and_needed_sigkill argv_cannot_tell_a_test_daemon_from_production JANITOR_TEST_SANDBOX_DENY_names_forbidden_real_dirs production_daemon_pid_is_in_global-state_daemon.pid an_escapee_holds_an_fd_on_an_unlinked_flock identify_an_escapee_by_its_sandbox_env_not_argv, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
@@ -162,7 +146,6 @@ Because the isolation levers are per-process env, an escapee CANNOT corrupt real
 is contained, not dangerous. It is still worth killing: it holds an fd on an unlinked flock,
 and it makes every later process-table audit ambiguous.
 
-
 ^ATOM-5STX-ZL36 [desc:"the measured escapee: 2d18h alive on 0.13s of CPU, SIGTERM ignored — so a leak is silent and a terminate-and-assume cleanup does not clear it", keywords: orphaned_process_alive_for_days_with_almost_no_cpu my_teardown_sent_sigterm_and_reported_success leaked_process_nobody_noticed is_this_orphan_evidence_my_fix_failed compare_the_orphan_start_time_to_the_fix_commit_date 2_days_18_hours_alive_at_0.13s_cpu_total a_leak_is_silent_absence_of_symptoms_is_not_absence_of_leaks terminate-and-assume_cleanup_does_not_clear_a_leak parked_in_a_sleep_which_is_why_nothing_noticed_it ppid_1_process-group_leader_long_gone sandbox_HOME_already_deleted_but_process_still_alive is_this_orphan_process_a_sign_my_fix_didnt_work, type: project, ocd: 2026-08-01, lmd: 2026-08-01]
 
 Measured instance (2026-07-30 → 2026-08-02): one escapee still alive **2 d 18 h** after its
@@ -180,6 +163,21 @@ The fix is to kill the process GROUP rather than the handle the suite holds (lan
 2026-08-01). Note the ordering when judging a leak you find: an escapee that STARTED before
 that fix is not evidence the fix failed — compare its start time against the fix's commit
 date before concluding anything.
+
+## See also
+
+- [[janitor-architecture]] — the L0–L3 immortality layers this component lives in.
+- [[macos-keychain]] — the 2026-07-09 keychain-flood RECURRENCE: this keepalive had STAGED the
+  pre-fix 0.31.0 flooder into DATA and kept relaunching it, so a published+cached fix never
+  reached the running daemon until the staged closure was force-restaged + byte-verified (that
+  page's root-cause #5 / lesson `[^2]`).
+- Same keepalive subsystem, related seam: the hub's TRDD-KEEPQRTN lesson (`[^3]`) —
+  "a self-healing gate must be consulted by EVERY respawn path." Both are keepalive
+  restage/respawn bugs that looked correct per-path but broke at the whole-surface
+  seam.
+- [[feedback-a-launcher-is-not-the-process]] — the general rule behind the escapee atom
+  above: the suite launches the daemon through `uv run`, so the handle it holds is the
+  LAUNCHER; signalling that handle orphans the real child. Kill the process GROUP.
 
 ## Notes and lessons learned
 

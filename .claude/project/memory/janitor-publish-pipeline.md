@@ -120,7 +120,7 @@ only generic procedure (use `<repo-root>`, `$HOME`, `<email>`, the CPV repo by
 name, never literal paths or secrets).
 
 
-^ATOM-SQZO-66VW [keywords: the_test_gate_blocks_a_publish_at_random tests_fail_only_in_the_full_suite_and_pass_alone detector_exits_0_with_empty_stdout which_of_the_four_load-flake_categories_is_this assert_something_in_empty_string raw_TimeoutExpired_in_a_test the_suite_flakes_under_xdist publish_gate_red_but_tests_pass_isolated tell_the_four_flake_categories_apart_by_the_failure_text conftest_timeout-scale_knob_never_reaches_a_minimal_child_env a_production_helper_bypasses_state.run_subprocess elapsed_less_than_N_assertion_needs_a_causal_redesign the_tests_own_subprocess_run_timeout_cannot_be_scaled, ocd: 2026-08-21, lmd: 2026-08-21]
+^ATOM-SQZO-66VW [desc:"The pytest gate flakes under load in four distinct ways (A-D); tell them apart by the FAILURE TEXT (empty stdout / TimeoutExpired / elapsed<N / literal 'timeout'), not by which file failed.", keywords: the_test_gate_blocks_a_publish_at_random tests_fail_only_in_the_full_suite_and_pass_alone detector_exits_0_with_empty_stdout which_of_the_four_load-flake_categories_is_this assert_something_in_empty_string raw_TimeoutExpired_in_a_test the_suite_flakes_under_xdist publish_gate_red_but_tests_pass_isolated tell_the_four_flake_categories_apart_by_the_failure_text conftest_timeout-scale_knob_never_reaches_a_minimal_child_env a_production_helper_bypasses_state.run_subprocess elapsed_less_than_N_assertion_needs_a_causal_redesign the_tests_own_subprocess_run_timeout_cannot_be_scaled, ocd: 2026-08-21, lmd: 2026-08-21]
 
 The pytest gate flakes under load in FOUR distinct ways, and each needs a DIFFERENT fix — collapsing them is why TRDD-7NSRD8OV was misdiagnosed three times before it converged.
 
@@ -184,19 +184,6 @@ When a publish is interrupted AFTER `[G1] version bump` created the local tag bu
 ^ATOM-01KZ-DNOF [desc: "the release gate is NOT a superset of CI and publishes before CI judges the pushed sha — a green publish.py is not evidence the release is good", keywords: publish_said_green_but_CI_went_red ci_failed_on_the_commit_I_just_released the_gate_passed_and_github_rejected_it pyright_errors_after_a_successful_publish is_publish.py_the_same_as_CI red_badge_on_a_released_tag gate_runs_ruff_and_mypy_CI_runs_ruff_and_pyright release_created_before_CI_ran which_checks_does_the_publish_gate_actually_run my_release_is_public_and_CI_is_failing, type: project, ocd: 2026-09-03, lmd: 2026-09-03]
 
 `publish.py`'s gate and `.github/workflows/ci.yml` check DIFFERENT things, and the gate is the smaller set. Measured 2026-09-04 on the `--patch` run that shipped 3.4.14 (from that run's own `$` echoes vs ci.yml): the gate ran `ruff check scripts/` where CI runs `ruff check scripts/ tests/`; the gate ran NO pyright where CI runs bare `uvx --with pyright pyright` over the whole project with no continue-on-error; and the gate skips shellcheck, CI's separate serial `-m integration` pytest run, the hooks.json/dispatch/hook/detector smoke runs, and the memgrep staging. mypy is gate-only, which is fine — pyproject.toml documents the mypy/pyright split as deliberate (TRDD-BMDZK4RA: mypy cannot check `scripts/lib/` sibling calls, pyright owns that class). CI rejected `4326519d` with 7 pyright errors, all in `tests/` — the directory the gate's ruff does not read either. Worse than the missing checks: publish.py tags, pushes, creates the GitHub release and installs before CI has judged the pushed sha, so the release was public, installed, and the daemon had respawned onto it before the red badge appeared. Card: TRDD-MYQGMAQZ. [^19]
-
-## See also
-
-- `[[project_janitor_publish_blocked_cpv_fps]]` — the publish-gate history + the
-  devitalize-or-remove unblock recipe (RESOLVED; v0.7.x shipped).
-- [[janitor-self-update-bootstrap-gap]] — the OTHER half of a release: after publish.py
-  succeeds, why the local cache can stay on the old version (the fast-updater can't
-  accelerate its own first release; reload ≠ update).
-- `[[debugging-methodology]]` (USER scope) — owns the GENERAL method behind
-  `^ATOM-UHO6-Q99D`: separating a SLOW operation from a STUCK one before touching any
-  timeout (`^ATOM-KYV1-HR97` + its lesson). This page keeps only the CPV-specific facts;
-  the transferable technique belongs there, so it is findable from a hang that has
-  nothing to do with publishing.
 
 ^rc3-with-every-test-passing-is-the-write-guard [desc: publish_blocked_but_tests_green, keywords: publish exited 3 but every test passed pytest rc=3 nothing failed write guard mutation list heartbeat wrote fleet-attribution mid-gate, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
 An `rc=3` from the test gate with **every test passing** is the suite's own write-guard
@@ -279,6 +266,19 @@ The general shape, worth carrying elsewhere: an SSOT indirection is only free wh
 CONSUMER can follow it. A consumer that reads your file as text rather than running it sees
 the indirection, not the value — so the fix is not to abandon the SSOT but to move the
 enforcement into a test, where duplication becomes checked rather than trusted. [^15]
+
+## See also
+
+- `[[project_janitor_publish_blocked_cpv_fps]]` — the publish-gate history + the
+  devitalize-or-remove unblock recipe (RESOLVED; v0.7.x shipped).
+- [[janitor-self-update-bootstrap-gap]] — the OTHER half of a release: after publish.py
+  succeeds, why the local cache can stay on the old version (the fast-updater can't
+  accelerate its own first release; reload ≠ update).
+- `[[debugging-methodology]]` (USER scope) — owns the GENERAL method behind
+  `^ATOM-UHO6-Q99D`: separating a SLOW operation from a STUCK one before touching any
+  timeout (`^ATOM-KYV1-HR97` + its lesson). This page keeps only the CPV-specific facts;
+  the transferable technique belongs there, so it is findable from a hang that has
+  nothing to do with publishing.
 
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0011, status:valid, keywords:"pipeline_step_numbers_skip_preserve renumbering_breaks_log_greps removed_stage_keep_downstream_numbers", ocd:2026-06-13, lmd:2026-06-13] The step numbers intentionally skip 5 —

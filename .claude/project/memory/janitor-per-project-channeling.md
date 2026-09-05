@@ -29,15 +29,6 @@ BROADCAST fleet-wide into agent contexts.
 own-repo dedupe digest); `_propose_for_this_repo` (was already correct). The same invariant
 was communicated to ai-maestro (janitor#100) as binding on the server's daemon-function.
 
-## Applies to
-
-- TRDD-4649ZLE0 — human-notification channel (per-project escalation rule)
-- `scripts/detectors/fleet-github-config.py`, `scripts/lib/github_config_audit.py`
-
-See also [[janitor-daemon-bulk-lane]] — the other v0.50.0-era daemon invariant (bulk-lane
-serialization, a sibling concern, not governed by this one).
-
-
 ^ATOM-IGW8-NJLC [desc:"Per-project channeling ALSO applies to token telemetry: window-burn-rate alarms only inside the culprit project, and the 80% context-advisory default sits one runway band below the 85% enforcement", keywords: token_telemetry_per_project_only window_burn_rate_culprit_project_only context_advisory_default_80_percent one_runway_band_below_enforcement does_per-project_channeling_apply_to_token_telemetry_too unattributable_burn_trips_stay_silent_everywhere why_is_the_advisory_band_below_the_enforcement_band CC_harness_covers_the_mid_band fleet-wide_views_exist_only_behind_explicit_human_commands per-project_channeling_invariant_TRDD-X92VBFNF does_token_telemetry_leak_across_projects_too findings_about_a_repo_with_no_open_session_go_to_the_human, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
 - **Per-project channeling invariant (TRDD-X92VBFNF, security):** any AUTOMATIC surface
@@ -46,6 +37,14 @@ serialization, a sibling concern, not governed by this one).
   TELEMETRY included: `window-burn-rate` alarms only inside the CULPRIT project's own
   sessions (unattributable trips silent everywhere); the context-advisory default is 80%
   (one runway band below the 85% enforcement — the CC harness covers the mid band).
+
+## Applies to
+
+- TRDD-4649ZLE0 — human-notification channel (per-project escalation rule)
+- `scripts/detectors/fleet-github-config.py`, `scripts/lib/github_config_audit.py`
+
+See also [[janitor-daemon-bulk-lane]] — the other v0.50.0-era daemon invariant (bulk-lane
+serialization, a sibling concern, not governed by this one).
 
 ## Notes and lessons learned
 
