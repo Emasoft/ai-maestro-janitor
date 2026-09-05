@@ -3,7 +3,7 @@ trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
 column: todo
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T18:48:20+0200
+updated: 2026-09-05T18:55:16+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -65,15 +65,22 @@ pending→claimed (never the reverse), so both were already in the pool
   `janitor-memory-subconscious-agent` spawn instructions pass
   `<project-root>/.janitor/state` (or the resolved USER/LOCAL scope
   equivalent) directly in the text the spawning session hands the agent.
-  The SPAWNING session resolves that path itself at spawn time —
-  `$CLAUDE_PROJECT_DIR/.janitor/state` when `$CLAUDE_PROJECT_DIR` is set,
-  else `$(git -C "$PWD" rev-parse --show-toplevel)/.janitor/state` —
-  do not rely on unverified assumptions about the spawning session's cwd:
-  whether an ai-maestro-harness agent's Bash cwd equals its registered
-  workdir is unverified (`$CLAUDE_PROJECT_DIR` is empty in at least one
-  observed session). If that resolution fails (git rev-parse errors and
-  `$CLAUDE_PROJECT_DIR` is unset), the spawning session MUST NOT spawn
-  the memory agent — it reports one line instead and aborts the spawn.
+  A MODEL TURN in the spawning session composes that path — it reads a
+  Bash tool result (e.g. `$CLAUDE_PROJECT_DIR/.janitor/state` when
+  `$CLAUDE_PROJECT_DIR` is set, else
+  `$(git -C "$PWD" rev-parse --show-toplevel)/.janitor/state`) and types
+  it into the agent prompt; there is no harness guarantee that turn reads
+  the RIGHT project's result — do not rely on unverified assumptions
+  about the spawning session's cwd: whether an ai-maestro-harness agent's
+  Bash cwd equals its registered workdir is unverified
+  (`$CLAUDE_PROJECT_DIR` is empty in at least one observed session). If
+  that resolution fails (git rev-parse errors and `$CLAUDE_PROJECT_DIR`
+  is unset), the spawning session MUST NOT spawn the memory agent — it
+  reports one line instead and aborts the spawn. A correctly-typed path
+  still leaves the cross-project harness case open (the model turn
+  composes project A's path while the fire came from project B); item
+  (e) below is the backstop that makes such a wrong composition harmless
+  instead of silently reporting an empty pool.
 - (c) All 8 `janitor-memory-*` SKILL.md files run the claim step with
   `--state-dir "$STATE_DIR"`, where `$STATE_DIR` is the path from (b),
   never resolved from the agent's own cwd. Each SKILL.md's command block
@@ -93,7 +100,37 @@ pending→claimed (never the reverse), so both were already in the pool
   human, do not retry" rather than as an ordinary failure. A genuinely
   empty pending set with claimed files present in the directory stays the
   existing cheap-abstain exit 2.
-- (e) Tests: one asserting every `janitor-memory-*` SKILL.md passes
+- (e) Defense in depth for the case (b) cannot rule out: `_write_pending`
+  (`scripts/detectors/memory-maintenance.py:256`) records the absolute
+  `state_dir` it wrote into inside the dispatch payload;
+  `memory_dispatch_claim.py` compares the payload's `state_dir` with the
+  directory it was actually invoked on and REFUSES the claim (a distinct
+  message, non-zero exit; the record is left untouched, still pending)
+  when they differ. This closes V1 with no new stdout line and no
+  pointer file, because the check travels INSIDE THE RECORD ITSELF — a
+  spawning-session model turn that composes the wrong project's path
+  writes an agent that looks in the wrong directory, but the claim
+  attempt is caught and refused rather than silently reporting an empty
+  pool. **Comparison is NORMALISED, never raw strings**: both sides
+  resolve `Path(x).expanduser().resolve()` before comparing — the
+  scheduler at write time (`memory-maintenance.py:256`) and the claim
+  script at claim time (`memory_dispatch_claim.py:200`) — because
+  `git rev-parse --show-toplevel` yields the physical path while a
+  model-composed `--state-dir` may carry a trailing slash, `~`, a
+  relative form, or `/tmp` vs `/private/tmp` on macOS; raw string
+  equality would refuse EVERY claim and grow the pile one record per
+  fire. The acceptance test for (e) includes a symlinked pool directory
+  that still claims successfully. A record written by an OLDER cached
+  plugin version with no `state_dir` field at all (live for up to the
+  30-min TTL plus the keep-20 prune horizon after an update) is ACCEPTED
+  with one log line, never refused — absence of the field is not
+  evidence of a wrong directory, only of a version gap. This guard is
+  DISTINCT from (d): (d)'s new exit code fires on "no pool at all" (zero
+  `memory-maint-*` files anywhere) — a mistyped path; (e)'s refusal fires
+  when a real pool exists but for the wrong project — a correctly-typed
+  path to the wrong root. Each keeps its own exit code; neither
+  subsumes the other.
+- (f) Tests: one asserting every `janitor-memory-*` SKILL.md passes
   `--state-dir` to the claim step (grep-based, over `skills/`); one for
   the new exit code (`memory_dispatch_claim.py` invoked with no
   `--state-dir` against a directory with zero `memory-maint-*` files of
@@ -139,4 +176,16 @@ failure: the claiming agent looking in the wrong directory entirely.
       verified by a test that sources the skill's command block with
       `STATE_DIR` unset and asserts non-zero exit (e.g.
       `tests/test_memory_skill_state_dir_guard.py`).
+- [ ] `memory_dispatch_claim.py` refuses a claim (distinct message,
+      non-zero exit, record left untouched/still pending) when a
+      dispatch record's payload `state_dir` differs from the directory
+      the claim step was actually invoked on, verified by a new test
+      that writes a record with a foreign `state_dir` into a tmp pool
+      and asserts the claim is refused and the file is still pending.
+- [ ] The comparison normalises both sides via
+      `Path(x).expanduser().resolve()` before comparing, verified by a
+      test that invokes the claim step through a SYMLINKED pool
+      directory and asserts the claim still succeeds.
+- [ ] A record with no `state_dir` field at all (older-version payload)
+      is accepted with one log line, never refused, verified by a test.
 - [ ] `uv run pytest` full suite still green.

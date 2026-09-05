@@ -3,7 +3,7 @@ trdd-id: Q7X4M2KP
 title: Scheduler must supersede its own unclaimed dispatch record for the same scope root and intervention instead of stacking a new one
 column: todo
 created: 2026-09-05T18:40:37+0200
-updated: 2026-09-05T18:48:20+0200
+updated: 2026-09-05T18:55:16+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -32,7 +32,11 @@ happens when `global_state.memory_root_inflight()` (`scripts/lib/global_state.py
 `MEMORY_INFLIGHT_TTL_S = 30 * 60`, fail-open) times out without ever being claimed: the
 30-minute in-flight stamp lapses, the scheduler's next pass (`memory-maintenance.py:592-599`
 returns early only while the stamp is live) writes a fresh pending record for the same key,
-and the old one is left behind because `_write_pending` never looks for it. Card N1CPV1QV
+and the old one is left behind because `_write_pending` never looks for it. A second, distinct
+path to the same pile-up: `memory_root_inflight()` (`scripts/lib/global_state.py:1142-1157`)
+fails OPEN on an unreadable/corrupt stamp — it returns `None` — so a fresh pending record can
+also be written WITHOUT the 30-minute TTL ever lapsing (V3). Both paths land in the same place:
+an unclaimed record for a key that already has one. Card N1CPV1QV
 (agent-side state-dir mismatch) explains why a spawned agent can fail to claim the record at
 all; card IB5B14QQ makes the resulting pile visible to the scheduler. This card is the third
 leg: even once an agent looks in the right directory and the pile is visible, the pile keeps
@@ -57,6 +61,10 @@ This also restores the intent of TRDD-LDSCQ0NU's relay-suppression gate: with du
 present in the pool, that gate always finds *some* match for the key and never actually
 suppresses a redundant relay; with at most one record per key it becomes meaningful again.
 
+The new `memory-maint-superseded-` prefix joins the prune tuple at `memory-maintenance.py:238`
+under the same `_PENDING_KEEP` cap: today that prune loop only walks `(_PENDING_PREFIX,
+_CLAIMED_PREFIX)`, so a third, un-pruned prefix would accumulate one file per lapse forever.
+
 ## Acceptance criteria
 
 - [ ] `_write_pending` removes (renames or unlinks) any existing unclaimed record sharing
@@ -71,6 +79,8 @@ suppresses a redundant relay; with at most one record per key it becomes meaning
       concurrently renamed out from under it by a supersede (the peer-claim race stays benign).
 - [ ] `uv run pytest tests/test_memory_maintenance.py -k supersede` passes.
 - [ ] Full suite still green: `uv run pytest`.
+- [ ] A new test seeds `_PENDING_KEEP + N` superseded lapses for distinct keys and asserts the
+      `memory-maint-superseded-` count never exceeds `_PENDING_KEEP` after the prune pass runs.
 
 ## Notes
 

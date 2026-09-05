@@ -3,7 +3,7 @@ trdd-id: JDIJ76SW
 title: TRDD filename matcher drops v1-migrated bare TRDD-<8hex>-<slug> cards from detectors and the board count
 column: testing
 created: 2026-09-05T18:31:12+0200
-updated: 2026-09-05T18:51:00+0200
+updated: 2026-09-05T18:55:16+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -142,5 +142,15 @@ their finding, filed under standing autonomous-drain permission (todo-list queue
 code changed by the card author). The next session that picks this up chooses the
 implementation approach (regex alternative vs. a small pre-check); no architecture
 decision is pre-made here beyond the fix requirement above.
+
+### Known trade-off (review 2026-09-05)
+
+The shipped alternation admits an 8-DIGIT run for the bare-shape id, so a hand-named
+`TRDD-20260905-slug.md` would parse as uid `20260905` (before this fix: `None`). No such
+file exists in any of the three design roots on this host as of this review. Requiring at
+least one letter in the bare-shape group was considered and rejected: it would reject
+legitimate all-digit ids too (a hex id is all-digit with probability (10/16)^8 ≈ 2.3%;
+base36 ids can be all-digit as well), trading one unmeasured false-positive risk for a
+real false-negative one. The regex stays as committed.
 
 ## Approval log
