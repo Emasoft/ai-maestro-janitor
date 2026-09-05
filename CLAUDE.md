@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=cdd87b365d55 generated=2026-09-04T06:37:03+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=ab94c537309f generated=2026-09-05T04:44:40+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -168,8 +168,11 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 
 **janitor-publish-pipeline** — publish blocked
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
+  - [janitor-publish-pipeline-gate-sequence](.claude/project/memory/janitor-publish-pipeline-gate-sequence.md) — how do I release the janitor
+  - [janitor-publish-pipeline-gate-timeouts-and-flakiness](.claude/project/memory/janitor-publish-pipeline-gate-timeouts-and-flakiness.md) — publish exited 3 but every test passed
+  - [janitor-publish-pipeline-address-lint](.claude/project/memory/janitor-publish-pipeline-address-lint.md) — publish blocked on a personal e-mail address
+  - [janitor-publish-pipeline-cpv-and-release](.claude/project/memory/janitor-publish-pipeline-cpv-and-release.md) — the release tag points at an old commit
   - [project_janitor_publish_blocked_cpv_fps](.claude/project/memory/project_janitor_publish_blocked_cpv_fps.md) — janitor won't publish
-  - [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
 
 **memory-system** — how does the wiki-memory system work
 - [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
@@ -195,15 +198,18 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 
 **Other topics**
 - [agentlens-diagnostics-integration](.claude/project/memory/agentlens-diagnostics-integration.md) — should I switch a janitor detector to agentlensPro's window budget
+- [closing-a-card-changes-what-its-dependents-may-do](.claude/project/memory/closing-a-card-changes-what-its-dependents-may-do.md) — closing a TRDD broke another card's task
 - [feedback_peer_agent_consensus](.claude/project/memory/feedback_peer_agent_consensus.md) — Coordinating with the peer Claude agents (maintainer/manager plugins) on GitHub — seek consensus, never give…
 - [identify-environment-prober](.claude/project/memory/identify-environment-prober.md) — how does /janitor-identify-environment detect the environment
 - [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
 - [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
 - [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
+- [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
 - [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
 - [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
 - [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
 - [plugin-cache-install-integrity](.claude/project/memory/plugin-cache-install-integrity.md) — the installed plugin is missing agents commands or hooks
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
+- [review-fork-gate-when-to-spawn-and-when-not](.claude/project/memory/review-fork-gate-when-to-spawn-and-when-not.md) — the review-fork gate fires on every turn
 - [status-lines-to-autonomous-readers-cause-escalation](.claude/project/memory/status-lines-to-autonomous-readers-cause-escalation.md) — agents keep turning global maintenance back on by themselves
 <+-+-JANITOR-WIKIMEM-INDEX-END-(do-not-modify)-+-+>
