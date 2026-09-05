@@ -55,6 +55,9 @@ def test_source_manifest_never_descends_into_target_or_pycache(
     manifest = _conftest._source_manifest(tmp_path)
 
     assert manifest == {"src/y.py": hashlib.sha256(b"y-content").hexdigest()}
+    # Without this the loop below is vacuous: a revert to `rglob` never calls os.walk,
+    # visited_dirpaths stays empty, and the test passes while proving nothing.
+    assert visited_dirpaths, "os.walk was not used — the in-place prune cannot have run"
     for dirpath in visited_dirpaths:
         parts = Path(dirpath).parts
         assert "target" not in parts

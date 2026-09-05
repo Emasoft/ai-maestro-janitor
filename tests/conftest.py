@@ -551,14 +551,26 @@ def _source_manifest(root: Path) -> dict[str, str]:
     damage: ``*.py`` and ``*.sh``.
 
     Deliberately NOT `_manifest`: that walks every file, and `scripts/memgrep/target/` is
-    5.1 GB of gitignored Rust build artifacts (101,173 files today). Hashing them would
-    make session start slow AND make the guard false-positive the moment anyone runs
-    `cargo build` mid-suite. The thing the clobber destroyed was source, so source is what
-    we guard.
+    gitignored Rust build artifacts, six figures of files (5.1 GB / 101k measured
+    2026-09-05; 1.4 GB / 15k when this was first written). Hashing them would make session
+    start slow AND make the guard false-positive the moment anyone runs `cargo build`
+    mid-suite. The thing the clobber destroyed was source, so source is what we guard.
 
     Uses `os.walk` and prunes `dirnames` in place (rather than `Path.rglob` + a post-hoc
     filter) because `rglob` cannot skip a directory before descending into it — it would
-    still enumerate and stat all 101k files under `target/` only to discard them.
+    still enumerate and stat every file under `target/` only to discard them
+    (TRDD-TASA9ACJ). Two deliberate differences from the old `rglob` form, both in the
+    guard's favour: the prune matches DESCENDANT directory names only, whereas
+    `"target" in p.parts` tested the absolute path and silently produced an EMPTY manifest
+    — a disabled guard — for any checkout under an ancestor named `target`; and
+    `os.walk` does not follow directory symlinks (`rglob` does), which is correct here
+    because a symlink into the repo is already hashed at its real path and a symlink out
+    of it is foreign source (and the same unbounded-tree cost class) this guard does not
+    own. The `is_file()` test stays: `filenames` can carry a FIFO or socket, and
+    `read_bytes()` on a FIFO with no writer blocks in `open()` until a writer appears —
+    `pytest_configure` would hang instead of skipping it. That branch is not cheaply
+    testable (a FIFO fixture hangs on regression rather than failing; a dangling symlink is
+    skipped either way), so this sentence is its guardrail.
     """
     if not root.is_dir():
         return {}
@@ -567,7 +579,7 @@ def _source_manifest(root: Path) -> dict[str, str]:
         dirnames[:] = [d for d in dirnames if d not in ("target", "__pycache__")]
         for name in filenames:
             p = Path(dirpath) / name
-            if p.suffix in (".py", ".sh"):
+            if p.suffix in (".py", ".sh") and p.is_file():
                 candidates.append(p)
     out: dict[str, str] = {}
     for p in sorted(candidates):

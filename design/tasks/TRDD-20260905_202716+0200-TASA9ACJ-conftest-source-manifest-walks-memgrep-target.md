@@ -70,6 +70,24 @@ coordinator on the test file: `0 errors`). Targeted timing on `tests/test_dispat
 with other pytest sessions live, so a direction, not a ratio (git-stash isolated on
 `tests/conftest.py` only; stash list and the other agents' diffs verified intact
 afterwards). Landed in `0f2edc79`. Remaining box: the full suite, at the publish gate.
+`testing` per the JDIJ76SW / LDSCQ0NU pattern (one open box, the gate is the tester);
+TRDD-5OR85VHP owns whether that pattern becomes `blocked` + `unblock-when:`.
+
+Review-fork follow-up (same day): the old and new walks are NOT identical for every tree,
+and the docstring now says so. (1) `os.walk` does not follow directory symlinks, `rglob`
+does. Not following is BY DESIGN for a clobber guard (an in-repo symlink is hashed at its
+real path; an out-of-repo one is foreign source and the same unbounded-tree cost class).
+On the real `scripts/` tree the question is moot: `find scripts -type l -not -path
+'*/target/*'` lists nothing, and the old-vs-new key lists are `511 511 True` with empty
+`only-old` / `only-new`. (2) The old `"target" in p.parts` tested the ABSOLUTE path, so a
+checkout under an ancestor named `target` got an empty manifest and a silently disabled
+guard; the new prune is descendant-only, which is the correct direction. (3) The worker
+dropped `is_file()`; restored — `filenames` can carry a FIFO, and `read_bytes()` on one
+with no writer blocks in `open()`, so `pytest_configure` would hang rather than skip it.
+That branch has no test on purpose: a FIFO fixture hangs on regression instead of
+failing, and a dangling symlink is skipped by both forms, so any such test passes by
+construction. (4) The walk-spy test now asserts `visited_dirpaths` is non-empty first —
+before that, a revert to `rglob` left the list empty and the prune assertions vacuous.
 
 ## Acceptance criteria
 

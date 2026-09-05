@@ -4,7 +4,7 @@ title: eleven suite failures found on a full run under load — triage each as r
 column: blocked
 pre-block-column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-05T20:44:00+0200
+updated: 2026-09-05T20:52:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -26,19 +26,42 @@ external-refs: [TRDD-7NSRD8OV]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
-> ### ⏵ 2026-09-05 20:44 — `dev` → `blocked`; unit-8 pair adds a 13-id set that fails in BOTH full runs, 10 of them from this card's populations and 3 new
+> ### ⏵ 2026-09-05 20:52 — the 13 tracebacks read: 12 fail with IDENTICAL text and site in both runs; `inject_still_wanted` ×2 also fail in isolation (a regression, not this card's)
+>
+> `reports/board-drain/20260905_203815+0200-common13-tracebacks.md` quotes every `E` line
+> for all 13 ids in both files. Labels: 4× `AssertionError` on an EMPTY-STDOUT subprocess
+> with `returncode=0` (`branch_protection.py` ×2, `branch_protection_guard`,
+> `gh_reply_watch::…inbox_does_not_leak`), 1× `assert 3 == 4` (`gh_reply_watch` fleet, proj3
+> missing both runs), 1× baseline file not written (`github_issues_watch`), 1× missing
+> `agentlensPro: $10.45/h` (`token_usage_anomaly`), 2× `FileNotFoundError` on
+> `grandchild.pid` never written (`capture_all_logins`), 2× `StopIteration`
+> (`inject_still_wanted`), 1× raised `TimeoutExpired` (`external_clear_retry`,
+> `fake-llm-ext.sh` 100 s). Only `gh_reply_watch::test_the_floor_expires…` moves its
+> failing assertion between runs (r1 vs r2 — a timing race); the other 12 are byte-stable.
+> **`tests/test_inject_still_wanted.py` fails the same two tests in isolation**
+> (`2 failed, 3 passed in 0.48s`, `StopIteration` at `:51` via
+> `terminal_trigger.py::inject_until_sent → _still_shows_ours → reader(terminal)`), so
+> those two are a deterministic regression outside this card's "fails only inside the
+> full suite" population — filed separately. The empty-stdout-rc0 cluster (5 ids across
+> three detector subprocesses) is the shape to instrument next: a subprocess that exits 0
+> and prints nothing under the full suite but prints under isolation.
+>
+> ### ⏵ 2026-09-05 20:44 — `dev` → `blocked`; unit-8 pair adds a 13-id set that fails in BOTH full runs, 10 of them in the 38 and 3 new
 >
 > **Column.** No worker has been on this card since 13:24 and its only open gate is the
 > USER waiver, so `dev` was untrue (the 08-26 move on 7NSRD8OV, same reason). Now
-> `blocked`, `blocked-by: [decision:user-suite-failure-waiver]`, `pre-block-column: dev`;
-> `decision:` never auto-clears.
+> `blocked`, `blocked-by: [user-decision-suite-failure-waiver]` (a condition slug, the
+> board's `blocked-by:` grammar), `unblock-when: [decision:user]`, `pre-block-column: dev`;
+> `decision:` never auto-clears. Evidence collection is exempt and column-independent, so
+> the traceback read above landed while `blocked`.
 >
 > Two more full runs, sequential, `-n auto` from a quiet start (loadavg 7.81) then `-n 4`:
 > `17 failed` and `20 failed` (`reports/suite-soak/20260905_133200+0200-{nauto,n4}.txt`,
 > compare in `reports/board-drain/20260905_202532+0200-soak-compare-and-conftest-walk-cost.md`).
 > **13 node ids fail in both** (`reports/board-drain/20260905_204000+0200-common13.txt`).
 > Checked by `comm` against the ids in the 38-classification report and by direct grep of
-> this card: **10 are in this card's 11+38; 3 are NEW** —
+> this card (the original 11 are listed by file + count, so the check is against the 38):
+> **10 are in the 38; 3 are NEW** —
 > `test_branch_protection.py::test_linear_history_line_fires_on_protected_repo`,
 > `test_inject_still_wanted.py::test_absent_still_wanted_changes_nothing`,
 > `test_inject_still_wanted.py::test_still_wanted_True_keeps_the_8s_defer_cadence`.
