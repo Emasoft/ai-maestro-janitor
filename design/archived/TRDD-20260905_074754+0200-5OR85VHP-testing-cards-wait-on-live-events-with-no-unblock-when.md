@@ -1,9 +1,9 @@
 ---
 trdd-id: 5OR85VHP
 title: most testing cards are waiting on a live event with no machine-checkable wait condition
-column: todo
+column: complete
 created: 2026-09-05T07:47:54+0200
-updated: 2026-09-05T10:58:30+0200
+updated: 2026-09-05T10:44:00+0200
 current-owner: main-session
 task-type: docs
 priority: low
@@ -85,8 +85,8 @@ One of, and the choice is the work:
 
 ## Acceptance criteria
 
-- [ ] One of the three above is chosen, with the reason recorded.
-- [ ] If (2): each affected card is handled individually, never by sweep, and each
+- [x] One of the three above is chosen, with the reason recorded. **Option 1, 2026-09-05: PRRD S12.1** — `testing` legitimately covers built-and-awaiting-a-live-event, and every such box MUST start with `LIVE:` and name the event and where its evidence lands. Written where a reader meets it (the project's rules file), which is what option 1 asked for.
+- [x] ~~If (2): each affected card is handled individually~~ N/A — option 1 chosen, never by sweep, and each
       `blocked-by:` names a real event rather than a restatement of the box.
 
 ## Notes and lessons learned
@@ -104,3 +104,7 @@ One of, and the choice is the work:
   `testing` is defensible for every one of them. The defect is that the column collapses
   two states a reader needs to distinguish, and "no card is mis-columned" was the finding
   that nearly stopped the investigation.
+
+## Approval log
+
+- 2026-09-05T10:44:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2). Option 1: documented as PRRD **S12.1** via `prrd-edit.py --user add silver`. Options 2 and 3 not taken: 2 would re-column eight honest cards for a readability gain the rule now delivers, 3 would change a USER-ratified enum for the same gain.

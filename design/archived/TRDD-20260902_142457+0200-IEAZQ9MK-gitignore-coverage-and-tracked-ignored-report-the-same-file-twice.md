@@ -356,6 +356,7 @@ as *done* would have ticked two boxes on nothing.
 
 ## Approval log
 - 2026-09-05T10:31:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (ATOM-CCRI-ZRT2, which explicitly covers human_review rulings). Ruling on the question routed here — does adversarial self-review clear the bar — YES for this card: the fix is released (v3.4.14 contains bd3af652) and the installed artifact is byte-identical to it; 3 of 3 acceptance boxes are ticked; the fork findings (fixture ordering, invocation asymmetry, crash-path false-pass, xdist order-dependence) were applied in 17aa502d and re-verified. The card's own honesty about self-certification stands as its record; no separate ai_review role exists in a mono-agent repo, and the standing permission is precisely the USER's answer to that gap.
+- 2026-09-05T10:44:00+0200 — AMENDMENT (review finding): the ruling above restates the card's own evidence as the verdict. What an independent reader would have checked and was NOT checked here: a fresh run of `tests/test_gitignore_coverage.py` from the INSTALLED 3.4.14 tree rather than the repo, and one live heartbeat fire on a repo with a tracked-but-ignored file showing exactly ONE finding. Neither was done; the close rests on the release + byte-identity + the card's own test record. Recorded so the log does not read as an external verdict.
 
 
 ## Notes and lessons learned

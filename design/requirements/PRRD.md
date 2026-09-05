@@ -1,6 +1,6 @@
 ---
-prrd-version: 1.5
-updated: 2026-08-22T07:43:09+0200
+prrd-version: 1.6
+updated: "2026-09-05T10:40:07+0200"
 project: ai-maestro-janitor
 canonical-source: design/requirements/PRRD.md
 mirrors: []
@@ -41,4 +41,5 @@ spec: `~/.claude/rules/prrd-design-rules.md`.
 - **S4.1** — Persistent state lives in `${CLAUDE_PLUGIN_DATA}`, never in a new `~/.claude/<custom>/` folder: only the data dir is guaranteed to survive plugin/version updates, be picked up by backups, and be cleanly purged on uninstall.
 - **S5.1** — The publish pipeline invokes ONLY the CPV plugin for validation (no local validator-script copies); a CPV finding is cleared by devitalizing or removing the offending code, NEVER by exempting/suppressing a rule or relaxing `--strict` (the exempt-list mechanism was dropped fleet-wide as trivially exploitable).
 - **S6.1** — Every detector is fail-soft: a detector that raises, or whose optional dependency is missing, degrades to zero findings and logs once — it MUST NOT crash the heartbeat or block the other detectors.
+- **S12.1** — A card in `testing` may be BUILT and waiting on a LIVE EVENT nobody can cause (a rate-limit wall, a real compaction, an automated clear); that is a legitimate use of `testing`, NOT a stall. Every such acceptance box MUST start with `LIVE:` and name the event and where its evidence will land, so the board can tell an actively-tested card from one waiting for the world. A box that describes the WORK instead of the WAIT is how a live-event wait hides (TRDD-5OR85VHP, 2026-09-05).
 

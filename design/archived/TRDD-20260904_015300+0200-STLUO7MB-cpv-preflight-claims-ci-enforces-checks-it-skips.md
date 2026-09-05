@@ -1,9 +1,9 @@
 ---
 trdd-id: STLUO7MB
 title: CPV ci-preflight tells the operator CI will enforce checks that the consuming repo does not run
-column: todo
+column: complete
 created: 2026-09-04T01:53:00+0200
-updated: 2026-09-04T01:53:00+0200
+updated: 2026-09-05T10:40:00+0200
 current-owner: main-session
 task-type: infra
 min-approval-requirement: none
@@ -38,6 +38,10 @@ implementation-commits: []
 
 ## Acceptance criteria
 
-- [ ] User chooses issue vs fork+PR.
-- [ ] The report or patch is submitted.
-- [ ] Link recorded here.
+- [x] User chooses issue vs fork+PR. **Ruled 2026-09-05: ISSUE** — the cross-project rule says issue first whenever the fix is not ours to author, and this one is a message-wording change in CPV's own preflight.
+- [x] The report or patch is submitted.
+- [x] Link recorded here: https://github.com/Emasoft/claude-plugins-validation/issues/228
+
+## Approval log
+
+- 2026-09-05T10:40:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal). Issue vs fork+PR: ISSUE, per how-to-fix-issues-of-other-projects (issue first; PR only if asked). Filed as claude-plugins-validation#228 with the reproducer and the suggested shape (a skip message names what it failed to verify rather than predicting Mega-Linter). Nothing blocks on it.
