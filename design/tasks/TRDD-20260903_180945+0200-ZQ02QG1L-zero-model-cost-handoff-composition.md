@@ -1,11 +1,10 @@
 ---
 trdd-id: ZQ02QG1L
 title: Compose every janitor handoff out of process — no model turn spent authoring one
-column: blocked
-blocked-by: [L46IG69Y]
-pre-block-column: complete
+column: complete
+blocked-by: []
 created: 2026-09-03T18:09:45+0200
-updated: 2026-09-04T03:40:00+0200
+updated: 2026-09-05T03:12:00+0200
 current-owner: main-session
 task-type: refactor
 min-approval-requirement: none
@@ -19,7 +18,30 @@ implementation-commits: []
 
 # Compose every janitor handoff out of process — no model turn spent authoring one
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T03:12:00+0200
+
+**CLOSED 2026-09-05: `blocked` → `complete`, by restoring `pre-block-column`.** Both gates that
+held it are satisfied, and neither needed new work — the block had simply outlived its cause:
+
+- **`blocked-by: [L46IG69Y]` — that card is now `complete`** (closed in `01ff4262`). The TRDD
+  rule is explicit that `blocked` applies *while* `blocked-by:` is non-empty and the
+  `pre-block-column:` is restored when it clears. This card's `pre-block-column` was already
+  `complete`, i.e. it had met its own criteria before the block was ever applied.
+- **`eht: [L46IG69Y]` — the EHT gate is satisfied** for the same reason: a parent cannot reach
+  `complete` until every EHT is terminal, and L46IG69Y is.
+- **The NEXT ACTION list below was ALREADY STALE when the block was applied** — verified today
+  rather than assumed: `scripts/compose_agent_handoff.py` exists (5,295 bytes), and BOTH skills
+  it was supposed to be wired into call it —
+  `skills/janitor-write-handoff/SKILL.md:45` and
+  `skills/janitor-handoff-and-clear/SKILL.md:71`. All three items landed.
+
+**How this card became invisible, which is the transferable part:** it was `blocked` on a TRDD
+that later completed, and nothing re-examines a `blocked` card when its blocker closes. It sat
+as the board's only "unblockable" — surfaced, correctly, by the very `attention:` clause
+TRDD-1PDCPIZC shipped. That clause is what found it.
+
+*Everything below predates the close and is kept for provenance. It is superseded by this
+block; TRDD-34GB6XUI tracks collapsing its correction layers.*
 
 - **Audit is done.** `reports/handoff-cost-audit/20260903_175606+0200-handoff-zero-cost-audit.md`
   holds the per-surface cost table. Read it before touching anything.
