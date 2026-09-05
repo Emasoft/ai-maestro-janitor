@@ -2920,7 +2920,7 @@ class Task:
                 state.atomic_write(self.failcount_path, "0")
             state.log_line("daemon", f"task '{self.name}' done in {dt_s}s (background)")
 
-    def run(self) -> int:
+    def run(self) -> float:
         if self.child_alive():
             # Belt for the cadence-bypass callers (_consume_version_update_request):
             # a synchronous run while this task's background child is in flight would
@@ -2928,7 +2928,7 @@ class Task:
             state.log_line(
                 "daemon", f"task '{self.name}' skipped — background run already in flight"
             )
-            return 0
+            return 0.0
         state.log_line("daemon", f"task '{self.name}' starting")
         t0 = time.time()
         failed = False
@@ -2938,7 +2938,12 @@ class Task:
             failed = True
             state.log_line("daemon", f"task '{self.name}' raised: {exc}")
         finally:
-            dt = int(time.time() - t0)
+            # Wall-clock elapsed, kept as a float — the budget accumulator (below)
+            # under-counted by up to 0.999s per body under the old int truncation,
+            # and N sub-second bodies (e.g. reap-only passes) never accrued at all.
+            # `dt` (int) survives only for the two log lines, which want whole seconds.
+            elapsed = time.time() - t0
+            dt = int(elapsed)
             state.atomic_write(self.last_run_path, str(int(time.time())))
             # Pillar-1 supervision: a success clears the streak; each consecutive
             # failure increments it so time_until_due() quarantines the task with
@@ -2957,7 +2962,7 @@ class Task:
                 if self._failcount():
                     state.atomic_write(self.failcount_path, "0")  # recovered → reset the streak
                 state.log_line("daemon", f"task '{self.name}' done in {dt}s")
-        return dt
+        return elapsed
 
 
 def _build_tasks() -> list[Task]:
@@ -3077,12 +3082,20 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
     # Decided ONCE, before the loop, so the choice cannot depend on where we are in
     # list order — that dependence is exactly the starvation `_next_bulk_task` cures.
     bulk_next = None if bulk_busy else _next_bulk_task(tasks, yielded)
-    # Dispatch order for the loop below, oldest-last-run-first — mirrors
-    # `_next_bulk_task`'s own starvation fix so a non-floor task near the tail of the
-    # fixed registration order isn't structurally the one that always pays for an
-    # over-budget beat. Background dispatch is unaffected by position (`bulk_next` is
-    # a fixed object, selected above); floor tasks always run regardless of position.
-    dispatch_order = sorted(tasks, key=lambda t: t._last_run())
+    # Dispatch order for the loop below: FLOOR TASKS FIRST, then oldest-last-run-first
+    # among the rest. Floor-first is load-bearing, not cosmetic — an age-only sort
+    # (the pre-fix bug) can place a floor task's dispatch AFTER a non-floor task that
+    # merely ran longer ago, so the survival beat waits behind a legal foreground body
+    # instead of the reverse. Registration order used to guarantee floor-first before
+    # this sort existed; the two-key sort restores that guarantee while keeping the
+    # age-based starvation fix for everything else — mirrors `_next_bulk_task`'s own
+    # fix so a non-floor task near the tail of the fixed registration order isn't
+    # structurally the one that always pays for an over-budget beat. Background
+    # dispatch is unaffected by position (`bulk_next` is a fixed object, selected
+    # above).
+    dispatch_order = sorted(
+        tasks, key=lambda t: (t.name not in _FOREGROUND_FLOOR, t._last_run())
+    )
     budget_used = 0.0
     budget_exceeded_logged = False
     for task in dispatch_order:

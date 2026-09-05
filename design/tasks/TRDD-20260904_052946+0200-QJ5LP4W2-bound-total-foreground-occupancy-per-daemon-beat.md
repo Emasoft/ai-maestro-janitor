@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: testing
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T17:01:55+0200
+updated: 2026-09-05T17:15:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -44,8 +44,28 @@ external-refs: [TRDD-8BXMNQ4T]
   one PRE-EXISTING, UNRELATED flake in `test_daemon_does_not_write_reload_flag_when_nothing_updated`
   (a stub-spawn timing assertion, no foreground-budget code in its path); full
   `tests/test_daemon*.py` run separately, see next bullet or the impl report for the count.
+- **REVIEW FIX 2026-09-05T17:15:00+0200 — 3 findings fixed, still `testing`.** (1) The dispatch
+  sort above was age-only (`key=t._last_run()`), which is a REGRESSION for WHEN a floor task
+  runs even though it is harmless for WHETHER: `_build_tasks` used to register the OAuth
+  survival chain ahead of every long foreground body, guaranteeing floor-first dispatch within a
+  pass; the age-only sort broke that guarantee — a floor task that ran recently could now
+  dispatch AFTER a non-floor task that merely ran longer ago, so the survival beat waits behind
+  a legal foreground body instead of the reverse. Fixed: sort key is now
+  `(t.name not in _FOREGROUND_FLOOR, t._last_run())` — floor tasks dispatch first as a group,
+  oldest-`_last_run()`-first among the rest. (2) `Task.run()`'s `dt = int(time.time() - t0)`
+  under-counted every body by up to 0.999s and N sub-second bodies never accrued budget at all;
+  `run()` now returns the float wall-clock elapsed seconds (the `int dt` survives only for the
+  two log lines, which want whole seconds). (3) Added
+  `test_floor_task_dispatches_before_older_non_floor_task`, which stamps the hog OLDER than the
+  floor task (so an age-only sort would dispatch the hog first) and asserts on `daemon.log`
+  START-line offsets that the floor task's dispatch precedes the hog's — the existing
+  "floor runs despite exhausted budget" test proved WHETHER, not WHEN, and could not have caught
+  this regression. `test_zero_budget_defers_every_non_floor_task_immediately`'s docstring now
+  says the `max(1, ...)` clamp (not `_env_interval`, which has no floor of its own) is why the
+  test monkeypatches past 0 rather than reaching it through the module default.
 - **NEXT ACTION (2026-09-05T17:01:55+0200):** box 4 — after the next janitor publish,
-  re-measure from `daemon.log` over ≥24 h (stall count, beat lengths, any
+  re-measure from `daemon.log` over ≥24 h (coordinator's choice, adjustable: one day so every
+  chore cadence fires at least once) (stall count, beat lengths, any
   `foreground budget … exceeded` lines) and record the numbers here; box 3 — the replay
   harness is TRDD-9FONCK33 (an EHT of this card: this card cannot reach `complete` until
   it is terminal). Column stays `testing` until both boxes are answered. Landed as

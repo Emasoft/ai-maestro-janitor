@@ -71,6 +71,31 @@ def test_floor_task_runs_even_after_budget_exhausted(monkeypatch: pytest.MonkeyP
     assert tick._last_run() > 0, "floor task must run despite an exhausted budget"
 
 
+def test_floor_task_dispatches_before_older_non_floor_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The floor task must be DISPATCHED before the hog, not merely run at some
+    point — an age-only sort (the regression this guards) would place a floor task
+    dispatched *after* a non-floor task with an older last-run, so the survival
+    beat would wait behind the hog's whole body instead of the reverse. Stamps are
+    whole seconds and cannot prove dispatch order (both tasks could tie or the hog
+    could still finish first in real time); only the daemon.log START-line offsets
+    can. The hog's last-run is stamped far OLDER than the tick's so an age-only
+    sort would dispatch the hog first — proving this test would catch the bug the
+    fix repairs, not just repeat the fix's own tie-breaking."""
+    monkeypatch.setattr(daemon, "_FOREGROUND_BUDGET_SEC", 100)
+    now = int(time.time())
+    hog = _slow_task("cold-cache-clear", 0.05)
+    tick = _slow_task("oauth-rotator-tick", 0.05)
+    _stamp_last_run(hog, now - 1000)  # far older — an age-only sort runs this first
+    _stamp_last_run(tick, now)  # fresh — an age-only sort would defer/run this last
+    daemon._run_due_tasks([hog, tick], yielded=set())
+    log_text = (state.log_dir() / "daemon.log").read_text()
+    tick_start = log_text.index("task 'oauth-rotator-tick' starting")
+    hog_start = log_text.index("task 'cold-cache-clear' starting")
+    assert tick_start < hog_start, "floor task must be dispatched before an older non-floor task"
+
+
 def test_deferrable_task_past_budget_is_skipped_and_stays_due(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -126,7 +151,11 @@ def test_zero_budget_defers_every_non_floor_task_immediately(
 ) -> None:
     """budget_used (0.0) >= a 0 budget is True before anything has run, so a 0 budget
     defers every non-floor task on every pass — the documented reason the module
-    default clamps to max(1, ...) rather than letting an env override reach 0."""
+    default clamps to max(1, ...) rather than letting an env override reach 0.
+    A 0 budget is unreachable through the module default (`_env_interval` itself
+    has no floor; `max(1, ...)` is the only clamp), which is exactly why this test
+    monkeypatches past it — it deliberately exercises the unclamped state the
+    module-level default never produces."""
     monkeypatch.setattr(daemon, "_FOREGROUND_BUDGET_SEC", 0)
     a = _slow_task("gh-notify-inbox", 0.01)
     tick = _slow_task("oauth-rotator-tick", 0.01)
