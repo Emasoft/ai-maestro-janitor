@@ -1997,7 +1997,9 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # number, plus the queued-command count the flush law needs.
         #
         # SCOPE (TRDD-ZVZAFQY6, 2026-09-05): "no extra osascript" is true of THE POLICY TABLE
-        # — `act()` receives `state=` and skips its own read (`pane_actuate.py:174`). It is NOT
+        # — the call sites below pass `state=pane` (`daemon.py:2052`, `:2107`) and `act()` then
+        # skips its own read (the `if state is None and read_pane:` guard,
+        # `pane_actuate.py:174`). Both halves are needed; neither line proves it alone. It is NOT
         # a claim about the beat: the field-busy guard below takes TWO more captures of this
         # same pane, deliberately, and this comment predates it. Read on for why they must.
         pane = pane_state.read(inst.terminal)
@@ -2038,10 +2040,10 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # THE NEXT TWO CALLS EACH TAKE THEIR OWN CAPTURE OF THIS PANE, AND THAT IS THE POINT
         # (TRDD-ZVZAFQY6 investigated deduplicating them and REFUSED). Both have an UNSAFE
         # direction, so a shared capture buys ~15 s of osascript by widening a race:
-        #   · `command_plan_field_busy` — stale EMPTY ⇒ a dialog opened since and we type into
+        #   - `command_plan_field_busy` — stale EMPTY ⇒ a dialog opened since and we type into
         #     it. That race is irreducible; reading LATE is what keeps the window small, and
         #     reusing an older capture is what widens it.
-        #   · `field_holds_our_queued_command` — stale OURS ⇒ a human typed over our command,
+        #   - `field_holds_our_queued_command` — stale OURS ⇒ a human typed over our command,
         #     the cached text still matches our vocabulary, and `act(OWN_COMMAND_UNSUBMITTED)`
         #     presses Enter on THEIR line. Nothing downstream re-checks: `pane_policy._submit`
         #     tests only `input_field.kind == EMPTY`, never whose text it is.
