@@ -283,7 +283,10 @@ bounds that **sum** — only individual subprocess workloads are capped
   no previous end; no synthetic bound). **But "0 discarded" only proves every beat had
   AT LEAST ONE guard in its window, not that the right one was picked** — taking the last
   candidate hides ties. Tallied: **19 windows held more than one guard, and in exactly 1
-  of those 19 did the candidates DISAGREE**, so at most one row of 886 is ambiguous.
+  of those 19 did the candidates DISAGREE**, so at most one row of 886 is ambiguous —
+  **and that row is a 10 s beat, i.e. in the `≤60 s` arm of 880, not in the long arm.
+  All six long beats are unambiguously attributed**, which is what matters, since the
+  long arm is where every conclusion here is already fragile.
   Also **0 guards landed inside a `session-liveness` body**, as the single-threaded loop
   requires.
 
