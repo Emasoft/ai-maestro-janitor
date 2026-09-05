@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T02:46:22+0200
+updated: 2026-09-05T02:49:53+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -269,9 +269,19 @@ on Q8PNPRTW for being plausible.
      **The harness now records all three averages** (`1m/5m/15m` per ledger cell) so the next
      comparison has the figure that tells a tail from sustained load. Free — `uptime` already
      printed them.
-     *Corroborating, and it cuts the other way:* three green runs at 95.50 / 118.99 / 149.04 s
-     as the box got busier. Load clearly moves the wall clock **within this environment** — it
-     just does not reach 822 s.
+     *An OBSERVATION that cuts the other way — deliberately not called a demonstration:* three
+     green runs spanning 95.50 / 118.99 / 149.04 s as the box got busier. **This is not a
+     controlled series and must not be read as one:** the first two are from one launch, the
+     third from a different launch with a different harness, and the load that rose across that
+     window was largely load *I* generated investigating — greps, `git log -S`, `uv run`,
+     three probe runs of the suite itself. Three points rising in the order they happened to be
+     run is the arrangement most likely to be over-read. Consistent with load mattering within
+     this environment; it demonstrates nothing, and it still does not reach 822 s.
+     *The experiment that would settle it, and it is cheap (~80 s a run):* N greens from ONE
+     launch on an otherwise idle box, then N more under a deliberate CPU load generator. A
+     manipulated variable and a control. Not yet run — and it cannot be run honestly while this
+     session is doing foreground work on the same box, which is itself the reason the three
+     points above are not a series.
    - **⇒ WHAT DID DIFFER, AND IT IS AN ENVIRONMENT DIFFERENCE, NOT A LOAD ONE: both soak runs
      report `8 subtests passed`.** That counter comes from `pytest-subtests`. It is NOT
      installed here (`pytest`, `pytest-timeout`, `pytest-xdist`), and the string `subtests`
@@ -294,7 +304,12 @@ on Q8PNPRTW for being plausible.
      *Speculation, labelled:* a clean ~8-10× multiplier at identical worker count is the
      signature of per-bytecode instrumentation (coverage, a tracer), not of contention —
      contention shows up as variance and stalls, not a uniform factor. No evidence for it; it
-     is simply the hypothesis this data most resembles.
+     is simply the hypothesis this data most resembles. **Two caveats that weaken even that:**
+     soak8 and soak9 differ from each other by 10% (906.91 vs 822.89), which is variance rather
+     than a clean constant; and **the multiplier is inferred from two TOTALS, never from
+     per-test timings** — and per-test timings are the measurement that would actually separate
+     "everything 8× slower" from "a handful of tests stalling for minutes". Neither soak run
+     appears to carry `--durations`, so that measurement is probably not recoverable from them.
    - *Not established, and deliberately not asserted:* whether slowness relates to the failure
      at all. What IS established is that a wall-clock comparison across that boundary compares
      two environments, so the honest status of "the loop may be unable to reproduce soak9" is
@@ -304,19 +319,20 @@ on Q8PNPRTW for being plausible.
    `SLOW_RUN_S=250` now gets its own `slow-runs.log` line — a 400 s green run would be the
    first real evidence here and would otherwise read as an unremarkable row.
 
-   **STARTED 2026-09-05T02:45:29+0200** (a start event, not a state — see the check below) —
+   **STARTED 2026-09-05T02:49:17+0200** (a start event, not a state — see the check below) —
    `scripts_dev/k7wq2nrb_full_suite_load_loop.sh` (gitignored; the harness is scratch, the
    numbers are the record). `uv run pytest -n auto`, `MAX_RUNS=30`, `RUN_TIMEOUT=1200`,
    `SLOW_RUN_S=250`, load sampled every 15 s, every run's full output plus a per-run `ps`
    snapshot kept under
-   `reports/suite-failures/20260905_024529+0200-k7wq2nrb-full-suite-loop/`, with `ledger.tsv`
+   `reports/suite-failures/20260905_024917+0200-k7wq2nrb-full-suite-loop/`, with `ledger.tsv`
    (run/exit/load-start/load-end/duration/summary — each load cell is now **`1m/5m/15m`**, see
    the load bullet above) and, when they have content, `unrelated.log`, `slow-runs.log`,
    `survivors.log`. **Read `unrelated.log` with `sort | uniq -c`, not by scanning** — over 30
    runs the same known flake repeats and only a NEW name is worth noticing, which is why each
    line names its failing tests rather than only a run number and exit code.
-   **Sibling dir `…024041` = third launch, superseded harness, one green run (149.04 s at
-   34.46).**
+   **Sibling dirs `…024041` = third launch, superseded harness, one green run (149.04 s at
+   34.46 — *1-minute figure only, pre-dating the 1m/5m/15m change, so it carries the very
+   defect the load bullet retracts*); `…024529` = fourth launch, superseded by the census fix.**
    **The sibling dirs, named absolutely so this stays true however many loops follow:**
    `…022821` = first launch, superseded harness, ONE green run at 77.53 s (the measurement
    above). `…023245` = deliberate `RUN_TIMEOUT=5` smoke test — its `exit 124` is THE CAP
@@ -369,8 +385,23 @@ on Q8PNPRTW for being plausible.
    repo path would be dropped and the census would confidently print 0. A census that fails
    silently is worse than no census. It now discriminates on **identity and executable** —
    `awk` drops this script's own pid and its parent's, then the pattern anchors on
-   `.venv/bin/python3` (which a `zsh -c` wrapper cannot match however it quotes) or a command
-   field that IS `sleep 600`. Re-run against the 45 s probe's stored snapshot: still 0.
+   `.venv/bin/python3` … or a command field that IS `sleep 600`.
+   **⚠ AND THAT SECOND FIX WAS ALSO BLIND — measured, not argued.** It looked for
+   `execnet|popen-gw` in argv. Snapshotting `ps` during a live 14-worker run shows an xdist
+   worker actually is:
+   `<repo>/.venv/bin/python3 -u -c import sys;exec(eval(sys.stdin.readline()))` — **execnet
+   ships the real code over STDIN, so the token `execnet` is never in argv**, and `popen-gw` is
+   a tmp DIRECTORY name that appears only inside tracebacks (which is where every sighting of
+   it on this card comes from). So the pattern matched **nothing, ever**: a permanent silent 0,
+   the exact failure the fix before it was written to prevent. Three versions, two of them
+   unable to see the thing they counted.
+   **The THIRD version matches the bootstrap SHAPE**, scoped to this repo's interpreter
+   (`$REPO/.venv/bin/python3 -u -c`), plus the `sleep 600` arm. `$2!=me` was dropped as
+   protection theatre — an orphan is reparented to init, so its PPID is 1, never this script's.
+   **POSITIVE CONTROL, which is what makes the zero meaningful:** the new pattern finds
+   **14** in a snapshot taken *while* a suite was running, and **0** in the 45 s probe's
+   post-kill snapshot. The old pattern returns 0 for BOTH. Until that control existed, "zero
+   survivors" was a statement about the instrument, not about the box.
    Row 2's instrumentation was landed FIRST, on purpose: a failure caught by a loop started
    before it would have thrown its evidence away exactly as every failure so far has.
    **⚠ SCOPE — the loop's stop condition is WIDER than the instrumentation's reach.** It stops
