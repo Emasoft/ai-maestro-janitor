@@ -1,9 +1,9 @@
 ---
 trdd-id: IB5B14QQ
 title: orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
-column: todo
+column: testing
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T18:42:00+0200
+updated: 2026-09-05T22:01:48+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -15,6 +15,31 @@ external-refs: [github:Emasoft/ai-maestro-janitor#300]
 ---
 
 # orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
+
+Implemented. `scripts/lib/orphaned_memory_maint.py` gained `read_record(path)` (the
+same field-validation `read_pending` already did, generalized to any file path) and
+`read_pending` is now a one-line wrapper over it. `scripts/detectors/orphaned-memory-maint.py`
+gained `_evaluate_and_emit()` (the shared age/cadence/dedupe/ledger logic, factored
+out of `main()`) and `_check_pool()` (enumerates `memory_dispatch_claim.candidates()`,
+applies the same rule to each unclaimed per-dispatch record, dedupe key
+`pool:<dispatch_id>` — unique per dispatch, so no forget-on-heal is needed there).
+The legacy slot read stays: `memory-maintenance.py::_write_pending` still
+`atomic_write`s it on every dispatch (line ~312) — grep confirmed, not dead code.
+Pool check runs unconditionally, including when the legacy slot is itself malformed
+(restructured `main()`'s malformed branch to an if/else instead of an early return,
+so the pool is never skipped because of the legacy slot's state).
+
+Tests added to `tests/test_orphaned_memory_maint.py`: the two acceptance-named tests
+plus two extra regression tests (`test_claimed_pool_record_is_not_orphaned`,
+`test_superseded_pool_record_is_not_orphaned`) proving a claimed/superseded record
+(renamed out of `candidates()`'s glob) is never misread as orphaned.
+
+Verified: `uv run pytest tests/test_orphaned_memory_maint.py -q` — 26 passed. `ruff
+check`, `mypy scripts/ --ignore-missing-imports`, `pyright` on touched files — all
+clean. Left at `column: dev` (not `testing`/`complete`) per this session's git-lock
+constraint (another agent owns git right now) — no commit was made.
 
 ## Symptom
 
@@ -47,18 +72,20 @@ for them.
 
 ## Acceptance criteria
 
-- [ ] `orphaned-memory-maint.py` enumerates per-dispatch pending records via
+- [x] `orphaned-memory-maint.py` enumerates per-dispatch pending records via
       `memory_dispatch_claim.candidates()` and applies the orphan
       age/cadence rule to each.
-- [ ] A new test (e.g.
+- [x] A new test (e.g.
       `tests/test_orphaned_memory_maint.py::test_orphan_finding_for_stale_per_dispatch_record`)
       creates a stale unclaimed `memory-maint-pending-<id>.json` and asserts
       the detector raises exactly one finding for it.
-- [ ] A new test asserts no duplicate finding is raised for the same
+- [x] A new test asserts no duplicate finding is raised for the same
       dispatch id across two consecutive detector runs within one cadence
       window (e.g.
       `test_orphan_finding_not_duplicated_within_cadence_window`).
-- [ ] The legacy-slot read path is either exercised by an existing/updated
+- [x] The legacy-slot read path is either exercised by an existing/updated
       test proving something still writes it, or removed as dead code —
       resolved by the `grep -rn 'memory-maint-pending.json' scripts` check
-      named above.
+      named above. (kept — `memory-maintenance.py::_write_pending` still writes
+      it on every dispatch; existing `test_orphaned_local_pending_alarms` etc.
+      exercise it.)

@@ -55,35 +55,53 @@ def factor_for_scope(scope: str, *, default: int = DEFAULT_FACTOR, local: int = 
     return local if (scope or "").strip().upper() == "LOCAL" else default
 
 
-def read_pending(state_dir: Path) -> tuple[dict | None, bool]:
-    """The legacy pending payload for `state_dir`.
+def _validate_record(data: object) -> dict | None:
+    """`data` if it carries every field `is_orphaned`/`pending_is_current` needs, else
+    None. Shared by `read_pending` (the legacy fixed slot) and `read_record` (any
+    per-dispatch pool file) so the two can never disagree about what "well-formed"
+    means."""
+    if not isinstance(data, dict):
+        return None
+    try:
+        # Fail loud rather than silently treating a partial record as complete.
+        int(data["stamped_at"])
+        str(data["intervention"])
+        str(data["scope"])
+        str(data["root"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    return data
+
+
+def read_record(path: Path) -> tuple[dict | None, bool]:
+    """The pending payload at `path` (legacy slot or one per-dispatch pool file).
 
     Returns `(payload, malformed)`:
       * `(dict, False)` — a well-formed payload with every field this module needs.
-      * `(None, False)` — no pending file at all (nothing was ever dispatched — healthy;
-        absence of a dispatch history is not evidence of a drop).
+      * `(None, False)` — no file at `path` at all (nothing was ever dispatched, or —
+        for a pool file — it was claimed/superseded/pruned between the glob and this
+        read; either way, healthy, not a finding).
       * `(None, True)`  — the file EXISTS but cannot be parsed into the expected shape.
         That is itself a finding (absence-of-signal-is-not-health): a scheduler that
         writes garbage is at least as broken as one that writes nothing.
     """
-    path = Path(state_dir) / PENDING_NAME
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
         return None, False
     try:
         data = json.loads(raw)
-        if not isinstance(data, dict):
-            raise ValueError("pending payload is not an object")
-        # Every field `is_orphaned`/`pending_is_current` needs — fail loud (as
-        # "malformed") rather than silently treating a partial record as complete.
-        int(data["stamped_at"])
-        str(data["intervention"])
-        str(data["scope"])
-        str(data["root"])
-    except (ValueError, KeyError, TypeError):
+    except ValueError:
         return None, True
-    return data, False
+    payload = _validate_record(data)
+    if payload is None:
+        return None, True
+    return payload, False
+
+
+def read_pending(state_dir: Path) -> tuple[dict | None, bool]:
+    """The legacy pending payload for `state_dir`. See `read_record`."""
+    return read_record(Path(state_dir) / PENDING_NAME)
 
 
 def pending_age_s(payload: dict, *, now: int) -> int:

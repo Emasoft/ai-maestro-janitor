@@ -29,12 +29,107 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import dedupe  # noqa: E402
 import findings_ledger  # noqa: E402
+import memory_dispatch_claim  # noqa: E402
 import memory_settings  # noqa: E402
 import orphaned_memory_maint as omm  # noqa: E402
 import state  # noqa: E402
+
+
+def _evaluate_and_emit(
+    payload: dict, *, key: str, seen: Path, now: int, default_factor: int, local_factor: int,
+) -> None:
+    """Apply the orphan rule to one well-formed record and print/ledger a finding if
+    it fires. Shared by the legacy slot and every per-dispatch pool record so the two
+    can never apply the rule differently."""
+    intervention = payload["intervention"]
+    scope = payload["scope"]
+    root = payload["root"]
+
+    try:
+        cadence_s = memory_settings.interval_s_for(intervention)
+    except ValueError:
+        # An unknown intervention name — a scheduler/lib drift, not this project's fault.
+        return
+
+    last_run = memory_settings.read_last_run(intervention, scope, root)
+    is_current = omm.pending_is_current(payload, last_run=last_run)
+    age_s = omm.pending_age_s(payload, now=now)
+    factor = omm.factor_for_scope(scope, default=default_factor, local=local_factor)
+    orphaned = is_current and omm.is_orphaned(age_s, cadence_s, factor=factor)
+    if not orphaned:
+        # Healthy — clear any prior alert for this key so a FUTURE drop is reported
+        # fresh rather than suppressed by a stale dedupe entry. A pool key embeds its
+        # dispatch_id and is never reused, so this is a no-op there but matches the
+        # legacy slot's re-arm behaviour.
+        dedupe.emit_forget(seen, key)
+        return
+
+    msg = omm.format_finding(intervention, scope, age_s, cadence_s)
+    line = dedupe.emit_once(seen, key, f"[orphaned-memory-maint] {msg}")
+    if line is None:
+        return  # already alerted for this exact drop
+
+    try:
+        findings_ledger.record(
+            sev="HIGH", code="MEMPASS-ORPHANED", src="orphaned-memory-maint", msg=msg, now=now,
+        )
+    except Exception as exc:  # noqa: BLE001 - a ledger fault must never break the fire
+        state.log_line("orphaned-memory-maint", f"ledger write failed: {exc}")
+
+    state.log_line("orphaned-memory-maint", f"recorded MEMPASS-ORPHANED for {key} ({age_s}s)")
+    print(line, flush=True)
+
+
+def _check_pool(state_dir: Path, seen: Path, now: int, default_factor: int, local_factor: int) -> None:
+    """The per-dispatch claim pool (TRDD-IB5B14QQ): `memory-maintenance.py::_write_pending`
+    writes one immutable `memory-maint-pending-<dispatch_id>.json` per dispatch, on top of
+    the legacy fixed slot this script already checks. A pending record is only claimable —
+    i.e. still sitting here — until `memory_dispatch_claim.claim_one` renames it away; a
+    claimed or superseded record does not match this glob at all (janitor#300 / af6340a5),
+    so anything this loop sees is, by construction, unclaimed."""
+    try:
+        pool = memory_dispatch_claim.candidates(state_dir)
+    except Exception as exc:  # noqa: BLE001 - a pool read failure must never break the fire
+        state.log_line("orphaned-memory-maint", f"pool read failed: {exc}")
+        return
+
+    for path in pool:
+        dispatch_id = path.name[len(memory_dispatch_claim.PENDING_PREFIX):-len(".json")]
+        try:
+            payload, malformed = omm.read_record(path)
+        except Exception as exc:  # noqa: BLE001
+            state.log_line("orphaned-memory-maint", f"pool record read failed: {exc}")
+            continue
+
+        if malformed:
+            msg = (
+                f"memory-maintenance pending pool record at {path} exists but cannot be "
+                "parsed — the scheduler's own record of what it dispatched is unreadable. "
+                "Investigate/remove the file so a claim or a future dispatch can proceed cleanly."
+            )
+            line = dedupe.emit_once(seen, f"pool-malformed:{dispatch_id}", f"[orphaned-memory-maint] {msg}")
+            if line is not None:
+                try:
+                    findings_ledger.record(
+                        sev="HIGH", code="MEMPASS-MALFORMED", src="orphaned-memory-maint",
+                        msg=msg, now=now,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    state.log_line("orphaned-memory-maint", f"ledger write failed: {exc}")
+                print(line, flush=True)
+            continue
+
+        if payload is None:
+            continue  # claimed/superseded/pruned between the glob and this read — healthy
+
+        _evaluate_and_emit(
+            payload, key=f"pool:{dispatch_id}", seen=seen, now=now,
+            default_factor=default_factor, local_factor=local_factor,
+        )
 
 
 def main() -> int:
@@ -83,53 +178,21 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 state.log_line("orphaned-memory-maint", f"ledger write failed: {exc}")
             print(line, flush=True)
-        return 0
-    # The record parses again — forget the malformed dedupe so a future genuine
-    # malformation re-alerts rather than staying suppressed forever.
-    dedupe.emit_forget(seen, "malformed")
+    else:
+        # The record parses (or is simply absent) — forget the malformed dedupe so a
+        # future genuine malformation re-alerts rather than staying suppressed forever.
+        dedupe.emit_forget(seen, "malformed")
+        if payload is not None:
+            key = f"{payload['intervention']}|{payload['scope']}"
+            _evaluate_and_emit(
+                payload, key=key, seen=seen, now=now,
+                default_factor=default_factor, local_factor=local_factor,
+            )
+            # else: never dispatched — nothing to check, nothing wrong
 
-    if payload is None:
-        return 0  # never dispatched — nothing to check, nothing wrong
-
-    intervention = payload["intervention"]
-    scope = payload["scope"]
-    root = payload["root"]
-    key = f"{intervention}|{scope}"
-
-    try:
-        cadence_s = memory_settings.interval_s_for(intervention)
-    except ValueError:
-        # An unknown intervention name — a scheduler/lib drift, not this project's fault.
-        # Skip silently rather than guess a cadence for a chore that no longer exists.
-        return 0
-
-    last_run = memory_settings.read_last_run(intervention, scope, root)
-    is_current = omm.pending_is_current(payload, last_run=last_run)
-    age_s = omm.pending_age_s(payload, now=now)
-    factor = omm.factor_for_scope(scope, default=default_factor, local=local_factor)
-    orphaned = is_current and omm.is_orphaned(age_s, cadence_s, factor=factor)
-
-    if not orphaned:
-        # Healthy — either superseded by a newer dispatch (elsewhere) or simply not
-        # stale yet. Clear any prior alert for this (intervention, scope) so a FUTURE
-        # drop is reported fresh rather than suppressed by a stale dedupe entry.
-        dedupe.emit_forget(seen, key)
-        return 0
-
-    msg = omm.format_finding(intervention, scope, age_s, cadence_s)
-    line = dedupe.emit_once(seen, key, f"[orphaned-memory-maint] {msg}")
-    if line is None:
-        return 0  # already alerted for this exact (intervention, scope) drop
-
-    try:
-        findings_ledger.record(
-            sev="HIGH", code="MEMPASS-ORPHANED", src="orphaned-memory-maint", msg=msg, now=now,
-        )
-    except Exception as exc:  # noqa: BLE001 - a ledger fault must never break the fire
-        state.log_line("orphaned-memory-maint", f"ledger write failed: {exc}")
-
-    state.log_line("orphaned-memory-maint", f"recorded MEMPASS-ORPHANED for {key} ({age_s}s)")
-    print(line, flush=True)
+    # The pool is independent of the legacy slot's state, so it is always checked,
+    # even when the legacy slot is itself malformed.
+    _check_pool(state_dir, seen, now, default_factor, local_factor)
 
     state.rotate_log_if_big("orphaned-memory-maint")
     return 0

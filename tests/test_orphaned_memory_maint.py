@@ -24,7 +24,9 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "scripts" / "lib"))
+sys.path.insert(0, str(_HERE.parent / "scripts"))
 
+import memory_dispatch_claim  # noqa: E402
 import orphaned_memory_maint as omm  # noqa: E402
 
 _NOW = 1_800_000_000
@@ -159,6 +161,23 @@ def _write_pending(state_dir: Path, *, intervention: str, scope: str, root: str,
         json.dumps({
             "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
             "scope": scope, "root": root, "stamped_at": stamped_at, "dispatch_id": "d1",
+        }),
+        encoding="utf-8",
+    )
+
+
+def _write_pool_pending(
+    state_dir: Path, *, dispatch_id: str, intervention: str, scope: str, root: str, stamped_at: int,
+) -> None:
+    """A per-dispatch pool record (`_write_pending` in memory-maintenance.py), the
+    shape `memory_dispatch_claim.candidates()` enumerates — distinct from the legacy
+    fixed-slot `_write_pending` helper above."""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / f"{memory_dispatch_claim.PENDING_PREFIX}{dispatch_id}.json").write_text(
+        json.dumps({
+            "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
+            "scope": scope, "root": root, "stamped_at": stamped_at, "dispatch_id": dispatch_id,
+            "state_dir": str(state_dir.resolve()),
         }),
         encoding="utf-8",
     )
@@ -380,3 +399,99 @@ def test_repeated_orphan_fires_write_the_ledger_once_then_healing_clears_dedupe(
     out4 = _run(home, project, gstate, settings)
     assert "orphaned-memory-maint" in out4
     assert len(_ledger_lines(project)) == 2
+
+
+# ── the per-dispatch pool (TRDD-IB5B14QQ) ───────────────────────────────────
+
+
+def test_orphan_finding_for_stale_per_dispatch_record(tmp_path):
+    """A stale, unclaimed per-dispatch pool record — never mirrored to the legacy
+    slot, exactly the shape janitor#300's dispatches are — must be reported. Before
+    this fix the detector never even glanced at these files."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, consolidation_per_day=1000.0)  # cadence ~86.4s
+    now = int(time.time())
+    old = now - 500  # well past 3x cadence
+    _write_pool_pending(
+        state_dir, dispatch_id="1111111111-aaaaaaaa", intervention="consolidate",
+        scope="USER", root=root, stamped_at=old,
+    )
+    _stamp_last_run(gstate, "consolidate", "USER", root, old)
+
+    out = _run(home, project, gstate, settings)
+
+    assert "orphaned-memory-maint" in out
+    lines = _ledger_lines(project)
+    assert len(lines) == 1
+    assert '"MEMPASS-ORPHANED"' in lines[0]
+
+
+def test_orphan_finding_not_duplicated_within_cadence_window(tmp_path):
+    """The same dispatch id, still unclaimed, across two consecutive fires must
+    alarm exactly once — the same dedupe contract the legacy slot already has."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    old = now - 500
+    _write_pool_pending(
+        state_dir, dispatch_id="2222222222-bbbbbbbb", intervention="repair",
+        scope="LOCAL", root=root, stamped_at=old,
+    )
+    _stamp_last_run(gstate, "repair", "LOCAL", root, old)
+
+    out1 = _run(home, project, gstate, settings)
+    assert "orphaned-memory-maint" in out1
+    out2 = _run(home, project, gstate, settings)
+    assert out2 == ""
+    assert len(_ledger_lines(project)) == 1
+
+
+def test_claimed_pool_record_is_not_orphaned(tmp_path):
+    """A CLAIMED record (renamed out of the pool by `memory_dispatch_claim.claim_one`)
+    must never be read as pending — the whole point of the rename is that it is no
+    longer sitting where `candidates()` looks."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    old = now - 500
+    state_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
+        "root": root, "stamped_at": old, "dispatch_id": "3333333333-cccccccc",
+    }
+    (state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}3333333333-cccccccc.json").write_text(
+        json.dumps(payload), encoding="utf-8",
+    )
+    _stamp_last_run(gstate, "repair", "LOCAL", root, old)
+
+    out = _run(home, project, gstate, settings)
+
+    assert out == ""
+    assert _ledger_lines(project) == []
+
+
+def test_superseded_pool_record_is_not_orphaned(tmp_path):
+    """A SUPERSEDED record (renamed by `_supersede_older_unclaimed`) is likewise
+    absent from `candidates()` and must not be reported."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    old = now - 500
+    state_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
+        "root": root, "stamped_at": old, "dispatch_id": "4444444444-dddddddd",
+    }
+    (state_dir / "memory-maint-superseded-4444444444-dddddddd.json").write_text(
+        json.dumps(payload), encoding="utf-8",
+    )
+    _stamp_last_run(gstate, "repair", "LOCAL", root, old)
+
+    out = _run(home, project, gstate, settings)
+
+    assert out == ""
+    assert _ledger_lines(project) == []
