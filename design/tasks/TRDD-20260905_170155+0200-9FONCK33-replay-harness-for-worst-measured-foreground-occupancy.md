@@ -3,7 +3,7 @@ trdd-id: 9FONCK33
 title: replay harness for worst measured foreground occupancy
 column: testing
 created: 2026-09-05T17:01:55+0200
-updated: 2026-09-05T17:29:24+0200
+updated: 2026-09-05T17:43:10+0200
 current-owner: main-session
 task-type: feature
 scope: project
