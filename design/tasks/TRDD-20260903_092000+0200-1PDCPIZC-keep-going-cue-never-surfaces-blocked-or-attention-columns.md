@@ -1,10 +1,9 @@
 ---
 trdd-id: 1PDCPIZC
 title: the keep-going cue never surfaces blocked, failed, design or planned cards — 21 blocked cards sat invisible through a whole night of heartbeats
-column: testing
+column: complete
 created: 2026-09-03T09:20:00+0200
-updated: 2026-09-03T11:09:13+0200
-review-after: 2026-09-05
+updated: 2026-09-05T03:07:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -17,13 +16,25 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [81c927ac, edf0bcd2, edd19f0a]
 created-by: USER report 2026-09-03 09:18
 ---
 
 # The keep-going cue never surfaces blocked or attention columns
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T03:07:00+0200
+
+**CLOSED 2026-09-05. All three acceptance boxes are ticked; nothing is left to do here.**
+Box 3 was the only one open, and both halves of its 2026-09-03 blocker are resolved:
+- **Published.** `git tag --contains edd19f0a` now returns `v3.4.14`, the installed version.
+- **Observed live.** A heartbeat fire at ~03:00 today carried
+  `attention: 16 blocked (1 unblockable: …; 7 decision-needed: …); 1 human_review (…)`.
+- **⚠ And the other half of that blocker was a WRONG OBSERVATION CHANNEL:** "dispatch.log has
+  zero `attention:` occurrences" was read as evidence the fix was not live. dispatch.log carries
+  **zero occurrences of ANY cue text**, so its silence said nothing about this fix. The cue goes
+  to the stub's STDOUT. Check a heartbeat's own output, never dispatch.log.
+
+## ⏵ PRIOR STATE — 2026-09-03T11:09:13+0200 (superseded)
 
 **Board reconciliation (2026-09-03 11:09):** boxes 1-2 confirmed proven (unit tests, unchanged).
 Box 3 stays open: the implementing commits (`81c927ac`, `edf0bcd2`, `edd19f0a`) are UNPUBLISHED
@@ -101,7 +112,25 @@ i.e. they are decisions nobody was ever reminded to take.
       fire counter).
       `test_attention_gate_fires_on_first_and_every_nth_fire_since` — PASS (also
       `test_attention_gate_fires_immediately_when_the_id_set_changes` for the id-change path).
-- [ ] Live: the next heartbeat after this ships lists the current blocked count.
+- [x] Live: the next heartbeat after this ships lists the current blocked count.
+      **OBSERVED 2026-09-05 ~03:00** in a heartbeat fire of the INSTALLED plugin (3.4.14 —
+      `git tag --contains edd19f0a` now returns `v3.4.14`, so the "unpublished" blocker recorded
+      on 2026-09-03 is gone). The `[janitor-resume]` cue carried, verbatim:
+      `attention: 16 blocked (1 unblockable: TRDD-ZQ02QG1L; 7 decision-needed: TRDD-56d24c02,
+      TRDD-74AA4PAL, TRDD-7NSRD8OV +4 more); 1 human_review (TRDD-Q8PNPRTW)` — the count, the
+      unblockable/decision-needed split, and the `human_review` clause, which is more than this
+      box asks for.
+      **⚠ AND THE 2026-09-03 BLOCKER WAS PARTLY A WRONG OBSERVATION CHANNEL, worth recording so
+      nobody re-derives it.** That note read *"`.janitor/logs/dispatch.log` has zero `attention:`
+      clause occurrences — cannot be observed live yet"*. Measured today: dispatch.log carries
+      **zero occurrences of ANY cue text** — `grep -c "keep-going\|open board:"` is also 0 — so
+      its silence about `attention:` was never evidence about the fix. The cue is written to the
+      stub's STDOUT, which is what the heartbeat prints into the session; the log records
+      dispatch bookkeeping only. A future check should read a heartbeat's own output, not
+      dispatch.log.
+      *(The clause is gated to roughly every `CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES`
+      fires — default 6 — so it correctly appeared in one of this session's several fires, not
+      all of them. Consistent with acceptance box 2, which pins that gating in unit tests.)*
 
 ## Approval log
 
