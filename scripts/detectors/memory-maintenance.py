@@ -195,6 +195,9 @@ _PENDING_PREFIX = "memory-maint-pending-"
 # The claim prefix `memory_dispatch_claim.py` renames a consumed dispatch to.
 _CLAIMED_PREFIX = "memory-maint-claimed-"
 _PENDING_KEEP = 20  # bounded append site: prune older per-dispatch files past this cap
+# A pending record the scheduler is about to supersede (TRDD-Q7X4M2KP) is renamed here
+# instead of unlinked, so the audit trail survives — see `_supersede_older_unclaimed`.
+_SUPERSEDED_PREFIX = "memory-maint-superseded-"
 
 
 def _new_dispatch_id(now: int) -> str:
@@ -235,7 +238,7 @@ def _prune_old_pending(*, keep: int = _PENDING_KEEP) -> None:
     nothing else sweeps. Separate caps rather than one over the union, because a burst
     of claims must not evict the unclaimed backlog it is draining.
     """
-    for prefix in (_PENDING_PREFIX, _CLAIMED_PREFIX):
+    for prefix in (_PENDING_PREFIX, _CLAIMED_PREFIX, _SUPERSEDED_PREFIX):
         try:
             # `prefix` is captured late, which is SAFE here and must stay this way: `sorted`
             # calls the key eagerly, inside this same loop iteration, so the closure can never
@@ -253,11 +256,56 @@ def _prune_old_pending(*, keep: int = _PENDING_KEEP) -> None:
             pass
 
 
+def _supersede_older_unclaimed(payload: dict) -> None:
+    """Rename any existing UNCLAIMED pending record sharing this payload's
+    `(root, intervention)` key out of the claim pool, before the new record for
+    that key lands — TRDD-Q7X4M2KP. `root` already implies scope (a scope's root
+    path is unique), so matching on `(root, intervention)` alone — the exact
+    field spellings the on-disk records carry, never an invented `scope_label`
+    — is sufficient and avoids depending on `scope` staying consistent too.
+    Without this, a lapsed 30-minute in-flight stamp (or a fail-open corrupt
+    stamp, `global_state.memory_root_inflight` V3) lets the scheduler stack a
+    fresh record on top of one nobody ever claimed; `memory_dispatch_claim
+    .claim_one` sorts oldest-first, so the growing pile hands agents stale,
+    now-redundant work while the useful record waits behind it.
+
+    Renamed (never unlinked BY THE SUPERSEDE — rename only; the ordinary
+    keep-20 prune still ages superseded files out like pending and claimed)
+    so the superseded record stays inspectable for audit in the meantime. A
+    rename that loses the race to a peer's `claim_one` — which wraps its own
+    `os.rename` in `except OSError: continue` — is itself just skipped: that
+    record is no longer pending either way, so there is nothing to retry.
+    """
+    key = (payload.get("root"), payload.get("intervention"))
+    try:
+        candidates = list(state.state_dir().glob(f"{_PENDING_PREFIX}*.json"))
+    except OSError:
+        return
+    for path in candidates:
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue  # unreadable: leave it for the orphan detector, don't touch it
+        if not isinstance(existing, dict):
+            continue
+        if (existing.get("root"), existing.get("intervention")) != key:
+            continue
+        dispatch_id = path.name[len(_PENDING_PREFIX):-len(".json")]
+        target = state.state_dir() / f"{_SUPERSEDED_PREFIX}{dispatch_id}.json"
+        try:
+            os.rename(path, target)
+        except OSError:
+            continue  # a peer claimed it first — no longer pending, nothing left to supersede
+
+
 def _write_pending(payload: dict) -> None:
     """Persist one dispatch's pending state to BOTH its own immutable
-    per-dispatch file and the legacy fixed-path sidecar. Order matters: the
-    per-dispatch (never-clobbered) copy lands first, so a reader racing this
-    write always finds at least one complete, correctly-attributed record."""
+    per-dispatch file and the legacy fixed-path sidecar. Order matters: any
+    older unclaimed record for the same key is superseded FIRST, then the
+    per-dispatch (never-clobbered) copy lands, so a reader racing this write
+    always finds at least one complete, correctly-attributed record — and at
+    most one unclaimed record per (root, intervention) key."""
+    _supersede_older_unclaimed(payload)
     text = json.dumps(payload)
     state.atomic_write(_pending_path(payload["dispatch_id"]), text)
     _prune_old_pending()
@@ -647,6 +695,11 @@ def _run() -> int:
             "root": str(root),
             "stamped_at": now,
             "dispatch_id": dispatch_id,
+            # TRDD-N1CPV1QV (e): the dir THIS scheduler wrote into, so a claim step
+            # invoked against the wrong project's state dir can be refused instead of
+            # silently reporting an empty pool. Resolved now, at write time, so the
+            # comparison at claim time is symlink/relative-path agnostic on both ends.
+            "state_dir": str(state.state_dir().resolve()),
         })
         # TRDD-LDSCQ0NU / janitor#300: verify the record we JUST wrote is what the
         # agent's claim step will actually find — using the CLAIM SCRIPT's own

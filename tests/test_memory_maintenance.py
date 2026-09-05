@@ -1045,3 +1045,119 @@ def test_an_in_scope_symlink_yields_no_scope_escape_finding(fixture):
 
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     assert out.strip() == "", out
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-Q7X4M2KP: `_write_pending` must supersede an older UNCLAIMED record for
+# the same (root, intervention) key instead of stacking a new one — the pile
+# `claim_one`'s oldest-first pick was handing agents stale, redundant work
+# from. Exercised directly against the real `_write_pending` (the exact
+# function `_run` calls to persist a dispatch), never a hand-rolled JSON seed,
+# so a test that stays green cannot mean production supersedes nothing.
+# --------------------------------------------------------------------------- #
+
+def _load_mm(monkeypatch, state_dir: Path):
+    """Import the hyphenated detector module fresh and point its `state.state_dir()`
+    at `state_dir` — the same pattern `test_memory_dispatch_claim
+    .test_claimed_records_are_pruned_too` already uses for unit-level access to
+    `memory-maintenance.py`'s internals."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "mm_q7x4m2kp", _PROJECT_ROOT / "scripts" / "detectors" / "memory-maintenance.py"
+    )
+    assert spec is not None and spec.loader is not None
+    mm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mm)
+    monkeypatch.setattr(mm.state, "state_dir", lambda: state_dir)
+    return mm
+
+
+def _dispatch_payload(mm, *, root: str, intervention: str, scope: str, stamped_at: int) -> dict:
+    """Build a payload shaped exactly like the one `_run` passes to `_write_pending`
+    (marker/intervention/scope/root/stamped_at/dispatch_id) — the same six keys, so a
+    test seeding through this helper is indistinguishable from a real dispatch."""
+    return {
+        "marker": dict(mm._MARKERS)[intervention],
+        "intervention": intervention,
+        "scope": scope,
+        "root": root,
+        "stamped_at": stamped_at,
+        "dispatch_id": mm._new_dispatch_id(stamped_at),
+    }
+
+
+def test_write_pending_supersedes_older_unclaimed_same_key(tmp_path, monkeypatch):
+    """Two dispatches for the same (root, intervention) key, both via the real
+    `_write_pending` — the second must supersede the first's still-unclaimed
+    per-dispatch file rather than leave it sitting in the claim pool."""
+    mm = _load_mm(monkeypatch, tmp_path)
+    root = "/tmp/local/memory"
+    first = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=1000)
+    mm._write_pending(first)
+    second = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=2000)
+    mm._write_pending(second)
+
+    pending = list(tmp_path.glob(f"{mm._PENDING_PREFIX}*.json"))
+    assert len(pending) == 1, pending
+    assert json.loads(pending[0].read_text(encoding="utf-8"))["dispatch_id"] == second["dispatch_id"]
+
+    superseded = list(tmp_path.glob(f"{mm._SUPERSEDED_PREFIX}*.json"))
+    assert len(superseded) == 1, superseded
+    assert superseded[0].name == f"{mm._SUPERSEDED_PREFIX}{first['dispatch_id']}.json"
+
+
+def test_write_pending_leaves_claimed_and_other_keys_alone(tmp_path, monkeypatch):
+    """A CLAIMED record for the same key, and a pending record for a DIFFERENT key,
+    must both survive a supersede — only an unclaimed record sharing the exact
+    (root, intervention) key is touched."""
+    mm = _load_mm(monkeypatch, tmp_path)
+    root = "/tmp/local/memory"
+    claimed_payload = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=500)
+    claimed_path = tmp_path / f"{mm._CLAIMED_PREFIX}{claimed_payload['dispatch_id']}.json"
+    claimed_path.write_text(json.dumps(claimed_payload), encoding="utf-8")
+
+    other_key = _dispatch_payload(
+        mm, root="/tmp/user/memory", intervention="repair", scope="USER", stamped_at=600
+    )
+    mm._write_pending(other_key)
+
+    new_dispatch = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=2000)
+    mm._write_pending(new_dispatch)
+
+    assert claimed_path.is_file() and claimed_path.read_text(encoding="utf-8") == json.dumps(claimed_payload)
+    other_pending = tmp_path / f"{mm._PENDING_PREFIX}{other_key['dispatch_id']}.json"
+    assert other_pending.is_file(), "a pending record for a different key must be left alone"
+    assert not list(tmp_path.glob(f"{mm._SUPERSEDED_PREFIX}*.json")), (
+        "nothing shared the new dispatch's key, so nothing should have been superseded"
+    )
+
+
+def test_superseded_prefix_is_pruned_under_keep_cap(tmp_path, monkeypatch):
+    """The new `memory-maint-superseded-` prefix joins the prune tuple under the
+    same `_PENDING_KEEP` cap — else a third, un-pruned prefix accumulates one file
+    per lapse forever."""
+    mm = _load_mm(monkeypatch, tmp_path)
+    for i in range(mm._PENDING_KEEP + 5):
+        (tmp_path / f"{mm._SUPERSEDED_PREFIX}{1000 + i}-abcd1234.json").write_text(
+            "{}", encoding="utf-8"
+        )
+    mm._prune_old_pending()
+    left = list(tmp_path.glob(f"{mm._SUPERSEDED_PREFIX}*.json"))
+    assert len(left) == mm._PENDING_KEEP, f"superseded records not capped: {len(left)}"
+
+
+def test_write_pending_supersede_rewrites_legacy_slot_to_new_id(tmp_path, monkeypatch):
+    """`orphaned-memory-maint.py` reads only the legacy single-slot sidecar
+    (`memory-maint-pending.json`); after a supersede it must name the NEW dispatch,
+    never the one just superseded, or the orphan detector keeps reporting a
+    deliberately-retired id."""
+    mm = _load_mm(monkeypatch, tmp_path)
+    root = "/tmp/local/memory"
+    first = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=1000)
+    mm._write_pending(first)
+    second = _dispatch_payload(mm, root=root, intervention="split", scope="LOCAL", stamped_at=2000)
+    mm._write_pending(second)
+
+    legacy = json.loads((tmp_path / mm.PENDING_LEGACY_NAME).read_text(encoding="utf-8"))
+    assert legacy["dispatch_id"] == second["dispatch_id"]

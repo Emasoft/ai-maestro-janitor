@@ -8,6 +8,8 @@ the assignment. These pin the properties that make that impossible.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -260,6 +262,126 @@ def test_is_claimable_never_renames_the_record(tmp_path):
     assert p.exists(), "is_claimable must not rename the pending record"
     got = mdc.claim_one(tmp_path, "atomize")
     assert got is not None, "the record must still be claimable by a real claim afterwards"
+
+
+# ---------------------------------------------------------------------------
+# TRDD-Q7X4M2KP — the scheduler's supersede-rename can win the race against a
+# peer's `claim_one`: it reads the payload fine, then loses ITS OWN rename
+# because the scheduler already renamed the file out from under it. The
+# `except OSError: continue` guarding that rename must swallow the loss and
+# move on to the next candidate rather than raise.
+# ---------------------------------------------------------------------------
+
+
+def test_claim_one_skips_a_record_superseded_under_it(tmp_path, monkeypatch):
+    """A stale record is renamed away (simulating the scheduler's supersede)
+    exactly when `claim_one` tries to claim it — `claim_one` must not raise, and
+    must fall through to the next (still-pending) candidate instead."""
+    stale = _dispatch(tmp_path, 100, "split")
+    _dispatch(tmp_path, 200, "split")
+
+    real_rename = os.rename
+
+    def _flaky_rename(src, dst):
+        if Path(src) == stale:
+            raise OSError("simulated: superseded out from under the claim")
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(os, "rename", _flaky_rename)
+
+    got = mdc.claim_one(tmp_path, "split")
+
+    assert got is not None, "claim_one must not raise on the lost race"
+    assert got["dispatch_id"] == "200-abcd1234", "must fall through to the next candidate"
+    assert stale.is_file(), "the superseded-away record was never actually renamed by claim_one"
+
+
+# ---------------------------------------------------------------------------
+# TRDD-N1CPV1QV — the claim script must be told the scheduler's actual state
+# dir, not resolve one of its own from cwd. Parts (c)/(d)/(e).
+# ---------------------------------------------------------------------------
+
+_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "memory_dispatch_claim.py"
+
+
+def _run_cli(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    full_env = dict(os.environ)
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), *args],
+        capture_output=True, text=True, env=full_env,
+    )
+
+
+def test_rejects_empty_state_dir_argument():
+    """An EXPLICITLY empty --state-dir must be a distinct error, never a silent
+    fallback to cwd resolution (part (c))."""
+    proc = _run_cli(["--state-dir", ""])
+    assert proc.returncode == 4, proc.stderr
+    assert "empty" in proc.stderr
+
+
+def test_refuses_when_state_dir_unresolved_and_no_pool(tmp_path):
+    """No --state-dir given AND the cwd-resolved directory holds zero
+    `memory-maint-*` files of either kind gets its OWN exit code, distinct from
+    the ordinary 'nothing claimable' exit 2 (part (d))."""
+    proc = _run_cli([], env={"CLAUDE_PROJECT_DIR": str(tmp_path)})
+    assert proc.returncode == 3, proc.stderr
+    assert "no memory-maintenance state at all" in proc.stderr
+
+
+def test_explicit_state_dir_with_no_pool_keeps_ordinary_exit_2(tmp_path):
+    """The same empty directory, but reached via an EXPLICIT --state-dir, must
+    stay the pre-existing 'nothing claimable' exit 2 — the new code in (d) fires
+    only on cwd resolution."""
+    proc = _run_cli(["--state-dir", str(tmp_path)])
+    assert proc.returncode == 2, proc.stderr
+
+
+def test_claim_one_refuses_a_foreign_state_dir(tmp_path):
+    """A dispatch record whose payload `state_dir` names a DIFFERENT directory than
+    the one the claim step was actually invoked on must be refused — distinct
+    exception, record left untouched and still pending (part (e))."""
+    foreign = _dispatch(tmp_path, 100, "split")
+    payload = json.loads(foreign.read_text(encoding="utf-8"))
+    payload["state_dir"] = "/some/other/project/.janitor/state"
+    foreign.write_text(json.dumps(payload), encoding="utf-8")
+
+    expected = tmp_path.resolve()
+    try:
+        mdc.claim_one(tmp_path, "split", expected_state_dir=expected)
+        raised = False
+    except mdc.StateDirMismatch:
+        raised = True
+    assert raised, "a foreign state_dir must raise StateDirMismatch, not silently skip"
+    assert foreign.is_file(), "the mismatched record must be left untouched, still pending"
+
+
+def test_claim_one_accepts_state_dir_through_a_symlink(tmp_path):
+    """The comparison is normalised via `Path.resolve()` on both sides, so a claim
+    invoked through a SYMLINKED pool directory still succeeds."""
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    _dispatch(real_dir, 100, "split")
+    for p in real_dir.glob(f"{mdc.PENDING_PREFIX}*.json"):
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        payload["state_dir"] = str(real_dir.resolve())
+        p.write_text(json.dumps(payload), encoding="utf-8")
+
+    link_dir = tmp_path / "link"
+    link_dir.symlink_to(real_dir)
+
+    got = mdc.claim_one(link_dir, "split", expected_state_dir=link_dir.resolve())
+    assert got is not None, "a symlinked pool directory must still claim successfully"
+
+
+def test_claim_one_accepts_a_record_with_no_state_dir_field(tmp_path):
+    """An older-version payload with no `state_dir` field at all is a version gap,
+    not evidence of a wrong directory — accepted, never refused."""
+    _dispatch(tmp_path, 100, "split")  # helper never sets state_dir
+    got = mdc.claim_one(tmp_path, "split", expected_state_dir=tmp_path.resolve())
+    assert got is not None, "a missing state_dir field must never refuse the claim"
 
 
 def test_every_memory_skill_passes_its_own_chore(tmp_path):

@@ -22,6 +22,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import dispatch  # noqa: E402
+import findings_ledger  # noqa: E402
 import memory_dispatch_claim as mdc  # noqa: E402
 import state  # noqa: E402
 
@@ -229,29 +230,52 @@ def test_marker_survives_when_the_dispatch_is_still_pending(tmp_path, monkeypatc
 
 def test_stale_marker_gate_is_scoped_to_memory_maintenance(tmp_path, monkeypatch):
     """The claim-pool gate is applied by `_run_detector` only when
-    `name == "memory-maintenance"` — a bare `[janitor-memory-*]` line emitted by
-    ANY other detector must never be suppressed, even with an empty claim pool.
-    It is left to `_defang_foreign_markers`'s ordinary non-owner handling (the
-    marker is neutralized to `⟦…⟧`, not silently dropped)."""
+    `name == "memory-maintenance"` — driven through `_run_detector` ITSELF (not a
+    mirror of its composition, which cannot catch the guard widening), so a bare
+    `[janitor-memory-*]` line emitted by a non-owner detector must never be
+    suppressed, even with an empty claim pool. It is left to
+    `_defang_foreign_markers`'s ordinary non-owner handling (neutralized to
+    `⟦…⟧`, never silently dropped)."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    # Guard, not the fix: the fake detector below prints and exits in well under 1s
+    # (measured), so this test never sits near the 120s default. Shrinking the bound
+    # anyway means a FUTURE hang here shows up as a fast red in seconds, not a slow
+    # green (or slow red) that hides in CI runtime.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT", "5")
+    _clear_state_cache()
+    detectors_dir = tmp_path / "detectors"
+    detectors_dir.mkdir()
+    script = detectors_dir / "some-other-detector.py"
+    script.write_text("#!/usr/bin/env python3\nprint('[janitor-memory-split]')\n", encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setattr(dispatch, "_HERE", tmp_path)
+    try:
+        state.state_dir().mkdir(parents=True, exist_ok=True)  # empty claim pool
+        out = _capture(lambda: dispatch._run_detector("some-other-detector", interval=0))
+        assert out == "⟦janitor-memory-split⟧\n", (
+            "non-owner detector: never gated by the memory-maintenance suppression, "
+            "only defanged (never dropped)"
+        )
+    finally:
+        _clear_state_cache()
+
+
+def test_marker_suppression_records_one_ledger_finding_per_chore_per_day(tmp_path, monkeypatch):
+    """Ordering fix: the suppressed marker's finding actually lands in the ledger
+    (read back through `findings_ledger._read_raw` — the same call `/janitor-findings`
+    itself uses, see `scripts/findings_cli.py::_cmd_list`), and a repeat suppression
+    of the same chore the same day does not duplicate the record."""
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     _clear_state_cache()
     try:
         state.state_dir().mkdir(parents=True, exist_ok=True)  # empty claim pool
-        text = "[janitor-memory-split]\n"
-        # Mirror `_run_detector`'s composition: the suppression gate is only
-        # entered for the owner detector name, exactly as line ~971 does.
-        for name in ("memory-maintenance", "some-other-detector"):
-            out = text
-            if name == "memory-maintenance":
-                out = dispatch._suppress_stale_memory_markers(out)
-            out = dispatch._defang_foreign_markers(name, out)
-            if name == "memory-maintenance":
-                assert "[janitor-memory-split]" not in out, (
-                    "empty pool: owner detector's marker is suppressed"
-                )
-            else:
-                assert out == "⟦janitor-memory-split⟧\n", (
-                    "non-owner detector: never gated, only defanged (never dropped)"
-                )
+        for _ in range(2):
+            out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+            assert "[janitor-memory-split]" not in out
+        entries, _size = findings_ledger._read_raw(None)  # noqa: SLF001 -- the /janitor-findings reader itself
+        matches = [e for e in entries if e.get("code") == "MEMORY-MARKER-SUPPRESSED"]
+        assert len(matches) == 1, "one record per chore per day — no duplicate on repeat suppression"
     finally:
         _clear_state_cache()
+    leaked = _PROJECT_ROOT / ".janitor" / "state" / "memory-marker-suppressed-seen.txt"
+    assert not leaked.exists(), "test must write only into the tmp_path project, never the real repo"

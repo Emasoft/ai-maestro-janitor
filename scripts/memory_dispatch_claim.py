@@ -106,7 +106,25 @@ def is_claimable(state_dir: Path, dispatch_id: str, chore: str = "") -> bool:
     return payload_matches_chore(payload, chore)
 
 
-def claim_one(state_dir: Path, chore: str = "") -> dict | None:
+class StateDirMismatch(Exception):
+    """Raised by `claim_one` (TRDD-N1CPV1QV part (e)) when the oldest matching candidate's
+    recorded `state_dir` disagrees with the directory the claim was actually invoked on —
+    a spawning session composed the wrong project's path, and a real pool exists there, so
+    it must be refused rather than silently reported as an empty pool."""
+
+    def __init__(self, dispatch_id: str, expected: str, found: str) -> None:
+        self.dispatch_id = dispatch_id
+        self.expected = expected
+        self.found = found
+        super().__init__(
+            f"dispatch {dispatch_id} was written for state_dir {found!r}, "
+            f"not {expected!r} — refusing the claim"
+        )
+
+
+def claim_one(
+    state_dir: Path, chore: str = "", expected_state_dir: Path | None = None
+) -> dict | None:
     """Atomically claim the oldest unclaimed dispatch and return its payload, else None.
 
     `chore` (janitor#275, and the root cause of #280 and #273) restricts the claim to
@@ -137,6 +155,21 @@ def claim_one(state_dir: Path, chore: str = "") -> dict | None:
         # disagree about what counts as claimable.
         if not payload_matches_chore(payload, chore):
             continue
+        # TRDD-N1CPV1QV (e): a record with no `state_dir` field at all predates this
+        # field (older cached plugin version) — absence is a version gap, not evidence
+        # of a wrong directory, so it is accepted with one log line, never refused.
+        if expected_state_dir is not None:
+            recorded = payload.get("state_dir")
+            if not recorded:
+                state.log_line(
+                    "memory_dispatch_claim",
+                    f"dispatch {payload.get('dispatch_id', '?')} has no state_dir field "
+                    "(older payload) — accepted",
+                )
+            elif Path(recorded).expanduser().resolve() != expected_state_dir:
+                raise StateDirMismatch(
+                    payload.get("dispatch_id", "?"), str(expected_state_dir), recorded
+                )
         target = state_dir / f"{CLAIMED_PREFIX}{path.name[len(PENDING_PREFIX):]}"
         try:
             os.rename(path, target)
@@ -188,7 +221,10 @@ def _retire_legacy_mirror(state_dir: Path, dispatch_id: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--state-dir", default="", help="override the project's .janitor/state")
+    # default=None (not "") so an EXPLICITLY empty --state-dir is distinguishable from
+    # "not given at all" (TRDD-N1CPV1QV part (c)) — a bare falsy check below would treat
+    # both the same and silently fall back to cwd resolution.
+    ap.add_argument("--state-dir", default=None, help="override the project's .janitor/state")
     ap.add_argument("--peek", action="store_true",
                     help="report the next claimable dispatch WITHOUT claiming it")
     ap.add_argument("--chore", default="",
@@ -197,7 +233,29 @@ def main() -> int:
                          "it must not consume another chore's assignment")
     args = ap.parse_args()
 
+    if args.state_dir is not None and args.state_dir.strip() == "":
+        print(
+            "memory_dispatch_claim: --state-dir was given but empty — refusing to silently "
+            "fall back to cwd resolution",
+            file=sys.stderr,
+        )
+        return 4
+
     state_dir = Path(args.state_dir) if args.state_dir else state.state_dir()
+    expected_state_dir = state_dir.expanduser().resolve()
+
+    if args.state_dir is None:
+        # TRDD-N1CPV1QV part (d): cwd resolution found NOTHING at all (no pending, no
+        # claimed) — most likely resolved the wrong project root entirely. Distinct from
+        # the ordinary "pool present but nothing claimable" exit 2 below.
+        if not any(state_dir.glob("memory-maint-*")):
+            print(
+                f"memory_dispatch_claim: no memory-maintenance state at all in {state_dir} "
+                "(cwd-resolved, no --state-dir given) — probably the wrong project root",
+                file=sys.stderr,
+            )
+            return 3
+
     if args.peek:
         nxt = candidates(state_dir)
         if not nxt:
@@ -206,7 +264,11 @@ def main() -> int:
         print(nxt[0])
         return 0
 
-    payload = claim_one(state_dir, args.chore)
+    try:
+        payload = claim_one(state_dir, args.chore, expected_state_dir=expected_state_dir)
+    except StateDirMismatch as exc:
+        print(f"memory_dispatch_claim: {exc}", file=sys.stderr)
+        return 5
     if payload is None:
         # The legacy single slot is NOT a fallback. It is the very file whose clobbering
         # this exists to fix, so consuming it here would reintroduce the bug on exactly the

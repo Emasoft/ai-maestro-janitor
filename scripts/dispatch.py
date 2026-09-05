@@ -820,18 +820,25 @@ def _suppress_stale_memory_markers(text: str) -> str:
             # Dedup by (chore, local day) — same day-bucket convention as
             # `_phase_self_cost_alarm` / `_phase_heartbeat_renew` above: one record per
             # chore per day, not one per fire (the heartbeat can fire every few minutes).
+            # ORDERING: `emit_once` both checks AND marks the key in one call, so marking
+            # before `record()` runs meant a swallowed ledger failure permanently lost the
+            # day's finding (the key was already "seen"). `dedupe.py` has no check-without-
+            # marking primitive, so the day-key membership is read here directly (not
+            # through the lock — worst case under a concurrent writer is one extra
+            # `record()` call the same day, which is harmless); the key is marked seen
+            # only AFTER `record()` returns without raising.
             today = datetime.now().astimezone().strftime("%Y%m%d")
-            if dedupe.emit_once(
-                state.state_dir() / "memory-marker-suppressed-seen.txt",
-                f"{chore}@{today}",
-                chore,
-            ) is not None:
+            seen_file = state.state_dir() / "memory-marker-suppressed-seen.txt"
+            key = f"{chore}@{today}"
+            already_seen = seen_file.exists() and key in seen_file.read_text(encoding="utf-8").splitlines()
+            if not already_seen:
                 try:
                     findings_ledger.record(
                         sev="LOW", code="MEMORY-MARKER-SUPPRESSED", src="dispatch",
                         msg=f"[janitor-memory-{chore}] suppressed — claim pool empty (janitor#300)",
                         ref="",
                     )
+                    dedupe.emit_once(seen_file, key, chore)
                 except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
                     pass
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")

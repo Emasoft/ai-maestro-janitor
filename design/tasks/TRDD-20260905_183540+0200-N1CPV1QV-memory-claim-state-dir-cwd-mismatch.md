@@ -3,7 +3,7 @@ trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
 column: todo
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T18:55:16+0200
+updated: 2026-09-05T21:15:00+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -16,6 +16,65 @@ external-refs: [github:Emasoft/ai-maestro-janitor#300]
 ---
 
 # Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T21:15
+
+A dead worker left NO code for this card — only `scripts/memory_dispatch_claim.py` was
+already committed at its PRE-this-TRDD baseline (parts (a)-(f) were all still to do). This
+takeover session implemented ONLY the parts confined to the two in-scope scripts
+(`scripts/memory_dispatch_claim.py`, `scripts/detectors/memory-maintenance.py`) plus their
+test files — **NOT** the skills/heartbeat-protocol/agent-prompt-template wiring (parts
+(a)/(b)/(c)/(f)-skill-grep/(f)-prompt-template), which touch 8 `SKILL.md` files and
+`~/.claude/rules/janitor-heartbeat-protocol.md` outside this card's declared file scope
+for this takeover and were not attempted.
+
+**Implemented this session:**
+- `scripts/detectors/memory-maintenance.py`: the scheduler's dispatch payload now carries
+  `"state_dir": str(state.state_dir().resolve())` (part (e), write side).
+- `scripts/memory_dispatch_claim.py`:
+  - `--state-dir` default changed from `""` to `None` so an explicitly-empty value is
+    distinguishable from "not given"; empty value → exit 4, distinct stderr message (part (c)).
+  - New exit code 3 ("no memory-maint-* files at all", cwd-resolved only, `--state-dir` not
+    given) — distinct from the pre-existing exit 2 "nothing claimable" (part (d)).
+  - `claim_one()` gained `expected_state_dir` kwarg + `StateDirMismatch` exception: a
+    candidate's payload `state_dir` differing from the resolved invocation directory
+    raises (claim refused, record untouched, still pending); a MISSING `state_dir` field
+    (older payload) is accepted with one `state.log_line` call, never refused; comparison
+    is `Path(...).expanduser().resolve()` on both sides so a symlinked pool directory still
+    claims successfully (part (e), all sub-requirements including the symlink + missing-field
+    cases).
+  - `main()` wires all of the above; existing callers that don't pass `--state-dir` at all
+    keep working exactly as before except for the new (d) exit code when the pool is
+    genuinely empty.
+- New tests in `tests/test_memory_dispatch_claim.py`: `test_rejects_empty_state_dir_argument`,
+  `test_refuses_when_state_dir_unresolved_and_no_pool`,
+  `test_explicit_state_dir_with_no_pool_keeps_ordinary_exit_2`,
+  `test_claim_one_refuses_a_foreign_state_dir`,
+  `test_claim_one_accepts_state_dir_through_a_symlink`,
+  `test_claim_one_accepts_a_record_with_no_state_dir_field`.
+
+**NOT implemented (left for a follow-up NPT/session):** (a) spawn-prompt carrying the path,
+(b) the model-turn composition + abort-if-unresolvable requirement, the 8 `SKILL.md`
+`--state-dir` wiring + `: "${STATE_DIR:?…}"` guard, and the two grep-based tests for those
+(skill invocation + prompt-template placeholder). These require editing files outside this
+takeover's declared scope (`skills/janitor-memory-*/SKILL.md`,
+`~/.claude/rules/janitor-heartbeat-protocol.md`) and were explicitly not touched.
+
+**Verification (this session):**
+```
+uv run pytest tests/test_memory_dispatch_claim.py -q -p no:cacheprovider → 27 passed
+uv run pytest tests/test_memory_maintenance.py tests/test_memory_dispatch_claim.py -q -p no:cacheprovider → 76 passed
+uv run ruff check scripts/memory_dispatch_claim.py scripts/detectors/memory-maintenance.py \
+  tests/test_memory_maintenance.py tests/test_memory_dispatch_claim.py → All checks passed!
+uv run mypy scripts/ --ignore-missing-imports → Success: no issues found in 504 source files
+uvx --with pyright pyright <same 4 files> → 0 errors, 0 warnings, 0 informations
+```
+Manual exit-code spot check:
+```
+uv run python3 scripts/memory_dispatch_claim.py --state-dir ""            → exit 4
+uv run python3 scripts/memory_dispatch_claim.py --state-dir /tmp/empty    → exit 2
+CLAUDE_PROJECT_DIR=/tmp/empty uv run python3 scripts/memory_dispatch_claim.py → exit 3
+```
 
 ## Symptom
 
@@ -162,12 +221,12 @@ failure: the claiming agent looking in the wrong directory entirely.
       sourced from that prompt (verified by
       `grep -L -- '--state-dir' skills/janitor-memory-*/SKILL.md`
       returning nothing, wired into a test).
-- [ ] `memory_dispatch_claim.py` exits with a distinct new code (not 0 or
+- [x] `memory_dispatch_claim.py` exits with a distinct new code (not 0 or
       2) and a clear stderr message when no `--state-dir` is given and the
       resolved directory holds no `memory-maint-*` files at all (verified
       by a new test in `tests/test_memory_dispatch_claim.py`, e.g.
       `test_refuses_when_state_dir_unresolved_and_no_pool`).
-- [ ] `memory_dispatch_claim.py` rejects an EMPTY `--state-dir` argument
+- [x] `memory_dispatch_claim.py` rejects an EMPTY `--state-dir` argument
       with a distinct error message (never silently falls back to cwd
       resolution), verified by a new test, e.g.
       `test_rejects_empty_state_dir_argument`.
@@ -175,17 +234,21 @@ failure: the claiming agent looking in the wrong directory entirely.
       invoking the claim step when `$STATE_DIR` is unset or empty,
       verified by a test that sources the skill's command block with
       `STATE_DIR` unset and asserts non-zero exit (e.g.
-      `tests/test_memory_skill_state_dir_guard.py`).
-- [ ] `memory_dispatch_claim.py` refuses a claim (distinct message,
+      `tests/test_memory_skill_state_dir_guard.py`). (NOT done this
+      session — requires editing 8 `SKILL.md` files outside this
+      takeover's declared scope; see STATE block.)
+- [x] `memory_dispatch_claim.py` refuses a claim (distinct message,
       non-zero exit, record left untouched/still pending) when a
       dispatch record's payload `state_dir` differs from the directory
       the claim step was actually invoked on, verified by a new test
       that writes a record with a foreign `state_dir` into a tmp pool
       and asserts the claim is refused and the file is still pending.
-- [ ] The comparison normalises both sides via
+- [x] The comparison normalises both sides via
       `Path(x).expanduser().resolve()` before comparing, verified by a
       test that invokes the claim step through a SYMLINKED pool
       directory and asserts the claim still succeeds.
-- [ ] A record with no `state_dir` field at all (older-version payload)
+- [x] A record with no `state_dir` field at all (older-version payload)
       is accepted with one log line, never refused, verified by a test.
-- [ ] `uv run pytest` full suite still green.
+- [ ] `uv run pytest` full suite still green. (NOT run this session per
+      orchestrator instruction; see the sibling card's STATE block for the
+      flaky, unrelated `test_dispatch_defang.py` finding.)
