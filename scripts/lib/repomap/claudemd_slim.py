@@ -138,22 +138,20 @@ def scan_pages(memdir: Path) -> list[PageInfo]:
     return pages
 
 
-def corpus_digest(pages: list[PageInfo]) -> str:
-    """12-hex digest over (name, description) — the cheap freshness probe, mixing exactly
-    the two fields the rendered index actually shows.
+def corpus_digest(pages: list[PageInfo], memdir_rel: str = ".claude/project/memory") -> str:
+    """12-hex digest over the RENDERED index body (TRDD-Q3WSQ9M5 / janitor#298) — the
+    cheap freshness probe deciding whether `CLAUDE.md`'s wikimem index gets rewritten.
 
-    `lmd` USED to be in the mix, as a proxy for "this page changed, so re-render its
-    (possibly changed) description". It was a safe proxy only because nothing bumped it
-    (janitor#265): the field was effectively frozen, so it contributed no churn. memgrep's
-    write verbs now stamp it on every add-atom / add-lesson / edit, which would turn that
-    inert proxy into a flip on EVERY atom edit — the exact CLAUDE.md cache-bust this digest
-    was designed to avoid, arriving through the back door.
-
-    Dropping it costs no signal: `description` is already mixed in directly, and it is the
-    only page field `render_index` renders besides `name`. A description change still flips
-    the digest; a body edit that changes neither correctly does not."""
-    mix = "\n".join(f"{p.name}\t{p.description}" for p in sorted(pages, key=lambda p: p.name))
-    return hashlib.sha256(mix.encode("utf-8")).hexdigest()[:12]
+    Previously hashed a hand-picked `(name, description)` pair, hand-synced with what
+    `render_index` -> `_entry` actually emits (`name`, `filename`, `_short_desc`, `tier`,
+    `wikilinks`). That sync drifted: a `description:` edit past the first ` / ` segment
+    flipped the digest with a byte-identical rendered body (over-fires, cache-busts the
+    prompt prefix every turn), while a page rename or `tier:` change left the digest
+    untouched despite changing the rendered body (under-fires — `index_is_stale` never
+    returns True again). Hashing `_render_body`'s own output makes drift between the
+    digest and the renderer structurally impossible instead of a maintained field list."""
+    body = _render_body(pages, memdir_rel)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
 
 
 def _short_desc(desc: str) -> str:
@@ -171,8 +169,12 @@ def _entry(page: PageInfo, memdir_rel: str) -> str:
     return f"- {link} — {desc}" if desc else f"- {link}"
 
 
-def render_index(pages: list[PageInfo], *, generated_iso: str, memdir_rel: str = ".claude/project/memory") -> str:
-    """The full fenced index block, trailing newline included.
+def _render_body(pages: list[PageInfo], memdir_rel: str) -> str:
+    """The index body — everything between the fence header and `WIKIMEM_FENCE_END` — as
+    its own function so `corpus_digest` can hash exactly what gets rendered instead of a
+    hand-picked field subset (TRDD-Q3WSQ9M5). `render_index` calls this once and embeds
+    `corpus_digest`'s hash of the SAME output in its header; hashing `render_index`'s own
+    output would be circular since the header embeds the digest.
 
     Topic order: the overview first (the entry point), then each HUB as a topic group
     listing the pages its body `[[links]]` to, then everything unclaimed under "Other".
@@ -214,8 +216,14 @@ def render_index(pages: list[PageInfo], *, generated_iso: str, memdir_rel: str =
         for p in others:
             lines.append(_entry(p, memdir_rel))
         lines.append("")
-    body = "\n".join(lines).rstrip("\n")
-    start = f"{WIKIMEM_FENCE_START} {_SCHEMA} digest={corpus_digest(pages)} generated={generated_iso}"
+    return "\n".join(lines).rstrip("\n")
+
+
+def render_index(pages: list[PageInfo], *, generated_iso: str, memdir_rel: str = ".claude/project/memory") -> str:
+    """The full fenced index block, trailing newline included."""
+    body = _render_body(pages, memdir_rel)
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+    start = f"{WIKIMEM_FENCE_START} {_SCHEMA} digest={digest} generated={generated_iso}"
     return f"{start}\n{body}\n{WIKIMEM_FENCE_END}\n"
 
 
@@ -265,7 +273,7 @@ def slim_violations(text: str, *, require_map: bool = False) -> list[str]:
     return violations
 
 
-def index_is_stale(text: str, pages: list[PageInfo]) -> bool:
+def index_is_stale(text: str, pages: list[PageInfo], memdir_rel: str = ".claude/project/memory") -> bool:
     """True iff the spliced index's digest no longer matches the corpus (or there is no
     index at all). Cheap: no extraction, just the header line vs a hash of scan_pages
     output."""
@@ -274,4 +282,4 @@ def index_is_stale(text: str, pages: list[PageInfo]) -> bool:
         return True
     header = text[span[0] : span[1]].splitlines()[0]
     m = re.search(r"digest=([0-9a-f]{12})", header)
-    return m is None or m.group(1) != corpus_digest(pages)
+    return m is None or m.group(1) != corpus_digest(pages, memdir_rel)

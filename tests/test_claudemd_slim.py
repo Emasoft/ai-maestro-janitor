@@ -103,6 +103,55 @@ def test_corpus_digest_tracks_description_not_lmd(tmp_path: Path) -> None:
     assert cs.corpus_digest(cs.scan_pages(memdir)) != d1
 
 
+def test_corpus_digest_unchanged_by_description_edit_past_first_segment(tmp_path: Path) -> None:
+    """TRDD-Q3WSQ9M5 / janitor#298 (over-fires): the index only ever renders the FIRST
+    ' / ' symptom segment of a description (`_short_desc`). Editing text past that
+    segment leaves the rendered body byte-identical, so the digest — now hashing the
+    rendered body itself — must NOT move (the old hand-picked-field digest hashed the
+    full description string and flipped here, cache-busting CLAUDE.md for nothing)."""
+    memdir = _corpus(tmp_path)
+    d1 = cs.corpus_digest(cs.scan_pages(memdir))
+
+    _page(memdir, "daemon-page", tier="component",
+          desc="how the daemon works / when it dies / a brand new trailing symptom")
+    assert cs.corpus_digest(cs.scan_pages(memdir)) == d1
+
+
+def test_corpus_digest_changes_on_page_rename(tmp_path: Path) -> None:
+    """TRDD-Q3WSQ9M5 / janitor#298 (under-fires): a page file rename changes the rendered
+    link target (`_entry`'s `({memdir_rel}/{filename})`) but never touched the old
+    `(name, description)` digest, so `index_is_stale` stayed False forever. Hashing the
+    rendered body catches it."""
+    memdir = _corpus(tmp_path)
+    d1 = cs.corpus_digest(cs.scan_pages(memdir))
+
+    (memdir / "orphan-page.md").rename(memdir / "orphan-page-renamed.md")
+    assert cs.corpus_digest(cs.scan_pages(memdir)) != d1
+
+
+def test_corpus_digest_changes_on_hub_tier_change(tmp_path: Path) -> None:
+    """TRDD-Q3WSQ9M5 / janitor#298 (under-fires): a non-overview hub's `tier:` flipping to
+    `component` moves it out of the Hub topic-group section entirely (it also stops
+    exposing its `wikilinks` children), which changes the rendered body — the digest
+    must follow."""
+    memdir = _corpus(tmp_path)
+    d1 = cs.corpus_digest(cs.scan_pages(memdir))
+
+    _page(memdir, "arch-hub", tier="component", desc="architecture topics / more symptoms",
+          body="Links: [[daemon-page]] and [[missing-page]].")
+    assert cs.corpus_digest(cs.scan_pages(memdir)) != d1
+
+
+def test_corpus_digest_stable_across_noop_regeneration(tmp_path: Path) -> None:
+    """Regenerating the index twice with no corpus change must yield the same digest —
+    the freshness probe must not be a source of its own churn."""
+    memdir = _corpus(tmp_path)
+    pages = cs.scan_pages(memdir)
+    d1 = cs.corpus_digest(pages)
+    d2 = cs.corpus_digest(cs.scan_pages(memdir))
+    assert d1 == d2
+
+
 def test_both_fences_coexist_and_neither_eats_the_other(tmp_path: Path) -> None:
     """The parameterized surgery must replace ONE fence's span and keep the other's
     bytes — the failure this guards is one splicer swallowing the other's block."""
