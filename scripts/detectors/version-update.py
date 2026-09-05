@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
+import harness_backend  # noqa: E402
 import state  # noqa: E402
 import version_update_lib as vu  # noqa: E402
 
@@ -131,6 +132,30 @@ def main() -> int:
                 f"[version-update] {vu.PLUGIN_NAME} {latest_installed} → "
                 f"{latest_published} — auto_update_on_new_release is off; "
                 f"run /plugin update {vu.PLUGIN_NAME} + /janitor-arm.",
+            )
+
+        # Branch A2: SAY OUT LOUD when this update is riding the 4 h unconditional
+        # cadence floor instead of the <=15 min flag path (TRDD-A70YJLXN box 3 — the
+        # RIDER attached to option 4's server-owned lane). That happens exactly when
+        # the ai-maestro server has claimed the `version-update` chore (so the
+        # daemon's own fast consumer, `daemon.py::_task_yielded_to_server`, never
+        # runs) and no flag is raised — checked AFTER the raise above so a flag just
+        # raised this pass correctly suppresses it (the fast path IS engaged then).
+        if line is None and vu.should_emit_floor_line(
+            server_owns_chore=(
+                harness_backend.server_runs_chores()
+                and "version-update" in harness_backend.claimed_chores()
+            ),
+            newer_available=True,
+            flag_present=gs.version_update_requested_present(),
+        ):
+            line = dedupe.emit_once(
+                seen,
+                f"version-update@floor@{latest_installed}->{latest_published}",
+                f"version-update: {latest_installed} -> {latest_published} detected; "
+                "the ai-maestro server owns this chore and no flag is raised on this "
+                "host, so the update rides the 4 h cadence floor (not the <=15 min "
+                "flag path)",
             )
 
     # Branch B: cache advanced past the running cron (likely daemon just

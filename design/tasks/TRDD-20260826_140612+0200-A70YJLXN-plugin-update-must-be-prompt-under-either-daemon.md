@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: dev
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-05T16:39:30+0200
+updated: 2026-09-05T17:21:12+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -319,8 +319,41 @@ So the fix is one of:
 - [x] ~~The janitor's own path re-verified unchanged~~ (superseded by the box above; it already
       meets the directive; a change on
       the server side must not regress it)
-- [ ] The asymmetry documented where a reader will hit it — a frozen `version-update.last-run.ts`
-      must not be readable as either "healthy" or "broken" without saying which mechanism owns it
+- [x] The asymmetry documented where a reader will hit it — a frozen `version-update.last-run.ts`
+      must not be readable as either "healthy" or "broken" without saying which mechanism owns it.
+      **IMPLEMENTED 2026-09-05 17:16 — the "SAID OUT LOUD" rider (box 3), at RUNTIME not just in
+      CLAUDE.md prose.** Added `version_update_lib.should_emit_floor_line()` (pure predicate:
+      server owns the `version-update` chore AND a newer release is detected AND
+      `version-update-requested.flag` is absent → the update is riding the 4 h unconditional
+      cadence floor, not the <=15 min flag path). Wired into
+      `scripts/detectors/version-update.py` Branch A2 (right after the existing flag-raise
+      logic, so a flag just raised this pass correctly suppresses the line): emits
+      `version-update: <installed> -> <published> detected; the ai-maestro server owns this
+      chore and no flag is raised on this host, so the update rides the 4 h cadence floor (not
+      the <=15 min flag path)` through the same `dedupe.emit_once` / `print(line)` drift channel
+      its siblings use (quiet-filter + findings-ledger treat it identically). Tests:
+      `tests/test_version_update_floor_line.py` —
+      `test_floor_line_emitted_when_server_owned_and_newer_and_no_flag`,
+      `test_floor_line_not_emitted_when_flag_present`,
+      `test_floor_line_not_emitted_when_janitor_owns_the_chore`,
+      `test_floor_line_not_emitted_when_no_newer_version` (4 passed). Gates: ruff, mypy, pyright
+      all clean; `tests/test_version_update_daemon.py` (45 passed, unaffected).
+      **17:21 addendum (coordinator ask) — 2 more tests drive the Branch A2 WIRING, not just
+      the pure predicate.** Loaded `scripts/detectors/version-update.py` via
+      `importlib.util.spec_from_file_location` (hyphenated filename, same pattern as
+      `test_ci_status_detector.py`), isolated `CLAUDE_PROJECT_DIR`/`JANITOR_GLOBAL_STATE_DIR`/
+      `JANITOR_CONTROL_DIR` into `tmp_path`, and monkeypatched ONLY the collaborators
+      (`vu._SEMVER_RE`, `vu.list_installed_versions`, `vu.resolve_latest_published`,
+      `harness_backend.server_runs_chores`, `harness_backend.claimed_chores`) — Branch A2's
+      own code (the `line is None` guard, the `dedupe.emit_once` key, the printed text) runs
+      for real. `test_main_prints_floor_line_when_server_owned_newer_and_no_flag` calls
+      `mod.main()` and asserts the exact floor text appears exactly once;
+      `test_main_suppresses_floor_line_when_flag_already_present` calls
+      `mod.gs.request_version_update(...)` first (the real flag writer) and asserts `main()`
+      then prints nothing about the floor. `tests/test_version_update_floor_line.py` now 6
+      tests, all real, no mocking of the code under test. Re-ran: ruff/mypy/pyright clean;
+      `pytest tests/test_version_update_floor_line.py tests/test_version_update_daemon.py` — 51
+      passed.
 
 ## Notes and lessons learned
 

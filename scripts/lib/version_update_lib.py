@@ -131,6 +131,22 @@ def should_request_prompt_update(
     return _semver_tuple(installed) < _semver_tuple(published)
 
 
+def should_emit_floor_line(
+    *, server_owns_chore: bool, newer_available: bool, flag_present: bool,
+) -> bool:
+    """True iff the janitor must SAY OUT LOUD that this update is riding the 4 h
+    unconditional cadence floor rather than the <=15 min flag path (TRDD-A70YJLXN box 3).
+
+    That degradation happens exactly when the ai-maestro server has claimed the
+    `version-update` chore (so the daemon's own fast consumer never runs,
+    `daemon.py::_task_yielded_to_server`), a newer release is actually detected, and
+    `version-update-requested.flag` is NOT present — i.e. nobody (this detector or an
+    external writer) has raised the fast-path request, so the server's own 4 h absorbed
+    beat is the only thing that will pick it up. A present flag means the <=15 min poll
+    is engaged and there is nothing new to say. Pure — no I/O."""
+    return server_owns_chore and newer_available and not flag_present
+
+
 def registry_path() -> Path:
     """Claude Code's authoritative plugin-install registry."""
     return Path.home() / ".claude" / "plugins" / "installed_plugins.json"
