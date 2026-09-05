@@ -41,6 +41,7 @@ the child as data — a child that got reparented to init couldn't re-resolve it
 from __future__ import annotations
 
 import base64
+import fcntl
 import json
 import os
 import re
@@ -62,10 +63,13 @@ from token_burn import model_family  # noqa: E402  # one definition, shared with
 # The caller must surface it and let the user run the command themselves.
 USER_PRESENT = "USER_PRESENT"
 
-# Terminals this module automates beyond iTerm. tmux is first-class (verifiable +
-# the ai-maestro agent host). Add "kitty"/"wezterm" here once a real host confirms
-# their send commands; until then they fall through to USE_ITERM_PATH (degrade).
-_DELEGATE_KINDS = frozenset({"tmux"})
+# Terminals this module drives ITSELF, through the one verified injector: both can be READ
+# BACK (tmux `capture-pane`, iTerm `contents of session`), which is what makes the owner's
+# three injection rules enforceable on them. Add "kitty"/"wezterm" here only with a reader;
+# until then they fall through to USE_ITERM_PATH (degrade). iTerm joined on 2026-09-05 — it
+# used to be the caller's own BLIND osascript, and a blind sender typed `/compact` four times
+# into one field because it could not see the three already there.
+_DELEGATE_KINDS = frozenset({"tmux", "iterm"})
 
 # A tmux pane id is `%<n>` (e.g. `%3`). $TMUX_PANE is set by tmux for the active
 # pane. Validate before interpolating it into an argv — never trust an env var.
@@ -80,8 +84,11 @@ def valid_tmux_pane(pane: str) -> bool:
     are hardened symmetrically (a tampered TTY→pane map can't reach the argv)."""
     return bool(_TMUX_PANE_RE.match(pane.strip()))
 
-# Sentinel: the caller should use its own iTerm-osascript path (covers iTerm and
-# every not-yet-automated terminal, whose fallback is "ask the human").
+# Sentinel: no channel this module can drive — neither a tmux pane nor an iTerm session id
+# in the env, and no Linux GUI injector. The caller degrades to "ask the human". Since
+# 2026-09-05 it is NOT returned for iTerm any more (iTerm is a delegate kind above); the
+# callers' own osascript branches behind it are dead on every macOS host and are kept only
+# until their scheduled removal.
 USE_ITERM_PATH = "USE_ITERM_PATH"
 
 # On this Claude Code build a SINGLE ESC only cancels the in-flight TOOL (e.g. a running
@@ -148,6 +155,10 @@ _PROMPT_POLL_TIMEOUT_S = 300.0     # bounded: a hook that never returns is its o
 # full 8 s quiet window per attempt and, at 30 s, the whole injection.
 _SETTLE_READ_ATTEMPTS = 2
 _SETTLE_READ_INTERVAL_S = 0.4
+# Post-submit confirm (2026-09-05): re-read after Enter and press it again while the field
+# still shows ONLY our command. Bounded; never on any other text; never while the user types.
+_SUBMIT_CONFIRM_ATTEMPTS = 2
+_SUBMIT_CONFIRM_INTERVAL_S = 1.0
 # Owner directive, refined 2026-08-02: *"even if the user is reported as present, it should not
 # stop the command! it should simply retry every 8 seconds! it must check if in the last 8
 # seconds nothing was typed by the user."*
@@ -775,6 +786,12 @@ def inject_until_sent(
         text = reader(terminal)
         if text is not None and prompt_field_shows_only(text, command):
             clear_fn()
+
+    def _still_shows_ours() -> bool:
+        """After Enter: does the field STILL show exactly our command, with nobody typing?
+        Only that state licenses a second Enter — never other text, never an unreadable pane."""
+        post = reader(terminal)
+        return post is not None and prompt_field_shows_only(post, command) and not typing_probe(terminal)
     # Clock-independent bound (see wait_until_pane_free): a frozen/stalled clock must not
     # turn "bounded by giveup_s" into an infinite CPU-pinned loop inside a hook or daemon
     # beat. Exits through the same loud give-up return.
@@ -819,12 +836,22 @@ def inject_until_sent(
         # RULE 1 — inject only into an EMPTY field; otherwise re-check after the 8 s window.
         # Uses `quiet_s`, not `retry_s`: a non-empty field means a human is composing, and the
         # owner's rule for "wait for the human" is 8 s. `retry_s` is for OUR failed attempt.
-        if not prompt_field_is_empty(text):
+        #
+        # ONE exception (2026-09-05): a field that ALREADY shows exactly this command. That is
+        # an earlier injection whose Enter never took, not a human composing — the blind iTerm
+        # path typed `/compact` four times into one field that day, and what finally reached
+        # the model was `/compact/compact/compact/compact`. Retyping is the one act that can
+        # never be right, and deferring leaves the session where it was (over the context
+        # wall), so the text already there is taken as ours and goes through the SAME verified
+        # submit below. Rule 2 (the typing probe above) still wins over this.
+        already_typed = prompt_field_shows_only(text, command)
+        if not already_typed and not prompt_field_is_empty(text):
             last = f"field not empty ({extract_prompt_field(text)!r})"
             sleeper(quiet_s)
             continue
 
-        type_fn()
+        if not already_typed:
+            type_fn()
         typed_once = True
         # POLL for the field to settle — do NOT judge on ONE immediate read. Typing is
         # asynchronous: the keystrokes cross an Apple Event / tmux send-keys boundary and the
@@ -847,7 +874,7 @@ def inject_until_sent(
         #
         # `verify_then_submit` (the sibling helper other call sites use) has always polled.
         # This loop was the odd one out, reading exactly once.
-        after = reader(terminal)
+        after = text if already_typed else reader(terminal)
         for _ in range(_SETTLE_READ_ATTEMPTS):
             # Poll ONLY while the field reads back EMPTY. Empty is the one state that cannot
             # be a verdict: our keystrokes were sent, so an empty pane means they have not
@@ -877,6 +904,20 @@ def inject_until_sent(
             if pre_submit is not None:
                 pre_submit()
             submit_fn()
+            # CONFIRM THAT ENTER TOOK (2026-09-05). An Enter can be absorbed — a slash-command
+            # completion menu eats the first one — and a command left sitting in the field is
+            # exactly how the quadruple `/compact` began. Read FIRST: a field already empty or
+            # showing anything else ends the confirm at no cost. Only a field still showing
+            # ONLY our command earns a settle (the TUI may simply not have processed Enter yet),
+            # a re-read, and — if it STILL shows only our command and nobody is typing — one
+            # more Enter, at most `_SUBMIT_CONFIRM_ATTEMPTS` times. Never a retype.
+            for _ in range(_SUBMIT_CONFIRM_ATTEMPTS):
+                if not _still_shows_ours():
+                    break
+                sleeper(_SUBMIT_CONFIRM_INTERVAL_S)
+                if not _still_shows_ours():
+                    break
+                submit_fn()
             return True, "verified; submitted"
 
         # MALFORMED — and CLEARING IT IS NOT OPTIONAL. Our own bad text is now sitting in the
@@ -1412,6 +1453,185 @@ def _fire_detached_steps(
     )
 
 
+_ITERM_SESSION_ID_RE = re.compile(r"[0-9a-fA-F-]{8,64}")
+
+
+def valid_iterm_session_id(sid: str) -> bool:
+    """True iff `sid` is a bare iTerm session UUID safe to interpolate into an AppleScript
+    string literal — the gate `fleet_inject.valid_session_id` applies on the fleet side."""
+    return bool(_ITERM_SESSION_ID_RE.fullmatch(sid.strip()))
+
+
+def self_terminal(env: Mapping[str, str] | None, kind: str) -> dict[str, str]:
+    """THIS session's own pane, in the dict shape the verified injector drives, from the ids
+    the terminal itself put in the env — `$TMUX_PANE` for tmux, `$ITERM_SESSION_ID` for iTerm.
+    `kind` is the ancestry-detected terminal (`state.terminal_kind()`): an id is used only when
+    it matches that kind, or when detection came back `unknown` (a timed-out `ps` walk must not
+    turn a perfectly identifiable iTerm pane into "ask the human"). An `$ITERM_SESSION_ID`
+    inherited inside a tmux pane is therefore never mistaken for the channel — the pane wins.
+    Returns `{"kind": "unknown"}` when no id passes, never a half-built target."""
+    e: Mapping[str, str] = os.environ if env is None else env
+    if kind in ("tmux", "unknown"):
+        pane = (e.get("TMUX_PANE") or "").strip()
+        if valid_tmux_pane(pane):
+            return {"kind": "tmux", "pane": pane}
+    if kind in ("iterm", "unknown"):
+        sid = (e.get("ITERM_SESSION_ID") or "").strip().split(":")[-1].strip()
+        if valid_iterm_session_id(sid):
+            return {"kind": "iterm", "session_id": sid}
+    return {"kind": "unknown"}
+
+
+# Same-command dedupe for the verified self-send. The context-usage hook re-fires its
+# `/compact` every 180 s (`_AUTOCOMPACT_DEDUPE_S`) while the session stays over the wall, and a
+# compaction takes longer than that to land: without this, child B finds the field empty again
+# right after child A's submit and queues a SECOND compaction of the same session.
+_SELF_SEND_DEDUPE_S = 300.0
+_SELF_SEND_LOCK = "self-send.lock"
+_SELF_SEND_STAMPS = "self-send.stamps.json"
+# ONE ceiling for the whole child — waiting for the lock AND waiting for an empty field. The
+# lock is held across the field wait, so an uncapped wait (the injector's own default is an
+# hour) would let one child deferring on a busy field starve every later child, including a
+# DIFFERENT command. And a self-triggered slash command that could not land within this long
+# is stale for every caller (a /compact typed an hour late hits a session that may already have
+# compacted by hand). A caller may pass its own `giveup_s` in the payload.
+# ponytail: one global ceiling; per-command ceilings if a caller ever needs a longer wait.
+_SELF_SEND_GIVEUP_S = 900.0
+_SELF_SEND_LOCK_POLL_S = 2.0
+
+
+def _fire_detached_verified(
+    delay_s: float, terminal: Mapping[str, str], commands: Sequence[str], *,
+    esc_first: bool, abort_unless_any: list[str] | None = None, giveup_s: float | None = None,
+) -> None:
+    """The verified twin of `_fire_detached_steps`: a detached child that sleeps, then types
+    each command through `send_verified` — read the field, type only into an empty one,
+    re-read, Enter, confirm. Detached for the same reason as the blind sender: the ESC a HARD
+    send opens with would kill a parent that is a hook of the very turn being interrupted."""
+    payload: dict = {
+        "delay": float(delay_s), "terminal": dict(terminal), "commands": list(commands),
+        "esc_first": bool(esc_first), "state_dir": str(state.state_dir()),
+    }
+    if giveup_s is not None:
+        payload["giveup_s"] = float(giveup_s)
+    if abort_unless_any:
+        payload["abort_unless_any"] = [str(p) for p in abort_unless_any]
+    blob = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+    subprocess.Popen(  # noqa: S603 - fixed argv (this script + a base64 blob), no shell
+        [sys.executable, str(Path(__file__).resolve()), "--__send-verified", blob],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def _recently_self_sent(stamps: Path, command: str, now: float) -> bool:
+    try:
+        data = json.loads(stamps.read_text(encoding="utf-8"))
+        return (now - float(data.get(command, 0.0))) < _SELF_SEND_DEDUPE_S
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False  # no stamp file yet, or not ours to read — nothing was sent recently
+
+
+def _stamp_self_sent(stamps: Path, command: str, now: float) -> None:
+    try:
+        data = json.loads(stamps.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data[command] = now
+    tmp = stamps.with_name(f"{stamps.name}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, stamps)
+
+
+def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time.sleep) -> int:
+    """The verified child's body, separated from the argv/base64 boundary so it can be
+    exercised without a pane. ONE child per project at a time — an exclusive lock held for the
+    whole send, so two children can never both read "empty" and both type; a later child WAITS
+    rather than being dropped, because a different command must still land — but only up to
+    the one ceiling (`giveup_s`, default `_SELF_SEND_GIVEUP_S`), which also caps the field wait
+    inside `send_verified`, so a stuck child cannot starve the ones behind it for an hour. A
+    command submitted less than `_SELF_SEND_DEDUPE_S` ago is skipped, not repeated (the stamp is
+    read AFTER the lock is held, so two children cannot both miss it). Stops at the first
+    command that is not sent: typing the next one into a pane where the previous never landed
+    is the blind failure this path exists to end. ALWAYS logs the outcome — the child's stdio is
+    DEVNULL, so a silent give-up would be indistinguishable from success."""
+    do_send = send_verified if send is None else send
+    sd = Path(str(data.get("state_dir") or state.state_dir()))
+    sd.mkdir(parents=True, exist_ok=True)
+    stamps = sd / _SELF_SEND_STAMPS
+    terminal = dict(data.get("terminal") or {})
+    esc_first = bool(data.get("esc_first"))
+    giveup_s = float(data.get("giveup_s") or _SELF_SEND_GIVEUP_S)
+    deadline = clock() + giveup_s
+    # Clock-independent bound on the lock wait, as `inject_until_sent` has on its own loop: a
+    # stalled clock must not turn "bounded by giveup_s" into a forever-poll.
+    max_polls = int(giveup_s / _SELF_SEND_LOCK_POLL_S) + 16
+    with open(sd / _SELF_SEND_LOCK, "a+", encoding="utf-8") as lock:
+        while True:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:  # held by another child — wait, bounded by the same ceiling
+                max_polls -= 1
+                if clock() >= deadline or max_polls <= 0:
+                    state.log_line(
+                        "terminal_trigger",
+                        f"verified send gave up after {giveup_s:.0f}s: another self-send held "
+                        f"the pane the whole time ({data.get('commands')!r} not sent)",
+                    )
+                    return 1
+                sleeper(_SELF_SEND_LOCK_POLL_S)
+        # The ceiling bounds the SEND, not only the wait: a remaining budget of a fraction of a
+        # second would still let one whole injection land 900 s after the caller decided it —
+        # the stale-`/compact` case the ceiling exists for. At the deadline, refuse.
+        if clock() >= deadline:
+            state.log_line(
+                "terminal_trigger",
+                f"verified send refused: the {giveup_s:.0f}s ceiling passed while waiting for "
+                f"the pane ({data.get('commands')!r} not sent)",
+            )
+            return 1
+        for i, command in enumerate(str(c) for c in (data.get("commands") or [])):
+            if _recently_self_sent(stamps, command, clock()):
+                state.log_line(
+                    "terminal_trigger",
+                    f"verified send {command!r} skipped: the same command was submitted "
+                    f"<{_SELF_SEND_DEDUPE_S:.0f}s ago",
+                )
+                continue
+            sent, why = do_send(
+                terminal, command, esc_first=esc_first and i == 0,
+                giveup_s=max(0.0, deadline - clock()),
+            )
+            state.log_line(
+                "terminal_trigger",
+                f"verified send {command!r} -> {'sent' if sent else 'NOT SENT'}: {why}",
+            )
+            if not sent:
+                return 1
+            _stamp_self_sent(stamps, command, clock())
+    return 0
+
+
+def _run_verified_payload(payload_b64: str) -> int:
+    """CHILD role for `_fire_detached_verified`: decode, sleep out the delay, honour the
+    type-time guard (TRDD-DXM75JB2), then `run_verified_send`."""
+    try:
+        data = json.loads(base64.b64decode(payload_b64.encode("ascii")).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return 2
+    time.sleep(max(0.0, float(data.get("delay", 0.0))))
+    guards = data.get("abort_unless_any")
+    if isinstance(guards, list) and guards and not any(Path(str(g)).is_file() for g in guards):
+        state.log_line("terminal_trigger", "verified send aborted: type-time guard — no guard file remains")
+        return 0
+    return run_verified_send(data)
+
+
 def fire_detached_argv(
     delay_s: float, argv: list[str], *, abort_unless_any: list[str] | None = None
 ) -> None:
@@ -1710,6 +1930,7 @@ def send_self_command(
     sleeper=time.sleep,
     abort_unless_any: Sequence[str] | None = None,
     aimaestro_resolve_timeout_s: float = _AIMAESTRO_RESOLVE_TIMEOUT_S,
+    giveup_s: float | None = None,
 ) -> str:
     """Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
     pane, choosing the mechanism by `state.terminal_kind()`.
@@ -1724,10 +1945,12 @@ def send_self_command(
     enqueues (documented in `_try_ai_maestro_send`).
 
     Returns a status string:
-      - `USE_ITERM_PATH` — kind is iTerm or a terminal we don't automate; the caller
-        should use its own iTerm-osascript path (which itself degrades to "ask the
-        human" when iTerm isn't actually available).
-      - `FIRED:<kind>` — a detached delayed send was launched.
+      - `USE_ITERM_PATH` — no channel this module can drive (neither a tmux pane nor an
+        iTerm session id in the env, no Linux GUI injector); the caller degrades to "ask
+        the human". NOT returned for iTerm since 2026-09-05 — iTerm is driven here.
+      - `FIRED:<kind>` — a detached child was launched that types each command through
+        `send_verified` (`tmux` / `iterm`: read the field, type only into an empty one,
+        re-read, Enter, confirm) or the blind Linux GUI injector (`wtype` / `xdotool`).
       - `DRY_RUN:<kind>:<keys>@<delay>s` — dry-run plan (nothing fired); `<keys>` shows
         an `ESC+` prefix for a hard send and the `+`-joined command list.
       - `NO_AUTO_TERMINAL:<kind>` — the kind is delegated but its target was
@@ -1802,30 +2025,35 @@ def send_self_command(
         if api is not None:
             return api
     kind = state.terminal_kind()
-    if kind not in _DELEGATE_KINDS:
-        # tmux is PREFERRED (the delegate kind, handled below). With no tmux, a Linux
-        # GUI-terminal session can still be reached by typing into its focused window
-        # via wtype/xdotool. Off Linux or with neither tool present this returns None,
-        # so macOS/iTerm keeps its unchanged USE_ITERM_PATH degrade. (TRDD-ME8V2YJF)
-        # _try_linux_gui_send returns None (degrade) or a truthy FIRED:/DRY_RUN: status.
+    terminal = self_terminal(e, kind)
+    if terminal["kind"] not in _DELEGATE_KINDS:
+        if kind in _DELEGATE_KINDS:
+            # Detected tmux/iTerm, but the env carries no valid id for it: nothing can be
+            # driven, and no caller can do better with the same env.
+            return f"NO_AUTO_TERMINAL:{kind}"
+        # Neither a tmux pane nor an iTerm session. With no tmux, a Linux GUI-terminal session
+        # can still be reached by typing into its focused window via wtype/xdotool. Off Linux
+        # or with neither tool present this returns None, so the caller keeps its
+        # USE_ITERM_PATH degrade — "ask the human". (TRDD-ME8V2YJF)
         return _try_linux_gui_send(
             cmds, delay_s=delay_s, esc_first=esc_first, dry_run=dry_run, env=e,
             abort_unless_any=abort_unless_any,
         ) or USE_ITERM_PATH
-    if kind == "tmux":
-        pane = (e.get("TMUX_PANE") or "").strip()
-        if not valid_tmux_pane(pane):
-            return "NO_AUTO_TERMINAL:tmux"
-        if dry_run:
-            keys = ("ESC+" if esc_first else "") + "+".join(cmds)
-            return f"DRY_RUN:tmux:{pane}:{keys}@{delay_s}s"
-        _fire_detached_steps(
-            delay_s,
-            build_tmux_steps(pane, cmds, esc_first=esc_first),
-            list(abort_unless_any) if abort_unless_any else None,
-        )
-        return "FIRED:tmux"
-    return f"NO_AUTO_TERMINAL:{kind}"  # unreachable while _DELEGATE_KINDS == {"tmux"}
+    # tmux and iTerm are both READABLE channels, so both go through the ONE verified injector
+    # (`send_verified`, in a detached child). Until 2026-09-05 this branch was tmux-only and
+    # BLIND (`build_tmux_steps` + Enter, no read-back), and iTerm returned USE_ITERM_PATH so
+    # every self-trigger fell to its own blind osascript — which typed `/compact` four times
+    # into one field, because a blind sender cannot see the three already there.
+    target = terminal.get("pane") or terminal.get("session_id") or ""
+    if dry_run:
+        keys = ("ESC+" if esc_first else "") + "+".join(cmds)
+        return f"DRY_RUN:{terminal['kind']}:{target}:{keys}@{delay_s}s"
+    _fire_detached_verified(
+        delay_s, terminal, cmds, esc_first=esc_first,
+        abort_unless_any=list(abort_unless_any) if abort_unless_any else None,
+        giveup_s=giveup_s,
+    )
+    return f"FIRED:{terminal['kind']}"
 
 
 def main() -> int:
@@ -1838,6 +2066,12 @@ def main() -> int:
             return _run_send_payload(sys.argv[2])
         except Exception as exc:  # noqa: BLE001 - a detached child must log, never vanish
             state.log_line("terminal_trigger", f"send child aborted: {exc!r}")
+            return 1
+    if len(sys.argv) >= 3 and sys.argv[1] == "--__send-verified":
+        try:
+            return _run_verified_payload(sys.argv[2])
+        except Exception as exc:  # noqa: BLE001 - same boundary contract as `--__send`
+            state.log_line("terminal_trigger", f"verified send child aborted: {exc!r}")
             return 1
 
     import argparse

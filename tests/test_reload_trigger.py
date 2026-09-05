@@ -135,24 +135,24 @@ def test_dry_run_reports_plan_and_does_not_fire() -> None:
     assert proc.returncode == 0
     assert "DRY_RUN" in proc.stdout and "789D8299-5AA2-48CF-9325-3BC972B9BEAE" in proc.stdout
     assert "reload-plugins --force" in proc.stdout
-    assert "ESC->" not in proc.stdout, "SOFT default must not interrupt the in-flight turn"
+    assert "ESC" not in proc.stdout, "SOFT default must not interrupt the in-flight turn"
     assert "RELOAD_FIRED" not in proc.stdout, "dry-run must not fire"
 
 
 def test_soft_dry_run_omits_esc_from_plan() -> None:
-    """--soft (deprecated no-op alias of the default): NO `ESC->` prefix in the plan."""
+    """--soft (deprecated no-op alias of the default): NO ESC prefix in the plan."""
     proc = _run(["--dry-run", "--soft"], iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert proc.returncode == 0
     assert "DRY_RUN" in proc.stdout and "/reload-plugins" in proc.stdout
-    assert "ESC->" not in proc.stdout, "soft mode must not interrupt with an ESC"
+    assert "ESC" not in proc.stdout, "soft mode must not interrupt with an ESC"
     assert "RELOAD_FIRED" not in proc.stdout
 
 
 def test_hard_dry_run_has_esc_prefix() -> None:
-    """--hard (opt-in since TRDD-0GPQROC1): the plan leads with `ESC->` (interrupt now)."""
+    """--hard (opt-in since TRDD-0GPQROC1): the plan leads with `ESC+` (the verified path's marker since 2026-09-05) (interrupt now)."""
     proc = _run(["--dry-run", "--hard"], iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert proc.returncode == 0
-    assert "ESC->" in proc.stdout, "--hard must restore the ESC-interrupt"
+    assert "ESC+" in proc.stdout, "--hard must restore the ESC-interrupt"
     assert "RELOAD_FIRED" not in proc.stdout
 
 

@@ -167,14 +167,14 @@ def test_dry_run_writes_directive_and_reports_plan(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert "DIRECTIVE_WRITTEN" in proc.stdout
     assert "DRY_RUN" in proc.stdout and "789D8299-5AA2-48CF-9325-3BC972B9BEAE" in proc.stdout
-    assert "ESC->" not in proc.stdout, "SOFT default must not interrupt the in-flight turn"
+    assert "ESC" not in proc.stdout, "SOFT default must not interrupt the in-flight turn"
     assert "COMPACT_FIRED" not in proc.stdout, "dry-run must not fire"
     written = (p / ".janitor" / "state" / "resume-directive.txt").read_text(encoding="utf-8")
     assert written.strip() == "continue TRDD-31095269 at P3 — read STATE block"
 
 
 def test_soft_dry_run_omits_esc_from_plan(tmp_path: Path) -> None:
-    """--soft (deprecated no-op alias of the default): NO `ESC->` prefix in the plan."""
+    """--soft (deprecated no-op alias of the default): NO ESC prefix in the plan."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run(
@@ -182,12 +182,12 @@ def test_soft_dry_run_omits_esc_from_plan(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0
     assert "DRY_RUN" in proc.stdout and "/compact" in proc.stdout
-    assert "ESC->" not in proc.stdout, "soft mode must not interrupt with an ESC"
+    assert "ESC" not in proc.stdout, "soft mode must not interrupt with an ESC"
     assert "COMPACT_FIRED" not in proc.stdout
 
 
 def test_hard_dry_run_has_esc_prefix(tmp_path: Path) -> None:
-    """--hard (opt-in since TRDD-0GPQROC1): the plan leads with `ESC->` — the emergency
+    """--hard (opt-in since TRDD-0GPQROC1): the plan leads with `ESC+` (the verified path's marker since 2026-09-05) — the emergency
     semantics the >=85% context-enforcement hook requests explicitly."""
     p = tmp_path / "proj"
     p.mkdir()
@@ -195,7 +195,7 @@ def test_hard_dry_run_has_esc_prefix(tmp_path: Path) -> None:
         ["--dry-run", "--hard"], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE"
     )
     assert proc.returncode == 0
-    assert "ESC->" in proc.stdout, "--hard must restore the ESC-interrupt"
+    assert "ESC+" in proc.stdout, "--hard must restore the ESC-interrupt"
     assert "COMPACT_FIRED" not in proc.stdout
 
 
@@ -222,7 +222,7 @@ def test_handoff_hard_dry_run_runs_handoff_skill_first(tmp_path: Path) -> None:
         iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
     )
     assert proc.returncode == 0
-    assert "ESC->" in proc.stdout, "hard --handoff interrupts first"
+    assert "ESC+" in proc.stdout, "hard --handoff interrupts first"
     assert "/janitor-write-handoff --then-compact" in proc.stdout
 
 
@@ -234,7 +234,7 @@ def test_handoff_default_is_soft_enqueues_both(tmp_path: Path) -> None:
         ["--dry-run", "--handoff"], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE"
     )
     assert proc.returncode == 0
-    assert "ESC->" not in proc.stdout, "--handoff default must be soft"
+    assert "ESC" not in proc.stdout, "--handoff default must be soft"
     out = proc.stdout
     assert out.index("/janitor-write-handoff") < out.index("/compact"), "handoff before compact"
 
@@ -249,7 +249,7 @@ def test_handoff_soft_dry_run_enqueues_both(tmp_path: Path) -> None:
         iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
     )
     assert proc.returncode == 0
-    assert "ESC->" not in proc.stdout, "soft mode must not interrupt"
+    assert "ESC" not in proc.stdout, "soft mode must not interrupt"
     out = proc.stdout
     assert out.index("/janitor-write-handoff") < out.index("/compact"), "handoff before compact"
 

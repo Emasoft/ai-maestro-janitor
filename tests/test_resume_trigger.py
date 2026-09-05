@@ -105,7 +105,7 @@ def test_dry_run_reports_plan_and_does_not_fire() -> None:
     assert proc.returncode == 0
     assert "DRY_RUN" in proc.stdout and "789D8299-5AA2-48CF-9325-3BC972B9BEAE" in proc.stdout
     assert "/janitor-resume" in proc.stdout
-    assert "ESC->" not in proc.stdout, "resume is SOFT-only — never an ESC"
+    assert "ESC" not in proc.stdout, "resume is SOFT-only — never an ESC"
     assert "RESUME_FIRED" not in proc.stdout, "dry-run must not fire"
 
 

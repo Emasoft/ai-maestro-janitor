@@ -133,12 +133,13 @@ def test_an_unautomatable_terminal_is_refused_rather_than_silently_dropped():
     assert "cannot type-then-verify" in why
 
 
-def test_send_self_command_still_returns_the_sentinel_on_iterm():
-    """Documents the trap that caused the bug, so a future reader sees it is not hypothetical.
-
-    If terminal_trigger ever stops degrading on iTerm this test fails LOUDLY — at which point the
-    sibling trigger scripts' osascript branches become dead code worth deleting, which is a change
-    someone should make deliberately rather than discover.
+def test_send_self_command_drives_iterm_itself_now():
+    """The trap that caused the bug is CLOSED (2026-09-05, TRDD-HMLS5WE8): `send_self_command`
+    no longer degrades on iTerm — it plans the verified child (`DRY_RUN:iterm:…`), the same
+    read-back path `send_verified` drives. The older form of this test pinned USE_ITERM_PATH
+    and said that when it broke, the sibling trigger scripts' osascript branches would become
+    dead code worth deleting deliberately. That is now the case; their removal is phase 2 of
+    the same card.
     """
     import os
 
@@ -148,7 +149,7 @@ def test_send_self_command_still_returns_the_sentinel_on_iterm():
         os.environ.pop("TMUX_PANE", None)
         assert tt.send_self_command(
             ["/janitor-handoff-and-clear"], dry_run=True, respect_user_presence=False
-        ) == tt.USE_ITERM_PATH
+        ) == "DRY_RUN:iterm:ECEF0378-8D5D-4834-A8A9-371F0FDB3720:ESC+/janitor-handoff-and-clear@2.0s"
     finally:
         for k, v in saved.items():
             if v is None:

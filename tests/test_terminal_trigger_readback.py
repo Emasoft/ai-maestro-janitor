@@ -88,7 +88,7 @@ def test_wait_for_empty_polls_until_the_field_clears() -> None:
     slept: list[float] = []
     ok, why = tt.wait_for_empty_prompt(
         {"kind": "tmux", "pane": "%1"},
-        reader=lambda _t: next(reads), sleeper=slept.append, clock=lambda: 0.0,
+        reader=lambda _t: next(reads, _pane("")), sleeper=slept.append, clock=lambda: 0.0,
     )
     assert ok, why
     assert slept == [5.0, 5.0], "the owner asked for a 5s retry interval"
@@ -150,7 +150,9 @@ def test_enter_is_NOT_sent_when_the_field_never_settles() -> None:
 
 def _seq(*items):
     it = iter(items)
-    return lambda _t=None: next(it)
+    # Exhausted ⇒ an EMPTY field: the post-submit confirm (2026-09-05) re-reads the pane once
+    # after Enter, and "empty" is what a submit that took looks like.
+    return lambda _t=None: next(it, _pane(""))
 
 
 def test_a_present_user_DEFERS_the_command_instead_of_cancelling_it() -> None:
@@ -584,7 +586,7 @@ def test_an_abort_mid_procedure_restarts_the_window_it_does_not_resume() -> None
 
     def _reader(_t):
         log.append("read")
-        return next(reads)
+        return next(reads, _pane(""))
 
     sent: list[str] = []
     ok, why = tt.inject_until_sent(
@@ -599,6 +601,8 @@ def test_an_abort_mid_procedure_restarts_the_window_it_does_not_resume() -> None
         "probe=False", "read", "type", "read",   # injected, then the human typed
         "probe=True", "wait8",                   # STOP: no cleanup, full window restarts
         "probe=False", "read", "type", "read",   # start over from the top
+        "read",                                  # the post-submit confirm (2026-09-05): one
+                                                 # read after Enter, empty → done, no sleep
     ], "an abort must re-enter the quiet window, not resume the 5s retry"
     assert "CLEAR" not in log, "the user's own keystrokes must never be cleared"
     assert sent == ["Enter"]
@@ -828,7 +832,7 @@ def test_a_transient_unreadable_pane_RETRIES_instead_of_aborting() -> None:
     ok, why = tt.inject_until_sent(
         {"kind": "tmux", "pane": "%1"}, "/compact",
         type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
-        reader=lambda _t: next(reads), is_typing=lambda _t: False,
+        reader=lambda _t: next(reads, _pane("")), is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
     )
     assert ok, why
@@ -1197,3 +1201,78 @@ def test_still_wanted_cancel_never_clears_the_users_own_text() -> None:
     )
     assert ok is False and "cancelled" in why
     assert cleared == [], "the user's own text must never be cleared"
+
+
+# --- 2026-09-05 (TRDD-HMLS5WE8): the field already holds our command; Enter must be confirmed ---
+
+
+def test_a_field_that_ALREADY_shows_the_command_is_submitted_never_retyped() -> None:
+    """The blind iTerm sender typed `/compact` four times into one field. A field already
+    holding EXACTLY our command is an earlier injection whose Enter never took: press Enter,
+    type nothing."""
+    typed: list[str] = []
+    sent: list[str] = []
+    ok, _ = tt.inject_until_sent(
+        {"kind": "iterm", "session_id": "789D8299-5AA2-48CF-9325-3BC972B9BEAE"}, "/compact",
+        type_fn=lambda: typed.append("/compact"), submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None,
+        reader=_seq(_pane("/compact"), _pane("")),
+        is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok and typed == [] and sent == ["Enter"]
+
+
+def test_the_incidents_own_field_is_NOT_ours_and_is_never_touched() -> None:
+    """`/compact/compact` is not "exactly our command": rule 1 defers, nothing is typed,
+    nothing is cleared, nothing is submitted."""
+    typed: list[str] = []
+    sent: list[str] = []
+    cleared: list[str] = []
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: typed.append("/compact"), submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: cleared.append("clear"),
+        reader=lambda _t: _pane("/compact/compact"),
+        is_typing=lambda _t: False, sleeper=lambda _s: None, giveup_s=1.0, clock=lambda: 0.0,
+    )
+    assert not ok and "field not empty" in why
+    assert typed == [] and sent == [] and cleared == []
+
+
+def test_after_enter_the_field_is_re_read_and_enter_is_pressed_again_while_it_still_shows_ours() -> None:
+    """Post-submit confirm: an Enter can be absorbed (a completion menu eats the first one). The
+    field is read right after Enter; only when it STILL shows exactly our command is there a
+    settle, a re-read, and one more Enter — never a retype."""
+    sent: list[str] = []
+    slept: list[float] = []
+    ok, _ = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"), clear_fn=lambda: None,
+        # empty -> typed, verified -> Enter -> still shows (immediate read) -> still shows after
+        # the settle -> Enter again -> empty: the second Enter took.
+        reader=_seq(_pane(""), _pane("/compact"), _pane("/compact"), _pane("/compact"), _pane("")),
+        is_typing=lambda _t: False, sleeper=slept.append, clock=lambda: 0.0,
+    )
+    assert ok and sent == ["Enter", "Enter"]
+    assert slept == [tt._SUBMIT_CONFIRM_INTERVAL_S]
+
+
+def test_the_confirm_is_bounded_and_never_presses_enter_on_other_text() -> None:
+    sent: list[str] = []
+    ok, _ = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"), clear_fn=lambda: None,
+        # after Enter the field shows the user's own new text: not ours, hands off.
+        reader=_seq(_pane(""), _pane("/compact"), _pane("hello")),
+        is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok and sent == ["Enter"]
+    sent.clear()
+    ok, _ = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"), clear_fn=lambda: None,
+        # the field never clears: at most _SUBMIT_CONFIRM_ATTEMPTS extra Enters, then stop.
+        reader=lambda _t: _pane("/compact"),
+        is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert ok and sent == ["Enter"] * (1 + tt._SUBMIT_CONFIRM_ATTEMPTS)

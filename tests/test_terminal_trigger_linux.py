@@ -179,7 +179,10 @@ def test_try_linux_gui_send_none_when_channel_unavailable(tmp_path, monkeypatch)
 
 def _force_kind(monkeypatch, kind: str) -> None:
     monkeypatch.setenv("JANITOR_FORCE_TERMINAL_KIND", kind)
-    for var in ("AIMAESTRO_AGENT", "THIS_IS_AIMAESTRO", "AMP_AGENT_ID", "AID_AUTH"):
+    # The pane ids go too (2026-09-05): iTerm and tmux are DRIVEN now, so a forced-kind test
+    # that inherits the developer's real id would fire a real verified child at their pane.
+    for var in ("AIMAESTRO_AGENT", "THIS_IS_AIMAESTRO", "AMP_AGENT_ID", "AID_AUTH",
+                "ITERM_SESSION_ID", "TMUX_PANE"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -209,8 +212,10 @@ def test_send_self_command_degrades_when_no_linux_tool(tmp_path, monkeypatch):
 
 
 def test_send_self_command_macos_never_diverted(tmp_path, monkeypatch):
-    """Regression guard: a macOS host (non-tmux) returns USE_ITERM_PATH even with $DISPLAY +
-    xdotool present — the Linux channel is never attempted off Linux."""
+    """Regression guard: a macOS iTerm host with no session id in the env is `NO_AUTO_TERMINAL`
+    even with $DISPLAY + xdotool present — the Linux channel is never attempted off Linux.
+    (Until 2026-09-05 this read USE_ITERM_PATH; iTerm is now driven by terminal_trigger itself,
+    so the only thing left to degrade on is a missing id.)"""
     _fake_tool(tmp_path, "xdotool")
     _force_kind(monkeypatch, "iterm")
     monkeypatch.setattr(tt.sys, "platform", "darwin")
@@ -218,4 +223,4 @@ def test_send_self_command_macos_never_diverted(tmp_path, monkeypatch):
     out = tt.send_self_command(
         "/compact", delay_s=2.0, dry_run=True, env=_linux_env(DISPLAY=":0")
     )
-    assert out == tt.USE_ITERM_PATH
+    assert out == "NO_AUTO_TERMINAL:iterm"

@@ -56,7 +56,11 @@ def _force(monkeypatch, kind: str) -> None:
     monkeypatch.setenv("JANITOR_FORCE_TERMINAL_KIND", kind)
     # Hermetic dispatch: clear any ai-maestro agent signals so the API path is only
     # taken by tests that explicitly opt in (and isn't inherited from the host env).
-    for var in ("AIMAESTRO_AGENT", "THIS_IS_AIMAESTRO", "AMP_AGENT_ID", "AID_AUTH"):
+    # The pane ids go too (2026-09-05): iTerm is now DRIVEN, so a forced-kind test that
+    # inherits the developer's real $ITERM_SESSION_ID would launch a real verified child at
+    # the developer's own pane. A test that wants a channel sets a fake id explicitly.
+    for var in ("AIMAESTRO_AGENT", "THIS_IS_AIMAESTRO", "AMP_AGENT_ID", "AID_AUTH",
+                "ITERM_SESSION_ID", "TMUX_PANE"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -164,9 +168,89 @@ def test_build_tmux_steps_multi_command_enqueues_both_no_esc():
 
 # --- send_self_command dispatch (forced kind) ------------------------------
 
-def test_iterm_returns_use_iterm_path(monkeypatch):
+_ITERM_ID = "789D8299-5AA2-48CF-9325-3BC972B9BEAE"
+
+
+def test_iterm_with_a_session_id_is_driven_verified(monkeypatch):
+    """2026-09-05: iTerm is a delegate kind. The plan is the verified child's, in the same
+    shape as tmux — never the USE_ITERM_PATH degrade that sent every caller to its own blind
+    osascript (which typed `/compact` four times into one field)."""
     _force(monkeypatch, "iterm")
-    assert tt.send_self_command("/compact") == tt.USE_ITERM_PATH
+    monkeypatch.setenv("ITERM_SESSION_ID", f"w0t1p0:{_ITERM_ID}")
+    out = tt.send_self_command("/compact", dry_run=True)
+    assert out == f"DRY_RUN:iterm:{_ITERM_ID}:ESC+/compact@2.0s"
+
+
+def test_iterm_without_a_session_id_cannot_auto_send(monkeypatch):
+    # Detected iTerm, no id in the env: nothing can be driven, and no caller could do better.
+    _force(monkeypatch, "iterm")
+    assert tt.send_self_command("/compact", dry_run=True) == "NO_AUTO_TERMINAL:iterm"
+
+
+def test_an_inherited_iterm_id_inside_a_tmux_pane_never_wins(monkeypatch):
+    # iTerm launches tmux; the pane inherits $ITERM_SESSION_ID. The pane is the channel.
+    _force(monkeypatch, "tmux")
+    monkeypatch.setenv("TMUX_PANE", "%5")
+    monkeypatch.setenv("ITERM_SESSION_ID", f"w0t1p0:{_ITERM_ID}")
+    assert tt.send_self_command("/compact", dry_run=True) == "DRY_RUN:tmux:%5:ESC+/compact@2.0s"
+
+
+def test_unknown_kind_still_trusts_an_iterm_id_in_the_env(monkeypatch):
+    # A timed-out `ps` ancestry walk reports `unknown`; the env still identifies the pane.
+    _force(monkeypatch, "unknown")
+    monkeypatch.setenv("ITERM_SESSION_ID", f"w0t1p0:{_ITERM_ID}")
+    assert tt.send_self_command("/compact", dry_run=True) == f"DRY_RUN:iterm:{_ITERM_ID}:ESC+/compact@2.0s"
+
+
+def test_run_verified_send_dedupes_the_same_command_but_lands_a_different_one(tmp_path):
+    """Two children for `/compact` inside the dedupe window: the second SKIPS (the same session
+    compacted twice is the failure); a different command still lands; after the window `/compact`
+    is sent again."""
+    calls: list[tuple[str, bool]] = []
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s):
+        calls.append((command, esc_first))
+        return True, "verified; submitted"
+
+    data = {"terminal": {"kind": "iterm", "session_id": _ITERM_ID},
+            "commands": ["/compact"], "esc_first": True, "state_dir": str(tmp_path)}
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: 1000.0) == 0
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: 1100.0) == 0
+    other = {**data, "commands": ["/janitor-arm"]}
+    assert tt.run_verified_send(other, send=fake_send, clock=lambda: 1100.0) == 0
+    later = 1000.0 + tt._SELF_SEND_DEDUPE_S + 1.0
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: later) == 0
+    assert calls == [("/compact", True), ("/janitor-arm", True), ("/compact", True)]
+
+
+def test_run_verified_send_refuses_to_type_once_the_ceiling_has_passed(tmp_path):
+    """The ceiling bounds the SEND, not only the wait: deadline computed at t=0, the lock
+    acquired, then the clock reads t=901 — nothing is typed, the child reports failure."""
+    calls: list[str] = []
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s):
+        calls.append(command)
+        return True, "verified; submitted"
+
+    ticks = iter([0.0, 901.0, 901.0, 901.0])
+    data = {"terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/compact"],
+            "esc_first": True, "state_dir": str(tmp_path), "giveup_s": 900.0}
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: next(ticks, 901.0)) == 1
+    assert calls == []
+
+
+def test_run_verified_send_stops_at_the_first_command_that_did_not_land(tmp_path):
+    calls: list[str] = []
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s):
+        calls.append(command)
+        return False, "gave up"
+
+    data = {"terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/a", "/b"],
+            "esc_first": False, "state_dir": str(tmp_path)}
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 1
+    assert calls == ["/a"]
+    assert not (tmp_path / tt._SELF_SEND_STAMPS).exists()
 
 
 def test_unknown_returns_use_iterm_path(monkeypatch):
@@ -521,7 +605,8 @@ def test_not_in_agent_skips_cli(monkeypatch, tmp_path):
     cli.chmod(0o755)
     _force(monkeypatch, "iterm")                              # _force clears agent flags
     monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
-    assert tt.send_self_command("/compact") == tt.USE_ITERM_PATH
+    monkeypatch.setenv("ITERM_SESSION_ID", f"w0t1p0:{_ITERM_ID}")
+    assert tt.send_self_command("/compact", dry_run=True) == f"DRY_RUN:iterm:{_ITERM_ID}:ESC+/compact@2.0s"
 
 
 # --- TRDD-3T9HQEQ6: the queue-flush ESC loop ahead of `/model opus` ------------------------
