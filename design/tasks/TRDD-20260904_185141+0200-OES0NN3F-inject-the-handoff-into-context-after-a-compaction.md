@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-05T03:18:54+0200
+updated: 2026-09-05T05:24:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -115,9 +115,28 @@ injection lands before the first turn and needs no nudge to have fired.
       `2026-09-04T06:37:02` and `2026-09-04T13:22:32`, while the implementation landed that
       evening (`0f00fd60`, 19:57:37). So **no compaction has occurred since the code shipped**,
       and `.janitor/state/resume-after-compact.flag` is absent right now.
-      **The check:** `grep "source=compact" .janitor/logs/session-start.log` — any entry after
-      2026-09-04T19:57 is the evidence this box wants; then confirm the handoff text actually
-      reached that session's context.
+      **⚠ THAT RECIPE WAS INCOMPLETE AND WOULD HAVE MIS-TICKED THIS BOX — corrected
+      2026-09-05 by running it.** It said: *"any entry after 2026-09-04T19:57 is the evidence
+      this box wants"*. A real compaction then happened
+      (`[2026-09-05T04:44:39+0200] [s:58951a2c] source=compact`), which satisfies that
+      condition **and proves nothing**, because the SESSION WAS RUNNING A BUILD WITHOUT THE
+      FIX:
+      - installed `…/ai-maestro-janitor/3.4.14/scripts/hooks/on-session-start.py` →
+        `grep -c _inject_post_compact_handoff` = **0**; repo HEAD = **2**.
+      - `v3.4.14` was tagged **2026-09-04 00:38:38**; the fix landed **2026-09-04 19:57:37**
+        (`0f00fd60`) — about 19 h AFTER the release. So no session on 3.4.14 can exercise it.
+      - Consistent with that: no `.janitor/state/compact-handoff-injected.ts` stamp exists, and
+        `session-start.log` goes straight from `source=compact` to `armed` with no injection
+        line. **The code did not fail — it was not there.**
+      **The corrected check, both halves required:** (1) a `source=compact` entry, AND (2) the
+      session that logged it was running a build that CONTAINS the fix — verify with
+      `grep -c _inject_post_compact_handoff` against the plugin_root that same log line records
+      (`session-start.log` prints it on the `entered` line). Then confirm the handoff text
+      reached that session's context: the `compact-handoff-injected.ts` stamp is the cheap
+      witness.
+      **So this box is now blocked on a RELEASE, not on a compaction.** Compactions are
+      plentiful here; builds carrying the fix are not. Do not re-run the old recipe and tick
+      this box — it is satisfiable only after a publish lands and this machine installs it.
       **⚠ A `/clear` DOES NOT COUNT and must not be mistaken for one.** This very session
       resumed from a post-CLEAR injection (`post-clear resume cue emitted (age 877s)`), which
       exercises `_inject_post_clear_handoff` — a DIFFERENT path from the
