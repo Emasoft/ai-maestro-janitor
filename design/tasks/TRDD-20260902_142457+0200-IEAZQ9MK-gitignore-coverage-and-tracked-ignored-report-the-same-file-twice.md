@@ -1,10 +1,10 @@
 ---
 trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
-column: ai_review
+column: human_review
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:57:05+0200
-current-owner: main-session
+updated: 2026-09-05T05:58:59+0200
+current-owner: user
 task-type: bugfix
 scope: project
 severity: low
@@ -17,25 +17,23 @@ eht: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — last updated 2026-09-05T05:53:00+0200; contains material from 2026-09-03 and 2026-09-02, each dated inline
 
-**WHAT `ai_review` MEANS ON THIS CARD, said explicitly because otherwise it claims a gate
-nobody will close.** This repo is mono-agent: there is no separate AI-reviewer role, so the
-`ai_review` gate here IS the adversarial review-fork chain, and this card's code was reviewed by
-one — fork 15 examined the test's fixture ordering, its invocation asymmetry, its crash-path
-false-pass, and its xdist order-dependence, and its findings are applied above and below.
-`current-owner: main-session` therefore does NOT mean "waiting on its author to review itself";
-it means the review ran and the card is queued for the USER's `human_review` decision. If a
-future setup grows a real reviewer role, reassign rather than inheriting this.
+**NO INDEPENDENT `ai_review` HAPPENED, AND THIS CARD MUST NOT CLAIM ONE.** This repo is
+mono-agent: there is no separate AI-reviewer role, so nothing here can perform an independent
+`ai_review`. What this card got instead is **adversarial SELF-review** — review forks I
+spawned, whose interrogation lists I wrote, which inherited my reasoning, and whose findings I
+chose to apply (fork 15: fixture ordering, invocation asymmetry, crash-path false-pass, xdist
+order-dependence; fixes in `17aa502d`). That is stronger than no review and weaker than the
+gate's name. Recorded so the USER decides at `human_review` whether it suffices, rather than
+inheriting a claim that the gate was met.
+*An earlier version of this paragraph declared that the fork chain IS this repo's `ai_review`.
+That was a self-certification: I authored the code, the reviewer's brief, the choice of which
+findings to apply, AND the sentence saying the arrangement satisfied the gate — minted in the
+same commit as the work it certified. It also minted a project-wide convention inside the one
+card that needed it to be true, which is the weakest possible venue for one. If that convention
+is wanted, it belongs in a PRRD proposal ruled on while no card waits on the answer.*
 
-*(`review-after:` — REMOVED, and this is the second reversal on that field, so here is the
-whole reasoning rather than another bare verdict. I deleted it (wrong: on an invented principle
-that "a falsified premise should leave no trace"), restored it (right at the time: an expired
-field is inert, and `grep -l "^review-after:"` is how one would enumerate cards parked on a
-premise that later failed — this session found TWO), and have now removed it again because
-**the card's state changed underneath both decisions**: it left `testing` for `ai_review`. A
-park field on a card in an ACTIVE work column is a contradiction in the frontmatter — "in
-review, and also parked" — and the grep it was preserved for is a question about HISTORY, which
-git answers. The value was `review-after: 2026-09-05`; that record lives here now, which is
-where the archival argument always pointed.)*
+*(`review-after: 2026-09-05` was set, then removed when the card left `testing` — a park field
+on an active card is a contradiction, and git carries the full history of the reversals.)*
 
 **⚠ 2026-09-05 — THE "UNRELEASED" HALF BELOW HAS DECAYED, AND THE PARK IT JUSTIFIED IS OVER.**
 It was true on 2026-09-03, when the newest release was 3.4.13. `v3.4.14` was tagged
