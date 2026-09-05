@@ -30,9 +30,25 @@ Box 3 was the only one open, and both halves of its 2026-09-03 blocker are resol
 - **Observed live.** A heartbeat fire at ~03:00 today carried
   `attention: 16 blocked (1 unblockable: …; 7 decision-needed: …); 1 human_review (…)`.
 - **⚠ And the other half of that blocker was a WRONG OBSERVATION CHANNEL:** "dispatch.log has
-  zero `attention:` occurrences" was read as evidence the fix was not live. dispatch.log carries
-  **zero occurrences of ANY cue text**, so its silence said nothing about this fix. The cue goes
-  to the stub's STDOUT. Check a heartbeat's own output, never dispatch.log.
+  zero `attention:` occurrences" was read as evidence the fix was not live. **dispatch.log
+  records cue EMISSION events — its tail carries `post-clear resume cue emitted (age 877s)` —
+  but never cue CONTENT.** The payload goes to the stub's STDOUT. So the log's silence about
+  `attention:` was never evidence about this fix. Check a heartbeat's own output, not
+  dispatch.log.
+  *(My closing commit `62858e33` said dispatch.log "carries zero occurrences of ANY cue text".
+  That is FALSE, and falsified by a line I had already read — I proved only that two specific
+  phrases were absent and generalized. The narrower claim above is the true one and is just as
+  useful.)*
+- **Box 3's counts were VERIFIED AGAINST THE BOARD, not just seen to be present** —
+  `grep -c "^column: blocked$"` = **16** and `human_review` = **1**, matching the clause exactly.
+  Ticking presence alone would have passed a clause hardcoded to print `16`, which is the very
+  defect class this card's closing note is about. The single `unblockable`, TRDD-ZQ02QG1L, also
+  checks out: its `blocked-by: [L46IG69Y]` names a card that is `complete`, which is precisely
+  what acceptance box 1 defines as unblockable.
+- **Box 3 read as INTENT, not letter.** It says "the NEXT heartbeat after this ships"; the
+  observation is a fire ~2 days later. The literal reading was never satisfiable — the clause is
+  gated to roughly every 6th fire — so the box is closed on its intent: the clause appears live,
+  in the installed build.
 
 ## ⏵ PRIOR STATE — 2026-09-03T11:09:13+0200 (superseded)
 
@@ -120,14 +136,18 @@ i.e. they are decisions nobody was ever reminded to take.
       TRDD-74AA4PAL, TRDD-7NSRD8OV +4 more); 1 human_review (TRDD-Q8PNPRTW)` — the count, the
       unblockable/decision-needed split, and the `human_review` clause, which is more than this
       box asks for.
+      **Counts VERIFIED against the board, not merely present:** `grep -c "^column: blocked$"`
+      = 16 and `human_review` = 1, matching exactly; the one `unblockable` (ZQ02QG1L) has
+      `blocked-by: [L46IG69Y]` naming a `complete` card, which is what box 1 defines as
+      unblockable. Read as INTENT rather than letter — "the NEXT heartbeat" was unsatisfiable
+      literally, since the clause is gated to ~every 6th fire.
       **⚠ AND THE 2026-09-03 BLOCKER WAS PARTLY A WRONG OBSERVATION CHANNEL, worth recording so
       nobody re-derives it.** That note read *"`.janitor/logs/dispatch.log` has zero `attention:`
-      clause occurrences — cannot be observed live yet"*. Measured today: dispatch.log carries
-      **zero occurrences of ANY cue text** — `grep -c "keep-going\|open board:"` is also 0 — so
-      its silence about `attention:` was never evidence about the fix. The cue is written to the
-      stub's STDOUT, which is what the heartbeat prints into the session; the log records
-      dispatch bookkeeping only. A future check should read a heartbeat's own output, not
-      dispatch.log.
+      clause occurrences — cannot be observed live yet"*. Measured today: **dispatch.log records
+      cue EMISSION events (its tail carries `post-clear resume cue emitted (age 877s)`) but
+      never cue CONTENT** — the payload goes to the stub's STDOUT. So the log's silence about
+      `attention:` was never evidence about the fix. A future check reads a heartbeat's own
+      output, not dispatch.log.
       *(The clause is gated to roughly every `CLAUDE_PLUGIN_OPTION_ATTENTION_EVERY_FIRES`
       fires — default 6 — so it correctly appeared in one of this session's several fires, not
       all of them. Consistent with acceptance box 2, which pins that gating in unit tests.)*
