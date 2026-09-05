@@ -29,16 +29,38 @@ held it are satisfied, and neither needed new work — the block had simply outl
   `complete`, i.e. it had met its own criteria before the block was ever applied.
 - **`eht: [L46IG69Y]` — the EHT gate is satisfied** for the same reason: a parent cannot reach
   `complete` until every EHT is terminal, and L46IG69Y is.
-- **The NEXT ACTION list below was ALREADY STALE when the block was applied** — verified today
-  rather than assumed: `scripts/compose_agent_handoff.py` exists (5,295 bytes), and BOTH skills
-  it was supposed to be wired into call it —
-  `skills/janitor-write-handoff/SKILL.md:45` and
-  `skills/janitor-handoff-and-clear/SKILL.md:71`. All three items landed.
+- **The NEXT ACTION list below was ALREADY STALE when the block was applied.** Its deliverables
+  exist and are wired: `scripts/compose_agent_handoff.py` (5,295 bytes), and both skills collapse
+  their compose step to a single call of it — `janitor-write-handoff/SKILL.md:45` and
+  `janitor-handoff-and-clear/SKILL.md:71`, each headed *"ONE command, and you author nothing"*.
+  **The RUNTIME evidence is the stronger claim, and it is what actually shows the card's goal
+  met:** `.janitor/logs/agent-handoff-compose.log` exists, and THIS session resumed from a
+  composer-produced handoff its own resume directive described as *"auto-composed with no model
+  turn"*. A file existing and being referenced would not have shown that — and this card's own
+  body warns of exactly that trap, naming a richer composer that was *"fully tested and
+  unwired"*.
 
-**How this card became invisible, which is the transferable part:** it was `blocked` on a TRDD
-that later completed, and nothing re-examines a `blocked` card when its blocker closes. It sat
-as the board's only "unblockable" — surfaced, correctly, by the very `attention:` clause
-TRDD-1PDCPIZC shipped. That clause is what found it.
+**Why the close is licensed regardless:** `pre-block-column:` exists so unblocking is
+MECHANICAL — it restores a judgment already made (this card was `complete` on 2026-09-04T03:40).
+Re-litigating that judgment is not what unblocking is for; the verification above is
+corroboration, not the warrant.
+
+**THE TRANSFERABLE LESSON — this card carried no `unblock-when:`, which is the mechanical
+reason it could not self-restore.** `trdd-drift.py` can auto-clear a `blocked` card via
+`evaluate_unblock_when`, but only against predicates the card declares. With none, no detector
+had anything to evaluate, so a blocker completing was an event nothing was watching for. **A
+`blocked` card whose release condition is machine-checkable should say so** — here,
+`unblock-when: [trdd:L46IG69Y]` would have cleared it automatically two days ago.
+
+**⚠ AND THE `attention:` CLAUSE DID NOT FIND THIS CARD — I did, and the distinction matters.**
+The clause named it correctly, hours earlier: `1 unblockable: TRDD-ZQ02QG1L`. I surfaced that
+line in a reply and moved on. What exposed the stall was an adversarial review demanding I
+verify the clause's COUNTS rather than accept their presence — that check is what made me grep
+`blocked-by:` and notice L46IG69Y was complete. Crediting the instrument for a conclusion
+reached by hand is the same error as reading a survivor count from a census that cannot see
+survivors. **What the clause genuinely earns:** it classified this shape correctly and surfaced
+it unprompted, and the classification held up under adversarial checking — which is the better
+advert anyway.
 
 *Everything below predates the close and is kept for provenance. It is superseded by this
 block; TRDD-34GB6XUI tracks collapsing its correction layers.*
