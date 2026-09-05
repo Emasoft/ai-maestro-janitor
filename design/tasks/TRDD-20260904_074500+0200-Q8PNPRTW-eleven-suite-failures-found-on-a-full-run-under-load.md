@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-05T13:18:49+0200
+updated: 2026-09-05T13:24:38+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -24,6 +24,29 @@ external-refs: [TRDD-7NSRD8OV]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
+> ### ⏵ 2026-09-05 13:24 — all 38 reproduced ZERO times outside the full suite (2 reruns, 0 defects)
+>
+> A `lean-worker` reran all 38 `FAILED` ids from `20260905_103230+0200-full-nauto.txt` in
+> isolation: ONE serial invocation (`38 passed in 57.05s`, exit=0) and ONE `-n auto`
+> invocation restricted to just this 38-id population (`38 passed in 21.69s`, exit=0). **Zero
+> failures in either rerun** — not one of the 38 reproduces outside the full 16k+-test suite.
+> Verified with `comm`: **8 of the 38 are recurrences of this card's original 11**
+> (`capture_all_logins` x2, `gh_reply_watch` x3, `memory_librarian` reindex x2,
+> `token_usage_anomaly` x1 — matches the prior bullet's "8 recurred"); the other **30 are new**
+> (`daemon_integration` x5, `branch_protection.py` x5, `branch_protection_guard.py` x8,
+> `gh_reply_watch` x4 more, `github_issues_watch` x2, `pre_push_python_floor` x2,
+> `pkg_manager_guard`, `self_scan_guard`, `launchd_keepalive`, `external_clear_retry`
+> ×1 each). Hook contamination checked and ruled out for these 38 specifically: `grep -rl
+> "post_compact_resume"` across every file owning one of the 38 ids + `conftest.py` returns
+> zero hits, so the run's `REAL-STATE WRITE GUARD FAILED` mutation of
+> `scripts/hooks/post-compact-resume.py` is a session-wide isolation-escape flag, not a
+> per-test taint here. **This EXTENDS the card's existing full-suite-only pattern to 3x the
+> population, still without a measured resource metric** — per this card's own bar, that is a
+> characterisation (fails only inside the full suite), not a named mechanism. Full table + raw
+> reruns: `reports/suite-failures/20260905_132339+0200-Q8PNPRTW-38-classification.md`
+> (`serial.txt`, `nauto.txt` alongside it). Does not change `column:` — still awaiting the
+> USER decision on the waiver question above.
+>
 > ### ⏵ 2026-09-05 13:18 — a full `-n auto` run landed RED: 38 failed, exit=3, 8 of 11 recurred
 >
 > `reports/suite-soak/20260905_103230+0200-full-nauto.txt` (1474 lines, read in full):
@@ -44,6 +67,18 @@ external-refs: [TRDD-7NSRD8OV]
 > load-artifact framing this card had settled into, and most of the new failures have no
 > triage at all yet. `column:` left as-is pending a decision on whether to re-dispatch a
 > fresh triage worker or re-column to `todo` (no worker is currently alive on this card).
+>
+> ### ⇒ 2026-09-05 13:25 — NEXT ACTION: the one experiment that names a mechanism
+> The 10:32 full run had 38 failures (exit 3); all 38 PASS alone, serially and under `-n auto`
+> as a 38-test batch (report `reports/suite-failures/20260905_132339+0200-Q8PNPRTW-38-classification.md`).
+> So the failures need the FULL suite AND a loaded host. The USER refused a characterisation
+> (c503ea52), so the resource must be measured. The cheapest measurement with a knob: run the
+> full suite twice on the same host state — `-n auto` (14 workers on 14 cores) and `-n 4` —
+> recording `sysctl vm.loadavg` every 10 s alongside; if `-n 4` is green where `-n auto` is red,
+> the mechanism is worker oversubscription under an already-loaded host (loadavg 22.7 measured
+> at 13:25 with several agents running), and the FIX is a worker cap in the publish gate
+> (`publish.py` uses `-n auto`). **Not launched now**: the host is at load 22 with the owner
+> present; a full-suite storm is the failing condition itself. Run when loadavg < 8.
 >
 > ### ⇒ THE USER DECISION, IN ONE LINE (everything else here is how we got to it)
 > **Accept the 10 remaining failures on a CHARACTERISATION rather than a mechanism, or refuse
