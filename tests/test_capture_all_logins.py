@@ -319,8 +319,16 @@ def test_capture_one_kills_the_whole_tree_and_reports_timeout(
     monkeypatch.setattr(cal, "_CAPTURE_PY", _REPO / "scripts" / "oauth_rotator" / "slot_capture_browser.py")
 
     slack = _deadline_slack()
-    with pytest.raises(subprocess.TimeoutExpired):
+    with pytest.raises(subprocess.TimeoutExpired) as timeout_info:
         cal.capture_one("a@example.com", env={}, timeout=1.0)
+
+    # TRDD-K7WQ2NRB: when this test fails, the child shell never wrote the pid file and
+    # its own stderr is the only witness to why. `capture_one` PIPEs fd 2, so `pytest -s`
+    # cannot reach that text — it arrives here on TimeoutExpired and used to be discarded.
+    # pytest prints captured stdout only on failure, so this is silent on the passing path.
+    # `text=True` at the spawn makes both fields `str` ('' when the child printed nothing).
+    print(f"[K7WQ2NRB] child stderr: {timeout_info.value.stderr!r}")
+    print(f"[K7WQ2NRB] child stdout: {timeout_info.value.stdout!r}")
 
     for _ in range(int(30 * slack)):
         if pid_file.is_file() and pid_file.read_text().strip():

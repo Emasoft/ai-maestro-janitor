@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T01:35:40+0200
+updated: 2026-09-05T02:28:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -232,6 +232,16 @@ on Q8PNPRTW for being plausible.
    configuration that actually fails, with its load on the record. Expensive by construction
    (~12 min/iteration), which is exactly why the 4 in-config data points so far are worth
    counting before spending more.
+   **RUNNING since 2026-09-05T02:28:21+0200** — `scripts_dev/k7wq2nrb_full_suite_load_loop.sh`
+   (gitignored; the harness is scratch, the numbers are the record). `uv run pytest -n auto`,
+   the soak9 shape, up to `MAX_RUNS=8`, load sampled every 15 s, every run's full output kept
+   in `reports/suite-failures/20260905_022821+0200-k7wq2nrb-full-suite-loop/` with a
+   `ledger.tsv` of run/exit/load-start/load-end/duration/summary. It **stops early on
+   `^FAILED tests/test_capture_all_logins`** — that capture is what the runs are being spent
+   on, and it now arrives with the child's stderr attached (step 1, landed below). A `STOP`
+   file in the report dir halts it between runs. Row 2's instrumentation was landed FIRST, on
+   purpose: a failure caught by a loop started before it would have thrown its evidence away
+   exactly as every failure so far has.
    **Why this does not violate step 1's "do not re-attempt by re-running the tests":** that
    prohibition rests on (1a), and the card brackets (1a) to the 2-test selection in its own
    words — *"licenses NOTHING about the full-suite configuration"*. Step 0 IS the configuration
@@ -374,7 +384,22 @@ on Q8PNPRTW for being plausible.
    already makes at lines 88-94. Do not read (1b) as "stderr was the channel that got closed"
    for that case — there is no stderr message in it.
 
-   **⇒ The replacement instrumentation for row 2:** bind the exception
+   **⇒ LANDED 2026-09-05 — the row-2 instrumentation is in the tree, and NOT as a revertible
+   probe.** `tests/test_capture_all_logins.py:322` now binds `as timeout_info` and prints
+   `.stderr`/`.stdout` right after the `raises` block. **Why this one is exempt from the Notes
+   revert rule:** that rule exists for probes that CHANGE the subject (the `.started` marker
+   edited the child script). This changes no behaviour — it prints data the test already
+   receives and threw away — and reverting it would guarantee the next failure again destroys
+   its own only witness, which is the entire point of the step. Silent on the passing path
+   (pytest reports captured stdout only on failure), so it costs nothing per green run.
+   Module re-run after the edit: **16 passed in 12.90 s**; `ruff check` clean and
+   `ruff format --diff` touches none of the new lines (the file's pre-existing reflow diff at
+   `:84-145` is unrelated and deliberately left alone — the gate is check/mypy/pyright, not
+   `format --check`).
+   *Unchanged by landing it:* **the MEASUREMENT still needs a failing run.** On a passing run
+   both fields are `''`.
+
+   **⇒ The original wording of this step, for the record:** bind the exception
    (`with pytest.raises(...) as ei`) and print/attach `ei.value.stderr` — the text the test
    already receives and throws away. `text=True` (`:145`) means it is `str`, `''` when the
    child printed nothing, never `None`. A probe edit under the revert rule in Notes, not a fix.
