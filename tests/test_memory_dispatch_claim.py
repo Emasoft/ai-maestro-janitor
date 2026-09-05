@@ -228,6 +228,40 @@ def test_an_empty_chore_keeps_the_historical_chore_blind_behaviour(tmp_path):
     assert got is not None and got["intervention"] == "atomize"
 
 
+def test_is_claimable_true_for_a_freshly_written_matching_dispatch(tmp_path):
+    """TRDD-LDSCQ0NU: the scheduler's write-then-verify gate must see its own write
+    as claimable — this is the non-empty-pool path the acceptance criteria require
+    to stay unaffected."""
+    p = _dispatch(tmp_path, 100, "split")
+    dispatch_id = p.name[len(mdc.PENDING_PREFIX):-len(".json")]
+    assert mdc.is_claimable(tmp_path, dispatch_id, "split") is True
+
+
+def test_is_claimable_false_for_a_missing_dispatch_id(tmp_path):
+    """The empty-claim-pool case (janitor#300): no record on disk at all — the
+    scheduler must be able to detect this and suppress its own marker."""
+    assert mdc.is_claimable(tmp_path, "999-doesnotexist", "split") is False
+
+
+def test_is_claimable_false_on_chore_mismatch(tmp_path):
+    """A record exists but for a different chore — not claimable BY this chore's
+    agent, so the marker naming this chore must not be printed either."""
+    p = _dispatch(tmp_path, 100, "consolidate")
+    dispatch_id = p.name[len(mdc.PENDING_PREFIX):-len(".json")]
+    assert mdc.is_claimable(tmp_path, dispatch_id, "split") is False
+
+
+def test_is_claimable_never_renames_the_record(tmp_path):
+    """Read-only, by contract: a verification check must never itself consume the
+    dispatch it is only supposed to be looking at."""
+    p = _dispatch(tmp_path, 100, "atomize")
+    dispatch_id = p.name[len(mdc.PENDING_PREFIX):-len(".json")]
+    mdc.is_claimable(tmp_path, dispatch_id, "atomize")
+    assert p.exists(), "is_claimable must not rename the pending record"
+    got = mdc.claim_one(tmp_path, "atomize")
+    assert got is not None, "the record must still be claimable by a real claim afterwards"
+
+
 def test_every_memory_skill_passes_its_own_chore(tmp_path):
     """Pinned over the SHIPPED skills: the filter only helps if the callers use it, and a
     skill that forgets the flag silently reverts to the chore-blind bug for its chore."""

@@ -72,6 +72,40 @@ def candidates(state_dir: Path) -> list[Path]:
         return []
 
 
+def payload_matches_chore(payload: object, chore: str) -> bool:
+    """True iff `payload` is a well-formed dispatch record for `chore` (any chore
+    when `chore` is empty). Factored out of `claim_one`'s loop (TRDD-LDSCQ0NU) so
+    `is_claimable` below checks a record with the EXACT SAME predicate a real claim
+    would use, instead of a hand-rolled duplicate that could quietly drift from it."""
+    if not isinstance(payload, dict):
+        return False
+    if chore and str(payload.get("intervention") or "") != chore:
+        return False
+    return True
+
+
+def is_claimable(state_dir: Path, dispatch_id: str, chore: str = "") -> bool:
+    """Read-only: would `claim_one(state_dir, chore)` be ABLE to claim the
+    per-dispatch record named `dispatch_id`, right now? Never renames, never
+    consumes — this is a verification read, not a claim.
+
+    TRDD-LDSCQ0NU / janitor#300: `[janitor-memory-<chore>]` used to be printed the
+    instant the scheduler decided a chore was due, with no check that the record it
+    had just written was actually sitting in the claim pool the spawned agent would
+    read from. When the two disagreed, the agent paid a full ~326k-token turn to
+    discover there was nothing to claim. The scheduler calls this immediately after
+    writing the dispatch, before printing the marker, using the SAME
+    `payload_matches_chore` predicate `claim_one` itself applies — so "claimable"
+    can never mean two different things in the two places that ask the question.
+    """
+    path = state_dir / f"{PENDING_PREFIX}{dispatch_id}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return payload_matches_chore(payload, chore)
+
+
 def claim_one(state_dir: Path, chore: str = "") -> dict | None:
     """Atomically claim the oldest unclaimed dispatch and return its payload, else None.
 
@@ -97,11 +131,11 @@ def claim_one(state_dir: Path, chore: str = "") -> dict | None:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue  # unreadable: leave it for the orphan detector to report, don't consume it
-        if not isinstance(payload, dict):
-            continue
         # Filter BEFORE the rename — a mismatched dispatch must be left in the pool for the
-        # agent that can actually run it, which is the whole point.
-        if chore and str(payload.get("intervention") or "") != chore:
+        # agent that can actually run it, which is the whole point. Shared with
+        # `is_claimable` (TRDD-LDSCQ0NU) so a read-only check and a real claim never
+        # disagree about what counts as claimable.
+        if not payload_matches_chore(payload, chore):
             continue
         target = state_dir / f"{CLAIMED_PREFIX}{path.name[len(PENDING_PREFIX):]}"
         try:

@@ -88,10 +88,15 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+# scripts/ itself (NOT scripts/lib) — memory_dispatch_claim.py lives there, one level
+# up from this detectors/ package (TRDD-LDSCQ0NU: the scheduler verifies its own
+# write against the claim script's own predicate, so it must import that module).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import dedupe  # noqa: E402
 import global_state  # noqa: E402
 import memory_content_precheck  # noqa: E402
+import memory_dispatch_claim  # noqa: E402
 import memory_scopes  # noqa: E402
 import memory_settings  # noqa: E402
 import memory_txn  # noqa: E402
@@ -643,6 +648,27 @@ def _run() -> int:
             "stamped_at": now,
             "dispatch_id": dispatch_id,
         })
+        # TRDD-LDSCQ0NU / janitor#300: verify the record we JUST wrote is what the
+        # agent's claim step will actually find — using the CLAIM SCRIPT's own
+        # predicate (`memory_dispatch_claim.is_claimable`), not a new heuristic, so
+        # the two can never disagree about what "claimable" means. Under normal
+        # execution this is always True (atomic_write already raised on any real
+        # write failure, and nothing else can rename this dispatch_id away before
+        # we have even printed the marker) — it is a belt-and-suspenders read-back,
+        # not the primary defence. It exists so a marker is NEVER printed for a
+        # dispatch that is not, in fact, sitting in the claim pool: every prior
+        # incident of this cost (issue #300) was a spawned agent paying a full
+        # ~326k-token turn only to learn the pool was empty. mark_ran/the cursor/
+        # the fingerprint stamp above already advanced, so skipping here simply
+        # leaves this intervention due again at its next cadence — the identical
+        # "no marker this fire" contract an idle fire already has.
+        if not memory_dispatch_claim.is_claimable(state.state_dir(), dispatch_id, intervention):
+            state.log_line(
+                "memory-maintenance",
+                f"not claimable after write: {intervention} @ {scope_label} ({root}) "
+                f"dispatch {dispatch_id} — suppressing marker (janitor#300)",
+            )
+            return 0
         # Record the in-flight gate under the SAME dispatch_id just persisted above, so
         # the payload and the stamp can never disagree about which dispatch is holding
         # this root (the scheduler checks this stamp before picking the same root again).

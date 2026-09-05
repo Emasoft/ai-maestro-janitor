@@ -13,6 +13,7 @@ to every detector's captured stdout. These tests pin the contract:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -21,8 +22,16 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import dispatch  # noqa: E402
+import memory_dispatch_claim as mdc  # noqa: E402
+import state  # noqa: E402
 
 DEFANG = dispatch._defang_foreign_markers
+
+
+def _clear_state_cache() -> None:
+    state.project_root.cache_clear()
+    state.janitor_root.cache_clear()
+    state.state_dir.cache_clear()
 
 
 def test_foreign_bare_memory_marker_is_defanged():
@@ -172,3 +181,47 @@ def test_emit_decision_preserves_nonmarker_payload_verbatim():
     ]
     out = _capture(lambda: dispatch._emit_decision("[janitor-resume]", payload))
     assert out == "[janitor-resume]\n" + "\n".join(payload) + "\n"
+
+
+def _write_pending(state_dir: Path, dispatch_id: str, intervention: str) -> Path:
+    state_dir.mkdir(parents=True, exist_ok=True)
+    p = state_dir / f"{mdc.PENDING_PREFIX}{dispatch_id}.json"
+    p.write_text(json.dumps({
+        "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
+        "scope": "LOCAL", "root": "/tmp/local/memory", "stamped_at": 100,
+        "dispatch_id": dispatch_id,
+    }), encoding="utf-8")
+    return p
+
+
+def test_marker_suppressed_when_claim_pool_is_empty(tmp_path, monkeypatch):
+    """TRDD-LDSCQ0NU / janitor#300: the RELAY-time gate. A peer session's agent
+    already claimed the scheduler's dispatch (real `claim_one`, not a mock) by the
+    time this process re-checks — the marker must not reach heartbeat stdout."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        _write_pending(sd, "100-abcd1234", "split")
+        claimed = mdc.claim_one(sd, "split")
+        assert claimed is not None, "sanity: the dispatch really was claimed"
+        out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        assert "[janitor-memory-split]" not in out, (
+            "an already-claimed dispatch's marker must be suppressed"
+        )
+    finally:
+        _clear_state_cache()
+
+
+def test_marker_survives_when_the_dispatch_is_still_pending(tmp_path, monkeypatch):
+    """The non-empty-pool case (acceptance criterion 2): a genuinely unclaimed,
+    matching dispatch record must leave the marker byte-for-byte unchanged."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        _write_pending(sd, "200-deadbeef", "split")
+        out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        assert out == "[janitor-memory-split]\n"
+    finally:
+        _clear_state_cache()

@@ -635,6 +635,26 @@ def test_pending_writes_a_per_dispatch_file_alongside_the_legacy_sidecar(fixture
     assert data == legacy, "per-dispatch file and legacy sidecar must agree for a fresh dispatch"
 
 
+def test_emitted_marker_dispatch_is_claimable_by_the_claim_script(fixture):
+    """TRDD-LDSCQ0NU / janitor#300: a printed marker must name a dispatch the claim
+    script can actually claim — this is the write-then-verify gate's own invariant,
+    checked end to end with the REAL `memory_dispatch_claim.is_claimable` (the same
+    predicate `claim_one` uses), not a re-implementation of it. This is acceptance
+    criterion 2 (a non-empty/valid claim pool is unaffected — the marker still fires
+    and the record it names is genuinely claimable)."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert "[janitor-memory-split]" in out
+    state_dir = fixture["project"] / ".janitor" / "state"
+    legacy = json.loads((state_dir / "memory-maint-pending.json").read_text(encoding="utf-8"))
+    sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
+    import memory_dispatch_claim as mdc  # noqa: E402  (imported here, not module-level, so
+    # it never shadows a same-named fixture/env var used by the other subprocess-only tests
+    # in this file)
+    assert mdc.is_claimable(state_dir, legacy["dispatch_id"], "split") is True
+
+
 def test_second_dispatch_does_not_clobber_the_first_dispatchs_own_file(fixture, monkeypatch):
     """The measured janitor#242 failure: a repair dispatch's authority was
     overwritten by a LATER consolidate marker while the repair agent was still

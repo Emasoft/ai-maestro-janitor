@@ -34,6 +34,7 @@ unrecoverable errors.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -46,6 +47,11 @@ from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
+# `_HERE` itself (scripts/) — memory_dispatch_claim.py lives there, a sibling of this
+# file rather than under lib/. Explicit, not relying on Python's "script's own dir"
+# auto-insert (this file is always run as __main__ today, but the import must not
+# depend on that staying true).
+sys.path.insert(0, str(_HERE))
 
 # The cache-version PARENT — the dir that holds every cached `<version>/` of the
 # janitor (the same dir the dispatcher-stub's PLUGIN_CACHE_ROOT points at). This
@@ -58,6 +64,7 @@ _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.
 import dedupe  # noqa: E402
 import findings_ledger  # noqa: E402  -- the quiet heartbeat's pull-model sink
 import global_state as gs  # noqa: E402
+import memory_dispatch_claim  # noqa: E402  -- TRDD-LDSCQ0NU relay-time claim-pool gate
 import session_liveness  # noqa: E402  -- SSOT for the `FIRED rearm → iterm` evidence parse
 import state  # noqa: E402
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
@@ -753,6 +760,59 @@ def _defang_foreign_markers(detector: str, text: str) -> str:
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
+_MEMORY_MARKER_RE = re.compile(r"\[janitor-memory-([a-z0-9-]+)\]")
+
+
+def _suppress_stale_memory_markers(text: str) -> str:
+    """Drop a bare `[janitor-memory-<chore>]` line whose claim pool is empty
+    (TRDD-LDSCQ0NU / janitor#300).
+
+    This is the RELAY-time gate, not a duplicate of the scheduler's own
+    write-then-verify check in `memory-maintenance.py::_run` — that check reads its
+    own write milliseconds after making it, so it can never see a record a PEER
+    session's agent claims minutes later (issue #300's fire-2: the marker printed
+    again with no unclaimed record left, per the reporter's own read of
+    `global-state/`). The claim pool is machine-wide (`state.state_dir()` under the
+    project the dispatch fired in — the same directory every session's claim step
+    reads), so THIS process re-checking it right before the marker leaves the
+    heartbeat is the latest point any machine code can still catch the race, before
+    the session reading this stdout decides to spawn an agent.
+
+    Reuses `memory_dispatch_claim.candidates()` + `payload_matches_chore` — the
+    EXACT predicate `claim_one` applies — never a re-implementation of "claimable".
+    Only `[janitor-memory-*]` lines are inspected; everything else in `text`
+    (findings, other markers) passes through unchanged.
+    """
+    if not text or "[janitor-memory-" not in text:
+        return text
+    state_dir = state.state_dir()
+    out: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        m = _MEMORY_MARKER_RE.fullmatch(stripped)
+        if m is None or stripped != line:
+            out.append(line)
+            continue
+        chore = m.group(1)
+        claimable = False
+        for p in memory_dispatch_claim.candidates(state_dir):
+            try:
+                payload = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue  # unreadable candidate matches no chore — same treatment claim_one gives it
+            if memory_dispatch_claim.payload_matches_chore(payload, chore):
+                claimable = True
+                break
+        if claimable:
+            out.append(line)
+        else:
+            state.log_line(
+                "dispatch",
+                f"memory-dispatch: marker for {chore} suppressed — claim pool empty (janitor#300)",
+            )
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
 # D5 (TRDD-82JRK0CY): one funnel for every machine-authored heartbeat DECISION.
 # `_decision_fired` records whether an ACTION marker (survival OR stacking) was emitted
 # this fire, so _emit_quiet_if_idle can print the explicit [janitor-quiet] token on the
@@ -903,7 +963,14 @@ def _run_detector(name: str, interval: int) -> None:
         _record_default_outcome(name, "error:spawn-failed", started)
         return
     if proc.stdout:
-        sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, proc.stdout)))
+        out = proc.stdout
+        # TRDD-LDSCQ0NU / janitor#300: the LAST point machine code can still catch a
+        # `[janitor-memory-<chore>]` marker whose claim pool went empty since the
+        # scheduler wrote it (a peer session's agent claimed it in the interim) —
+        # after this, the marker is heartbeat stdout and the session decides to spawn.
+        if name == "memory-maintenance":
+            out = _suppress_stale_memory_markers(out)
+        sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, out)))
         sys.stdout.flush()
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")
