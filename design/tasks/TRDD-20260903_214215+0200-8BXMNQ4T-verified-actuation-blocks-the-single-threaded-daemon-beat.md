@@ -3,7 +3,7 @@ trdd-id: 8BXMNQ4T
 title: verified actuation blocks the single-threaded daemon beat — measure the multiplier before choosing a mechanism
 column: todo
 created: 2026-09-03T21:42:15+0200
-updated: 2026-09-04T05:35:00+0200
+updated: 2026-09-05T05:00:55+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -25,11 +25,40 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
 - **⚠ THIS CARD'S OWN HYPOTHESIS WAS NEVER TESTED.** The title claims verified *rotation
-  actuation* starves the beat. `grep -c 'rotation-esc'` = **0** — no rotation window has
-  occurred on this host, so that was never measured and will not be, on this card. What
-  WAS measured is that *other* foreground work blocks the loop; **none of the measured
-  blockers is rotation actuation.** Read the next bullet as an adjacent finding, not as
-  an answer to the title.
+  actuation* starves the beat. That was never measured. What WAS measured is that *other*
+  foreground work blocks the loop; **none of the measured blockers is rotation actuation.**
+  Read the next bullet as an adjacent finding, not as an answer to the title.
+- **⚠ CORRECTION 2026-09-05 — "no rotation window has occurred on this host" WAS FALSE, and
+  it was the premise under this card's entire NEXT ACTION.** The bullet above used to carry
+  `grep -c 'rotation-esc'` = **0** as proof no rotation had ever happened here. Measured
+  today, first-hand:
+  - `global-state/rotation-success.ts` = `1788573479` = **2026-09-05T03:57:59** — a rotation
+    SUCCEEDED on this host about an hour before this correction was written.
+  - `global-state/daemon.log.1` carries **2** `rotation-esc:` lines (2026-09-04T04:56:18 and
+    04:57:13, both *"cannot read the pane for AgentlensPro — skipped"*). `_rotation_esc_pass`
+    returns early unless `rotation_succeeded_within(_ROTATION_WAKE_WINDOW_S=600)`
+    (`scripts/daemon.py:2220`), so reaching the per-pane log line **proves** a rotation window
+    was open that morning too.
+  - **Why the grep read 0:** it searched the LIVE `daemon.log` only. The evidence was in the
+    ROTATED `daemon.log.1`. The count was true of the file it read and false of the host —
+    the log-rotation boundary was never accounted for. *A `grep -c` over one log file is not a
+    statement about a machine's history; check `<log>.1` and any archive before concluding an
+    event has never happened.*
+- **What is ACTUALLY missing is narrower than "a rotation", and that changes the next action.**
+  Both call sites (`daemon.py:992` under `oauth-rotator-tick`, `:1601` under `session-liveness`)
+  entered the pane loop and neither reached actuation: every exit was the unreadable-pane skip
+  (`:2238`) or the silent `continue` for a pane not in `RETRY_WEDGE` (`:2242`). The completed
+  form (`rotation-esc: <STATUS> ESC → <channel>`, `:2302`) and the DRY form (`:2250`) appear
+  **0 times across both log files**. So the ~9 s/pane cost is still unpaid — not because
+  rotations do not happen, but because **no pane has been in `RETRY_WEDGE` at the moment of a
+  rotation window.** That is the condition to wait for, and it is not the one the card was
+  waiting for.
+- **A partial bound now exists, and it is NOT a stall.** Inside the 600 s wake window after the
+  03:57:59 rotation (esc pass running over the fleet, zero actuations): `oauth-rotator-tick`
+  bodies 13–22 s, `session-liveness` 8–21 s, no `wait > 60 s`. **Do not read this as "the pass
+  costs time"** — the control hour 02:50–03:50 already ranges 1–18 s (mode 10 s), so the ranges
+  overlap and the elevation is suggestive at best. Recorded so the next reader does not
+  re-derive it, and does not over-read it either.
 - **The generalisation is a DEDUCTION, not a guess.** The measured mechanism is *any*
   foreground body occupying a single-threaded loop. Rotation actuation is foreground work
   with a known ~9 s/pane cost, so the prediction follows from the measured mechanism — it
@@ -50,10 +79,12 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
   **NOT "confirmed":** the control excludes rivals, it does not independently prove
   causation, because on a single-threaded loop "waited long" and "the loop was busy" are
   near-definitional.
-- **NEXT ACTION** — box 1's remaining half only: the *during-a-rotation-window* measurement.
-  It is **not obtainable on this host** (`grep -c 'rotation-esc'` = 0; no rotation has ever
-  occurred here), so it needs a rotation to happen, not more looking. Everything else on this
-  card is done or delegated.
+- **NEXT ACTION** — box 1's remaining half only: the cost of a *completed* actuation. It waits
+  on a pane sitting in `RETRY_WEDGE` **while** a rotation window is open — not on a rotation,
+  which happens here routinely (see the correction above). Rare, but no longer a thing this
+  host has never done. Everything else on this card is done or delegated.
+  **Do not park this card for "a rotation to happen"** — that was the old, false reading and it
+  would park it forever against a condition already satisfied.
 - **DO NOT re-derive the measurement.** It took three attempts and six adversarial reviews.
   Read `## STEP 1 — MEASURED` and stop; the two sections below it are kept as lessons only.
 - **SUPERSEDED — do NOT carry forward:**
@@ -63,6 +94,10 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
     have re-run finished work.
   - "fleet size 9" (in the first measurement block below) — it is **15**; 9 counted
     cumulative `gh-issues-monitor/` registry dirs.
+  - **"`grep -c 'rotation-esc'` = 0; no rotation has ever occurred here"** — false, and it had
+    already been false for ~24 h when it was written. See the 2026-09-05 correction above.
+    Every sentence anywhere on this card that treats a rotation window as hypothetical on this
+    host is superseded by it.
   - The first two results tables below, and every conclusion drawn from them.
 
 ## What changed and why it costs
