@@ -3,7 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:44:26+0200
+updated: 2026-09-05T05:45:26+0200
 review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
@@ -153,7 +153,14 @@ as *done* would have ticked two boxes on nothing.
         mildly. It is a sanity check on the harness, not a result.
       - **What the fleet sweep DOES contribute** is the measured population, which is not
         vacuous: `rule_only = 167` files across 81 repos (tracked ∧ ignored ∧ not
-        private-class), `gc_offenders = 229`, `ti_offenders = 206`.
+        private-class), `gc_offenders = 229`, `ti_offenders = 206` — *reported by the worker,
+        not independently checked by me.*
+        **Do NOT over-apply the tautology argument to these.** `rule_only` is derived
+        (`ti − gc`) but a derived quantity is not a tautology: `|ti − gc| = 167` says 39 of the
+        206 tracked-ignored files ARE private-class matches, and that could have been 0 or 206.
+        **A definition constrains a RELATIONSHIP; it does not fix a CARDINALITY.** That is
+        precisely the difference from `bad_overlap`, whose *value* is forced to 0 by the same
+        definitions. The fleet table is measurement; only that one row is theorem.
       - **THE EVIDENCE THE TICK RESTS ON — the largest named component of the historical 47,
         re-run by the coordinator rather than taken from the report** (`decide-on-facts`), on
         `Code/SVG_FBF_PROJECT/svg2fbf`:
@@ -171,12 +178,17 @@ as *done* would have ticked two boxes on nothing.
           HEAD SHA + the mtimes of the two files `--exclude-standard` consumes (`:41-44`,
           state at `:61-62`), and my first run consumed that slot. Measured: the re-run
           emitted 0 lines.
-          *⚠ A first version called that silence "the fail-open behaviour met live". WRONG,
-          and the distinction is the point: the dedupe is DESIGNED suppression working
-          correctly, not a detector failing. What is true — and is why the control matters —
-          is that **a working dedupe and a broken detector produce the identical observable**,
-          so an empty run can never be read as "clean" without knowing which one you are
-          looking at. Conflating the two would have made a healthy design sound like a defect.*
+          *⚠ A first version called that silence "the fail-open behaviour met live". WRONG:
+          the dedupe is DESIGNED suppression working correctly — the detector ran, evaluated
+          the repo, found the cache key unchanged and withheld a repeat as redundant. A
+          fail-open never obtains the information at all.*
+          **The useful form, and it is THREE causes not two:** silence from these detectors
+          means *(1)* a clean repo, *(2)* a deduped repeat, or *(3)* a genuine fail-open. **The
+          control separates only (3) from (1) and (2)** — it cannot tell a clean repo from a
+          cache hit. On a sweep, (2) is the likeliest, which is exactly why the report bypassed
+          the CLIs and why the 41 is confirmed from plumbing rather than a second detector run.
+          *Read "detector went quiet" as "fail-open" and you will chase a bug that is a cache
+          hit.*
         So: **41 files that one detector reports and the other does not name at all** — an
         observation about two real programs' outputs, not a definition. ANIME2SVG contributes
         3 more the same way (from the report, not hand-checked).
@@ -207,7 +219,9 @@ as *done* would have ticked two boxes on nothing.
         (`rule_only=167`, `gc=229`, `ti=206`), ANIME2SVG's 3, §1's control, and §2's account
         of why the CLIs were not run fleet-wide. **The tick rests on the hand-measured set;
         the reported set only widens it.**
-      - **The fleet numbers come from the REAL library, not a reimplementation** (report §2):
+      - **The fleet numbers come from the REAL library, not a reimplementation — *per report
+        §2; I did not read the worker's script*** (attribution stated because a flat assertion
+        here would be the same substitution this card keeps catching):
         the worker imported `scripts/lib/gitignore_coverage.py` and used `git ls-files`
         plumbing instead of invoking the two CLIs across 81 repos — because both call
         `state.init_state()`, which WRITES `.janitor/state/` and `.janitor/logs/` into every
