@@ -54,7 +54,8 @@ changes `ocd`, never merges/splits/deletes.
 2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
 
    ```bash
-   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore enrich
+   : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
+   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore enrich --state-dir "$STATE_DIR"
    ```
 
    It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute path —
@@ -67,7 +68,10 @@ changes `ocd`, never merges/splits/deletes.
    |---|---|
    | a `(intervention, scope, root)` naming `enrich` | proceed to step 3 |
    | **`no claimable dispatch` (exit 0)** | **STOP and report exactly that.** It is a NORMAL, correct outcome — no marker is pending — not an error and not a licence to pick a scope. Verified 2026-08-26 on a live host: the claim script exits **0**, so a check that keys only on a non-zero exit reads this as success and walks on with no scope. |
-   | exit 2, unreadable output, or a chore name other than `enrich` | STOP and report that |
+   | exit 2 (nothing claimable), unreadable output, or a chore name other than `enrich` | STOP and report that |
+   | exit 3 (no memory-maintenance state at all — `$STATE_DIR` is wrong) | STOP and report that |
+   | exit 4 (`$STATE_DIR` empty) | STOP and report that |
+   | exit 5 (dispatch was recorded for a different state dir — claim refused) | STOP and report that |
 
 3. **Candidate set — from the CLI, never your own counting.**
 

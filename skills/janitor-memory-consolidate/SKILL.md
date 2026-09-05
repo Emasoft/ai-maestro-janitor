@@ -71,11 +71,15 @@ Process exactly **ONE scope this run**, and CLAIM it before touching anything �
 never self-select:
 
 ```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore consolidate
+: "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore consolidate --state-dir "$STATE_DIR"
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
-path — your cwd as a spawned agent is not the project root). **Exit 2, an unreadable
+path — your cwd as a spawned agent is not the project root). **Exit 2 (nothing
+claimable), 3 (no memory-maintenance state at all — `$STATE_DIR` is wrong), 4
+(`$STATE_DIR` empty), 5 (dispatch was recorded for a different state dir — claim
+refused), an unreadable
 result, or a chore name other than `consolidate`: STOP and report that** — never
 pick a scope yourself, never re-derive what is due, and **never read the legacy
 `memory-maint-pending.json` slot**. A USER-named scope is the one exception (a

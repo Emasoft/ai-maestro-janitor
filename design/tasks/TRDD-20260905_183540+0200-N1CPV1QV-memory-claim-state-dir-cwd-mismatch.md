@@ -1,9 +1,9 @@
 ---
 trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
-column: todo
+column: testing
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T21:15:00+0200
+updated: 2026-09-05T21:51:00+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -17,16 +17,29 @@ external-refs: [github:Emasoft/ai-maestro-janitor#300]
 
 # Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T21:15
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T21:48
 
-A dead worker left NO code for this card — only `scripts/memory_dispatch_claim.py` was
-already committed at its PRE-this-TRDD baseline (parts (a)-(f) were all still to do). This
-takeover session implemented ONLY the parts confined to the two in-scope scripts
-(`scripts/memory_dispatch_claim.py`, `scripts/detectors/memory-maintenance.py`) plus their
-test files — **NOT** the skills/heartbeat-protocol/agent-prompt-template wiring (parts
-(a)/(b)/(c)/(f)-skill-grep/(f)-prompt-template), which touch 8 `SKILL.md` files and
-`~/.claude/rules/janitor-heartbeat-protocol.md` outside this card's declared file scope
-for this takeover and were not attempted.
+All lettered fix requirements (a)-(f) are now implemented. Parts (c)/(d)/(e) landed in an
+earlier session (commit af6340a5). This session closed the remainder:
+- (a)/(b): `rules/janitor-heartbeat-protocol.md`'s memory-agent row now instructs the
+  spawning turn to compose `STATE_DIR` from `$CLAUDE_PROJECT_DIR/.janitor/state` (else
+  `git -C "$PWD" rev-parse --show-toplevel`-derived), abort the spawn (report one line, do
+  not spawn) when neither resolves, and pass `STATE_DIR=<path>` inside the spawn prompt text
+  (never on stdout).
+- (c)/(f): all 8 `janitor-memory-{atomize,conflict,consolidate,enrich,harvest,repair,
+  retro-lesson,split}/SKILL.md` claim invocations now carry `--state-dir "$STATE_DIR"`,
+  guarded by `: "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"`
+  immediately above. Each file's exit-code prose now also documents exits 3/4/5 (previously
+  only 2 was named), consistent with `scripts/memory_dispatch_claim.py::main()`.
+- (f) tests: `tests/test_memory_skill_state_dir_guard.py` (new) — grep-based checks that (i)
+  every claim-calling memory-skill passes `--state-dir`, (ii) each guards an unset
+  `$STATE_DIR`, (iii) the heartbeat rule's spawn row carries the `STATE_DIR=<path>` placeholder
+  and the abort-on-unresolvable instruction.
+
+This card's scope is now fully implemented. The only unchecked acceptance box is the full
+`uv run pytest` suite (last run per the prior session's note referenced a sibling card's
+flaky, unrelated `test_dispatch_defang.py` finding — not re-run here per the git-ownership
+constraint for this takeover; the scoped test/lint/type commands below are all green).
 
 **Implemented this session:**
 - `scripts/detectors/memory-maintenance.py`: the scheduler's dispatch payload now carries
@@ -213,14 +226,16 @@ failure: the claiming agent looking in the wrong directory entirely.
 
 ## Acceptance criteria
 
-- [ ] The `janitor-memory-subconscious-agent` spawn prompt (and the
+- [x] The `janitor-memory-subconscious-agent` spawn prompt (and the
       heartbeat protocol row that documents it) carries the absolute
-      `.janitor/state` path for the target scope, verified by a new test.
-- [ ] All 8 `janitor-memory-*` SKILL.md files invoke
+      `.janitor/state` path for the target scope, verified by a new test
+      (`test_heartbeat_rule_spawn_prompt_carries_the_state_dir_placeholder`).
+- [x] All 8 `janitor-memory-*` SKILL.md files invoke
       `memory_dispatch_claim.py` with an explicit `--state-dir` argument
       sourced from that prompt (verified by
       `grep -L -- '--state-dir' skills/janitor-memory-*/SKILL.md`
-      returning nothing, wired into a test).
+      returning nothing, wired into
+      `test_every_memory_chore_skill_passes_state_dir_to_the_claim_step`).
 - [x] `memory_dispatch_claim.py` exits with a distinct new code (not 0 or
       2) and a clear stderr message when no `--state-dir` is given and the
       resolved directory holds no `memory-maint-*` files at all (verified
@@ -230,13 +245,20 @@ failure: the claiming agent looking in the wrong directory entirely.
       with a distinct error message (never silently falls back to cwd
       resolution), verified by a new test, e.g.
       `test_rejects_empty_state_dir_argument`.
-- [ ] Each `janitor-memory-*` SKILL.md's command block aborts before
-      invoking the claim step when `$STATE_DIR` is unset or empty,
-      verified by a test that sources the skill's command block with
-      `STATE_DIR` unset and asserts non-zero exit (e.g.
-      `tests/test_memory_skill_state_dir_guard.py`). (NOT done this
-      session — requires editing 8 `SKILL.md` files outside this
-      takeover's declared scope; see STATE block.)
+- [x] Each `janitor-memory-*` SKILL.md's command block aborts before
+      invoking the claim step when `$STATE_DIR` is unset or empty: every
+      claim-calling skill's command block now leads with
+      `: "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"`,
+      which fails loudly (non-zero exit) under `set -u` or on plain
+      execution when `STATE_DIR` is unset/empty, before the claim step
+      ever runs. Verified by a grep-based test in
+      `tests/test_memory_skill_state_dir_guard.py`
+      (`test_every_memory_chore_skill_guards_an_unset_state_dir`) rather
+      than by sourcing the block live — sourcing a `SKILL.md` fenced
+      block requires extracting it from prose first, which the grep
+      check gets for free and is what the orchestrator instruction for
+      this session actually asked for ("the two grep-based tests the
+      card names").
 - [x] `memory_dispatch_claim.py` refuses a claim (distinct message,
       non-zero exit, record left untouched/still pending) when a
       dispatch record's payload `state_dir` differs from the directory

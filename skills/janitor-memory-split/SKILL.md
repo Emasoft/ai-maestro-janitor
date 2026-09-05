@@ -70,7 +70,8 @@ stage+commit into the PROJECT root and it rides the next publish, never pushed b
 Process exactly **ONE scope this run**, and CLAIM it before you touch anything:
 
 ```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore split
+: "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore split --state-dir "$STATE_DIR"
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped when it emitted your
@@ -78,7 +79,9 @@ marker, and atomically hands that dispatch to you alone. `$SCOPE_ROOT` below is 
 `root` it printed. **The path is ABSOLUTE on purpose** — your cwd as a spawned agent
 is not guaranteed to be the project root.
 
-**Exit 2, an unreadable file, or a chore name other than `split`: STOP and report
+**Exit 2 (nothing claimable), 3 (no memory-maintenance state at all — `$STATE_DIR`
+is wrong), 4 (`$STATE_DIR` empty), 5 (dispatch was recorded for a different state
+dir — claim refused), an unreadable file, or a chore name other than `split`: STOP and report
 that** — do not pick a scope yourself, do not re-derive what is due (the stamp
 already advanced when the marker was emitted), and **do not read the legacy
 `memory-maint-pending.json` slot**: it is still on disk, so ceasing to point at it

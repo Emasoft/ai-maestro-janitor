@@ -70,14 +70,18 @@ and the agent prompts live in the references (Resources).
 2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
 
    ```bash
-   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore conflict
+   : "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"
+   uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore conflict --state-dir "$STATE_DIR"
    ```
 
    It prints the `(intervention, scope, root)` the scheduler stamped for you
    (absolute path — your cwd as a spawned agent is not the project root); the
    scheduler already gated the cadence, so re-checking `memory_settings.is_due`
    here would abstain on the very scope it scheduled (TRDD-VJ8L465M: scheduler
-   owns cadence, agent owns content). **Exit 2, an unreadable result, or a chore
+   owns cadence, agent owns content). **Exit 2 (nothing claimable), 3 (no
+   memory-maintenance state at all — `$STATE_DIR` is wrong), 4 (`$STATE_DIR`
+   empty), 5 (dispatch was recorded for a different state dir — claim
+   refused), an unreadable result, or a chore
    name other than `conflict`: STOP and report that** — never pick a scope
    yourself, never re-derive what is due, and **never read the legacy
    `memory-maint-pending.json` slot**. A USER-named scope is the one exception (a

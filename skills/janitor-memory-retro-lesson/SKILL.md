@@ -56,13 +56,16 @@ already in lesson form; only body ATOM markers count.
 ## Procedure
 
 0. **Scope.** CLAIM your dispatch — never read a shared file for it:
-   `uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore retro-lesson`.
+   `: "${STATE_DIR:?janitor: STATE_DIR not provided by the spawn prompt}"`
+   `uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore retro-lesson --state-dir "$STATE_DIR"`.
    `--chore` is not optional (janitor#275): without it the claim is FIFO-by-age and
    chore-BLIND, so this agent would consume another chore's assignment — orphaning that
    dispatch and leaving itself nothing it can perform. It prints the
    scheduler's pinned `(intervention, scope, root)` (absolute — your cwd is not the project
    root) and hands it to you alone, so a later dispatch cannot re-point work in flight
-   (janitor#242). Exit 2 → STOP and report that; never fall back to the legacy
+   (janitor#242). Exit 2 (nothing claimable), 3 (no memory-maintenance state at all —
+   `$STATE_DIR` is wrong), 4 (`$STATE_DIR` empty), or 5 (dispatch was recorded for a
+   different state dir — claim refused) → STOP and report that; never fall back to the legacy
    `memory-maint-pending.json` slot or to "whichever is due" (#150).
    Then `uv run scripts/memory_txn_cli.py resume <scope-root>`.
 1. **Scan.** Walk the scope's curated pages for the candidate signature above. No
