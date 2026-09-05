@@ -60,9 +60,10 @@ external-refs: [TRDD-8BXMNQ4T]
     at 04:15–04:18?* — now with bigger siblings. Read-only diagnosis; the precedent is set
     here for ungated read-only source reading.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
-    pattern is not writing a scheduling change; only the bound it pins is. **⚠ Replay the 32 h
-    maximum (191 s), NOT 8BXMNQ4T's snapshot maximum (~78 s) — box 3 said "one log snapshot"
-    and that premise is retracted; see the box, now annotated.**
+    pattern is not writing a scheduling change; only the bound it pins is. **⚠ Take the pattern
+    as a PARAMETER from the widest window available when it runs — NOT 8BXMNQ4T's snapshot
+    maximum (~78 s), and not a hard-coded 191 s either, which is only today's value; box 3
+    said "one log snapshot" and that premise is retracted. See the box, now annotated.**
   *(A first wording of this bullet added "…more than anything the advisor could say": a
   confident comparative about an advisor nobody has reached, unfalsifiable, and sitting in a
   block that is authoritative by rule.)*
