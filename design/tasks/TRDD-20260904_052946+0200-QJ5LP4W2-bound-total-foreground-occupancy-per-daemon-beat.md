@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T08:06:31+0200
+updated: 2026-09-05T08:24:10+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -48,19 +48,12 @@ external-refs: [TRDD-8BXMNQ4T]
   else on the card is startable", which was FALSE and, sitting in a STATE block, would have
   foreclosed it for every later reader.** Box 1 gates *writing a `scripts/daemon.py` scheduling
   change*. It does not gate:
-  - **The two open questions below — the FIRST is PARTLY answered (2026-09-05), the second
-    is untouched.** On the first, and no stronger than the section it summarises: long
-    single bodies are MEASURED (a 78/78/77 s cluster, n=3, plus beats of 102/137/191 s
-    across ~32 h of `daemon.log`) — **the measurement is the finding; every attribution of
-    it is open.** `probe_iterm_sessions`' escalating ladder (`fleet_scan.py:1234/1237`) is
-    the only known mechanism whose ceiling brackets the 78 s, and it is UNCONFIRMED; the
-    100 s+ beats exceed its 96 s ceiling and may be a larger single cost OR that ladder plus
-    per-instance costs (ZVZAFQY6). Do not re-derive the measurement; do not treat any
-    attribution as settled. **One candidate IS closed: the memory-pressure / starvation
-    confound was TESTED (both arms, per-pass attribution verified against the code) and
-    shows no signal — read that subsection before reviving it.** **STILL OPEN and still
-    ungated:** *what is the ~84 s unaccounted at 04:15–04:18?* — now with bigger siblings.
-    Read-only diagnosis; the precedent is set here for ungated read-only source reading.
+  - **The two open questions below.** The first is PARTLY answered (2026-09-05): six long
+    bodies are MEASURED (78/78/77/102/137/191 s over ~32 h), **the measurement is the
+    finding and every attribution of it is open**, and one candidate is CLOSED (memory
+    pressure / starvation — tested, no signal). The second is untouched: *what is the
+    ~84 s unaccounted at 04:15–04:18?* — now with bigger siblings. Read that entry rather
+    than re-deriving it; read-only diagnosis is ungated, precedent set here.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
     pattern is not writing a scheduling change; only the bound it pins is. **⚠ Take the pattern
     as a PARAMETER from the widest window available when it runs — NOT 8BXMNQ4T's snapshot
@@ -201,158 +194,64 @@ bounds that **sum** — only individual subprocess workloads are capped
 
 ## Open questions inherited from the measurement
 
-- **Why does `session-liveness` need 78 s at all?** **PARTLY ANSWERED, 2026-09-05 —
-  and NOT by the mechanism I first named. Read the correction; the first version of
-  this entry is wrong in a way worth keeping.**
+- **Why does `session-liveness` need 78 s at all?** **PARTLY ANSWERED, 2026-09-05.**
 
-  **THE CANDIDATE, from source.** `task_session_liveness` (`daemon.py:1544`) calls
-  `fleet_scan.gather_fleet` once (`daemon.py:1593`), which calls
-  `probe_iterm_sessions` once (`fleet_scan.py:1417`), gated only on `iterm_running`
-  (`:1413`). That probe retries the iTerm enumeration **three times with ESCALATING
-  deadlines — `_ITERM_PROBE_TIMEOUTS = (15.0, 30.0, 45.0)` (`fleet_scan.py:1234`)
-  plus `_ITERM_PROBE_BACKOFF_S = (2.0, 4.0)` (`:1237`)** — 51 s for two exhausted
-  attempts and backoff, 96 s for full exhaustion. The ladder was deliberate
-  (2026-08-28, contention not denial); nobody costed it against the 60 s beat.
+  **MEASURED** (`global-state/daemon.log` + `.log.1`, 2026-09-03T22:32 → 2026-09-05T06:57,
+  ~32 h, every `task 'session-liveness' done in Ns` line):
 
-  **⚠ I FIRST WROTE THAT THIS *IS* THE 78 s, on the strength of 15+2+30+4+≈27 ≈ 78.
-  That was an arithmetic FIT presented as a finding — the 27 is not measured, it is
-  whatever residual makes the sum land on the number, and ANY ladder with a ceiling
-  above 78 admits such a fit.** Recorded rather than deleted because it shipped into
-  a STATE block, which is authoritative by rule: the failure mode is not the wrong
-  guess, it is that a fit written there is indistinguishable from an observation.
+  - Normally cheap: 375 beats at 2 s, 194 at 3 s, 84 at 4 s.
+  - **Six long beats: 78, 78, 77, 102, 137, 191 s.** The 78/78/77 cluster (n=3) suggests
+    a BOUNDED cost; it does not say which bound.
 
-  **THE ACTUAL MEASUREMENT** (`global-state/daemon.log` + `.log.1`, 2026-09-03T22:32
-  → 2026-09-05T06:57, ~32 h, every `task 'session-liveness' done in Ns` line):
+  **ATTRIBUTION — UNCONFIRMED, and that word is load-bearing.** The only known mechanism
+  on this path whose ceiling brackets 78 s is `probe_iterm_sessions`, called once per beat
+  from `gather_fleet` (`fleet_scan.py:1417`, gated on `iterm_running` at `:1413`), which
+  retries the iTerm enumeration on an escalating ladder — `_ITERM_PROBE_TIMEOUTS =
+  (15.0, 30.0, 45.0)` plus `_ITERM_PROBE_BACKOFF_S = (2.0, 4.0)` (`fleet_scan.py:1234`,
+  `:1237`): 51 s for two exhausted attempts, **96 s ceiling**. Deliberate (2026-08-28,
+  contention not denial); never costed against the 60 s beat. **Nothing measured confirms
+  the ladder is what runs long** — an earlier version of this entry asserted it from an
+  arithmetic fit and was wrong to.
 
-  - **The body is cheap almost always:** 375 beats at 2 s, 194 at 3 s, 84 at 4 s.
-    The long beats are rare and episodic, not a standing cost.
-  - **A tight cluster at the top: 78 s, 78 s, 77 s** (2026-09-03T23:06,
-    2026-09-04T04:34, 04:47). Three long beats within 1 s of each other suggests a
-    BOUNDED cost rather than an unbounded one — the best evidence here for a fixed
-    component, **and n=3.** It does not identify WHICH bound: a fixed remote timeout,
-    a lock held for a bounded period, or a retry ladder all cluster this way.
-  - **But beats of 102 s, 137 s and 191 s also occur** (2026-09-04T15:36, 21:49,
-    17:18). **Those EXCEED the ladder's 96 s ceiling, so the ladder cannot be the
-    whole cost of those beats.** Two shapes fit, and the second needs no new
-    mechanism: (a) a larger single unidentified cost, or (b) **the ladder ADDING to
-    per-instance costs — see TRDD-ZVZAFQY6, up to ~45 s per instance on osascript,
-    additive because the loop is a plain `for`. Two instances on that path plus a
-    full ladder reaches 191 s with nothing new invoked.** Do not go looking only for
-    a single ~191 s thing.
+  **The 102/137/191 s beats EXCEED that 96 s ceiling**, so the ladder cannot be their whole
+  cost. Two shapes fit and the second needs no new mechanism: a larger single cost, or the
+  ladder ADDING to per-instance costs (**TRDD-ZVZAFQY6** — up to ~45 s per instance on
+  osascript, additive because the loop is a plain `for`; two such instances plus a full
+  ladder reaches 191 s). Do not go hunting only for a single ~191 s thing.
 
-  **So the honest status:** a bounded ~78 s component is real and the ladder is the only
-  known mechanism on this path whose ceiling brackets it; the attribution is
-  UNCONFIRMED, and the 100 s+ beats are unexplained by it either way.
+  **TO SETTLE IT — a takeable task:** log a timestamp either side of the
+  `probe_iterm_sessions` call (`fleet_scan.py:1417`), or log `osascript_attempts`
+  unconditionally. One long beat answers it.
 
-  **THE MEMORY-PRESSURE CANDIDATE — TESTED PROPERLY, AND NULL.** This is the
-  CPU/memory-starvation confound the original question named, so it mattered to settle
-  rather than wave at.
+  **⚠ DO NOT try to settle it from the logs.** The obvious falsifier — the
+  `(after N attempts)` suffix — fires only when `probe_outcome` is non-empty
+  (`fleet_scan.py:1439`), and that is `""` unless `blocked` (iTerm up AND zero sessions).
+  **A probe that retries and then SUCCEEDS leaves no trace**, so the zero suffixes in
+  32 h refute nothing.
 
-  *How it looked first:* all three 100 s+ beats are immediately preceded by a
-  `memory-guard` pressure line (`free 616MB` before the 191 s, `823MB` before the 137 s,
-  a 16 s guard body before the 102 s), while two of the three ~78 s beats show
-  `memory-guard done in 0s`. A clean-looking discriminator.
+  **RULED OUT — memory pressure / CPU starvation** (the confound the original question
+  named). Both arms, over every beat, attributing each to the `memory-guard` run in its
+  own pass: **long (>60 s) 3/6, normal (≤60 s) 482/880 (≈55%)** — no signal, the long arm
+  if anything below background. Attribution verified three ways: `_build_tasks` registers
+  `memory-guard` 9th and `session-liveness` 14th with an unsorted dispatch `for` (order);
+  both intervals default to 120 s (`harness_backend.py:105/109`, so normally due together —
+  env-overridable, hence a claim about THIS host); and 886/886 beats attributed, 19 windows
+  with >1 guard, exactly 1 with disagreeing candidates — **a 10 s beat, so all six long
+  beats are clean**. Limits: long arm n=6 (CI ≈12–88%), so only a near-universal
+  association is excluded; and a RATE test bounds frequency, never MAGNITUDE. *(A 20–60 s
+  band sits at 11/13 — n=13, a data-suggested boundary, not a lead. The 60 s split is the
+  scheduler's own interval, which is why it is not the same kind of slice.)*
 
-  *The actual test* — for EVERY `session-liveness` beat in the ~32 h window, did the
-  `memory-guard` run in that same beat report pressure:
+  **STILL OPEN:** the typical body; the ~84 s below; and whether the ladder runs long at all.
 
-  | beat length | preceded by pressure |
-  |---|---|
-  | **> 60 s** | **3 / 6** |
-  | ≤ 60 s | 482 / 880 (≈55%) |
+  Blocking-call inventory (timeouts, per-beat vs per-instance):
+  `reports/qj5lp4w2-session-liveness/20260905_120000+0200-session-liveness-blocking-inventory.md`
+  (gitignored). `_rotation_esc_pass` (`daemon.py:2195`) and `_resume_wake_pass` (`:2307`)
+  are marked UNDETERMINED there and were not traced.
 
-  **No signal.** The long-beat rate is if anything BELOW background. And the "three for
-  three" that started this dissolves: it was three of the *100 s+ subset*, a slice chosen
-  after seeing it — of all six long beats, only half had pressure.
-
-  **Why the 60 s split is not itself a fishing expedition**, since the 20–60 s band below
-  is dismissed for being one: **60 s is the boundary the SCHEDULER defines** (the beat
-  interval a long body overruns), not a boundary the data suggested. A split the system
-  already draws is principled; a split chosen because a bump appeared there is not.
-
-  **THE ATTRIBUTION WAS THE THING THAT COULD HAVE MADE THIS WRONG, SO IT WAS CHECKED —
-  TWICE, AND THE SECOND CHECK IS THE ONE THAT COUNTS.**
-
-  The first pass carried a `pressure` flag forward while walking the log: a correlation
-  with *the last guard run anywhere*, not with *this beat's guard*. Had `memory-guard`
-  ever run AFTER `session-liveness` in a pass, or skipped one, every row would carry a
-  stale reading and a real effect would wash into a null.
-
-  *Check 1, from the log:* attribute each beat only to a guard whose `done` falls between
-  the PREVIOUS beat's end and this beat's start. 886 of 887 attributed (row 1 skipped —
-  no previous end; no synthetic bound). **But "0 discarded" only proves every beat had
-  AT LEAST ONE guard in its window, not that the right one was picked** — taking the last
-  candidate hides ties. Tallied: **19 windows held more than one guard, and in exactly 1
-  of those 19 did the candidates DISAGREE**, so at most one row of 886 is ambiguous —
-  **and that row is a 10 s beat, i.e. in the `≤60 s` arm of 880, not in the long arm.
-  All six long beats are unambiguously attributed**, which is what matters, since the
-  long arm is where every conclusion here is already fragile.
-  Also **0 guards landed inside a `session-liveness` body**, as the single-threaded loop
-  requires.
-
-  *Check 2, from the CODE — the independent one:* `_build_tasks` (`daemon.py:2975-3007`)
-  registers **`memory-guard` 9th and `session-liveness` 14th**, and the dispatch loop is a
-  plain `for` with no sort (established earlier on this card). This is what check 1 could
-  only be consistent with: both log checks read the same event stream, so their agreement
-  is consistency, never independent evidence — the registration list is.
-
-  **⚠ Registration order gives DISPATCH order only for tasks due in the SAME pass, so the
-  intervals matter and were checked too:** `harness_backend.py:105/109` — `memory-guard`
-  and `session-liveness` both default to **120 s**. Equal cadence, so they are normally
-  due together and the guard goes first. **The honest scope:** both are env-overridable
-  (`CLAUDE_PLUGIN_OPTION_DAEMON_{MEMORY_GUARD,SESSION_LIVENESS}_INTERVAL`), and equal
-  intervals can still drift when a body overruns, so this is a claim about THIS host's
-  config, not a structural guarantee. The 886/886 log result is what shows no drift
-  actually occurred.
-
-  So the three legs are: registration order (code), equal intervals (code), and
-  886/886 with 1 ambiguous row (log). Same numbers under all of it.
-
-  Same numbers under both: **3/6 long, 482/880 normal.**
-
-  **What this does and does NOT license.** The long arm is **n=6** — a 3/6 has a
-  confidence interval spanning roughly 12–88%, so this excludes only a near-universal
-  association. It says nothing about MAGNITUDE: pressure could still triple a beat
-  whenever it coincides with something else, and this test would not see it, because it
-  measures how OFTEN pressure precedes a long beat, never how much time pressure costs.
-  Do not revive it without a materially larger long-beat sample. *(A `20–60 s` band sits
-  at 11/13, above background — n=13, a data-suggested boundary, and exactly the shape of
-  the thing this paragraph killed. Noted so it is not "discovered" later; not a lead.)*
-
-  **The methodology lesson, which is the durable part.** The first version of this entry
-  recorded the hypothesis as dead on `0.55³ ≈ p 0.17` — a post-hoc statistic on a
-  comparison picked because it looked striking, quoted with a `p` symbol it could not
-  carry, and computed against the wrong denominator (the rate over memory-guard RUNS, not
-  over BEATS). It also threw away the control arm it had already collected. Right instinct
-  (check the background before believing a streak), wrong execution, and it reached the
-  right verdict for reasons that would not have survived scrutiny — which is luck, not
-  method. **Compare the rate in both arms; do not compute the probability of the streak
-  you just noticed.**
-
-  **WHAT WOULD SETTLE IT, so this is a takeable task and not a re-litigation:** a
-  timestamp either side of the `probe_iterm_sessions` call in `gather_fleet`
-  (`fleet_scan.py:1417`), logged unconditionally, answers it in one long beat. The
-  attempt count already exists in that scope — logging `osascript_attempts`
-  unconditionally rather than only inside the `blocked` suffix would do it too.
-
-  **THE FALSIFIER THAT DOES NOT WORK — do not run it and read silence as
-  confirmation.** The obvious check is `gather_fleet`'s attempt count, which suffixes
-  the outcome `(after N attempts)` when N>1. It only fires when `probe_outcome` is
-  non-empty (`fleet_scan.py:1439`), and `probe_outcome` is `""` unless `blocked`
-  (iTerm up AND zero sessions enumerated). **A probe that retries and then SUCCEEDS
-  leaves no trace at all** — and indeed the ~32 h of logs contain zero such suffixes,
-  which refutes nothing. Confirming the ladder needs a timestamp around the probe,
-  i.e. an instrumentation change, not a log read.
-
-  **What this does NOT establish:** it says nothing about the typical body, nothing
-  about the ~84 s unaccounted below, and the detached-bulk-child CPU-starvation
-  confound named by the original question is untested and stays open.
-
-  Inventory of every blocking call on the path, with timeouts and per-beat vs
-  per-instance attribution: `reports/qj5lp4w2-session-liveness/20260905_120000+0200-session-liveness-blocking-inventory.md`
-  (gitignored). Its two load-bearing claims were re-verified against source before
-  being written here; two call sites in it are marked UNDETERMINED and were not
-  traced (`_rotation_esc_pass` `daemon.py:2195`, `_resume_wake_pass` `:2307`).
+  *(This entry was rewritten six times across 2026-09-05 as review caught successive
+  overclaims. The methodology lessons from that — arithmetic fits, post-hoc statistics,
+  attribution bugs, overclaiming from code — live in USER memory, not here.)*
 - **~84 s of one episode is unaccounted for** (the 54% row, 04:18:26, a 184 s wait).
   The unexplained mass clusters at 04:15–04:18 rather than spreading evenly, which
   is the signature of one unmodelled event.
