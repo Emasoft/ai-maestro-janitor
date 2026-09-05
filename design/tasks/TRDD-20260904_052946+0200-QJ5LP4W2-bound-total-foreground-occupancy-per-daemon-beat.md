@@ -201,11 +201,14 @@ bounds that **sum** — only individual subprocess workloads are capped
 
   - Normally cheap: 375 beats at 2 s, 194 at 3 s, 84 at 4 s.
   - **Six long beats: 78, 78, 77, 102, 137, 191 s.** The 78/78/77 cluster (n=3) suggests
-    a BOUNDED cost; it does not say which bound.
+    a BOUNDED cost; it does not say WHICH bound — *a fixed remote timeout, a lock held
+    for a bounded period, and a retry ladder all cluster identically, so the shape alone
+    does not pick the ladder below.*
 
   **ATTRIBUTION — UNCONFIRMED, and that word is load-bearing.** The only known mechanism
   on this path whose ceiling brackets 78 s is `probe_iterm_sessions`, called once per beat
-  from `gather_fleet` (`fleet_scan.py:1417`, gated on `iterm_running` at `:1413`), which
+  from `gather_fleet` (`daemon.py:1593` → `fleet_scan.py:1417`, gated on `iterm_running`
+  at `:1413`), which
   retries the iTerm enumeration on an escalating ladder — `_ITERM_PROBE_TIMEOUTS =
   (15.0, 30.0, 45.0)` plus `_ITERM_PROBE_BACKOFF_S = (2.0, 4.0)` (`fleet_scan.py:1234`,
   `:1237`): 51 s for two exhausted attempts, **96 s ceiling**. Deliberate (2026-08-28,
@@ -237,7 +240,8 @@ bounds that **sum** — only individual subprocess workloads are capped
   both intervals default to 120 s (`harness_backend.py:105/109`, so normally due together —
   env-overridable, hence a claim about THIS host); and 886/886 beats attributed, 19 windows
   with >1 guard, exactly 1 with disagreeing candidates — **a 10 s beat, so all six long
-  beats are clean**. Limits: long arm n=6 (CI ≈12–88%), so only a near-universal
+  beats are clean**; and 0 guards landed INSIDE a `session-liveness` body, as the
+  single-threaded loop requires. Limits: long arm n=6 (CI ≈12–88%), so only a near-universal
   association is excluded; and a RATE test bounds frequency, never MAGNITUDE. *(A 20–60 s
   band sits at 11/13 — n=13, a data-suggested boundary, not a lead. The 60 s split is the
   scheduler's own interval, which is why it is not the same kind of slice.)*
