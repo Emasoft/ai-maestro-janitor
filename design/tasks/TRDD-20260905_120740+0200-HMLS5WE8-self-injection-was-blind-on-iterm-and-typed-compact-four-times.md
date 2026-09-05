@@ -3,7 +3,7 @@ trdd-id: HMLS5WE8
 title: Self-injection was blind on iTerm and typed compact four times into one field
 column: human_review
 created: 2026-09-05T12:07:40+0200
-updated: 2026-09-05T21:04:00+0200
+updated: 2026-09-05T21:08:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -18,17 +18,21 @@ implementation-commits: [6803ade0, 0c7037bc, a0455402]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
-### ⏵ 2026-09-05 21:04 (janitor-main-session) — a test this card's commits turned red, fixed under TRDD-KS41G6AL; read before approving
+### ⏵ 2026-09-05 21:08 (janitor-main-session) — phase 1 changed a test-visible read count; the reviewer should confirm it was intended
 
 `tests/test_inject_still_wanted.py` (untouched since `11f176a4`) failed two tests in
 isolation with `StopIteration`: its two-read `_seq` fixture was shorter than
-`inject_until_sent`'s read count on that path. Bisected with `git archive` snapshots under
-`--noconftest`: green at `6803ade0^` and `6803ade0`, red from `0c7037bc` through `87622b4c`
-— `_still_shows_ours` and its two call sites arrived in phase 1 (`6803ade0`), the tests
-first reached the third read at `0c7037bc`. The fixture was the stale side;
-`terminal_trigger.py` was not changed. Fix landed in KS41G6AL (a derived card, because
-`human_review → dev` is not this session's transition). This card's `human_review` claim
-holds again once KS41G6AL's test file is committed alongside it.
+`inject_until_sent`'s read count on the tmux non-busy path. Bisected with `git archive`
+snapshots under `--noconftest`: `6803ade0^` green, **`6803ade0` red**, and red through
+`87622b4c` (a 21:04 version of this entry said "green at 6803ade0, red from 0c7037bc" —
+a snapshot-directory name collision measured the parent twice; corrected). So phase 1's
+post-submit confirm (`_still_shows_ours`, two call sites) made a tmux injection read the
+pane 3 times instead of 2 on that path. TRDD-KS41G6AL updated the only test that pinned
+the old count (fixture side; `terminal_trigger.py` unchanged) and is `testing` with only
+the publish-gate box open. What this card's reviewer still has to decide: that the extra
+confirm read on the tmux path is intended by phase 1's design (the STATE above says the
+guard is re-asked during the verified wait), not a side effect — KS41G6AL took "intended"
+from that STATE text, not from the reviewer.
 
 **Owner report (verbatim, 2026-09-05 11:45):** *"you made a mess.. the compaction script of the
 janitor injected 4 times the compact command, and the api gave error"* — the pane showed

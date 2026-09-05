@@ -104,9 +104,9 @@ def test_still_wanted_True_keeps_the_8s_defer_cadence() -> None:
     # 6803ade0 — NOT 87622b4c, which never touches this function) re-reads the pane once more
     # after Enter. On THIS path that is exactly 3 `reader(terminal)` calls, not 2: (1) the
     # empty-field read, (2) the settle read after `type_fn()`, (3) the confirm read. The 3rd
-    # read here is EMPTY — modelling Enter having cleared the field, the normal successful-
-    # submit case — which fails `prompt_field_shows_only` and stops the confirm loop before it
-    # touches `is_typing` again, so this fixture's 3-item `typing` iterator above is untouched
+    # read here is EMPTY — as if Enter had cleared the field — which fails
+    # `prompt_field_shows_only` and stops the confirm loop before it touches `is_typing`
+    # again, so this fixture's 3-item `typing` iterator above is untouched
     # (still consumed exactly 3x: two defers + one "not typing"). Bounded, not held-forever: a
     # 4th call raises, so a future extra re-read trips this test loudly instead of passing.
     reader = _seq(_pane(""), _pane("/clear"), _pane(""))
@@ -129,8 +129,8 @@ def test_absent_still_wanted_changes_nothing() -> None:
     """The default (None) is the historical contract — no probe, clock-bounded only."""
     sent: list[str] = []
     # TRDD-KS41G6AL: same 3-read count as above (no `still_wanted` probe changes how many times
-    # the field is read). The 3rd read is EMPTY for the same reason — Enter cleared the field —
-    # which here also matters because `is_typing` is a constant `False`: if the 3rd read instead
+    # the field is read). The 3rd read is EMPTY for the same reason — as if Enter had cleared
+    # the field — which here also matters because `is_typing` is a constant `False`: if the 3rd read instead
     # still showed "/clear", `_still_shows_ours` would stay True forever (nothing ever signals
     # "stop"), and the confirm loop would press Enter a 2nd time, failing `sent == ["Enter"]`.
     reader = _seq(_pane(""), _pane("/clear"), _pane(""))

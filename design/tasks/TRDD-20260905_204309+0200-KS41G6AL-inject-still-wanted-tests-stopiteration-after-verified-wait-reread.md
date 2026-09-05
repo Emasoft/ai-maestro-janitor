@@ -3,7 +3,7 @@ trdd-id: KS41G6AL
 title: test_inject_still_wanted raises StopIteration since the verified wait re-reads the pane through _still_shows_ours
 column: testing
 created: 2026-09-05T20:43:09+0200
-updated: 2026-09-05T21:04:00+0200
+updated: 2026-09-05T21:08:00+0200
 current-owner: janitor-main-session
 assignee: janitor-main-session
 task-type: bugfix
@@ -18,7 +18,7 @@ eht: []
 
 See also: TRDD-Q8PNPRTW (where the pair surfaced), TRDD-7NSRD8OV (the suite-health parent).
 
-## ⏵ STATE — 2026-09-05 21:04 — fixture fixed, targeted checks green, provenance bisected
+## ⏵ STATE — 2026-09-05 21:08 — fixture fixed, targeted checks green, provenance bisected to 6803ade0
 
 Fixture side was stale (worker report in
 `reports/board-drain/20260905_210043+0200-KS41G6AL-inject-still-wanted.md`; diff read in
@@ -27,14 +27,20 @@ reader is exhausted afterwards. `5 passed` / `test_terminal_trigger.py` `43 pass
 skipped`, ruff/mypy/pyright clean. `terminal_trigger.py` untouched.
 
 Provenance, bisected by the coordinator with `git archive` snapshots run under
-`--noconftest` (the old conftest's session witnesses hang in this environment):
-`6803ade0^` 5 passed · `6803ade0` 5 passed · `0c7037bc` 2 failed · `a0455402` 2 failed ·
-`87622b4c` 2 failed. So `_still_shows_ours` and both call sites arrived in `6803ade0`
-(def/call counts 1/3 from there on, 0/0 before), but these two tests first REACHED the
-third read at `0c7037bc` ("self-send ceiling refuses under a 5 s floor, one clock read per
-command") — the Mechanism section below was written before the bisect and named
-`87622b4c`; that was wrong on both counts. Remaining box: the full suite at the publish
-gate; `testing` per the JDIJ76SW / TASA9ACJ pattern.
+`--noconftest` (with the old conftest the snapshot runs hung for minutes on a 0.1 s file —
+not diagnosed; the tests inject every collaborator as a lambda, so the verdicts are
+comparable, and the working tree passes both ways): `6803ade0^` 5 passed ·
+**`6803ade0` 2 failed** · `0c7037bc` 2 failed · `a0455402` 2 failed · `87622b4c` 2 failed.
+`6803ade0` (HMLS5WE8 phase 1) introduced `_still_shows_ours` with both call sites
+(def/call grep 1/3 from there on, 0/0 before) and is the commit that turned these tests
+red; `0c7037bc` does not touch `inject_until_sent` at all (its hunks are the iTerm-id
+validators, `self_terminal`, and `run_verified_send`). An earlier version of this block
+(21:04, commit `7b4148aa`) said "green at 6803ade0, first red at 0c7037bc": the snapshot
+dir for `6803ade0^` was named by stripping the caret, so it collided with `6803ade0`'s
+and both "runs" measured the parent — caught by the review fork asking what 0c7037bc had
+changed on the read path (nothing). The Mechanism section below was written before the
+bisect and named `87622b4c`; wrong too. Remaining box: the full suite at the publish gate;
+`testing` per the JDIJ76SW / TASA9ACJ pattern.
 
 ## Symptom
 
@@ -61,8 +67,8 @@ reads the pane three times — initial field read, settle read after typing, con
 while the fixture `reader=_seq(_pane(""), _pane("/clear"))` supplied two, so the third read
 raised `StopIteration`. The three passing tests use `_seq(_pane("busy"))` and never reach
 the wait. `tests/test_terminal_trigger.py` moved with HMLS5WE8; `test_inject_still_wanted.py`
-(untouched since `11f176a4`, written for the generic cancel hook) did not. Which HMLS5WE8
-commit first made these tests reach the third read: `0c7037bc`, per the bisect above.
+(untouched since `11f176a4`, written for the generic cancel hook) did not. The commit that
+turned the tests red is `6803ade0` itself, per the bisect above.
 
 ## Fix requirement
 
