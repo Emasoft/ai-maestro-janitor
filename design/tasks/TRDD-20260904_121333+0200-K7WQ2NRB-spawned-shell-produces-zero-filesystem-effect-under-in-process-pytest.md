@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T02:28:55+0200
+updated: 2026-09-05T02:33:57+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -16,7 +16,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [6268dbeb]
 external-refs: [TRDD-Q8PNPRTW]
 ---
 
@@ -232,16 +232,54 @@ on Q8PNPRTW for being plausible.
    configuration that actually fails, with its load on the record. Expensive by construction
    (~12 min/iteration), which is exactly why the 4 in-config data points so far are worth
    counting before spending more.
-   **RUNNING since 2026-09-05T02:28:21+0200** — `scripts_dev/k7wq2nrb_full_suite_load_loop.sh`
-   (gitignored; the harness is scratch, the numbers are the record). `uv run pytest -n auto`,
-   the soak9 shape, up to `MAX_RUNS=8`, load sampled every 15 s, every run's full output kept
-   in `reports/suite-failures/20260905_022821+0200-k7wq2nrb-full-suite-loop/` with a
-   `ledger.tsv` of run/exit/load-start/load-end/duration/summary. It **stops early on
-   `^FAILED tests/test_capture_all_logins`** — that capture is what the runs are being spent
-   on, and it now arrives with the child's stderr attached (step 1, landed below). A `STOP`
-   file in the report dir halts it between runs. Row 2's instrumentation was landed FIRST, on
-   purpose: a failure caught by a loop started before it would have thrown its evidence away
-   exactly as every failure so far has.
+   **⚠ THE STEP'S OWN COST ESTIMATE ABOVE IS WRONG, AND THAT IS THE FIRST RESULT.
+   MEASURED 2026-09-05T02:28: a green `-n auto` full suite is 77.53 s here — `16416 passed,
+   1 skipped`, host load 5.35 → 14.34.** Not "~12 min/iteration": that figure is the SERIAL
+   shape. So the runs this step calls "expensive by construction" cost ~80 s each, and the
+   argument for counting the 4 existing points before spending more does not apply to this
+   configuration at all. **The much sharper consequence is a discriminator nobody had:
+   soak9 — the FAILING `-n auto` run — took 822.89 s** (Q8PNPRTW `:212`). Same command, same
+   suite, **10.6× the wall clock**, start load 15.53 vs 5.35. A run that slow was not merely
+   "under load"; it was contending for CPU with something large for its whole duration. **A
+   green 78 s run is therefore NOT a sample from soak9's population**, and a loop that only
+   ever produces 78 s runs may be incapable of reproducing the failure no matter how many
+   iterations it buys. Duration is now a cheap per-run proxy for "was this run even in the
+   right regime", and the ledger records it. *Not yet established:* whether the slowness
+   CAUSES the failure or merely accompanies it — one paired observation, no manipulation.
+
+   **STARTED 2026-09-05T02:33:05+0200** (a start event, not a state — see the check below) —
+   `scripts_dev/k7wq2nrb_full_suite_load_loop.sh` (gitignored; the harness is scratch, the
+   numbers are the record). `uv run pytest -n auto`, the soak9 shape, `MAX_RUNS=30`,
+   `RUN_TIMEOUT=1800`, load sampled every 15 s, every run's full output kept under
+   `reports/suite-failures/20260905_023305+0200-k7wq2nrb-full-suite-loop/` with a `ledger.tsv`
+   of run/exit/load-start/load-end/duration/summary. **Two EARLIER sibling dirs are not this
+   run and must not be read as its data:** `…022821+0200` is the first launch (one green run,
+   77.53 s — the measurement above; stopped so the harness could be fixed without editing a
+   script bash was mid-read of), and `…023245+0200` is the deliberate `RUN_TIMEOUT=5` smoke
+   test whose single `exit 124` row proves the timeout path, not a hang in the suite.
+   **VERIFY IT IS STILL ALIVE BEFORE BELIEVING THIS LINE** — nothing updates it when the loop
+   dies, is killed by a session restart, or wedges: `tail ledger.tsv` and check the process
+   table. A stale last row with no pytest running means the loop is dead and this paragraph is
+   history.
+   **It stops on the EXIT CODE, not on an output format.** The first version stopped on
+   `^FAILED tests/test_capture_all_logins`, which exists only by virtue of pytest's `-r`
+   default and is absent entirely from a timed-out or crashed run — a loop whose only exit
+   lever is a rendering detail can burn its whole budget and stop on nothing. Now: non-zero
+   exit stops it, and grep only CLASSIFIES the stop (timeout / capture_all_logins / some other
+   test). **Exit 124 is a RESULT, not an accident** — it is the card's own predicted second
+   failure shape (the untimed `communicate()` at `capture_all_logins.py:157` blocking on a
+   grandchild that still holds the pipe, lines 384-392); uncapped, that shape would wedge the
+   loop silently. The timeout path was proven end-to-end with a deliberate `RUN_TIMEOUT=5`
+   run: exit 124, correctly classified, loop stopped. A `STOP` file in the report dir halts it
+   between runs.
+   Row 2's instrumentation was landed FIRST, on purpose: a failure caught by a loop started
+   before it would have thrown its evidence away exactly as every failure so far has.
+   **⚠ SCOPE — the loop's stop condition is WIDER than the instrumentation's reach.** It stops
+   on any red run, but the child's stderr is attached only for **row 2's `FileNotFoundError`
+   shape**. Not for the hang shape (the prints are after the `raises` block, which never
+   exits), and not for **row 1**, which got no instrumentation this turn — correctly, since it
+   inherits fds and `--capture=fd` already reports its child (1c). Do not read a captured stop
+   as "the stderr question is answered"; read the classification line first.
    **Why this does not violate step 1's "do not re-attempt by re-running the tests":** that
    prohibition rests on (1a), and the card brackets (1a) to the 2-test selection in its own
    words — *"licenses NOTHING about the full-suite configuration"*. Step 0 IS the configuration
@@ -398,6 +436,18 @@ on Q8PNPRTW for being plausible.
    `format --check`).
    *Unchanged by landing it:* **the MEASUREMENT still needs a failing run.** On a passing run
    both fields are `''`.
+   **⚠ THE EXEMPTION IS A SESSION JUDGMENT, NOT A CARD FINDING.** It is recorded in the same
+   voice as the measurements above, and it is not one — no measurement says a rule does not
+   apply. If a later session disagrees, `git revert 6268dbeb` is the whole undo.
+   *And the Notes rule is now FALSE AS WRITTEN for this file* — it says every probe editing
+   `tests/test_capture_all_logins.py` must be reverted, which would mis-instruct anyone who
+   reads it after this commit. Corrected in Notes to name its actual subject: probes that
+   CHANGE the thing under test.
+   **⚠ COVERS ONE OF THE TWO PREDICTED FAILURE SHAPES.** The prints sit AFTER the
+   `pytest.raises` block, so they run only if `capture_one` actually raised. In the hang shape
+   this card predicts (lines 384-392) `communicate()` never returns, the block never exits,
+   and the instrumentation contributes nothing — that run appears as a wedged worker, which is
+   why step 0 now caps each run and treats exit 124 as its own observation.
 
    **⇒ The original wording of this step, for the record:** bind the exception
    (`with pytest.raises(...) as ei`) and print/attach `ei.value.stderr` — the text the test
@@ -477,8 +527,15 @@ on Q8PNPRTW for being plausible.
 
 ## Notes
 
-- Any probe that edits `tests/test_capture_all_logins.py` MUST be reverted with the Edit tool
-  and verified by an empty `git status --porcelain` + `git diff`. The git guard refuses
-  `git checkout --` here, correctly.
+- Any probe that **CHANGES THE THING UNDER TEST** in `tests/test_capture_all_logins.py` — the
+  `.started` marker edited the child script, and that is the shape this rule is about — MUST
+  be reverted with the Edit tool and verified by an empty `git status --porcelain` +
+  `git diff`. The git guard refuses `git checkout --` here, correctly.
+  *(Narrowed 2026-09-05, and the narrowing is the exception's own justification, so weigh it
+  as such: as written the rule said EVERY edit to this file must be reverted, which would have
+  required reverting `6268dbeb` — an instrument whose only value is that the NEXT failure
+  keeps its evidence, i.e. a rule reading that guarantees the gap it was meant to close. The
+  hazard the rule actually guards is uncommitted probe state in a file the git guard will not
+  `checkout --`; a committed, behaviour-neutral change is not in that class.)*
 - Evidence: `reports/suite-failures/20260904_114209+0200-capture-all-logins-failure-state.md`,
   `reports/suite-failures/20260904_113039+0200-fixture-fork-latency.md`.
