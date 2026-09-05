@@ -1,13 +1,10 @@
 ---
 trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
-column: blocked
-pre-block-column: todo
-blocked-by: [user-decision-cpv-design-card-lint-scope]
-unblock-when: [decision:user]
+column: complete
 min-approval-requirement: user
 created: 2026-09-04T10:03:19+0200
-updated: 2026-09-04T14:19:13+0200
+updated: 2026-09-05T10:38:00+0200
 current-owner: ai-maestro-janitor-08
 task-type: infra
 scope: project
@@ -916,3 +913,7 @@ path outside the ignore list (`README.md`) lints normally, which is the control
 that distinguishes this from the CLI simply being broken. Use `--stdin`, or
 `-p /dev/null` to override the ignore file, and always pair a "clean" result with
 a positive control that proves files were read.
+
+## Approval log
+
+- 2026-09-05T10:38:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal). RULING: option 3 — no repo-side lint gating change; design cards keep satisfying CPV's `--strict` gate, because the card's own strongest finding is that every past MD056 hit was a REAL defect. Also applied: `.markdownlintignore` DELETED (`git rm`) — verified 2026-09-05 that no script under scripts/, no workflow under .github/, and no installed CPV script reads it, so it was a file whose only effect was to make readers believe an exclusion existed. The CPV doc/UX courtesy issue is filed separately.

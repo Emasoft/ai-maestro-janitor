@@ -1,9 +1,9 @@
 ---
 trdd-id: WP7TCRME
 title: The janitor FIXES instead of notifying — loudness gate, own-project-only warnings, and cross-project issue filing
-column: blocked
+column: complete
 created: 2026-08-12T20:13:28+0200
-updated: 2026-09-03T11:08:56+0200
+updated: 2026-09-05T10:38:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 approval-tier: 0
@@ -13,9 +13,6 @@ implementation-commits: [b8dbc254, 7ad7c0ee, da249936, d4d9f726]
 relevant-rules: []
 npt: []
 eht: []
-blocked-by: [user-decision-exempt-subset-applier]
-unblock-when: [decision:user]
-pre-block-column: todo
 external-refs: [TRDD-FENWWB4E, TRDD-CGYMUKO6]
 ---
 
@@ -213,3 +210,5 @@ the most expensive resource in the system to avoid using the cheapest.
   `dev`, not `backburner`: it is the USER's own directive, given in-session, and the filter
   half already shipped — leaving the card outside a WORK column would make an in-flight
   change look unstarted.
+- 2026-09-05T10:38:00+0200 — COMPLETED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal). RULING: the janitor MAY fix rather than only notify for the EXEMPT subset, because the governance already says so — `manager-approval-defaults.md` §F lists 'SHA-pin third-party GitHub Actions', 'apply baseline branch rulesets (as-is)', 'restore drifted branch rules back to the ratified baseline' and the config-lint/secret-scan runs as EXEMPT standard hardening. The card's own framing ('defensible either way, the difference is not technical') is right, and the tie-break is that the rules had already been written. Anything OUTSIDE §F stays notify-only; the loudness gate (one notice per applied fix) stands.
+

@@ -1,11 +1,9 @@
 ---
 trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
-column: blocked
-pre-block-column: todo
-unblock-when: [decision: owner approves or refuses the deferred-push change (it alters when the janitor types keystrokes into a live pane)]
+column: todo
 created: 2026-09-04T18:48:19+0200
-updated: 2026-09-04T19:05:00+0200
+updated: 2026-09-05T10:38:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,7 +13,6 @@ project-id: ai-maestro-janitor
 min-approval-requirement: user
 labels: [continuity, hooks, compaction, handoff, owner-reported]
 relevant-rules: []
-blocked-by: [owner decision on the deferred-push keystroke-timing change]
 npt: []
 eht: []
 implementation-commits: []
@@ -183,3 +180,7 @@ trading that away.
   call, not an agent's.
 - Evidence commands are in the STATE block above rather than in a gitignored report, so this
   card survives a `git clean`.
+
+## Approval log
+
+- 2026-09-05T10:38:00+0200 — APPROVED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal): the deferred-push change (defer ~60 s instead of cancelling when the pane is attended). It preserves the no-typing-under-live-fingers floor that the rejected alternative (shrinking `_PROMPT_WINDOW_S`) would have weakened, and it answers the one hard number on the card — 63 of 115 push decisions SUPPRESSED, measured directly. The trigger-attributed split (auto 66% / manual 38%) stays INDICATIVE, as the card itself labels it, and does not bear on the approval. Column restored to `todo`; this is now startable code work.
