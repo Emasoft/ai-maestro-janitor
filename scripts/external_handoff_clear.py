@@ -406,8 +406,20 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str
         "then": list(clear_trigger._BOOTSTRAP_CMDS),
         "state_dir": str(sd),
         "gate_baseline": clear_trigger._gate_baseline(),
+        # The after-phase clause is FIRST for the same reason the skill puts it first
+        # (`skills/janitor-handoff-and-clear/SKILL.md:116`): the checks it runs — context size,
+        # cron id, resume-flag consumption — are all properties of the FRESH session, and a
+        # turn of real work destroys the very deltas being measured.
+        #
+        # It is here because `_snapshot_before` above is UNCONDITIONAL: without this, every
+        # automated fire pays for a `before` snapshot that nothing ever compares against, and
+        # `handoff-clear-verify.json` keeps only a `before` key forever (measured on
+        # llm-externalizer, 2026-09-03 — TRDD-1QJIZFFW box 5 could not tick by waiting). So this
+        # does not ADD a cost; it stops discarding one already paid. The manual path has asked
+        # for it all along — the two directives had simply diverged.
         "directive": (
-            "read the injected SessionStart handoff summary FIRST (auto-composed with no "
+            "run `uv run scripts/handoff_clear_verify.py --phase after` FIRST, then "
+            "read the injected SessionStart handoff summary (auto-composed with no "
             "model turn — follow its wikimem/TRDD links via memgrep recall on demand), "
             "then resume your prior in-flight task."
         ),

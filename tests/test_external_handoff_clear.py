@@ -333,6 +333,7 @@ def test_fire_takes_a_verify_before_snapshot_before_spawning_the_chain(tmp_path,
     def fake_spawn(payload, env=None):
         seen["json_present_at_spawn"] = verify.is_file()
         seen["env_root"] = (env or {}).get("CLAUDE_PROJECT_DIR")
+        seen["directive"] = payload.get("directive", "")
 
     monkeypatch.setattr(clear_trigger, "_spawn_chain", fake_spawn)
     monkeypatch.setattr(cold_cache_compact, "mark_clear_fired", lambda sd, now=0: None)
@@ -341,6 +342,15 @@ def test_fire_takes_a_verify_before_snapshot_before_spawning_the_chain(tmp_path,
 
     assert seen["json_present_at_spawn"] is True
     assert seen["env_root"] == str(tmp_path)
+    # The `before` snapshot above is UNCONDITIONAL, so without an after-phase in the resume
+    # directive every fire writes a snapshot nothing ever compares against — measured on
+    # llm-externalizer 2026-09-03, where handoff-clear-verify.json held only a `before` key
+    # (TRDD-1QJIZFFW box 5). Assert the WHOLE invocation, not just the `--phase after`
+    # substring, so a directive that merely mentions the phase in prose cannot pass.
+    assert "handoff_clear_verify.py --phase after" in seen["directive"], seen["directive"]
+    # FIRST, because every check it runs (context size, cron id, resume-flag consumption) is a
+    # property of the fresh session that a turn of real work destroys.
+    assert seen["directive"].index("--phase after") < seen["directive"].index("handoff summary")
     before = json.loads(verify.read_text(encoding="utf-8"))["before"]
     assert before["cron_id"] == "abc12345"
     assert t0 <= before["ts"] <= t0 + ehc._VERIFY_BEFORE_TIMEOUT_S

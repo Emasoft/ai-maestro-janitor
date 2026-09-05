@@ -1,9 +1,9 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: dev
+column: testing
 created: 2026-08-12T13:11:10+0200
-updated: 2026-09-05T09:02:33+0200
+updated: 2026-09-05T09:26:14+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -54,9 +54,19 @@ So the 2026-09-03 automated cycle did not "forget" the after-phase: **its direct
 asked for it.** Every future automated fire will do the same, leaving a `before`-only
 `handoff-clear-verify.json` indefinitely, so box 5 cannot tick by waiting.
 
-**The fix is small and already has a reference implementation:** add the after-phase clause
-to the automated directive at `external_handoff_clear.py:409`, matching what the skill has
-done all along. Then box 5 becomes a live-event wait like box 4 was.
+**✅ FIXED 2026-09-05 — the automated directive now asks for the after-phase**
+(`external_handoff_clear.py`, the `"directive"` key of the `_spawn_chain` payload), worded
+after the skill's. Pinned by a test on the spawn payload
+(`tests/test_external_handoff_clear.py`) that asserts the WHOLE invocation
+`handoff_clear_verify.py --phase after` — not the bare `--phase after` substring, which prose
+could satisfy — and that it precedes the handoff-summary clause, because every check it runs
+is a property of the fresh session that a turn of real work destroys. 22 + 18 tests pass,
+ruff/mypy/pyright clean.
+
+**This does not ADD a cost.** `_snapshot_before` is unconditional, so the `before` half was
+already being paid on every fire and thrown away. Box 5 is now what it was always described
+as: a live-event wait for the next automated clear, whose resumed session should leave a
+PASS/FAIL table in `reports/continuity-build/`.
 
 **⚠ MY FIRST VERSION OF THIS BLOCK SAID "nothing tells the resumed session to", AND THAT WAS
 FALSE.** It rested on one `grep` of `scripts/` — a negative existence claim from a single
@@ -72,8 +82,10 @@ and the cheap one is only visible once you know the manual path already solved i
 ~~No code work remains — the two open boxes are both measurements on future/next automated fires.
 Column moved `dev → testing` accordingly.~~
 
-**Column moved BACK `testing → dev` (2026-09-05).** `testing` asserts the work is built and
-under test; the automated directive's after-phase clause is not built.
+**Column: `testing → dev → testing` (2026-09-05).** Moved to `dev` when the missing clause was
+found, and back to `testing` the same day now that it is built and pinned by a test. The round
+trip is left visible because it is the honest record: the card spent two days in `testing`
+asserting that something was under test which did not exist.
 
 **Also verified in passing — TRDD-BDZG8Y8A looks DONE:** it was filed because "the daemon fire
 path takes no `--phase before` snapshot", and `external_handoff_clear.py:401` now calls
