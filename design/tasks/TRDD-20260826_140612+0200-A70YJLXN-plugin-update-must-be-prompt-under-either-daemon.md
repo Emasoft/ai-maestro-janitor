@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: dev
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-05T16:35:40+0200
+updated: 2026-09-05T16:38:30+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -21,17 +21,24 @@ relevant-rules: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
-**2026-09-05 16:35 — the peer's option-4 commit `9725bebf` is LIVE on this host but NOT on GitHub.**
-Measured read-only: `gh api repos/Emasoft/ai-maestro/commits/9725bebf` → 422 "No commit found";
-no commit on ai-maestro `main` dated today; ai-maestro#156 is CLOSED (stateReason COMPLETED,
-09:25Z) by a comment from the hub-session Claude naming that SHA. In the peer's local clone the
-commit exists (`fix(absorbed-duty): honour version-update-requested.flag on the next POLL, not the
-next 4h tick`, 2026-09-05T09:52:10+02:00) on the unpushed local branch `governance-rules`, and it
-IS an ancestor of `2fb4ef1c`, the checkout the running server reports in
-`~/.aimaestro/server-liveness.json` (pid 24895, started 11:16:27 today). So: option 4 is in effect
-here since 11:16 today; every other host is still on the 4 h floor until the peer pushes. **Box 2 is
-now measurable on this host at the next janitor release** (publish→installed latency; expect ≤15 min).
-Nothing here is the janitor's to fix — the push is the peer's/USER's call.
+**2026-09-05 16:38 — the peer's option-4 commit `9725bebf` is in the running server's checkout on
+this host, and is NOT on GitHub.** Measured read-only: `gh api repos/Emasoft/ai-maestro/commits/9725bebf`
+→ 422 "No commit found"; no commit on ai-maestro `main` dated today; ai-maestro#156 is CLOSED
+(stateReason COMPLETED, 09:25Z) by a comment from the hub-session Claude naming that SHA. In the
+peer's local clone the commit exists (`fix(absorbed-duty): honour version-update-requested.flag on
+the next POLL, not the next 4h tick`, 2026-09-05T09:52:10+02:00), unpushed, and it IS an ancestor of
+`2fb4ef1c`, the checkout the running server reports in `~/.aimaestro/server-liveness.json`; the server
+process started 5 s after that commit's timestamp. The server runs via `tsx` from the working tree and
+the tree is dirty (8 files), so the loaded code was checked separately: `git diff 2fb4ef1c --
+services/auto-update-service.ts` (the file that defines `runAbsorbedDutyPoll`) is EMPTY and the
+working copy carries the `version-update-requested.flag` check — the resident file equals the fixed
+commit. Bounded claim: option 4 is live on THIS host (since the 11:16 server start, assuming no
+hot-reload since); a host installing the peer from GitHub does not have it yet. **Box 2 is now
+measurable on this host at the next janitor release** (publish→installed latency; the peer's stated
+figure is ≤15 min, one poll). Nothing here is the janitor's to fix; whether and when the commit is
+pushed is the peer's/USER's decision. A first wording of this bullet (commit 455740bc) said "in
+effect since 11:16" and "every other host is still on the 4 h floor" — the first was an inference
+until the diff above, the second was never measured; both corrected here.
 
 **Q1 — who RAISES `version-update-requested.flag`?** The janitor's own per-session
 `version-update` detector, and nothing else in this repo. Writer:
