@@ -332,6 +332,27 @@ _BULK_RECHECK_SEC = max(
     1, _env_interval("CLAUDE_PLUGIN_OPTION_DAEMON_BULK_RECHECK_INTERVAL", 5)
 )
 
+# Per-beat foreground budget (TRDD-QJ5LP4W2) — a run of individually-legal sub-60s
+# foreground bodies can still stall the loop past its interval when several land in
+# one pass (measured on 8BXMNQ4T: 12 stalls in a 6h22m snapshot, median 92.7% of each
+# stall window filled by foreground task bodies; the blockers are NOT single long
+# bodies — one stall was 55s+15s). Half the 60s survival cadence (oauth-rotator-tick,
+# fleet-stop — GLOBAL_CHORES), so a budget-exceeded beat still leaves headroom before
+# the next due 60s beat instead of consuming the whole interval on foreground work.
+# DESIGN DEFAULT, NOT A MEASUREMENT: no data in TRDD-QJ5LP4W2 pins 30s over e.g. 20s
+# or 40s, only that some bound beats none — and it carries no advisor sign-off either
+# (the advisor plugin was disabled when this was drafted; see the card's STATE block).
+_FOREGROUND_BUDGET_SEC = max(
+    1, _env_interval("CLAUDE_PLUGIN_OPTION_DAEMON_FOREGROUND_BUDGET_SEC", 30)
+)
+# Never deferred by the budget above, regardless of dispatch order — the OAuth
+# survival chain (TRDD-QJ5LP4W2 §B3). Only the first two are literally the "60s
+# survival beats" _build_tasks' own comment names; the other two are included by
+# role (rotator supervision / recovery) rather than a measured survival dependency.
+_FOREGROUND_FLOOR = frozenset(
+    {"oauth-rotator-tick", "fleet-stop", "oauth-rotator-supervisor", "oauth-recovery"}
+)
+
 # Grace added on top of _WORKLOAD_TIMEOUT_SEC before the parent hard-kills a
 # detached background child. The child's own _run_workload caps should end it
 # first; this is the belt for a child wedged OUTSIDE a workload subprocess.
@@ -2899,7 +2920,7 @@ class Task:
                 state.atomic_write(self.failcount_path, "0")
             state.log_line("daemon", f"task '{self.name}' done in {dt_s}s (background)")
 
-    def run(self) -> None:
+    def run(self) -> int:
         if self.child_alive():
             # Belt for the cadence-bypass callers (_consume_version_update_request):
             # a synchronous run while this task's background child is in flight would
@@ -2907,7 +2928,7 @@ class Task:
             state.log_line(
                 "daemon", f"task '{self.name}' skipped — background run already in flight"
             )
-            return
+            return 0
         state.log_line("daemon", f"task '{self.name}' starting")
         t0 = time.time()
         failed = False
@@ -2936,6 +2957,7 @@ class Task:
                 if self._failcount():
                     state.atomic_write(self.failcount_path, "0")  # recovered → reset the streak
                 state.log_line("daemon", f"task '{self.name}' done in {dt}s")
+        return dt
 
 
 def _build_tasks() -> list[Task]:
@@ -3036,13 +3058,18 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
     """One due-pass over `tasks` (extracted from main() for testability after the
     2026-07-17 oauth-rotation starvation incident).
 
-    Foreground tasks run synchronously as before. Background (bulk) tasks run in ONE
-    detached child at a time — the bulk lane: finished children are reaped first
-    (stamping last-run/failcount), then at most one due background task is spawned.
-    One lane (not N children) preserves the old single-loop serialization between
-    the bulk chores themselves. A due background task deferred by a busy lane stays
-    due and is retried on the next pass. Returns whether the bulk lane is busy AFTER
-    the pass, for the sleep computation."""
+    Foreground tasks run synchronously as before, bounded by a per-beat foreground
+    budget (TRDD-QJ5LP4W2): once cumulative foreground runtime this pass reaches
+    _FOREGROUND_BUDGET_SEC, remaining non-floor foreground tasks are deferred to the
+    next pass (their last-run untouched, so they stay due) rather than run now.
+    _FOREGROUND_FLOOR tasks (the OAuth survival chain) always run regardless of
+    budget. Background (bulk) tasks run in ONE detached child at a time — the bulk
+    lane: finished children are reaped first (stamping last-run/failcount), then at
+    most one due background task is spawned. One lane (not N children) preserves the
+    old single-loop serialization between the bulk chores themselves. A due
+    background task deferred by a busy lane stays due and is retried on the next
+    pass. Returns whether the bulk lane is busy AFTER the pass, for the sleep
+    computation."""
     for task in tasks:
         if task.background:
             task.poll_background()  # reap even while yielded/paused — bookkeeping only
@@ -3050,7 +3077,15 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
     # Decided ONCE, before the loop, so the choice cannot depend on where we are in
     # list order — that dependence is exactly the starvation `_next_bulk_task` cures.
     bulk_next = None if bulk_busy else _next_bulk_task(tasks, yielded)
-    for task in tasks:
+    # Dispatch order for the loop below, oldest-last-run-first — mirrors
+    # `_next_bulk_task`'s own starvation fix so a non-floor task near the tail of the
+    # fixed registration order isn't structurally the one that always pays for an
+    # over-budget beat. Background dispatch is unaffected by position (`bulk_next` is
+    # a fixed object, selected above); floor tasks always run regardless of position.
+    dispatch_order = sorted(tasks, key=lambda t: t._last_run())
+    budget_used = 0.0
+    budget_exceeded_logged = False
+    for task in dispatch_order:
         # A kill-switch set mid-loop skips the REMAINING tasks NOW, not after the current
         # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause and maintenance
         # used to join it here; both are gone (owner directive 2026-07-31), so the only
@@ -3067,7 +3102,17 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
             task.spawn_background()
             bulk_busy = True
             continue
-        task.run()
+        if task.name not in _FOREGROUND_FLOOR and budget_used >= _FOREGROUND_BUDGET_SEC:
+            if not budget_exceeded_logged:
+                state.log_line(
+                    "daemon",
+                    f"chore-coordination: foreground budget {_FOREGROUND_BUDGET_SEC}s "
+                    f"exceeded ({budget_used:.0f}s used this pass) — deferring remaining "
+                    "non-floor tasks",
+                )
+                budget_exceeded_logged = True
+            continue  # stays due; last-run untouched, retried next pass
+        budget_used += task.run()
     return any(t.child_alive() for t in tasks if t.background)
 
 
