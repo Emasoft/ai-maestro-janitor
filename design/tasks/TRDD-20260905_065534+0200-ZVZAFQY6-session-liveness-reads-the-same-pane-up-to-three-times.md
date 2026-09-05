@@ -3,15 +3,15 @@ trdd-id: ZVZAFQY6
 title: session-liveness reads the same pane up to three times per instance on the field-busy path
 column: todo
 created: 2026-09-05T06:55:34+0200
-updated: 2026-09-05T06:55:34+0200
+updated: 2026-09-05T08:41:57+0200
 current-owner: main-session
-task-type: refactor
+task-type: docs
 priority: low
 severity: low
 scope: project
 project-id: ai-maestro-janitor
 min-approval-requirement: none
-labels: [daemon, session-liveness, redundant-io]
+labels: [daemon, session-liveness, redundant-io, deliberate-redundancy]
 relevant-rules: []
 blocked-by: []
 npt: []
@@ -21,6 +21,35 @@ external-refs: [TRDD-QJ5LP4W2, TRDD-8BXMNQ4T]
 ---
 
 # session-liveness reads the same pane up to three times per instance
+
+## ⏵ STATE — READ THIS FIRST — 2026-09-05: THE FIX THIS CARD PROPOSED IS UNSAFE AND IS REFUSED
+
+**The three reads are DELIBERATE. Do not deduplicate them.** Investigated the same day the
+card was filed (read-only analysis, then the two load-bearing claims verified against
+source). Each read is fresh for a reason, and two of the three have an UNSAFE direction:
+
+| read | drives | stale in the unsafe direction ⇒ |
+|---|---|---|
+| 1 · `daemon.py:1999` | the RETRY_WEDGE decline (`:2000-2011`) and `state=` into `pane_actuate.act` (`:2052`, `:2107`) | wedge appears after the read ⇒ `plan()` branches on a screen it never saw — **covered**, because read 2 runs strictly later and refuses |
+| 2 · `fleet_inject.py:430` | whether the field is non-empty RIGHT NOW, gating the whole fire path | **empty → busy**: a permission dialog opens between read and keystroke and we type into it. **This is the 2026-07-17 incident class the guard exists to close** (`fleet_inject.py:404-411`). It must be taken as LATE as possible |
+| 3 · `fleet_inject.py:489` | whose text occupies an already-busy field | **ours → a human's**: reusing read 2's text still matches our vocabulary, so `ours` is wrongly truthy and `act(OWN_COMMAND_UNSUBMITTED)` fires a bare `Enter` — **onto the human's line** |
+
+**Read 3 is the decisive one, and the reason is that nothing downstream re-checks.**
+`pane_policy._submit` (`pane_policy.py:235-245`) tests ONLY
+`state.input_field.kind == InputFieldKind.EMPTY` before emitting the `Enter`; it never
+re-verifies the content is still ours. So read 3's freshness is the *sole* thing standing
+between the janitor and submitting a human's unrelated input. Verified first-hand at both
+sites, plus the exact-match rule in `field_holds_our_command` (`fleet_inject.py:470-475`).
+
+**The code already anticipated this refactor and rejected it.** That function's own
+docstring (`fleet_inject.py:459-468`) argues against caching the field content as a second
+source of truth, naming *"staleness and pane-reuse questions"* — i.e. this card — and
+concluding *"the field content is already the record."*
+
+**So the cost is real and it is the price of the guard.** Up to ~45 s per instance on the
+osascript channel is what it costs to check, twice, as close to the keystroke as possible,
+that we are not typing into someone's dialog or over their line. **A cheaper design must
+come from making the READ cheaper or the path rarer — never from reusing a capture.**
 
 ## The finding
 
@@ -64,36 +93,38 @@ is the thing that stops them checking.
   attributes an observed stall to it. **Do not write a commit message claiming it fixed
   one** unless a measurement says so.
 
-## The task
+## What is left of this card
 
-Make one pane capture serve the whole iteration. The shape is already established by
-`pane_actuate.act`, which takes `state=` and skips its own read — give
-`command_plan_field_busy` and `field_holds_our_queued_command` the same optional
-parameter and pass the `pane` already read at `daemon.py:1999`.
+Only the comment. `daemon.py:1995` says routing every keystroke through the policy table
+"costs no extra osascript (Proposal §5)" — true of `pane_actuate.act`, which receives
+`state=pane` and skips its own read (`pane_actuate.py:174`), and NOT true of the field-busy
+guard added beside it. Narrow its scope so a reader does not carry the claim onto the guard.
 
-**The one real design question, which is why this is not a two-line change:** the three
-reads are at three different instants, and the guard exists precisely because the field
-can change under it (a permission prompt appearing between reads is the 2026-07-17
-incident the guard was added for). Re-using one capture makes the check cheaper and
-STALER. Decide deliberately whether staleness is acceptable at each site, and record
-the reasoning — if it is not, the correct fix may be to drop read #1 or #2 rather than
-share one.
+Full analysis: `reports/zvzafqy6-pane-read-staleness/20260905_071916+0200-staleness-safety-per-call-site.md` (gitignored).
 
 ## Acceptance criteria
 
-- [ ] At most one `read_pane_text` per instance per beat on the field-busy path, OR a
-      written justification on this card for each read that survives.
-- [ ] The staleness question above is answered explicitly, not silently resolved by
-      whichever refactor was convenient.
-- [ ] `daemon.py:1995`'s "costs no extra osascript" comment is either true of all
-      neighbouring code or corrected to say which paths it covers.
-- [ ] A test pins the read count for one instance on the field-busy path, so a future
-      helper cannot quietly add a fourth.
+- [ ] `daemon.py:1995`'s comment names which paths it covers.
+- [ ] A comment at the field-busy guard records WHY the two reads are independent — the
+      unsafe direction of each, in one line — so the next person to notice the redundancy
+      finds the answer at the code rather than re-deriving it here.
+- [ ] ~~At most one `read_pane_text` per instance per beat~~ **REFUSED, see STATE.**
+- [ ] ~~A test pins the read count~~ **REFUSED — it would pin the unsafe design.** If
+      anything is pinned it is the opposite: that reads 2 and 3 each take their OWN capture.
 
 ## Notes and lessons learned
 
-- **A helper that resolves its own inputs cannot be composed cheaply.**
-  `command_plan_field_busy(terminal, plan)` takes the terminal, not the text, so every
-  caller pays a capture even when one is already in hand. The version that takes the
-  data and a version that fetches it are not the same function; the second silently
-  costs whatever fetching costs, at every call site, forever.
+- **A helper that resolves its own inputs cannot be composed cheaply — and sometimes that
+  is the point.** `command_plan_field_busy(terminal, plan)` takes the terminal, not the
+  text, so every caller pays a capture even when one is already in hand. That reads as a
+  design flaw until you ask what the function is FOR: it answers *"is the field busy right
+  now"*, and a parameter carrying text someone else read cannot answer *now*. **Taking the
+  terminal rather than the text is how the signature makes staleness unrepresentable.**
+- **Redundancy that costs 15 s a call is not obviously waste — find out what it buys before
+  removing it.** This card was filed as a redundant-IO fix on a real, correctly-measured
+  cost, and the fix would have let the janitor press Enter on a human's half-typed line. The
+  measurement was right and the conclusion did not follow from it.
+- **The refusal belongs at the CODE, not only here.** A future reader meets the three reads
+  in `daemon.py` long before they find this card, and will re-derive the same wrong fix. That
+  is why an acceptance box now asks for a one-line why at the guard — a card nobody opens
+  cannot defend an invariant.
