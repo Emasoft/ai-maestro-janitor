@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=ab94c537309f generated=2026-09-05T04:44:40+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=02ab66eb3113 generated=2026-09-05T16:07:52+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -208,6 +208,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
 - [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
 - [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
+- [oauth-rotator-keychain-latch-false-positive-under-load](.claude/project/memory/oauth-rotator-keychain-latch-false-positive-under-load.md) — the janitor failed again to rotate
 - [plugin-cache-install-integrity](.claude/project/memory/plugin-cache-install-integrity.md) — the installed plugin is missing agents commands or hooks
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
 - [review-fork-gate-when-to-spawn-and-when-not](.claude/project/memory/review-fork-gate-when-to-spawn-and-when-not.md) — the review-fork gate fires on every turn
