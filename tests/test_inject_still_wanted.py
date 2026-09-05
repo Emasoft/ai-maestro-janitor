@@ -100,10 +100,20 @@ def test_still_wanted_True_keeps_the_8s_defer_cadence() -> None:
     typing = iter([True, True, False])
     slept: list[float] = []
     sent: list[str] = []
+    # TRDD-KS41G6AL: `inject_until_sent`'s post-submit confirm (`_still_shows_ours`, added by
+    # 6803ade0 — NOT 87622b4c, which never touches this function) re-reads the pane once more
+    # after Enter. On THIS path that is exactly 3 `reader(terminal)` calls, not 2: (1) the
+    # empty-field read, (2) the settle read after `type_fn()`, (3) the confirm read. The 3rd
+    # read here is EMPTY — modelling Enter having cleared the field, the normal successful-
+    # submit case — which fails `prompt_field_shows_only` and stops the confirm loop before it
+    # touches `is_typing` again, so this fixture's 3-item `typing` iterator above is untouched
+    # (still consumed exactly 3x: two defers + one "not typing"). Bounded, not held-forever: a
+    # 4th call raises, so a future extra re-read trips this test loudly instead of passing.
+    reader = _seq(_pane(""), _pane("/clear"), _pane(""))
     ok, why = tt.inject_until_sent(
         {"kind": "tmux", "pane": "%1"}, "/clear",
         type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
-        reader=_seq(_pane(""), _pane("/clear")),
+        reader=reader,
         is_typing=lambda _t: next(typing),
         still_wanted=lambda: (True, "cache still expired"),
         sleeper=slept.append, clock=lambda: 0.0,
@@ -111,19 +121,29 @@ def test_still_wanted_True_keeps_the_8s_defer_cadence() -> None:
     assert ok, why
     assert sent == ["Enter"]
     assert slept[:2] == [8.0, 8.0]
+    with pytest.raises(StopIteration):
+        reader()  # exactly 3 reads consumed — a 4th proves a read-count regression, not passes one
 
 
 def test_absent_still_wanted_changes_nothing() -> None:
     """The default (None) is the historical contract — no probe, clock-bounded only."""
     sent: list[str] = []
+    # TRDD-KS41G6AL: same 3-read count as above (no `still_wanted` probe changes how many times
+    # the field is read). The 3rd read is EMPTY for the same reason — Enter cleared the field —
+    # which here also matters because `is_typing` is a constant `False`: if the 3rd read instead
+    # still showed "/clear", `_still_shows_ours` would stay True forever (nothing ever signals
+    # "stop"), and the confirm loop would press Enter a 2nd time, failing `sent == ["Enter"]`.
+    reader = _seq(_pane(""), _pane("/clear"), _pane(""))
     ok, _ = tt.inject_until_sent(
         {"kind": "tmux", "pane": "%1"}, "/clear",
         type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
-        reader=_seq(_pane(""), _pane("/clear")),
+        reader=reader,
         is_typing=lambda _t: False,
         sleeper=lambda _s: None, clock=lambda: 0.0,
     )
     assert ok and sent == ["Enter"]
+    with pytest.raises(StopIteration):
+        reader()  # exactly 3 reads consumed — bounded, not held-forever
 
 
 def test_run_chained_inject_gates_ONLY_the_first_command(monkeypatch) -> None:

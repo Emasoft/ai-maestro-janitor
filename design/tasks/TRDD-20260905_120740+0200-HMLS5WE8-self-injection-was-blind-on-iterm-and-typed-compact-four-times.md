@@ -3,7 +3,7 @@ trdd-id: HMLS5WE8
 title: Self-injection was blind on iTerm and typed compact four times into one field
 column: human_review
 created: 2026-09-05T12:07:40+0200
-updated: 2026-09-05T13:14:00+0200
+updated: 2026-09-05T21:04:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -17,6 +17,18 @@ implementation-commits: [6803ade0, 0c7037bc, a0455402]
 # Self-injection was blind on iTerm and typed `/compact` four times into one field
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
+
+### ⏵ 2026-09-05 21:04 (janitor-main-session) — a test this card's commits turned red, fixed under TRDD-KS41G6AL; read before approving
+
+`tests/test_inject_still_wanted.py` (untouched since `11f176a4`) failed two tests in
+isolation with `StopIteration`: its two-read `_seq` fixture was shorter than
+`inject_until_sent`'s read count on that path. Bisected with `git archive` snapshots under
+`--noconftest`: green at `6803ade0^` and `6803ade0`, red from `0c7037bc` through `87622b4c`
+— `_still_shows_ours` and its two call sites arrived in phase 1 (`6803ade0`), the tests
+first reached the third read at `0c7037bc`. The fixture was the stale side;
+`terminal_trigger.py` was not changed. Fix landed in KS41G6AL (a derived card, because
+`human_review → dev` is not this session's transition). This card's `human_review` claim
+holds again once KS41G6AL's test file is committed alongside it.
 
 **Owner report (verbatim, 2026-09-05 11:45):** *"you made a mess.. the compaction script of the
 janitor injected 4 times the compact command, and the api gave error"* — the pane showed
@@ -166,10 +178,5 @@ completes. Nothing else is outstanding except the two untested claims listed und
 - A sender that cannot read the screen cannot be made safe by timers or dedupe windows: the
   180 s hook dedupe was working exactly as written and still produced four copies, because the
   question "is my command already there?" can only be answered by looking.
-- 2026-09-05 20:50 (janitor-main-session, append-only pointer — read before approving this
-  card): phase 1 (`6803ade0`) introduced `_still_shows_ours` with both of its call sites in
-  the verified wait, and `tests/test_inject_still_wanted.py` (untouched since `11f176a4`)
-  now fails two tests in isolation with `StopIteration` — its two-read `_seq` fixture is
-  shorter than the wait's read count. The fix lives in TRDD-KS41G6AL (a derived card,
-  because `human_review → dev` is not this session's transition to make); this card's
-  `human_review` claim is not true until KS41G6AL is green.
+- 2026-09-05 20:50 → moved to the STATE block at 21:04 (it was a status pointer, not a
+  lesson): see "a test this card's commits turned red" above.

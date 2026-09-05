@@ -45,7 +45,13 @@ external-refs: [TRDD-7NSRD8OV]
 > no sleep, no subprocess between the stub and the raise, so one run settles it) and
 > outside this card's "fails only inside the full suite" population — owned by
 > TRDD-KS41G6AL (`_still_shows_ours` and both its call sites arrived in `6803ade0`,
-> HMLS5WE8 phase 1; the test file was last touched in `11f176a4`, three weeks earlier).
+> HMLS5WE8 phase 1; the tests first went red at `0c7037bc` — bisected; the test file was
+> last touched in `11f176a4`, three weeks earlier). Fixed (fixture side), `5 passed`.
+> A second data point for the shared-state class, measured 20:55:
+> `test_dispatch_defang::test_stale_marker_gate_is_scoped_to_memory_maintenance` passes
+> alone and after `test_memory_dispatch_claim`, fails only when `test_memory_maintenance`
+> runs first in the same session — something that file leaves behind (pending-pool or
+> global-state path) is visible to the next file's detector subprocess.
 > The empty-stdout-rc0 cluster (5 ids across three detector subprocesses, all with
 > `stderr=''`) has a nameable hypothesis, recorded as a hypothesis, not a disposition: a
 > dedupe or floor stamp NOT scoped to the test's fake `HOME` — leaking across tests on one
