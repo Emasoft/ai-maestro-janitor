@@ -3,7 +3,7 @@ trdd-id: JDIJ76SW
 title: TRDD filename matcher drops v1-migrated bare TRDD-<8hex>-<slug> cards from detectors and the board count
 column: testing
 created: 2026-09-05T18:31:12+0200
-updated: 2026-09-05T19:00:30+0200
+updated: 2026-09-05T19:03:40+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -105,13 +105,15 @@ uppercase base36 id) and `TRDD-<uuid>-<slug>.md`, but no case for the bare
       short-id negative test) exists in `tests/test_trdd_common.py` asserting the bare-shape
       id is extracted, and passes via `uv run pytest tests/test_trdd_common.py -k
       test_extract_uid_bare`.
-- [x] TARGETED suite green (coordinator, 2026-09-05 18:53–19:00): every test file naming the
-      matcher or one of its six caller modules (`extract_uid|trdd_common|_all_folders_columns|
-      trdd-reminder|trdd-drift|cross-card-blindspot|ticket_proposal|findings_cli` over `tests/`,
-      24 files) — 411 + 243 passed, zero failures. Both runs exited 3 only because the
-      source-tree write guard saw `scripts/dispatch.py` change under a concurrent worker
-      (memory: rc3-with-every-test-passing-is-the-write-guard). The unscoped full run is NOT
-      claimed here; the pre-publish gate performs it.
+- [ ] Full suite still green: `uv run pytest` — the UNSCOPED run is not claimed here; the
+      pre-publish gate performs it. Evidence so far (coordinator, 2026-09-05 18:53–19:00):
+      every test file naming the matcher or one of its six caller modules (`extract_uid|
+      trdd_common|_all_folders_columns|trdd-reminder|trdd-drift|cross-card-blindspot|
+      ticket_proposal|findings_cli` over `tests/`, 24 files) — 411 + 243 passed, zero
+      failures. Each run exited 3 only because the source-tree write guard saw a file change
+      under a concurrent worker (run 1: `scripts/detectors/memory-maintenance.py`; run 2:
+      `scripts/dispatch.py` — read from each run's own guard line; memory:
+      rc3-with-every-test-passing-is-the-write-guard).
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T18:49:00+0200
 
