@@ -73,6 +73,16 @@ the SCRIPT, not a model handed a failing FIRST instruction, which retries or ask
 the very resume the lane exists to make fast. The directive now says
 *"a diagnostic — if it fails, skip it and carry on"*.
 
+**⚠ ONE LIMIT REMAINS, ACCEPTED AND VISIBLE.** Under the daemon, `_SCRIPTS` resolves inside
+the VERSION-PINNED plugin cache, and the directive is consumed minutes later — a plugin roll in
+that window leaves the path naming a pruned version. Measured 2026-09-05: 16 versions retained,
+oldest a week old, no pruning observed, and no stable `current` symlink to anchor on. The
+failure is benign and self-signalling: the skip clause keeps the resume moving, and box 5 needs
+an `after` key to APPEAR, so a skipped run leaves the box unticked rather than falsely ticked.
+The path-free fix — hand the resumed session a slash command, which resolves through the live
+plugin registry and cannot go stale — needs a command that does not exist yet.
+`${CLAUDE_PLUGIN_ROOT}` is NOT a substitute: verified unset in a plain Bash call.
+
 Pinned by a test on the spawn payload
 (`tests/test_external_handoff_clear.py`) that asserts the PROPERTIES rather than the literal
 — the harness path parses out of the directive and is ABSOLUTE and RESOLVES on disk, the

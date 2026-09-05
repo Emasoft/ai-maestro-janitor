@@ -437,12 +437,23 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str
         # harness is fail-open internally, but that covers the SCRIPT, not a model told to run
         # it: handed a failing FIRST instruction, a model retries, hunts for the file, or asks —
         # and that is the resume path, whose entire purpose is getting straight back to work.
+        # KNOWN LIMIT, accepted rather than hidden: under the daemon `_SCRIPTS` resolves inside
+        # the VERSION-PINNED plugin cache, and this string is consumed minutes later (the clear
+        # lane's whole shape is fire -> /clear -> re-arm -> resume, and a summary hold can add
+        # 15 min). A plugin roll in that window leaves the path naming a pruned version. Measured
+        # 2026-09-05: 16 versions retained, oldest a week old, no pruning observed and no stable
+        # `current` symlink to anchor on instead. The failure is BENIGN and VISIBLE — the skip
+        # clause below keeps the resume moving, and box 5 needs an `after` key to appear in the
+        # JSON, so a skipped run leaves the box unticked rather than falsely ticked. The
+        # path-free fix (hand the session a slash command, which resolves through the live plugin
+        # registry) needs a command that does not exist yet; `${CLAUDE_PLUGIN_ROOT}` is NOT a
+        # substitute — verified unset in a plain Bash call.
         "directive": (
             f'run: uv run --script --quiet "{_SCRIPTS / "handoff_clear_verify.py"}" '
-            "--phase after   (a diagnostic — if it fails, skip it and carry on), then "
-            "read the injected SessionStart handoff summary (auto-composed with no "
-            "model turn — follow its wikimem/TRDD links via memgrep recall on demand), "
-            "then resume your prior in-flight task."
+            "--phase after (a diagnostic - if that command fails, skip it and continue with "
+            "the rest), then read the injected SessionStart handoff summary (auto-composed "
+            "with no model turn - follow its wikimem/TRDD links via memgrep recall on "
+            "demand), then resume your prior in-flight task."
         ),
         # Let the chain's warm-cancel probe run ONLY when coldness is what fired us. The other
         # two triggers are idleness/prediction rules that fire with the cache deliberately warm.

@@ -353,10 +353,19 @@ def test_fire_takes_a_verify_before_snapshot_before_spawning_the_chain(tmp_path,
     # the CLEARED project and a repo-relative `scripts/...` names a file that is not there. Pin
     # that the harness is addressed by ABSOLUTE path — the first version of this clause shipped
     # relative and would have failed on every project but this one.
-    m = re.search(r'"(\S*handoff_clear_verify\.py)"', directive)
+    # `[^"]*` not `\S*`: the path is quoted precisely so it survives a space, and a
+    # whitespace-terminated pattern would match only the trailing fragment of
+    # `/Users/some one/...` — then fail the is_absolute assertion below and blame the wrong
+    # thing. macOS home directories with spaces are routine.
+    m = re.search(r'"([^"]*handoff_clear_verify\.py)"', directive)
     assert m, f"harness not invoked by a quoted path: {directive}"
     assert Path(m.group(1)).is_absolute(), f"harness path must be absolute: {m.group(1)}"
-    assert Path(m.group(1)).is_file(), f"harness path does not resolve: {m.group(1)}"
+    # Deliberately NOT asserting is_file(): under pytest the module is imported from the repo,
+    # so that check is a tautology here and unevaluable against the deployed plugin-cache path
+    # that actually ships. is_absolute() is the part that holds in both environments.
+    # ASCII only — this is typed into a live pane through an injector; an em-dash bought
+    # nothing and was the string's only non-ASCII character.
+    assert directive.isascii(), directive
     # `--script` makes it a self-contained PEP-723 run instead of resolving against the foreign
     # project's environment.
     assert "uv run --script" in directive, directive
