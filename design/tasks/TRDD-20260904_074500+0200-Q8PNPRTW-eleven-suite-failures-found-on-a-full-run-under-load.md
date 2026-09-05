@@ -82,7 +82,13 @@ external-refs: [TRDD-7NSRD8OV]
 > load-gated runner is ARMED for exactly that (13:26, detached `nohup`, machine-local and
 > gitignored: `scripts_dev/q8pnprtw_nauto_vs_n4.sh`); it waits for two quiet minutes, then
 > writes `reports/suite-soak/<ts>-q8pnprtw-experiment.log`, `<ts>-nauto.txt`/`.loadavg` and
-> `<ts>-n4.txt`/`.loadavg`. Read those before re-running anything.
+> `<ts>-n4.txt`/`.loadavg`. Read those before re-running anything. **Two caveats the runner
+> does not enforce:** the load gate is checked only at START — if the host gets busy mid-pass
+> (the owner returning), that pass reproduces the failing condition, so read the `.loadavg`
+> file beside a red result before believing it; and each pass has a 2400 s deadline (one hung
+> xdist worker otherwise never finishes), so an `exit=142`/killed pass is a hang, not a verdict.
+> The 38-test `-n auto` batch passing rules out "fails alone" ONLY — it does not discriminate
+> load from cross-test interaction with tests outside the 38; only the full-suite pair can.
 >
 > ### ⇒ THE USER DECISION, IN ONE LINE (everything else here is how we got to it)
 > **Accept the 10 remaining failures on a CHARACTERISATION rather than a mechanism, or refuse
