@@ -3,7 +3,7 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-05T05:18:15+0200
+updated: 2026-09-05T05:20:58+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -135,10 +135,25 @@ this card still flushes whatever is already queued.
       2026-09-02 22:40:36, against `v3.4.14` tagged **2026-09-04 00:38:38**. The whole fix
       ships in the installed 3.4.14, so **this box is NOT release-gated** — it waits only on a
       genuine no-headroom Fable wall, a live event.
-      *It was true when written (2026-09-03, when the newest release was 3.4.13). A release
-      then landed under it and nothing re-checked — the general hazard of writing "unpublished"
-      into a card at all: it decays silently on someone else's schedule. Record the SHAs and
-      the version they need, so a reader can re-evaluate instead of trusting a snapshot.*
+      *It was true when written (2026-09-03; `v3.4.13` is tagged **2026-09-02 22:16:50** and
+      `v3.4.14` **2026-09-04 00:38:38**, so 3.4.13 was indeed newest that day — dated, not
+      assumed). A release then landed under it and nothing re-checked.*
+      **⚠ AND THE SAME LINE'S OTHER HALF IS ALSO FALSE:** it says *"the core fix `e0c328c4` is
+      in installed 3.4.13"*. `e0c328c4` is **2026-09-02 22:35:00**, eighteen minutes AFTER
+      `v3.4.13` was tagged. It was never in 3.4.13. All three commits shipped together in
+      v3.4.14 — which is why "publish first" was the right call on 2026-09-03 and is the wrong
+      call now.
+      **The general lesson, and the reason the remedy is not a wash:** "record the SHAs and the
+      version they need" still makes a reader resolve SHA→release, but that is a **decidable**
+      lookup against git, available forever. "UNPUBLISHED" is an **undecidable** claim about a
+      moment that no longer exists — nothing in the repo can confirm or refute it. Decidable in
+      two steps beats undecidable in one.
+      **Provenance of this card's `updated:`, so the bump does not erase a signal:** it was
+      `2026-09-03T11:09:13+0200`, shared identically with 10 sibling cards — a batch sweep
+      timestamp meaning *"these were swept together, none individually examined."* The bump to
+      2026-09-05 reflects **this documentation correction, not progress on the work**, which is
+      exactly as stale as it was. `trdd-drift` ages on this field, so read the bump as
+      paperwork.
 
 ## Approval log
 
