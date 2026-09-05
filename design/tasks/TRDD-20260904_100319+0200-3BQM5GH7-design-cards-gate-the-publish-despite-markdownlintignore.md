@@ -3,6 +3,7 @@ trdd-id: 3BQM5GH7
 title: design cards gate the publish even though markdownlintignore excludes them
 column: blocked
 pre-block-column: todo
+blocked-by: [user-decision-cpv-design-card-lint-scope]
 unblock-when: [decision:user]
 min-approval-requirement: user
 created: 2026-09-04T10:03:19+0200
