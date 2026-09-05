@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T07:05:12+0200
+updated: 2026-09-05T07:14:40+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -49,15 +49,16 @@ external-refs: [TRDD-8BXMNQ4T]
   foreclosed it for every later reader.** Box 1 gates *writing a `scripts/daemon.py` scheduling
   change*. It does not gate:
   - **The two open questions below — the FIRST is PARTLY answered (2026-09-05), the second
-    is untouched.** On the first: a fixed ~78 s component is REAL and measured (a 78/78/77 s
-    cluster across ~32 h of `daemon.log`), and `probe_iterm_sessions`' escalating 15/30/45 s
-    ladder (`fleet_scan.py:1234/1237`) is **the only known mechanism on this path whose
-    ceiling brackets it — an UNCONFIRMED attribution, not a finding.** ⚠ **And the same logs
-    show beats of 102 s, 137 s and 191 s, ABOVE that ladder's 96 s ceiling, so a larger
-    unidentified cost also exists.** Do not re-derive the measurement; DO treat the
-    attribution as open. **STILL OPEN and still ungated:** *what is the ~84 s unaccounted at
-    04:15–04:18?* — and it now has a bigger sibling in those 191 s beats. Read-only
-    diagnosis; the precedent is set here for ungated read-only source reading.
+    is untouched.** On the first, and no stronger than the section it summarises: long
+    single bodies are MEASURED (a 78/78/77 s cluster, n=3, plus beats of 102/137/191 s
+    across ~32 h of `daemon.log`) — **the measurement is the finding; every attribution of
+    it is open.** `probe_iterm_sessions`' escalating ladder (`fleet_scan.py:1234/1237`) is
+    the only known mechanism whose ceiling brackets the 78 s, and it is UNCONFIRMED; the
+    100 s+ beats exceed its 96 s ceiling and may be a larger single cost OR that ladder plus
+    per-instance costs (ZVZAFQY6). Do not re-derive the measurement; do not treat any
+    attribution as settled. **STILL OPEN and still ungated:** *what is the ~84 s unaccounted
+    at 04:15–04:18?* — now with bigger siblings. Read-only diagnosis; the precedent is set
+    here for ungated read-only source reading.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
     pattern is not writing a scheduling change; only the bound it pins is.
   *(A first wording of this bullet added "…more than anything the advisor could say": a
@@ -65,10 +66,12 @@ external-refs: [TRDD-8BXMNQ4T]
   block that is authoritative by rule.)*
 - **⚠ A REFRAMING FOR THE CONSULT — CONDITIONAL, and written BEFORE the advisor was reached.**
   The card was built on "stalls are cumulative across many bodies, so no per-body deadline
-  helps". That stands for the 55+15 stall. It is doubtful for the 78 s row, which is one body
-  — **but only a per-body deadline *below 78 s* would have caught it, and whether one call
-  inside that body accounts for the time is UNCONFIRMED (above).** The 191 s beat is the
-  stronger case that single bodies matter, and it has no attributed cause at all.
+  helps". That stands for the 55+15 stall. **Single bodies of 78–191 s are now MEASURED, so
+  the claim is not general — but that is all that is established.** Nothing here says a
+  per-body deadline is the right mechanism, or that any single CALL dominates those bodies:
+  the 78 s attribution is unconfirmed and the 100 s+ beats may themselves be cumulative
+  ACROSS INSTANCES inside one body (ZVZAFQY6), which a per-body deadline would truncate
+  rather than fix.
   **Give the advisor BOTH framings — the original cumulative one and this one — and the
   measurement; do not hand over only the narrowed question.** This bullet eliminates no
   candidate: 3 and 4 both stand. Choosing between them is the design judgment box 1 reserves.
@@ -204,17 +207,28 @@ bounds that **sum** — only individual subprocess workloads are capped
   - **The body is cheap almost always:** 375 beats at 2 s, 194 at 3 s, 84 at 4 s.
     The long beats are rare and episodic, not a standing cost.
   - **A tight cluster at the top: 78 s, 78 s, 77 s** (2026-09-03T23:06,
-    2026-09-04T04:34, 04:47). Three values within 1 s is quantized, which is what a
-    fixed ceiling looks like — this is the real support for a fixed component, and
-    it is much better evidence than the arithmetic was.
+    2026-09-04T04:34, 04:47). Three long beats within 1 s of each other suggests a
+    BOUNDED cost rather than an unbounded one — the best evidence here for a fixed
+    component, **and n=3.** It does not identify WHICH bound: a fixed remote timeout,
+    a lock held for a bounded period, or a retry ladder all cluster this way.
   - **But beats of 102 s, 137 s and 191 s also occur** (2026-09-04T15:36, 21:49,
     17:18). **Those EXCEED the ladder's 96 s ceiling, so the ladder cannot be the
-    whole cost of a `session-liveness` beat.** Whatever produces them is unidentified
-    and is a better target than the 78 s cluster, being twice the size.
+    whole cost of those beats.** Two shapes fit, and the second needs no new
+    mechanism: (a) a larger single unidentified cost, or (b) **the ladder ADDING to
+    per-instance costs — see TRDD-ZVZAFQY6, up to ~45 s per instance on osascript,
+    additive because the loop is a plain `for`. Two instances on that path plus a
+    full ladder reaches 191 s with nothing new invoked.** Do not go looking only for
+    a single ~191 s thing.
 
-  **So the honest status:** a fixed ~78 s component is real and the ladder is the only
+  **So the honest status:** a bounded ~78 s component is real and the ladder is the only
   known mechanism on this path whose ceiling brackets it; the attribution is
-  UNCONFIRMED, and at least one other unidentified cost exists that is larger.
+  UNCONFIRMED, and the 100 s+ beats are unexplained by it either way.
+
+  **WHAT WOULD SETTLE IT, so this is a takeable task and not a re-litigation:** a
+  timestamp either side of the `probe_iterm_sessions` call in `gather_fleet`
+  (`fleet_scan.py:1417`), logged unconditionally, answers it in one long beat. The
+  attempt count already exists in that scope — logging `osascript_attempts`
+  unconditionally rather than only inside the `blocked` suffix would do it too.
 
   **THE FALSIFIER THAT DOES NOT WORK — do not run it and read silence as
   confirmation.** The obvious check is `gather_fleet`'s attempt count, which suffixes
