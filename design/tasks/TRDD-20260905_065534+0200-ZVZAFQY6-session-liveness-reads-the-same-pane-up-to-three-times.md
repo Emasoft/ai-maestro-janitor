@@ -1,10 +1,10 @@
 ---
 trdd-id: ZVZAFQY6
 title: session-liveness reads the same pane up to three times per instance on the field-busy path
-column: todo
+column: human_review
 created: 2026-09-05T06:55:34+0200
 updated: 2026-09-05T10:04:18+0200
-current-owner: main-session
+current-owner: user
 task-type: docs
 priority: low
 severity: low
@@ -21,6 +21,15 @@ external-refs: [TRDD-QJ5LP4W2, TRDD-8BXMNQ4T]
 ---
 
 # session-liveness reads the same pane up to three times per instance
+
+## ⏵ STATUS — filed, investigated, refused, and documented at the code, all on 2026-09-05
+
+- Both live acceptance boxes **ticked**; the two dedup boxes **struck as REFUSED**, not deleted.
+- **`human_review`, owner USER — I am not closing a card on my own verdict.** The judgment
+  being reviewed is mine end to end: I filed this card, I refused it, and I wrote the comments
+  that now assert the refusal in the code. What needs your eye is whether the refusal is right,
+  not whether the boxes are ticked. (Same routing as TRDD-IEAZQ9MK, for the same reason.)
+- Nothing is blocked on it and no behaviour changed — comments only, gates green.
 
 ## ⏵ STATE — READ THIS FIRST — 2026-09-05: THE FIX THIS CARD PROPOSED IS UNSAFE AND IS REFUSED
 
