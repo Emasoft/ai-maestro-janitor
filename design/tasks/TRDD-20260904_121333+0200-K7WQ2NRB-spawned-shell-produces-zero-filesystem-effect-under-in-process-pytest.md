@@ -3,7 +3,7 @@ trdd-id: K7WQ2NRB
 title: a spawned shell produces zero filesystem effect under in-process pytest — capture_all_logins rows 1 and 2
 column: todo
 created: 2026-09-04T12:13:33+0200
-updated: 2026-09-05T02:33:57+0200
+updated: 2026-09-05T02:41:22+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -237,26 +237,55 @@ on Q8PNPRTW for being plausible.
    1 skipped`, host load 5.35 → 14.34.** Not "~12 min/iteration": that figure is the SERIAL
    shape. So the runs this step calls "expensive by construction" cost ~80 s each, and the
    argument for counting the 4 existing points before spending more does not apply to this
-   configuration at all. **The much sharper consequence is a discriminator nobody had:
-   soak9 — the FAILING `-n auto` run — took 822.89 s** (Q8PNPRTW `:212`). Same command, same
-   suite, **10.6× the wall clock**, start load 15.53 vs 5.35. A run that slow was not merely
-   "under load"; it was contending for CPU with something large for its whole duration. **A
-   green 78 s run is therefore NOT a sample from soak9's population**, and a loop that only
-   ever produces 78 s runs may be incapable of reproducing the failure no matter how many
-   iterations it buys. Duration is now a cheap per-run proxy for "was this run even in the
-   right regime", and the ledger records it. *Not yet established:* whether the slowness
-   CAUSES the failure or merely accompanies it — one paired observation, no manipulation.
+   configuration at all.
 
-   **STARTED 2026-09-05T02:33:05+0200** (a start event, not a state — see the check below) —
+   **⚠ MY FIRST READING OF THE GAP WAS THE CARD'S OWN CLASSIC ERROR, AND I RETRACT IT.** I
+   wrote that soak9's 822.89 s vs a green 78 s meant "a green run is therefore NOT a sample
+   from soak9's population" and blamed the difference on load — one paired observation, four
+   uncontrolled variables, one blamed. That is (1a)'s warning, one screen below (1a). What the
+   artifacts actually say, read first-hand (`/tmp/soak8.txt`, `/tmp/soak9.txt`,
+   `/tmp/soak9.meta`, all still present — they were assumed lost):
+
+   - **BOTH soak runs were slow, so it is not a one-off:** soak8 `11 failed, 16380 passed,
+     1 skipped, 8 subtests passed in 906.91s`; soak9 `11 failed, 16391 passed, 1 skipped,
+     8 subtests passed in 822.89s`. *And soak8 was NOT a clean run* — this card's line above
+     calls it "soak8 PASS 11.39", true only of the two ROWS, never of the suite.
+   - **The worker-count confound is CLOSED, in the direction that strengthens comparability:**
+     soak9's tracebacks name `gw0…gw13`, i.e. 14 workers; `hw.ncpu` is 14 and today's run
+     header says `created: 14/14 workers`. Same width.
+   - **LOAD IS REFUTED as the explanation for the wall clock — on this card's own
+     start-vs-start rule.** Our run at start load **22.79 took 95.50 s**; soak9 at start load
+     **15.53 took 822.89 s**. Higher ambient load, **8.6× faster**. Whatever made the soak runs
+     take a quarter of an hour, it was not the number in the load average.
+   - **⇒ WHAT DID DIFFER, AND IT IS AN ENVIRONMENT DIFFERENCE, NOT A LOAD ONE: both soak runs
+     report `8 subtests passed`.** That counter comes from `pytest-subtests`. It is NOT
+     installed here (`pytest`, `pytest-timeout`, `pytest-xdist`), and the string `subtests`
+     appears nowhere in `tests/`, `scripts/`, `pyproject.toml` or `uv.lock` **in any revision**
+     (`git log -S`) — only in TRDD prose. So the soak-era plugin set is **not reproducible from
+     this repo**, and the collected counts differ too (16403 then, 16417 now).
+   - *Not established, and deliberately not asserted:* whether that plugin difference explains
+     the 8.6×, and whether slowness relates to the failure at all. What IS established is that
+     a wall-clock comparison across that boundary compares two environments, so the honest
+     status of "the loop may be unable to reproduce soak9" is **open**, not shown.
+
+   Duration stays in the ledger as a cheap per-run regime proxy, and a PASSING run over
+   `SLOW_RUN_S=250` now gets its own `slow-runs.log` line — a 400 s green run would be the
+   first real evidence here and would otherwise read as an unremarkable row.
+
+   **STARTED 2026-09-05T02:40:41+0200** (a start event, not a state — see the check below) —
    `scripts_dev/k7wq2nrb_full_suite_load_loop.sh` (gitignored; the harness is scratch, the
-   numbers are the record). `uv run pytest -n auto`, the soak9 shape, `MAX_RUNS=30`,
-   `RUN_TIMEOUT=1800`, load sampled every 15 s, every run's full output kept under
-   `reports/suite-failures/20260905_023305+0200-k7wq2nrb-full-suite-loop/` with a `ledger.tsv`
-   of run/exit/load-start/load-end/duration/summary. **Two EARLIER sibling dirs are not this
-   run and must not be read as its data:** `…022821+0200` is the first launch (one green run,
-   77.53 s — the measurement above; stopped so the harness could be fixed without editing a
-   script bash was mid-read of), and `…023245+0200` is the deliberate `RUN_TIMEOUT=5` smoke
-   test whose single `exit 124` row proves the timeout path, not a hang in the suite.
+   numbers are the record). `uv run pytest -n auto`, `MAX_RUNS=30`, `RUN_TIMEOUT=1200`,
+   `SLOW_RUN_S=250`, load sampled every 15 s, every run's full output plus a per-run `ps`
+   snapshot kept under
+   `reports/suite-failures/20260905_024041+0200-k7wq2nrb-full-suite-loop/`, with `ledger.tsv`
+   (run/exit/load-start/load-end/duration/summary) and, when they have content,
+   `unrelated.log`, `slow-runs.log`, `survivors.log`.
+   **The sibling dirs, named absolutely so this stays true however many loops follow:**
+   `…022821` = first launch, superseded harness, ONE green run at 77.53 s (the measurement
+   above). `…023245` = deliberate `RUN_TIMEOUT=5` smoke test — its `exit 124` is THE CAP
+   FIRING, never a hang in the suite. `…023305` = second launch, superseded harness, two green
+   runs (95.50 s at load 22.79; 118.99 s at 18.43). `…023902` / `…023927` = deliberate
+   `RUN_TIMEOUT=8` / `=45` kill probes, likewise cap-firings by construction.
    **VERIFY IT IS STILL ALIVE BEFORE BELIEVING THIS LINE** — nothing updates it when the loop
    dies, is killed by a session restart, or wedges: `tail ledger.tsv` and check the process
    table. A stale last row with no pytest running means the loop is dead and this paragraph is
@@ -269,9 +298,29 @@ on Q8PNPRTW for being plausible.
    test). **Exit 124 is a RESULT, not an accident** — it is the card's own predicted second
    failure shape (the untimed `communicate()` at `capture_all_logins.py:157` blocking on a
    grandchild that still holds the pipe, lines 384-392); uncapped, that shape would wedge the
-   loop silently. The timeout path was proven end-to-end with a deliberate `RUN_TIMEOUT=5`
-   run: exit 124, correctly classified, loop stopped. A `STOP` file in the report dir halts it
-   between runs.
+   loop silently.
+   **An UNRELATED red run does NOT stop the loop — it logs to `unrelated.log` and continues.**
+   Stopping on any non-zero would have spent the whole 30-run budget on the first unrelated
+   flake, and this suite has a documented supply of them (Q8PNPRTW's eleven; TRDD-CI9AC02Y is
+   a whole card about `branch_protection` rows failing only in-suite). The stop decision is the
+   CLASSIFICATION; `rc` is only what makes 124 detectable at all. A `STOP` file in the report
+   dir halts it between runs.
+
+   **What the cap is PROVEN to do, and what it is not.** `RUN_TIMEOUT=5` proved the shell
+   branch (exit 124 → correct classification → break) and **no more** — it killed pytest during
+   collection, where there is nothing to orphan, so calling that "end-to-end" (my previous
+   commit's word) covered only the control flow. A second probe at **`RUN_TIMEOUT=45`,
+   mid-suite with all 14 workers live**: after `timeout --kill-after=30`, the per-run `ps`
+   snapshot showed **zero surviving `execnet` / `popen-gw` / `sleep 600` processes**. The chain
+   `uv` → pytest → 14 execnet workers → `/bin/sh` → `sleep 600` does get reaped.
+   *Still NOT proven:* propagation when a worker is genuinely wedged draining a pipe — which is
+   the case the cap exists for. A healthy worker is killable by construction.
+   **⚠ AND THE CENSUS'S FIRST ANSWER WAS A FALSE POSITIVE — worth recording because it would
+   have invented evidence.** It reported exactly one survivor: the `zsh -c` wrapper running the
+   census, whose argv carries the search pattern. Snapshotting `ps` to a file defeats *grep's*
+   self-match but not the *invoker's*. The census now drops `shell-snapshots` / the loop's own
+   name before counting. Uncorrected, it would have produced a standing non-zero survivor count
+   — i.e. manufactured support for line 77's cross-run-state hypothesis out of its own shell.
    Row 2's instrumentation was landed FIRST, on purpose: a failure caught by a loop started
    before it would have thrown its evidence away exactly as every failure so far has.
    **⚠ SCOPE — the loop's stop condition is WIDER than the instrumentation's reach.** It stops
