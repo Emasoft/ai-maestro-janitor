@@ -3,7 +3,7 @@ trdd-id: HMLS5WE8
 title: Self-injection was blind on iTerm and typed compact four times into one field
 column: dev
 created: 2026-09-05T12:07:40+0200
-updated: 2026-09-05T12:30:00+0200
+updated: 2026-09-05T12:36:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -11,7 +11,7 @@ scope: project
 project-id: ai-maestro-janitor
 relevant-rules: []
 labels: [terminal-injection, compaction, continuity]
-implementation-commits: []
+implementation-commits: [6803ade0]
 ---
 
 # Self-injection was blind on iTerm and typed `/compact` four times into one field
@@ -70,17 +70,28 @@ make the script that gives commands smarter and aware of what there is on the sc
    user is not typing) settle, re-read, and press Enter again, at most
    `_SUBMIT_CONFIRM_ATTEMPTS = 2`. Never a retype.
 4. One ceiling for the child (`_SELF_SEND_GIVEUP_S = 900`, overridable per payload): it caps
-   the wait for the lock AND the field wait inside `send_verified`, and once it has passed the
-   child REFUSES to type at all (a remaining budget of a fraction of a second would otherwise
-   still land one whole injection 900 s late — the stale-`/compact` case). So a child deferring
+   the wait for the lock AND the field wait inside `send_verified`, and once fewer than
+   `_SELF_SEND_MIN_BUDGET_S = 5` s of it remain the child REFUSES to type at all (a remaining
+   budget of a fraction of a second would otherwise still land one whole injection 900 s late —
+   the stale-`/compact` case — or, on a HARD send, fire its two ESCs into a working pane and
+   then give up before typing, a cancelled turn for nothing). So a child deferring
    on a busy field cannot hold the lock for the injector's default hour and starve a DIFFERENT
    later command. **This is a second deviation** from the injector's own 3600 s default — a
    self-triggered slash command that could not land in 15 minutes is stale for every caller.
 5. Test hermeticity: `_force`/`_force_kind` clear `ITERM_SESSION_ID`/`TMUX_PANE`. A spawn-level
-   deny of the `--__send*`/`--__chain` children was tried and REVERTED: the trigger tests drive
-   those children on purpose against `tmux`/`osascript` stubs written into tmp (the suite's
-   "stub it on PATH" pattern), and the guard's default-deny of the REAL binaries inside the
-   child is what actually protects the developer's pane.
+   deny of the `--__send*`/`--__chain` children was tried and REVERTED (byte-clean,
+   `git diff --exit-code`): the trigger tests drive those children on purpose against
+   `tmux`/`osascript` stubs written into tmp (the suite's "stub it on PATH" pattern), and the
+   guard's default-deny of the REAL binaries inside the child is what actually protects the
+   developer's pane — **measured, not inferred**: `classify_argv(["osascript","-e","x"])` and
+   `classify_argv(["tmux","send-keys",…])` both return `allowed=False` ("BLOCKED spawn").
+6. After the third review: the refusal at the ceiling and the budget handed to `send_verified`
+   come from ONE clock read per command (two reads could straddle the deadline and hand a
+   zero budget to a HARD send AFTER its ESCs had gone into a working pane), and it is
+   re-checked per command so a long first send cannot license a stale second one.
+
+**Phase-1 commits:** `6803ade0` (the fix + tests + card), plus the follow-up carrying item 6 and
+the wikimem atom `ATOM-9ZJ0-9VV1` on `claude-code-esc-input-semantics`.
 
 **What the first test run did (claim softened after review):** three forced-kind tests fired a
 real `--__send-verified` child each, because they inherited this session's real

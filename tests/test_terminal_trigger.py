@@ -239,6 +239,23 @@ def test_run_verified_send_refuses_to_type_once_the_ceiling_has_passed(tmp_path)
     assert calls == []
 
 
+def test_run_verified_send_refuses_a_budget_too_small_for_the_esc_settles(tmp_path):
+    """A HARD send fires two ESCs BEFORE the field is read. With 1 s of the ceiling left the
+    ESCs would go out and the injector would then give up — a cancelled live turn for nothing.
+    Under the floor, nothing is sent at all."""
+    calls: list[str] = []
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s):
+        calls.append(command)
+        return True, "verified; submitted"
+
+    ticks = iter([0.0, 899.0, 899.0])
+    data = {"terminal": {"kind": "iterm", "session_id": _ITERM_ID}, "commands": ["/compact"],
+            "esc_first": True, "state_dir": str(tmp_path), "giveup_s": 900.0}
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: next(ticks, 899.0)) == 1
+    assert calls == []
+
+
 def test_run_verified_send_stops_at_the_first_command_that_did_not_land(tmp_path):
     calls: list[str] = []
 

@@ -2,7 +2,7 @@
 name: claude-code-esc-input-semantics
 description: "how many ESC to unstick claude / too many ESC opens rewind and could delete turns / commands typed while claude is busy just enqueue and flood later / double esc cleared my draft / ctrl-c exited claude / what does esc actually do in the claude code TUI — the verified input state machine that makes typing keystrokes safe / the typing gate let a keystroke through while the user was typing / a sub-second quiet_s silently disarmed the presence probe / is it safe to send Esc to a Claude Code pane / why did the rewind menu open when I only meant to clear the input / does pressing Ctrl+C twice exit Claude Code / how many dialogs stack before Esc reaches the running turn / is there a difference between stopping a tool call and closing a permission dialog with Esc / how do I background a running bash or agent command / how do I safely type a slash command into a session pane / what is inject_until_sent and why not send_self_command / why does the keystroke sender give up when it should retry / channel_is_readable and the write-only ai-maestro session channel gap"
 ocd: 2026-07-18
-lmd: 2026-09-03
+lmd: 2026-09-05
 metadata:
   node_type: memory
   type: reference
@@ -76,6 +76,12 @@ ONE long tool call — a 13-minute suite, a build, a slow poll — writes no tra
 call, so it goes stale precisely when the screen is right. Refusing strands nothing: a genuinely
 rate-limited pane is never `WORKING` (it parses `RETRY_WEDGE`/`SESSION_LIMIT`/`API_ERROR`), and
 the refusal `_decline`s WITHOUT spending a recovery attempt, so the rung retries next beat.
+
+
+^ATOM-9ZJ0-9VV1 [desc: "the self-trigger typed /compact four times into one field on iTerm because it wrote blind (USE_ITERM_PATH) instead of reading the screen — fixed 2026-09-05 by routing iTerm through the verified inject", keywords: compact_typed_four_times /compact/compact/compact/compact duplicate_slash_command_in_the_input_field blind_osascript_write_text USE_ITERM_PATH_sentinel self-trigger_typed_without_reading_the_screen injector_did_not_check_the_terminal_screen command_already_sitting_in_the_input_field Enter_did_not_submit_the_command verified_self-send_child --__send-verified self-send.lock same_command_re-sent_after_180_s context_hook_re-fires_every_180_s prompt_is_too_long_after_compact, trdd: TRDD-HMLS5WE8, ocd: 2026-09-05, lmd: 2026-09-05]
+Until 2026-09-05 `send_self_command` returned USE_ITERM_PATH on iTerm, so every self-trigger (compact / clear / reload / reload-skills / resume) fell to its own blind osascript `write text` — no screen read. The ≥85% context-usage hook re-fires `compact_trigger.py --hard` every 180 s while a session stays over the wall, and with nothing looking at the field it typed `/compact` four times into ONE field; the model received `/compact/compact/compact/compact` (prompt too long). The owner's three injection rules already lived in `inject_until_sent` and were iTerm-capable — only the /clear chain, the model-fallback switch and the idle-clear phase used them.
+
+Since TRDD-HMLS5WE8 (6803ade0): iTerm and tmux both go through ONE detached verified child (`terminal_trigger.py --__send-verified` → `send_verified` per command) under a project `self-send.lock`, with a 300 s same-command dedupe stamp read after the lock and ONE 900 s ceiling that caps the lock wait and the field wait and refuses to type once passed. `inject_until_sent` treats a field that ALREADY shows exactly the command as an earlier injection whose Enter never took — it submits, never retypes (`/compact/compact` is left alone) — and re-reads after Enter, pressing it again (≤2) only while the field still shows only that command with nobody typing. Two deviations are on the card for the owner (Enter on text the janitor did not type; 900 s vs the injector's 3600 s). Why the first Enter never took is NOT established.
 
 ## See also
 

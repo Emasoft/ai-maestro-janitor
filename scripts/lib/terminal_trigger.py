@@ -313,7 +313,7 @@ def build_clear_field_steps(terminal: Mapping[str, str]) -> list[list[str]] | No
             ["RUN", "tmux", "send-keys", "-t", pane, "C-k"],
             ["RUN", "tmux", "send-keys", "-t", pane, "C-u"],
         ]
-    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+    if kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
         # The SAME C-a / C-k / C-u trio as tmux, as raw control characters (0x01, 0x0b, 0x15).
         # This branch was MISSING until 2026-08-02 and its absence was silent in the worst way:
         # `clear_fn` resolved to None on iTerm, so rule 3's "clear the field and re-inject"
@@ -381,7 +381,7 @@ def channel_is_readable(terminal: Mapping[str, str]) -> bool:
     if kind == "tmux":
         return valid_tmux_pane(terminal.get("pane", ""))
     if kind == "iterm":
-        return bool(re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")))
+        return valid_iterm_session_id(terminal.get("session_id", ""))
     return False
 
 
@@ -406,7 +406,7 @@ def build_type_only_steps(
         # `-l` is LITERAL: without it tmux interprets the text as key names, so a command
         # containing e.g. "Enter" would be sent as the Enter KEY rather than typed.
         return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "-l", command]]
-    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+    if kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
         return [["RUN", "osascript", "-e", _iterm_session_script(
             terminal["session_id"],
             [f'            write text "{applescript_quote(command)}" without newline'],
@@ -457,7 +457,7 @@ def build_esc_only_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
     kind = terminal.get("kind", "")
     if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
         return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "Escape"]]
-    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+    if kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
         return [["RUN", "osascript", "-e", _iterm_session_script(
             terminal["session_id"], iterm_esc_lines(),
         )]]
@@ -470,7 +470,7 @@ def build_submit_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
     kind = terminal.get("kind", "")
     if kind == "tmux" and valid_tmux_pane(terminal.get("pane", "")):
         return [["RUN", "tmux", "send-keys", "-t", terminal["pane"], "Enter"]]
-    if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+    if kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
         # `write text ""` sends the trailing newline ONLY — iTerm appends one unless
         # `without newline` is given, so an empty write IS the Enter keypress. Uses the same
         # verb as the typing half rather than a `character id 13` variant, so both halves
@@ -498,7 +498,7 @@ def read_pane_text(terminal: Mapping[str, str]) -> str | None:
             return proc.stdout if proc and proc.returncode == 0 else None
         # Bare-UUID guard, mirroring fleet_inject.valid_session_id — the id is interpolated
         # into an AppleScript string literal, so anything else could break out of it.
-        if kind == "iterm" and re.fullmatch(r"[0-9a-fA-F-]{8,64}", terminal.get("session_id", "")):
+        if kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
             script = (
                 'tell application "iTerm2" to repeat with w in windows\n'
                 '  repeat with t in tabs of w\n    repeat with s in sessions of t\n'
@@ -1458,19 +1458,26 @@ _ITERM_SESSION_ID_RE = re.compile(r"[0-9a-fA-F-]{8,64}")
 
 def valid_iterm_session_id(sid: str) -> bool:
     """True iff `sid` is a bare iTerm session UUID safe to interpolate into an AppleScript
-    string literal — the gate `fleet_inject.valid_session_id` applies on the fleet side."""
-    return bool(_ITERM_SESSION_ID_RE.fullmatch(sid.strip()))
+    string literal — the gate `fleet_inject.valid_session_id` applies on the fleet side.
+    No stripping here, on purpose: the builders interpolate the value they were GIVEN, so
+    validating a stripped copy would pass an id that iTerm then fails to match (` 789D…`).
+    `self_terminal` strips at the one place ids enter from the env."""
+    return bool(_ITERM_SESSION_ID_RE.fullmatch(sid))
 
 
-def self_terminal(env: Mapping[str, str] | None, kind: str) -> dict[str, str]:
+def self_terminal(env: Mapping[str, str] | None = None, kind: str | None = None) -> dict[str, str]:
     """THIS session's own pane, in the dict shape the verified injector drives, from the ids
     the terminal itself put in the env — `$TMUX_PANE` for tmux, `$ITERM_SESSION_ID` for iTerm.
     `kind` is the ancestry-detected terminal (`state.terminal_kind()`): an id is used only when
     it matches that kind, or when detection came back `unknown` (a timed-out `ps` walk must not
-    turn a perfectly identifiable iTerm pane into "ask the human"). An `$ITERM_SESSION_ID`
-    inherited inside a tmux pane is therefore never mistaken for the channel — the pane wins.
-    Returns `{"kind": "unknown"}` when no id passes, never a half-built target."""
+    turn a perfectly identifiable iTerm pane into "ask the human"). `kind=None` means "no
+    detection available — trust the env alone" (the read-back callers that never walked the
+    ancestry). An `$ITERM_SESSION_ID` inherited inside a tmux pane is never mistaken for the
+    channel either way — the pane is checked first and wins. Returns `{"kind": "unknown"}`
+    when no id passes, never a half-built target."""
     e: Mapping[str, str] = os.environ if env is None else env
+    if kind is None:
+        kind = "unknown"
     if kind in ("tmux", "unknown"):
         pane = (e.get("TMUX_PANE") or "").strip()
         if valid_tmux_pane(pane):
@@ -1498,6 +1505,13 @@ _SELF_SEND_STAMPS = "self-send.stamps.json"
 # ponytail: one global ceiling; per-command ceilings if a caller ever needs a longer wait.
 _SELF_SEND_GIVEUP_S = 900.0
 _SELF_SEND_LOCK_POLL_S = 2.0
+# A HARD send opens with two ESCs BEFORE the field is read, and two ESCs with no command behind
+# them cancel a live turn for nothing ([[claude-code-esc-input-semantics]]). So a budget that
+# cannot fit one CLEAN attempt — two ESC settles (2 × 0.6 s) + the field settle (2 × 0.4 s)
+# = 2.0 s, plus the 1.0 s confirm read when the first post-Enter read still shows the command,
+# with margin — is refused outright, not spent on the ESCs. It does NOT cover a 5 s retry; a
+# budget that small has no business retrying.
+_SELF_SEND_MIN_BUDGET_S = 5.0
 
 
 def _fire_detached_verified(
@@ -1585,16 +1599,6 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
                     )
                     return 1
                 sleeper(_SELF_SEND_LOCK_POLL_S)
-        # The ceiling bounds the SEND, not only the wait: a remaining budget of a fraction of a
-        # second would still let one whole injection land 900 s after the caller decided it —
-        # the stale-`/compact` case the ceiling exists for. At the deadline, refuse.
-        if clock() >= deadline:
-            state.log_line(
-                "terminal_trigger",
-                f"verified send refused: the {giveup_s:.0f}s ceiling passed while waiting for "
-                f"the pane ({data.get('commands')!r} not sent)",
-            )
-            return 1
         for i, command in enumerate(str(c) for c in (data.get("commands") or [])):
             if _recently_self_sent(stamps, command, clock()):
                 state.log_line(
@@ -1603,9 +1607,24 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
                     f"<{_SELF_SEND_DEDUPE_S:.0f}s ago",
                 )
                 continue
+            # The ceiling bounds the SEND, not only the wait: a remaining budget of a fraction
+            # of a second would still let one whole injection land 900 s after the caller
+            # decided it — the stale-`/compact` case the ceiling exists for. ONE clock read
+            # decides both the refusal and the budget handed down (two reads could straddle the
+            # deadline and hand `send_verified` a zero budget AFTER it has already sent its
+            # HARD-mode ESCs into a working pane). Re-checked per command: a long first send
+            # must not license a stale second one. The floor, not zero: a sub-second budget
+            # would still let the ESCs out (see `_SELF_SEND_MIN_BUDGET_S`).
+            remaining = deadline - clock()
+            if remaining < _SELF_SEND_MIN_BUDGET_S:
+                state.log_line(
+                    "terminal_trigger",
+                    f"verified send {command!r} refused: {remaining:.1f}s of the "
+                    f"{giveup_s:.0f}s ceiling left, under the {_SELF_SEND_MIN_BUDGET_S:.0f}s floor",
+                )
+                return 1
             sent, why = do_send(
-                terminal, command, esc_first=esc_first and i == 0,
-                giveup_s=max(0.0, deadline - clock()),
+                terminal, command, esc_first=esc_first and i == 0, giveup_s=remaining,
             )
             state.log_line(
                 "terminal_trigger",
