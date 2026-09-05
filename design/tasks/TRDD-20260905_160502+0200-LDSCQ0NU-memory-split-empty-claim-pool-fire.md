@@ -3,7 +3,7 @@ trdd-id: LDSCQ0NU
 title: janitor-memory-split marker fires against an empty claim pool costing a full agent spawn to abstain
 column: testing
 created: 2026-09-05T16:05:02+0200
-updated: 2026-09-05T18:11:33+0200
+updated: 2026-09-05T18:30:30+0200
 current-owner: main-session
 task-type: bugfix
 priority: low
@@ -15,7 +15,7 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [9681eb7c]
 external-refs: [janitor#300]
 ---
 

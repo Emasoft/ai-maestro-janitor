@@ -3,7 +3,7 @@ trdd-id: KI0H9C8N
 title: claudemd_slim cannot read metadata.topic so hub grouping degenerates to a flat list
 column: testing
 created: 2026-09-05T16:05:01+0200
-updated: 2026-09-05T17:57:32+0200
+updated: 2026-09-05T18:31:00+0200
 current-owner: main-session
 task-type: refactor
 priority: low
@@ -65,7 +65,17 @@ failure mode.
 - [x] The overview page still renders first in both grouping modes.
       `test_render_index_overview_first_in_both_grouping_modes`
 
-## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-09-05T17:57:32+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-09-05T18:31:00+0200
+
+**The grouping-mode switch is CORPUS-GLOBAL, not per page (coordinator note, 18:31).**
+`_render_body` picks `_render_by_topic` the moment ANY non-overview page carries
+`metadata.topic:`; from then on every page WITHOUT a topic lands under "Other
+topics" (the hub/wikilink grouping is not consulted for them). So the migration
+is all-or-nothing in effect: the first page to gain a `topic:` demotes every
+untopiced page to the flat tail until the rest are tagged. Tag the corpus in one
+pass, or accept a flat "Other topics" list in between. Verified by reading
+`_render_body` in `f948226e` (`has_topics = any(p.topic for p in pages if not
+p.is_overview)`), not from the worker's report.
 
 Implemented: `PageInfo.topic` (parsed from nested `metadata.topic:`, same line-based
 parser that already read `tier`), `_render_by_hub`/`_render_by_topic` split out of
