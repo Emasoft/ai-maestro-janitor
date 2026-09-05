@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T07:26:03+0200
+updated: 2026-09-05T07:38:20+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -94,7 +94,8 @@ external-refs: [TRDD-8BXMNQ4T]
 
 ## Why this exists — the measurement is done, the decision is not
 
-TRDD-8BXMNQ4T asked *"measure the multiplier before choosing a mechanism"*. It did.
+TRDD-8BXMNQ4T asked *"measure the multiplier before choosing a mechanism"*. It did, within
+its window.
 It then spent five commits and six adversarial reviews failing to tick its own
 remedy box, because **the remedy is a scheduling design decision and the card was a
 measurement card**. Splitting it lets a finished measurement be finished and puts the
@@ -180,12 +181,16 @@ bounds that **sum** — only individual subprocess workloads are capped
       candidates above stay rejected (or what new evidence revives one).
 - [ ] A test pins the bound, and `oauth-rotator-tick` is shown still firing on
       cadence with the worst measured occupancy pattern replayed.
-      **⚠ "WORST MEASURED" MEANS THE 32 h WINDOW, NOT 8BXMNQ4T's SNAPSHOT (2026-09-05).**
-      That snapshot's largest `session-liveness` body is ~78 s; the wider window contains
-      **191 s**. A harness built to the snapshot pins a bound 2.4× too low and then PASSES
-      on a daemon that still skips cycles — the worst kind of green. These boxes were
-      written before the wider measurement and were not revisited when the STATE was
-      corrected; that is how a retracted premise survives, in the section nobody re-reads.
+      **⚠ THE OCCUPANCY PATTERN IS A PARAMETER, NOT A CONSTANT (2026-09-05).** Take it
+      from the WIDEST window available when the harness runs. 8BXMNQ4T's snapshot maxes at
+      ~78 s and the 32 h window at **191 s**, so a harness built to the snapshot pins a
+      bound 2.4× too low and then PASSES on a daemon that still skips cycles — the worst
+      kind of green. **But 191 s is today's value, not the specification:** a maximum is an
+      order statistic, the least stable thing a sample yields, and widening the window
+      again will find something larger. Pinning 191 s into the test is the same error one
+      level out. These boxes were written before the wider measurement and were not
+      revisited when the STATE was corrected; that is how a retracted premise survives, in
+      the section nobody re-reads.
 - [ ] Re-measure after the change with the same method (per-task `starting` markers,
       body subtracted) and show the stall count falling. **NOT "one log snapshot"** — same
       reason as above: one snapshot is what hid the 100 s+ bodies in the first place. Use a
@@ -236,18 +241,43 @@ bounds that **sum** — only individual subprocess workloads are capped
   known mechanism on this path whose ceiling brackets it; the attribution is
   UNCONFIRMED, and the 100 s+ beats are unexplained by it either way.
 
-  **A CANDIDATE EXAMINED AND NOT SUPPORTED — recorded so nobody spends the round again.**
-  All three 100 s+ beats are immediately preceded by a `memory-guard` pressure line
-  (`free 616MB` before the 191 s, `823MB` before the 137 s, a 16 s memory-guard body
-  before the 102 s), and two of the three ~78 s beats are preceded by `memory-guard done
-  in 0s` — no pressure. That looked like a clean discriminator and like the
-  CPU/memory-starvation confound the original question named. **It is not, because the
-  BASE RATE kills it: `memory-guard` reports pressure on 497 of 906 runs — 55% of beats.**
-  Three-for-three at a 55% base rate is p≈0.17, which is nothing. Suggestive, unproven,
-  and it would have been reported as a finding if the base rate had not been checked
-  — the same defect this entry already records twice. **If someone revisits it, the
-  design is a comparison of pressure rates on long vs normal beats, not a look at what
-  precedes the long ones.**
+  **THE MEMORY-PRESSURE CANDIDATE — TESTED PROPERLY, AND NULL.** This is the
+  CPU/memory-starvation confound the original question named, so it mattered to settle
+  rather than wave at.
+
+  *How it looked first:* all three 100 s+ beats are immediately preceded by a
+  `memory-guard` pressure line (`free 616MB` before the 191 s, `823MB` before the 137 s,
+  a 16 s guard body before the 102 s), while two of the three ~78 s beats show
+  `memory-guard done in 0s`. A clean-looking discriminator.
+
+  *The actual test* — for EVERY `session-liveness` beat in the ~32 h window, did the
+  `memory-guard` run in that same beat report pressure:
+
+  | beat length | preceded by pressure |
+  |---|---|
+  | **> 60 s** | **3 / 6 = 50.0%** |
+  | ≤ 60 s | 482 / 881 = 54.7% |
+
+  **No effect.** The long-beat rate is if anything BELOW the background rate. And the
+  "three for three" that started this dissolves under the correct per-beat attribution:
+  it was three of the *100 s+ subset*, a slice chosen after seeing it — of all six long
+  beats, only half had pressure.
+
+  **What this does and does not license.** The long arm is n=6, so a modest effect could
+  hide; what is excluded is an effect large enough to explain a 3× beat. Do not revive
+  this without a materially larger long-beat sample. *(A `20–60 s` band sits at 11/13 =
+  85%, above background — n=13 and another post-hoc slice, i.e. exactly the shape of the
+  thing this paragraph just killed. Noted so it is not "discovered" later; not a lead.)*
+
+  **The methodology lesson, which is the durable part.** The first version of this entry
+  recorded the hypothesis as dead on `0.55³ ≈ p 0.17` — a post-hoc statistic on a
+  comparison picked because it looked striking, quoted with a `p` symbol it could not
+  carry, and computed against the wrong denominator (the rate over memory-guard RUNS, not
+  over BEATS). It also threw away the control arm it had already collected. Right instinct
+  (check the background before believing a streak), wrong execution, and it reached the
+  right verdict for reasons that would not have survived scrutiny — which is luck, not
+  method. **Compare the rate in both arms; do not compute the probability of the streak
+  you just noticed.**
 
   **WHAT WOULD SETTLE IT, so this is a takeable task and not a re-litigation:** a
   timestamp either side of the `probe_iterm_sessions` call in `gather_fleet`
