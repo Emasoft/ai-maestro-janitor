@@ -4,7 +4,7 @@ title: verified actuation blocks the single-threaded daemon beat — measure the
 column: backburner
 review-after: 2026-10-05
 created: 2026-09-03T21:42:15+0200
-updated: 2026-09-05T05:00:55+0200
+updated: 2026-09-05T05:32:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -42,9 +42,15 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
     comment says it *"cannot fire without an observed change of live account — which is
     required, because the consumer types into the user's pane"*, and explicitly refuses to
     trust the beacon's `ts` because a re-stamp proves only that a re-stamp ran. So neither a
-    renew, an age-driven re-stamp, nor an optimistic self-heal can write this file. *(Scope: a
-    test calling `record_rotation_success` directly would also write it; what is verified is
-    that the two PRODUCTION callers are rotation-only.)*
+    renew, an age-driven re-stamp, nor an optimistic self-heal can write this file.
+    **And the log settles the residual "a test wrote it" worry, which is NOT idle here** — this
+    repo has a page titled *"a unit test wrote to the REAL `~/.claude/janitor-global-state` or
+    the real plugin DATA dir"*, so leakage into real global state is a documented past failure,
+    not a hypothetical. The discriminator: `oauth-rotator-tick` ran **03:57:53 → 03:58:13**
+    (19 s) and the stamp landed **03:57:59 — inside that live rotator body**. A stray test
+    writing the file would not also produce a 19 s rotator tick bracketing it. *(Unasserted
+    residue: that `scripts/` is the whole runtime, and `getattr` dispatch. Neither is worth
+    chasing against the bracketing evidence.)*
   - `global-state/daemon.log.1` carries **2** `rotation-esc:` lines (2026-09-04T04:56:18 and
     04:57:13, both *"cannot read the pane for AgentlensPro — skipped"*). `_rotation_esc_pass`
     returns early unless `rotation_succeeded_within(_ROTATION_WAKE_WINDOW_S=600)`
@@ -61,8 +67,12 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
   (`:2238`) or the silent `continue` for a pane not in `RETRY_WEDGE` (`:2242`). The completed
   form (`rotation-esc: <STATUS> ESC → <channel>`, `:2302`) and the DRY form (`:2250`) appear
   **0 times across both SURVIVING log segments** (`daemon.log`, `daemon.log.1`). *Deliberately
-  not "never": older segments have been pruned, and asserting a machine's whole history from
-  the files that happen to remain is the exact error this correction is about.* The grep is
+  not "never": only two segments exist, and **whether older ones ever existed is UNCHECKED**.
+  A first wording said they "have been pruned" — which asserts a rotation policy nobody read,
+  answering a claim-about-history-from-available-files with a second claim about history drawn
+  from the same absence. The one hint on hand: `daemon.log.1` is 1,048,611 bytes ≈ 1 MiB, which
+  smells like size-triggered rotation. Still inference; the config is one grep for whoever
+  needs it.* The grep is
   sound within those two — `OutcomeStatus` is `done|failed|deferred|noop`
   (`lib/pane_policy.py:394`), all single words, so `[A-Z]+ ESC` matches every status `:2302`
   can emit; a multi-word value would have slipped through and there is none.
@@ -75,11 +85,22 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
   defect, not rarity, is preventing. Worth one look before concluding "rare" next time.
 - **A partial bound now exists, and it is NOT a stall.** Inside the 600 s wake window after the
   03:57:59 rotation (esc pass running over the fleet, zero actuations): `oauth-rotator-tick`
-  bodies were `13 16 18 19 20 21 22` s (n=7), `session-liveness` 8–21 s, no `wait > 60 s`.
+  bodies `13 16 18 20 21 22` s (**n=6**), `session-liveness` 8–21 s, no `wait > 60 s`.
+  **The 19 s body at 03:58:13 is EXCLUDED and must stay excluded:** it started 03:57:53 and the
+  rotation stamp is 03:57:59, so that body *contains the rotation itself* — it measures a
+  different event than the esc-pass-only sample this bullet claims to be.
   **Do not read this as "the pass costs time".** Control, `oauth-rotator-tick` over 02:50–03:50:
   **n=42, min 1, max 40, p50 9, p90 14**. So the in-window values sit above the control median
-  and 5 of 7 above its p90 — but **every one is inside the control's own range**, on 7 points.
-  A shifted sample, not an established cost.
+  and **5 of 6** above its p90 — but **every one is inside the control's own range**, on 6
+  points. A shifted sample, not an established cost.
+  **⚠ The control is NOT verified clean, and calling it "control" oversells it.**
+  `_ROTATION_WAKE_WINDOW_S` is 600 s and `rotation-success.ts` holds only the LATEST epoch
+  (overwritten), so it cannot say whether 02:50–03:50 contained its own wake windows. Absence
+  of `rotation-esc:` lines there proves nothing either — a window in which every pane is
+  readable and unwedged logs **nothing at all** (`:2242` is a silent `continue`), which is the
+  mechanism established higher up this very block. Contamination would make the elevation look
+  SMALLER than real, so it cannot rescue the superseded claim — but the baseline is unverified
+  and should be read as such.
   **⚠ The first version of this bullet cited the control as "1–18 s (mode 10 s)" — WRONG, and
   wrong in the direction that flattered the hedge.** That came from `sort | uniq -c | sort -rn
   | head`, which is the ten most FREQUENT values, not the range; `head` hid the 40 s max. A

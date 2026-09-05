@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T05:09:00+0200
+updated: 2026-09-05T05:32:00+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -54,8 +54,10 @@ external-refs: [TRDD-8BXMNQ4T]
     wants, and the precedent is already set here for ungated read-only source reading.
   - **The replay harness for box 3.** Building a test that replays the worst measured occupancy
     pattern is not writing a scheduling change; only the bound it pins is.
-  Start with the `session-liveness` question — it is in 8 of 12 stall rows, so its answer moves
-  candidate 4 more than anything the advisor could say.
+  Start with the `session-liveness` question — it is in 8 of 12 stall rows. *(A first wording
+  added "…more than anything the advisor could say": a confident comparative about an advisor
+  nobody has reached, unfalsifiable, and sitting in a block that is authoritative by rule. The
+  8-of-12 carries the whole point without it.)*
 - **The analysis is NOT the blocker — it is done.** Candidates 1 and 2 are rejected with
   reasons, 3 and 4 stand, and the transferable structure (decide the budget/deferral set ONCE
   before the loop) is settled below. The consult is for choosing between 3 and 4 and for
