@@ -452,7 +452,13 @@ def test_push_fires_when_unattended(
 def test_push_skips_when_attended(
     state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """FALSIFICATION of the attended gate: recent user input → NO push."""
+    """FALSIFICATION of the attended gate: recent user input → NO keystroke push.
+
+    TRDD-74AA4PAL: attended no longer means "dropped" — it means DEFERRED. So a
+    Popen call IS expected (the detached recheck child), but it must never be
+    `resume_trigger.py` (the actual keystroke injector) and no keystroke may fire
+    synchronously.
+    """
     _project, state = state_mod
     hook = _import_hook()
     home = tmp_path / "home"
@@ -463,7 +469,12 @@ def test_push_skips_when_attended(
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
     calls = _patch_popen(monkeypatch, hook)
     hook._maybe_push_resume(state)
-    assert calls == [], "push must NOT fire while the user is recently active"
+    assert not any(c[-1].endswith("resume_trigger.py") for c in calls), (
+        "push must NOT type a keystroke while the user is recently active"
+    )
+    assert len(calls) == 1 and hook._DEFER_ARG in calls[0], (
+        "attended must DEFER (spawn a recheck child), not silently drop the push"
+    )
 
 
 def test_push_skips_when_disabled(
@@ -500,10 +511,11 @@ def test_push_skips_when_no_plugin_root(
 def test_push_skips_when_attended_but_reading(
     state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE FIX end-to-end (TRDD-GRHP2YHP): last prompt 2 min ago, no keystroke since → NO push.
+    """THE FIX end-to-end (TRDD-GRHP2YHP): last prompt 2 min ago, no keystroke since → NO keystroke,
+    but DEFERRED (TRDD-74AA4PAL), not dropped.
 
     Reproduces the owner incident — submitted a prompt, then read a long reply for >20 s. With HID
-    pinned None and the default 300 s window, 120 s reads as attended → the push is suppressed.
+    pinned None and the default 300 s window, 120 s reads as attended → the push is deferred.
     """
     _project, state = state_mod
     hook = _import_hook()
@@ -516,7 +528,9 @@ def test_push_skips_when_attended_but_reading(
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED", raising=False)
     calls = _patch_popen(monkeypatch, hook)
     hook._maybe_push_resume(state)
-    assert calls == [], "push must NOT fire for an attended-but-reading user (last prompt 2 min ago)"
+    assert not any(c[-1].endswith("resume_trigger.py") for c in calls), (
+        "push must NOT type a keystroke for an attended-but-reading user (last prompt 2 min ago)"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -574,3 +588,69 @@ def test_this_pane_being_attended_still_suppresses_the_push(
     key = _in_pane(monkeypatch, "%7")
     _write_pane_presence(home, key, now - 3)
     assert hook._user_recently_active(state, now, 20, 300) is True
+
+
+# ---------- deferred push retry (TRDD-74AA4PAL) -----------------------------
+
+def _write_resume_flag(state) -> None:  # noqa: ANN001
+    """Seed the pending resume-after-compact.flag the deferred recheck looks for."""
+    state.state_dir().mkdir(parents=True, exist_ok=True)
+    state.state_dir().joinpath("resume-after-compact.flag").write_text("x", encoding="utf-8")
+
+
+def test_deferred_recheck_pushes_once_pane_goes_idle(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(b) Deferred, then the pane goes idle → the push fires exactly once."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    _no_pane(monkeypatch)
+    monkeypatch.setenv("HOME", str(home))  # no presence file written → unattended NOW
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    _write_resume_flag(state)
+    calls = _patch_popen(monkeypatch, hook)
+    hook._run_deferred_recheck(state, str(_PROJECT_ROOT), 0, sleep_fn=lambda _s: None)
+    assert len(calls) == 1 and calls[0][-1].endswith("resume_trigger.py"), (
+        "an idle pane at recheck time must fire the actual keystroke push, exactly once"
+    )
+
+
+def test_deferred_recheck_gives_up_past_bound(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(c) Still attended past the ≤15-minute bound → gives up, logs it, no re-arm, no keystroke."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    _no_pane(monkeypatch)
+    monkeypatch.setenv("HOME", str(home))
+    _write_presence(home, int(time.time()) - 5)  # still attended at recheck time
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    _write_resume_flag(state)
+    calls = _patch_popen(monkeypatch, hook)
+    elapsed_at_bound = hook._PUSH_DEFER_MAX_S - hook._PUSH_DEFER_RECHECK_S
+    hook._run_deferred_recheck(state, str(_PROJECT_ROOT), elapsed_at_bound, sleep_fn=lambda _s: None)
+    assert calls == [], "past the bound, nothing may be spawned — no re-arm, no keystroke"
+    log = (state.log_dir() / "post-compact-resume.log").read_text(encoding="utf-8")
+    assert "gave up" in log, "the give-up must be logged so an operator can see it happened"
+
+
+def test_deferred_recheck_moot_when_flag_already_consumed(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heartbeat fire consumed the flag while we were waiting → no keystroke, no re-arm."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    _no_pane(monkeypatch)
+    monkeypatch.setenv("HOME", str(home))  # unattended — would otherwise push
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    # Deliberately do NOT write the resume-after-compact.flag: simulates a
+    # heartbeat that already consumed it during the deferral sleep.
+    calls = _patch_popen(monkeypatch, hook)
+    hook._run_deferred_recheck(state, str(_PROJECT_ROOT), 0, sleep_fn=lambda _s: None)
+    assert calls == [], "a consumed flag means the push target is gone; nothing may fire"

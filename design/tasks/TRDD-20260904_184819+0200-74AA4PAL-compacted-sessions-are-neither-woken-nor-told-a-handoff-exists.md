@@ -1,9 +1,9 @@
 ---
 trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
-column: todo
+column: testing
 created: 2026-09-04T18:48:19+0200
-updated: 2026-09-05T10:38:00+0200
+updated: 2026-09-05T13:19:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -142,6 +142,38 @@ it, because a woken agent with no handoff still does not know what it was doing.
   was a 10-line tail; the real split is **104 auto / 102 manual**. A raw "63 suppressed" tally is
   also uninformative on its own: a suppression on a genuinely attended pane is the gate working.
 
+## Adversarial review resolution (2026-09-05) — recheck-guard question
+
+**Deviation from the original plan, recorded verbatim:** the re-entry sentence in the
+original plan was unsatisfiable; a bounded detached recheck child (60 s cadence, 15 min
+cap — `_defer_push`/`_run_deferred_recheck`, `scripts/hooks/post-compact-resume.py:434-503`)
+supersedes "no new timer" for this path.
+
+**Review question:** does the recheck re-validate the SESSION (not just the flag and the
+pane) — the same identity check `resume_trigger.py` applies on the direct path?
+
+**Finding (verified from source, no gap):** `resume_trigger.py`'s direct (2 s) path carries
+**no stronger session-identity check than flag presence** — it does not compare a stored
+session id, pid, or transcript path anywhere. Pane targeting is `$TMUX_PANE` /
+`$ITERM_SESSION_ID`, env vars set once by the terminal and inherited unchanged down every
+child process (`scripts/lib/terminal_trigger.py:1478-1494`) — stable for the *pane*, blind to
+which process currently occupies it, on BOTH paths equally. So "mirror the direct path's
+session check" has nothing extra to mirror; what the direct path actually relies on is the
+flag's existence, re-checked at multiple independent layers:
+1. `_run_deferred_recheck` itself re-reads `resume-after-compact.flag` before calling
+   `_fire_push` (`post-compact-resume.py:481-484`).
+2. `resume_trigger.py:81` re-checks the same flags at its own fire time (called fresh by
+   `_fire_push`, not cached from the deferred child).
+3. `send_self_command`'s `abort_unless_any` is threaded into the DETACHED TYPER CHILD's own
+   `--__send` payload (`terminal_trigger.py:1388,1601,1672`) and re-checked again at TYPE
+   time, in a process separate from both (1) and (2).
+
+So the deferred path performs a **strict superset** of the direct path's checks (three
+re-checks of the same guard vs. the direct path's one), not a weaker one. Conclusion:
+**no additional guard needed** — verdict is CONFIRM, not FIX. Gates re-run clean:
+pytest 42/42, ruff clean, mypy clean, pyright 0/0. Full command output:
+`reports/board-drain/20260905_131900+0200-74AA4PAL-recheck-guard.md`.
+
 ## NEXT ACTION — two changes, not one; they fix different halves
 
 **⇒ CHANGE 1 IS NO LONGER THIS CARD'S WORK — it is `TRDD-OES0NN3F`, `column: todo`,
@@ -167,10 +199,10 @@ trading that away.
 ## Acceptance criteria
 
 - [ ] A session that AUTO-compacts has the handoff in its context without any nudge firing.
-- [ ] An attended pane still receives no keystroke during the grace window, but does receive
+- [x] An attended pane still receives no keystroke during the grace window, but does receive
       the push once the pane goes quiet.
 - [ ] Both verified from the logs on a real compaction, not only by unit test.
-- [ ] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports` and
+- [x] `uv run ruff check scripts tests`, `uv run mypy scripts/ --ignore-missing-imports` and
       `uvx --with pyright pyright` all clean.
 
 ## Notes

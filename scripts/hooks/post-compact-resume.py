@@ -375,21 +375,40 @@ def _maybe_push_resume(state) -> None:  # noqa: ANN001
     """Fire the detached /janitor-resume push — gated + best-effort.
 
     Called ONLY after a resume flag was written (so there IS a target). Skips
-    silently when: the push is disabled by config, the user is recently active
-    (attended — the cron path resumes them), or the injector cannot be located.
-    Spawns fully detached so the hook returns immediately; the caller wraps this so
-    a fault never affects the compaction.
+    silently when: the push is disabled by config, or the injector cannot be
+    located. When the user is recently active (attended), the push is DEFERRED
+    (see `_defer_push`) rather than dropped — TRDD-74AA4PAL. Spawns fully
+    detached so the hook returns immediately; the caller wraps this so a fault
+    never affects the compaction.
     """
     if not state.is_truthy_env(_PUSH_ENABLED_ENV, default=True):
-        return
-    if _user_recently_active(
-        state, int(time.time()), _push_grace_s(), _push_prompt_window_s()
-    ):
-        state.log_line("post-compact-resume", "user recently active; skipping resume push")
         return
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
     if not plugin_root:
         return
+    trigger = Path(plugin_root) / "scripts" / "resume_trigger.py"
+    if not trigger.is_file():
+        return
+    if _user_recently_active(
+        state, int(time.time()), _push_grace_s(), _push_prompt_window_s()
+    ):
+        # TRDD-74AA4PAL (approved 2026-09-05): DEFER, don't cancel. Cancelling
+        # outright was measured at 63/115 push decisions SUPPRESSED (card
+        # STATE block) — every one of those left the pane waiting on the next
+        # heartbeat cron alone, which can be up to the *15 min fast floor (or
+        # 30 min at the slow floor) away, or simply absent if the cron died.
+        # The floor this gate exists to protect (never type a keystroke under
+        # live fingers — the HID grace + prompt-window checks above) is
+        # UNCHANGED: we still never fire `resume_trigger.py` while attended.
+        # We only stop treating "attended right now" as "attended forever".
+        _defer_push(state, plugin_root)
+        return
+    _fire_push(plugin_root)
+    state.log_line("post-compact-resume", "resume push fired (/janitor-resume)")
+
+
+def _fire_push(plugin_root: str) -> None:
+    """Spawn the detached `resume_trigger.py` — the actual keystroke injector."""
     trigger = Path(plugin_root) / "scripts" / "resume_trigger.py"
     if not trigger.is_file():
         return
@@ -400,10 +419,108 @@ def _maybe_push_resume(state) -> None:  # noqa: ANN001
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    state.log_line("post-compact-resume", "resume push fired (/janitor-resume)")
+
+
+# ---- Deferred push retry (TRDD-74AA4PAL, GAP 1 fix) -----------------------
+# Recheck interval and the total bound on how long we keep re-arming before
+# giving up. The bound matters, not the exact interval: past it,
+# `dispatch.py::_phase_compact_resume` will have already resolved the
+# pending `resume-after-compact.flag` on its own, unconditionally, on the
+# very next heartbeat cron fire — that phase carries no attendance check
+# because it runs INSIDE that fire's own fresh turn (nothing is typed into a
+# live pane, so the "don't type under live fingers" floor doesn't apply to
+# it). So giving up here never strands the session; it only means the
+# accelerant (seconds instead of up to the cron's cadence) was not used.
+_PUSH_DEFER_RECHECK_S = 60
+_PUSH_DEFER_MAX_S = 15 * 60
+_DEFER_ARG = "--deferred-push-recheck"
+
+
+def _defer_push(state, plugin_root: str) -> None:  # noqa: ANN001
+    """Re-arm the push ~60s out instead of dropping it (TRDD-74AA4PAL).
+
+    Spawns a detached child of THIS SAME script (re-entered via `_DEFER_ARG`,
+    handled in `main()` before the normal PostCompact flow) that sleeps, then
+    re-evaluates attendance and either fires the push, re-defers, or gives up
+    (`_run_deferred_recheck`). This is the same fire-and-forget async spawn
+    `_fire_push` already uses for the push itself — the hook's own synchronous
+    handler never sleeps or blocks; only the detached child does.
+    """
+    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, "0"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    state.log_line(
+        "post-compact-resume",
+        f"resume push deferred (attended); recheck in {_PUSH_DEFER_RECHECK_S}s",
+    )
+
+
+def _run_deferred_recheck(
+    state,  # noqa: ANN001
+    plugin_root: str,
+    elapsed_s: int,
+    sleep_fn=time.sleep,
+) -> None:
+    """CHILD role (detached): wait, re-check attendance, push / re-defer / give up.
+
+    `elapsed_s` is the total deferral time accumulated across self-chained
+    re-arms, so the `_PUSH_DEFER_MAX_S` bound holds regardless of how many
+    hops it took. Testable directly: pass `sleep_fn=lambda _: None` and drive
+    `_user_recently_active`'s inputs (presence files) the same way the other
+    `_maybe_push_resume` tests already do — no real subprocess needed.
+    """
+    sleep_fn(_PUSH_DEFER_RECHECK_S)
+    # The resume flag is the only thing the push is FOR. If a heartbeat fire
+    # already consumed it (via _phase_compact_resume) while we were waiting,
+    # firing the push now would just queue a spurious /janitor-resume into an
+    # already-resumed session.
+    flag = state.state_dir() / "resume-after-compact.flag"
+    if not flag.is_file():
+        state.log_line("post-compact-resume", "deferred push moot (flag already consumed)")
+        return
+    total = elapsed_s + _PUSH_DEFER_RECHECK_S
+    now = int(time.time())
+    if not _user_recently_active(state, now, _push_grace_s(), _push_prompt_window_s()):
+        _fire_push(plugin_root)
+        state.log_line("post-compact-resume", f"resume push fired after {total}s deferral")
+        return
+    if total >= _PUSH_DEFER_MAX_S:
+        state.log_line(
+            "post-compact-resume", f"resume push deferral gave up after {total}s (still attended)"
+        )
+        return
+    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, str(total)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    state.log_line("post-compact-resume", f"resume push re-armed (+{_PUSH_DEFER_RECHECK_S}s)")
 
 
 def main() -> int:
+    # Re-entry for the deferred-push CHILD (TRDD-74AA4PAL) — argv, not stdin,
+    # and NONE of the normal PostCompact flow below (no new resume flag, no
+    # compaction stamp): this process is a re-check, not a fresh compaction.
+    if len(sys.argv) >= 4 and sys.argv[1] == _DEFER_ARG:
+        plugin_root_arg = sys.argv[2]
+        try:
+            elapsed_arg = int(sys.argv[3])
+        except ValueError:
+            elapsed_arg = 0
+        sys.path.insert(0, str(Path(plugin_root_arg) / "scripts"))
+        try:
+            from lib import state as state_mod  # noqa: E402 - local package, not PyPI
+        except Exception:  # noqa: BLE001 - a broken re-entry must never crash noisily
+            return 0
+        _run_deferred_recheck(state_mod, plugin_root_arg, elapsed_arg)
+        return 0
+
     # Drain stdin (PostCompact delivers a JSON payload there). We mainly rely on
     # CLAUDE_PROJECT_DIR for project resolution, but fall back to the payload's
     # `cwd` if the env var is somehow absent in this hook's environment.
