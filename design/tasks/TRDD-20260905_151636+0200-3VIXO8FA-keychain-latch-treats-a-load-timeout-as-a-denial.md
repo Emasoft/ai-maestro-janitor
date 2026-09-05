@@ -3,7 +3,7 @@ trdd-id: 3VIXO8FA
 title: The keychain denied-latch treats a stalled security call as a denial and blinds rotation
 column: todo
 created: 2026-09-05T15:16:36+0200
-updated: 2026-09-05T15:26:00+0200
+updated: 2026-09-05T15:33:00+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -45,9 +45,15 @@ only trigger is 97%.
 **Why `security` stalled is NOT established.** Host loadavg was 18–27 on 14 cores, and the
 server's independent tmux keychain watchdog logged eight `keychain_probe_timeout`s between
 13:59 and 15:08 — so `security` calls stalled machine-wide, from two instruments. At loadavg
-11 (15:22) the same not-found attribute read took 0.01–0.02 s. Load is a correlation; securityd
-contention from many concurrent callers is the other candidate; this card does not depend
-on which — it fixes the POLICY that turns any stall into a denial.
+11 (15:22) a not-found attribute read on a different service took 0.01–0.02 s (which rules
+out nothing — different op, different condition). Load is a correlation; securityd contention
+is one other candidate; the set is not enumerated. The watchdog IS an independent
+instrument: `ps` ancestry shows pm2 and the tmux server are both direct children of launchd
+(two process trees, one window) — "machine-wide", as the 2c26db5b commit subject put it,
+was one step past that evidence. **Scope of this card:** it removes the false positive for
+isolated/transient stalls. For a persistently blocked keychain (every `-w` read hangs to
+budget) it delays the latch by two reads and changes nothing else — and there the latch is
+the right outcome, which the tests must PRESERVE (a third consecutive timeout still latches).
 
 **The janitor's own python path is one step worse.** `safe_storage.run_security`'s
 `except subprocess.TimeoutExpired: set_keychain_denied(...)` branch (read at
@@ -119,6 +125,8 @@ gap in the TS port and the attribute-read exemption there are the peer's (messag
 - A timeout is not a denial. The latch's text already admitted it ("cause NOT observed"); the
   policy still acted on it. When `security` stalls machine-wide, the breaker built to stop a
   prompt flood becomes the thing that stops rotation.
+- The filename slug says "load-timeout"; the title was corrected at 15:26 and the slug kept so
+  the commit trail resolves. Read the title, not the path.
 - The first version of this card named "load" as the cause from a loadavg correlation, with
   the server's own keychain-blind watchdog lines sitting unexplained in the same log excerpt.
   Caught by review; the settling read (0.01–0.02 s at loadavg 11) only shows `security` is
