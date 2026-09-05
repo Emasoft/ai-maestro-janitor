@@ -1,9 +1,10 @@
 ---
 trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
-column: testing
+column: ai_review
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:48:42+0200
+updated: 2026-09-05T05:53:07+0200
+review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -15,13 +16,17 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T05:49:00+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — last updated 2026-09-05T05:53:00+0200; contains material from 2026-09-03 and 2026-09-02, each dated inline
 
-*(`review-after: 2026-09-05` REMOVED from the frontmatter, not left to lapse. It parked this
-card on the premise that the fix was unreleased — a premise now FALSIFIED, not merely elapsed.
-A snooze that ran out and a snooze whose reason was wrong read identically in frontmatter, and
-only one of them should leave a trace. `trdd-drift` was never misled either way; a human
-reading the field was.)*
+*(`review-after: 2026-09-05` — kept. **I removed it and put it back**, because the reason for
+removing was invented: "a falsified premise should leave no trace" appears nowhere in the rule,
+which only says the field is a snooze that self-releases. An expired field being INERT to
+`trdd-drift` makes deleting it harmless, not correct, and the deletion had a real cost —
+`grep -l "^review-after:" design/tasks/*.md` is how anyone would enumerate "cards parked on a
+premise that later failed", which this session has now found TWO of. Removing a member from
+that index while writing prose about listing a count's members was the wrong direction. The
+STATE block already tells a reader the premise was falsified, and it is authoritative by
+rule 10 — that was always enough.)*
 
 **⚠ 2026-09-05 — THE "UNRELEASED" HALF BELOW HAS DECAYED, AND THE PARK IT JUSTIFIED IS OVER.**
 It was true on 2026-09-03, when the newest release was 3.4.13. `v3.4.14` was tagged
@@ -43,9 +48,12 @@ whole point — a claim that is still true is not an instance of claims going st
 Record the SHA and let a reader ask git — never a snapshot word like "unreleased".*
 
 **Board reconciliation (2026-09-03 11:09) — SUPERSEDED, kept verbatim for the record. Its
-"all 3 boxes stay open" is NOW FALSE: the count is 1 open / 2 done** (the `.env`-with-no-rule
-box, ticked 2026-09-04; the fleet-sweep box, ticked 2026-09-05). Said explicitly rather than
-left to the header, because a reader acting on "all 3 open" would re-do a sweep that has run:
+"all 3 boxes stay open" is NOW FALSE: the count is **0 open / 3 done** — the `.env`-with-no-rule
+box (2026-09-04), the fleet-sweep box and the exactly-one-detector test box (both 2026-09-05).
+Said explicitly rather than left to the header, because a reader acting on "all 3 open" would
+re-do a sweep that has run. *(This line itself said "1 open / 2 done" for four minutes, until
+the third box closed — a count in prose goes stale the moment the thing it counts moves, which
+is why the checkboxes above are the source of truth and this is a courtesy.)*
 implemented (`bd3af652`) and re-verified (`uv run pytest tests/test_gitignore_coverage.py
 tests/test_tracked_ignored.py -q` → 17 passed), but `git tag --contains bd3af652` is empty
 (UNRELEASED, not in installed 3.4.13) — the live fleet check cannot run yet.
@@ -113,9 +121,31 @@ check no existing test makes, and one needing a command actually RUN. Recording
 that distinction because "CODE" in that audit means *reachable*, and reading it
 as *done* would have ticked two boxes on nothing.
 
-- [ ] A tracked file ignored by a repo rule but in NO private class is reported by exactly one
-      detector per fire, with wording that does not call it a private class.
-      — NOT satisfied, and the audit's CODE label was optimistic here. The test
+- [x] **SATISFIED 2026-09-05 — the test now exists, and it is proven able to FAIL.**
+      `tests/test_gitignore_coverage.py::test_exactly_one_detector_reports_a_no_private_class_ignored_tracked_file`
+      seeds one repo with a `ccpm/**` rule and a tracked `ccpm/state.json` (no private class),
+      runs **both detectors as real subprocesses against that same fixture**, and asserts
+      `len(coverage_hits) + len(tracked_ignored_hits) == 1`, that the coverage side is empty,
+      that tracked-ignored has exactly one — **and the wording half**, `"private class" not in
+      tracked_ignored_hits[0]`. That conjunction is what the two solo-detector tests never
+      asserted together.
+      **MUTATION-VERIFIED BY THE COORDINATOR, not on the worker's word.** I reinstated the
+      pre-fix defect in `lib/gitignore_coverage.py::tracked_offenders` (dropped the
+      `and matches_private_class(p)` term, restoring the rule-only branch `bd3af652` removed)
+      and re-ran: **`AssertionError: assert (1 + 1) == 1`**, exit 1. Both detectors report the
+      same file, the test catches it. Source then restored — `git diff --stat` on that file is
+      empty, i.e. byte-identical to HEAD — and the suite is green again.
+      *Why this check and not the easy one: my first instruction to the worker asked it to flip
+      the ASSERTION and confirm failure. That proves nothing — `assert 1 == 1` passes it too.
+      Corrected mid-flight to mutate the CODE UNDER TEST, which is the only version that shows
+      the test detects the regression it guards.*
+      **Gates, run by me:** `pytest tests/test_gitignore_coverage.py tests/test_tracked_ignored.py -q`
+      → **18 passed** (baseline 17 on a stashed tree, +1 new — the worker reported "19, was
+      18+1", which overcounted the baseline by one; the test itself is collected and passes,
+      verified by running it alone with `-v`). `ruff check` and `mypy --ignore-missing-imports`
+      clean.
+      *(Original note, kept — it was right that the box was unsatisfied:)*
+      > — NOT satisfied, and the audit's CODE label was optimistic here. The test
       it pointed at (`test_a_rule_that_exists_does_not_clear_an_already_tracked_file`)
       asserts the `.env` case, not this one — I read its assertions rather than
       trusting its name. Nothing in `tests/test_gitignore_coverage.py` or

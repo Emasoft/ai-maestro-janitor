@@ -13,6 +13,7 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _DETECTOR = _REPO / "scripts" / "detectors" / "gitignore-coverage.py"
+_TRACKED_IGNORED_DETECTOR = _REPO / "scripts" / "detectors" / "tracked-ignored.py"
 sys.path.insert(0, str(_REPO / "scripts" / "lib"))
 
 import gitignore_coverage as gc  # noqa: E402
@@ -203,3 +204,35 @@ def test_a_tracked_file_covered_by_an_ordinary_rule_is_not_this_detectors_findin
     lines = _run_detector(repo)
     contamination = [ln for ln in lines if "still TRACKED" in ln]
     assert not contamination, contamination
+
+
+def test_exactly_one_detector_reports_a_no_private_class_ignored_tracked_file(
+    tmp_path: Path,
+) -> None:
+    """TRDD-IEAZQ9MK: on the SAME fixture, `tracked-ignored` reports and `gitignore-coverage`
+    does not — the conjunction the two solo-detector tests above never assert together — and
+    the reporting detector's wording never calls the file a private class.
+    """
+    repo = tmp_path / "seed"
+    git = _seed(repo)
+    (repo / "ccpm").mkdir()
+    (repo / "ccpm" / "state.json").write_text("{}\n")
+    git("add", "ccpm/state.json")
+    git("commit", "-qm", "seed")
+    (repo / ".gitignore").write_text("ccpm/**\n")
+
+    coverage_lines = _run_detector(repo)
+    coverage_hits = [ln for ln in coverage_lines if "still TRACKED" in ln]
+
+    env = dict(os.environ)
+    env["CLAUDE_PROJECT_DIR"] = str(repo)
+    proc = subprocess.run(
+        [sys.executable, str(_TRACKED_IGNORED_DETECTOR)],
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    tracked_ignored_hits = [ln for ln in proc.stdout.splitlines() if "[tracked-ignored]" in ln]
+
+    assert len(coverage_hits) + len(tracked_ignored_hits) == 1
+    assert not coverage_hits
+    assert len(tracked_ignored_hits) == 1
+    assert "private class" not in tracked_ignored_hits[0]
