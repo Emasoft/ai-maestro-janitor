@@ -1,9 +1,9 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: testing
+column: dev
 created: 2026-08-12T13:11:10+0200
-updated: 2026-09-03T11:17:55+0200
+updated: 2026-09-05T09:02:33+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -18,7 +18,7 @@ external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
 
 # Zero-cost compaction on an expired cache
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05
 
 ### ✅ 2026-09-03 11:17 — box 4 PROVEN live; dev → testing (only box 5 left, a measurement)
 
@@ -40,8 +40,37 @@ automated clear, run `uv run scripts/handoff_clear_verify.py --phase after` in t
 right after its `post-clear resume cue`, before further turns run, and compare against that
 project's `before` snapshot.
 
-No code work remains — the two open boxes are both measurements on future/next automated fires.
-Column moved `dev → testing` accordingly.
+### ⛔ 2026-09-05 — "No code work remains" IS FALSE. Box 5 CANNOT tick on the automated path.
+
+**Nothing invokes `--phase after`, and nothing tells the resumed session to.** Verified:
+
+- `external_handoff_clear.py:363` runs the harness with `["--phase", "before"]` and nothing
+  else. A repo-wide grep for `handoff_clear_verify` finds exactly two other hits, both prose.
+- The harness's own docstring (`handoff_clear_verify.py:37`) says the after-phase is *"run by
+  the resumed session, driven by the resume directive"* — but no code puts that instruction
+  into the automated resume directive.
+- The ONE place that hands a human the command (`handoff_clear_verify.py:576-584`) is inside
+  `if not before.get("resume_flag_present")` — it fires only when NO resume flag is present,
+  i.e. on the MANUAL path. On an automated clear the flag IS present, so that branch is
+  silent and nobody is ever told.
+
+So the 2026-09-03 cycle did not "forget" the after-phase; **there is no mechanism by which it
+could have run it.** Waiting for the next automated fire will produce the same `before`-only
+`handoff-clear-verify.json` forever.
+
+**Box 5 therefore needs CODE before it can need a measurement** — emit the after-phase
+directive on the automated resume path (the natural home is beside the post-clear resume cue,
+where the resumed session is already being told what to do). Only then does the measurement
+become a live-event wait like box 4's was.
+
+*This block corrects the line below, which was written 2026-09-03 and is left in place so the
+correction is legible rather than silent.*
+
+~~No code work remains — the two open boxes are both measurements on future/next automated fires.
+Column moved `dev → testing` accordingly.~~
+
+**Column moved BACK `testing → dev` (2026-09-05).** `testing` asserts that the work is built
+and under test; box 5's mechanism is not built, so the column was claiming something untrue.
 
 ### ⛔ 2026-09-02 05:15 — THE DRILL FIRED; the summary half is dark. Blocked on TRDD-QZVAEWQH
 
