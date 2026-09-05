@@ -3,8 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: testing
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:47:57+0200
-review-after: 2026-09-05
+updated: 2026-09-05T05:48:42+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -16,7 +15,13 @@ npt: []
 eht: []
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T11:09:13+0200
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-05T05:49:00+0200
+
+*(`review-after: 2026-09-05` REMOVED from the frontmatter, not left to lapse. It parked this
+card on the premise that the fix was unreleased — a premise now FALSIFIED, not merely elapsed.
+A snooze that ran out and a snooze whose reason was wrong read identically in frontmatter, and
+only one of them should leave a trace. `trdd-drift` was never misled either way; a human
+reading the field was.)*
 
 **⚠ 2026-09-05 — THE "UNRELEASED" HALF BELOW HAS DECAYED, AND THE PARK IT JUSTIFIED IS OVER.**
 It was true on 2026-09-03, when the newest release was 3.4.13. `v3.4.14` was tagged
@@ -24,7 +29,10 @@ It was true on 2026-09-03, when the newest release was 3.4.13. `v3.4.14` was tag
 and the installed artifact agrees: `3.4.14/scripts/lib/gitignore_coverage.py` is
 **byte-identical to `bd3af652`'s version** (`ed60e60b091f`), not to its parent
 (`02bf145ec508`). So the fix is released AND installed, the live fleet check CAN run — and it
-did: the sweep box below is now ticked on it. `review-after: 2026-09-05` has also expired.
+did — though **in that order, not this one**: the sweep was run and ticked BEFORE the release
+status was checked. The sweep working is what should have prompted the question; the tag and
+sha evidence above is what answers it, and it stands alone. *Stated because the card would
+otherwise narrate a verification order that did not happen.*
 *SECOND card this session carrying a decayed "unreleased, wait" claim, and the members are
 named because a count without them is an estimate: **3T9HQEQ6** ("publish first" about
 `fb25366f`/`1533ccc9`, both already in v3.4.14) and **this card**. A first version said
