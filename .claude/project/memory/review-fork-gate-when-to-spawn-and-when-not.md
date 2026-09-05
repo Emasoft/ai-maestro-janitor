@@ -13,33 +13,38 @@ metadata:
 # review-fork-gate-when-to-spawn-and-when-not
 
 
-^ATOM-0GLJ-EK3A [desc: "Spawn a review fork when the turn changed EXECUTABLE BEHAVIOUR or asserted a VERIFIABLE VERDICT; a turn whose whole diff is prose gets a re-read instead — checkable with git diff --name-only | grep -v", keywords: should_I_spawn_a_fork_for_a_docs-only_commit review-fork_gate_fires_on_every_turn prose-only_turn_triggered_the_gate when_is_a_review_fork_worth_it stopping_criterion_for_review_forks the_adversarial_review_loop_is_eating_the_session forks_finding_smaller_and_smaller_things diminishing_returns_on_adversarial_review is_a_card_closure_worth_a_fork gate_blocks_the_turn_with_nothing_to_review how_to_decline_the_review_gate_honestly review-supervisor_says_changes_unreviewed, ocd: 2026-09-05, lmd: 2026-09-05]
+^ATOM-0GLJ-EK3A [desc: "Fork when the turn changed EXECUTABLE BEHAVIOUR, asserted a VERDICT, or CHARACTERISED WHAT EVIDENCE ESTABLISHES — that third clause is load-bearing: without it the rule suppresses review of exactly th", keywords: should_I_spawn_a_fork_for_a_docs-only_commit review-fork_gate_fires_on_every_turn prose-only_turn_triggered_the_gate when_is_a_review_fork_worth_it stopping_criterion_for_review_forks the_adversarial_review_loop_is_eating_the_session forks_finding_smaller_and_smaller_things diminishing_returns_on_adversarial_review is_a_card_closure_worth_a_fork gate_blocks_the_turn_with_nothing_to_review how_to_decline_the_review_gate_honestly review-supervisor_says_changes_unreviewed, ocd: 2026-09-05, lmd: 2026-09-05]
+**SPAWN a review fork when the turn (a) changed EXECUTABLE BEHAVIOUR — code, a test, a script, a
+config the machine reads; (b) asserted a VERDICT — closing a card, claiming a fix works, a rules
+interpretation, a memory write; or (c) CHARACTERISED WHAT EVIDENCE ESTABLISHES — "this shows X",
+"this bounds Y", "this was measured", a withdrawal, a restatement of what a result means.**
+Only a turn that is none of those gets a re-read instead.
 
-**SPAWN a review fork when the turn changed EXECUTABLE BEHAVIOUR** (code, a test, a script, a
-config the machine reads) **or asserted a VERIFIABLE VERDICT** (closing a card, claiming a fix
-works, a rules interpretation others will act on, a memory write). **A turn whose entire diff is
-prose gets a re-read before commit and no fork.**
+**⚠ CLAUSE (c) IS LOAD-BEARING AND THE FIRST VERSION OF THIS ATOM OMITTED IT — the rule was
+unsound, and its own session refutes it.** Written with (a)+(b) only, it would have suppressed the
+two forks that caught the worst late errors of the session that produced it. Both commits changed
+no code, closed no card and interpreted no rule; both were things I had re-read and was satisfied
+with:
+- a "negative result" from 30 green runs that **tested nothing** — the hypothesis predicts
+  leftover state from a FAILING run, and every run passed;
+- a **polarity inversion** (leakage confounds a RED result, not a green one) plus the wrong
+  statistical assumption named (independence, when the failure is identical-distribution).
+A third caught a memory atom citing **another agent's measurement of a different operation** as
+evidence for mine. **A claim about what evidence shows is not a "verdict" by the (b) definition,
+and it is exactly where the errors were.** The rule caught decisions and missed inferences.
 
-Checkable in one command: `git diff --name-only HEAD~1 HEAD | grep -v '\.md$'` — non-empty ⇒
-fork. No judgment about severity required.
+**The honest cost curve:** findings shrank in SCOPE but not reliably in MATERIALITY, and the ones
+that stayed material were about evidence claims. That is the shape to prune by — not "early forks
+good, late forks prose".
 
-**The gate will keep firing on prose turns; it is a Stop hook and cannot tell the difference.**
-Say so in one line and do not spawn. That is not defying it — the gate's own purpose is "the
-check that catches what tests and types cannot", and there is no test that could catch a
-paragraph being too long, nor any defect when it is.
+**The gate keeps firing on turns that are genuinely none of (a)-(c);** it is a Stop hook and
+cannot tell. Say so in one line and do not spawn. Checkable start:
+`git diff --name-only HEAD~1 HEAD | grep -v '\.md$'` — non-empty ⇒ (a). It does not decide (b)
+or (c); read the diff for those.
 
-**WHY, measured 2026-09-05 over ~20 forks in one session.** The first five caught real
-instrument defects that would have produced false data — a survivor census blind to the process
-it counted, a loop stop-condition tied to a rendering detail, a missing per-run cap, an
-overclaimed `--kill-after`. Then the findings moved from the EVIDENCE to how the PROSE
-characterises the evidence, and kept shrinking: a stale STATE block, then a column contradicting
-it, then the justification for the column, then the wording of the justification. **Prose about
-prose has unbounded surface area** — there is always another imprecision, so the loop does not
-converge on its own. Five consecutive rounds touched the same two paragraphs while the operative
-content had been stable for three.
-
-**A fork that says STOP is a finding — act on it.** When one recommends ending the review of
-something, that instruction survives the next round: do the fixes it names, then stop *regardless
-of what a further review would say*. Otherwise the gate re-opens what the previous fork closed.
+**A fork that says STOP is a finding — act on it, SCOPED TO WHAT THAT FORK WAS REVIEWING.** "Stop
+reviewing this card's prose" is not "stop reviewing". Do the fixes it names, then stop on that
+subject regardless of what a further review would say; rescoping to a different subject is
+legitimate and is not defiance.
 
 ## Notes and lessons learned
