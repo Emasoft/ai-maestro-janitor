@@ -10,6 +10,7 @@ scope: project
 project-id: ai-maestro-janitor
 min-approval-requirement: none
 external-refs: [TRDD-QJ5LP4W2, TRDD-8BXMNQ4T]
+implementation-commits: [f2f7656d]
 ---
 
 # Replay harness for worst measured foreground occupancy

@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: dev
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-05T17:38:28+0200
+updated: 2026-09-05T17:42:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -13,7 +13,7 @@ min-approval-requirement: none
 labels: [version-update, absorbed-chores, ai-maestro, rollout]
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [3903ca44, ab381b19]
 relevant-rules: []
 ---
 
