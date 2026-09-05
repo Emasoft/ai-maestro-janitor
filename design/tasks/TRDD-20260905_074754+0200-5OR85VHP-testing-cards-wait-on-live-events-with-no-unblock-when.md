@@ -3,7 +3,7 @@ trdd-id: 5OR85VHP
 title: most testing cards are waiting on a live event with no machine-checkable wait condition
 column: todo
 created: 2026-09-05T07:47:54+0200
-updated: 2026-09-05T10:36:05+0200
+updated: 2026-09-05T10:47:12+0200
 current-owner: main-session
 task-type: docs
 priority: low
@@ -38,6 +38,10 @@ grep -h '^- \[ \]' <card> | grep -ciE '\blive\b|observed|real compaction|next (s
 **8 of 11 cards** have at least one box matching: PXP08ZQC, X6I04SAO, Q0Y4M1TF, N954KWUC,
 L32WC0H7, 3T9HQEQ6, KE88RIKX, OES0NN3F. Three do not: 1QJIZFFW, 2F3I2P18, GK35MOXU.
 
+**The count is NOT load-bearing and should not be argued about.** The argument holds at
+n=1: if ONE card in `testing` waits on an event nobody can cause, the column collapses two
+states a reader needs to distinguish. Eight adds rhetorical weight the case does not need.
+
 **That predicate is a HEURISTIC over box PROSE, not a classification** — it is stated so a
 reader can re-run it or disagree, which an eyeballed "roughly eight" does not allow. It is
 known to under-count: 2F3I2P18's box ends *"— awaits…"*, plainly a wait, and matches no
@@ -55,13 +59,24 @@ gates ran. What the column cannot express is *"built, and now waiting for the wo
 produce the event that proves it"*, so a reader cannot tell an actively-tested card from
 one that has been waiting a week for a rate-limit wall.
 
-## Why this is not simply "move them to blocked"
+## ⚠ CORRECTION — option 2 is NOT constrained the way this card first said
 
-`blocked` needs a true non-empty `blocked-by:` naming what blocks it, and *"a rate-limit
-wall has not happened yet"* is not another card. `unblock-when:` is the closer fit — it has
-a `log:` predicate kind precisely for machine-checkable waits, and `trdd-drift.py` can
-auto-restore on it — but `unblock-when:` is defined as a field on a **`blocked`** card, so
-using it means answering the `blocked-by:` question first.
+The first version of this section argued that `blocked` was awkward because *"`blocked-by:`
+must name what blocks it, and 'a rate-limit wall has not happened yet' is not another
+card."* **That is false, and it is false in the direction that made my preferred option look
+better** — a card presenting a fake constraint against one of its own choices is steering,
+not offering.
+
+`blocked-by:` on THIS board does not name cards. Values read from it the same day:
+`[user-present-supervised-hard-restart-trial]` (56d24c02),
+`[user-decision-exempt-subset-applier]` (WP7TCRME), `[peer-repo-hub-lane-wiring]`
+(9ZPU69UC) — all prose labels naming a CONDITION. I filed 3BQM5GH7's own `blocked-by:`
+following exactly that convention hours earlier, then wrote a paragraph claiming it was not
+allowed.
+
+So **option 2 is fully available**: `blocked-by: [next-scoped-rate-limit-wall]` plus
+`unblock-when: [log:...]`, where `blocked-by:` is the human-readable label and
+`unblock-when:` carries the machine-checkable predicate `trdd-drift.py` auto-restores on.
 
 **This is a vocabulary question, not a bookkeeping one**, which is why it is its own card
 and not a sweep. TRDD-QJ5LP4W2's notes already recorded the sibling gap — *"the 22-column

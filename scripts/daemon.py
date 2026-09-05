@@ -1997,7 +1997,9 @@ def task_session_liveness(fleet: list | None = None) -> None:
         # number, plus the queued-command count the flush law needs.
         #
         # SCOPE (TRDD-ZVZAFQY6, 2026-09-05): "no extra osascript" is true of THE POLICY TABLE
-        # — the call sites below pass `state=pane` (`daemon.py:2052`, `:2107`) and `act()` then
+        # — the two `act()` call sites below (`OWN_COMMAND_UNSUBMITTED`, `RECOVERY_RUNG`) pass
+        # `state=pane`, cited by Event because same-file line numbers rot on every edit above
+        # them, and `act()` then
         # skips its own read (the `if state is None and read_pane:` guard,
         # `pane_actuate.py:174`). Both halves are needed; neither line proves it alone. It is NOT
         # a claim about the beat: the field-busy guard below takes TWO more captures of this
