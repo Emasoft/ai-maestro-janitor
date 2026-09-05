@@ -3,7 +3,7 @@ trdd-id: 34GB6XUI
 title: collapse TRDD-ZQ02QG1L's five correction layers into its surviving facts
 column: todo
 created: 2026-09-04T20:18:32+0200
-updated: 2026-09-04T20:18:32+0200
+updated: 2026-09-05T03:21:39+0200
 current-owner: main-session
 task-type: docs
 min-approval-requirement: none
@@ -50,6 +50,37 @@ composer -> L46IG69Y was its EHT (fixing the concision-check interaction that
 shipped with it) -> this card came out of L46IG69Y as doc hygiene its own box
 could not tick. The chain ends there: the `eht:` link was dropped, so this card
 gates nothing.
+
+## ⏵ 2026-09-05 — THE PREMISE UNDER BOX 3 IS NOW FALSE, AND THE TASK IS FORBIDDEN AS WRITTEN
+
+**I closed ZQ02QG1L to `complete` today** (`87e13001`) — its blocker L46IG69Y had gone terminal,
+so `pre-block-column: complete` was restored mechanically. That was correct on the rules and it
+**falsifies box 3 below**, which reads *"it is `blocked`, so this is an ordinary edit to an open
+card and NO terminal-freeze question arises."*
+
+ZQ02QG1L is now terminal, and rule 12 freezes terminal cards: *no body edits on `complete`*, with
+narrow exceptions (the closing edit; an `## Approval log` append; archival; removing a body line
+that FALSELY and machine-verifiably contradicts the terminal column). **A readability collapse is
+none of those.** So the earlier review that called this whole task forbidden — which box 3 records
+as having reasoned from a false premise — now reaches the same conclusion from a TRUE one.
+
+**Box 3's self-enforcement worked exactly as designed**, and that is worth noting rather than
+patching: whoever picks this up reads ZQ02QG1L to collapse it and sees `column: complete` on the
+way in. The card fails closed. Nobody was going to collapse a frozen card by accident.
+
+**THE OPEN DECISION, not mine to take silently — the column is deliberately left `todo` so it is
+visible rather than quietly parked:**
+1. **Cancel it.** The card says "Nothing waits on this", and the USER already dropped its gate.
+   A 404-line card nobody must read again may simply not be worth an exception.
+2. **Re-scope to a permitted form** — e.g. the collapse lands as a NEW card carrying the surviving
+   facts, with ZQ02QG1L left frozen and pointing at it. Rule 12's own remedy is "new work = new
+   TRDD".
+3. **Seek a freeze exception** for readability-only edits to terminal cards. That is a rules
+   question, not a task, and it would need the USER.
+
+*What must NOT happen: reverting ZQ02QG1L to `blocked` to make this card executable again.* The
+close was mechanically correct; un-closing a card to unblock a chore about that card would be
+falsifying board state to suit a convenience.
 
 ## Acceptance criteria
 
