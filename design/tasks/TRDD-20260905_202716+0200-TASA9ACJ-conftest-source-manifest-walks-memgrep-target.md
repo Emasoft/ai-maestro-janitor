@@ -18,11 +18,13 @@ eht: []
 
 ## Symptom
 
-Every pytest invocation pays 8–22 s twice before and after the tests, regardless of which
-tests are selected. Under host load the same cost stretched a 19-test file to 66 s
-(`reports/board-drain/20260905_200826+0200-LDSCQ0NU-duration-investigation.md`: cProfile
-attributed 54.6 s cumulative to `tests/conftest.py:549 _source_manifest`, called from
-`pytest_configure` and `pytest_sessionfinish`).
+Every pytest invocation enumerates and sorts 103,910 filesystem entries twice — once in
+`pytest_configure`, once in `pytest_sessionfinish` — to keep 511 of them, regardless of
+which tests are selected. On a host at loadavg 133 that walk took 8–22 s per call; a single
+cProfile run under external `cargo test` load attributed 54.6 s of a 63 s 19-test run to it
+(`reports/board-drain/20260905_200826+0200-LDSCQ0NU-duration-investigation.md`,
+`tests/conftest.py:549 _source_manifest`). The seconds are load-contaminated; the 200×
+entry ratio and the pruned walk's sub-second time under the same load are not.
 
 ## Mechanism (measured 2026-09-05)
 

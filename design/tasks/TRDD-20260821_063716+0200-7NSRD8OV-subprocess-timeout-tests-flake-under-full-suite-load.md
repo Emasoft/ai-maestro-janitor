@@ -22,24 +22,34 @@ eht: [TASA9ACJ]
 `q8pnprtw-experiment.log`), compared in
 `reports/board-drain/20260905_202532+0200-soak-compare-and-conftest-walk-cost.md`:
 
-| run | start loadavg | summary | `TimeoutExpired` | exit |
+| run | start loadavg | summary | raised `TimeoutExpired` (category D) | exit |
 |---|---|---|---|---|
-| `-n auto` | 7.81 (waited for <8 for 2 min) | `17 failed, 16438 passed, 2 skipped … 2237.29s` | 7 | 3 |
-| `-n 4` | 17.90 (host not yet quiet after nauto) | `20 failed, 16445 passed, 2 skipped … 2967.91s` | 10 | 1 |
+| `-n auto` | 7.81 (waited for <8 for 2 min) | `17 failed, 16438 passed, 2 skipped … 2237.29s` | 1 | 3 |
+| `-n 4` | 17.90 (host not yet quiet after nauto) | `20 failed, 16445 passed, 2 skipped … 2967.91s` | 2 | 1 |
 
-**13 failures are common to both runs** (`test_branch_protection*`, `test_gh_reply_watch`,
-`test_github_issues_watch`, `test_capture_all_logins`, `test_inject_still_wanted`,
-`test_token_usage_anomaly_detector::test_alarm_enriched_with_agentlens`,
-`test_external_clear_retry::test_a_real_failing_binary_is_classified_not_swallowed`) — a
-stable set that a quiet start did not clear, so not the load-only category this card owns.
-`test_branch_protection_guard.py` fails a DIFFERENT sub-test each run (3+3, none shared).
-The `-n 4` run also carries a 300 s `dispatcher-stub.py --run-cold-cache-clear` timeout
-inside `test_cold_cache_clear_server_lane`. Neither run is the RULING's green; `column:`
-stays `testing`. The 13-common set wants its own triage (network/`gh`-auth-shaped names
-dominate) before the next soak, or the soak measures them, not load.
+The category-D column is from the traceback sections, not a `grep -c` (which says 7 and 10
+because `test_capture_one_kills_the_whole_tree_and_reports_timeout` carries the word in its
+docstring, a comment and a `pytest.raises`). Maps with the `____ test_x ____` headers
+interleaved: `reports/board-drain/20260905_203100+0200-{nauto,n4}-failure-map.txt`. The
+raised ones: `test_external_clear_retry::test_a_real_failing_binary_is_classified_not_swallowed`
+(`fake-llm-ext.sh … timed out after 100.0 seconds`) in BOTH runs, plus
+`test_cold_cache_clear_server_lane::test_the_stub_passes_argv_through_to_the_dispatch_it_execs`
+(`dispatcher-stub.py --run-cold-cache-clear … 300.0 seconds`) in the `-n 4` run only.
+
+**13 failures are common to both runs by node id**, and **12 of the 13 have NO raised
+`TimeoutExpired` in their section** — `test_branch_protection*`, `test_gh_reply_watch` ×3,
+`test_github_issues_watch`, `test_capture_all_logins` ×2, `test_inject_still_wanted` ×2,
+`test_token_usage_anomaly_detector::test_alarm_enriched_with_agentlens` (the 13th is the
+fake-llm-ext one above). Their actual failure lines have not been read yet; only the
+absence of a category-D raise is verified. `test_branch_protection_guard.py` fails a
+DIFFERENT sub-test each run (3+3, none shared). Neither run is the RULING's green;
+`column:` stays `testing`. The 12 non-D common failures want their tracebacks read before
+the next soak, or the soak measures them, not load — that population overlaps
+TRDD-Q8PNPRTW's, which owns the per-test triage.
 
 EHT filed: TRDD-TASA9ACJ — `conftest.py::_source_manifest` walks + sorts the 101k-file
-`scripts/memgrep/target/` tree before filtering it (8–22 s, twice per run).
+`scripts/memgrep/target/` tree before filtering it (103,910 entries enumerated for 511
+kept; 8–22 s per call on a host at loadavg 133, twice per run).
 
 ## ⏵ 2026-09-05 13:18 — a full `-n auto` run landed RED: does NOT meet the ruling's bar
 

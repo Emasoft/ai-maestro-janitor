@@ -3,7 +3,7 @@ trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
 column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-05T13:24:38+0200
+updated: 2026-09-05T20:33:00+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -24,6 +24,22 @@ external-refs: [TRDD-7NSRD8OV]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
 
+> ### ⏵ 2026-09-05 20:33 — unit-8 pair adds a 13-id set that fails in BOTH full runs, 12 of them without a category-D raise
+>
+> Two more full runs, sequential, `-n auto` from a quiet start (loadavg 7.81) then `-n 4`:
+> `17 failed` and `20 failed` (`reports/suite-soak/20260905_133200+0200-{nauto,n4}.txt`,
+> compare in `reports/board-drain/20260905_202532+0200-soak-compare-and-conftest-walk-cost.md`).
+> **13 node ids fail in both** — all inside this card's populations (`capture_all_logins` ×2,
+> `gh_reply_watch` ×3, `github_issues_watch`, `token_usage_anomaly`, `branch_protection` ×2,
+> `branch_protection_guard`, `inject_still_wanted` ×2, `external_clear_retry`). Read from the
+> traceback maps (`reports/board-drain/20260905_203100+0200-{nauto,n4}-failure-map.txt`): only
+> `external_clear_retry::test_a_real_failing_binary_is_classified_not_swallowed` raises
+> `TimeoutExpired` (`fake-llm-ext.sh … 100.0 seconds`, both runs); the other 12 do not. Their
+> failure lines are still unread. A quiet start did not clear them, and the 13:24 entry above
+> says they pass in isolation — so the mechanism is still "inside the full suite", now with a
+> stable 13-id core to instrument. `column:` unchanged; the waiver question is still the
+> USER's. `test_branch_protection_guard.py` fails a different sub-test in each run (3+3).
+>
 > ### ⏵ 2026-09-05 13:24 — all 38 reproduced ZERO times outside the full suite (2 reruns, 0 defects)
 >
 > A `lean-worker` reran all 38 `FAILED` ids from `20260905_103230+0200-full-nauto.txt` in
