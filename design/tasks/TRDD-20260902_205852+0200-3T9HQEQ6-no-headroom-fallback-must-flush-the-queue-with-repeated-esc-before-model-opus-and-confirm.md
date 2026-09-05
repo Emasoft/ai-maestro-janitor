@@ -3,7 +3,7 @@ trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
 column: testing
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-05T05:20:58+0200
+updated: 2026-09-05T05:23:58+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -139,18 +139,28 @@ this card still flushes whatever is already queued.
       `v3.4.14` **2026-09-04 00:38:38**, so 3.4.13 was indeed newest that day — dated, not
       assumed). A release then landed under it and nothing re-checked.*
       **⚠ AND THE SAME LINE'S OTHER HALF IS ALSO FALSE:** it says *"the core fix `e0c328c4` is
-      in installed 3.4.13"*. `e0c328c4` is **2026-09-02 22:35:00**, eighteen minutes AFTER
-      `v3.4.13` was tagged. It was never in 3.4.13. All three commits shipped together in
-      v3.4.14 — which is why "publish first" was the right call on 2026-09-03 and is the wrong
-      call now.
+      in installed 3.4.13"*. **Proved by reachability, not by dates:**
+      `git merge-base --is-ancestor e0c328c4 v3.4.13` → **false**, and
+      `git tag --contains e0c328c4` returns **only `v3.4.14`**. It was never in 3.4.13; all
+      three commits shipped together in v3.4.14 — which is why "publish first" was right on
+      2026-09-03 and is wrong now.
+      *(The date ordering — `e0c328c4` 22:35:00 vs `v3.4.13` 22:16:50 — agrees, but it is NOT
+      what settles it and must not be cited as if it were: a commit date can precede a tag it
+      is absent from, and follow one it is present in, after a cherry-pick, a rebase, or a
+      moved tag. **Membership is a reachability question; ask git that question directly.**)*
       **The general lesson, and the reason the remedy is not a wash:** "record the SHAs and the
       version they need" still makes a reader resolve SHA→release, but that is a **decidable**
       lookup against git, available forever. "UNPUBLISHED" is an **undecidable** claim about a
       moment that no longer exists — nothing in the repo can confirm or refute it. Decidable in
       two steps beats undecidable in one.
       **Provenance of this card's `updated:`, so the bump does not erase a signal:** it was
-      `2026-09-03T11:09:13+0200`, shared identically with 10 sibling cards — a batch sweep
-      timestamp meaning *"these were swept together, none individually examined."* The bump to
+      `2026-09-03T11:09:13+0200`, shared identically with **4** sibling cards (2F3I2P18,
+      IEAZQ9MK, Q0Y4M1TF, X6I04SAO — counted with
+      `grep -l "^updated: 2026-09-03T11:09:13+0200" design/tasks/*.md`) — a batch sweep
+      timestamp meaning *"these were swept together, none individually examined."*
+      *(A first version of this line said "10 sibling cards". Nobody counted; the number was
+      carried over from a loose "11 other cards" said about a different set. Same defect as the
+      rest of this session — a figure supplied in the register of a measurement.)* The bump to
       2026-09-05 reflects **this documentation correction, not progress on the work**, which is
       exactly as stale as it was. `trdd-drift` ages on this field, so read the bump as
       paperwork.
