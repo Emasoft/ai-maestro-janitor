@@ -230,6 +230,10 @@ def test_exactly_one_detector_reports_a_no_private_class_ignored_tracked_file(
         [sys.executable, str(_TRACKED_IGNORED_DETECTOR)],
         capture_output=True, text=True, env=env, timeout=30,
     )
+    # Matches `_run_detector`'s own guard: without it, a detector that crashes AFTER printing a
+    # matching line leaves all four assertions below satisfied, so the test would go green on a
+    # broken detector — the one false-pass path in this half.
+    assert proc.returncode == 0, proc.stderr
     tracked_ignored_hits = [ln for ln in proc.stdout.splitlines() if "[tracked-ignored]" in ln]
 
     assert len(coverage_hits) + len(tracked_ignored_hits) == 1

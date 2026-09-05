@@ -3,8 +3,7 @@ trdd-id: IEAZQ9MK
 title: gitignore-coverage and tracked-ignored report the same tracked-but-ignored file twice an hour with different wording
 column: ai_review
 created: 2026-09-02T14:24:57+0200
-updated: 2026-09-05T05:53:07+0200
-review-after: 2026-09-05
+updated: 2026-09-05T05:57:05+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -18,15 +17,25 @@ eht: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — last updated 2026-09-05T05:53:00+0200; contains material from 2026-09-03 and 2026-09-02, each dated inline
 
-*(`review-after: 2026-09-05` — kept. **I removed it and put it back**, because the reason for
-removing was invented: "a falsified premise should leave no trace" appears nowhere in the rule,
-which only says the field is a snooze that self-releases. An expired field being INERT to
-`trdd-drift` makes deleting it harmless, not correct, and the deletion had a real cost —
-`grep -l "^review-after:" design/tasks/*.md` is how anyone would enumerate "cards parked on a
-premise that later failed", which this session has now found TWO of. Removing a member from
-that index while writing prose about listing a count's members was the wrong direction. The
-STATE block already tells a reader the premise was falsified, and it is authoritative by
-rule 10 — that was always enough.)*
+**WHAT `ai_review` MEANS ON THIS CARD, said explicitly because otherwise it claims a gate
+nobody will close.** This repo is mono-agent: there is no separate AI-reviewer role, so the
+`ai_review` gate here IS the adversarial review-fork chain, and this card's code was reviewed by
+one — fork 15 examined the test's fixture ordering, its invocation asymmetry, its crash-path
+false-pass, and its xdist order-dependence, and its findings are applied above and below.
+`current-owner: main-session` therefore does NOT mean "waiting on its author to review itself";
+it means the review ran and the card is queued for the USER's `human_review` decision. If a
+future setup grows a real reviewer role, reassign rather than inheriting this.
+
+*(`review-after:` — REMOVED, and this is the second reversal on that field, so here is the
+whole reasoning rather than another bare verdict. I deleted it (wrong: on an invented principle
+that "a falsified premise should leave no trace"), restored it (right at the time: an expired
+field is inert, and `grep -l "^review-after:"` is how one would enumerate cards parked on a
+premise that later failed — this session found TWO), and have now removed it again because
+**the card's state changed underneath both decisions**: it left `testing` for `ai_review`. A
+park field on a card in an ACTIVE work column is a contradiction in the frontmatter — "in
+review, and also parked" — and the grep it was preserved for is a question about HISTORY, which
+git answers. The value was `review-after: 2026-09-05`; that record lives here now, which is
+where the archival argument always pointed.)*
 
 **⚠ 2026-09-05 — THE "UNRELEASED" HALF BELOW HAS DECAYED, AND THE PARK IT JUSTIFIED IS OVER.**
 It was true on 2026-09-03, when the newest release was 3.4.13. `v3.4.14` was tagged
