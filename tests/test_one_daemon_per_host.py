@@ -308,15 +308,27 @@ def test_the_daemons_exit_and_the_spawn_gate_are_guarded_by_the_SAME_decision() 
     a real supervised daemon in a unit test."""
     body = (ROOT / "scripts" / "daemon.py").read_text(encoding="utf-8")
     exit_pred = re.search(
-        r"if harness_backend\.(\w+)\(\):\n\s+exit_reason = \"server-owns-host\"", body
+        r"if harness_backend\.(\w+)\((\w*)\):\n\s+exit_reason = \"server-owns-host\"", body
     )
     assert exit_pred, "the server-owns-host exit must be guarded by a harness_backend predicate"
     gate = (ROOT / "scripts" / "lib" / "global_state.py").read_text(encoding="utf-8")
     spawn_pred = re.search(r"return harness_backend\.(\w+)\(\)", gate)
     assert spawn_pred, "the spawn gate must delegate to a harness_backend predicate"
-    assert exit_pred.group(1) == spawn_pred.group(1) == "server_owns_every_chore", (
-        f"exit is gated on {exit_pred.group(1)}() but spawn on {spawn_pred.group(1)}() — "
-        "they must be the same decision, else the daemon spawn/exit-flaps"
+    # TRDD-ARTTXA7P: the exit gate derives from the tick's ONE probe (`owns_every_chore_from(
+    # probe)`) while the spawn gate, holding no probe, calls `server_owns_every_chore()`. They
+    # stay the same decision only because the wrapper is a pure delegation to the helper over
+    # one fresh read — so that delegation is asserted here too, not assumed.
+    assert exit_pred.group(1) == "owns_every_chore_from" and exit_pred.group(2) == "probe", (
+        f"exit is gated on {exit_pred.group(1)}({exit_pred.group(2)}) — it must derive from "
+        "the tick's single probe (TRDD-ARTTXA7P)"
+    )
+    assert spawn_pred.group(1) == "server_owns_every_chore", (
+        f"spawn is gated on {spawn_pred.group(1)}() — it must be the wrapper of the exit decision"
+    )
+    hb_body = (ROOT / "scripts" / "lib" / "harness_backend.py").read_text(encoding="utf-8")
+    assert "return owns_every_chore_from(server_liveness_probe(now=now))" in hb_body, (
+        "server_owns_every_chore() must be a pure delegation to owns_every_chore_from() over "
+        "one probe, else exit and spawn answer different questions and the daemon flaps"
     )
 
 

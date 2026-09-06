@@ -166,6 +166,52 @@ def _explicit_chore_override() -> bool:
     return False
 
 
+def _override_bool() -> bool | None:
+    """The operator/test env override as a tri-state: True/False when
+    SERVER_CHORES_ENV or SERVER_STATE_ENV names a recognised value, else None (no
+    override — the probe decides). Env-only, so reading it costs nothing and never
+    counts as "the" liveness read."""
+    for env_name in (SERVER_CHORES_ENV, SERVER_STATE_ENV):
+        override = os.environ.get(env_name, "").strip().lower()
+        if override in _TRUE:
+            return True
+        if override in _FALSE:
+            return False
+    return None
+
+
+def claimed_chores_from(probe: "LivenessProbe") -> frozenset[str]:
+    """PURE: `claimed_chores()`'s exact verdict, derived from an ALREADY-taken probe.
+
+    TRDD-ARTTXA7P: a daemon tick used to call `claimed_chores()` (which re-reads
+    the liveness file) after already reading it once for `server_runs_chores()` and again
+    for the transition-log probe — three reads of a file that can be mid-rewrite between
+    any two of them, so the logged reason could describe a different read than the one
+    that drove the decision. Taking the probe ONCE and deriving everything from that one
+    object makes such disagreement impossible by construction.
+    """
+    caps = probe.capabilities if probe.reason == "alive" else None
+    if not caps:
+        # No live claim, or a live claim of nothing. ONE exception: an operator who has
+        # EXPLICITLY forced the chores knob (or the state knob) "up" is asserting by hand
+        # that the server owns the absorbed set — there is no capability list to read in
+        # that path, and silently degrading the knob to a no-op would break an operator
+        # tool rather than fix anything. It is honoured as a claim on the LEGACY absorbed
+        # set only, and it can recreate the ai-maestro#111 blackout for the other six
+        # chores — which is acceptable only because it takes a deliberate human action,
+        # unlike the default that caused it.
+        if _explicit_chore_override() and runs_chores_from(probe):
+            return SERVER_ABSORBED_TASKS
+        return frozenset()
+    claimed: set[str] = set()
+    for token in caps:
+        if token in GLOBAL_CHORES:  # a per-chore claim: exact, preferred
+            claimed.add(token)
+        else:  # a coarse token, or one we do not know — unknown claims nothing
+            claimed |= _CAPABILITY_CHORE_SETS.get(token, frozenset())
+    return frozenset(claimed)
+
+
 def claimed_chores(*, now: Optional[float] = None) -> frozenset[str]:
     """The chores a live ai-maestro server has actually CLAIMED — not merely "is alive".
 
@@ -182,27 +228,11 @@ def claimed_chores(*, now: Optional[float] = None) -> frozenset[str]:
     asked was "is a server alive?", and then ran nowhere. **A chore run twice is wasteful
     and guarded by cross-process file locks; a chore run by nobody is invisible.** When in
     doubt, keep it.
+
+    Delegates to `claimed_chores_from()` over a fresh `server_liveness_probe()` read — the
+    ONE-read contract lives there; this wrapper exists for callers with no probe on hand.
     """
-    caps = server_capabilities(now=now)
-    if not caps:
-        # No probe, or a probe claiming nothing. ONE exception: an operator who has
-        # EXPLICITLY forced the chores knob (or the state knob) "up" is asserting by hand
-        # that the server owns the absorbed set — there is no capability list to read in
-        # that path, and silently degrading the knob to a no-op would break an operator
-        # tool rather than fix anything. It is honoured as a claim on the LEGACY absorbed
-        # set only, and it can recreate the ai-maestro#111 blackout for the other six
-        # chores — which is acceptable only because it takes a deliberate human action,
-        # unlike the default that caused it.
-        if _explicit_chore_override() and server_runs_chores():
-            return SERVER_ABSORBED_TASKS
-        return frozenset()
-    claimed: set[str] = set()
-    for token in caps:
-        if token in GLOBAL_CHORES:  # a per-chore claim: exact, preferred
-            claimed.add(token)
-        else:  # a coarse token, or one we do not know — unknown claims nothing
-            claimed |= _CAPABILITY_CHORE_SETS.get(token, frozenset())
-    return frozenset(claimed)
+    return claimed_chores_from(server_liveness_probe(now=now))
 
 
 def orphaned_chores(*, daemon_alive: bool, now: Optional[float] = None) -> frozenset[str]:
@@ -235,6 +265,18 @@ def orphaned_chores(*, daemon_alive: bool, now: Optional[float] = None) -> froze
     return frozenset(orphans)
 
 
+def owns_every_chore_from(probe: "LivenessProbe") -> bool:
+    """PURE: `server_owns_every_chore()`'s exact verdict, derived from an ALREADY-taken probe.
+
+    TRDD-ARTTXA7P: the daemon's loop-exit gate used to call `server_owns_every_chore()`,
+    which read the liveness file twice (`server_is_alive()` + `claimed_chores()`) BEFORE
+    the tick took the one probe its chore decision and transition log derive from. That
+    made the "one read per tick" claim false at the exact edge it exists for. The gate
+    now derives from the tick's single probe through this helper.
+    """
+    return probe.reason == "alive" and claimed_chores_from(probe) >= frozenset(GLOBAL_CHORES)
+
+
 def server_owns_every_chore(*, now: Optional[float] = None) -> bool:
     """True iff a live server has claimed EVERY chore the daemon owns.
 
@@ -246,8 +288,11 @@ def server_owns_every_chore(*, now: Optional[float] = None) -> bool:
     There is no two-owner hazard in the gap: the daemon yields each CLAIMED chore
     individually (`claimed_chores`), so a running daemon and a running server never
     execute the same chore, and the cross-process locks remain the backstop.
+
+    Delegates to `owns_every_chore_from()` over ONE `server_liveness_probe()` read; this
+    wrapper exists for callers with no probe on hand (the spawn gate in `global_state`).
     """
-    return server_is_alive(now=now) and claimed_chores(now=now) >= frozenset(GLOBAL_CHORES)
+    return owns_every_chore_from(server_liveness_probe(now=now))
 
 
 # Staleness window the probe contract mandates: the server rewrites the file every 30 s;
@@ -330,6 +375,12 @@ def server_liveness_probe(*, now: Optional[float] = None) -> LivenessProbe:
         return LivenessProbe(reason="read-error", exc_type=type(exc).__name__)
     try:
         data = json.loads(raw)
+        if not isinstance(data, dict):
+            # Valid JSON that is not an object (a list, a string, a number) is a SHAPE
+            # defect, not a read failure: without this guard the `.get` below raised
+            # AttributeError into the broad except and the probe reported "read-error",
+            # mislabelling a malformed file as a torn read (four-commit review, 2026-09-06).
+            return LivenessProbe(reason="malformed")
         ts = data.get("ts")
         caps = data.get("capabilities")
         if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not isinstance(caps, list):
@@ -380,6 +431,20 @@ def server_is_alive(*, now: Optional[float] = None) -> bool:
     return server_capabilities(now=now) is not None
 
 
+def runs_chores_from(probe: "LivenessProbe") -> bool:
+    """PURE: `server_runs_chores()`'s exact verdict, derived from an ALREADY-taken probe.
+
+    Env overrides are re-checked here too (they are env reads, not file reads, so
+    re-checking costs nothing and keeps this function self-contained for a caller
+    holding one probe object — TRDD-ARTTXA7P). Only the probe.reason=="alive"
+    fallback avoids a second file read.
+    """
+    override = _override_bool()
+    if override is not None:
+        return override
+    return probe.reason == "alive"
+
+
 def server_runs_chores() -> bool:
     """THE binary chore switch (TRDD-LU0C5KAR, owner directive 2026-07-17): must the
     #N daemon yield the absorbed chores (`SERVER_ABSORBED_TASKS`) to the server?
@@ -392,19 +457,20 @@ def server_runs_chores() -> bool:
 
     Resolution: `$JANITOR_AIMAESTRO_SERVER_CHORES` override (chores-only knob) →
     `$JANITOR_AIMAESTRO_SERVER_STATE` override (machine-wide knob; also drives the
-    fleet-actuation exclusion) → `server_is_alive()`. No memo — the probe is one
+    fleet-actuation exclusion) → `server_liveness_probe()`. No memo — the probe is one
     small file read per 60 s daemon tick, and a memo would only delay the handoff
     at a server start/stop boundary. The cross-process file locks
     (oauth-rotator-tick.lock, marketplace-op.lock) remain the collision backstop
     across the 90 s staleness window around those boundaries.
+
+    The override check happens BEFORE the probe read (not inside `runs_chores_from`'s
+    call), so an explicit override still short-circuits the file read entirely — the
+    original contract this function has always had.
     """
-    for env_name in (SERVER_CHORES_ENV, SERVER_STATE_ENV):
-        override = os.environ.get(env_name, "").strip().lower()
-        if override in _TRUE:
-            return True
-        if override in _FALSE:
-            return False
-    return server_is_alive()
+    override = _override_bool()
+    if override is not None:
+        return override
+    return runs_chores_from(server_liveness_probe())
 
 
 def server_state_override() -> bool | None:

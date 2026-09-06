@@ -176,6 +176,8 @@ def test_probe_reports_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     '{"capabilities": ["family-a"]}',              # missing ts
     '{"ts": true, "capabilities": ["family-a"]}',  # bool masquerading as ts
     '{"ts": 1, "capabilities": "family-a"}',       # caps not a list
+    '[]',                                          # valid JSON, not an object at all
+    '"just a string"',                             # ditto — used to surface as read-error
 ])
 def test_probe_reports_malformed_for_a_wrong_shaped_but_valid_json_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
@@ -291,3 +293,100 @@ def test_continuity_cli_falls_back_to_path_then_none(tmp_path: Path, monkeypatch
     assert hb.continuity_cli() == "/somewhere/aimaestro-continuity.sh"
     monkeypatch.setattr(hb.shutil, "which", lambda _n: None)
     assert hb.continuity_cli() is None
+
+
+# --- runs_chores_from / claimed_chores_from: one probe drives both (TRDD-ARTTXA7P) ---
+# The daemon tick used to call `server_runs_chores()`, `claimed_chores()` and
+# `server_liveness_probe()` separately — up to three reads of a file the server rewrites
+# non-atomically every 30 s, so the logged reason could describe a different read than the
+# one that drove the decision. These pin that `*_from(probe)` matches the live wrapper for
+# a fresh file, and that ONE probe, held across a simulated fresh->stale flip, still reports
+# the OLD probe's answer for both derived facts — i.e. the mismatch is impossible by
+# construction because there is only one probe object to derive from.
+
+
+def test_runs_chores_from_matches_server_runs_chores_for_a_fresh_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    f = tmp_path / "liveness.json"
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    _write_liveness(f, ts=time.time(), caps=["family-a"])
+    probe = hb.server_liveness_probe()
+    assert hb.runs_chores_from(probe) == hb.server_runs_chores() is True
+
+
+def test_claimed_chores_from_matches_claimed_chores_for_a_partial_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    f = tmp_path / "liveness.json"
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    _write_liveness(f, ts=time.time(), caps=["session-liveness"])
+    probe = hb.server_liveness_probe()
+    assert hb.claimed_chores_from(probe) == hb.claimed_chores() == frozenset({"session-liveness"})
+
+
+def test_one_probe_holds_its_own_answer_across_a_fresh_to_stale_flip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The construction proof: take ONE probe while the file is fresh, then let the file
+    go stale (simulating the server exiting mid-tick). A caller that re-reads (the old
+    `claimed_chores()` shape) now disagrees with the decision already made; a caller that
+    derives everything from the ORIGINAL probe object cannot — there is nothing left to
+    re-read."""
+    f = tmp_path / "liveness.json"
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    _write_liveness(f, ts=time.time(), caps=["family-a"])
+    probe = hb.server_liveness_probe()
+    assert hb.runs_chores_from(probe) is True
+    assert hb.claimed_chores_from(probe) == hb.SERVER_ABSORBED_TASKS
+
+    # The file now reads stale (server gone) — a FRESH read disagrees with `probe`.
+    _write_liveness(f, ts=time.time() - hb.LIVENESS_STALE_AFTER_S - 5, caps=["family-a"])
+    assert hb.server_runs_chores() is False
+    assert hb.claimed_chores() == frozenset()
+
+    # The ORIGINAL probe object still answers exactly as it did when it was taken — a
+    # message built from it can never contradict the decision built from it.
+    assert hb.runs_chores_from(probe) is True
+    assert hb.claimed_chores_from(probe) == hb.SERVER_ABSORBED_TASKS
+
+
+@pytest.mark.parametrize("caps,age_s,expected", [
+    (sorted(hb.GLOBAL_CHORES), 0.0, True),                 # fresh, every chore claimed
+    (["session-liveness"], 0.0, False),                    # fresh, partial claim
+    (sorted(hb.GLOBAL_CHORES), hb.LIVENESS_STALE_AFTER_S + 5, False),  # full claim, stale
+])
+def test_owns_every_chore_from_matches_server_owns_every_chore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caps: list[str], age_s: float, expected: bool
+) -> None:
+    """The daemon's exit gate derives from the tick's one probe; the spawn gate calls the
+    wrapper. Both must answer the same question or the daemon spawn/exit-flaps (the d45a843a
+    incident), so the helper is pinned to the wrapper for all three shapes."""
+    f = tmp_path / "liveness.json"
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    _write_liveness(f, ts=time.time() - age_s, caps=caps)
+    probe = hb.server_liveness_probe()
+    assert hb.owns_every_chore_from(probe) is hb.server_owns_every_chore() is expected
+
+
+def test_runs_chores_from_still_honors_the_explicit_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator override must win even when handed a probe that disagrees with it."""
+    f = tmp_path / "liveness.json"
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    _write_liveness(f, ts=time.time(), caps=[])  # alive, claims nothing
+    probe = hb.server_liveness_probe()
+    monkeypatch.setenv(hb.SERVER_CHORES_ENV, "down")
+    assert hb.runs_chores_from(probe) is False
+    assert hb.server_runs_chores() is False
+
+
+def test_claimed_chores_from_still_honors_the_explicit_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(tmp_path / "absent.json"))
+    probe = hb.server_liveness_probe()
+    assert probe.reason == "absent"
+    monkeypatch.setenv(hb.SERVER_CHORES_ENV, "up")
+    assert hb.claimed_chores_from(probe) == hb.SERVER_ABSORBED_TASKS == hb.claimed_chores()

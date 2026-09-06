@@ -77,16 +77,19 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 
 def _claim(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tokens: list[str],
-           *, age_s: float = 0.0) -> None:
-    """Publish a server-liveness probe advertising `tokens`, `age_s` seconds old."""
+           *, age_s: float = 0.0) -> float:
+    """Publish a server-liveness probe advertising `tokens`, `age_s` seconds old.
+    Returns the `ts` it wrote, so a boundary test can pin the probe's clock to it."""
     import json as _json
 
+    ts = time.time() - age_s
     f = tmp_path / "liveness.json"
     f.write_text(
-        _json.dumps({"ts": time.time() - age_s, "pid": 1, "capabilities": tokens}),
+        _json.dumps({"ts": ts, "pid": 1, "capabilities": tokens}),
         encoding="utf-8",
     )
     monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+    return ts
 
 
 def test_a_chore_yields_only_when_the_server_has_CLAIMED_it(
@@ -95,8 +98,9 @@ def test_a_chore_yields_only_when_the_server_has_CLAIMED_it(
     """The owner's ruling in one assertion: running is necessary, claimed is also required."""
     name = "marketplace-refresh"
     _claim(monkeypatch, tmp_path, ["family-a"])
-    assert daemon._task_yielded_to_server(name, True) is True
-    assert daemon._task_yielded_to_server(name, False) is False, "a dead server owns nothing"
+    claimed = hb.claimed_chores()
+    assert daemon._task_yielded_to_server(name, True, claimed) is True
+    assert daemon._task_yielded_to_server(name, False, claimed) is False, "a dead server owns nothing"
 
 
 def test_an_absorbed_chore_the_server_has_NOT_claimed_does_not_yield(
@@ -108,8 +112,9 @@ def test_an_absorbed_chore_the_server_has_NOT_claimed_does_not_yield(
     days, and this is the assertion that keeps them apart."""
     _claim(monkeypatch, tmp_path, [])  # alive, claiming nothing
     assert hb.server_is_alive() is True
+    claimed = hb.claimed_chores()
     for name in hb.SERVER_ABSORBED_TASKS:
-        assert daemon._task_yielded_to_server(name, True) is False, name
+        assert daemon._task_yielded_to_server(name, True, claimed) is False, name
 
 
 def test_non_absorbed_task_never_yields(
@@ -118,7 +123,7 @@ def test_non_absorbed_task_never_yields(
     """A task outside the absorbed set runs even under a running server that claims the
     whole family-A set."""
     _claim(monkeypatch, tmp_path, ["family-a"])
-    assert daemon._task_yielded_to_server("session-liveness", True) is False
+    assert daemon._task_yielded_to_server("session-liveness", True, hb.claimed_chores()) is False
 
 
 def test_a_per_chore_token_yields_exactly_that_chore(
@@ -127,8 +132,9 @@ def test_a_per_chore_token_yields_exactly_that_chore(
     """The granularity ai-maestro asked for on janitor#134, so the fleet can migrate one
     chore at a time without a janitor release for each."""
     _claim(monkeypatch, tmp_path, ["session-liveness"])
-    assert daemon._task_yielded_to_server("session-liveness", True) is True
-    assert daemon._task_yielded_to_server("memory-guard", True) is False
+    claimed = hb.claimed_chores()
+    assert daemon._task_yielded_to_server("session-liveness", True, claimed) is True
+    assert daemon._task_yielded_to_server("memory-guard", True, claimed) is False
 
 
 def test_an_unknown_token_claims_nothing(
@@ -214,8 +220,9 @@ def test_yielded_names_cover_exactly_the_CLAIMED_chores(
     1 s ticks."""
     _claim(monkeypatch, tmp_path, ["family-a"])
     tasks = daemon._build_tasks()
-    assert daemon._yielded_task_names(tasks, True) == hb.SERVER_ABSORBED_TASKS
-    assert daemon._yielded_task_names(tasks, False) == set()
+    claimed = hb.claimed_chores()
+    assert daemon._yielded_task_names(tasks, True, claimed) == hb.SERVER_ABSORBED_TASKS
+    assert daemon._yielded_task_names(tasks, False, claimed) == set()
 
 
 def test_a_partial_claim_yields_only_its_own_chores(
@@ -225,7 +232,9 @@ def test_a_partial_claim_yields_only_its_own_chores(
     the daemon must keep the other nine — including the rest of the family-A set."""
     _claim(monkeypatch, tmp_path, ["session-liveness", "cache-prune"])
     tasks = daemon._build_tasks()
-    assert daemon._yielded_task_names(tasks, True) == {"session-liveness", "cache-prune"}
+    assert daemon._yielded_task_names(tasks, True, hb.claimed_chores()) == {
+        "session-liveness", "cache-prune",
+    }
 
 
 # ---------- 2. the liveness signal ----------
@@ -270,14 +279,14 @@ def test_probe_file_drives_the_claim_yield_end_to_end(
                  encoding="utf-8")
     assert hb.server_is_alive() is True
     assert hb.server_runs_chores() is True
-    assert daemon._yielded_task_names(tasks, hb.server_runs_chores()) == set()
+    assert daemon._yielded_task_names(tasks, hb.server_runs_chores(), hb.claimed_chores()) == set()
 
     # 2. alive, claiming family-a ⇒ exactly those five yield.
     f.write_text(_json.dumps({"ts": _time.time(), "pid": 1, "capabilities": ["family-a"]}),
                  encoding="utf-8")
-    assert daemon._yielded_task_names(tasks, hb.server_runs_chores()) == (
-        hb.SERVER_ABSORBED_TASKS
-    )
+    assert daemon._yielded_task_names(
+        tasks, hb.server_runs_chores(), hb.claimed_chores()
+    ) == hb.SERVER_ABSORBED_TASKS
 
     # 3. stale ⇒ it exited; everything resumes here.
     stale = _time.time() - (hb.LIVENESS_STALE_AFTER_S + 5)
@@ -285,7 +294,7 @@ def test_probe_file_drives_the_claim_yield_end_to_end(
                  encoding="utf-8")
     assert hb.server_is_alive() is False
     assert hb.server_runs_chores() is False
-    assert daemon._yielded_task_names(tasks, hb.server_runs_chores()) == set()
+    assert daemon._yielded_task_names(tasks, hb.server_runs_chores(), hb.claimed_chores()) == set()
 
 
 # ---------- 3. the watchdog goes silent while the server owns the chores ----------
@@ -363,8 +372,11 @@ def test_transition_message_at_the_89_91_second_boundary(
 ) -> None:
     """The exact boundary from the incident report: 89 s reads alive, 91 s reads stale —
     both must surface their reason and age in the transition line."""
-    _claim(monkeypatch, tmp_path, ["family-a"], age_s=age_s)
-    probe = hb.server_liveness_probe()
+    ts = _claim(monkeypatch, tmp_path, ["family-a"], age_s=age_s)
+    # Pin `now` to the written stamp: against wall-clock, one second of scheduler stall
+    # under load (this host has run at loadavg 30+) turns the 89 s case into 90+ s and the
+    # test flakes on the very boundary it exists to pin (four-commit review, 2026-09-06).
+    probe = hb.server_liveness_probe(now=ts + age_s)
     assert probe.reason == expected_reason
     msg = daemon._chore_coordination_message(
         hb.SERVER_ABSORBED_TASKS if expected_reason == "alive" else set(), probe

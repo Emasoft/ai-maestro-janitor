@@ -222,13 +222,14 @@ def test_daemon_yields_cold_cache_clear_the_tick_the_server_claims_it(
     assert spec is not None and spec.loader is not None
     daemon = _u.module_from_spec(spec)
     spec.loader.exec_module(daemon)
-    monkeypatch.setattr(
-        daemon.harness_backend, "claimed_chores", lambda **_k: frozenset({"cold-cache-clear"})
-    )
-    assert daemon._task_yielded_to_server("cold-cache-clear", True) is True
-    assert daemon._task_yielded_to_server("cold-cache-clear", False) is False, (
+    # `claimed` is now INJECTED (TRDD-ARTTXA7P), not re-read inside the function —
+    # the caller passes the set derived from ONE tick's probe instead of monkeypatching
+    # `claimed_chores()`.
+    claimed = frozenset({"cold-cache-clear"})
+    assert daemon._task_yielded_to_server("cold-cache-clear", True, claimed) is True
+    assert daemon._task_yielded_to_server("cold-cache-clear", False, claimed) is False, (
         "no live server ⇒ the daemon keeps the chore"
     )
-    assert daemon._task_yielded_to_server("memory-guard", True) is False, (
+    assert daemon._task_yielded_to_server("memory-guard", True, claimed) is False, (
         "an unclaimed sibling is never yielded by someone else's claim"
     )

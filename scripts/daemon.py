@@ -3015,21 +3015,33 @@ def _build_tasks() -> list[Task]:
 # only when the server has claimed EVERY chore (`server_owns_every_chore`), so while any
 # chore is unclaimed the daemon keeps looping and this per-chore yield is what decides each
 # one. No chore is ever run by both: the daemon yields exactly what the server claims.
-def _task_yielded_to_server(task_name: str, server_runs_chores: bool) -> bool:
-    """PURE: must the daemon yield `task_name` to the active ai-maestro server?"""
+def _task_yielded_to_server(
+    task_name: str, server_runs_chores: bool, claimed: AbstractSet[str]
+) -> bool:
+    """PURE: must the daemon yield `task_name` to the active ai-maestro server?
+
+    `claimed` is now INJECTED rather than re-read here (TRDD-ARTTXA7P): the caller
+    takes ONE `LivenessProbe` for the whole tick and derives both `server_runs_chores`
+    and `claimed` from it, so the decision and the transition-log line it drives can
+    never disagree about which read of the liveness file they describe.
+    """
     # CLAIMED, not merely alive (owner ruling 2026-08-05, janitor#134: "it means both").
     # `claimed_chores()` fails toward coverage — an unrecognised or absent claim keeps the
     # chore here — so a server that claims nothing changes nothing, and the janitor can
     # never again yield a chore to a server that has not taken it (ai-maestro#111).
-    return server_runs_chores and task_name in harness_backend.claimed_chores()
+    return server_runs_chores and task_name in claimed
 
 
-def _yielded_task_names(tasks: list[Task], server_runs_chores: bool) -> set[str]:
+def _yielded_task_names(
+    tasks: list[Task], server_runs_chores: bool, claimed: AbstractSet[str]
+) -> set[str]:
     """The names in `tasks` yielded to the server for this loop iteration. A yielded
     task must be excluded from BOTH the due-loop AND the next-due sleep computation —
     a due-but-yielded task left in `time_until_due` would clamp the sleep to ~1 s and
     busy-spin the daemon for as long as the server stays up."""
-    return {t.name for t in tasks if _task_yielded_to_server(t.name, server_runs_chores)}
+    return {
+        t.name for t in tasks if _task_yielded_to_server(t.name, server_runs_chores, claimed)
+    }
 
 
 def _chore_coordination_message(
@@ -3609,7 +3621,12 @@ def main() -> int:
             # Detection is by FILE only. The server is "wherever the user installs
             # ai-maestro" and runs under pm2, so we can neither locate nor stop it; the
             # liveness file is the whole handshake.
-            if harness_backend.server_owns_every_chore():
+            # TRDD-ARTTXA7P: THE tick's one liveness read. The exit gate, the B2 yield
+            # decision and its transition-log line below all derive from this one object;
+            # `server_owns_every_chore()` used to take two reads of its own here, ahead of
+            # the tick's probe, which made "one read per tick" false at the stale/alive edge.
+            probe = harness_backend.server_liveness_probe()
+            if harness_backend.owns_every_chore_from(probe):
                 exit_reason = "server-owns-host"
                 break
 
@@ -3627,15 +3644,23 @@ def main() -> int:
             # chores twice". BINARY since TRDD-LU0C5KAR (owner directive 2026-07-17):
             # a running server owns them ALL; its exit (the probe file goes stale
             # within 90 s) hands them ALL back. Resolved once per loop iteration.
-            server_chores = harness_backend.server_runs_chores()
-            yielded = _yielded_task_names(tasks, server_chores)
+            # TRDD-ARTTXA7P: ONE liveness read for the whole tick — `probe`, taken above
+            # the exit gate. The old code read the file up to three times per tick
+            # (`server_runs_chores()`, `claimed_chores()` inside `_task_yielded_to_server`,
+            # and the transition-log `server_liveness_probe()` call) — three chances for the
+            # server's 30 s non-atomic rewrite to land between reads, so the logged reason
+            # could describe a different read than the one that flipped the decision.
+            # Deriving `server_chores` and `claimed` from the SAME probe object makes that
+            # disagreement impossible by construction.
+            server_chores = harness_backend.runs_chores_from(probe)
+            claimed = harness_backend.claimed_chores_from(probe)
+            yielded = _yielded_task_names(tasks, server_chores, claimed)
             if bool(yielded) != chores_yielded_last_loop:  # log transitions, not every tick
                 chores_yielded_last_loop = bool(yielded)
                 # TRDD-HXZ8B0IS: a flap between "yielded" and "resumed" used to log with no
                 # clue WHY the liveness read flipped. The probe's ts/age/reason turn that into
                 # a one-line diagnosis (e.g. "reason=stale(age=91.2)" pins it to the 90 s
                 # window rather than a restart). Still transition-only — no per-tick logging.
-                probe = harness_backend.server_liveness_probe()
                 state.log_line("daemon", _chore_coordination_message(yielded, probe))
 
             # The consume paths are cadence-bypass entrances to two absorbed tasks, so each
