@@ -3,7 +3,7 @@ trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
 column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-05T21:12:00+0200
+updated: 2026-09-06T05:31:37+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -169,6 +169,23 @@ records as fixed on 2026-09-02 — and it was never checked against.
    `subprocess.run` patch for the enforcement), test-only, production untouched.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-08-21 13:40
+
+### ⏵ 2026-09-06 05:31 — the guard family's cause was UNOBSERVABLE, not "not credible": measured via the decline stamps
+
+Full run at start loadavg 11.6 (`reports/board-drain/20260906_052127+0200-full-suite-gate.txt`,
+`-x`, 10 failed / 2055 passed, 7m23s). 7 of 10 were `test_branch_protection_guard.py::test_apply_*`
+with exit 0 + empty stdout + empty stderr — the shape this card previously reasoned about
+("a 100 s expiry is not credible … NOT this family") without an artifact. The artifact exists:
+the guard writes `last-outcome-guard-branch-protection.ts` on its tmp state dir and pytest kept
+the basetemp; all 7 read `declined:no-default-branch`. So `bpl.detect_default_branch()` returned
+None — and that function (plus `viewer_is_admin`, `list_existing_rulesets`) swallows
+TimeoutExpired / OSError / rc≠0 / empty stdout into None with no trace, so WHICH of the four it
+was is unrecorded by construction. TRDD-9EAQS97B closed this exact gap for `run_subprocess`
+(8bcd2975); these three direct callers were left out. Filed **TRDD-PJD6XV66** to add the stderr
+trace there; until it lands, this family stays unattributable. The other 3 failures were the
+known classes: 2× `test_capture_all_logins` grandchild-pid race, 1× `branch-protection.py`
+`[run_subprocess] … timed out after 10s: gh` (the 9EAQS97B trace working as designed). Both
+families rerun green isolated (4.81 s). Nothing here changes this card's gates.
 
 ### ⏵ 2026-09-02 12:35 — one category-C flake surfaced at the 3.4.9 publish gate; fixed causally, still no fifth category
 

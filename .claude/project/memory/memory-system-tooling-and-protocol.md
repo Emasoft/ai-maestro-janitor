@@ -156,7 +156,7 @@ janitor's own repo (`state.is_self_scan_target`) unless
   auto-silences the instant a note is written. Read-only (git + note mtimes); never
   reads USER scope (a cross-project write would falsely suppress this project's nudge).
 
-^89810AOE [desc:"why-in-commits enforces the WHY-in-commit rule: surfaces recent subject-only feat/fix/refactor/perf commits with no body, ai-maestro-gated, >=3 over a 3-day window, dedupes against immutable history.", keywords:"what_does_why_in_commits_detect commit_message_missing_a_why_body subject_only_conventional_commits ai_maestro_gated_fleet_only three_day_window_deduplication never_re_nags_immutable_history", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^89810AOE [desc: "why-in-commits enforces the WHY-in-commit rule: surfaces recent subject-only feat/fix/refactor/perf commits with no body, ai-maestro-gated, >=3 over a 3-day window, dedupes against immutable history.", keywords: what_does_why_in_commits_detect commit_discipline_rule_enforcement why_in_the_commit_message_rule janitor_nags_about_commit_bodies commit_message_missing_a_why_body subject_only_conventional_commits ai_maestro_gated_fleet_only three_day_window_deduplication set_based_dedupe_of_nagged_commits never_re_nags_immutable_history, type: project, ocd: 2026-06-13, lmd: 2026-09-06]
 - **`why-in-commits`** (`scripts/detectors/why-in-commits.py`, TRDD-87935f21 #6) —
   enforces the commit-discipline rule (the WHY belongs in the message body; only the
   author can write it and it is lost once committed). Surfaces recent subject-only
@@ -202,7 +202,7 @@ proportional to the task. The full data model lives in the write skill's
 
 ## Install procedure — adopt the system in a new project/plugin
 
-^JWEHPGUJ [desc:"Adopting the memory system in a new project: cargo-install memgrep once, create scope dirs lazily, keep PROJECT memory/ git-tracked, gitignore its SQLite sidecar, wire detectors via /janitor-arm.", keywords:"how_do_i_install_the_memory_system_in_a_new_project memgrep_binary_missing_cargo_install project_scope_gitignore_invariant gitignore_the_memgrep_index_sidecar wire_heartbeat_detectors_janitor_arm recall_discipline_rule_installed_at_session_start", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^JWEHPGUJ [desc: "Adopting the memory system in a new project: cargo-install memgrep once, create scope dirs lazily, keep PROJECT memory/ git-tracked, gitignore its SQLite sidecar, wire detectors via /janitor-arm.", keywords: how_do_i_install_the_memory_system_in_a_new_project how_to_adopt_the_memory_system memgrep_binary_missing_cargo_install memgrep_command_not_found recall_fell_back_to_plain_grep recall_degrades_to_grep_until_memgrep_installed project_scope_gitignore_invariant gitignore_the_memgrep_index_sidecar wire_heartbeat_detectors_janitor_arm recall_discipline_rule_installed_at_session_start, type: project, ocd: 2026-06-13, lmd: 2026-09-06]
 1. **Install the engine once** (memgrep is a Rust binary that ships in this
    plugin). If `command -v memgrep` is empty:
    `cargo install --path "$CLAUDE_PLUGIN_ROOT/scripts/memgrep"` (or

@@ -140,7 +140,8 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   props while moving it; never move a `status:valid` atom.
 - **Atom `desc:` incomplete** (TRDD-3SOO1RWE — `verify_repair` refuses a repair that
   leaves one): every `^id [...]` atom marker must carry a `desc:` that is PRESENT,
-  ≤200 chars, and either QUOTED (`desc:"…"`, the canonical form) or an unquoted clean
+  ≤200 chars, and either QUOTED (`desc:"…"` — the write verbs emit `desc: "…"`; the
+  parser trims after the colon, so the space is immaterial) or an unquoted clean
   legacy slug (`[a-z0-9_]+` only — exactly memgrep's `atom-unquoted-desc` bar; unquoted
   PROSE is the defect). **Backfill by SUMMARIZING the atom's own body** — a true
   one-line summary of what the atom asserts, never facts the body doesn't contain
