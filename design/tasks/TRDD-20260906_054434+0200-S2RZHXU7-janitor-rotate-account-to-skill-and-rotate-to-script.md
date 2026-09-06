@@ -1,0 +1,82 @@
+---
+trdd-id: S2RZHXU7
+title: A one-call account rotation — the janitor-rotate-account-to skill and the rotate_to.py script it wraps, with headroom-driven target selection when no account is named
+column: dev
+created: 2026-09-06T05:44:34+0200
+updated: 2026-09-06T05:44:34+0200
+current-owner: janitor-main-session
+task-type: feature
+priority: high
+scope: project
+project-id: ai-maestro-janitor
+min-approval-requirement: none
+relevant-rules: []
+npt: []
+eht: []
+---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-06
+
+USER directive 2026-09-06 05:40, verbatim intent: *"all this to rotate? too slow. we will end
+breaking continuity! next time create a janitor skill `/janitor-rotate-account-to
+<account_email>` that calls a single script `rotate_to.py <account_email>`. if no account is
+specified in the skill argument, it picks the one with still 5h and 6d window headroom but with
+more headroom left for Fable, if no headroom is left for Fable, picks the one with more 5h and
+7d headroom, but switch model to opus first."* ("6d" read as the 7-day window — the only
+second window the rotator tracks.) Context: the Fable window on the live account hit 100 % and
+the manual path took ~15 tool calls (recall, slot list, usage, verb lookup, switch) before
+`rotator.py switch emanuele.sabetta@…` ran. The switch itself is one keychain write and a
+running `claude` adopts it on its next turn — the cost was entirely in FINDING it.
+
+Implementation delegated (lean-worker). NEXT ACTION: verify the worker's gate first-hand,
+commit, move to `testing`.
+
+## Spec
+
+**Skill** `skills/janitor-rotate-account-to/SKILL.md` — one command, no reasoning: run
+`uv run --script --quiet "<plugin-root>/scripts/oauth_rotator/rotate_to.py" [<email>]` with
+the skill's argument (may be empty), then relay the script's FIRST stdout line verbatim. The
+description must trigger on "rotate account", "switch account", "Fable window is ending",
+"rate limit / out of headroom, move to another account".
+
+**Script** `scripts/oauth_rotator/rotate_to.py [email]` — reuses `rotator.py` (no second
+implementation of anything the rotator already has):
+
+1. `email` given → must be a known slot (`rotator.cmd_known_emails` set); unknown ⇒
+   `UNKNOWN_ACCOUNT <email>` on stdout, exit 2. Known ⇒ `rotator.cmd_switch(email)`; on
+   success print `ROTATED <email>` and exit 0.
+2. no `email` → rank every NON-live slot that has a usage snapshot. Per slot, account headroom
+   = `100 − max(5h%, 7d%)`; Fable headroom = `100 − util` of the slot's Fable-scoped window
+   (the same per-model windows `token_burn.model_fallback_verdict` parses; absent ⇒ treat as
+   unknown, rank last). Candidates = slots whose account headroom is above the rotator's own
+   `SCOPED_ACCOUNT_HEADROOM` floor (`ROTATOR_SCOPED_ACCOUNT_HEADROOM`, already an env knob).
+   - some candidate has Fable headroom > `100 − SCOPED_SWITCH_AT` ⇒ pick the max-Fable one.
+   - none does ⇒ pick the max-account-headroom candidate, and BEFORE switching type
+     `/model opus` into THIS session's pane through the existing
+     `model_fallback` / `terminal_trigger.send_verified` + `confirm_model_switch` path
+     (the same keystroke the model-fallback detector types); if the pane is not automatable
+     (`NO_ITERM`), still switch and say so.
+   - no candidate ⇒ `NO_TARGET <one-line reason>` exit 3, switch nothing.
+   Print `ROTATED <email> fable=<n>% 5h=<n>% 7d=<n>% [model-fallback: typed|not-automatable]`.
+3. Never prompts, never sleeps, never retries; every failure is one stdout token + non-zero
+   exit. Idempotent: naming the already-live account prints `ALREADY_LIVE <email>` exit 0.
+
+**Tests** `tests/test_rotate_to.py` — real code against a temp profiles root (reuse the
+fixture shape of the existing rotator tests): unknown email exit 2; explicit email switches;
+Fable-headroom ranking picks the max-Fable slot; no-Fable path picks max-account-headroom AND
+requests the model fallback; no candidate exits 3; already-live exit 0.
+
+## Acceptance
+
+- [ ] `/janitor-rotate-account-to <email>` is one tool call from the skill to a switched
+      credential
+- [ ] the no-argument path selects per the spec and is pinned by tests
+- [ ] the no-Fable path types `/model opus` first (or reports not-automatable) and is pinned
+- [ ] ruff, mypy, pyright, skill-frontmatter test, rotator tests green
+- [ ] full-suite publish gate green (shared box)
+
+## Notes
+
+`cmd_auto` already contains the scoped-wall ranking for the DAEMON's automatic rotation
+(f185e521, ATOM-PH7Z-4FY8); this card is the OPERATOR's one-call verb for the same decision,
+usable when the daemon's chore is owned by the ai-maestro server (as it was on 2026-09-06).
