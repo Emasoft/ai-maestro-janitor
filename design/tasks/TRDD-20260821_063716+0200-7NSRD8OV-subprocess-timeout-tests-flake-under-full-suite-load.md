@@ -184,9 +184,12 @@ False declines the same way, one line earlier), so WHICH of the five it was is u
 construction. Timeout is the LEAST likely of them: conftest exports
 `CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE=10` per test via `monkeypatch.setenv` (~line 897)
 and `_run_apply` copies `os.environ` into the child, so the child's `_t(10)` was 100 s — the
-candidates that remain are a non-zero rc or empty stdout from the python `gh` stub, an OSError
-on spawn (EAGAIN under a full process table is the natural one at 14 xdist workers each running
-`uv run --script`), or `which("gh")` missing the stub on the prepended PATH. All 7 stamps were
+candidates that remain, UNRANKED and none measured, are a non-zero rc or empty stdout from the
+python `gh` stub, an OSError on spawn (HYPOTHESIS: EAGAIN under a full process table with 14
+xdist workers each running `uv run --script` — no `kern.maxproc`, process count or EAGAIN text
+was captured), or `which("gh")` missing the stub on the prepended PATH. Preconditions of the
+100 s figure verified: the conftest fixture is `autouse=True`, none of the seven carries
+`no_timeout_scale`, and `plugin_option()` returns the env value whenever it is set. All 7 stamps were
 verified by full test name (`acts_when_only_one`, `warns_when_viewer_not_admin`,
 `falls_back_to_empty_checks`, `deletes_legacy_orphan`, `logs_failure_when_post_rejected`,
 `reports_put_unverified`, `reports_unchanged`) before pytest's 3-basetemp window rotated. TRDD-9EAQS97B closed this exact gap for `run_subprocess`

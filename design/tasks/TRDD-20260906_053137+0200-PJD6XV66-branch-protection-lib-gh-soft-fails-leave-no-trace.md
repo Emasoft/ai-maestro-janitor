@@ -28,8 +28,9 @@ timeout=_t(10))` directly and return None/False on TimeoutExpired, OSError, non-
 stdout, writing nothing anywhere — and their `if not gh_available(): return None` line declines
 the same way before any subprocess runs. Timeout is the least likely of the five in that run:
 the suite exports scale 10 into the child, so its `_t(10)` was 100 s; a non-zero rc / empty
-stdout from the python `gh` stub, an OSError on spawn (EAGAIN under load), or `which("gh")`
-missing the stub remain. This is the exact shape TRDD-9EAQS97B (8bcd2975) closed for
+stdout from the python `gh` stub, an OSError on spawn (EAGAIN under load is a HYPOTHESIS, not
+measured), or `which("gh")` missing the stub remain — unranked; the trace this card adds is
+what will rank them. This is the exact shape TRDD-9EAQS97B (8bcd2975) closed for
 `state.run_subprocess`, left open on these three direct callers — and why TRDD-7NSRD8OV could
 only say the guard family "breaks the single-cause story": the cause was unobservable by
 construction. Both tests rerun green in isolation (4.81 s).
