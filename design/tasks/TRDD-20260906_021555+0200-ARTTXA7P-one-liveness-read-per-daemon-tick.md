@@ -1,10 +1,11 @@
 ---
 trdd-id: ARTTXA7P
 title: The daemon tick must derive its chore decision and its transition-log line from ONE liveness-file read, not up to three
-column: dev
+column: testing
 created: 2026-09-06T02:15:55+0200
-updated: 2026-09-06T02:50:00+0200
-current-owner: main-session
+updated: 2026-09-06T02:52:00+0200
+implementation-commits: [a02c58de]
+current-owner: janitor-main-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor

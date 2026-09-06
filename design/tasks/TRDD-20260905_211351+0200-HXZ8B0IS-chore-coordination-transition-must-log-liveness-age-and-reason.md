@@ -3,7 +3,8 @@ trdd-id: HXZ8B0IS
 title: A chore-coordination transition must log the liveness file's ts, age and the None reason so an ownership flap attributes itself
 column: testing
 created: 2026-09-05T21:13:51+0200
-updated: 2026-09-06T02:15:55+0200
+updated: 2026-09-06T05:17:11+0200
+implementation-commits: [e9dea96a, a02c58de]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -20,9 +21,9 @@ eht: [ARTTXA7P]
 the tick read the liveness file up to 3x per iteration (`server_runs_chores()`,
 `claimed_chores()` inside `_task_yielded_to_server`, and the transition-log probe), so the
 logged reason could still describe a different read than the one that flipped the decision
-on the stale/alive edge. Filed depth-1 EHT **TRDD-ARTTXA7P** (`design/tasks/`, `column: dev`)
-to make the whole tick derive from ONE probe object. Does not change this card's own
-acceptance boxes.
+on the stale/alive edge. Filed depth-1 EHT **TRDD-ARTTXA7P** (`design/tasks/`, landed in a02c58de, now
+`column: testing`) to make the whole tick derive from ONE probe object. Does not change this
+card's own acceptance boxes. Both cards now wait on the same full-suite publish gate.
 
 Implemented and green. `harness_backend.py` gained `LivenessProbe` (dataclass: reason /
 ts / age / exc_type / capabilities) + `server_liveness_probe()`; `server_capabilities()`
