@@ -50,8 +50,11 @@ implementation of anything the rotator already has):
    percent-USED thresholds, not headroom** (verified 2026-09-06 in `token_burn.model_fallback_verdict`:
    `if account_max > account_headroom: no verdict`; `util_pct >= scoped_high ⇒ spent`; both
    default 90). So, per slot: `account_used = max(5h%, 7d%)`; `fable_used` = `util_pct` of the
-   window whose model label is Fable in `token_burn.model_windows_from_usage(usage, now)`
-   (absent ⇒ unknown, rank last). Candidates = slots with `account_used <= SCOPED_ACCOUNT_HEADROOM`
+   entry labelled `7d/Fable` in `token_burn.model_windows_from_usage(usage, now)` (verified
+   2026-09-06: it builds `<base>/<model>` labels from the probe's `limits[]` entries — the Fable
+   one is `kind: weekly_scoped`, `scope.model.display_name: Fable`, utilization key `percent`).
+   A slot with NO Fable entry is never in the has-Fable-headroom set but stays a candidate for
+   the no-Fable fallback below. Candidates = slots with `account_used <= SCOPED_ACCOUNT_HEADROOM`
    (`ROTATOR_SCOPED_ACCOUNT_HEADROOM`, the rotator's own knob — reuse the constant).
    - some candidate has `fable_used < SCOPED_SWITCH_AT` ⇒ pick the LOWEST `fable_used`.
    - none does ⇒ pick the LOWEST `account_used` candidate, and BEFORE switching type
@@ -63,6 +66,13 @@ implementation of anything the rotator already has):
    Print `ROTATED <email> fable=<n>% 5h=<n>% 7d=<n>% [model-fallback: typed|not-automatable]`.
 3. Never prompts, never sleeps, never retries; every failure is one stdout token + non-zero
    exit. Idempotent: naming the already-live account prints `ALREADY_LIVE <email>` exit 0.
+4. **NEVER gated on chore ownership or on the harness.** The script must not consult
+   `harness_backend.server_runs_chores()` / claimed chores / any chore-coordination yield, must
+   not require an ai-maestro server, a running daemon, or a liveness file, and must not defer
+   to the daemon's `cmd_auto`. USER, 2026-09-06 (verbatim): *"when the rotator chore is owned
+   by the ai-maestro, the janitor (even outside of the ai-maestro harness) must still have a way
+   to do the rotation manually. that is the reason of the new skill."* It is the operator's
+   manual verb; the only preconditions are a known slot and a readable keychain.
 
 **Tests** `tests/test_rotate_to.py` — real code against a temp profiles root (reuse the
 fixture shape of the existing rotator tests): unknown email exit 2; explicit email switches;
@@ -81,5 +91,11 @@ requests the model fallback; no candidate exits 3; already-live exit 0.
 ## Notes
 
 `cmd_auto` already contains the scoped-wall ranking for the DAEMON's automatic rotation
-(f185e521, ATOM-PH7Z-4FY8); this card is the OPERATOR's one-call verb for the same decision,
-usable when the daemon's chore is owned by the ai-maestro server (as it was on 2026-09-06).
+(f185e521, ATOM-PH7Z-4FY8); this card is the OPERATOR's one-call verb for the same decision.
+The reason it exists (USER, 2026-09-06): when the rotator chore is owned by the ai-maestro
+server, the janitor's daemon yields it and nothing on the janitor side rotates — and outside the
+ai-maestro harness there is no server at all. The janitor must still be able to rotate manually
+in both cases, which is why Spec §4 forbids any ownership/harness gate. On 2026-09-06 the chore
+was server-owned and no rotation fired at a Fable wall; the manual switch worked, but finding
+it took ~15 tool calls. A test MUST pin that the script runs to completion with no liveness
+file, no daemon and the chore claimed by a (fake) server.
