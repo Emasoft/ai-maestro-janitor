@@ -45,13 +45,16 @@ implementation of anything the rotator already has):
 1. `email` given → must be a known slot (`rotator.cmd_known_emails` set); unknown ⇒
    `UNKNOWN_ACCOUNT <email>` on stdout, exit 2. Known ⇒ `rotator.cmd_switch(email)`; on
    success print `ROTATED <email>` and exit 0.
-2. no `email` → rank every NON-live slot that has a usage snapshot. Per slot, account headroom
-   = `100 − max(5h%, 7d%)`; Fable headroom = `100 − util` of the slot's Fable-scoped window
-   (the same per-model windows `token_burn.model_fallback_verdict` parses; absent ⇒ treat as
-   unknown, rank last). Candidates = slots whose account headroom is above the rotator's own
-   `SCOPED_ACCOUNT_HEADROOM` floor (`ROTATOR_SCOPED_ACCOUNT_HEADROOM`, already an env knob).
-   - some candidate has Fable headroom > `100 − SCOPED_SWITCH_AT` ⇒ pick the max-Fable one.
-   - none does ⇒ pick the max-account-headroom candidate, and BEFORE switching type
+2. no `email` → rank every NON-live slot that has a usage snapshot (each slot's usage dict is
+   what `cmd_usage` already reads per slot through `usage_probe`). **Both rotator knobs are
+   percent-USED thresholds, not headroom** (verified 2026-09-06 in `token_burn.model_fallback_verdict`:
+   `if account_max > account_headroom: no verdict`; `util_pct >= scoped_high ⇒ spent`; both
+   default 90). So, per slot: `account_used = max(5h%, 7d%)`; `fable_used` = `util_pct` of the
+   window whose model label is Fable in `token_burn.model_windows_from_usage(usage, now)`
+   (absent ⇒ unknown, rank last). Candidates = slots with `account_used <= SCOPED_ACCOUNT_HEADROOM`
+   (`ROTATOR_SCOPED_ACCOUNT_HEADROOM`, the rotator's own knob — reuse the constant).
+   - some candidate has `fable_used < SCOPED_SWITCH_AT` ⇒ pick the LOWEST `fable_used`.
+   - none does ⇒ pick the LOWEST `account_used` candidate, and BEFORE switching type
      `/model opus` into THIS session's pane through the existing
      `model_fallback` / `terminal_trigger.send_verified` + `confirm_model_switch` path
      (the same keystroke the model-fallback detector types); if the pane is not automatable
