@@ -54,8 +54,16 @@ implementation of anything the rotator already has):
    2026-09-06: it builds `<base>/<model>` labels from the probe's `limits[]` entries — the Fable
    one is `kind: weekly_scoped`, `scope.model.display_name: Fable`, utilization key `percent`).
    A slot with NO Fable entry is never in the has-Fable-headroom set but stays a candidate for
-   the no-Fable fallback below. Candidates = slots with `account_used <= SCOPED_ACCOUNT_HEADROOM`
-   (`ROTATOR_SCOPED_ACCOUNT_HEADROOM`, the rotator's own knob — reuse the constant).
+   the no-Fable fallback below. Two exclusions apply to BOTH sets: (a) an EMPTY probe — the
+   window builders skip any entry whose `resets_at` does not parse, so a never-probed slot has
+   no windows at all, and its flat `five_hour`/`seven_day` blocks read `0.0` with
+   `resets_at: None` (seen on disk 2026-09-06); such a slot is UNKNOWN, never "0 % used", and
+   is excluded (`NO_TARGET` names it if nothing else remains); (b) a slot whose token
+   `_blob_locally_expired(blob)` says is at/past its local expiry is excluded from automatic
+   selection — an explicit `<email>` keeps `cmd_switch`'s existing behaviour (WARNING line, then
+   switch), because the operator named it. Candidates = the rest with
+   `account_used <= SCOPED_ACCOUNT_HEADROOM` (`ROTATOR_SCOPED_ACCOUNT_HEADROOM`, the rotator's
+   own knob — reuse the constant).
    - some candidate has `fable_used < SCOPED_SWITCH_AT` ⇒ pick the LOWEST `fable_used`.
    - none does ⇒ pick the LOWEST `account_used` candidate, and BEFORE switching type
      `/model opus` into THIS session's pane through the existing
