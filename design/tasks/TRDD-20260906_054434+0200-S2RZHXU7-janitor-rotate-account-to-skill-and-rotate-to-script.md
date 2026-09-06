@@ -1,9 +1,10 @@
 ---
 trdd-id: S2RZHXU7
 title: A one-call account rotation — the janitor-rotate-account-to skill and the rotate_to.py script it wraps, with headroom-driven target selection when no account is named
-column: dev
+column: testing
 created: 2026-09-06T05:44:34+0200
-updated: 2026-09-06T05:44:34+0200
+updated: 2026-09-06T06:10:00+0200
+implementation-commits: [ae96dd12]
 current-owner: janitor-main-session
 task-type: feature
 priority: high
@@ -28,8 +29,11 @@ the manual path took ~15 tool calls (recall, slot list, usage, verb lookup, swit
 `rotator.py switch emanuele.sabetta@…` ran. The switch itself is one keychain write and a
 running `claude` adopts it on its next turn — the cost was entirely in FINDING it.
 
-Implementation delegated (lean-worker). NEXT ACTION: verify the worker's gate first-hand,
-commit, move to `testing`.
+Landed in ae96dd12 (verified first-hand: ruff, mypy, pyright clean; 204 tests incl. 10 new).
+Two review fixes folded in before commit: the pane resolver reuses
+`terminal_trigger.self_terminal` instead of a local copy, and `cmd_switch`'s WARNING lines
+are forwarded to stderr on the explicit-email path. NEXT ACTION: none — waits on the
+full-suite publish gate (shared box); reaches sessions with the next `publish.py`.
 
 ## Spec
 
@@ -44,7 +48,9 @@ implementation of anything the rotator already has):
 
 1. `email` given → must be a known slot (`rotator.cmd_known_emails` set); unknown ⇒
    `UNKNOWN_ACCOUNT <email>` on stdout, exit 2. Known ⇒ `rotator.cmd_switch(email)`; on
-   success print `ROTATED <email>` and exit 0.
+   success print `ROTATED <email>` and exit 0; a non-zero `cmd_switch` prints
+   `SWITCH_FAILED <email>` and returns that code. `cmd_switch`'s own WARNING lines (an
+   expired token) are forwarded to stderr, never swallowed.
 2. no `email` → rank every NON-live slot that has a usage snapshot (each slot's usage dict is
    what `cmd_usage` already reads per slot through `usage_probe`). **Both rotator knobs are
    percent-USED thresholds, not headroom** (verified 2026-09-06 in `token_burn.model_fallback_verdict`:
@@ -59,7 +65,8 @@ implementation of anything the rotator already has):
    no windows at all, and its flat `five_hour`/`seven_day` blocks read `0.0` with
    `resets_at: None` (seen on disk 2026-09-06); such a slot is UNKNOWN, never "0 % used", and
    is excluded (`NO_TARGET` names it if nothing else remains); (b) a slot whose token
-   `_blob_locally_expired(blob)` says is at/past its local expiry is excluded from automatic
+   `_blob_locally_expired(blob)` says is within `EXPIRY_GRACE_H` (0.5 h,
+   `ROTATOR_EXPIRY_GRACE_H`) of its local expiry, or past it, is excluded from automatic
    selection — an explicit `<email>` keeps `cmd_switch`'s existing behaviour (WARNING line, then
    switch), because the operator named it. Candidates = the rest with
    `account_used <= SCOPED_ACCOUNT_HEADROOM` (`ROTATOR_SCOPED_ACCOUNT_HEADROOM`, the rotator's
