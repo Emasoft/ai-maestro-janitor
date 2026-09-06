@@ -2,11 +2,11 @@
 name: memory-system-tooling-and-protocol
 description: "how does the memgrep engine work / what are the memgrep subcommands / how do I recall / find / links / reindex / what do the three memory skills do / MEMORIZE RECALL UPDATE / what is the update invariant / how does a superseded memory get demoted to a lesson / what do the memory heartbeat detectors do / memory-scope-leak memory-librarian memorize-nudge why-in-commits / what is the wikimem layer / hub aspect component tiers / the link law every link is bidirectional / how do I install the memory system in a new project / memgrep binary is stale on this host / cargo install does not roll forward with the plugin update"
 ocd: 2026-06-13
-lmd: 2026-09-03
+lmd: 2026-09-06
 metadata:
   node_type: memory
   type: project
-  tier: hub
+  tier: component
   functionality: janitor
   globs: ["scripts/memgrep/**", "scripts/lib/memory_*.py"]
   originSessionId: memory-audit-draft
@@ -25,7 +25,7 @@ format, and the editor's operational gotchas.
 
 ## The memgrep engine
 
-^WQBHAC45 [desc:"memgrep is a grep/rg-style markdown search engine with structural filters, boolean --where queries, and dedicated memory subcommands (recall/find/overview/index/links/fact); ordinary grep flags transfer directly.", keywords:"what_is_memgrep how_does_memgrep_engine_work memgrep_subcommand_table grep_muscle_memory_transfers where_expr_boolean_query markdown_structural_filters_heading_level multi_root_searches_local_project_user", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^WQBHAC45 [desc:"memgrep is a grep/rg-style markdown search engine with structural filters, boolean --where queries, and dedicated memory subcommands (recall/find/overview/index/links); grep flags transfer directly.", keywords:"what_is_memgrep how_does_memgrep_engine_work memgrep_subcommand_table grep_muscle_memory_transfers where_expr_boolean_query markdown_structural_filters_heading_level multi_root_searches_local_project_user", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 `memgrep` is `grep`/`rg` for markdown: gitignore-aware tree walk, per-line regex,
 markdown-structural filters (`--heading`, `--level`, `--code-lang`,
 `--node table,…`, inline `--bold`/`--code-span`/…), boolean `--where 'EXPR'`
@@ -48,7 +48,7 @@ one call searches LOCAL + PROJECT + USER together (`$ROOTS`).
 | `links --broken\|--orphans\|--to N\|--from N` | link graph / semijoin over the corpus |
 | `fact [--cat/--comp/--session/--kind/--since/--until]` | query one-fact-per-line memory lines; `--with-notes` (OFF by default) appends lessons |
 
-^NCA05AI2 [desc:"recall/find share flags (--with-notes, --sort, --since/--until, --top, --use-index); the find DSL uses +term/-term/wildcard/quoted-phrase syntax; worked example commands for recall, find, links, and reindex.", keywords:"memgrep_recall_flags_reference find_dsl_grammar_plus_minus_wildcard how_do_i_search_memory_with_boolean_terms memgrep_command_examples recall_sort_score_ocd_lmd only_notes_searches_lessons", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^NCA05AI2 [desc:"recall/find share flags (--with-notes, --sort, --since/--until, --top, --use-index); the find DSL uses +term/-term/wildcard/quoted-phrase syntax; worked commands for recall, find, links, reindex.", keywords:"memgrep_recall_flags_reference find_dsl_grammar_plus_minus_wildcard how_do_i_search_memory_with_boolean_terms memgrep_command_examples recall_sort_score_ocd_lmd only_notes_searches_lessons", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 **`recall`** — symptom-ranked, precision-first (surface matches suppress
 body-only matches unless nothing matched the surface). Shared flags on
 `recall`/`find`: `--with-notes` (default ON — resolve+append `[^N]` lessons) ·
@@ -92,7 +92,7 @@ incomplete; recall the page, read it WHOLE, then act.
 | `/janitor-memory-recall` | RECALL | FIND/READ — two entry points: FILE-anchored (about to edit a file → surface that functionality's HUB via its `globs`, descend its links to the detail needed) and SYMPTOM ("have we hit this before?" → rank pages by description/title/tags). Read-only; degrades to grep when memgrep is absent |
 | `/janitor-memory-update` | UPDATE | MODIFY a page — ADD a decision to the owning page, CORRECT a fact non-destructively (the 2-step protocol), or RESHAPE a page that outgrew its tier (expand/reduce/merge/rename). Keeps See-also, the hub map, and the lessons trail consistent |
 
-^CKDJWQJR [desc:"THE UPDATE INVARIANT: a superseded memory is never deleted — the body is cleaned to the current truth and the superseded statement is demoted to a dated lesson carrying the WHY, per RULE 0 and the Bug-Autopsy directive.", keywords:"what_is_the_update_invariant how_does_a_superseded_memory_get_demoted_to_a_lesson never_delete_a_memory_only_supersede two_step_correction_protocol rule_0_bug_autopsy_applied_to_memory", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^CKDJWQJR [desc:"THE UPDATE INVARIANT: a superseded memory is never deleted — the body is cleaned to the current truth and the old statement is demoted to a dated lesson carrying the WHY, per RULE 0.", keywords:"what_is_the_update_invariant how_does_a_superseded_memory_get_demoted_to_a_lesson never_delete_a_memory_only_supersede two_step_correction_protocol rule_0_bug_autopsy_applied_to_memory", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 **THE UPDATE INVARIANT (governs every update):** a superseded memory is NEVER
 deleted — in two moves, (1) the body is cleaned to the current truth, and (2) the
 superseded statement is DEMOTED to a dated `[^N]` lesson under
@@ -102,7 +102,7 @@ cause it changed). The corrected body links to it with `[^N]`. This is RULE 0
 
 ## The heartbeat detectors + nudges (janitor enforcement)
 
-^AN7XDVXA [desc:"Heartbeat detectors only SURFACE candidates and never mutate a fact (RULE 0); the janitor reorganizes structure, an agent corrects content, and the sole mutating path is the autonomous wikimem editor through the memory_txn transaction core.", keywords:"what_do_the_memory_heartbeat_detectors_do surfacing_vs_mutating_detectors janitor_never_mutates_a_fact_directly which_path_actually_edits_memory memory_txn_transaction_core scope_resolution_ssot", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^AN7XDVXA [desc:"Heartbeat detectors only SURFACE candidates, never mutate a fact (RULE 0); the janitor reorganizes structure, an agent corrects content, and the sole mutating path is the wikimem editor's txn core.", keywords:"what_do_the_memory_heartbeat_detectors_do surfacing_vs_mutating_detectors janitor_never_mutates_a_fact_directly which_path_actually_edits_memory memory_txn_transaction_core scope_resolution_ssot", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 The SURFACING detectors run on the janitor heartbeat, surface candidates to a
 proposal file or a one-line nudge, and **never mutate a fact** (RULE 0):
 the **janitor** reorganizes structure and surfaces contradictions; an **agent**
@@ -114,7 +114,7 @@ raw write.) All scope resolution for every detector + the scheduler is the share
 janitor's own repo (`state.is_self_scan_target`) unless
 `CLAUDE_PLUGIN_ALLOW_SELF_SCAN` is set.
 
-^OR8Z7JIM [desc:"memory-scope-leak keeps the pushed PROJECT scope free of machine/user-private data — scans every PROJECT page with private-path/PII/credential/entropy checks, enforces PROJECT memory/ stays git-tracked, and never includes the matched secret text in its proposal.", keywords:"what_does_memory_scope_leak_detect load_bearing_privacy_guard_three_scope_model project_memory_must_be_git_tracked local_shaped_store_committed_inside_repo_is_a_leak shannon_entropy_base64_secret_pass gitignore_guard_check_ignore", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^OR8Z7JIM [desc:"memory-scope-leak keeps the pushed PROJECT scope free of machine/user-private data — scans every PROJECT page for private-path/PII/credential/entropy leaks and never includes the matched secret text.", keywords:"what_does_memory_scope_leak_detect load_bearing_privacy_guard_three_scope_model project_memory_must_be_git_tracked local_shaped_store_committed_inside_repo_is_a_leak shannon_entropy_base64_secret_pass gitignore_guard_check_ignore", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 - **`memory-scope-leak`** (`scripts/detectors/memory-scope-leak.py`) — keeps the
   PUSHED PROJECT scope free of machine/user-private data, because PROJECT is the
   ONLY scope that leaves the machine. [^3] It scans every `<repo-root>/memory/**/*.md`
@@ -132,7 +132,7 @@ janitor's own repo (`state.is_self_scan_target`) unless
   (`MEMORY.md`, `memory-index.md`, `memory-reorg-proposed.md`) are excluded from
   scanning. **This is the load-bearing privacy guard for the whole 3-scope model.**
 
-^0DF9I011 [desc:"memory-librarian surfaces (never mutates) aggregation/conflict candidates across all three scope roots: same-topic clusters, un-cross-linked pairs, one-sided-link audit, page-shape issues, and MEMORY.md sync mismatches; auto-merge is designed but not yet shipped.", keywords:"what_does_memory_librarian_do same_topic_note_clusters_consolidation_candidates conflict_candidate_pairs_not_cross_linked link_law_audit_one_sided_links auto_merge_designed_not_shipped memory_reorg_proposed_file", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^0DF9I011 [desc:"memory-librarian surfaces (never mutates) conflict candidates across all three scopes: same-topic clusters, un-cross-linked pairs, one-sided links, page-shape issues; auto-merge not yet shipped.", keywords:"what_does_memory_librarian_do same_topic_note_clusters_consolidation_candidates conflict_candidate_pairs_not_cross_linked link_law_audit_one_sided_links auto_merge_designed_not_shipped memory_reorg_proposed_file", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 - **`memory-librarian`** (`scripts/detectors/memory-librarian.py`) — SURFACES
   (never mutates) memory aggregation/conflict candidates across all three scope
   roots that exist (LOCAL → PROJECT → USER) to `memory-reorg-proposed.md`. It
@@ -146,7 +146,7 @@ janitor's own repo (`state.is_self_scan_target`) unless
   one wiki page) is DESIGNED but not yet shipped — today the detector only
   proposes; an agent applies via `/janitor-memory-update`.
 
-^DFGB2IF9 [desc:"memorize-nudge keeps the wiki populated by nudging /janitor-memory-write after >=3 substantive commits with no new LOCAL/PROJECT note since; adoption-gated, one nudge per interval, self-silences the instant a note is written, and never reads USER scope.", keywords:"why_does_the_janitor_nudge_me_to_write_a_memory memorize_nudge_detector_trigger_threshold adoption_gated_silent_unless_wiki_in_use substantive_commits_no_new_memory_note self_silences_on_write never_reads_user_scope", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^DFGB2IF9 [desc:"memorize-nudge keeps the wiki populated, nudging /janitor-memory-write after >=3 substantive commits with no new LOCAL/PROJECT note; one nudge per interval, self-silences on write, ignores USER scope.", keywords:"why_does_the_janitor_nudge_me_to_write_a_memory memorize_nudge_detector_trigger_threshold adoption_gated_silent_unless_wiki_in_use substantive_commits_no_new_memory_note self_silences_on_write never_reads_user_scope", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 - **`memorize-nudge`** (`scripts/detectors/memorize-nudge.py`, TRDD-87935f21 #6) —
   keeps the wiki POPULATED. When SUBSTANTIVE (non-bookkeeping) commits have landed
   since the last LOCAL/PROJECT memory note, it nudges the agent to
@@ -156,7 +156,7 @@ janitor's own repo (`state.is_self_scan_target`) unless
   auto-silences the instant a note is written. Read-only (git + note mtimes); never
   reads USER scope (a cross-project write would falsely suppress this project's nudge).
 
-^89810AOE [desc:"why-in-commits enforces the commit-discipline WHY-in-the-message rule: surfaces recent subject-only feat/fix/refactor/perf commits with no body, ai-maestro-gated, >=3 deficient over a 3-day window, set-based dedupe so it never re-nags immutable history.", keywords:"what_does_why_in_commits_detect commit_message_missing_a_why_body subject_only_conventional_commits ai_maestro_gated_fleet_only three_day_window_deduplication never_re_nags_immutable_history", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^89810AOE [desc:"why-in-commits enforces the WHY-in-commit rule: surfaces recent subject-only feat/fix/refactor/perf commits with no body, ai-maestro-gated, >=3 over a 3-day window, dedupes against immutable history.", keywords:"what_does_why_in_commits_detect commit_message_missing_a_why_body subject_only_conventional_commits ai_maestro_gated_fleet_only three_day_window_deduplication never_re_nags_immutable_history", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 - **`why-in-commits`** (`scripts/detectors/why-in-commits.py`, TRDD-87935f21 #6) —
   enforces the commit-discipline rule (the WHY belongs in the message body; only the
   author can write it and it is lost once committed). Surfaces recent subject-only
@@ -167,7 +167,7 @@ janitor's own repo (`state.is_self_scan_target`) unless
 
 ## The wikimem layer (pages are wiki nodes, not loose notes)
 
-^VGX77X5X [desc:"Every wikimem page declares a tier: hub (functionality overview, carries globs), aspect (a general rule that expands/radiates via Applies to), or component (one element's page that reduces/receives via Governed by, one-component-one-page).", keywords:"what_is_the_wikimem_layer hub_aspect_component_tiers_explained what_is_a_tier_hub_page what_is_an_aspect_page_expand_radiate what_is_a_component_page_reduce_receive one_component_one_page_invariant", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^VGX77X5X [desc:"Every wikimem page declares a tier: hub (functionality overview, carries globs), aspect (a general rule that radiates via Applies to), or component (one element's page, receives via Governed by).", keywords:"what_is_the_wikimem_layer hub_aspect_component_tiers_explained what_is_a_tier_hub_page what_is_an_aspect_page_expand_radiate what_is_a_component_page_reduce_receive one_component_one_page_invariant", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 The corpus is a navigable WIKI, not a pile. On top of the note format, every page
 declares its place in the pyramid via `metadata.tier`:
 
@@ -182,7 +182,7 @@ declares its place in the pyramid via `metadata.tier`:
   `## Governed by` up-links to its governors and NEVER re-copies a governing rule.
   A terminal. **One element = one page, always** (one-component-one-page).
 
-^I13TI6G4 [desc:"THE LINK LAW: every wikimem link is bidirectional — Applies to pairs with Governed by across tiers, See also pairs with See also laterally; links are scope-local, and memgrep's --to/--from agree under the law.", keywords:"what_is_the_link_law_in_wikimem every_link_must_be_bidirectional applies_to_governed_by_reciprocal see_also_mirrored_on_both_pages links_are_scope_local_only wire_both_ends_in_the_same_edit", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^I13TI6G4 [desc:"THE LINK LAW: every wikimem link is bidirectional — Applies to pairs with Governed by across tiers, See also pairs laterally; links are scope-local, and --to/--from agree under the law.", keywords:"what_is_the_link_law_in_wikimem every_link_must_be_bidirectional applies_to_governed_by_reciprocal see_also_mirrored_on_both_pages links_are_scope_local_only wire_both_ends_in_the_same_edit", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 **THE LINK LAW — every link is bidirectional.** If A links to B, B links to A:
 `## Applies to` ↔ `## Governed by` across tiers, `## See also` ↔ `## See also`
 laterally. Wire both ends in the same edit; links are **scope-local** (a
@@ -191,7 +191,7 @@ scope's page in prose). The librarian flags one-sided links as a safety net, but
 the author wires both ends now. memgrep's `--to`/`--from` agree under the link
 law, so the graph navigates from ANY entry point in ANY direction. [^1]
 
-^JYHON0PY [desc:"Navigate the wiki progressively: recall surfaces the tip (the hub/best page), follow only the links the task needs, and cache the suns — read a shared general page once and reuse it across every component that points at it.", keywords:"how_should_i_navigate_the_wikimem_wiki cache_the_suns_reuse_shared_general_page dont_read_a_whole_functionality_tree context_spend_proportional_to_the_task existing_flat_notes_default_to_component_tier", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^JYHON0PY [desc:"Navigate the wiki progressively: recall surfaces the tip (the hub/best page), follow only links the task needs, and cache the suns — read a shared general page once, reuse across components using it.", keywords:"how_should_i_navigate_the_wikimem_wiki cache_the_suns_reuse_shared_general_page dont_read_a_whole_functionality_tree context_spend_proportional_to_the_task existing_flat_notes_default_to_component_tier", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 **Navigate progressively:** recall surfaces the TIP (the hub / best page); follow
 only the links the task needs; read a shared general page ONCE and reuse it
 (cache the suns) across every component that points at it. Reading a whole
@@ -202,7 +202,7 @@ proportional to the task. The full data model lives in the write skill's
 
 ## Install procedure — adopt the system in a new project/plugin
 
-^JWEHPGUJ [desc:"Adopting the memory system in a new project: cargo-install memgrep once (recall degrades to plain grep until then), create scope dirs lazily, keep PROJECT memory/ git-tracked and gitignore its SQLite index sidecar, and wire the heartbeat detectors via /janitor-arm.", keywords:"how_do_i_install_the_memory_system_in_a_new_project memgrep_binary_missing_cargo_install project_scope_gitignore_invariant gitignore_the_memgrep_index_sidecar wire_heartbeat_detectors_janitor_arm recall_discipline_rule_installed_at_session_start", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^JWEHPGUJ [desc:"Adopting the memory system in a new project: cargo-install memgrep once, create scope dirs lazily, keep PROJECT memory/ git-tracked, gitignore its SQLite sidecar, wire detectors via /janitor-arm.", keywords:"how_do_i_install_the_memory_system_in_a_new_project memgrep_binary_missing_cargo_install project_scope_gitignore_invariant gitignore_the_memgrep_index_sidecar wire_heartbeat_detectors_janitor_arm recall_discipline_rule_installed_at_session_start", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
 1. **Install the engine once** (memgrep is a Rust binary that ships in this
    plugin). If `command -v memgrep` is empty:
    `cargo install --path "$CLAUDE_PLUGIN_ROOT/scripts/memgrep"` (or

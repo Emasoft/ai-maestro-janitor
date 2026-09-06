@@ -2,11 +2,11 @@
 name: janitor-detector-and-hook-roster-findings
 description: "how good are the scan_text rules / does agent-context-integrity actually catch poisoning / measuring a security detector's coverage / detector recall unknown / why did this rule score zero on its own class / detector flagged my security policy / false positive on prohibition text / widening a security regex without false positives / gitignore-coverage named a tracked templates dir as contamination / why does project-map-drift do nothing in this repo / the CLAUDE.md slim-contract nudge never fires / a detector emitted nothing and I read that as clean / an opt-in flag silently disabled an unrelated check / can a poisoned CLAUDE.md attack me without running anything / snake_case defeats word boundary / nested paren defeats negated character class / how to widen a detector regex safely / do not tune a pattern against the samples that exposed it"
 ocd: 2026-08-02
-lmd: 2026-09-05
+lmd: 2026-09-06
 metadata:
   node_type: memory
   type: reference
-  tier: hub
+  tier: component
   functionality: detector-and-hook-roster
 publish-globally: false
 split-lineage: c4529390a94648e49f74f86799cd937b

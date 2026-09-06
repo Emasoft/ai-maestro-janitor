@@ -2,7 +2,7 @@
 name: macos-keychain
 description: "macOS keychain dialog opened hundreds of times / 'Security wants to use the login keychain' with no Always Allow button / cannot type — a keychain prompt FLOOD, often right after rotating/re-logging a Claude account. Prompts KEEP coming even after I paused the rotator / iCloudNotificationAgent is ALSO asking for the login keychain / I typed my password (or ran `security unlock-keychain`) and it is NOT sticking / how do I stop the keychain popups and keep them from coming back. The safe `security` protocol every keychain interaction MUST follow so this is structurally impossible: single choke-point, hard timeout, headless fail-fast, one-shot denied-latch, opt-in gate on EVERY keychain-reading path (detectors included), temp-keychain test isolation; plus the user-side fix for a LOCKED login keychain: `security unlock-keychain` + `set-keychain-settings` no-auto-lock (in a real terminal — the Claude lean-ctx wrapper blocks `security`). / all Claude agents on the machine suddenly report Not logged in / security list-keychains says parameters not valid / does /login fix a dead security session / what is a dangling keychain entry from dotenclave unlock / why does the search list get replaced in my shell rc / SecKeychainItemSetAccess prompts on every write / add-generic-password -U with -A or -T on an existing item hangs / why did rotation die overnight after one transient keychain error / what is the denied-latch TTL half-open circuit breaker / does pausing the rotator opt-in stop every detector from reading the keychain / why did the flood come back days after I published the fix / what is a staged launchd keepalive closure and why does it revive the old flooder / keychain-health detector reachability check every heartbeat"
 ocd: 2026-07-09
-lmd: 2026-09-02
+lmd: 2026-09-06
 metadata:
   node_type: memory
   type: reference
@@ -36,7 +36,7 @@ touches the keychain (see `## Applies to`).
 
 ## Gotcha 3 — the ACL-PROMPT FLOOD (severity: locks the user out; 2026-07-09 incident)
 
-^K6DGL5HD [desc:"Keychain dialog opens hundreds of times after rotating a Claude account: an unbounded -w read hangs on the ACL prompt, the daemon never re-checks its stop flag, stale cached/staged versions and ungated detectors keep the flood going.", keywords:"keychain_dialog_hundreds_of_times acl_prompt_flood cannot_type_modal_steals_focus rotate_account_recreates_credentials_acl unbounded_read_hangs_forever crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon detectors_read_independent_of_rotator_opt_in kill_hung_reader_by_pid killall_securityagent two_independent_flooders_same_night"]
+^K6DGL5HD [desc:"Keychain dialog opens hundreds of times after rotating a Claude account: an unbounded -w read hangs on the ACL prompt; the daemon never re-checks its stop flag, so the flood continues.", keywords:"keychain_dialog_hundreds_of_times acl_prompt_flood cannot_type_modal_steals_focus rotate_account_recreates_credentials_acl unbounded_read_hangs_forever crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon detectors_read_independent_of_rotator_opt_in kill_hung_reader_by_pid killall_securityagent two_independent_flooders_same_night"]
 **Symptom:** the keychain dialog opens hundreds of times, no Always-Allow sticks, the user
 cannot even type (a modal steals focus each time). Frequently triggered **right after the
 user rotates / re-logs a Claude account**.
@@ -81,7 +81,7 @@ polling `Claude Code-credentials`; diagnose the ACTUAL reader by tracing
 
 ## Gotcha 3b — the WRITE-side ACL prompt (severity: kills rotation; 2026-07-15 incident)
 
-^3KMR5QAX [desc:"security add-generic-password -U with -A or -T on an EXISTING item forces SecKeychainItemSetAccess, which prompts every time and hangs unattended rotation; fix is ACL flag only at CREATE, data-only update after.", keywords:"write_side_acl_prompt add_generic_password_dash_U seckeychainitemsetaccess_prompts_every_time user_canceled_the_operation rotation_death_hang set_acl_only_at_create_time data_only_update_is_silent probe_existence_first_no_dash_w fa46a49_wrong_fix throwaway_keychain_timing_proof"]
+^3KMR5QAX [desc:"security add-generic-password -U with -A/-T on an EXISTING item forces SecKeychainItemSetAccess, which prompts every time and hangs unattended rotation; set ACL only at CREATE.", keywords:"write_side_acl_prompt add_generic_password_dash_U seckeychainitemsetaccess_prompts_every_time user_canceled_the_operation rotation_death_hang set_acl_only_at_create_time data_only_update_is_silent probe_existence_first_no_dash_w fa46a49_wrong_fix throwaway_keychain_timing_proof"]
 Gotcha 3 is about a READ (`-w`) prompting. There is a DISTINCT write-side prompt that was the real
 recurring rotation-death, nailed 2026-07-15 (TRDD-EQJPPZ2L): `security add-generic-password -U` with
 **ANY ACL flag (`-A` OR `-T`) on an item that ALREADY EXISTS** forces `SecKeychainItemSetAccess`
@@ -104,7 +104,7 @@ ACL harmlessly" was also wrong. Only NO-ACL-flag-on-update is silent.[^6]
 
 ## The SAFE KEYCHAIN PROTOCOL (mandatory for every `security` interaction)
 
-^14S62JV6 [desc:"The mandatory safe_storage.py choke-point protocol: denied-latch TTL circuit breaker first, hard subprocess timeout, headless fail-fast, log-and-stop on denial, temp-keychain test scope, prefer -T mirrors, never poll in a tight loop.", keywords:"safe_storage_choke_point denied_latch_ttl_circuit_breaker hard_timeout_on_subprocess headless_fail_fast_never_prompt acl_denied_set_latch_and_log_once temp_keychain_test_isolation prefer_T_accessible_mirrors never_poll_keychain_in_tight_loop claude_keychain_latch_cooldown_s half_open_probe_recovery"]
+^14S62JV6 [desc:"The mandatory safe_storage.py choke-point protocol: denied-latch TTL breaker, hard subprocess timeout, headless fail-fast, log-and-stop on denial, temp-keychain test scope, never poll.", keywords:"safe_storage_choke_point denied_latch_ttl_circuit_breaker hard_timeout_on_subprocess headless_fail_fast_never_prompt acl_denied_set_latch_and_log_once temp_keychain_test_isolation prefer_T_accessible_mirrors never_poll_keychain_in_tight_loop claude_keychain_latch_cooldown_s half_open_probe_recovery"]
 Route EVERY keychain read/write/delete through the ONE choke-point
 (`scripts/oauth_rotator/safe_storage.py`) — no ad-hoc `subprocess.run(["security", …])`
 anywhere else. The choke-point enforces, in order:
@@ -141,7 +141,7 @@ anywhere else. The choke-point enforces, in order:
 
 ## Gotcha 4 — the DEAD SECURITY SESSION (severity: fleet-down; 2026-07-12 incident)
 
-^45YMC3RE [desc:"Every Claude agent suddenly reports Not logged in fleet-wide: the keychain search list is per-security-session and a securityd recycle kills a long-lived terminal's session; /login does not fix it, recreate the terminal.", keywords:"not_logged_in_fleet_wide dead_security_session parameters_not_valid_error securityd_session_dies_and_is_inherited per_security_session_search_list dotenclave_unlock_replaces_search_list dangling_keychain_entry_empty_string login_does_not_fix_this_class_of_failure recreate_terminal_tmux_server keychain_health_detector_every_heartbeat"]
+^45YMC3RE [desc:"Every Claude agent suddenly reports Not logged in fleet-wide: the per-security-session search list dies when securityd recycles a long-lived terminal's session; recreate the terminal.", keywords:"not_logged_in_fleet_wide dead_security_session parameters_not_valid_error securityd_session_dies_and_is_inherited per_security_session_search_list dotenclave_unlock_replaces_search_list dangling_keychain_entry_empty_string login_does_not_fix_this_class_of_failure recreate_terminal_tmux_server keychain_health_detector_every_heartbeat"]
 **Symptom:** EVERY Claude agent on the machine reports `Not logged in`, all at once. New
 `claude` processes fail; ones started earlier keep working (they hold a token in memory).
 `/login` succeeds and **changes nothing**. The keychain item is present, unmodified, and

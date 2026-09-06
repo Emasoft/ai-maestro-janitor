@@ -2,11 +2,11 @@
 name: memory-system-scopes-and-format
 description: "how does the wiki-memory 3-scope model work / LOCAL vs PROJECT vs USER scope precedence / where do memories live / what fields does a wikimem note frontmatter carry / why did my PROJECT memory page get flagged for a leak / what is the load-bearing recall field / does memgrep recall rank on the body or the description / why is MEMORY.md a deprecation stub / where does the harvest chore file stray memories / what is the note format for a memory page / index by the question not the answer"
 ocd: 2026-06-13
-lmd: 2026-09-03
+lmd: 2026-09-06
 metadata:
   node_type: memory
   type: project
-  tier: aspect
+  tier: component
   functionality: janitor
   originSessionId: memory-audit-draft
 publish-globally: false
