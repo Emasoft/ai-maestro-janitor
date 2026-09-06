@@ -179,8 +179,17 @@ with exit 0 + empty stdout + empty stderr — the shape this card previously rea
 the guard writes `last-outcome-guard-branch-protection.ts` on its tmp state dir and pytest kept
 the basetemp; all 7 read `declined:no-default-branch`. So `bpl.detect_default_branch()` returned
 None — and that function (plus `viewer_is_admin`, `list_existing_rulesets`) swallows
-TimeoutExpired / OSError / rc≠0 / empty stdout into None with no trace, so WHICH of the four it
-was is unrecorded by construction. TRDD-9EAQS97B closed this exact gap for `run_subprocess`
+TimeoutExpired / OSError / rc≠0 / empty stdout into None with no trace (and `gh_available()`
+False declines the same way, one line earlier), so WHICH of the five it was is unrecorded by
+construction. Timeout is the LEAST likely of them: conftest exports
+`CLAUDE_PLUGIN_OPTION_SUBPROCESS_TIMEOUT_SCALE=10` per test via `monkeypatch.setenv` (~line 897)
+and `_run_apply` copies `os.environ` into the child, so the child's `_t(10)` was 100 s — the
+candidates that remain are a non-zero rc or empty stdout from the python `gh` stub, an OSError
+on spawn (EAGAIN under a full process table is the natural one at 14 xdist workers each running
+`uv run --script`), or `which("gh")` missing the stub on the prepended PATH. All 7 stamps were
+verified by full test name (`acts_when_only_one`, `warns_when_viewer_not_admin`,
+`falls_back_to_empty_checks`, `deletes_legacy_orphan`, `logs_failure_when_post_rejected`,
+`reports_put_unverified`, `reports_unchanged`) before pytest's 3-basetemp window rotated. TRDD-9EAQS97B closed this exact gap for `run_subprocess`
 (8bcd2975); these three direct callers were left out. Filed **TRDD-PJD6XV66** to add the stderr
 trace there; until it lands, this family stays unattributable. The other 3 failures were the
 known classes: 2× `test_capture_all_logins` grandchild-pid race, 1× `branch-protection.py`
