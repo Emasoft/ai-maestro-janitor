@@ -25,7 +25,7 @@ format, and the editor's operational gotchas.
 
 ## The memgrep engine
 
-^WQBHAC45 [desc:"memgrep is a grep/rg-style markdown search engine with structural filters, boolean --where queries, and dedicated memory subcommands (recall/find/overview/index/links); grep flags transfer directly.", keywords:"what_is_memgrep how_does_memgrep_engine_work memgrep_subcommand_table grep_muscle_memory_transfers where_expr_boolean_query markdown_structural_filters_heading_level multi_root_searches_local_project_user", type: project, ocd: 2026-06-13, lmd: 2026-09-03]
+^WQBHAC45 [desc: "memgrep is a grep/rg-style markdown search engine with structural filters, boolean --where queries, and dedicated memory subcommands (recall/find/overview/index/links); grep flags transfer directly.", keywords: what_is_memgrep how_does_memgrep_engine_work memgrep_subcommand_table what_subcommands_does_memgrep_have memgrep_fact_subcommand memgrep_recall_find_overview_index_links_fact is_memgrep_just_grep_for_markdown grep_muscle_memory_transfers where_expr_boolean_query markdown_structural_filters_heading_level multi_root_searches_local_project_user, type: project, ocd: 2026-06-13, lmd: 2026-09-06]
 `memgrep` is `grep`/`rg` for markdown: gitignore-aware tree walk, per-line regex,
 markdown-structural filters (`--heading`, `--level`, `--code-lang`,
 `--node table,…`, inline `--bold`/`--code-span`/…), boolean `--where 'EXPR'`

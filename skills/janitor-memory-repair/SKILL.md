@@ -146,7 +146,11 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   one-line summary of what the atom asserts, never facts the body doesn't contain
   (rule 5: infer, never invent). Quote unquoted-prose descs verbatim rather than
   rewording them; trim an over-cap desc by tightening, never by dropping a fact the
-  body lacks elsewhere.
+  body lacks elsewhere. **A clause you cut from `desc:` leaves the RECALL SURFACE** (recall
+  ranks on desc + keywords, never the body), so before committing a trim check that every
+  cut symptom/cause/name is already in that atom's `keywords:` — and add it there if not
+  (review of 747b8bef, 2026-09-06: 16 trims, one dropped the `fact` subcommand from a
+  desc with no keyword carrying it).
 
 **WRITE DOWN EVERY defect you judge unfixable.** A page can carry a defect this pass cannot
 make STICK — e.g. a frontmatter shape an external writer keeps re-imposing. That page
