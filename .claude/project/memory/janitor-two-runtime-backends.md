@@ -2,7 +2,7 @@
 name: janitor-two-runtime-backends
 description: "does the janitor run a daemon inside an ai-maestro agent / why no daemon spawn inside the harness / what is #N standalone vs #J harness mode / where does resume rate-limit compact survival come from inside ai-maestro / can the janitor call the ai-maestro HTTP API directly / why was contextPoisoned blocked / the ai-maestro boundary is the scripts never the API / the feature works standalone but not on a server host / our stamp file is never written / a chore the server claims broke a downstream trigger / rotation happened but nothing reacted / why is this dead only on the ai-maestro host / hibernated vs crashed agent how to tell / is an offline agent actually broken / why does the janitor never call an ai-maestro script for status / does the janitor need a credential to read agent status / how does the janitor know a hibernation state without polling"
 ocd: 2026-08-02
-lmd: 2026-08-02
+lmd: 2026-09-08
 metadata:
   node_type: memory
   type: project
@@ -63,10 +63,6 @@ event-stamp — for rotation that is a changed live IDENTITY in the shared beaco
 `ts`, which also advances on age and on a fail-open unknown mtime. Ask of any chore the server
 can claim: *what else did we hang off our own doing of it?*
 
-## See also
-
-- [[janitor-architecture]] — the architecture hub this page details the harness-backend split for.
-
 
 ^ATOM-7Q1V-SGJE [desc:"The server↔janitor data channel: the server WRITES answers into <project>/.janitor/daemon_responses/; the janitor never calls a script and needs no credential", keywords: hibernation.json daemon_responses hibernated_vs_crashed is_an_offline_agent_broken server_pushes_a_file janitor_receives_never_requests staleAfterS the_janitor_cannot_observe_hibernation_directly a_pushed_file_needs_no_authorization_at_all the_path_is_never_caller-supplied_realpath-checked strictly_safer_than_a_script_the_janitor_could_call fleet_data_cannot_be_redirected_to_an_outlet, ocd: 2026-08-05, lmd: 2026-08-05]
 
@@ -114,5 +110,9 @@ each load-bearing:
 
 `hibernated` and `never_woken` are HEALTHY; only `crashed` is a fault. One Python trap worth
 remembering: `bool` is an `int` subclass, so a naive isinstance check reads `"ts": true` as epoch 1.
+
+## See also
+
+- [[janitor-architecture]] — the architecture hub this page details the harness-backend split for.
 
 ## Notes and lessons learned

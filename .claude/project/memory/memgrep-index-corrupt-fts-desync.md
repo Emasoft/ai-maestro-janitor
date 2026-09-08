@@ -2,7 +2,7 @@
 name: memgrep-index-corrupt-fts-desync
 description: "memgrep reindex fails with 'database disk image is malformed' / 'Content in the virtual table is corrupt' — recall broke / the memory search index is corrupt / did a killed agent or a missing WAL tear the sqlite db / why did integrity_check say ok but the index is still corrupt / recall returns every result twice / duplicate rows in memory search results / a schema migration desynced the fts5 index from its content table / how do I fix or recover a corrupt memgrep index / I added a column to the index and every row still reads the default / the migration ran but changed nothing / an ADD COLUMN migration stayed NULL forever / is memgrep index.db safe to delete by hand / why does memgrep report SQLITE_BUSY under concurrent writers / did a killed process tear the memgrep database / index.db is a derived cache is it safe to rebuild / one file has two index keys because of path spelling"
 ocd: 2026-07-14
-lmd: 2026-07-14
+lmd: 2026-09-08
 metadata:
   node_type: memory
   type: project
@@ -19,7 +19,7 @@ The pages were never torn. Do **not** go hunting for a durability bug: memgrep s
 process being **killed** (only an OS/power crash can tear it) — so "an agent was killed by the rate
 limit" is **not** a sufficient explanation, and enabling WAL "harder" fixes nothing. [^1]
 
-^ATOM-MGDX-WHYD [desc:"a schema migration that DROP+CREATEs an FTS5 virtual table empties the index while the content table keeps every row, so the next reindex writes negative postings and SQLITE_CORRUPT_VTAB is raised deterministically", keywords: why_does_the_index_desync_after_a_schema_migration ALTER_cannot_add_an_FTS5_column DROP_CREATE_empties_the_virtual_table negative_postings_SQLITE_CORRUPT_VTAB manufactured_not_a_race the_content_table_keeps_every_row_while_the_index_is_empty clearing_the_files_ledger_does_not_repopulate_the_fts_index external-content_shadow_delete_trusts_the_delete_without_checking the_upgrade_path_manufactured_the_corruption_deterministically fixed_2026-07-14_in_scripts_memgrep_src_index.rs a_schema_migration_cannot_alter_an_fts5_column_set desync_after_a_schema_migration_manufactured_deterministically, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^ATOM-MGDX-WHYD [desc:"a schema migration that DROP+CREATEs an FTS5 table empties the index while content keeps every row, so reindex writes negative postings and SQLITE_CORRUPT_VTAB is raised deterministically", keywords: why_does_the_index_desync_after_a_schema_migration ALTER_cannot_add_an_FTS5_column DROP_CREATE_empties_the_virtual_table negative_postings_SQLITE_CORRUPT_VTAB manufactured_not_a_race the_content_table_keeps_every_row_while_the_index_is_empty clearing_the_files_ledger_does_not_repopulate_the_fts_index external-content_shadow_delete_trusts_the_delete_without_checking the_upgrade_path_manufactured_the_corruption_deterministically fixed_2026-07-14_in_scripts_memgrep_src_index.rs a_schema_migration_cannot_alter_an_fts5_column_set desync_after_a_schema_migration_manufactured_deterministically, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Why it desyncs (the real bug, fixed 2026-07-14 in `scripts/memgrep/src/index.rs`).** A schema
 migration cannot `ALTER` an FTS5 column set, so it must `DROP` + re-`CREATE` the virtual table — which
 leaves the index **EMPTY while the content table keeps every row**. Clearing the `files` LEDGER does

@@ -2,7 +2,7 @@
 name: wikimem-retrieval-engine
 description: "recall returned the wrong page / why is a memory search so expensive / what does memgrep rank on / lint fails on everything and I cannot find the real errors / how do I hop from a search result to the full atom / a superseded atom is missing from search results / keywords went missing from a lesson after a write / a bracket in a description broke parsing / link-one-sided reported a pair that plainly links both ways / a wikilink resolved into the wrong scope / recall printed a huge absolute path instead of a short locator / should I add a tie-break to the ranking scorer / does the keyword order matter for recall ranking / lint prints info warn and error but which one gates the exit code / why is a lesson footnote reported as uncited when it exists / recall is expensive because it costs search plus a hop / lint prints all findings but only errors block the gate"
 ocd: 2026-07-26
-lmd: 2026-08-26
+lmd: 2026-09-08
 metadata:
   node_type: memory
   type: project
@@ -53,14 +53,6 @@ every corpus. WARN is real but not fixable from the page being edited (one-sided
 semantic judgement (oversized atom). ERROR is corruption or invisibility. On the live USER scope:
 161 findings, 8 ERRORs. [^1] [^3]
 
-## See also
-
-- [[feedback_memory_system_is_more_than_memgrep]] — the write-side gates (scope lock, CAS) that produce what this engine retrieves.
-
-
-- `[[memory-system]]` — the surrounding system this engine serves: the three scopes, where
-  memories live, and the recall-before-acting protocol.
-
 
 ^ATOM-B9G7-XSR8 [desc:"memgrep default-excludes status:superseded atoms from search (recall+find); --include-superseded restores; addressed second-hop always returns them", keywords: recall_does_not_return_an_atom_that_exists superseded_atom_missing_from_search_results where_did_the_old_atom_go include_superseded_flag search_shows_obsolete_facts memgrep_default-excludes_status_superseded_atoms include-superseded_restores_them_with_a_tag addressed_lookups_always_return_superseded_content superseded_lessons_stay_searchable_by_design lint_warns_superseded-atom-above-delimiter_and_no-delimiter-heading exclude_is_keyed_on_atom_status_never_body_position the_reorder_pass_that_clears_those_warns_is_a_separate_trdd, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
 
@@ -81,6 +73,12 @@ Measured 2026-08-05. `lint` reported 4/4 FALSE `link-one-sided` findings on pair
 The lint false positive is the cheap symptom. The real defect is that the resolved edge is WRONG: the author meant their local sibling. It also lets a link resolve DOWNWARD (USER -> LOCAL), which is the dangling-for-every-other-contributor shape the one-way scope law exists to forbid.
 
 Diagnosing it: three plausible causes were tested and DISCARDED first — inline-code masking (backtick parity was even, 0 fences), a resolution failure (`links` resolves BOTH directions fine), and a harness timeout (rc=0 in 0s). The tell is that the finding appears ONLY in a multi-root invocation: with one root there is no name ambiguity.
+
+## See also
+
+- [[feedback_memory_system_is_more_than_memgrep]] — the write-side gates (scope lock, CAS) that produce what this engine retrieves.
+- `[[memory-system]]` — the surrounding system this engine serves: the three scopes, where
+  memories live, and the recall-before-acting protocol.
 
 ## Notes and lessons learned
 
