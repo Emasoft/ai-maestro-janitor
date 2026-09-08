@@ -389,6 +389,7 @@ def model_fallback_verdict(
     account_headroom: float,
     snapshot_age_s: float | None,
     max_age_s: float = _FALLBACK_MAX_SNAPSHOT_AGE_S,
+    require_active: bool = False,
 ) -> dict | None:
     """The MODEL to stop using because its own window is spent while the ACCOUNT is fine.
 
@@ -413,7 +414,18 @@ def model_fallback_verdict(
 
     Measured motivation (2026-08-06): the live account sat at 5h=42% / 7d=60% with the
     Fable scoped window at ~98%. The remedy was `/model opus`; instead the account was
-    rotated away from and then disqualified as a return target for ~123h."""
+    rotated away from and then disqualified as a return target for ~123h.
+
+    `require_active` (TRDD-M4HVFU2A, 2026-09-06 incident): `scoped_high` alone answers
+    "is the number big", not "is the window actually spent". Measured live 2026-09-06:
+    the live account's own Fable window read 97% with `is_active: true` and
+    `severity: critical` — `is_active` flips well below 100% (see `models_in_use`'s
+    docstring: it means "this limit is currently binding", not "fully spent"), so it is
+    NOT a usable "spent" signal here either. The only number that means "actually spent"
+    is 100%. The rotator's early-warning caller (`cmd_auto`) wants the `scoped_high` bar
+    unchanged (it decides whether to ROTATE ahead of time), so this stays False by
+    default; the MODEL-SWITCH caller (the detector, which types into a live pane) passes
+    True so a window only qualifies once it hits 100%, never on a merely-high reading."""
     if not isinstance(usage, dict):
         return None
     if snapshot_age_s is None or snapshot_age_s > max_age_s:
@@ -424,7 +436,12 @@ def model_fallback_verdict(
     account_max = max(float(w["util_pct"]) for w in account)
     if account_max > account_headroom:
         return None  # the ACCOUNT is the constraint — rotating/waiting is the remedy
-    scoped = [w for w in model_windows_from_usage(usage, now) if float(w["util_pct"]) >= scoped_high]
+    scoped = [
+        w
+        for w in model_windows_from_usage(usage, now)
+        if float(w["util_pct"]) >= scoped_high
+        and (not require_active or float(w["util_pct"]) >= 100.0)
+    ]
     if not scoped:
         return None
     worst = max(scoped, key=lambda w: float(w["util_pct"]))

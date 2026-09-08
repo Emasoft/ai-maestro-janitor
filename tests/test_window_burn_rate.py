@@ -718,3 +718,35 @@ def test_model_fallback_refuses_an_UNKNOWN_snapshot_age() -> None:
     usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.26)))
     usage["limits"] = [_limit(group="weekly", percent=98.0, resets_at=_reset_for(_7D, 0.26), model="Fable")]
     assert _verdict(usage, age_s=None) is None
+
+
+def test_model_fallback_require_active_refuses_97pct_even_with_is_active_true() -> None:
+    """TRDD-M4HVFU2A, 2026-09-06 incident: the live account's own Fable window read 97%
+    with `is_active: true` and `severity: critical`. `is_active` flips well before the
+    window is actually spent (`models_in_use`'s docstring), so it cannot gate a MODEL
+    SWITCH — only a true 100% may. `require_active=True` (the detector's path) must
+    refuse this, while the plain (rotator early-warning) path still fires."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.26)))
+    usage["limits"] = [
+        _limit(group="weekly", percent=97.0, resets_at=_reset_for(_7D, 0.26), model="Fable",
+               severity="critical", is_active=True)
+    ]
+    assert tbn.model_fallback_verdict(
+        usage, NOW, scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM,
+        snapshot_age_s=30.0, require_active=True,
+    ) is None
+    assert _verdict(usage) is not None, "the number-only bar (rotator path) must be unchanged"
+
+
+def test_model_fallback_require_active_fires_at_a_true_100pct() -> None:
+    """The only reading `require_active=True` accepts: the window is actually exhausted."""
+    usage = _usage(five=(42.0, _reset_for(_5H, 0.5)), seven=(60.0, _reset_for(_7D, 0.26)))
+    usage["limits"] = [
+        _limit(group="weekly", percent=100.0, resets_at=_reset_for(_7D, 0.26), model="Fable",
+               severity="critical", is_active=True)
+    ]
+    v = tbn.model_fallback_verdict(
+        usage, NOW, scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM,
+        snapshot_age_s=30.0, require_active=True,
+    )
+    assert v is not None and v["model"] == "Fable"

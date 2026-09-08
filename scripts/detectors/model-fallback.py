@@ -52,6 +52,11 @@ _LOG = "model-fallback"
 _SCOPED_HIGH = 90.0
 _ACCOUNT_HEADROOM = 90.0
 _STAMP = "model-fallback-last-switch.ts"
+_DECLINED_STAMP = "model-fallback-declined.ts"
+# TRDD-M4HVFU2A (2026-09-06 incident): an unconfirmed switch (the owner cancelled the
+# dialog) is retryable today and re-types every heartbeat — this is the back-off window
+# after a SENT-but-not-confirmed switch, so a declined dialog is not re-typed every ~5 min.
+_DECLINED_BACKOFF_S = 3600
 
 
 def _last_switch_ts() -> int:
@@ -76,6 +81,46 @@ def _this_terminal() -> dict[str, str]:
     if iterm:
         return {"kind": "iterm", "session_id": iterm.split(":")[-1].strip()}
     return {"kind": "unknown"}
+
+
+def _declined_age_s(now: int) -> float | None:
+    ts = state.read_int_state(state.state_dir() / _DECLINED_STAMP, 0)
+    return None if ts <= 0 else float(now - ts)
+
+
+def _stamp_declined(now: int) -> None:
+    """A switch was SENT but not confirmed — back off, don't stamp the retry cooldown."""
+    state.atomic_write(state.state_dir() / _DECLINED_STAMP, str(now))
+
+
+def _sibling_has_headroom(verdict: dict, now: int) -> str | None:
+    """A NON-live account whose window for the SAME model is still below 100% — the
+    account to rotate to BEFORE switching models here.
+
+    TRDD-M4HVFU2A (2026-09-06 incident, owner ruling): "rotation must come BEFORE any
+    model change" — a model switch resets the whole cache, burning millions of tokens
+    across every agent on the pane, so it must never be the first move when a cheaper
+    remedy (rotate to a sibling with real headroom) is available. `is_active` is NOT part
+    of this check — measured live the SAME day: the live account's own Fable window read
+    97% with `is_active: true`, so the flag flips well before the window is actually
+    spent (see `models_in_use`'s docstring in `token_burn.py`) and cannot answer "does
+    this sibling have headroom". Only `util_pct < 100` answers that. Returns the
+    sibling's label, or None when no sibling helps."""
+    model = str(verdict.get("model") or "")
+    try:
+        accounts = rotator_usage.accounts_usage()
+    except Exception:  # noqa: BLE001 — a rotator failure must not block the fallback
+        return None
+    for acct in accounts:
+        if acct.get("is_live"):
+            continue
+        for w in token_burn.model_windows_from_usage(acct.get("usage") or {}, now):
+            label = str(w.get("label", ""))
+            if not label.endswith(f"/{model}"):
+                continue
+            if float(w.get("util_pct", 0.0)) < 100.0:
+                return str(acct.get("label") or "sibling")
+    return None
 
 
 def _live_account() -> dict | None:
@@ -103,9 +148,33 @@ def main() -> int:
         acct.get("usage") or {}, now,
         scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM,
         snapshot_age_s=acct.get("sample_age_s"),
+        require_active=True,  # TRDD-M4HVFU2A: only a TRUE 100% qualifies — 97% is not spent
     )
     if not verdict:
         return 0  # window fine, account is the constraint, or the sample is unproven
+
+    # TRDD-M4HVFU2A: rotation before any model change. If a sibling account still has
+    # real headroom on this same model, the fix is rotating TO it, not switching models
+    # on the live pane (a model switch resets the whole cache).
+    sibling = _sibling_has_headroom(verdict, now)
+    if sibling is not None:
+        state.log_line(
+            _LOG,
+            f"{verdict['scoped_label']} spent on the live account, but {sibling} still "
+            f"has {verdict['model']} headroom — rotate first: "
+            f"/janitor-rotate-account-to {sibling}",
+        )
+        print(
+            f"[model-fallback] {verdict['scoped_label']} spent on the live account, but "
+            f"{sibling} still has {verdict['model']} headroom — rotate first: "
+            f"/janitor-rotate-account-to {sibling}"
+        )
+        return 0
+
+    declined_age = _declined_age_s(now)
+    if declined_age is not None and declined_age < _DECLINED_BACKOFF_S:
+        state.log_line(_LOG, f"skip: declined {declined_age:.0f}s ago, backing off")
+        return 0
 
     terminal = _this_terminal()
     # READ the pane BEFORE planning: the plan needs to know whether this session is still on
@@ -159,9 +228,11 @@ def main() -> int:
         print(f"{line} — CONFIRMED")
     else:
         shown = "NOT confirmed" if confirmed is False else "confirmation UNKNOWN"
-        # No stamp: an unconfirmed switch must stay retryable. Reported either way, because a
-        # silent model change is confusing when the answers later change character.
-        print(f"{line} — {shown}; cooldown NOT stamped (retryable)")
+        # No switch-cooldown stamp: an unconfirmed switch must stay retryable. But the
+        # keystroke DID land (a human likely cancelled it), so the DECLINED back-off
+        # applies — otherwise this re-types every ~5 min heartbeat (TRDD-M4HVFU2A).
+        _stamp_declined(now)
+        print(f"{line} — {shown}; cooldown NOT stamped (retryable, backing off {_DECLINED_BACKOFF_S}s)")
 
     try:
         findings_ledger.record(

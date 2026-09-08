@@ -248,3 +248,63 @@ def test_an_idle_pane_keeps_the_esc_first_sequence(monkeypatch, capsys) -> None:
     assert det.main() == 0
     assert called["verified"] == ["/model opus"], "idle pane must keep the ESC-first path"
     assert called["true_error"] == [], "the true-error sequence must not fire on an idle pane"
+
+
+def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkeypatch, capsys) -> None:
+    """TRDD-M4HVFU2A, 2026-09-06 incident (owner ruling): rotation must come BEFORE any
+    model change — a model switch resets the whole cache, burning millions of tokens
+    across every agent. A non-live sibling still below 100% on the SAME model must divert
+    to the rotate-first line and the pane must never be touched (the injector fails loudly
+    if called, proving nothing was typed)."""
+    det = _load_detector()
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+
+    def _raise(*_a, **_k):
+        raise AssertionError("must not inject when a sibling has headroom")
+
+    monkeypatch.setattr(det.terminal_trigger, "send_verified", _raise)
+    monkeypatch.setattr(det.terminal_trigger, "send_model_switch_true_error", _raise)
+    monkeypatch.setattr(
+        det.rotator_usage, "accounts_usage",
+        lambda: [{"label": "sibling", "is_live": False,
+                  "usage": {"limits": [{"kind": "weekly_scoped", "group": "weekly", "percent": 40.0,
+                                        "severity": "normal", "resets_at": "2026-09-13T00:00:00Z",
+                                        "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None},
+                                        "is_active": False}]}}],
+    )
+
+    assert det.main() == 0
+    out = capsys.readouterr().out
+    assert "rotate first" in out and "/janitor-rotate-account-to sibling" in out
+    assert called["verified"] == [] and called["true_error"] == []
+
+
+def test_a_declined_switch_backs_off_and_retypes_nothing(monkeypatch, capsys) -> None:
+    """An unconfirmed switch (the owner cancelled the dialog) must not re-type on the very
+    next heartbeat — TRDD-M4HVFU2A. Within the back-off window the injector must not be
+    called at all."""
+    det = _load_detector()
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: [])
+    monkeypatch.setattr(det, "_declined_age_s", lambda _now: 10.0)  # declined 10s ago
+
+    def _raise(*_a, **_k):
+        raise AssertionError("must not inject while backing off a declined switch")
+
+    monkeypatch.setattr(det.terminal_trigger, "send_verified", _raise)
+    monkeypatch.setattr(det.terminal_trigger, "send_model_switch_true_error", _raise)
+
+    assert det.main() == 0
+    assert called["verified"] == [] and called["true_error"] == []
+
+
+def test_a_stale_decline_no_longer_backs_off(monkeypatch, capsys) -> None:
+    """Once the back-off window has elapsed, the switch is retryable again."""
+    det = _load_detector()
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: [])
+    monkeypatch.setattr(det, "_declined_age_s", lambda _now: det._DECLINED_BACKOFF_S + 1.0)
+
+    assert det.main() == 0
+    assert called["verified"] == ["/model opus"]
+    assert called["true_error"] == [], "the true-error sequence must not fire on an idle pane"

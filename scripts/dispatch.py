@@ -484,7 +484,9 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # 5h=42% / 7d=60% with Fable at ~98% — and the remedy is `/model opus`, not a rotation.
     # 60s cadence to match the planner's own interval; the planner ALSO enforces it, because
     # this roster's cadence is dynamic and a faster beat would fire a burst of switches.
-    # SHIPS DARK (CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED defaults off).
+    # DEFAULT ON (CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED defaults true — a spent
+    # model window otherwise stalls the session; TRDD-M4HVFU2A fixed this stale comment,
+    # 2026-09-06). Opt out with CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_ENABLED=false.
     ("model-fallback", 60, "CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_INTERVAL"),
     # system-daemon-runaway (TRDD-HK7IZ21Z, EHT of TRDD-ZNN0UK5K): the fseventsd-class
     # safety NET — `memory-guard` only kills JANITOR-OWNED runaways, so a SYSTEM daemon
