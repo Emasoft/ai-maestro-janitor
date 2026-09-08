@@ -218,13 +218,22 @@ scopes. PROJECT-scope editing is opt-in, never pushed standalone.
 
 ## Resources
 
-- [wikimem-model](../janitor-memory-write/references/wikimem-model.md) — the shared
-  data model every required field and the tier-shape rule come from: the wiki
-  ethos, the editorial decision flow, EXPAND/REDUCE, the three tiers, the
-  bidirectional link law, page anatomy, and atoms.
-- [repair-background](references/repair-background.md) — why REPAIR exists,
-  claim exit codes, the `publish-globally` non-defect reasoning, the
-  superseded-atom delimiter mechanics, and the `desc:` grammar + incident.
+- [wikimem-model](../janitor-memory-write/references/wikimem-model.md)
+  - A wiki, not a pile — and collaborative like Wikipedia
+  - The editorial decision flow (run this on any change worth remembering)
+  - EXPAND and REDUCE — radiating suns vs receiving terminals
+  - The three tiers (a page's role in the pyramid)
+  - The edge model — EVERY link is bidirectional (the link law)
+  - Page anatomy
+  - Atoms — first-class body elements (block-properties)
+- [repair-background](references/repair-background.md)
+  - Why REPAIR exists
+  - What REPAIR is (and is not)
+  - Claim exit codes
+  - desc: quoting grammar (TRDD-3SOO1RWE)
+  - desc-trim keyword incident (747b8bef)
+  - Superseded-atom delimiter mechanics
+  - Why `publish-globally` is NOT a repair defect
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides
   (`begin`/`commit --op repair`/`abort`/`resume`); `verify_repair` is its gate.
 - `scripts/lib/memory_settings.py` — cadence (`is_due`/`mark_ran`,

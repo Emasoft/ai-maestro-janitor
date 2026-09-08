@@ -269,12 +269,22 @@ edits a live page directly, never merges cross-scope or cross-type; LOCAL+USER b
 
 ## Resources
 
-- [merge-protocol](references/merge-protocol.md) — claim exit codes, the two-phase
-  transaction contract, `is_legal_merge`/`verify_merge`, why backlink redirect is
-  load-bearing, slug rules, worked + failure-path walkthroughs, bounds & safety,
-  and the full Steps 5-10 executable sequence.
-- [merge-page-rules](references/merge-page-rules.md) — the survivor-page
-  construction constraints: what `verify_merge` enforces, what you must ensure
-  yourself, and the frontmatter/link-web shape.
+- [merge-protocol](references/merge-protocol.md)
+  - Claim exit codes
+  - The two-phase transaction contract
+  - What is_legal_merge checks
+  - What verify_merge enforces at commit
+  - Why backlink redirect is the load-bearing step
+  - Slug rules
+  - Worked walkthrough
+  - Failure-path walkthrough
+  - Bounds & safety recap
+  - Steps 6-10 — the executable sequence (moved from the SKILL body)
+  - Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
+  - Recording an abstain
+- [merge-page-rules](references/merge-page-rules.md)
+  - What verify_merge enforces at commit
+  - What you must ensure (not verifier-checked)
+  - Frontmatter and link web
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons
   conventions + the LOCAL/PROJECT/USER scope table.

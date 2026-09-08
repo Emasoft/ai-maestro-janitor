@@ -1,5 +1,15 @@
 # REPAIR — background and rationale
 
+## Table of contents
+
+- Why REPAIR exists
+- What REPAIR is (and is not)
+- Claim exit codes
+- desc: quoting grammar (TRDD-3SOO1RWE)
+- desc-trim keyword incident (747b8bef)
+- Superseded-atom delimiter mechanics
+- Why `publish-globally` is NOT a repair defect
+
 ## Why REPAIR exists
 
 The wikimem corpus accumulates malformed pages: notes the harness `# Memory`

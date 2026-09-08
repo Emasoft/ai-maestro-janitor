@@ -216,12 +216,18 @@ the PROJECT-scope opt-in:
 
 ## Resources
 
-- [conflict-protocol](references/conflict-protocol.md) — preconditions, the per-pair
-  pipeline, the four stages in full, THE LESSON FORM, the same-slug derivation,
-  security and scope.
-- [ultracode-workflow](references/ultracode-workflow.md) — the pool + backoff
-  code, the per-pair pipeline + vote barrier, the verbatim agent prompts, the
-  invariants this Workflow enforces.
+- [conflict-protocol](references/conflict-protocol.md)
+  - Preconditions — verify BEFORE doing any work
+  - The per-pair pipeline (ULTRACODE Workflow)
+  - The four per-pair stages — classify, source the WHY, the gate, execute
+  - THE LESSON FORM — mandatory for every `[^N]` this pass AUTHORS
+  - Why a same-slug in-place edit does NOT work
+  - Security and scope
+- [ultracode-workflow](references/ultracode-workflow.md)
+  - The pool + backoff
+  - Per-pair pipeline + the vote barrier
+  - The agent prompts (verbatim templates)
+  - Invariants this Workflow enforces
 - [janitor-memory-update SKILL](../janitor-memory-update/SKILL.md) — the
   non-destructive correction protocol this pass applies mechanically.
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides.

@@ -17,6 +17,7 @@ has the runnable steps.
 - Bounds & safety recap
 - Steps 6-10 — the executable sequence (moved from the SKILL body)
 - Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
+- Recording an abstain
 
 ## Claim exit codes
 
