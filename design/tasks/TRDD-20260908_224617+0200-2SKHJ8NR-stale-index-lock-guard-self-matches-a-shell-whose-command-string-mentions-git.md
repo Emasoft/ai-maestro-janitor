@@ -3,7 +3,7 @@ trdd-id: 2SKHJ8NR
 title: The stale-index-lock guard self-matches a shell whose command string mentions git, so it refuses forever when invoked from any sh -c wrapper
 column: todo
 created: 2026-09-08T22:46:17+0200
-updated: 2026-09-08T22:55:44+0200
+updated: 2026-09-08T23:00:40+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -23,11 +23,10 @@ eht: []
   on seven consecutive calls over two minutes (five of them 15 s apart) for a 0-byte
   `.git/index.lock` aged 36–40 min with no `lsof` holder, while an unfiltered `ps` grep
   showed no `git` process on the host. The heartbeat detector `stale-index-lock.py` run by
-  hand (rc=0) also left it in place — from a Bash-tool zsh in the repo cwd. If its command
-  text carried a bare `git` token it is the same self-match; the lock was already past
-  1800 s, so `too-young` is excluded, but `no-probe` is not — and the detector is fail-soft,
-  so rc=0 with the lock left cannot distinguish these. It is no evidence about a heartbeat
-  fire either way.
+  hand (rc=0) also left it in place — from a Bash-tool zsh (cwd presumed the repo). Its
+  timestamp is not in evidence: before 22:35:09 the lock was under 1800 s, so `too-young`,
+  `no-probe` and the self-match all remain, and the detector is fail-soft, so rc=0 with the
+  lock left distinguishes none of them. It is no evidence about a heartbeat fire either way.
 - **Cause — measured part:** a probe printed what `_live_git_pids(_gather_ps_snapshot())`
   matched: exactly one pid, `75589`, `cwd=<this repo>`, alive, not a zombie, etime `00:00`,
   ps line `/bin/zsh -c source …/shell-snapshots/snapshot-zsh-<this session>.sh … && eval '…`
@@ -73,7 +72,9 @@ eht: []
   `uv run pytest tests -k "index_lock or live_git" -q`; re-run the probe from a Bash-tool
   shell whose command mentions git and confirm `matched pids: []`. Control for the
   production-path claim: run `stale-index-lock.py` from a wrapper whose command text has no
-  bare `git` token against a synthetic stale lock (`min_age_s=0`) and expect `removed`.
+  bare `git` token against a synthetic stale lock, with
+  `CLAUDE_PLUGIN_OPTION_STALE_INDEX_LOCK_MIN_AGE=0` and a fresh state dir (the seen-file
+  `stale-index-lock-seen.txt` dedupes a lock it already reported), and expect `removed`.
 
 ## Acceptance
 
@@ -88,7 +89,10 @@ eht: []
       `.git/index.lock`, `clear_stale_index_lock(repo, min_age_s=0)` returns `removed` while
       a child `sh -c 'sleep 60 # git'` (killed in `finally`, so it cannot exit before the
       snapshot under load) runs with cwd inside the repo. On any other value the test prints
-      it: `held`/`no-probe`/`no-snapshot` is the probe, not the matcher, and not this card.
+      it: `held`/`no-probe`/`no-snapshot` is the probe, not the matcher, and not this card;
+      on `live-git`, print the matched pids — a pid other than the test's child is the
+      7NSRD8OV concurrency class, not this card, so run the end-to-end half in its own xdist
+      group.
 - [ ] `git-index-lock-orphan-recovery` gains a dated lesson naming this fourth self-match
       form (via the memgrep verb, not by hand), then committed.
 
@@ -111,3 +115,8 @@ eht: []
   unable to pass for the wrong reason (`repo_root` = own cwd, `sleep 60` killed in `finally`,
   non-`removed` values printed); rule 0.5 audit line added; NEXT ACTION gains the PRRD sweep
   and the no-git-wrapper control. Further wording changes go to the owner, not a third round.
+- 2026-09-08T23:00:40+0200 — Correction of round 2's own over-claim (fork-identified, not a
+  third round): the by-hand detector run's timestamp is not in evidence, so `too-young` is not
+  excluded; the control names the detector's real knob
+  (`CLAUDE_PLUGIN_OPTION_STALE_INDEX_LOCK_MIN_AGE`, fresh state dir) instead of the lib
+  parameter; box 2 names the `live-git`-from-another-pid outcome.
