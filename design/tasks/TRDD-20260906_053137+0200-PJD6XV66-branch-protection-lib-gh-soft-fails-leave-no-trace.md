@@ -1,9 +1,10 @@
 ---
 trdd-id: PJD6XV66
 title: branch_protection_lib's direct gh calls fail soft with no trace, so a loaded suite cannot tell a timeout from a logic bug
-column: dev
+column: testing
 created: 2026-09-06T05:31:37+0200
-updated: 2026-09-06T05:31:37+0200
+updated: 2026-09-08T15:20:00+0200
+implementation-commits: [eb4bce28]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -35,11 +36,16 @@ what will rank them. This is the exact shape TRDD-9EAQS97B (8bcd2975) closed for
 only say the guard family "breaks the single-cause story": the cause was unobservable by
 construction. Both tests rerun green in isolation (4.81 s).
 
-Fix in flight (lean-worker): a stderr trace line `⟦branch_protection_lib⟧ <fn> <reason>: gh`
-on every soft-fail branch (`timeout after Ns` / `oserror:<Type>` / `rc=<n> stderr=…` /
-`empty-stdout`), return values unchanged, plus a real-subprocess test file. NEXT ACTION: verify
-the worker's gate first-hand, commit, move to `testing`; the next loaded full run will then
-NAME the guard family's cause instead of leaving 7NSRD8OV to guess.
+Landed in eb4bce28 (2026-09-08): a stderr trace line `⟦branch_protection_lib⟧ <fn> <reason>: gh`
+on every soft-fail branch (`gh-not-on-path` / `timeout after Ns` / `oserror:<Type>` /
+`rc=<n> stderr=…` / `empty-stdout`), return values unchanged, plus
+`tests/test_branch_protection_lib_soft_fail_trace.py` (5 real-subprocess tests; the timeout
+one carries `no_timeout_scale`). Verified first-hand: ruff, mypy, pyright clean; the three
+branch-protection test files pass isolated — 83 in 21.7 s at loadavg 58. The 2026-09-06 gate
+run of the same three files reported 7 failed / 76 passed in 2367 s (39 min): that run was the
+load class 7NSRD8OV tracks (the two named failures assert a FIRE on stdout, which a soft-failed
+`gh` read turns silent), and with this trace the next such run will name which read failed.
+NEXT ACTION: none — waits on the full-suite publish gate (shared box).
 
 ## Symptom
 
@@ -56,10 +62,11 @@ artifact is the decline stamp, which names the GATE but not what made gh fail.
 
 ## Acceptance
 
-- [ ] every soft-fail branch of the three gh readers prints one `⟦branch_protection_lib⟧` line
+- [x] every soft-fail branch of the three gh readers prints one `⟦branch_protection_lib⟧` line
       to stderr naming the function, the reason and `gh`; the success path prints nothing
-- [ ] a real-subprocess test pins all four reasons and the silent success path
-- [ ] ruff, mypy, pyright, and the branch-protection test files green
+- [x] a real-subprocess test pins all five reasons (gh-not-on-path added on review) and the
+      silent success path
+- [x] ruff, mypy, pyright, and the branch-protection test files green (eb4bce28)
 - [ ] full-suite publish gate green (shared box with every `testing` card)
 
 ## Notes
