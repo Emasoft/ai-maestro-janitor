@@ -49,8 +49,12 @@ import token_burn  # noqa: E402
 _LOG = "model-fallback"
 # The bars. Scoped-high is where a model window is "spent"; account-headroom is the ceiling
 # under which the ACCOUNT counts as fine (the ai-maestro side's number, janitor#222).
+# The rotation verb's has-Fable-headroom bar — MUST equal rotator.SCOPED_SWITCH_AT (pinned by
+# test_the_detectors_bars_equal_the_rotation_verbs_bars). Since TRDD-M4HVFU2A the verdict itself
+# ignores it (require_active=True admits only a true 100 %); it now gates ONLY the rotate-first
+# sibling scan, so do not "fix" it to 100 to match the verdict.
 _SCOPED_HIGH = 90.0
-_ACCOUNT_HEADROOM = 90.0
+_ACCOUNT_HEADROOM = 90.0  # == rotator.SCOPED_ACCOUNT_HEADROOM, same pin
 _STAMP = "model-fallback-last-switch.ts"
 _DECLINED_STAMP = "model-fallback-declined.ts"
 # TRDD-M4HVFU2A (2026-09-06 incident): an unconfirmed switch (the owner cancelled the
@@ -93,19 +97,20 @@ def _stamp_declined(now: int) -> None:
     state.atomic_write(state.state_dir() / _DECLINED_STAMP, str(now))
 
 
-def _sibling_has_headroom(verdict: dict, now: int) -> str | None:
-    """A NON-live account whose window for the SAME model is still below 100% — the
-    account to rotate to BEFORE switching models here.
+def _sibling_has_headroom(verdict: dict, now: int) -> tuple[str, float] | None:
+    """A NON-live account that `/janitor-rotate-account-to` (no argument) would pick as a
+    `<model>`-headroom target — account windows at/under `_ACCOUNT_HEADROOM` AND the
+    same-model window under `_SCOPED_HIGH` — as (label, model util_pct), or None.
 
-    TRDD-M4HVFU2A (2026-09-06 incident, owner ruling): "rotation must come BEFORE any
-    model change" — a model switch resets the whole cache, burning millions of tokens
-    across every agent on the pane, so it must never be the first move when a cheaper
-    remedy (rotate to a sibling with real headroom) is available. `is_active` is NOT part
-    of this check — measured live the SAME day: the live account's own Fable window read
-    97% with `is_active: true`, so the flag flips well before the window is actually
-    spent (see `models_in_use`'s docstring in `token_burn.py`) and cannot answer "does
-    this sibling have headroom". Only `util_pct < 100` answers that. Returns the
-    sibling's label, or None when no sibling helps."""
+    TRDD-M4HVFU2A (owner ruling, 2026-09-06): "rotation must come BEFORE any model change" —
+    a model switch resets the whole cache for every agent on the pane. The predicate is
+    `token_burn.model_headroom_candidate`, SHARED with rotate_to.py's auto-select, so this
+    stand-down never names a slot the rotation verb would refuse (review 2026-09-08: the
+    first cut used `< 100`, no account check, and printed the account's LABEL — a local part
+    the explicit `rotate_to.py <email>` path rejects as UNKNOWN_ACCOUNT). `is_active` plays
+    no part: measured live, it is true at 97 %. A sibling whose token is about to expire
+    still qualifies here while rotate_to's auto-select skips it — then the verb answers
+    NO_TARGET and this detector keeps standing down; accepted, and said on the card."""
     model = str(verdict.get("model") or "")
     try:
         accounts = rotator_usage.accounts_usage()
@@ -114,12 +119,12 @@ def _sibling_has_headroom(verdict: dict, now: int) -> str | None:
     for acct in accounts:
         if acct.get("is_live"):
             continue
-        for w in token_burn.model_windows_from_usage(acct.get("usage") or {}, now):
-            label = str(w.get("label", ""))
-            if not label.endswith(f"/{model}"):
-                continue
-            if float(w.get("util_pct", 0.0)) < 100.0:
-                return str(acct.get("label") or "sibling")
+        util = token_burn.model_headroom_candidate(
+            acct.get("usage") or {}, now, model,
+            scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM,
+        )
+        if util is not None:
+            return str(acct.get("label") or "sibling"), util
     return None
 
 
@@ -158,17 +163,14 @@ def main() -> int:
     # on the live pane (a model switch resets the whole cache).
     sibling = _sibling_has_headroom(verdict, now)
     if sibling is not None:
-        state.log_line(
-            _LOG,
-            f"{verdict['scoped_label']} spent on the live account, but {sibling} still "
-            f"has {verdict['model']} headroom — rotate first: "
-            f"/janitor-rotate-account-to {sibling}",
+        label, util = sibling
+        line = (
+            f"{verdict['scoped_label']} spent on the live account, but {label} still has "
+            f"{verdict['model']} headroom ({util:.0f}% used) — rotate first: "
+            f"/janitor-rotate-account-to"
         )
-        print(
-            f"[model-fallback] {verdict['scoped_label']} spent on the live account, but "
-            f"{sibling} still has {verdict['model']} headroom — rotate first: "
-            f"/janitor-rotate-account-to {sibling}"
-        )
+        state.log_line(_LOG, line)
+        print(f"[model-fallback] {line}")
         return 0
 
     declined_age = _declined_age_s(now)

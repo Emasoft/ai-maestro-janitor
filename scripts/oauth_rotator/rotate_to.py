@@ -98,6 +98,10 @@ def _pick_target(now: int) -> tuple[str, dict, float | None, float, float, bool]
     state = rotator.load_state()
     live = state.get("live_email")
     candidates: list[tuple[str, dict, float | None, float, float]] = []
+    # has-Fable-headroom membership is ONE shared predicate (token_burn.model_headroom_candidate):
+    # the model-fallback detector's rotate-first stand-down asks it about the same slots, so it
+    # can never name a slot this verb would refuse (TRDD-M4HVFU2A review, 2026-09-08).
+    with_headroom: set[str] = set()
     for email in state.get("slots", {}):
         if email == live:
             continue
@@ -117,12 +121,17 @@ def _pick_target(now: int) -> tuple[str, dict, float | None, float, float, bool]
         account_used = max(v for v in (fh, sd) if v is not None)
         if account_used > rotator.SCOPED_ACCOUNT_HEADROOM:
             continue
+        if token_burn.model_headroom_candidate(
+            usage, now, "Fable",
+            scoped_high=rotator.SCOPED_SWITCH_AT, account_headroom=rotator.SCOPED_ACCOUNT_HEADROOM,
+        ) is not None:
+            with_headroom.add(email)
         candidates.append((email, blob, _fable_used(usage, now), fh or 0.0, sd or 0.0))
     if not candidates:
         return None
     with_fable_headroom: list[tuple[str, dict, float, float, float]] = [
         (email, blob, fable, fh, sd) for email, blob, fable, fh, sd in candidates
-        if fable is not None and fable < rotator.SCOPED_SWITCH_AT
+        if email in with_headroom and fable is not None
     ]
     if with_fable_headroom:
         best_f = min(with_fable_headroom, key=lambda c: c[2])

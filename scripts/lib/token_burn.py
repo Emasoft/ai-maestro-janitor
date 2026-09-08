@@ -455,6 +455,37 @@ def model_fallback_verdict(
     }
 
 
+def model_headroom_candidate(
+    usage: dict, now: int, model: str, *, scoped_high: float, account_headroom: float
+) -> float | None:
+    """`model`'s own percent-USED on this account when rotating ONTO it would help, else None.
+
+    Qualifies only when BOTH hold: every computable account window (5h/7d) is at/under
+    `account_headroom`, AND the account's `model`-scoped window is strictly under
+    `scoped_high`. An account with no computable account windows (a never-probed slot) or no
+    `model` window is UNKNOWN -> None, never "0 % used".
+
+    ONE predicate for both callers (TRDD-M4HVFU2A review, 2026-09-08): rotate_to.py's
+    auto-select decides has-Fable-headroom membership with it, and the model-fallback
+    detector's rotate-first stand-down asks it about the same slots — so the detector can
+    never name a slot the rotation verb would refuse. Its first cut used `< 100` for the
+    model window and no account check, so for a sibling at 90–99 % it pointed at a rotation
+    that would itself type `/model opus` first."""
+    account = windows_from_usage(usage, now)
+    if not account:
+        return None
+    if max(float(w["util_pct"]) for w in account) > account_headroom:
+        return None
+    utils = [
+        float(w["util_pct"]) for w in model_windows_from_usage(usage, now)
+        if str(w.get("label", "")).rsplit("/", 1)[-1] == model
+    ]
+    if not utils:
+        return None
+    worst = max(utils)
+    return worst if worst < scoped_high else None
+
+
 def format_model_fallback_line(verdict: dict, target: str) -> str:
     """The one drift line a fallback emits. Names BOTH numbers, because the whole point is
     that they disagree — a reader who sees only "98%" assumes the account is exhausted."""

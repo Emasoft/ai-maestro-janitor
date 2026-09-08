@@ -14,6 +14,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _LIB = _PROJECT_ROOT / "scripts" / "lib"
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "window-burn-rate.py"
@@ -750,3 +752,30 @@ def test_model_fallback_require_active_fires_at_a_true_100pct() -> None:
         snapshot_age_s=30.0, require_active=True,
     )
     assert v is not None and v["model"] == "Fable"
+
+
+@pytest.mark.parametrize(
+    "five,seven,fable,expected",
+    [
+        (10.0, 20.0, 40.0, 40.0),   # account fine, Fable under the bar -> its util
+        (10.0, 95.0, 40.0, None),   # 7d over the account bar -> not a target
+        (10.0, 20.0, 95.0, None),   # Fable at/over the bar -> not a target
+        (10.0, 20.0, None, None),   # no Fable window at all -> UNKNOWN, never "0 % used"
+        (None, None, 40.0, None),   # no computable account windows -> UNKNOWN
+    ],
+)
+def test_model_headroom_candidate_is_the_rotation_verbs_predicate(five, seven, fable, expected) -> None:
+    """`model_headroom_candidate` (TRDD-M4HVFU2A review): the ONE has-headroom predicate shared
+    by rotate_to.py's auto-select and the model-fallback detector's rotate-first stand-down.
+    Both bars are percent-USED thresholds; an unknown window is None, never headroom."""
+    usage = _usage(
+        five=(five, _reset_for(_5H, 0.5)) if five is not None else None,
+        seven=(seven, _reset_for(_7D, 0.26)) if seven is not None else None,
+    )
+    usage["limits"] = (
+        [_limit(group="weekly", percent=fable, resets_at=_reset_for(_7D, 0.26), model="Fable")]
+        if fable is not None else []
+    )
+    assert tbn.model_headroom_candidate(
+        usage, NOW, "Fable", scoped_high=_SCOPED_HIGH, account_headroom=_ACCOUNT_HEADROOM,
+    ) == expected

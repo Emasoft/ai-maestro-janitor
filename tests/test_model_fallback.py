@@ -223,6 +223,11 @@ def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
     monkeypatch.setattr(det.terminal_trigger, "confirm_model_switch", lambda *a: True)
     monkeypatch.setattr(det, "_stamp_switch", lambda _n: None)
     monkeypatch.setattr(det, "_last_switch_ts", lambda: 0)
+    # The rotate-first scan and the declined back-off read REAL state (this host's rotator and
+    # this project's state dir) unless faked — the two pre-existing acting tests reached them
+    # unfaked after TRDD-M4HVFU2A. Default both to "nothing there"; a test overrides as needed.
+    monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: [])
+    monkeypatch.setattr(det, "_declined_age_s", lambda _now: None)
     monkeypatch.setattr(det.findings_ledger, "record", lambda **k: None)
     return called
 
@@ -267,16 +272,65 @@ def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkey
     monkeypatch.setattr(
         det.rotator_usage, "accounts_usage",
         lambda: [{"label": "sibling", "is_live": False,
-                  "usage": {"limits": [{"kind": "weekly_scoped", "group": "weekly", "percent": 40.0,
-                                        "severity": "normal", "resets_at": "2026-09-13T00:00:00Z",
+                  "usage": {"five_hour": {"utilization": 10.0, "resets_at": "2099-01-01T00:00:00Z"},
+                            "seven_day": {"utilization": 20.0, "resets_at": "2099-01-01T00:00:00Z"},
+                            "limits": [{"kind": "weekly_scoped", "group": "weekly", "percent": 40.0,
+                                        "severity": "normal", "resets_at": "2099-01-01T00:00:00Z",
                                         "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None},
                                         "is_active": False}]}}],
     )
 
     assert det.main() == 0
     out = capsys.readouterr().out
-    assert "rotate first" in out and "/janitor-rotate-account-to sibling" in out
+    assert "sibling still has Fable headroom (40% used)" in out
+    assert out.rstrip().endswith("rotate first: /janitor-rotate-account-to"), out
     assert called["verified"] == [] and called["true_error"] == []
+
+
+def _sibling(*, fable_pct: float, seven_day_pct: float = 20.0) -> list[dict]:
+    """One non-live account as `rotator_usage.accounts_usage()` returns it."""
+    reset = "2099-01-01T00:00:00Z"
+    return [{"label": "sibling", "is_live": False,
+             "usage": {"five_hour": {"utilization": 10.0, "resets_at": reset},
+                       "seven_day": {"utilization": seven_day_pct, "resets_at": reset},
+                       "limits": [{"kind": "weekly_scoped", "group": "weekly", "percent": fable_pct,
+                                   "severity": "normal", "resets_at": reset,
+                                   "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None},
+                                   "is_active": False}]}}]
+
+
+def test_a_sibling_over_the_rotation_bar_does_not_divert(monkeypatch, capsys) -> None:
+    """A sibling at 95 % Fable is NOT a rotation target — rotate_to's auto-select would type
+    `/model opus` itself before switching to it — so the detector must not stand down for it;
+    it switches here. Pins the shared bar (`_SCOPED_HIGH`, == rotator.SCOPED_SWITCH_AT)."""
+    det = _load_detector()
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: _sibling(fable_pct=95.0))
+    assert det.main() == 0
+    assert "rotate first" not in capsys.readouterr().out
+    assert called["verified"] == ["/model opus"]
+
+
+def test_a_sibling_with_a_spent_account_window_does_not_divert(monkeypatch, capsys) -> None:
+    """Fable headroom on a sibling whose 7d window is at 95 % is not a rotation target either
+    (rotate_to excludes it on the account bar) — the detector switches here."""
+    det = _load_detector()
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: _sibling(fable_pct=40.0, seven_day_pct=95.0))
+    assert det.main() == 0
+    assert "rotate first" not in capsys.readouterr().out
+    assert called["verified"] == ["/model opus"]
+
+
+def test_the_detectors_bars_equal_the_rotation_verbs_bars() -> None:
+    """The rotate-first line is only actionable if the detector's two bars are the rotation
+    verb's own — a drift here makes the detector stand down for a slot rotate_to refuses."""
+    sys.path.insert(0, str(_ROOT / "scripts" / "oauth_rotator"))
+    import rotator  # noqa: PLC0415
+
+    det = _load_detector()
+    assert det._SCOPED_HIGH == rotator.SCOPED_SWITCH_AT
+    assert det._ACCOUNT_HEADROOM == rotator.SCOPED_ACCOUNT_HEADROOM
 
 
 def test_a_declined_switch_backs_off_and_retypes_nothing(monkeypatch, capsys) -> None:
