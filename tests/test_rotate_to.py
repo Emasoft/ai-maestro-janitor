@@ -102,34 +102,34 @@ def _wire_state(monkeypatch: pytest.MonkeyPatch, *, live: str, slots: dict, usag
 
 def test_unknown_email_exits_2(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     """A name that is not a known slot refuses with UNKNOWN_ACCOUNT, exit 2 — no switch attempted."""
-    _known(monkeypatch, {"live@x.com"})
-    monkeypatch.setattr(rotator, "load_state", lambda *a, **k: {"live_email": "live@x.com", "slots": {}})
-    rc = rt.main(["rotate_to.py", "ghost@x.com"])
+    _known(monkeypatch, {"live@example.com"})
+    monkeypatch.setattr(rotator, "load_state", lambda *a, **k: {"live_email": "live@example.com", "slots": {}})
+    rc = rt.main(["rotate_to.py", "ghost@example.com"])
     assert rc == 2
-    assert capsys.readouterr().out.splitlines()[0] == "UNKNOWN_ACCOUNT ghost@x.com"
+    assert capsys.readouterr().out.splitlines()[0] == "UNKNOWN_ACCOUNT ghost@example.com"
 
 
 def test_explicit_email_switches(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     """A known, non-live email switches via rotator.cmd_switch and reports ROTATED as the
     first (and only) stdout line — cmd_switch's own chatter is swallowed."""
-    slots = {"live@x.com": _blob("LIVE"), "alt@x.com": _blob("ALT")}
-    saved = _wire_state(monkeypatch, live="live@x.com", slots=slots, usages={})
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("ALT")}
+    saved = _wire_state(monkeypatch, live="live@example.com", slots=slots, usages={})
     _known(monkeypatch, set(slots))
-    rc = rt.main(["rotate_to.py", "alt@x.com"])
+    rc = rt.main(["rotate_to.py", "alt@example.com"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.splitlines() == ["ROTATED alt@x.com"]
-    assert saved["live_email"] == "alt@x.com"
+    assert out.splitlines() == ["ROTATED alt@example.com"]
+    assert saved["live_email"] == "alt@example.com"
 
 
 def test_already_live_exits_0(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     """Naming the already-live account is a no-op success — idempotent, no switch attempted."""
-    slots = {"live@x.com": _blob("LIVE")}
-    _wire_state(monkeypatch, live="live@x.com", slots=slots, usages={})
-    _known(monkeypatch, {"live@x.com"})
-    rc = rt.main(["rotate_to.py", "live@x.com"])
+    slots = {"live@example.com": _blob("LIVE")}
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages={})
+    _known(monkeypatch, {"live@example.com"})
+    rc = rt.main(["rotate_to.py", "live@example.com"])
     assert rc == 0
-    assert capsys.readouterr().out.splitlines()[0] == "ALREADY_LIVE live@x.com"
+    assert capsys.readouterr().out.splitlines()[0] == "ALREADY_LIVE live@example.com"
 
 
 def test_fable_headroom_ranking_picks_lowest_fable(
@@ -137,16 +137,16 @@ def test_fable_headroom_ranking_picks_lowest_fable(
 ) -> None:
     """With multiple candidates under the account-headroom bar, the one with the LOWEST
     Fable usage (most Fable headroom) wins — no model-fallback keystroke needed."""
-    slots = {"live@x.com": _blob("LIVE"), "alt-a@x.com": _blob("ALT-A"), "alt-b@x.com": _blob("ALT-B")}
+    slots = {"live@example.com": _blob("LIVE"), "alt-a@example.com": _blob("ALT-A"), "alt-b@example.com": _blob("ALT-B")}
     usages = {
-        "alt-a@x.com": (200, _usage(five=10, seven=20, fable=80)),
-        "alt-b@x.com": (200, _usage(five=10, seven=20, fable=30)),
+        "alt-a@example.com": (200, _usage(five=10, seven=20, fable=80)),
+        "alt-b@example.com": (200, _usage(five=10, seven=20, fable=30)),
     }
-    _wire_state(monkeypatch, live="live@x.com", slots=slots, usages=usages)
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
     rc = rt.main(["rotate_to.py"])
     out = capsys.readouterr().out.splitlines()[0]
     assert rc == 0
-    assert out == "ROTATED alt-b@x.com fable=30% 5h=10% 7d=20%"
+    assert out == "ROTATED alt-b@example.com fable=30% 5h=10% 7d=20%"
 
 
 def test_no_fable_path_picks_max_headroom_and_requests_model_fallback(
@@ -154,24 +154,24 @@ def test_no_fable_path_picks_max_headroom_and_requests_model_fallback(
 ) -> None:
     """When every candidate's Fable window is spent (>= SCOPED_SWITCH_AT), the one with the
     lowest account usage (max headroom) wins, and the /model opus keystroke is requested first."""
-    slots = {"live@x.com": _blob("LIVE"), "alt-a@x.com": _blob("ALT-A"), "alt-b@x.com": _blob("ALT-B")}
+    slots = {"live@example.com": _blob("LIVE"), "alt-a@example.com": _blob("ALT-A"), "alt-b@example.com": _blob("ALT-B")}
     usages = {
-        "alt-a@x.com": (200, _usage(five=50, seven=60, fable=95)),
-        "alt-b@x.com": (200, _usage(five=10, seven=20, fable=99)),
+        "alt-a@example.com": (200, _usage(five=50, seven=60, fable=95)),
+        "alt-b@example.com": (200, _usage(five=10, seven=20, fable=99)),
     }
-    _wire_state(monkeypatch, live="live@x.com", slots=slots, usages=usages)
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
     monkeypatch.setattr(rt, "_request_model_opus", lambda: "not-automatable")
     rc = rt.main(["rotate_to.py"])
     out = capsys.readouterr().out.splitlines()[0]
     assert rc == 0
-    assert out == "ROTATED alt-b@x.com fable=99% 5h=10% 7d=20% [model-fallback: not-automatable]"
+    assert out == "ROTATED alt-b@example.com fable=99% 5h=10% 7d=20% [model-fallback: not-automatable]"
 
 
 def test_no_candidate_exits_3(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     """No non-live slot under the account-headroom bar -> NO_TARGET, exit 3, nothing switched."""
-    slots = {"live@x.com": _blob("LIVE"), "alt@x.com": _blob("ALT")}
-    usages = {"alt@x.com": (200, _usage(five=95, seven=95, fable=99))}
-    _wire_state(monkeypatch, live="live@x.com", slots=slots, usages=usages)
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("ALT")}
+    usages = {"alt@example.com": (200, _usage(five=95, seven=95, fable=99))}
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
     rc = rt.main(["rotate_to.py"])
     assert rc == 3
     assert capsys.readouterr().out.splitlines()[0].startswith("NO_TARGET")
@@ -183,16 +183,16 @@ def test_never_probed_slot_does_not_masquerade_as_max_headroom(
     """A slot whose payload carries utilization=0.0 with NO resets_at (never actually
     probed) must be excluded, not picked as the 0%-used 'best' candidate — token_burn's
     window builder drops an unparseable resets_at, so headroom here is UNPROVEN."""
-    slots = {"live@x.com": _blob("LIVE"), "never-probed@x.com": _blob("NP"), "real@x.com": _blob("REAL")}
+    slots = {"live@example.com": _blob("LIVE"), "never-probed@example.com": _blob("NP"), "real@example.com": _blob("REAL")}
     usages = {
-        "never-probed@x.com": (200, _usage(five=0, seven=0, no_resets=True)),
-        "real@x.com": (200, _usage(five=40, seven=50, fable=10)),
+        "never-probed@example.com": (200, _usage(five=0, seven=0, no_resets=True)),
+        "real@example.com": (200, _usage(five=40, seven=50, fable=10)),
     }
-    _wire_state(monkeypatch, live="live@x.com", slots=slots, usages=usages)
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
     rc = rt.main(["rotate_to.py"])
     out = capsys.readouterr().out.splitlines()[0]
     assert rc == 0
-    assert out == "ROTATED real@x.com fable=10% 5h=40% 7d=50%"
+    assert out == "ROTATED real@example.com fable=10% 5h=40% 7d=50%"
 
 
 def test_slot_with_hours_of_token_life_remains_auto_pickable(
@@ -201,13 +201,13 @@ def test_slot_with_hours_of_token_life_remains_auto_pickable(
     """A slot well outside the 0.5h EXPIRY_GRACE_H window (7h of token life left) is NOT
     excluded by the expiry check — only a token actually near/at death is."""
     healthy_ms = int((time.time() + 7 * 3600) * 1000)
-    slots = {"live@x.com": _blob("LIVE"), "alt@x.com": _blob("ALT", expires_ms=healthy_ms)}
-    usages = {"alt@x.com": (200, _usage(five=40, seven=50, fable=10))}
-    _wire_state(monkeypatch, live="live@x.com", slots=slots, usages=usages)
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("ALT", expires_ms=healthy_ms)}
+    usages = {"alt@example.com": (200, _usage(five=40, seven=50, fable=10))}
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
     rc = rt.main(["rotate_to.py"])
     out = capsys.readouterr().out.splitlines()[0]
     assert rc == 0
-    assert out == "ROTATED alt@x.com fable=10% 5h=40% 7d=50%"
+    assert out == "ROTATED alt@example.com fable=10% 5h=40% 7d=50%"
 
 
 def test_locally_expired_slot_is_never_auto_picked(
@@ -219,19 +219,19 @@ def test_locally_expired_slot_is_never_auto_picked(
     warn-then-switch behaviour (untouched by this exclusion)."""
     expired_ms = int((time.time() - 3600) * 1000)  # already expired an hour ago
     slots = {
-        "live@x.com": _blob("LIVE"),
-        "expired@x.com": _blob("EXP", expires_ms=expired_ms),
-        "real@x.com": _blob("REAL"),
+        "live@example.com": _blob("LIVE"),
+        "expired@example.com": _blob("EXP", expires_ms=expired_ms),
+        "real@example.com": _blob("REAL"),
     }
     usages = {
-        "expired@x.com": (200, _usage(five=1, seven=1, fable=1)),  # best numbers, but dead
-        "real@x.com": (200, _usage(five=40, seven=50, fable=10)),
+        "expired@example.com": (200, _usage(five=1, seven=1, fable=1)),  # best numbers, but dead
+        "real@example.com": (200, _usage(five=40, seven=50, fable=10)),
     }
-    _wire_state(monkeypatch, live="live@x.com", slots=slots, usages=usages)
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
     rc = rt.main(["rotate_to.py"])
     out = capsys.readouterr().out.splitlines()[0]
     assert rc == 0
-    assert out == "ROTATED real@x.com fable=10% 5h=40% 7d=50%"
+    assert out == "ROTATED real@example.com fable=10% 5h=40% 7d=50%"
 
 
 def test_never_consults_server_chore_ownership(
@@ -250,9 +250,9 @@ def test_never_consults_server_chore_ownership(
     # BEFORE trusting that rotate_to.py ignoring it means anything (an unrecognised
     # value would make this test pass vacuously).
     assert harness_backend.server_runs_chores() is True
-    slots = {"live@x.com": _blob("LIVE"), "alt@x.com": _blob("ALT")}
-    saved = _wire_state(monkeypatch, live="live@x.com", slots=slots, usages={})
+    slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("ALT")}
+    saved = _wire_state(monkeypatch, live="live@example.com", slots=slots, usages={})
     _known(monkeypatch, set(slots))
-    rc = rt.main(["rotate_to.py", "alt@x.com"])
+    rc = rt.main(["rotate_to.py", "alt@example.com"])
     assert rc == 0
-    assert saved["live_email"] == "alt@x.com"
+    assert saved["live_email"] == "alt@example.com"
