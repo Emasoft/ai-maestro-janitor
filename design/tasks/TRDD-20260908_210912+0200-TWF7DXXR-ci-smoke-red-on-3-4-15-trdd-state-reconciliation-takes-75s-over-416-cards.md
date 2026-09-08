@@ -3,7 +3,7 @@ trdd-id: TWF7DXXR
 title: CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
 column: todo
 created: 2026-09-08T21:09:12+0200
-updated: 2026-09-08T21:28:13+0200
+updated: 2026-09-08T22:34:36+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -61,19 +61,31 @@ eht: []
   by this session after the measurements), so dispatch does not wait on it. If the
   in-dispatch detector run matched the standalone 75 s and detectors run serially, ~33 s of
   the 108 s is unattributed; no other detector was timed.
+- **Measured (option 1's separating step, 2026-09-08 22:34, this host; two fresh local
+  clones, a fresh `HOME` dir each, detector run with `--one-shot`. The CI env vars and
+  `env -i` are what the worker was INSTRUCTED to use — it froze before writing its report,
+  so that part is the prompt, not an observation; both `home-*` dirs and both run files
+  exist):**
+  HEAD scripts on the HEAD board (417 cards = 416 at `8c07f50f` + this card): **rc=0,
+  119 s**, 4 dead-symbol findings + the board-drift summary (52 candidates).
+  HEAD scripts on the 09-03 board (`git restore --source=4326519d --staged --worktree
+  design/tasks`, then committed in the clone; 392 cards; `status --short` empty): **rc=0,
+  73 s**, 5 dead-symbol findings + summary (37 candidates).
+  Reading: the current code on the OLD board takes 73 s here; the runner's number is
+  unknown, but the previous green runs' whole dispatch step was ≤33 s on the runner, so the
+  code path grew regardless of board. The 25 net cards added since 09-03 (this clone
+  includes TWF7DXXR) cost 46 s more (+63% for +6% cards) and 15 more drift candidates, so
+  the cost is content-driven, not count-driven; whether it is per-card scanning or
+  per-finding output is what timing the subprocess call sites decides. Host noise is large
+  and not monotonic with load: the HEAD board measured 75 s earlier today (416 cards, a
+  stray daemon sharing the host) and 119 s now (417 cards, no daemon known) — at least
+  ±40%, so the 73 s vs 119 s ratio carries the same floor.
+  Raw: session scratchpad `twf7/timing.txt`, `run-a.txt`, `run-b.txt` (ephemeral).
 - **NEXT ACTION (decide; 1 combines with 2 or 3; record the choice in this STATE block):**
-  1. Make the detector cheap per fire. First the one measurement that separates the cards
-     from everything else: in the fresh clone, `git restore --source=4326519d --staged
-     --worktree design/tasks` (no-overlay, so cards absent at `4326519d` are deleted — a
-     plain `git checkout 4326519d -- design/tasks` is overlay-mode and would KEEP the new
-     cards), assert 392 `*.md` files, commit that board in the throwaway clone so the tree
-     is clean (scripts stay at HEAD), then time the detector — ≈75 s ⇒ the cost is not in
-     the cards that changed since 09-03; it is in the current code or in the git history the
-     detector walks (unchanged by the restore); far less ⇒ the cost is in the changed cards
-     (the 24 net new ones or edited older ones). A worktree at `4326519d` would swap board
-     and scripts together and decide nothing. Then time its seven `state.run_subprocess`
-     calls on the 416-card board, find the per-card or per-call cost, and batch or bound
-     it; OR
+  1. Make the detector cheap per fire. The separating measurement is done (above): both
+     the code path and the changed cards cost. Next: time its seven `state.run_subprocess`
+     call sites (only `_load_git_log` is confirmed git, called once) on the 417-card board,
+     find where the content-driven cost is, and batch or bound it; OR
   2. Give the CI smoke a realistic budget for a first fire on this board (the 60 s comment
      says "plenty even on a cold runner", which is now false); OR
   3. Exclude first-fire-only work from the smoke (a first fire runs EVERY detector because
@@ -134,3 +146,6 @@ eht: []
   clone so the detector's git calls see a clean tree; the slow-outcome label is now
   three-way (current code OR git history, which the restore does not rewind). Last edit
   from review on this card; further findings go to the fixer.
+- 2026-09-08T22:34:36+0200 — Option 1's separating measurement taken (see STATE): HEAD
+  board 119 s vs 09-03 board 73 s under HEAD scripts, both rc=0. Both the code path and the
+  changed cards exceed the budget. No option chosen yet — the USER's pick.
