@@ -64,7 +64,7 @@ reading, not reasoning:
   `skills/janitor-memory-split/SKILL.md:73`) resolve via the IDENTICAL
   function/env var (`CLAUDE_PROJECT_DIR`) — same code path, same directory.
   Measured on this host: both resolve to
-  `/Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/.janitor/state`,
+  `<project-root>/.janitor/state` (the janitor checkout on this host),
   which right now holds 14 real `memory-maint-pending-<id>.json` files.
 - `global_state.global_state_dir()` — what the issue #300 reporter checked
   ("a read-only look at global-state/") — is a DIFFERENT, DELIBERATELY
