@@ -3,7 +3,7 @@ trdd-id: 7MGJYLY5
 title: Janitor compaction prefers clear plus llm-ext at turn boundaries, preserves subagents, restores skills not files
 column: todo
 created: 2026-09-08T20:03:42+0200
-updated: 2026-09-08T20:10:28+0200
+updated: 2026-09-08T23:00:40+0200
 current-owner: janitor-session
 task-type: feature
 min-approval-requirement: none
@@ -23,10 +23,17 @@ relevant-rules: []
 - **What this card is:** an OWNER RULING (USER, 2026-09-08 ~15:52 and ~16:05), relayed verbatim by
   the ai-maestro session over cross-session messaging at ~20:00. It is a REQUIREMENT card: it
   constrains the compact / handoff / resume skills and hooks. No code has been changed under it yet.
-- **NEXT ACTION:** an implementer reads the STATE blocks of the open cards listed under
-  "Cards this ruling constrains", decides per card whether it is CONFORMANT, needs a scope
-  change, or is SUPERSEDED by this ruling, and records that decision in each card's STATE block
-  before touching any skill or hook.
+- **2026-09-08 23:00 — box 1 done:** the six constrained cards each carry a dated relationship
+  line (six-card read `reports/board-drain/20260908_223500+0200-7MGJYLY5-six-cards-read.md` plus
+  first-hand greps of every quoted line): four CONSISTENT WITH the R they touch — and none of the
+  six delivers R1's fire-before-autocompact on context fill, that trigger is owned by none of
+  them; 1QJIZFFW NEEDS A SCOPE CHANGE on R3 (its active-waiting gate vetoes the clear instead of
+  preserving subagents through it); OES0NN3F CONFLICTS with R2 (prose handoff injected on the
+  autocompact path) — OWNER DECISION pending: keep / narrow to a machine-readable record / drop.
+  No skill or hook touched.
+- **NEXT ACTION:** two owner decisions (1QJIZFFW's R3 scope change; OES0NN3F's R2 conflict),
+  then boxes 2–6 as implementation work on the skills and hooks — none started. The context-fill
+  trigger (box 2) has no owning card yet.
 - **Gotcha:** the ruling says `/clean`; the earlier quote from the same session says `/clear`.
   It means `/clear`.
 
@@ -98,8 +105,9 @@ All at `column: testing` on 2026-09-08 unless noted:
 
 ## Acceptance
 
-- [ ] Each card above carries a dated STATE-block line naming its relationship to this ruling
+- [x] Each card above carries a dated STATE-block line naming its relationship to this ruling
       (conformant / scope changed / superseded in part), written after reading its body.
+      (2026-09-08 23:00 — see STATE; the two non-conformant verdicts await the owner.)
 - [ ] The janitor's clear fires at a turn boundary and at a context fill below the harness
       autocompact point for the CURRENT setting. A test reads the value the harness actually has
       and asserts the janitor's clear fires below it. (Requirement 1 leaves keying on the variable

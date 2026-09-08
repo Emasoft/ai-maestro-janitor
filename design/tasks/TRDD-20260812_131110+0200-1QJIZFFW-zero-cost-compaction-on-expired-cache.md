@@ -3,7 +3,7 @@ trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
 column: testing
 created: 2026-08-12T13:11:10+0200
-updated: 2026-09-05T09:26:14+0200
+updated: 2026-09-08T23:00:40+0200
 current-owner: janitor-main-session
 task-type: feature
 approval-tier: 0
@@ -463,6 +463,13 @@ Two further cautions for the wiring:
   abort was disarmed when headers arrived, so the timeout bounded time-to-first-byte only and
   a stalled generation hung forever). Treat the version as young: wrap the call in a real
   timeout of our own and degrade to `compose_template_handoff` on any non-zero exit.
+
+**2026-09-08 — vs owner ruling TRDD-7MGJYLY5:** NEEDS A SCOPE CHANGE on R3. The ruling requires
+subagents PRESERVED THROUGH a clear; the gate this card cites at `lib/external_clear.py:1566`
+(`if active_waiting: return ClearVerdict(False, …)`) vetoes the clear instead, which also blocks
+R1's "always prefer" clause whenever a background agent runs. Reconcile before calling this card
+conformant. Otherwise CONSISTENT WITH R1's preferred path (no context-fill trigger here either);
+R2/R4: outside this card's scope (silent, not deficient).
 
 ## The injected payload — USER spec, 2026-08-12
 

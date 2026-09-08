@@ -3,7 +3,7 @@ trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
 column: testing
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-05T05:18:15+0200
+updated: 2026-09-08T23:00:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -59,6 +59,15 @@ heartbeat cue arrives to tell it to read the file.
 second one is this card: *"and even so they were unaware of any handoff."* Even a session woken
 perfectly — by a cue, or by the owner typing `/janitor-resume` — still has to be TOLD. An
 injection lands before the first turn and needs no nudge to have fired.
+
+**2026-09-08 — vs owner ruling TRDD-7MGJYLY5:** CONFLICTS with R2. The ruling forbids any summary
+or prose handoff on the harness's own AUTOcompact path (continuity nudge only); this card's
+compact-path injection (`_inject_post_compact_handoff`, gated on `resume-after-compact.flag`)
+delivers exactly such a handoff (22,702 bytes per the card). OWNER DECISION pending: keep as is
+(overriding R2), narrow to a machine-readable record only, or drop in favour of the nudge. No
+code change until decided; if the injection stays, the real-compaction check remains blocked on
+a release as the card says. R3: subagents are mentioned, not their preservation through a clear
+(per the six-card read); R4: outside this card's scope.
 
 ## NEXT ACTION
 
