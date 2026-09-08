@@ -68,11 +68,8 @@ PY
 > (H5, wikimem audit 2026-07-07). Applies to every block below.
 
 Process exactly **ONE scope this run**, and CLAIM it before touching anything —
-never self-select:
-
-Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
-`export` below before running the claim — the guard on the next line refuses to run
-without it.
+never self-select. Paste the `STATE_DIR=<path>` value from your spawn prompt into
+the `export` below — the guard on the next line refuses to run without it.
 
 ```bash
 export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
@@ -81,15 +78,13 @@ uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore c
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
-path — your cwd as a spawned agent is not the project root). **Exit 2 (nothing
-claimable), 3 (no memory-maintenance state at all — `$STATE_DIR` is wrong), 4
-(`$STATE_DIR` empty), 5 (dispatch was recorded for a different state dir — claim
-refused), an unreadable
-result, or a chore name other than `consolidate`: STOP and report that** — never
-pick a scope yourself, never re-derive what is due, and **never read the legacy
-`memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
-human naming a scope IS the assignment). Do **one** scope, **one** merge per pass
-(bounded; the next cycle handles the rest).
+path — your cwd as a spawned agent is not the project root). **Any non-zero exit,
+an unreadable result, or a chore name other than `consolidate`: STOP and report
+that** — never pick a scope yourself, never re-derive what is due, and **never
+read the legacy `memory-maint-pending.json` slot**. A USER-named scope is the one
+exception (a human naming a scope IS the assignment). Do **one** scope, **one**
+merge per pass (bounded; the next cycle handles the rest). Exit-code meanings:
+[merge-protocol § claim exit codes](references/merge-protocol.md#claim-exit-codes).
 
 ## Scope roots — and the PROJECT gate (default OFF)
 
@@ -118,9 +113,9 @@ PY
 
 A `memgrep`-driven recency+overlap scan can disagree with the scheduler's own precheck
 (`consolidate_has_work`) — the same janitor#227 class of bug `memory-repair` hit: a group the
-scheduler flagged structural-eligible could look like nothing to a differently-scoped memgrep
-query, so scanning independently risks abstaining on the very group it was dispatched for. Get
-the real candidate GROUPS from the same code the scheduler gates on:
+scheduler flagged eligible could look like nothing to a differently-scoped memgrep query, so
+scanning independently risks abstaining on the very group it was dispatched for. Get the real
+candidate GROUPS from the same code the scheduler gates on:
 
 ```bash
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
@@ -153,13 +148,12 @@ aspect, same scope. Different facets of different things ⇒ abstain. Uncertain 
 abstain. **The TOPIC decides sameness, never the title string** (TRDD-87RKBYJ8
 duty 10).
 
-**Description-named singletons are PRIME candidates (TRDD-NM4TPCQ9, corrective
-prong).** A page NAMED like one memory's description (`implementation-of-…`,
-`how-to-…`, `fix-for-…`) is the recurring agent naming error — one stranded atom.
-Treat it as candidate A and search for its broad TOPIC page (`agents-tracing`) as
-B. **Survivor rule:** the TOPIC-named page survives; the singleton retires
-(redirect `[[links]]`, ref-count footnotes per the move rule). NO topic page →
-not a merge: abstain and surface
+**Description-named singletons are PRIME candidates (TRDD-NM4TPCQ9).** A page NAMED
+like one memory's description (`implementation-of-…`, `how-to-…`, `fix-for-…`) is
+the recurring agent naming error — one stranded atom. Treat it as candidate A and
+search for its broad TOPIC page (`agents-tracing`) as B. **Survivor rule:** the
+TOPIC-named page survives; the singleton retires (redirect `[[links]]`, ref-count
+footnotes per the move rule). No topic page → abstain and surface
 `[janitor-memory] rename-candidate: <page> (description-named, no topic page)`.
 
 ### 3. Legality gate — `is_legal_merge` (BEFORE you open a transaction)
@@ -183,7 +177,7 @@ PY
 ```
 
 On a refusal, abstain and surface a one-line note. Full refusal catalog:
-[merge-protocol.md § What is_legal_merge checks](references/merge-protocol.md#what-is_legal_merge-checks-your-pre-flight-not-the-clis).
+[merge-protocol § is_legal_merge](references/merge-protocol.md).
 
 ### 4. No-third-page check (pre-merge)
 
@@ -196,12 +190,11 @@ the scope for the subject and confirm only A and B match:
 memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 10 | grep -v '/user-mem/'   # expect only A and B
 ```
 
-If a third page appears, **abstain** and surface all three for a human (they may
-need a different reshape). Never silently drop or ignore the third.
+If a third page appears, **abstain** and surface all three for a human. Never silently
+drop or ignore the third.
 
-**RECORD EVERY abstain** with `scripts/memory_refusal_cli.py record` before moving on —
-unrecorded, it re-dispatches forever. Exact invocation + why it expires:
-[merge-protocol](references/merge-protocol.md#recording-an-abstain).
+**RECORD EVERY abstain** with `scripts/memory_refusal_cli.py record` — unrecorded, it
+re-dispatches forever. Invocation + why it expires: [merge-protocol](references/merge-protocol.md#recording-an-abstain).
 
 ### 5. Discover backlinks to redirect (THE LINK LAW — mandatory)
 
@@ -212,10 +205,9 @@ links and the second is the one that gets missed:** the wikimem `[[…]]` graph,
 harness `MEMORY.md`, whose pointer lines `memgrep links` cannot see — leave it and a merged
 note reads as MISSING, the one outcome consolidation exists to prevent (janitor#182).
 
-**The full procedure — read it before executing:**
-[merge-protocol.md](references/merge-protocol.md) § "Step 5" (the `memgrep links --from`
-invocations, holder-repair-first ordering, prose-mention surfacing, and the `MEMORY.md`
-pointer repair).
+Full procedure (the `memgrep links --from` invocations, holder-repair-first ordering,
+prose-mention surfacing, `MEMORY.md` pointer repair) — read before executing:
+[merge-protocol § Step 5](references/merge-protocol.md).
 
 ### 6-9. Execute the merge through the transaction core
 
@@ -234,10 +226,10 @@ The non-negotiables you must uphold:
   byte-identical, `ocd = min(A,B)`, `lmd = today`, no duplicate lines, no link to a retired slug,
   edge sections merged + deduped. Body-fact preservation is YOURS; `verify_merge` does not
   enforce it.
-- **`commit --op merge`** verifies and applies atomically. FAIL (exit 1) = txn auto-aborted, live
-  tree untouched → fix `C` in a FRESH txn, **retry <= 3**, then abandon with a `[janitor-memory]
-  … abandoned` finding. `error:`/exit 2 (lock/stale) = abstain this cycle. A half-applied crash
-  self-heals via the next heartbeat's `resume`.
+- **`commit --op merge`** verifies and applies atomically. FAIL = txn auto-aborted, live tree
+  untouched → fix `C` in a FRESH txn, **retry ≤3**, then abandon with a `[janitor-memory] …
+  abandoned` finding. Lock/stale = abstain this cycle; a half-applied crash self-heals via the
+  next heartbeat's `resume`.
 
 ## Idempotency & bounds
 
@@ -277,22 +269,12 @@ edits a live page directly, never merges cross-scope or cross-type; LOCAL+USER b
 
 ## Resources
 
-- [merge-protocol](references/merge-protocol.md) — the worked walkthrough, the CLI
-  two-phase contract, and the verify_merge failure catalog. Its sections:
-  - The two-phase transaction contract
-  - What is_legal_merge checks
-  - What verify_merge enforces at commit
-  - Why backlink redirect is the load-bearing step
-  - Slug rules
-  - Worked walkthrough
-  - Failure-path walkthrough
-  - Bounds & safety recap
-  - Steps 6-10 — the executable sequence (moved from the SKILL body)
-  - Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
+- [merge-protocol](references/merge-protocol.md) — claim exit codes, the two-phase
+  transaction contract, `is_legal_merge`/`verify_merge`, why backlink redirect is
+  load-bearing, slug rules, worked + failure-path walkthroughs, bounds & safety,
+  and the full Steps 5-10 executable sequence.
 - [merge-page-rules](references/merge-page-rules.md) — the survivor-page
-  construction constraints. Its sections:
-  - What verify_merge enforces at commit
-  - What you must ensure (not verifier-checked)
-  - Frontmatter and link web
+  construction constraints: what `verify_merge` enforces, what you must ensure
+  yourself, and the frontmatter/link-web shape.
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons
   conventions + the LOCAL/PROJECT/USER scope table.

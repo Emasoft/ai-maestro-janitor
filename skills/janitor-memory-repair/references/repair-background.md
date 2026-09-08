@@ -20,6 +20,42 @@ OWN missing edges. It NEVER rewrites a fact, never changes `ocd` (a page's birth
 date), never merges/splits/deletes. Editorial judgment that changes meaning is
 the job of the other three passes; REPAIR only makes a page well-formed.
 
+## Claim exit codes
+
+`memory_dispatch_claim.py --chore repair --state-dir "$STATE_DIR"` reports its
+outcome via exit status: **2** = nothing claimable right now; **3** = no
+memory-maintenance state at all (`$STATE_DIR` is wrong); **4** = `$STATE_DIR` was
+empty; **5** = the dispatch was recorded for a different state dir, so the claim
+was refused. Any of these, an unreadable result, or a printed chore name other than
+`repair` means STOP and report — never pick a scope yourself, never re-derive what
+is due, and never read the legacy `memory-maint-pending.json` slot.
+
+## desc: quoting grammar (TRDD-3SOO1RWE)
+
+QUOTED form is `desc:"…"` — the write verbs emit `desc: "…"`; the parser trims
+after the colon, so the space is immaterial. The unquoted-slug bar is exactly
+memgrep's `atom-unquoted-desc` check (`[a-z0-9_]+` only). Quote unquoted-prose
+descs verbatim rather than rewording them; trim an over-cap desc by tightening,
+never by dropping a fact the body lacks elsewhere.
+
+## desc-trim keyword incident (747b8bef)
+
+Review of commit 747b8bef, 2026-09-06: 16 desc trims, one dropped the `fact`
+subcommand from a desc with no keyword carrying it — the recall surface lost that
+symptom entirely. This is why every desc trim must check the cut clause is still
+in `keywords:` before committing.
+
+## Superseded-atom delimiter mechanics
+
+TRDD-QKWU26ZG — the readability layer of the status-keyed default-exclude; memgrep
+lint's `superseded_heading_line` is the SSOT for the exact `## Superseded` spelling.
+Moving a superseded atom's block (marker line + body, up to the next
+marker/heading) below that delimiter is purely for humans reading current facts
+first — correctness does NOT depend on position, since the recall exclude keys on
+the atom's own `status:` prop, not on where it sits in the file. Lessons stay
+pooled in the page's Notes section throughout, so a within-page move keeps every
+`[^N]` reference resolving.
+
 ## Why `publish-globally` is NOT a repair defect
 
 The SKILL body says do not add or flip it by hand. The reasoning, and the two ways this

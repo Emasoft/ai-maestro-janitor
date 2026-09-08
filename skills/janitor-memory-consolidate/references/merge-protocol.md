@@ -6,6 +6,7 @@ has the runnable steps.
 
 ## Table of contents
 
+- Claim exit codes
 - The two-phase transaction contract
 - What is_legal_merge checks
 - What verify_merge enforces at commit
@@ -16,6 +17,16 @@ has the runnable steps.
 - Bounds & safety recap
 - Steps 6-10 — the executable sequence (moved from the SKILL body)
 - Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
+
+## Claim exit codes
+
+`memory_dispatch_claim.py --chore consolidate --state-dir "$STATE_DIR"` reports its
+outcome via exit status: **2** = nothing claimable right now; **3** = no
+memory-maintenance state at all (`$STATE_DIR` is wrong); **4** = `$STATE_DIR` was
+empty; **5** = the dispatch was recorded for a different state dir, so the claim
+was refused. Any of these, an unreadable result, or a printed chore name other than
+`consolidate` means STOP and report — never pick a scope yourself, never re-derive
+what is due, and never read the legacy `memory-maint-pending.json` slot.
 
 ## The two-phase transaction contract (`scripts/memory_txn_cli.py`)
 

@@ -67,11 +67,9 @@ so PROJECT split is governed by `edit_project_scope` — **ON by default since 2
 (owner directive: librarians must reach PROJECT scope; a host may set it off) — when on you
 stage+commit into the PROJECT root and it rides the next publish, never pushed by you.
 
-Process exactly **ONE scope this run**, and CLAIM it before you touch anything:
-
-Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
-`export` below before running the claim — the guard on the next line refuses to run
-without it.
+Process exactly **ONE scope this run**, and CLAIM it before you touch anything.
+Paste the `STATE_DIR=<path>` value from your spawn prompt into the `export` below —
+the guard on the next line refuses to run without it.
 
 ```bash
 export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
@@ -84,16 +82,12 @@ marker, and atomically hands that dispatch to you alone. `$SCOPE_ROOT` below is 
 `root` it printed. **The path is ABSOLUTE on purpose** — your cwd as a spawned agent
 is not guaranteed to be the project root.
 
-**Exit 2 (nothing claimable), 3 (no memory-maintenance state at all — `$STATE_DIR`
-is wrong), 4 (`$STATE_DIR` empty), 5 (dispatch was recorded for a different state
-dir — claim refused), an unreadable file, or a chore name other than `split`: STOP and report
-that** — do not pick a scope yourself, do not re-derive what is due (the stamp
-already advanced when the marker was emitted), and **do not read the legacy
-`memory-maint-pending.json` slot**: it is still on disk, so ceasing to point at it
-is not the same as forbidding it. A USER-named scope is the one exception (a human
-naming a scope IS the assignment). Why guessing here is
-dangerous, not just untidy:
-[split-plan-details.md#why-never-guess-the-scope](references/split-plan-details.md#why-never-guess-the-scope).
+**Any non-zero exit, an unreadable file, or a chore name other than `split`: STOP and
+report that** — do not pick a scope yourself, do not re-derive what is due, and **do
+not read the legacy `memory-maint-pending.json` slot**. A USER-named scope is the one
+exception (a human naming a scope IS the assignment). Exit-code meanings and why
+guessing here is dangerous, not just untidy:
+[split-plan-details § claim exit codes](references/split-plan-details.md#claim-exit-codes).
 
 ## The algorithm
 
@@ -167,9 +161,7 @@ rewording. (d) If a sub-page is still over cap after this run, the next heartbea
 splits it — convergence requires only real progress this level.
 
 **(e) HEADROOM — never emit a sub-page within ~10% of the cap** (keep each under
-~90% of `split_max_bytes`). A nearly-full sibling is re-split by the next atom, and
-each split voids the conflict refusals keyed to the old page names — measured at
-221,612 tokens for zero mutations (janitor#241). Rationale in the references file.
+~90% of `split_max_bytes`) — why: [split-plan-details § size rule (e)](references/split-plan-details.md#size-rule-e--headroom-and-why-it-is-a-rule-rather-than-a-preference).
 
 ### 4. Redirect inbound [[links]] (the connectedness gap — mandatory)
 
@@ -187,10 +179,8 @@ sub-topic. The overview KEEPS the source slug (it is NOT retired), so a backlink
 as a whole stays correct unchanged — redirect only the ones pointing at moved detail.
 
 > A split txn has exactly ONE source (`begin` takes only `$REL`); a backlink holder is
-> redirected as an extra STAGED WRITE at its own rel-path in step 5, never a source.
-> Why `len(sources) == 1` and why redirecting
-> still matters even though the overview keeps the source slug (retiring
-> nothing): [split-plan-details.md#backlink-redirect-mechanics](references/split-plan-details.md#backlink-redirect-mechanics).
+> redirected as an extra STAGED WRITE at its own rel-path in step 5, never a source. Why:
+> [split-plan-details § backlink-redirect mechanics](references/split-plan-details.md#backlink-redirect-mechanics).
 
 ### 5. Execute THROUGH the transaction core (begin → edit staging → commit)
 

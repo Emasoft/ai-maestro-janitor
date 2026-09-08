@@ -43,11 +43,9 @@ full additive-vs-editorial distinction.
 1. **Editor enabled.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward any interrupted txn). If the editor is kill-switched or
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
-2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
-
-   Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
-   `export` below before running the claim — the guard on the next line refuses to run
-   without it.
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
+   `STATE_DIR=<path>` value from your spawn prompt into the `export` below — the
+   guard on the next line refuses to run without it.
 
    ```bash
    export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
@@ -55,25 +53,20 @@ full additive-vs-editorial distinction.
    uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore repair --state-dir "$STATE_DIR"
    ```
 
-   It prints the `(intervention, scope, root)` the scheduler stamped for you
-   (absolute path — your cwd as a spawned agent is not the project root); the
-   scheduler already gated the cadence, so re-checking `memory_settings.is_due`
-   here would abstain on the very scope it scheduled (TRDD-VJ8L465M: scheduler
-   owns cadence, agent owns content). **Exit 2 (nothing claimable), 3 (no
-   memory-maintenance state at all — `$STATE_DIR` is wrong), 4 (`$STATE_DIR`
-   empty), 5 (dispatch was recorded for a different state dir — claim
-   refused), an unreadable result, or a chore
-   name other than `repair`: STOP and report that** — never pick a scope
-   yourself, never re-derive what is due, and **never read the legacy
-   `memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
+   Prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
+   path — your cwd as a spawned agent is not the project root); never re-check
+   `is_due` (scheduler owns cadence, agent owns content — TRDD-VJ8L465M). **Any
+   non-zero exit, an unreadable result, or a chore name other than `repair`: STOP
+   and report that** — never pick a scope yourself, never read the legacy
+   `memory-maint-pending.json` slot. A USER-named scope is the one exception (a
    human naming a scope IS the assignment). Process **one scope per pass** (PROJECT
    only if `edit_project_scope` is True — a PROJECT repair is staged-not-pushed,
-   rides the next `publish.py`).
+   rides the next `publish.py`). Exit-code meanings:
+   [repair-background § claim exit codes](references/repair-background.md#claim-exit-codes).
 3. **Candidate set — run the SCHEDULER's own predicate, not `memgrep lint`.**
-   `memgrep lint` and the scheduler's precheck used to disagree (a page the
-   scheduler flagged could return zero lint findings), so lint-driven discovery
-   found nothing to work and the chore re-dispatched forever (issue #227). Get the
-   real list from the same code the scheduler gates on:
+   `memgrep lint` and the scheduler's precheck used to disagree (issue #227), so
+   lint-driven discovery found nothing to work and the chore re-dispatched forever.
+   Get the real list from the same code the scheduler gates on:
 
    ```bash
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
@@ -98,11 +91,9 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   `ocd`/`lmd`, `metadata.{node_type: memory, type, tier}`.
 - **`publish-globally` — DO NOT ADD OR FLIP IT BY HAND. Not a repair defect; not yours.**
   The write path owns it: every write verb funnels through `atomic_write_page`, which
-  normalizes before AND after each write, so any page you touch comes back correct. Never
-  key it on `metadata.type` (that is the CONTENT class; memgrep decides from the PATH), and
-  never guess the value from page text alone (an existing symlink changes the right answer).
-  A VALUE you believe is editorially wrong is a real finding — record it as a refusal.
-  Full reasoning + the measurements: [repair-background](references/repair-background.md).
+  normalizes it on every write, so any page you touch comes back correct. A VALUE you
+  believe is editorially wrong is a real finding — record it as a refusal. Full
+  reasoning + measurements: [repair-background](references/repair-background.md).
 - **Missing `ocd`/`lmd`** → `lmd` = today (`date +%F`); `ocd` = the page's earliest
   known date (an existing `lmd`, else today). Never lower an existing `ocd`.
 - **Nested `metadata.ocd` / `metadata.lmd`** → MOVE them to the TOP level (the
@@ -125,33 +116,22 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **A page's OWN one-sided link** → only the reciprocal that lives on THIS page is
   in scope (the librarian backfills reciprocals on OTHER pages; repair is
   single-page).
-- **Superseded atom above / without the `## Superseded` delimiter** (TRDD-QKWU26ZG —
-  the readability layer of the status-keyed default-exclude; memgrep lint WARNs
-  `superseded-atom-no-delimiter-heading` and `superseded-atom-above-delimiter` name
-  these two shapes): when a page carries `status:superseded` atom markers, ensure a
-  `## Superseded` section exists (exactly that spelling — memgrep's
-  `superseded_heading_line` is the SSOT), placed after the live atoms and BEFORE
-  `## Notes and lessons learned`, and MOVE each superseded atom's whole block
-  (marker line + body lines, up to the next marker/heading) below it **VERBATIM** —
-  byte-identical lines, order among the moved atoms preserved. Lessons stay pooled
-  in the Notes section (a within-page move keeps every `[^N]` ref resolving).
-  Correctness does not depend on position (the exclude keys on the `status:` prop);
-  this move is purely so humans read current facts first. Never change the atom's
-  props while moving it; never move a `status:valid` atom.
-- **Atom `desc:` incomplete** (TRDD-3SOO1RWE — `verify_repair` refuses a repair that
-  leaves one): every `^id [...]` atom marker must carry a `desc:` that is PRESENT,
-  ≤200 chars, and either QUOTED (`desc:"…"` — the write verbs emit `desc: "…"`; the
-  parser trims after the colon, so the space is immaterial) or an unquoted clean
-  legacy slug (`[a-z0-9_]+` only — exactly memgrep's `atom-unquoted-desc` bar; unquoted
+- **Superseded atom above / without the `## Superseded` delimiter** (`memgrep lint`
+  WARNs `superseded-atom-no-delimiter-heading` / `superseded-atom-above-delimiter`):
+  ensure a `## Superseded` section exists (exactly that spelling), placed after the
+  live atoms and BEFORE `## Notes and lessons learned`, and MOVE each
+  `status:superseded` atom's whole block below it **VERBATIM** — byte-identical,
+  order preserved. Never change the atom's props while moving it; never move a
+  `status:valid` atom. Full rationale: [repair-background § superseded atoms](references/repair-background.md#superseded-atom-delimiter-mechanics).
+- **Atom `desc:` incomplete** (`verify_repair` refuses a repair that leaves one):
+  every `^id [...]` atom marker must carry a `desc:` that is PRESENT, ≤200 chars,
+  and either QUOTED or an unquoted clean legacy slug (`[a-z0-9_]+` only — unquoted
   PROSE is the defect). **Backfill by SUMMARIZING the atom's own body** — a true
-  one-line summary of what the atom asserts, never facts the body doesn't contain
-  (rule 5: infer, never invent). Quote unquoted-prose descs verbatim rather than
-  rewording them; trim an over-cap desc by tightening, never by dropping a fact the
-  body lacks elsewhere. **A clause you cut from `desc:` leaves the RECALL SURFACE** (recall
-  ranks on desc + keywords, never the body), so before committing a trim check that every
-  cut symptom/cause/name is already in that atom's `keywords:` — and add it there if not
-  (review of 747b8bef, 2026-09-06: 16 trims, one dropped the `fact` subcommand from a
-  desc with no keyword carrying it).
+  one-line summary, never facts the body doesn't contain (rule 5: infer, never
+  invent). **A clause you cut from `desc:` leaves the RECALL SURFACE** (recall
+  ranks on desc + keywords, never the body), so before committing a trim check
+  every cut symptom/cause/name is already in that atom's `keywords:` — and add it
+  there if not. Full grammar + a real incident: [repair-background § desc](references/repair-background.md#desc-trim-keyword-incident-747b8bef).
 
 **WRITE DOWN EVERY defect you judge unfixable.** A page can carry a defect this pass cannot
 make STICK — e.g. a frontmatter shape an external writer keeps re-imposing. That page
@@ -239,15 +219,12 @@ scopes. PROJECT-scope editing is opt-in, never pushed standalone.
 ## Resources
 
 - [wikimem-model](../janitor-memory-write/references/wikimem-model.md) — the shared
-  data model (tiers, expand/reduce, the link law, page anatomy) every required
-  field and the tier-shape rule come from. Its table of contents:
-  - A wiki, not a pile — and collaborative like Wikipedia
-  - The editorial decision flow (run this on any change worth remembering)
-  - EXPAND and REDUCE — radiating suns vs receiving terminals
-  - The three tiers (a page's role in the pyramid)
-  - The edge model — EVERY link is bidirectional (the link law)
-  - Page anatomy
-  - Atoms — first-class body elements (block-properties)
+  data model every required field and the tier-shape rule come from: the wiki
+  ethos, the editorial decision flow, EXPAND/REDUCE, the three tiers, the
+  bidirectional link law, page anatomy, and atoms.
+- [repair-background](references/repair-background.md) — why REPAIR exists,
+  claim exit codes, the `publish-globally` non-defect reasoning, the
+  superseded-atom delimiter mechanics, and the `desc:` grammar + incident.
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides
   (`begin`/`commit --op repair`/`abort`/`resume`); `verify_repair` is its gate.
 - `scripts/lib/memory_settings.py` — cadence (`is_due`/`mark_ran`,

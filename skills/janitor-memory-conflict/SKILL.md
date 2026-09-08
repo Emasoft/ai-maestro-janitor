@@ -67,11 +67,9 @@ and the agent prompts live in the references (Resources).
 1. **Editor enabled.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward an interrupted txn). If kill-switched /
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — stop.
-2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
-
-   Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
-   `export` below before running the claim — the guard on the next line refuses to run
-   without it.
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
+   `STATE_DIR=<path>` value from your spawn prompt into the `export` below — the
+   guard on the next line refuses to run without it.
 
    ```bash
    export STATE_DIR=""   # paste the path from the STATE_DIR=<path> line of your spawn prompt between the quotes
@@ -79,19 +77,15 @@ and the agent prompts live in the references (Resources).
    uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore conflict --state-dir "$STATE_DIR"
    ```
 
-   It prints the `(intervention, scope, root)` the scheduler stamped for you
-   (absolute path — your cwd as a spawned agent is not the project root); the
-   scheduler already gated the cadence, so re-checking `memory_settings.is_due`
-   here would abstain on the very scope it scheduled (TRDD-VJ8L465M: scheduler
-   owns cadence, agent owns content). **Exit 2 (nothing claimable), 3 (no
-   memory-maintenance state at all — `$STATE_DIR` is wrong), 4 (`$STATE_DIR`
-   empty), 5 (dispatch was recorded for a different state dir — claim
-   refused), an unreadable result, or a chore
-   name other than `conflict`: STOP and report that** — never pick a scope
-   yourself, never re-derive what is due, and **never read the legacy
-   `memory-maint-pending.json` slot**. A USER-named scope is the one exception (a
-   human naming a scope IS the assignment). Process **one scope per pass**;
-   nothing due → stop.
+   Prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
+   path — your cwd as a spawned agent is not the project root); never re-check
+   `is_due` (scheduler owns cadence, agent owns content — TRDD-VJ8L465M). **Any
+   non-zero exit, an unreadable result, or a chore name other than `conflict`: STOP
+   and report that** — never pick a scope yourself, never read the legacy
+   `memory-maint-pending.json` slot. A USER-named scope is the one exception (a
+   human naming a scope IS the assignment). Process **one scope per pass**; nothing
+   due → stop. Exit-code meanings:
+   [conflict-protocol § claim exit codes](references/conflict-protocol.md#claim-exit-codes).
 3. **Candidate set.** From the chosen scope's `memory-reorg-proposed.md`, take its
    `### Conflict candidates` (`- topic \`<tag>\`: <a> vs <b>`); bound to the **top-K
    oldest/most-conflicted** (K≈5). Empty/absent → stop.
@@ -131,13 +125,9 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
 
 The refusal re-arms by itself when either page changes, and after 7 days — so it is a
 verdict with an expiry, not a silence. `--reason` is the deliverable: the next reader
-has to be able to re-check it.
-
-**A ledger entry is the mechanism; a note on the page is the artifact.** When the
-confusion is one a human will hit too — two pages that *look* mergeable and are not —
-also write the verdict into the pages as a cross-linked See-also (the UPDATE this stage
-already allows). Then the answer lives at the point of confusion instead of in
-`.janitor/state/`.
+has to be able to re-check it. When the confusion is one a human will hit too, also
+write the verdict into the pages as a cross-linked See-also — why:
+[conflict-protocol § Stage 1](references/conflict-protocol.md#stage-1--classify-the-conflict).
 
 ### Stage 2 — source the WHY + resolve the repo (one agent, READ-ONLY)
 For the wrong/obsolete page, resolve provenance via the FIXED chain (never inferred):
@@ -166,10 +156,9 @@ atomically. The CLI exposes `--op merge|split|repair|atomize`, but repair/atomiz
 are in-place single-page ops — structurally wrong for a pair-retirement — so
 **BOTH conflict verdicts ride `--op merge`** — expressed as a REAL merge of the pair: one page is
 RETIRED (a delete) and its fact + EVERY `[^N]` lesson is FOLDED into the survivor (a
-write), so even a DELETE loses no knowledge. (A same-slug in-place edit is rejected:
-`commit` diffs staging vs the recorded sources, so a `rm`-then-rewrite at one path is
-a write with **zero deletes** and fails `verify_merge`'s `ocd_lmd_ok_merge` — a
-verdict ALWAYS retires one page of the pair.)
+write), so even a DELETE loses no knowledge. A same-slug in-place edit is rejected by
+`verify_merge` — why:
+[conflict-protocol § same-slug](references/conflict-protocol.md#why-a-same-slug-in-place-edit-does-not-work).
 
 - **DEMOTE** (the DEFAULT, non-destructive) — keep the page holding the CURRENT truth
   as survivor; retire the obsolete page; fold its still-true-of-the-past fact in as a
@@ -185,10 +174,8 @@ verdict ALWAYS retires one page of the pair.)
 On verify FAIL the txn self-aborts (live tree intact); read the reason, fix the
 staged copy, re-commit — **bounded retry ≤3**, then `abort` + surface a finding. After
 a clean pass do NOT call `memory_settings.mark_ran` — the scheduler already stamped the cadence
-at emit (the double-gate TRDD-VJ8L465M removed; scheduler owns cadence, agent owns content). The exact
-`begin → edit-staged → commit --op merge` recipes (both verdicts, with the why-a-
-same-slug-edit-fails derivation) are in
-[conflict-protocol](references/conflict-protocol.md).
+at emit (scheduler owns cadence, agent owns content). Full `begin → edit-staged →
+commit --op merge` recipes for both verdicts: [conflict-protocol](references/conflict-protocol.md).
 
 ## EXIT / SUCCESS / idempotency contract
 
@@ -229,18 +216,12 @@ the PROJECT-scope opt-in:
 
 ## Resources
 
-- [conflict-protocol](references/conflict-protocol.md)
-  - Preconditions — verify BEFORE doing any work
-  - The per-pair pipeline (ULTRACODE Workflow)
-  - The four per-pair stages — classify, source the WHY, the gate, execute
-  - THE LESSON FORM — mandatory for every `[^N]` this pass AUTHORS
-  - Why a same-slug in-place edit does NOT work
-  - Security and scope
-- [ultracode-workflow](references/ultracode-workflow.md)
-  - The pool + backoff (copy this; tune `CONCURRENCY`)
-  - Per-pair pipeline + the vote barrier
-  - The agent prompts (verbatim templates)
-  - Invariants this Workflow enforces (cross-check against the SKILL.md iron rules)
+- [conflict-protocol](references/conflict-protocol.md) — preconditions, the per-pair
+  pipeline, the four stages in full, THE LESSON FORM, the same-slug derivation,
+  security and scope.
+- [ultracode-workflow](references/ultracode-workflow.md) — the pool + backoff
+  code, the per-pair pipeline + vote barrier, the verbatim agent prompts, the
+  invariants this Workflow enforces.
 - [janitor-memory-update SKILL](../janitor-memory-update/SKILL.md) — the
   non-destructive correction protocol this pass applies mechanically.
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides.

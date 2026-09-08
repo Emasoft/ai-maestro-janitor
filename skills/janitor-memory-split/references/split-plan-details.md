@@ -54,6 +54,17 @@ sub-page. Then design the outputs:
   fine for THIS run — the next heartbeat splits it further. Convergence only
   requires real progress this level.
 
+## Claim exit codes
+
+`memory_dispatch_claim.py --chore split --state-dir "$STATE_DIR"` reports its
+outcome via exit status: **2** = nothing claimable right now; **3** = no
+memory-maintenance state at all (`$STATE_DIR` is wrong); **4** = `$STATE_DIR` was
+empty; **5** = the dispatch was recorded for a different state dir, so the claim
+was refused. Any of these, an unreadable result, or a printed chore name other than
+`split` means STOP and report — never pick a scope yourself, never re-derive what
+is due (the stamp already advanced when the marker was emitted), and never read the
+legacy `memory-maint-pending.json` slot.
+
 ## Why never guess the scope
 
 Two documented incidents: janitor#242 — a `consolidate` overwrote an in-flight

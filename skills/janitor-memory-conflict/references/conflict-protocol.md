@@ -63,6 +63,16 @@ nothing):
    most-conflicted pairs** (K ≈ 5; the lib default for the pool is ~8 agents). An
    empty/absent section ⇒ nothing to do, stop.
 
+### Claim exit codes
+
+`memory_dispatch_claim.py --chore conflict --state-dir "$STATE_DIR"` reports its
+outcome via exit status: **2** = nothing claimable right now; **3** = no
+memory-maintenance state at all (`$STATE_DIR` is wrong); **4** = `$STATE_DIR` was
+empty; **5** = the dispatch was recorded for a different state dir, so the claim
+was refused. Any of these, an unreadable result, or a printed chore name other than
+`conflict` means STOP and report — never pick a scope yourself, never re-derive
+what is due, and never read the legacy `memory-maint-pending.json` slot.
+
 ## The per-pair pipeline (ULTRACODE Workflow)
 
 This is a `Workflow` script. The shape (full code + prompts in the sibling
@@ -91,7 +101,11 @@ This is a `Workflow` script. The shape (full code + prompts in the sibling
 (one agent) Read both pages. Decide which of three the pair is:
 
 - **(C) Compatible** — not actually a conflict (the librarian over-surfaced). →
-  `verdict: skip`, optionally note a See-also to link them (a separate UPDATE).
+  `verdict: skip`, optionally note a See-also to link them (a separate UPDATE). **A
+  ledger entry is the mechanism; a note on the page is the artifact:** when the
+  confusion is one a human will hit too — two pages that *look* mergeable and are
+  not — also write the verdict into the pages as a cross-linked See-also. Then the
+  answer lives at the point of confusion instead of in `.janitor/state/`.
 - **(O) Obsolete-but-true** — both were true; one describes a now-superseded state
   (older code version / reversed decision). → candidate **DEMOTE**.
 - **(F) Contradictory** — they cannot both be true now; exactly one is correct. →
