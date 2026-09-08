@@ -49,7 +49,8 @@ conflate them: the full-suite run above (052127) named all seven (guard `test_ap
 stamps read); the three-file 39-min run's capture
 (`reports/board-drain/20260906_060841+0200-PJD6XV66-gate.txt`, re-read 2026-09-08) recorded
 only 2 of its 7 FAILED names — `test_branch_protection.py::test_inactive_ruleset_still_nags`
-and `::test_dedupe_then_rearm`, both `BRPROT-001` FIRE assertions — so 5 of THAT run are
+and `::test_dedupe_then_rearm`, both AssertionErrors on the FIRE path (which assert is
+inferred; the capture truncates the message) — so 5 of THAT run are
 unnamed, and the 20e63eb8 commit body's "the 7 loaded-gate failures in
 test_branch_protection*.py asserted only on stdout" over-generalises from those 2. A FIRE
 assertion on stdout is what a soft-failed `gh` read turns silent, and those assertion
