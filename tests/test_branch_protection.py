@@ -196,7 +196,7 @@ def test_dedupe_then_rearm(tmp_path: Path) -> None:
     second voice saying the same thing). When the repo gets protected the proposal is WITHDRAWN — so
     if protection is later removed, the finding is genuinely new again and says so.
     """
-    project_dir, _binp = repo = _make_repo(tmp_path)
+    project_dir, _ = repo = _make_repo(tmp_path)
     proposals = project_dir / "design" / "proposals"
     protected = {"GH_RULESETS_BODY": json.dumps([{"id": 1, "target": "branch", "enforcement": "active"}])}
 
