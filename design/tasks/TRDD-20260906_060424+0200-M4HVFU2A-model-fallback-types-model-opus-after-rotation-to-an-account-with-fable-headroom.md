@@ -55,7 +55,8 @@ token is about to expire qualifies here while rotate_to's auto-select skips it
 Rotate-first is ADVICE only: the detector types the skill name and never rotates. While the
 server's rotator fix (below) is on HOLD, or no alternate is server-safe, an unattended session
 therefore sits at a true Fable wall until a human runs the verb, where 3.4.14 at least switched
-models; once the server rotates at its 97 % trip the wall is never reached. The advisory line
+models; once the server's fix is live the wall is not reached while a server-safe alternate
+(Fable under its SAFE_SCOPED 95) exists. The advisory line
 repeats every fire until someone rotates (no backoff on the stand-down path) — the same loop as
 3.4.14's, as text instead of a keystroke. A SENT-but-unconfirmed keystroke writes `model-fallback-declined.ts` in the
 PROJECT state dir (same scope as the switch cooldown — each armed project backs off on its own
@@ -90,8 +91,9 @@ Different organizations never share caches, even if they use identical prompts")
 rotate-first buys Fable minutes but NOT the cache the ruling was made to protect; the burst
 itself is NOT measured by the janitor (its rotation log records swaps, not cache-hit rates).
 Verified for the fork's other questions: `is_live` and rotate_to's `live_email` come from the
-same rotator state; `_fable_used` and the predicate read the same `*/Fable` windows; nothing
-in dispatch.py or the daemon calls rotate_to.py. NEXT ACTION: `publish.py --patch`,
+same rotator state; `_fable_used` and the predicate read the same `*/Fable` windows; no heartbeat or daemon
+path calls rotate_to.py (grep over scripts/ + hooks/: only the detector's advisory text and a
+token_burn docstring name it). NEXT ACTION: `publish.py --patch`,
 `claude plugin update`, reply to the peer with the shipped version, then the peer confirms
 the retyping stopped.
 
