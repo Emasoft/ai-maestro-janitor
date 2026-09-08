@@ -115,9 +115,8 @@ All at `column: testing` on 2026-09-08 unless noted:
       reach and is not claimed here.
 - [ ] The restore prompt names each skill that was active in the previous session (a skill is not
       a process; naming it in the prompt is the only re-activation the janitor can do). "Active"
-      needs a recording mechanism the janitor does not have today; the card leaves it open and the
-      implementer names it in the STATE block. A test asserts on the prompt text for at least two
-      skills.
+      needs a recording mechanism this card does not identify; the implementer names it in the
+      STATE block. A test asserts on the prompt text for at least two skills.
 
 ## Approval log
 
