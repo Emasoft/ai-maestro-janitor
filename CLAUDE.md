@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=02ab66eb3113 generated=2026-09-05T16:07:52+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=599832683a33 generated=2026-09-08T15:08:00+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -163,8 +163,12 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
   - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
 
-**janitor-detector-and-hook-roster** — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
-- [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — full list of the janitor detectors by group (72 registered as of 2026-08-20; 73 as of 2026-08-16)
+**janitor-detector-and-hook-roster** — the janitor detector and hook roster split into parts
+- [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — the janitor detector and hook roster split into parts
+  - [janitor-detector-and-hook-roster-findings](.claude/project/memory/janitor-detector-and-hook-roster-findings.md) — how good are the scan_text rules
+
+**janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (73 registered)
+- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (73 registered)
 
 **janitor-publish-pipeline** — publish blocked
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
@@ -177,6 +181,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 **memory-system** — how does the wiki-memory system work
 - [memory-system](.claude/project/memory/memory-system.md) — how does the wiki-memory system work
   - [memory-system-scopes-and-format](.claude/project/memory/memory-system-scopes-and-format.md) — how does the wiki-memory 3-scope model work
+  - [memory-system-tooling-and-protocol](.claude/project/memory/memory-system-tooling-and-protocol.md) — how does the memgrep engine work
   - [memory-system-editor-gotchas](.claude/project/memory/memory-system-editor-gotchas.md) — add-atom inserts a new atom in the wrong place
   - [memory-system-superseded-history](.claude/project/memory/memory-system-superseded-history.md) — why does a superseded atom about publish-globally still exist
   - [claude-md-canonical-form](.claude/project/memory/claude-md-canonical-form.md) — what is allowed to live in CLAUDE.md
@@ -185,9 +190,6 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-is-not-a-role-agent](.claude/project/memory/janitor-is-not-a-role-agent.md) — why are ai-maestro role plugins erroring in this repo
   - [wikimem-retrieval-engine](.claude/project/memory/wikimem-retrieval-engine.md) — recall returned the wrong page
   - [reference_cpv_dotclaude_gitignore_fp](.claude/project/memory/reference_cpv_dotclaude_gitignore_fp.md) — CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/
-
-**memory-system-tooling-and-protocol** — how does the memgrep engine work
-- [memory-system-tooling-and-protocol](.claude/project/memory/memory-system-tooling-and-protocol.md) — how does the memgrep engine work
 
 **oauth-rotation-renew-reauth** — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
 - [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
