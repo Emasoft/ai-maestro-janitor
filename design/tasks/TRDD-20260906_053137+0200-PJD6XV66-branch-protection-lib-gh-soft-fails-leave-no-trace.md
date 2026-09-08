@@ -44,13 +44,16 @@ one carries `no_timeout_scale`). Verified first-hand: ruff, mypy, pyright clean;
 branch-protection test files pass isolated — 83 in 21.7 s at loadavg 58. The 2026-09-06 gate
 run of the same three files reported 7 failed / 76 passed in 2367 s (39 min). What that pair
 of runs PROVES: the failures are not a deterministic regression. What it does NOT prove: that
-they were the load class 7NSRD8OV tracks — that is a proxy read, and the gate capture
-(`reports/board-drain/20260906_052127+0200-full-suite-gate.txt`) recorded only 2 of the 7
-FAILED names, so 5 are unnamed. Both named ones assert a FIRE on stdout, which a soft-failed
-`gh` read turns silent, and their assertion messages were empty. Landed 20e63eb8 + 64255016:
-every FIRE assertion in `test_branch_protection.py` / `test_branch_protection_guard.py`
-carries `r.stderr`, so the next loaded failure prints the `⟦branch_protection_lib⟧` trace
-and names its own cause. (20e63eb8 also repointed `test_detector_roster_completeness.py` at
+they were the load class 7NSRD8OV tracks — that is a proxy read. Two different "7"s, do not
+conflate them: the full-suite run above (052127) named all seven (guard `test_apply_*`,
+stamps read); the three-file 39-min run's capture recorded only 2 of its 7 FAILED names
+(both `BRPROT-001` FIRE assertions in `test_branch_protection.py`), so 5 of THAT run are
+unnamed. A FIRE assertion on stdout is what a soft-failed `gh` read turns silent, and those
+assertion messages were empty. Landed 20e63eb8 + 64255016: every FIRE assertion in
+`test_branch_protection.py` / `test_branch_protection_guard.py` carries `r.stderr`, so a
+soft-failed `gh` read now names itself in the failure message. Scope: only failures that
+REACH the assertion — a `TimeoutExpired` raised inside `_run`/`_run_apply` (the 7NSRD8OV
+class) never gets there and is not covered. (20e63eb8 also repointed `test_detector_roster_completeness.py` at
 the hub's part links after the 9e115e6e memory split emptied the hub of group bullets and
 blocked the 3.4.15 publish at gate [3/11].) NEXT ACTION: none — waits on the publish gate.
 

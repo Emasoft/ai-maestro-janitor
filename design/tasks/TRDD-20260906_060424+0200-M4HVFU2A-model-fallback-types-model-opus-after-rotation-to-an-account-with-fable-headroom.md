@@ -52,9 +52,12 @@ membership and the detector's stand-down (bars pinned equal by test); the line n
 sibling with its util % and the verb with no argument. Accepted mismatch: a sibling whose
 token is about to expire qualifies here while rotate_to's auto-select skips it
 (`_blob_locally_expired`) → the verb answers NO_TARGET and the detector keeps standing down.
-Rotate-first is ADVICE only: the detector types the skill name and never rotates, so with the
-rotator chore server-owned an unattended session now sits at a true Fable wall until a human
-runs the verb, where 3.4.14 at least switched models. A SENT-but-unconfirmed keystroke writes `model-fallback-declined.ts` in the
+Rotate-first is ADVICE only: the detector types the skill name and never rotates. While the
+server's rotator fix (below) is on HOLD, or no alternate is server-safe, an unattended session
+therefore sits at a true Fable wall until a human runs the verb, where 3.4.14 at least switched
+models; once the server rotates at its 97 % trip the wall is never reached. The advisory line
+repeats every fire until someone rotates (no backoff on the stand-down path) — the same loop as
+3.4.14's, as text instead of a keystroke. A SENT-but-unconfirmed keystroke writes `model-fallback-declined.ts` in the
 PROJECT state dir (same scope as the switch cooldown — each armed project backs off on its own
 first cancel, so up to N first keystrokes across N projects before every one is quiet) and the
 detector backs off 3600 s. Comment fixed.
@@ -77,12 +80,18 @@ were the cause: `tick.ts SAFE_SCOPED = 90` vetoes every alternate at/above 90 wh
 rotate-away trip is 97, so in the 90–100 band no alternate is ever "safe" and the fleet gets
 the model switch. Its fix (not live, on HOLD): SAFE_SCOPED 95, SCOPED_SWITCH_AT_PCT 97.
 FOLLOW-UP, not done here: the janitor's `rotator.SCOPED_SWITCH_AT` (rotate_to's has-Fable-headroom
-bar AND, since 2d8cf86e, the detector's rotate-first bar) is 90 — a sibling at 92 % is a
-server-safe alternate but rotate_to types `/model opus` first for it; aligning 90→95 is an
-owner call (S2RZHXU7 settled 90). Peer's open premise for the owner: a rotation onto another
-subscription is a different org, and prompt caches are org-isolated, so rotate-first buys
-Fable minutes but NOT the cache the ruling was made to protect — NOT measured by the janitor
-(its rotation log records swaps, not cache-hit rates). NEXT ACTION: `publish.py --patch`,
+bar AND, since 2d8cf86e, the detector's rotate-first bar) is 90 — with the live window at
+100 % and the only sibling at 92 %, the server would rotate onto it but the DETECTOR sees no
+headroom sibling and types `/model opus`, and rotate_to (no other sibling under 90) types it
+first too; aligning 90→95 is an owner call (S2RZHXU7 settled 90). Peer's open premise for the
+owner: a rotation onto another subscription is a different org, and caches are org-isolated —
+VERIFIED 2026-09-08 in the prompt-caching doc ("Caches are isolated between organizations.
+Different organizations never share caches, even if they use identical prompts") — so
+rotate-first buys Fable minutes but NOT the cache the ruling was made to protect; the burst
+itself is NOT measured by the janitor (its rotation log records swaps, not cache-hit rates).
+Verified for the fork's other questions: `is_live` and rotate_to's `live_email` come from the
+same rotator state; `_fable_used` and the predicate read the same `*/Fable` windows; nothing
+in dispatch.py or the daemon calls rotate_to.py. NEXT ACTION: `publish.py --patch`,
 `claude plugin update`, reply to the peer with the shipped version, then the peer confirms
 the retyping stopped.
 
