@@ -3,7 +3,7 @@ trdd-id: 7MGJYLY5
 title: Janitor compaction prefers clear plus llm-ext at turn boundaries, preserves subagents, restores skills not files
 column: todo
 created: 2026-09-08T20:03:42+0200
-updated: 2026-09-08T20:03:42+0200
+updated: 2026-09-08T20:07:23+0200
 current-owner: janitor-session
 task-type: feature
 min-approval-requirement: none
@@ -51,16 +51,21 @@ relevant-rules: []
 
 ## What the ruling requires (derived; the verbatim text above wins on any disagreement)
 
-1. **Preferred path is `/clear` + llm-ext, driven by the janitor at a TURN BOUNDARY**, before the
-   harness autocompact would fire. The janitor's own trigger MUST NOT depend on the value of
-   `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (it changes; today 500k, was 400k). Reading it as a ceiling
-   is allowed; keying behaviour on it is not.
-2. **When autocompact happens anyway, the janitor does NOT summarize and does NOT write a
-   handoff for it** — the harness already produces the summary. The janitor's only job on that
-   path is a continuity nudge: resume the previous tasks.
+1. **Preferred path is `/clear` + llm-ext, driven by the janitor at a TURN BOUNDARY, earlier than
+   the harness autocompact** (owner: autocompact "happens too late, and without respecting turns
+   boundaries"), and preferred regardless of the configured threshold (owner: "no matter what
+   setting i use (it can change)"; today 500k, was 400k). The relaying session's derivation, NOT
+   the owner's words: that the trigger must not key on `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. A
+   trigger that reads the window and fires below it also satisfies the owner's sentence; the
+   implementer decides that, the card does not.
+2. **When autocompact happens anyway, the janitor writes NO summary and NO prose handoff for
+   it** — the harness already produces the summary. The janitor's only job on that path is a
+   continuity nudge: resume the previous tasks. A machine-readable record of what the nudge must
+   name (live background subagents, active skills, opened-file paths) is NOT a handoff and stays
+   allowed; requirement 3 depends on it.
 3. **Background subagents survive the clear.** The clear path must not kill them, and the resume
-   must re-attach (the resume listing already names them: "resume background agent via
-   SendMessage: <id> — <type>").
+   must re-attach. The relaying session reports its resume listing already names them ("resume
+   background agent via SendMessage: <id> — <type>"); unverified in this repo.
 4. **The post-clear restore re-activates only the ACTIVE SKILLS of the previous session** (for
    example `/ponytail`, `/colony`). It MUST NOT re-read the files that were open before. Those
    paths are listed as "mentioned, not read".
@@ -69,9 +74,10 @@ relevant-rules: []
 
 On the relaying session, before the ruling, the pre-fill that reached the 400k threshold was NOT
 the summary or the handoff (last five summaries 22–35 KB, precompact-handoff.md 6 KB). It was
-the always-injected rules prefix (~583 KB deduped) against a ~500k autocompact window. So the
-janitor's own re-read of previously-opened files on resume is the lever the owner is pointing at
-in requirement 4.
+the always-injected rules prefix (~583 KB deduped) against a ~500k autocompact window. The
+relaying session concluded from this that the re-read of previously-opened files on resume is the
+lever behind requirement 4. If its numbers hold, that re-read is second-order next to the fixed
+prefix; the owner's sentence says what to stop doing, not why.
 
 ## Cards this ruling constrains (? INFERRED from titles and columns — implementer verifies each)
 
@@ -94,16 +100,21 @@ All at `column: testing` on 2026-09-08 unless noted:
 
 - [ ] Each card above carries a dated STATE-block line naming its relationship to this ruling
       (conformant / scope changed / superseded in part), written after reading its body.
-- [ ] The janitor's clear trigger has no code path that keys on `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
-      (grep proves it; a read-as-ceiling is allowed and commented as such).
-- [ ] A PreCompact / post-autocompact path writes NO handoff and NO summary; it emits only the
-      resume nudge. A test asserts the absence.
+- [ ] The janitor's clear fires at a turn boundary below the harness autocompact point under ANY
+      configured threshold. A test sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to two different values
+      and asserts the janitor's clear fires below each.
+- [ ] The PreCompact / post-autocompact path writes NO summary and NO prose handoff; it emits the
+      resume nudge plus, at most, the machine-readable record requirement 2 carves out. A test
+      asserts the absence of the summary and prose-handoff files.
 - [ ] A clear with a live background subagent leaves that subagent alive and the resume listing
       names it. A test asserts it against a real subagent, not a mock.
-- [ ] The post-clear restore lists previously-open files as paths only and re-reads none of them.
-      A test asserts no Read of a listed path happens during restore.
-- [ ] Active skills of the previous session are re-activated on restore. A test asserts it for at
-      least two skills.
+- [ ] The post-clear restore hook lists previously-open files as paths only and opens none of
+      them, and the restore prompt tells the model "mentioned, not read". A test asserts on the
+      hook's file opens and on the prompt text; what the model then does is out of a hook test's
+      reach and is not claimed here.
+- [ ] The restore prompt names each skill that was active in the previous session (a skill is not
+      a process; naming it in the prompt is the only re-activation the janitor can do). A test
+      asserts on the prompt text for at least two skills.
 
 ## Approval log
 
