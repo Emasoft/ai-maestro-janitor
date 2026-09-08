@@ -3,8 +3,8 @@ trdd-id: PJD6XV66
 title: branch_protection_lib's direct gh calls fail soft with no trace, so a loaded suite cannot tell a timeout from a logic bug
 column: testing
 created: 2026-09-06T05:31:37+0200
-updated: 2026-09-08T15:20:00+0200
-implementation-commits: [eb4bce28]
+updated: 2026-09-08T16:05:00+0200
+implementation-commits: [eb4bce28, 20e63eb8, 64255016]
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -42,10 +42,17 @@ on every soft-fail branch (`gh-not-on-path` / `timeout after Ns` / `oserror:<Typ
 `tests/test_branch_protection_lib_soft_fail_trace.py` (5 real-subprocess tests; the timeout
 one carries `no_timeout_scale`). Verified first-hand: ruff, mypy, pyright clean; the three
 branch-protection test files pass isolated — 83 in 21.7 s at loadavg 58. The 2026-09-06 gate
-run of the same three files reported 7 failed / 76 passed in 2367 s (39 min): that run was the
-load class 7NSRD8OV tracks (the two named failures assert a FIRE on stdout, which a soft-failed
-`gh` read turns silent), and with this trace the next such run will name which read failed.
-NEXT ACTION: none — waits on the full-suite publish gate (shared box).
+run of the same three files reported 7 failed / 76 passed in 2367 s (39 min). What that pair
+of runs PROVES: the failures are not a deterministic regression. What it does NOT prove: that
+they were the load class 7NSRD8OV tracks — that is a proxy read, and the gate capture
+(`reports/board-drain/20260906_052127+0200-full-suite-gate.txt`) recorded only 2 of the 7
+FAILED names, so 5 are unnamed. Both named ones assert a FIRE on stdout, which a soft-failed
+`gh` read turns silent, and their assertion messages were empty. Landed 20e63eb8 + 64255016:
+every FIRE assertion in `test_branch_protection.py` / `test_branch_protection_guard.py`
+carries `r.stderr`, so the next loaded failure prints the `⟦branch_protection_lib⟧` trace
+and names its own cause. (20e63eb8 also repointed `test_detector_roster_completeness.py` at
+the hub's part links after the 9e115e6e memory split emptied the hub of group bullets and
+blocked the 3.4.15 publish at gate [3/11].) NEXT ACTION: none — waits on the publish gate.
 
 ## Symptom
 
