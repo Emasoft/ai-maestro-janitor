@@ -55,6 +55,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -539,20 +540,42 @@ def gh_available() -> bool:
     return shutil.which("gh") is not None
 
 
+def _trace_soft_fail(fn: str, reason: str, argv: list[str]) -> None:
+    """Print one breadcrumb for a `gh`-reader soft-fail. Never raises.
+
+    These three readers fail soft (None/empty on any error) so a loaded suite could not tell a
+    `gh` timeout from a logic bug — the guard just declined with exit 0 and empty stdout
+    (TRDD-7NSRD8OV, 7 such failures measured 2026-09-06). Mirrors `state._log_fail_open`'s
+    stderr-line shape (commit 8bcd2975) for the same class of failure in this sibling module.
+    """
+    try:
+        print(f"⟦branch_protection_lib⟧ {fn} {reason}: {argv[0] if argv else ''}", file=sys.stderr)
+    except Exception:
+        pass
+
+
 def detect_default_branch(slug: str) -> str | None:
     """Ask gh for the repo's default branch. Returns None on failure."""
     if not gh_available():
+        _trace_soft_fail("detect_default_branch", "gh-not-on-path", ["gh"])
         return None
+    argv = ["gh", "api", f"repos/{slug}", "--jq", ".default_branch"]
+    timeout = _t(10)
     try:
-        proc = subprocess.run(
-            ["gh", "api", f"repos/{slug}", "--jq", ".default_branch"],
-            capture_output=True, text=True, timeout=_t(10), check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        _trace_soft_fail("detect_default_branch", f"timeout after {timeout}s", argv)
+        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        _trace_soft_fail("detect_default_branch", f"oserror:{type(exc).__name__}", argv)
         return None
     if proc.returncode != 0:
+        stderr = " ".join((proc.stderr or "").split())[:120]
+        _trace_soft_fail("detect_default_branch", f"rc={proc.returncode} stderr={stderr}", argv)
         return None
     name = (proc.stdout or "").strip()
+    if not name:
+        _trace_soft_fail("detect_default_branch", "empty-stdout", argv)
     return name or None
 
 
@@ -562,34 +585,52 @@ def viewer_is_admin(slug: str) -> bool:
     can't administer, we can't fix.
     """
     if not gh_available():
+        _trace_soft_fail("viewer_is_admin", "gh-not-on-path", ["gh"])
         return False
+    argv = ["gh", "api", f"repos/{slug}", "--jq", ".permissions.admin"]
+    timeout = _t(10)
     try:
-        proc = subprocess.run(
-            ["gh", "api", f"repos/{slug}", "--jq", ".permissions.admin"],
-            capture_output=True, text=True, timeout=_t(10), check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        _trace_soft_fail("viewer_is_admin", f"timeout after {timeout}s", argv)
+        return False
+    except (OSError, subprocess.SubprocessError) as exc:
+        _trace_soft_fail("viewer_is_admin", f"oserror:{type(exc).__name__}", argv)
         return False
     if proc.returncode != 0:
+        stderr = " ".join((proc.stderr or "").split())[:120]
+        _trace_soft_fail("viewer_is_admin", f"rc={proc.returncode} stderr={stderr}", argv)
         return False
-    return (proc.stdout or "").strip().lower() == "true"
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        _trace_soft_fail("viewer_is_admin", "empty-stdout", argv)
+    return stdout.lower() == "true"
 
 
 def list_existing_rulesets(slug: str) -> list[dict] | None:
     """Return the ruleset list for `slug`, or None on failure."""
     if not gh_available():
+        _trace_soft_fail("list_existing_rulesets", "gh-not-on-path", ["gh"])
         return None
+    argv = ["gh", "api", f"repos/{slug}/rulesets"]
+    timeout = _t(10)
     try:
-        proc = subprocess.run(
-            ["gh", "api", f"repos/{slug}/rulesets"],
-            capture_output=True, text=True, timeout=_t(10), check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        _trace_soft_fail("list_existing_rulesets", f"timeout after {timeout}s", argv)
+        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        _trace_soft_fail("list_existing_rulesets", f"oserror:{type(exc).__name__}", argv)
         return None
     if proc.returncode != 0:
+        stderr = " ".join((proc.stderr or "").split())[:120]
+        _trace_soft_fail("list_existing_rulesets", f"rc={proc.returncode} stderr={stderr}", argv)
         return None
+    stdout = proc.stdout or ""
+    if not stdout.strip():
+        _trace_soft_fail("list_existing_rulesets", "empty-stdout", argv)
     try:
-        data = json.loads(proc.stdout or "[]")
+        data = json.loads(stdout or "[]")
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, list) else None
