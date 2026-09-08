@@ -3,7 +3,7 @@ trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
 column: testing
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-03T11:17:55+0200
+updated: 2026-09-08T23:00:40+0200
 review-after: 2026-09-05
 current-owner: claude-ai-maestro-janitor
 task-type: feature
@@ -339,6 +339,11 @@ only with a single-model (non-ensemble) profile.
 `scripts/clear_trigger.py` (the typist + `check_handoff_concise`) ·
 `scripts/lib/cold_cache_compact.py` (the CLEAR section + why size was dropped) ·
 `scripts/dispatch.py::_phase_idle_clear_nudge` (the in-model sibling).
+
+**2026-09-08 — vs owner ruling TRDD-7MGJYLY5:** CONSISTENT WITH R1's preferred path (external
+`/clear`+llm-ext at idle/expiry, no model turn, not threshold-keyed); does NOT itself deliver
+R1's fire-before-autocompact on context fill — this card has no context-fill trigger, and none
+of the six constrained cards does. R2/R3/R4: outside this card's scope (silent, not deficient).
 
 ## WHY
 

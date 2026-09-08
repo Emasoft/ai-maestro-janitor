@@ -3,7 +3,7 @@ trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
 column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-03T11:09:13+0200
+updated: 2026-09-08T23:00:40+0200
 review-after: 2026-09-05
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
@@ -64,6 +64,12 @@ ordering. It cannot happen yet — the lever is ON in `~/.claude/settings.json` 
 launchd-run daemon has no `CLAUDE_PLUGIN_OPTION_*` in its environment (measured 2026-09-02),
 so it evaluates in shadow. Blocked on **TRDD-XCJFCJUX**; the drill is shared with
 TRDD-1QJIZFFW (its STATE carries the runnable NEXT ACTION) and TRDD-PXP08ZQC.
+
+**2026-09-08 — vs owner ruling TRDD-7MGJYLY5:** CONSISTENT WITH R1's preferred path (clear fires
+first — no summary, no network, no model turn before it; trigger-based, not threshold-keyed);
+does NOT itself deliver R1's fire-before-autocompact on context fill (no such trigger here). The
+background summary composed after the clear belongs to the janitor's own clear path, not the
+harness autocompact path R2 forbids. R3/R4: outside this card's scope (silent, not deficient).
 
 ## The incident (USER, 2026-09-01)
 

@@ -3,7 +3,7 @@ trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
 column: testing
 created: 2026-09-04T18:48:19+0200
-updated: 2026-09-05T13:19:00+0200
+updated: 2026-09-08T23:00:40+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -151,6 +151,12 @@ it, because a woken agent with no handoff still does not know what it was doing.
   suppressed at 66% vs manual's 38%; (b) *"all pre-compact entries say `trigger=manual`"* — that
   was a 10-line tail; the real split is **104 auto / 102 manual**. A raw "63 suppressed" tally is
   also uninformative on its own: a suppression on a genuinely attended pane is the gate working.
+
+**2026-09-08 — vs owner ruling TRDD-7MGJYLY5:** CONSISTENT WITH R2 — the remaining scope after the
+split is the deferred continuity push alone. The pre-split acceptance bullet "A session that
+AUTO-compacts has the handoff in its context without any nudge firing" is OES0NN3F's scope and
+conflicts with R2 there; strike or cross-reference it, do not re-verify it here. R1/R3/R4:
+outside this card's scope (silent, not deficient).
 
 ## Adversarial review resolution (2026-09-05) — recheck-guard question
 

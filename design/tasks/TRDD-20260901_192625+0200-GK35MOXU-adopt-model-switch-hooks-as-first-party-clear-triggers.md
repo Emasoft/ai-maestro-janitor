@@ -3,7 +3,7 @@ trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
 column: testing
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-04T01:07:00+0200
+updated: 2026-09-08T23:00:40+0200
 review-after: 2026-09-05
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
@@ -64,7 +64,10 @@ external-refs: [TRDD-2F3I2P18]
 - (superseded 11:20 — the `.cpv-version` bump landed; see the top entry for the live-check
   NEXT ACTION.)
 
-
+**2026-09-08 — vs owner ruling TRDD-7MGJYLY5:** CONSISTENT WITH R1's preferred path (first-party
+PreModelSwitch/PostModelSwitch hooks as an earlier, non-polled trigger for the external clear);
+does NOT itself deliver R1's fire-before-autocompact on context fill (no such trigger here).
+R2/R4: outside this card's scope; R3: one passing mention, not assessed against the ruling.
 
 ## Why (USER directive, 2026-09-01: "you said there is no model change event? wrong")
 
