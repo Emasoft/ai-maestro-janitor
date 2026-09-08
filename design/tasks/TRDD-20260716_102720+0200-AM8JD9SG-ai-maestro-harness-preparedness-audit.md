@@ -37,7 +37,7 @@ relevant-rules: []
 > `failed` or was `cancelled` also releases this card. That is deliberate upstream
 > (`trdd_common.py:338-352`): none of those blockers will ever unblock a dependent by
 > completing, so a human should look either way.
-
+>
 > **⏵ 2026-08-29 — BLOCKED, and the block is honest.** Every remaining finding needs someone
 > other than a janitor session, so the card moved `todo` → `blocked` (`blocked-by: [OZNG3N2D]`)
 > rather than sitting in a column that claims it is workable. Of the ten findings, **F7 closed

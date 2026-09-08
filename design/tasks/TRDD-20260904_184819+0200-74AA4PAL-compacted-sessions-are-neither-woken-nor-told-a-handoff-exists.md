@@ -32,7 +32,7 @@ external-refs: [TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
 > flag's lifetime" as the commit says: on an unarmed session no heartbeat fires and the flag
 > survives indefinitely, which is exactly the case GAP 1 above documents. Same risk on both
 > paths; unchanged by the deferred push.
-
+>
 > **OWNER REPORT (2026-09-04, verbatim intent):** *"all claude code sessions were idle after
 > compaction, and I was forced to type the command to resume. and even so they were unaware of
 > any handoff."* The owner also recalled asking for the handoff to be fully scripted via

@@ -590,6 +590,7 @@ on Q8PNPRTW for being plausible.
    | `/tmp/test_capfd_child.py`, `-n 2` | stock, no conftest | present | **present** |
    | `tests/test_zz_capfd_transport_probe.py`, serial | **repo conftest + `sandbox_guard` active**; row 1's spawn SIGNATURE (tmp_path script, no `env=`, no `stdout=`/`stderr=`, `start_new_session=True`) — *but its child echoes and exits, where row 1's is killed while `wait`ing* | **present** | **present** |
    | `tests/test_zz_lifecycle_probe.py`, serial | same harness, row 1's spawn **+ kill** sequence **on the PASSING path**: child echoes to stderr, backgrounds `sleep 600`, writes the pid file, `wait`s, then `cal._kill_process_group(proc)` kills it, then a forced assertion | **present** (line 28) | **present** (line 29) |
+
    The fourth row exists because the third row matched only the spawn signature, and the
    objection it had to answer was "does a SIGKILL mid-`wait` lose the child's earlier write?"
    **It licenses exactly that and no more: a child's fd-2 write is still reported after
@@ -729,6 +730,7 @@ on Q8PNPRTW for being plausible.
    | `-n 2 -s` | **visible** | visible |
    | `-n 2`, no `-s` | absent | absent |
    | serial `-s` (control) | visible | visible |
+
    The `-n 2 -s` vs `-n 2` contrast is the discriminator: a silent downgrade would have made
    arm 1 look like arm 2. It does not. **So "inside the full suite, with `-s`" is a runnable
    configuration in which an inherited-fd child's stderr does reach the output — the exact
