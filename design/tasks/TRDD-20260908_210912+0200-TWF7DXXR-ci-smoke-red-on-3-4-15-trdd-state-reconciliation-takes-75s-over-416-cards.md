@@ -3,7 +3,7 @@ trdd-id: TWF7DXXR
 title: CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
 column: todo
 created: 2026-09-08T21:09:12+0200
-updated: 2026-09-08T21:25:18+0200
+updated: 2026-09-08T21:28:13+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -62,13 +62,18 @@ eht: []
   in-dispatch detector run matched the standalone 75 s and detectors run serially, ~33 s of
   the 108 s is unattributed; no other detector was timed.
 - **NEXT ACTION (decide; 1 combines with 2 or 3; record the choice in this STATE block):**
-  1. Make the detector cheap per fire. First the one measurement that separates code from
-     cards: in the fresh clone, `git checkout 4326519d -- design/tasks` with the scripts
-     left at HEAD, then time the detector — ≈75 s ⇒ the cost is in the current code, not
-     the board; far less ⇒ the cost is in cards that changed since 09-03 (the 24 net new
-     ones or edited older ones). A worktree at `4326519d` would swap board and scripts
-     together and decide nothing. Then time its seven `state.run_subprocess` calls on the
-     416-card board, find the per-card or per-call cost, and batch or bound it; OR
+  1. Make the detector cheap per fire. First the one measurement that separates the cards
+     from everything else: in the fresh clone, `git restore --source=4326519d --staged
+     --worktree design/tasks` (no-overlay, so cards absent at `4326519d` are deleted — a
+     plain `git checkout 4326519d -- design/tasks` is overlay-mode and would KEEP the new
+     cards), assert 392 `*.md` files, commit that board in the throwaway clone so the tree
+     is clean (scripts stay at HEAD), then time the detector — ≈75 s ⇒ the cost is not in
+     the cards that changed since 09-03; it is in the current code or in the git history the
+     detector walks (unchanged by the restore); far less ⇒ the cost is in the changed cards
+     (the 24 net new ones or edited older ones). A worktree at `4326519d` would swap board
+     and scripts together and decide nothing. Then time its seven `state.run_subprocess`
+     calls on the 416-card board, find the per-card or per-call cost, and batch or bound
+     it; OR
   2. Give the CI smoke a realistic budget for a first fire on this board (the 60 s comment
      says "plenty even on a cold runner", which is now false); OR
   3. Exclude first-fire-only work from the smoke (a first fire runs EVERY detector because
@@ -123,3 +128,9 @@ eht: []
   a worktree at `4326519d` swaps board and scripts together; the isolating form is HEAD
   scripts against the 09-03 `design/tasks`. "more than doubled" → "at least doubled" (the
   red step was killed, its true length is unknown).
+- 2026-09-08T21:28:13+0200 — Recipe made executable: `git restore --source … --staged
+  --worktree` (no-overlay) instead of the overlay-mode `git checkout … -- design/tasks`,
+  which would have kept the new cards; the restored board is committed in the throwaway
+  clone so the detector's git calls see a clean tree; the slow-outcome label is now
+  three-way (current code OR git history, which the restore does not rewind). Last edit
+  from review on this card; further findings go to the fixer.
