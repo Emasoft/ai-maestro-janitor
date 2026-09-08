@@ -417,6 +417,7 @@ All notable changes to this project will be documented in this file.
 - **memory:** Repair pass re-tiers 5 pages, and corrects one of them (e72bfa7)
 - Refresh the CLAUDE.md wikimem index (66 pages) (6659cf0)
 - **memory:** Repair pass on 5 PROJECT pages — 4 inverted-tier-shape fixes (roster gains Applies to; findings, scopes-and-format, tooling-and-protocol retagged component) + 16 over-cap atom descs trimmed to 200 chars (747b8be)
+- Bump version to 3.4.15 (634758c)
 
 ### Refactor
 
