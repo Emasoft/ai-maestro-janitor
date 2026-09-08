@@ -828,7 +828,7 @@ def test_apply_uses_the_project_slug_when_plugin_root_names_another_repo(
         },
     )
     assert r.returncode == 0, r.stderr
-    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout, r.stderr
     assert "ai-maestro-janitor" not in r.stdout
 
 
@@ -906,7 +906,7 @@ def test_apply_acts_when_only_one_baseline_present(project_env: Path) -> None:
         },
     )
     assert r.returncode == 0, r.stderr
-    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout, r.stderr
     # PUT (update) path reports "updated", POST path reports "created".
     assert "updated id=42" in r.stdout
     assert "created id=99" in r.stdout
@@ -940,7 +940,7 @@ def test_apply_reports_unchanged_when_the_put_moved_nothing(project_env: Path) -
     assert "unchanged id=42" in r.stdout
     assert "updated id=42" not in r.stdout
     # DD0M4QL7's anti-silence trace must survive: a no-op still announces itself.
-    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout, r.stderr
 
 
 def test_apply_reports_put_unverified_when_the_timestamp_is_absent(project_env: Path) -> None:
@@ -1002,7 +1002,7 @@ def test_apply_creates_both_baselines_when_all_gates_pass(project_env: Path) -> 
         extra_env={"GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"})},
     )
     assert r.returncode == 0, r.stderr
-    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout, r.stderr
     assert "baseline-history-protect=created id=1234" in r.stdout
     assert "baseline-pr-and-checks=created id=1234" in r.stdout
     # Audit log records the OK line AND both emitted payloads with the
@@ -1038,7 +1038,7 @@ def test_apply_deletes_legacy_orphan_after_applying(project_env: Path) -> None:
         },
     )
     assert r.returncode == 0, r.stderr
-    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout, r.stderr
     # The summary names the legacy ruleset with its delete result.
     assert "janitor-baseline=deleted id=7" in r.stdout
 
@@ -1068,7 +1068,7 @@ def test_apply_deletes_full_orphan_union_after_applying(project_env: Path) -> No
         },
     )
     assert r.returncode == 0, r.stderr
-    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout, r.stderr
     for name, rid in union.items():
         assert f"{name}=deleted id={rid}" in r.stdout, name
 
@@ -1112,7 +1112,7 @@ def test_apply_falls_back_to_empty_checks_when_none_detected(project_env: Path) 
         extra_env={"GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"})},
     )
     assert r.returncode == 0, r.stderr
-    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout, r.stderr
     assert "no required checks auto-detected" in r.stdout
 
 

@@ -101,7 +101,7 @@ def test_fires_when_unprotected(tmp_path: Path) -> None:
     """
     r = _run(_make_repo(tmp_path))
     assert r.returncode == 0, r.stderr
-    assert "BRPROT-001" in r.stdout
+    assert "BRPROT-001" in r.stdout, r.stderr
     assert "unprotected" in r.stdout
     assert "o/r" in r.stdout
     assert "/janitor-support-open-ticket TRDD-" in r.stdout
@@ -173,7 +173,7 @@ def test_inactive_ruleset_still_nags(tmp_path: Path) -> None:
         {"GH_RULESETS_BODY": json.dumps([{"id": 1, "target": "branch", "enforcement": "evaluate"}])},
     )
     assert r.returncode == 0, r.stderr
-    assert "BRPROT-001" in r.stdout
+    assert "BRPROT-001" in r.stdout, r.stderr
 
 
 def test_empty_permission_surfaces(tmp_path: Path) -> None:
@@ -185,7 +185,7 @@ def test_empty_permission_surfaces(tmp_path: Path) -> None:
         )},
     )
     assert r.returncode == 0, r.stderr
-    assert "BRPROT-001" in r.stdout
+    assert "BRPROT-001" in r.stdout, r.stderr
 
 
 def test_dedupe_then_rearm(tmp_path: Path) -> None:
@@ -200,7 +200,12 @@ def test_dedupe_then_rearm(tmp_path: Path) -> None:
     proposals = project_dir / "design" / "proposals"
     protected = {"GH_RULESETS_BODY": json.dumps([{"id": 1, "target": "branch", "enforcement": "active"}])}
 
-    assert "BRPROT-001" in _run(repo).stdout                    # first: fires
+    # A FIRE assertion carries r.stderr: a soft-failed `gh` read turns the detector SILENT, and
+    # without stderr in the message a loaded run fails as `'BRPROT-001' in ''` with the cause
+    # (the `[run_subprocess]` / `⟦branch_protection_lib⟧` trace) captured but never shown
+    # (TRDD-PJD6XV66 review, 2026-09-08 — 2 of the 7 failures in the 39-min gate were in this file).
+    first = _run(repo)
+    assert "BRPROT-001" in first.stdout, first.stderr                # first: fires
     assert len(list(proposals.glob("TRDD-*.md"))) == 1
     assert _run(repo).stdout == ""                              # second: already proposed → quiet
     assert len(list(proposals.glob("TRDD-*.md"))) == 1, "a recurring finding must not stack proposals"
@@ -208,7 +213,8 @@ def test_dedupe_then_rearm(tmp_path: Path) -> None:
     assert _run(repo, protected).stdout == ""                   # protected: silent…
     assert list(proposals.glob("TRDD-*.md")) == [], "…and the stale proposal must LEAVE the board"
 
-    assert "BRPROT-001" in _run(repo).stdout                    # regression: re-alerts
+    again = _run(repo)
+    assert "BRPROT-001" in again.stdout, again.stderr                # regression: re-alerts
 
 
 def test_disabled_env_silent(tmp_path: Path) -> None:
@@ -226,7 +232,7 @@ def test_unprotected_line_carries_BOTH_remedies(tmp_path: Path) -> None:
     (/janitor-github-config-fix, plan-first). It DROPS the old 'will not change repo settings'
     anti-suggestion (the root cause the user reported)."""
     r = _run(_make_repo(tmp_path))
-    assert "BRPROT-001" in r.stdout
+    assert "BRPROT-001" in r.stdout, r.stderr
     assert "/janitor-support-open-ticket TRDD-" in r.stdout
     assert "/janitor-github-config-fix" in r.stdout
     assert "will not change repo settings" not in r.stdout
@@ -249,7 +255,7 @@ def test_linear_history_line_fires_on_protected_repo(tmp_path: Path) -> None:
         },
     )
     assert r.returncode == 0, r.stderr
-    assert "BRPROT-002" in r.stdout
+    assert "BRPROT-002" in r.stdout, r.stderr
     assert "LINEAR HISTORY" in r.stdout
     assert "/janitor-github-config-fix" in r.stdout
     assert "BRPROT-001" not in r.stdout  # it IS protected — only the linear-history problem

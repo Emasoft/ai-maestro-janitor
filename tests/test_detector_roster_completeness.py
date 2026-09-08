@@ -32,6 +32,11 @@ group bullets only 44 were, because `agent-context-integrity` appeared in surrou
 being absent from every group. A whole-page grep would have counted a SUPERSEDED body, a lesson
 footnote, or an atom as documentation and passed vacuously on exactly the file this guard exists
 to defend.
+
+The "roster page" is no longer ONE page: the janitor's memory-split chore (9e115e6e, 2026-09-05)
+split it into a hub plus `-list` and `-findings` parts, and every group bullet moved into
+`-list`. The measurement above predates the split; the inventory it guards is now the union of
+the hub and the parts the hub links to.
 """
 
 from __future__ import annotations
@@ -41,7 +46,20 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _DISPATCH = _REPO / "scripts" / "dispatch.py"
-_ROSTER = _REPO / ".claude" / "project" / "memory" / "janitor-detector-and-hook-roster.md"
+_MEMORY = _REPO / ".claude" / "project" / "memory"
+_ROSTER = _MEMORY / "janitor-detector-and-hook-roster.md"
+# The hub's own links to its split-out parts. The memory-split chore (9e115e6e, 2026-09-05) moved
+# every group bullet out of the hub into `-list`; reading the hub alone found ZERO bullets and
+# blocked the 3.4.15 publish. Following the hub's links keeps this guard reading the inventory
+# wherever the wiki puts it next (a one-line repoint to `-list` would break on the next split).
+_PART_LINK = re.compile(r"\[\[(janitor-detector-and-hook-roster-[a-z0-9-]+)\]\]")
+
+
+def roster_pages() -> list[Path]:
+    """The roster hub plus every part page it links to, in link order, deduped."""
+    hub_text = _ROSTER.read_text(encoding="utf-8")
+    parts = list(dict.fromkeys(_PART_LINK.findall(hub_text)))
+    return [_ROSTER, *(_MEMORY / f"{name}.md" for name in parts)]
 
 # The registration tuple shape in dispatch.py: ("name", cadence_seconds, "CLAUDE_PLUGIN_OPTION_…").
 _REGISTRATION = re.compile(r'\(\s*"([a-z0-9-]+)"\s*,\s*\d+\s*,\s*"CLAUDE_PLUGIN_OPTION_')
@@ -81,8 +99,13 @@ def test_every_registered_detector_is_named_in_the_roster() -> None:
     )
     # ONLY the group bullets count as inventory — see the module docstring for the measurement
     # that made this necessary.
+    pages = roster_pages()
+    dangling = [p.name for p in pages if not p.is_file()]
+    assert not dangling, f"the roster hub links to part page(s) that do not exist: {dangling}"
     group_lines = "\n".join(
-        line for line in _ROSTER.read_text(encoding="utf-8").splitlines()
+        line
+        for page in pages
+        for line in page.read_text(encoding="utf-8").splitlines()
         if line.startswith("- *")
     )
     assert group_lines.strip(), (
