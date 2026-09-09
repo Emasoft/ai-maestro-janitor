@@ -228,8 +228,9 @@ def run_import(tmp_path, monkeypatch):
         # would pass for the wrong reason: with no lock the run proceeds, files nothing, and
         # returns 1 — the SAME code the refusal returns. Any main()-level lock test must
         # therefore bypass this fixture (stub server_tick_holder, or write a real lockfile
-        # into a state dir of its own) AND assert on the stdout line, never on rc alone. The
-        # two below do exactly that.
+        # into a state dir of its own) AND assert on the stdout line, never on rc alone.
+        # That is the rule; deliberately no count of the tests obeying it, because a count
+        # is falsified by the next person who adds one.
         monkeypatch.setattr(imp.gs, "global_state_dir", lambda: tmp_path / "state")
         monkeypatch.setattr(imp.rotator, "load_state", lambda: dict(state))
         monkeypatch.setattr(imp.sct, "account_status",

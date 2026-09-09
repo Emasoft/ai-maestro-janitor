@@ -120,8 +120,7 @@ the network down and the live token still valid locally, the tick logs *"usage u
 earlier version of this card asserted "the first network-down tick after an import selects the
 slot that cannot refresh" — that was missing this precondition and overstated the hazard.
 
-**Site 2 — the `unread` fall-through (network UP).** Materially worse, because it needs no
-outage at all:
+**Site 2 — the `unread` fall-through (network UP).** Reachable without any outage:
 
 ```ts
 const unread = st2 === 0 && (o2.reason === 'cooldown' || o2.reason === 'lock_contended')
@@ -142,7 +141,18 @@ if (st2 !== 200) {
 A probe in `cooldown` or `lock_contended` returns status 0, so `unread` is true, the refresh
 block is skipped, and control reaches the untested push. A setup-token blob is not
 `blobLocallyExpired` (its `expiresAt` is a year out), so it enters `degraded` and wins the
-ranking — during ordinary operation, on a probe cooldown, which is common rather than rare.
+ranking.
+
+**NO RANKING BETWEEN THE TWO SITES — an earlier version of this card had one and it was
+backwards.** It said site 2 was "materially worse, because it needs no outage at all". That
+compared the PUSH preconditions and stopped there. A push only matters if `degraded` is
+CONSULTED, and it is guarded: `tick.ts:1367` sits under the comment *"2) DEGRADED fallback —
+no usage-confirmed target"*, after the drain-first selection and after an early return on
+`scopedWall && best === null`. So site 2 additionally requires every healthy alternate to have
+failed its usage probe, while site 1 gets `best === null` free from the outage that caused it.
+Completing the precondition list inverts the ranking. **Gate both; the second gate is one
+line, and offering a partial fix manufactures a decision nobody needs.** Verified in their
+tree after the peer session retracted its own agreement with my ranking.
 
 Both sites are ai-maestro's to fix. That project is not ours to edit: issue or PR only. The
 peer holds cards `TRDD-WLHP34KZ` (the ranking inversion, both sites) and `TRDD-W11LAPSC` (the
@@ -209,12 +219,33 @@ not nested differently. `null` is falsy in TypeScript and round-trips to `None` 
 **both gates fire.** Had it been a placeholder, both would have silently never fired while
 both cards still read as correct.
 
-### The two gates are a ONE-WAY DOOR — intended, and worth stating
+Scope of that claim: it is a SOURCE TRACE through both write paths, corroborated independently
+by the peer reading the same files. Neither of us read a stored slot back, and nobody watched
+ai-maestro's gate evaluate a real blob. An earlier version of this card said "provably fire";
+"traced in source, not observed on a stored artifact" is what the evidence supports.
 
-ai-maestro's gate forbids rotating ONTO a no-refresh slot; ours forbids rotating OFF one. A
-no-refresh credential that becomes live by any route — a manual `/login`, an import — then has
-exactly one exit: a 401. That is the intended design, not an oversight, and it is recorded so
-it is not rediscovered as a bug.
+### WITHDRAWN — the "one-way door" framing was false, and it was labelled INTENDED
+
+An earlier version of this card claimed the two gates form a one-way door: a no-refresh
+credential that becomes live has "exactly one exit, a 401", marked as intended design. **Both
+halves are wrong**, verified first-hand in `tick.ts` after the peer session retracted it:
+
+1. **There is a second automatic exit.** `tick.ts:1169` is `near = usageNear || scopedWall ||
+   liveExpired`, so the blob passing its own `expiresAt` also triggers rotation. A fabricated
+   one-year expiry DEFERS that exit by a year; it does not remove it.
+2. **The gates are not two halves of one thing.** Their candidate loop opens with
+   `tick.ts:1218  if (email === liveEmail) continue` — it never examines the live blob at all.
+   Theirs governs which ALTERNATES may enter a target list; ours governs whether a 403 on the
+   LIVE blob counts as death. Different objects, different roles. The symmetry was tidiness,
+   not a property of the design.
+
+Accurate form: both gates restrict movement around a no-refresh credential — theirs keeps it
+out of the target list, ours keeps a 403 from evicting it. The automatic exits that remain are
+a 401 and the blob's own expiry.
+
+**The label was the dangerous part.** The error overstated how locked-in the design was, which
+is the safer direction — but "intended" is precisely the word that stops the next reader
+checking, and someone acting on it would have built an exit that already exists.
 
 ## Secret handling
 
@@ -260,8 +291,28 @@ Recorded because a commit message cannot be rewritten, and both are the same err
   judgement about relative reachability, not something read out of the file — reasonable, and
   not verified, sitting inside a sentence whose frame claims verification.
 
-Both are the same over-generalisation the peer caught in the 401 claim, made in the same
-session. The pattern to watch: one measurement stated as a property.
+- `bc85bf62` called the new order-test **"mutation-checked"** on the strength of a probe that
+  OMITTED the lockfile. That is the no-holder case; it proves `_boom` is reachable, which is a
+  wiring check. It says nothing about ORDER, and the message's parenthetical — "the same
+  observable state as the check having moved below them" — is false: under a real reorder
+  there IS a live holder and the refusal DOES fire. **The real mutation has since been run**
+  (the `holder = server_tick_holder()` block moved below `_secure`/`read_rows` with the
+  lockfile in place): the test FAILS on its own guard, so the order-sensitivity is now
+  genuinely established rather than asserted.
+- `bc85bf62` also said the blob trace made both gates **"provably"** fire. See the scope note
+  in the blob-shape section.
+
+**The class, since this is now four for four:** a specific observation promoted to a general
+property — one rate-limit measurement as an API property, a judgement inside a "verified
+first-hand" frame, a source trace as proof, a wiring check as a mutation. Every one was caught
+by review rather than at writing time, which is the part worth fixing. The peer session made
+three retractions of the same shape on the same day, so it is not idiosyncratic.
+
+**`implementation-commits` discipline, decided after it lagged twice.** A SHA cannot be known
+before its own commit, so this field will always trail by one and chasing it with an amend is
+not worth rewriting history. It means "commits known at the last card edit". The authoritative
+list is `git log --grep=TRDD-BMITQ2MN`, which is complete by construction because the id is in
+every subject line.
 
 ## Approval log
 

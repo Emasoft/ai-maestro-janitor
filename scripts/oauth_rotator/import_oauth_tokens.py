@@ -127,9 +127,14 @@ def server_tick_holder() -> int | None:
     lib/server-lockfile.ts). If that predicate ever treats an empty file as HELD — a
     defensible hardening for them — their tick would wait while this function reports the lock
     free and the import writes straight through it. Their change would be locally correct.
-    NOTHING HERE WOULD NOTICE: the tests stub the state dir and never read a real ai-maestro
-    lockfile, so no test, lint or CI run can fail on it. Treat a change to their `isStale` as
-    a change to this function.
+
+    No automated check in THIS repo currently fails on that — the tests stub the state dir and
+    never read a real ai-maestro lockfile. (Not that none could: a contract test greping their
+    source would, and is not obviously worth its fragility.) The failure is silent at write
+    time and surfaces later as an ORPHANED SLOT — a token in the keychain with nothing indexing
+    it, which reaches the user as a missing or expired slot for an account they hold a key for,
+    with nothing pointing back at this cause. Treat a change to their `isStale` as a change to
+    this function.
     """
     p = gs.global_state_dir() / SERVER_TICK_LOCK
     try:

@@ -16,9 +16,15 @@ description: Import the owner's long-lived Claude Code OAuth keys from ~/.claude
 >
 > Two changes clear this, neither of them landed: the janitor's stay-put branch must gate on
 > slot type (`refreshToken is None` ⇒ a 403 is expected and non-fatal; **401 stays fatal for
-> every slot**), and ai-maestro must gate its two `degraded` push sites the same way.
-> Tracked in `TRDD-BMITQ2MN`. **Tell the user this before running the import**, and delete
-> this block once the janitor half lands.
+> every slot**), and ai-maestro must gate BOTH its `degraded` push sites the same way.
+> Tracked in `TRDD-BMITQ2MN`. **Tell the user this before running the import.**
+>
+> **Removing this block is not your call to make from this file.** Landing only the janitor
+> half stops the janitor thrashing but leaves ai-maestro's sites ranking a fabricated one-year
+> `expiresAt` above every real slot, so the hazard would be half-live and this skill silent
+> about it. Narrow or delete this block ONLY when `TRDD-BMITQ2MN`'s acceptance boxes for BOTH
+> halves are ticked — read the card, do not infer it from here. A warning is the last thing
+> that should adjudicate its own removal.
 
 ## Overview
 
