@@ -1,9 +1,9 @@
 ---
 trdd-id: 2SKHJ8NR
 title: The stale-index-lock guard self-matches a shell whose command string mentions git, so it refuses forever when invoked from any sh -c wrapper
-column: todo
+column: testing
 created: 2026-09-08T22:46:17+0200
-updated: 2026-09-08T23:00:40+0200
+updated: 2026-09-09T11:52:53+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -11,13 +11,14 @@ scope: project
 project-id: ai-maestro-janitor
 labels: [git-utils, stale-index-lock, false-positive, self-match]
 relevant-rules: []
+implementation-commits: [9c3af0f2]
 npt: []
 eht: []
 ---
 
 # The stale-index-lock guard self-matches a shell whose command string mentions git, so it refuses forever when invoked from any sh -c wrapper
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-08
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-09
 
 - **Symptom:** `git_utils.clear_stale_index_lock(repo, min_age_s=1800)` returned `live-git`
   on seven consecutive calls over two minutes (five of them 15 s apart) for a 0-byte
@@ -66,35 +67,63 @@ eht: []
   path in a fresh snapshot, 0 bytes). Commit `49c09951` then landed. Audit (rule 0.5): no
   user text authorized it; a 0-byte `index.lock` is a regeneratable artifact (RULE 0
   exempt); removed after the janitor's own guard refused seven times, for the cause above.
-- **NEXT ACTION:** grep `design/requirements/PRRD.md` for `lock|guard|fail-closed` (the
-  PRRD was not swept when this card was filed — `relevant-rules: []` means none cited, not
-  none applies); implement the executable-token match + the two tests; run
-  `uv run pytest tests -k "index_lock or live_git" -q`; re-run the probe from a Bash-tool
-  shell whose command mentions git and confirm `matched pids: []`. Control for the
-  production-path claim: run `stale-index-lock.py` from a wrapper whose command text has no
-  bare `git` token against a synthetic stale lock, with
-  `CLAUDE_PLUGIN_OPTION_STALE_INDEX_LOCK_MIN_AGE=0` and a fresh state dir (the seen-file
-  `stale-index-lock-seen.txt` dedupes a lock it already reported), and expect `removed`.
+- **DONE 2026-09-09 (commit `9c3af0f2`; column: testing):** the PRRD grep
+  (`lock|guard|fail-closed`, per the previous NEXT ACTION) returned S3.1 (atomic file
+  writes) and S6.1 (detector fail-soft) only; judged not to constrain this change (S3.1: no
+  file write changed; S6.1: the matcher's no-raise `len(fields) > 3` guard is consistent
+  with it, not required by it) — a reading, so `relevant-rules: []` stands as none cited.
+  Executable-token match landed with three tests. Mutation check: under the OLD matcher
+  exactly the two tests that encode the new rule fail (by name:
+  `test_a_shell_whose_command_string_mentions_git_is_not_a_git_process`,
+  `test_stale_lock_is_removed_despite_a_git_mentioning_shell`; 2 failed / 38 passed, same
+  40-test file) and `test_a_git_invoked_by_full_path_is_still_a_git_process` passes under
+  both; new code 77 passed over `tests/test_git_index_lock_recovery.py`,
+  `tests/test_git_index_lock_e2e.py`, `tests/test_stale_index_lock_detector.py` plus three
+  of the guard's caller test files (the invocation lives in the session's task output, not
+  in the repo). ruff, mypy, pyright artefacts from 2026-09-08 23:13 are clean (mypy: `1
+  source file`, so scoped to `git_utils.py`; comment-only edits followed; the publish gate
+  re-runs all three tree-wide). Live probe at the lib level from a Bash-tool shell whose
+  command text mentioned git printed `matched pids: []` in the background run launched by
+  the 2026-09-08 session (exited 0; its output carries no clock line).
+- **Detector-level controls (2026-09-09; throwaway repos under the session scratchpad, a
+  fresh 0-byte `.git/index.lock` each, `CLAUDE_PLUGIN_OPTION_STALE_INDEX_LOCK_MIN_AGE=0`,
+  fresh `<repo>/.janitor/state` — there is no separate state-dir knob, the state dir derives
+  from `CLAUDE_PROJECT_DIR`):** (a) git-free wrapper → the detector printed its `Removed a
+  stale .git/index.lock` line, lock gone (shows the detector removes at all; dispatch's
+  actual argv is still unread from a fire, so the production-path claim stays a stand-in).
+  (b) wrapper whose text carried a bare `git` token but whose cwd was OUTSIDE the repo →
+  same outcome, NOT discriminating: `_live_git_holds` excludes a matched pid whose cwd
+  resolves outside `repo_root` (this card's own box 2 said so; a review round forgot it).
+  (c) child `sh -c 'sleep 60 # git'` with cwd INSIDE → same outcome, NOT discriminating
+  either: sh tail-execs into `sleep 60`, so no `git` token reaches the ps table — the design
+  this card's box 2 originally proposed has that hole. (d) child `/bin/sh -c 'sleep 60; :
+  git'` with cwd INSIDE (two commands keep sh alive; ps line `/bin/sh -c sleep 60; : git`,
+  the only git-bearing line in the saved snapshot): the OLD `_live_git_pids` (from
+  `01637fba`) replayed on that snapshot returned `[60722]` (the child), the NEW returned
+  `[]`, and the new-code detector printed its Removed line and the lock was gone. The old
+  DETECTOR was not run end to end; the old rule's refusal is measured at unit level (2 failed
+  by name) and at matcher level on this live snapshot. Reports:
+  `reports/colony/20260909_113921+0200-unit{3,4,5,6}-*.md` (gitignored, this machine).
+- **NEXT ACTION:** none open on this card; closure (`testing` → `complete`) is the owner's
+  call.
 
 ## Acceptance
 
-- [ ] `_live_git_pids` matches only when the executable token's basename is `git`; a
+- [x] `_live_git_pids` matches only when the executable token's basename is `git`; a
       `sh -c "… git …"` wrapper line is not matched (test present and passing).
-- [ ] Runnable without a 30-minute wait, and unable to pass for the wrong reason:
-      `_live_git_holds(snapshot, repo_root)` with `repo_root` = the test's OWN cwd
-      (`monkeypatch.chdir(tmp_repo)` — with the cwd outside `repo_root` the old code also
-      returns False and proves nothing) is False for a snapshot whose only git-mentioning
-      line is `<own pid> <ppid> 00:00 /bin/zsh -c git status` and True for `<own pid> <ppid>
-      00:00 /opt/homebrew/bin/git status`; end to end, in that tmp repo with a 0-byte
-      `.git/index.lock`, `clear_stale_index_lock(repo, min_age_s=0)` returns `removed` while
-      a child `sh -c 'sleep 60 # git'` (killed in `finally`, so it cannot exit before the
-      snapshot under load) runs with cwd inside the repo. On any other value the test prints
-      it: `held`/`no-probe`/`no-snapshot` is the probe, not the matcher, and not this card;
-      on `live-git`, print the matched pids — a pid other than the test's child is the
-      7NSRD8OV concurrency class, not this card, so run the end-to-end half in its own xdist
-      group.
-- [ ] `git-index-lock-orphan-recovery` gains a dated lesson naming this fourth self-match
-      form (via the memgrep verb, not by hand), then committed.
+- [x] With the only git-mentioning line being a shell wrapper, `_live_git_pids` returns `[]`
+      and `clear_stale_index_lock` returns `removed`, not `live-git` — tested with an
+      injected `ps_snapshot` (the parameter the card's first draft did not know existed) and
+      the three probes patched (`_pid_cwd` None, `_pid_is_alive` True, `_pid_is_zombie`
+      False): one of the two fail-closed combinations; the cwd-in-repo one is equally
+      unreachable because the pid is never matched; `removed` also relies on
+      `_lock_is_held` finding no lsof holder on the tmp lock. The OLD matcher fails this test
+      and its unit-level sibling (the two names in the 2-failed run). (Rewritten 2026-09-09,
+      see approval log.)
+- [x] `git-index-lock-orphan-recovery` gains a dated lesson naming this fourth self-match
+      form (via the memgrep verb, not by hand), then committed — done 2026-09-09: `[^4]` /
+      `ATOM-XMY7-ZFNS` via `memgrep update-mem-atom --lesson`, validate NONE, lint 0
+      findings, page commit `442e3794`.
 
 ## Approval log
 
@@ -120,3 +149,13 @@ eht: []
   excluded; the control names the detector's real knob
   (`CLAUDE_PLUGIN_OPTION_STALE_INDEX_LOCK_MIN_AGE`, fresh state dir) instead of the lib
   parameter; box 2 names the `live-git`-from-another-pid outcome.
+- 2026-09-09T11:52:53+0200 — Fix landed (`9c3af0f2`); column → testing (code and tests
+  landed; four detector-level controls run the same morning, results in STATE). Box 2
+  rewritten after the fact: the card predates knowing `ps_snapshot=` is injectable, and the
+  test does what the box meant (a git-mentioning shell as the only candidate, no 30-minute
+  wait) without `monkeypatch.chdir` or a sleeping `sh -c 'sleep 60 # git'` child — a child
+  that, run live, turned out not to carry the `git` token at all (control c). Box 3 ticked on
+  page commit `442e3794`. Two review rounds on this text plus one on the controls; the
+  control results and the correction of the "discriminating run" wording were added after
+  round 2 from measured output, not re-reviewed before the write (disclosed in the session
+  reply). Tier 0, no publish.
