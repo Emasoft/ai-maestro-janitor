@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline-gate-sequence
 description: "how do I release the janitor / publish blocked / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / what is the gate sequence for scripts/publish.py / why does publish.py refuse a --skip-tests flag / CPV --strict is the sole validation step / why does the resolver twin tag exist / what does --dry-run actually do / why can publish.py push directly to the default branch / how does the admin-bypass branch ruleset model work / process-ancestry pre-push hook verification / machine-specific facts live in LOCAL scope not here / devitalize-or-remove not exempt-and-suppress"
 ocd: 2026-06-13
-lmd: 2026-09-05
+lmd: 2026-09-09
 metadata:
   node_type: memory
   type: project
@@ -15,6 +15,7 @@ split-lineage: 08b34684a6214833bc3d78b80244d2cd
 
 # janitor-publish-pipeline — gate sequence, CPV-only policy & admin-bypass model
 
+^5VNCUPK1 [desc:"publish.py's ordered 16-step fail-fast gate sequence, from self-integrity check through tests/lint/CPV validate to version bump, changelog, tag, push, release; --dry-run stops before mutation.", keywords:"how_do_i_release_the_janitor publish_blocked what_is_the_gate_sequence_for_scripts_publish_py can_i_skip_a_gate self_integrity_env_bypass_rejection auto_detect_project_language version_consistency_check git_cliff_changelog_release_notes resolver_twin_tag_step push_and_github_release_step what_does_dry_run_actually_do no_changelog"]
 The janitor ships via `scripts/publish.py` — a strict, **fail-fast** release
 pipeline. **It is a CPV plugin**, so its pipeline includes the CPV plugin-schema +
 security gate. Not every fleet project is a plugin: **non-plugin agents (e.g.
@@ -86,6 +87,7 @@ ordered set of gates; **any gate failing exits non-zero and the release stops**
 push (it mutates nothing in git history; its only side effect is installing the
 push-guard hook).
 
+^7AY0CQO2 [desc:"CPV is the SOLE validator; a finding is cleared by devitalizing or removing the offending code, never by exempting or suppressing a rule or relaxing --strict.", keywords:"cpv_strict_is_the_sole_validation_step devitalize_or_remove_not_exempt_and_suppress no_local_copies_of_any_validator_script exempt_list_mechanism_dropped_fleet_wide execution_class_security_finding live_os_system_or_subprocess_shell_true eval_or_exec_of_a_string hardcoded_tokens_in_docs prrd_s5_1_devitalize_policy how_is_a_cpv_finding_cleared"]
 **CPV-ONLY validation policy + devitalize-or-remove (PRRD S5.1):** the pipeline
 invokes ONLY the CPV plugin for validation — there are NO local copies of any
 validator script. A CPV finding is cleared by **devitalizing or removing** the
@@ -98,6 +100,7 @@ signatures) is rewritten into provably-inert data the scanner recognizes
 (see the CPV `devitalize-threats` catalog) — you make the code's executable
 shape inert, you do not silence the rule.
 
+^7CRKBQJI [desc:"Why publish.py can push the release commit/tag to default branch: GitHub ruleset admin-bypass + local pre-push hook verifying caller by process ancestry; run forms --patch/--minor/--major, --dry-run.", keywords:"admin_bypass_for_publish_py how_does_the_admin_bypass_branch_ruleset_model_work process_ancestry_pre_push_hook_verification why_can_publish_py_push_directly_to_the_default_branch baseline_history_protect_no_bypass_actor pr_and_checks_admin_direct_push_bypass no_env_var_process_trees_cannot_be_spoofed run_forms_scripts_publish_py_patch_minor_major push_rejected_by_pre_push_hook"]
 **Admin-bypass-for-publish.py branch-ruleset model:** the default branch carries
 the ratified baseline ruleset pair (history-protect: no force-push / no deletion
 with NO bypass actor;[^9] pr-and-checks: PR ≥ 1 approval + required
@@ -113,6 +116,7 @@ push. No env var is involved (process trees can't be spoofed), so a stray
 Run forms: `scripts/publish.py --patch` (or `--minor` / `--major`), add
 `--dry-run` to exercise every gate without releasing.
 
+^BQWUFPQ3 [desc:"Machine-specific facts (repo path, gh auth identity, account emails, OAuth tokens) live in LOCAL scope, not on this git-tracked page; this page carries only generic procedure.", keywords:"machine_specific_facts_live_in_local_scope_not_here where_do_local_paths_and_secrets_go this_page_is_git_tracked_and_host_global never_literal_paths_or_secrets_in_project_scope repo_root_path_owner_gh_auth_account_emails_oauth_tokens use_repo_root_home_email_placeholders"]
 **Machine-specific facts live in LOCAL scope** (named here, not stored): the
 absolute repo-root path, the owner GitHub identity / `gh` auth, account emails,
 and any OAuth tokens. This page is git-tracked and host-global, so it carries

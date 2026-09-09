@@ -2,7 +2,7 @@
 name: memory-system-scopes-and-format
 description: "how does the wiki-memory 3-scope model work / LOCAL vs PROJECT vs USER scope precedence / where do memories live / what fields does a wikimem note frontmatter carry / why did my PROJECT memory page get flagged for a leak / what is the load-bearing recall field / does memgrep recall rank on the body or the description / why is MEMORY.md a deprecation stub / where does the harvest chore file stray memories / what is the note format for a memory page / index by the question not the answer"
 ocd: 2026-06-13
-lmd: 2026-09-06
+lmd: 2026-09-09
 metadata:
   node_type: memory
   type: project
@@ -23,6 +23,7 @@ detectors, the wikimem layer, and the editor's operational gotchas.
 
 ## The 3-scope model (LOCAL / PROJECT / USER)
 
+^FJ48CT7Q [desc:"The wiki-memory 3-scope model: LOCAL/PROJECT/USER roots, git status, precedence (LOCAL>PROJECT>USER), write-scope routing rules, and the ROOTS compose snippet.", keywords:"how_does_the_wiki_memory_3_scope_model_work local_vs_project_vs_user_scope_precedence where_do_memories_live which_scope_should_i_write_to unsure_scope_defaults_to_local memory_scope_leak_detector_polices_project scope_is_determined_by_the_notes_path compose_local_project_user_roots_once"]
 The corpus is layered exactly like Claude Code's own memory (the user CLAUDE.md,
 the project CLAUDE.md, and the git-ignored project-local CLAUDE override file).
 Three roots, ONE recall surface — recall
@@ -59,6 +60,7 @@ ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && RO
 
 ## The note format (recall-relevant fields)
 
+^G0O8GTYY [desc:"What fields a wikimem note frontmatter carries on disk: name/description/ocd/lmd plus metadata.node_type/type/tier/functionality/globs, and the mandatory empty Notes-and-lessons section.", keywords:"what_fields_does_a_wikimem_note_frontmatter_carry what_is_the_note_format_for_a_memory_page filename_stem_must_equal_frontmatter_name ocd_original_creation_date_set_once lmd_last_modified_date_bump_on_every_edit tier_hub_aspect_component_absent_means_component globs_required_on_hubs"]
 On disk every note is a markdown file whose stem == frontmatter `name:`:
 
 ```yaml
@@ -79,6 +81,7 @@ metadata:
 ## Notes and lessons learned
 ```
 
+^MD7L6SVB [desc:"description: is the load-bearing recall field — memgrep recall ranks only on description+title+tags, never the body, so symptom vocabulary must live in description and the answer in the body.", keywords:"what_is_the_load_bearing_recall_field does_memgrep_recall_rank_on_the_body_or_the_description index_by_the_question_not_the_answer symptom_query_note_body_answer_two_hop_recall put_symptom_vocabulary_in_description metadata_type_does_not_affect_ranking"]
 The `description:` is the load-bearing recall surface — `memgrep recall` ranks on
 `description + title + tags` ONLY (the `metadata.type` taxonomy does NOT affect
 ranking). [^2] Put **symptom vocabulary** in `description`, put the **answer** in the
@@ -87,6 +90,7 @@ body (two-hop recall: symptom query → note → body answer). The
 — the standing landing zone for `[^N]` correction lessons; the page-shape pass
 flags a note that omits it, or that omits `ocd`/`lmd`.
 
+^O5NY1MFE [desc:"The search index is entirely memgrep's SQLite index — MEMORY.md is a deprecation stub never loaded as an index; the daily harvest chore re-files any stray memory back into wiki pages.", keywords:"why_is_memory_md_a_deprecation_stub where_does_the_harvest_chore_file_stray_memories the_index_is_memgreps_and_only_memgreps agent_invisible_unlimited_sqlite_index_db never_hand_trim_memory_md project_overview_entry_page memgrep_overview_command"]
 **The index is memgrep's, and ONLY memgrep's** (v0.13.0, TRDD-a5780c23): recall runs on
 the agent-invisible, unlimited SQLite index `.memgrep/index.db` (or a live note-scan) and
 NEVER reads a human index.[^5] `MEMORY.md` is now a **deprecation stub** — never

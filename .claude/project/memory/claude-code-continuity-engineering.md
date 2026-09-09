@@ -2,7 +2,7 @@
 name: claude-code-continuity-engineering
 description: "claude stalled overnight / fleet stopped working in my absence / session stuck in a retry loop after a 429 / janitor kept injecting commands or compacting at random / how do we keep unattended Claude Code sessions ALWAYS working — the continuity-engineering topic HUB linking every layer of the never-stall stack / how does account rotation prevent 429 stalls / window-asymmetric rotation thresholds 7d vs 5h / how to unstick a frozen retrying session / why does typing text into a blocked session flood the input buffer / janitor backstop versus harness auto-compact competing / nudging an idle armed session to keep working / keep-going-off sentinel to mute nudges / stale-hook ghosts mimic an unfixed bug after a shipped fix / does a shipped fix apply without reloading hooks / per-project channeling so a burn alarm reaches only its own project / ai-maestro server chore must match janitor chore outcome parity / prevention versus recovery two-layer stall fix / TRDD-P7WU40G9 overnight stall incident record"
 ocd: 2026-07-18
-lmd: 2026-07-18
+lmd: 2026-09-09
 metadata:
   node_type: memory
   type: project
@@ -11,6 +11,7 @@ metadata:
 publish-globally: true
 ---
 
+^0SYALO3G [desc:"Claude Code continuity engineering: the discipline of keeping an unattended Claude Code fleet working indefinitely overnight (TRDD-P7WU40G9); owner directive: they must never stop.", keywords:"claude_stalled_overnight fleet_stopped_working_in_my_absence how_do_we_keep_unattended_claude_code_sessions_always_working trdd_p7wu40g9_overnight_stall_incident_record they_must_never_stop shipped_v0_53_0_v0_54_0"]
 **Claude Code continuity engineering** — the discipline of keeping an UNATTENDED fleet of
 Claude Code sessions working indefinitely (overnight, in the user's absence), distilled from
 the 2026-07-17/18 overnight-stall incident (TRDD-P7WU40G9, shipped v0.53.0+v0.54.0) and the
@@ -18,6 +19,7 @@ CC docs verified 2026-07-18. The owner's standing directive: *"they must never s
 
 ## The stack — six layers, each owned by its own page
 
+^4ESPVFB8 [desc:"The six-layer never-stall stack: settings substrate, account rotation (prevention), freeze recovery (ESC-only unstick), compaction discipline, nudging idle-armed sessions, rollout observability.", keywords:"how_does_account_rotation_prevent_429_stalls window_asymmetric_rotation_thresholds_7d_vs_5h how_to_unstick_a_frozen_retrying_session why_does_typing_text_into_a_blocked_session_flood_the_input_buffer janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks session_stuck_in_a_retry_loop_after_a_429 fleet_reachability_which_pane_can_be_injected"]
 1. **Settings substrate** — the harness must retry instead of stopping, and questions must
    auto-continue: [[claude-code-continuity-settings]] (watchdog + AFK chain, ensured by BOTH
    the janitor and the ai-maestro server in lockstep).
@@ -47,6 +49,7 @@ Fleet reachability (which pane can be injected, via which channel): USER-scope p
 
 ## Design laws (cross-layer, all owner-ratified)
 
+^M96S3JQO [desc:"Four cross-layer, owner-ratified design laws: prevention beats recovery, never type text+Enter into a blocked session, per-project alert channeling, ai-maestro/janitor outcome parity.", keywords:"prevention_versus_recovery_two_layer_stall_fix janitor_kept_injecting_commands_or_compacting_at_random per_project_channeling_so_a_burn_alarm_reaches_only_its_own_project ai_maestro_server_chore_must_match_janitor_chore_outcome_parity never_type_text_enter_into_a_blocked_session rate_limited_flag_janitor_resume_machinery"]
 - **Prevention beats recovery**: fix rotation first; recovery (ESC) then only accelerates a
   retry that would already succeed. [^1]
 - **Never type text+Enter into a blocked session** — ESC-only; the session's own
