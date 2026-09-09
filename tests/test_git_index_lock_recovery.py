@@ -61,6 +61,20 @@ _PS_WITH_GIT = _PS_NO_GIT + " 5150  4242       00:01 git commit -m wip\n"
 # component) — must NOT be mistaken for a live git process.
 _PS_GIT_LOOKALIKE = _PS_NO_GIT + " 6161  4242       00:02 /usr/bin/python3 scripts/lib/git_utils.py\n"
 
+# TRDD-2SKHJ8NR (2026-09-08): a shell whose `-c` string merely MENTIONS git —
+# the Bash-tool shell running the check, a CI `run:` step — is NOT a git
+# process; the executable is the shell. Under the any-argv-token rule this
+# line matched, the shell's cwd was the repo, and `clear_stale_index_lock`
+# returned 'live-git' seven times in a row for a 0-byte lock aged 36–40 min
+# with no lsof holder.
+_PS_SHELL_MENTIONING_GIT = (
+    _PS_NO_GIT
+    + "424242  4242       00:00 /bin/zsh -c source /tmp/snap.sh && git -C /repo add x && git commit\n"
+)
+
+# The positive control for the executable-token rule: git invoked by full path.
+_PS_REAL_GIT_BY_PATH = _PS_NO_GIT + "424242  4242       00:00 /opt/homebrew/bin/git commit -m x\n"
+
 
 def _make_lock(tmp_path: Path, *, age_s: float) -> Path:
     """Create `<tmp_path>/.git/index.lock` with mtime `age_s` seconds in the past."""
@@ -73,6 +87,39 @@ def _make_lock(tmp_path: Path, *, age_s: float) -> Path:
 
     os.utime(lock, (stamp, stamp))
     return lock
+
+
+# --- TRDD-2SKHJ8NR: only the executable token names a git process ----------
+
+
+def test_a_shell_whose_command_string_mentions_git_is_not_a_git_process():
+    """`_live_git_pids` must NOT match `/bin/zsh -c … git …`: the executable is
+    zsh, and the word git is data inside its -c string (TRDD-2SKHJ8NR)."""
+    assert git_utils._live_git_pids(_PS_SHELL_MENTIONING_GIT) == []
+
+
+def test_a_git_invoked_by_full_path_is_still_a_git_process():
+    """The executable-token rule keeps matching `/opt/homebrew/bin/git …` —
+    the positive control that the fix narrowed the rule, not removed it."""
+    assert git_utils._live_git_pids(_PS_REAL_GIT_BY_PATH) == [424242]
+
+
+def test_stale_lock_is_removed_despite_a_git_mentioning_shell(tmp_path, monkeypatch):
+    """End to end, subprocess-free: the only git-mentioning line is an alive zsh
+    wrapper whose cwd cannot be resolved — the exact fail-closed combination
+    `_live_git_holds` blocks on. Under the any-token rule this returned
+    'live-git' (matched → cwd None → alive → not a zombie → holds); under the
+    executable-token rule the pid is never a candidate and the stale lock is
+    'removed'. The three probes are patched so no real `lsof`/`ps` runs on a
+    pid that does not exist."""
+    monkeypatch.setattr(git_utils, "_pid_cwd", lambda _: None)
+    monkeypatch.setattr(git_utils, "_pid_is_alive", lambda _: True)
+    monkeypatch.setattr(git_utils, "_pid_is_zombie", lambda _: False)
+    _make_lock(tmp_path, age_s=3600)
+    outcome = git_utils.clear_stale_index_lock(
+        tmp_path, min_age_s=60, ps_snapshot=_PS_SHELL_MENTIONING_GIT
+    )
+    assert outcome == "removed"
 
 
 def test_absent_lock_is_not_an_error(tmp_path):

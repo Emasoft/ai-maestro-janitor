@@ -400,10 +400,12 @@ def _gather_ps_snapshot() -> Optional[str]:
 def _live_git_pids(ps_snapshot: str) -> list[int]:
     """The pids of every running `git` process in `ps_snapshot`.
 
-    Matches on the COMMAND column (basename of any argv token equal to "git"
-    exactly — never a substring match, so a path like `/Users/x/git-utils.py`
-    is not mistaken for the `git` executable), returning the pids so
-    `_live_git_holds` can go on to ask WHERE each one is running.
+    Matches on the EXECUTABLE token of the COMMAND column only (basename equal
+    to "git" exactly — never a substring match, so a path like
+    `/Users/x/git-utils.py` is not mistaken for the `git` executable, and never
+    a later argv token, so a shell whose `-c` string merely mentions git is not
+    either), returning the pids so `_live_git_holds` can go on to ask WHERE
+    each one is running.
     """
     pids: list[int] = []
     for line in ps_snapshot.splitlines():
@@ -417,18 +419,26 @@ def _live_git_pids(ps_snapshot: str) -> list[int]:
             pid = int(fields[0])
         except ValueError:
             continue
-        # The COMMAND column starts after pid, ppid, etime — but etime can
-        # itself contain no spaces (e.g. "01:23:45"), so fields[3] is the
-        # start of the command for a well-formed `ps -eo pid,ppid,etime,command`
-        # line. Match on the basename of that token (or the next token, for a
-        # command invoked as `/usr/bin/git ...`) equal to "git" exactly, or a
-        # later argv token equal to "git" (covers `sh -c git ...` wrappers).
-        command_tokens = fields[3:]
-        for tok in command_tokens:
-            base = tok.rsplit("/", 1)[-1]
-            if base == "git":
-                pids.append(pid)
-                break
+        # The COMMAND column starts at fields[3] for a `ps -eo
+        # pid,ppid,etime,command` line (etime never contains a space). ONLY
+        # that executable token decides. An earlier version (dc1af1ed) also
+        # matched any LATER argv token equal to "git", meant to cover
+        # `sh -c git ...` wrappers — but the git that holds index.lock is
+        # always its own process: a wrapper either execs into it (`env git`,
+        # `xcrun git`, most shells for a lone `-c 'git …'`) or forks it as a
+        # child with its own `git` line, so the executable-token rule sees
+        # every real git-process holder and the later-token rule caught none
+        # it misses. What the later-token rule DID catch was any shell whose
+        # -c string merely MENTIONED git — including the Bash-tool shell
+        # running this very check — so the guard refused forever from any
+        # `sh -c` wrapper (TRDD-2SKHJ8NR: seven `live-git` returns for a
+        # 0-byte lock aged 36–40 min with no lsof holder). Non-git holders
+        # (libgit2 GUI clients) were never
+        # visible to argv under either rule; G0 (`_lock_is_held`) is the guard
+        # for those. `len(fields) > 3` guards a truncated or hand-built line —
+        # this function must not raise inside a fail-closed guard.
+        if len(fields) > 3 and fields[3].rsplit("/", 1)[-1] == "git":
+            pids.append(pid)
     return pids
 
 
