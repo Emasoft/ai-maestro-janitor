@@ -1,6 +1,6 @@
 ---
 name: janitor-refresh-cc-logins
-description: Re-stock the rotator with a long-lived OAuth key per account — the human REAUTHENTICATE step no automation can do (the claude.ai login needs an OS-level passkey / Google-2FA prompt, and the consent page sits behind a Cloudflare challenge). Walks the user through /login then `claude setup-token` per account, has them paste each key into the keys CSV, then imports the whole file with /janitor-import-oauth-tokens. The login and the mint are HUMAN steps (an OS-level passkey prompt and a Cloudflare challenge), so this skill PAUSES for the user and cannot complete unattended; do not select it in a cron or headless context. Use on an oauth-login-needed / oauth-cookie-reminder nudge, when a slot's refresh is dead, or when "had to rotate manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-cc-logins, "reauth my accounts". (Named cc-logins, not claude-logins — a skill name may not contain the reserved word "claude".)
+description: Re-stock the rotator with a long-lived OAuth key per account. Walks the user through /login then `claude setup-token` per account, has them paste each key into the keys CSV, then imports the file with /janitor-import-oauth-tokens. INTERACTIVE — login and mint need a passkey prompt and a Cloudflare challenge, so it PAUSES for the user; never select it in a cron or headless context. Use on an oauth-login-needed / oauth-cookie-reminder nudge, when a slot's refresh is dead, or when "had to rotate manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-cc-logins, "reauth my accounts".
 ---
 
 # Janitor refresh-cc-logins
@@ -156,6 +156,12 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
   `/api/oauth/usage` and on every identity endpoint, while the SAME key is accepted by
   `/v1/messages`. So a 403 from those endpoints says nothing about the key's health — only a
   401 does. Do not read one as a dead credential.
+
+## Naming
+
+Called `cc-logins`, not `claude-logins`: a skill name may not contain the reserved word
+"claude". Moved here from the frontmatter `description:`, which is capped at 200 tokens and
+is for stating WHEN to invoke the skill — not for maintainer notes.
 
 ## Scope
 

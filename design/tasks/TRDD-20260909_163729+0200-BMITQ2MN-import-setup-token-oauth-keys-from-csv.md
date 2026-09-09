@@ -33,14 +33,41 @@ that the second fix reproduced the defect it was fixing): `run_import` now stubs
 real machine-wide state dir; and the skill's exit-code row for `1` now names all four paths
 that return it, not three. Gate re-run green after both.
 
-**NEXT ACTION — the ship-blocker, and it is not a code defect.** `/janitor-import-oauth-tokens`
-currently files keys that neither rotator will use: the janitor's stay-put branch is unwritten
-and both ai-maestro sites are unauthorised proposals. So the command's visible effect is
-"imported N accounts" while its actual effect is to load the rotator with slots it classifies
-dead on sight, driving the once-a-minute thrash that destroys the prompt cache. **The skill
-does not say this.** Either land the slot-type gate first, or the skill states plainly that
-filed keys are inert until it does. Owner's call; the second is done as of `780c811d`'s
-successor so the command cannot mislead in the meantime.
+**DONE — the janitor half of the ship-blocker has LANDED.** `rotator.is_setup_token_slot()`
+plus the `cmd_auto` branch: a 403 on a readable no-refresh slot is no longer read as death.
+401 stays fatal for every slot type, a full-OAuth slot's 403 stays fatal, and an EXPIRED
+setup-token slot still rotates. Four branch-level tests through the real `cmd_auto` via the
+existing `_setup_auto` harness, plus three helper tests, mutation-verified by forcing
+`is_setup_token_slot` to False (the stay-put test dies; the full-OAuth control survives,
+proving it is not falsely coupled to the gate).
+
+**THE GATE REMOVES AN ACCIDENTAL MITIGATION — record this, it inverts the naive reading.**
+Before the gate, a setup-token slot could never stay live for long: the janitor thrashed it away
+within a tick. That thrash was destructive, but it also guaranteed no such slot ever SAT as the
+live credential. With the gate one can now sit live for up to a year — which is the intended
+behaviour, and is also the precondition that makes ai-maestro's ungated `degraded` sites
+reachable in a way they were not before, because the long-lived fabricated one-year `expiresAt`
+is exactly what outranks every real slot in their max-expiry selection. Still net-positive
+(continuous cache destruction is worse than a latent inversion that needs `best === null`), but
+"the janitor half is strictly an improvement" is false and should not be written anywhere.
+
+**A DEFECT THAT HID FOR FOUR COMMITS, and the reason it hid.** `DEFAULT_CSV = Path.home() / …`
+shipped as a module-level constant in `f4457513`. That is an import-time home capture, which
+`tests/test_no_frozen_home_paths.py` fails the build over (TRDD-ZNN0UK5K — it escapes test and
+env isolation). It is now a call-time `default_csv()` resolver. **It went unnoticed because
+every "gate green" claim in this card's history was a SCOPED run** — this feature's own test
+file, plus lint — never `pytest tests/`. Four commits asserted a green gate that had never been
+run. Run the full suite before claiming it.
+
+**NEXT ACTION — the remaining half is ai-maestro's and is not ours to write.** Both their
+`degraded` push sites still rank a fabricated one-year `expiresAt` above every real slot, so
+the skill's warning stays until their cards land. They have queued the `isStale` comment ask as
+`TRDD-UIDK2SDL` (`column: todo`), awaiting their owner.
+
+**Still unshipped by choice, owner's call:** whether the importer should REFUSE by default
+while the ai-maestro half is open, rather than warn. A review argued a prose warning discharges
+urgency where a refusal cannot be skimmed past. Not done unilaterally — it changes the
+command's behaviour.
 
 **BLOCKED / OWNER DECISION OUTSTANDING:** see "The live cross-repo hazard" below. Filing keys
 is close to a no-op while both rotators classify a setup-token slot as dead on sight. The
@@ -149,10 +176,18 @@ compared the PUSH preconditions and stopped there. A push only matters if `degra
 CONSULTED, and it is guarded: `tick.ts:1367` sits under the comment *"2) DEGRADED fallback —
 no usage-confirmed target"*, after the drain-first selection and after an early return on
 `scopedWall && best === null`. So site 2 additionally requires every healthy alternate to have
-failed its usage probe, while site 1 gets `best === null` free from the outage that caused it.
-Completing the precondition list inverts the ranking. **Gate both; the second gate is one
-line, and offering a partial fix manufactures a decision nobody needs.** Verified in their
-tree after the peer session retracted its own agreement with my ranking.
+failed its usage probe.
+
+**Scope of that, because the first version of this paragraph overreached too.** It said site 1
+"gets `best === null` free from the outage". That is an INFERENCE, not something read: I traced
+the guard, not `best`'s assignment nor `selectDrainFirst`. And it is probably too strong —
+"network down" is per-request, not global, so a live probe that fails while alternate probes
+succeed leaves `candidates` populated and `degraded` is never consulted at all. Site 1's
+precondition is "likely under a TOTAL outage", not free.
+
+What survives: the original ranking compared push preconditions and ignored the consult guard
+entirely, so it was not sound. **Gate both; the second gate is one line, and offering a partial
+fix manufactures a decision nobody needs.**
 
 Both sites are ai-maestro's to fix. That project is not ours to edit: issue or PR only. The
 peer holds cards `TRDD-WLHP34KZ` (the ranking inversion, both sites) and `TRDD-W11LAPSC` (the
@@ -230,9 +265,16 @@ An earlier version of this card claimed the two gates form a one-way door: a no-
 credential that becomes live has "exactly one exit, a 401", marked as intended design. **Both
 halves are wrong**, verified first-hand in `tick.ts` after the peer session retracted it:
 
-1. **There is a second automatic exit.** `tick.ts:1169` is `near = usageNear || scopedWall ||
-   liveExpired`, so the blob passing its own `expiresAt` also triggers rotation. A fabricated
-   one-year expiry DEFERS that exit by a year; it does not remove it.
+1. **Expiry makes rotation ELIGIBLE, which is enough to falsify "exactly one exit".**
+   `tick.ts:1169` is `near = usageNear || scopedWall || liveExpired`, so the blob passing its
+   own `expiresAt` sets the same flag a usage wall does. A fabricated one-year expiry defers
+   that by a year; it does not remove it.
+   **Not "a second automatic exit" — I wrote that first and it overstates in the same way the
+   thing it corrects did.** `near` is eligibility, not rotation: the dwell guard, the
+   drain-guard, and the requirement that a target actually EXIST all still stand between the
+   flag and a switch. A no-refresh credential that is expired AND has no viable alternate
+   stays live indefinitely — which is the very "pinned on a dead credential" case this card
+   treats as the danger elsewhere.
 2. **The gates are not two halves of one thing.** Their candidate loop opens with
    `tick.ts:1218  if (email === liveEmail) continue` — it never examines the live blob at all.
    Theirs governs which ALTERNATES may enter a target list; ours governs whether a 403 on the

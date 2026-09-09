@@ -2549,3 +2549,119 @@ def test_a_successful_switch_records_the_rotation_for_the_fleet(
     rotator._switch_blob("alt@x", _blob("ALT"), "test rotation")
 
     assert len(stamps) == 1, "a successful switch must record the rotation exactly once"
+
+
+# ── the setup-token 403 gate (TRDD-BMITQ2MN) ────────────────────────────────────────────
+#
+# A `claude setup-token` key has no refreshToken and 403s on /api/oauth/usage by design.
+# cmd_auto's death path sets near=True DIRECTLY, bypassing the usage-based SWITCH_AT_5H
+# trigger, and MIN_DWELL_S equals the tick interval — so reading that 403 as death rotates
+# once per minute forever. These pin the gate that stops it, and the guards that keep the
+# gate from softening a 403 it should not.
+
+def _setup_token_blob(tok: str = "sk-ant-oat-x") -> dict:
+    return {"claudeAiOauth": {"accessToken": tok, "refreshToken": None,
+                              "expiresAt": int((time.time() + 86400 * 365) * 1000)}}
+
+
+def test_a_no_refresh_slot_is_identified_as_a_setup_token_slot() -> None:
+    """The positive case: a readable blob with an accessToken and no refreshToken."""
+    assert rotator.is_setup_token_slot(_setup_token_blob()) is True
+
+
+def test_a_full_oauth_slot_is_not_a_setup_token_slot() -> None:
+    """A slot WITH a refresh grant must keep the fatal 403 — the gate must not reach it."""
+    b = _setup_token_blob()
+    b["claudeAiOauth"]["refreshToken"] = "rt-real"
+    assert rotator.is_setup_token_slot(b) is False
+
+
+def test_an_unreadable_live_blob_is_not_a_setup_token_slot() -> None:
+    """THE TRAP THIS GUARD EXISTS FOR: _oauth(None) is {}, and {}.get("refreshToken") is None.
+
+    A bare `refreshToken is None` test therefore calls an UNREADABLE blob a setup-token slot
+    and softens a 403 on a credential nobody can even see. The accessToken requirement is what
+    makes the helper fail SAFE — unreadable must mean "not identified", so the pre-existing
+    fatal behaviour stands.
+    """
+    assert rotator.is_setup_token_slot(None) is False
+    assert rotator.is_setup_token_slot({}) is False
+    assert rotator.is_setup_token_slot({"claudeAiOauth": {}}) is False
+    assert rotator.is_setup_token_slot({"claudeAiOauth": {"refreshToken": None}}) is False, \
+        "no accessToken means the blob was not actually read — never soften on that"
+
+
+def test_cmd_auto_stays_put_on_403_for_a_setup_token_slot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE GATE ITSELF, at the branch — not the helper. A setup-token slot's 403 must NOT rotate.
+
+    Without it the death path sets near=True directly, skipping the SWITCH_AT_5H trigger, and
+    MIN_DWELL_S equals the tick interval — so a healthy imported key rotates every tick,
+    forever. A healthy alternate is offered precisely so a rotation WOULD be possible: the
+    assertion is that none happens anyway.
+    """
+    live = _setup_token_blob("LIVE")          # no refreshToken, a year of local runway
+    alt = _blob("ALT", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": alt},
+                           usage={"LIVE": (403, None), "ALT": (200, _usage_ok())})
+    assert rotator.cmd_auto() == 0
+    assert switches == [], "a setup-token slot's expected 403 must not be read as death"
+
+
+def test_cmd_auto_still_rotates_on_403_for_a_full_oauth_slot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gate must NOT widen. A slot WITH a refresh grant keeps the fatal 403 it always had.
+
+    This is the test that fails if someone later drops the slot-type condition and softens 403
+    for everyone — which would silently pin the user to genuinely dead credentials.
+    """
+    live = _blob("LIVE", expires_ms=_ms_in(50))   # a normal slot: HAS a refreshToken
+    alt = _blob("ALT", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": alt},
+                           usage={"LIVE": (403, None), "ALT": (200, _usage_ok())})
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"], "403 stays fatal for a full-OAuth slot"
+
+
+def test_cmd_auto_still_rotates_on_401_even_for_a_setup_token_slot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """401 stays fatal for EVERY slot type — the gate must not blind us to real death.
+
+    This is what makes softening 403 defensible: a revoked or corrupted credential answers 401
+    (measured), so death retains an authoritative signal the gate never touches.
+    """
+    live = _setup_token_blob("LIVE")
+    alt = _blob("ALT", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": alt},
+                           usage={"LIVE": (401, None), "ALT": (200, _usage_ok())})
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"], "401 must stay fatal for a setup-token slot"
+
+
+def test_cmd_auto_rotates_an_expired_setup_token_slot_despite_the_403_gate(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gate must not pin an EXPIRED setup-token slot: local expiry is API-independent death."""
+    live = _setup_token_blob("LIVE")
+    live["claudeAiOauth"]["expiresAt"] = _ms_in(-1)       # already past its own expiresAt
+    alt = _blob("ALT", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": alt},
+                           usage={"LIVE": (403, None), "ALT": (200, _usage_ok())})
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"], "an expired setup-token slot must still rotate"
+
+
+def test_a_truncated_blob_missing_the_refresh_key_is_not_a_setup_token_slot() -> None:
+    """ABSENT is not NULL. A capture writes "refreshToken": null EXPLICITLY; a truncated or
+    partially-written blob is the one likely to lack the key entirely — and `.get()` returns
+    None for both. Testing `is None` alone would call a corrupt blob a setup-token slot and
+    soften a genuine 403 on it, which is the readability guard failing one layer deeper.
+    """
+    assert rotator.is_setup_token_slot({"claudeAiOauth": {"accessToken": "x"}}) is False, \
+        "a missing refreshToken key means a corrupt blob, not a setup-token slot"
+    assert rotator.is_setup_token_slot(
+        {"claudeAiOauth": {"accessToken": "x", "refreshToken": None}}) is True, \
+        "the key present and null is the real setup-token shape"

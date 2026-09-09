@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from _fake_secrets import dsn  # fragmented fixtures — see tests/README.md
 
 _ROT = Path(__file__).resolve().parent.parent / "scripts" / "oauth_rotator"
 sys.path.insert(0, str(_ROT))
@@ -128,12 +129,19 @@ def test_account_status_delegates_instead_of_trusting_usage(monkeypatch, fake, c
 
 
 def test_account_status_network_error_never_leaks_the_exception_repr(monkeypatch, fake):
-    """A /usage outage reports the exception TYPE only — a repr can carry proxy credentials."""
-    fake(exc=OSError("tunnel to http://user:hunter2@proxy.internal:8080 failed"))
+    """A /usage outage reports the exception TYPE only — a repr can carry proxy credentials.
+
+    The fake proxy URL is BUILT, never written contiguously: a literal
+    `http://user:pass@host` in tracked source trips `test_no_contiguous_secret_literals_in_
+    tracked_source`, which cannot tell a fixture from a real leak (and should not try).
+    """
+    url = dsn("http", "proxy-leak-probe", host="proxy.internal", port=8080, db="")
+    pw = url.split(":")[2].split("@")[0]          # the generated password, for the assertion
+    fake(exc=OSError("tunnel to %s failed" % url))
     monkeypatch.setattr(sct, "_inference_status", lambda t: ("ok", "inference ok"))
     state, detail = sct.account_status("tok")
     assert state == "ok"
-    assert "hunter2" not in detail and "proxy.internal" not in detail
+    assert pw not in detail and "proxy.internal" not in detail
     assert "OSError" in detail
 
 

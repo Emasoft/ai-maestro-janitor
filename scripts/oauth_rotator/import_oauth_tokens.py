@@ -35,7 +35,16 @@ import global_state as gs  # noqa: E402  -- scripts/lib/global_state.py; for the
 import rotator  # type: ignore[import-not-found]  # noqa: E402
 import slot_capture_token as sct  # noqa: E402  -- the single-account path; shared validator + blob
 
-DEFAULT_CSV = Path.home() / ".claude" / "oauth_keys" / "claude_code_oauth_long_lived_keys.csv"
+
+def default_csv() -> Path:
+    """The owner's key file, resolved at CALL time.
+
+    NOT a module-level constant. `Path.home()` evaluated at import freezes whatever HOME the
+    interpreter started with, which escapes test and env isolation — the fseventsd-runaway
+    class, TRDD-ZNN0UK5K, and `tests/test_no_frozen_home_paths.py` fails the build over it.
+    It shipped as a constant in f4457513 and went unnoticed for four commits because the gate
+    was only ever run against this feature's own test file, never the full suite."""
+    return Path.home() / ".claude" / "oauth_keys" / "claude_code_oauth_long_lived_keys.csv"
 
 # The ai-maestro server's OWN rotation-tick lock, in the same machine-wide state dir this
 # plugin owns. Name and window read from its source (lib/server-lockfile.ts,
@@ -92,7 +101,7 @@ def _secure(path: Path) -> None:
     mode = path.stat().st_mode & 0o777
     if not mode & 0o077:
         return
-    if path == DEFAULT_CSV:
+    if path == default_csv():
         path.chmod(0o600)
         print("[import] tightened %s from mode %o to 600 (it held world- or group-readable "
               "long-lived tokens)." % (path, mode))
@@ -179,7 +188,7 @@ def _live_credential_is_dead() -> bool:
 
 def main() -> int:
     argv = sys.argv[1:]
-    csv_path = DEFAULT_CSV
+    csv_path = default_csv()
     if "--csv" in argv:
         i = argv.index("--csv")
         if i + 1 >= len(argv):

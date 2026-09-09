@@ -1010,7 +1010,11 @@ def write_live_blob(blob: dict) -> None:
 # --------------------------------------------------------------------------
 # small utils
 # --------------------------------------------------------------------------
-def _oauth(blob: dict) -> dict:
+def _oauth(blob: dict | None) -> dict:
+    # The annotation says `| None` because the body has ALWAYS accepted it — the isinstance
+    # check exists precisely so an unreadable blob degrades to {} rather than raising. Typing
+    # it as `dict` understated the contract and forced callers holding an Optional to cast,
+    # which is how a None slips past a guard that looks like it handles one.
     return blob.get("claudeAiOauth", {}) if isinstance(blob, dict) else {}
 
 
@@ -1723,6 +1727,34 @@ def _blob_locally_expired(blob: dict) -> bool:
     return e is not None and e <= EXPIRY_GRACE_H
 
 
+def is_setup_token_slot(blob: dict | None) -> bool:
+    """True iff blob is a READABLE credential carrying no refreshToken — a `claude setup-token`
+    key: a ~1-year, inference-scoped token that legitimately 403s on /api/oauth/usage and on
+    every identity endpoint, because it was never granted `user:profile`.
+
+    THE READABILITY GUARD IS THE WHOLE POINT, not a formality. `_oauth(None)` returns `{}`, and
+    `{}.get("refreshToken")` is ALSO None — so a bare `refreshToken is None` test would classify
+    an UNREADABLE live blob (keychain locked, mirror gone, integrity repair mid-flight) as a
+    setup-token slot and make a genuine 403 non-fatal on a credential we cannot even see.
+    Requiring a non-empty accessToken means we only ever soften the verdict for a slot we have
+    actually read and whose shape we have actually confirmed.
+
+    ABSENT IS NOT NULL, and the difference is the whole guard. A capture writes the key
+    EXPLICITLY as null (`"refreshToken": None` → `"refreshToken":null`; measured through both
+    the keychain and plaintext write paths). A full-OAuth blob writes it as a string. A blob
+    that is TRUNCATED or partially written is the one likely to be missing the key entirely —
+    and `.get("refreshToken")` returns None for that too. Testing `is None` alone would call a
+    corrupt blob a setup-token slot and soften a genuine 403 on it, which is the exact failure
+    the readability guard above exists to prevent, one layer deeper. So require the key to be
+    PRESENT and null.
+
+    FAIL-SAFE DIRECTION: unreadable, corrupt, or truncated → False → the pre-existing fatal
+    behaviour stands. This helper can only ever soften a 403 for a slot it positively
+    identified from a shape it fully recognises."""
+    o = _oauth(blob)
+    return bool(o.get("accessToken")) and "refreshToken" in o and o["refreshToken"] is None
+
+
 def is_near_limit(fh: float | None, sd: float | None) -> bool:
     """The LIVE account is 'near a limit' (→ rotate away) once EITHER window
     crosses its switch threshold. Unknown (None) usage on a window never trips
@@ -2023,6 +2055,43 @@ def cmd_auto() -> int:
                 near = True
                 scoped_only = True
                 live_desc += " +SCOPED[%s=%.0f%%]" % (mf["scoped_label"], mf["scoped_util"])
+    elif live_status == 403 and is_setup_token_slot(live_blob) and not live_expired:
+        # A setup-token slot 403s on /usage BY DESIGN — it holds no `user:profile` scope. Read
+        # as death (which is what the branch below does for every other slot) it rotates away
+        # every single tick: the death path sets near=True directly, BYPASSING the usage-based
+        # SWITCH_AT_5H trigger, and MIN_DWELL_S equals the tick interval so the dwell guard is
+        # no brake. That is one switch per minute, forever, destroying the prompt cache
+        # continuously — the whole reason imported keys were inert.
+        #
+        # 401 is deliberately NOT softened here, for any slot. A revoked/corrupted credential
+        # answers 401 (measured: a deliberately corrupted bearer token returns 401, not 403),
+        # so death still has an authoritative signal and this gate does not blind us to it.
+        #
+        # `not live_expired` keeps this arm OFF the expiry path rather than re-implementing it.
+        # An EXPIRED setup-token slot therefore falls through to the 401/403 death branch below
+        # (not to `elif live_expired`, which a 403 can never reach — 401/403 is tested first)
+        # and rotates, which is the outcome we want. COST, stated rather than waved off: it
+        # then logs "token REJECTED (HTTP 403)" instead of naming local expiry, and live_desc
+        # is not purely a log line — it is carried into `_mark_stuck(...)`, which a human reads
+        # when diagnosing a wedged rotator. Nothing PARSES it (no detector matches these
+        # strings), so no machine consumer misreads it; the cost is that a stuck record
+        # attributes an expired token to a server rejection. Accepted because the alternative
+        # is a second copy of the expiry rule in this arm, which could silently drift from the
+        # real one — a wrong ROTATION beats a wrong REASON.
+        #
+        # KNOWN, ACCEPTED EXPOSURE: it is NOT established that every death mode answers 401. A
+        # revoked grant or suspended account could plausibly answer 403 — different server
+        # paths, unmeasured. If one does, this branch holds a dead live credential instead of
+        # rotating to a healthy alternate. That trades SERVICE for nothing, so it is a real
+        # cost, not a free one. It is BOUNDED, though: `not live_expired` means the hold ends
+        # at the blob's own expiresAt — for a setup-token slot, up to a year, not forever.
+        # Accepted only because it reaches slots with no refresh grant at all. See
+        # TRDD-BMITQ2MN.
+        _decide("auto: live %s returned 403 on /usage, which is EXPECTED for a setup-token "
+                "slot (inference-scoped, no refreshToken) — not a death signal; no usage "
+                "learned and the token is not locally expired; staying put"
+                % (live_email or "(live)"))
+        return 0
     elif live_status in (401, 403):
         near = True  # server REJECTED the token (expired/invalid) — authoritative death signal
         live_desc = "token REJECTED (HTTP %d) — expired/invalid" % live_status
