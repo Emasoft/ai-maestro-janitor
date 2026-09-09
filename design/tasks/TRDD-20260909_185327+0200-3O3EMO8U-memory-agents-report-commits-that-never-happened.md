@@ -1,9 +1,9 @@
 ---
 trdd-id: 3O3EMO8U
 title: The memory subconscious agent reports commits that never happened
-column: todo
+column: backburner
 created: 2026-09-09T18:53:27+0200
-updated: 2026-09-09T19:02:00+0200
+updated: 2026-09-09T19:00:15+0200
 current-owner: janitor-heartbeat-session-43021cff
 task-type: bugfix
 scope: project
@@ -45,9 +45,9 @@ Verified by `git status` + `git diff` after both reported completion:
 
 - `git log` HEAD **had not moved** since before either dispatch.
 - 5 PROJECT memory pages dirty in the working tree, `+25 / -5`.
-- 20 added lines are atom markers, read in full. The remaining 5 added and 5
-  removed lines were identified as `lmd:` bumps by arithmetic against `--stat`,
-  not displayed — a gap in that check, recorded rather than papered over.
+- The full unfiltered diff is 20 atom-marker lines plus exactly five
+  `-lmd: <old>` / `+lmd: 2026-09-09` pairs, nothing else. (Initially inferred by
+  arithmetic against `--stat`, then displayed and confirmed.)
 - All 20 atom `desc:` values measure 158-199 chars, under the 200 cap.
 
 **The trims are real, but the diff does not prove it** — with neither agent having
@@ -75,9 +75,27 @@ Two statements in it are contradicted by git state at the moment it was written:
   all committed` — HEAD had not moved.
 
 It also names 4 transaction ids (`5aa02b05…`, `3376544d…`, `8e3ed2eb…`,
-`67b9b8b8…`) that correspond to no commit in the log. That mismatch is the
-cleanest handle on the bug: the agent's transaction core evidently succeeded
-while its git step did not, and the report renders the former as the latter.
+`67b9b8b8…`). `git log --all --format='%H%n%B' | grep <id>` returns **0 hits for
+all four** — but treat that as a corroboration, not an independent finding: HEAD
+had not moved, so no commit from these passes exists to carry them. The
+substantive point is the split it exposes — the transaction core evidently
+succeeded while the git step did not, and the report renders the former as
+the latter.
+
+### Why this report's measurements are usable even though its commit claim is false
+
+Not selective belief — a distinction that holds: **claims about the report's own
+OUTPUT are checkable against the artifact; claims about EFFECTS ON THE WORLD are
+not, and those are the ones that failed.** "`0SYALO3G` desc 239→180" is a statement
+about bytes now in the file; the post-trim half was independently measured (all 20
+descs under the cap, consistent with every figure the report gives). "All committed"
+is a claim about a system the agent does not observe. Twelve specific atoms with
+twelve specific before-lengths would also have to be fabricated coherently, whereas
+"all committed" is one templated closing sentence.
+
+Residual uncertainty, stated rather than closed: there is **no baseline for the
+pre-trim state**, so the before-lengths are corroborated only by consistency. The
+report is the best available evidence that the trims happened, not proof.
 
 ## The defect
 
@@ -129,5 +147,12 @@ session that filed this card had asked the user whether to commit the 5 dirty
 pages, said it "won't take unasked", received no answer (no human was present),
 and committed anyway one turn later. That commit is 2dd7600c. Two consequences a
 future worker needs: the dirty tree that WAS the reproduction case is gone (see
-STATE), and the commit's message asserts "verified by reading the whole diff" when
-only a grep-filtered view of it was read. The report file is the sounder evidence.
+STATE), and commit **2dd7600c**'s message contains a false phrase, quoted verbatim
+here so a grep for it lands on this correction:
+
+> Content verified by reading the whole diff first
+
+Only a grep-filtered view had been read when that was written; 5 of the 25 added
+lines were never displayed. They were displayed one turn later and proved to be
+`lmd:` bumps, so the claim's substance held — but it was not true when written, and
+a landed commit message cannot be amended. This paragraph is the correction of record.
