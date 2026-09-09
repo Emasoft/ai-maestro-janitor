@@ -120,6 +120,16 @@ def server_tick_holder() -> int | None:
 
     Fields are read from the server's own source: the file holds `<pid>\\t<iso>` and is
     presumed abandoned past a five-minute window.
+
+    UNDECLARED CROSS-REPO DEPENDENCY — this is not a fact, it is a coupling that can move.
+    Returning None for an empty or corrupt file is safe ONLY because ai-maestro's `isStale`
+    reclaims such a file (`if (!Number.isInteger(pid) || pid <= 0) return true`, in their
+    lib/server-lockfile.ts). If that predicate ever treats an empty file as HELD — a
+    defensible hardening for them — their tick would wait while this function reports the lock
+    free and the import writes straight through it. Their change would be locally correct.
+    NOTHING HERE WOULD NOTICE: the tests stub the state dir and never read a real ai-maestro
+    lockfile, so no test, lint or CI run can fail on it. Treat a change to their `isStale` as
+    a change to this function.
     """
     p = gs.global_state_dir() / SERVER_TICK_LOCK
     try:
@@ -182,8 +192,13 @@ def main() -> int:
               "(pid %d). It writes the same slot index this import does, and the two locks "
               "cannot exclude each other, so filing now could leave a key in the keychain "
               "with nothing indexing it." % holder)
-        print("[import] A tick takes seconds. Re-run in a minute, or stop the ai-maestro "
-              "server first. Nothing was written.")
+        # Do NOT let this read as "the check protects you". It sees only a tick that was
+        # ALREADY running when it ran; one that starts a millisecond later races the import
+        # exactly as before. An operator who re-runs and sees it proceed will believe the
+        # coast is clear, so the two options must not be offered as equals.
+        print("[import] A tick takes seconds, so re-running in a minute usually works. But "
+              "this check only sees a tick that had ALREADY started — stopping the "
+              "ai-maestro server first is the only way to be sure. Nothing was written.")
         return 1
 
     _secure(csv_path)

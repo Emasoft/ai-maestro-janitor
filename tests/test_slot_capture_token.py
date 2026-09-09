@@ -224,11 +224,12 @@ def run_import(tmp_path, monkeypatch):
         # a live rotation tick holds it — a pass that depends on the host. A subdir, not
         # tmp_path itself, so the state dir is never aliased to the dir holding keys.csv.
         #
-        # This hard-wires the lock-not-held path, so do NOT add a main()-level lock test on
-        # top of it: with no lock the run proceeds, files nothing, and returns 1 — the SAME
-        # code the refusal returns, so `rc == 1` would pass for the wrong reason. The six
-        # server_tick_holder() tests below cover the lock directly, which is the right level;
-        # if a main()-level one is ever really needed, assert on the stdout line, never on rc.
+        # This hard-wires the lock-not-held path, so a lock test written THROUGH this fixture
+        # would pass for the wrong reason: with no lock the run proceeds, files nothing, and
+        # returns 1 — the SAME code the refusal returns. Any main()-level lock test must
+        # therefore bypass this fixture (stub server_tick_holder, or write a real lockfile
+        # into a state dir of its own) AND assert on the stdout line, never on rc alone. The
+        # two below do exactly that.
         monkeypatch.setattr(imp.gs, "global_state_dir", lambda: tmp_path / "state")
         monkeypatch.setattr(imp.rotator, "load_state", lambda: dict(state))
         monkeypatch.setattr(imp.sct, "account_status",
@@ -402,6 +403,34 @@ def test_import_refuses_while_a_live_tick_holds_the_lock(tmp_path, monkeypatch, 
                         lambda *a, **k: called.append("filed") or True)
     assert imp.main() == 1
     assert called == [], "nothing may be written when the import refuses"
+    assert "NOT RUNNING" in capsys.readouterr().out
+
+
+def test_refusal_precedes_chmodding_or_reading_the_key_file(tmp_path, monkeypatch, capsys):
+    """A lock-held run returns before _secure() and read_rows() — the file is truly untouched.
+
+    The skill tells the user exit 1 can mean "the key file was never read". Nothing tested
+    that ORDER: the sibling test stubs server_tick_holder and only proves the refusal happens.
+    This one drives the REAL server_tick_holder against a REAL lockfile and makes both
+    downstream steps explode if reached, so the promise fails loudly if the check ever moves
+    below them.
+    """
+    csv = tmp_path / "keys.csv"
+    csv.write_text("a@x.com,%s\n" % ("a" * 40), encoding="utf-8")
+    csv.chmod(0o600)
+    state = tmp_path / "state"
+    state.mkdir()
+    monkeypatch.setattr(sys, "argv", ["import_oauth_tokens.py", "--csv", str(csv)])
+    monkeypatch.setattr(imp.gs, "global_state_dir", lambda: state)
+    _write_lock(state, os.getpid())  # our own pid — a genuinely live holder
+
+    def _boom(*a, **k):  # noqa: ANN002, ANN003, ARG001
+        raise AssertionError("main() ran past the lock refusal")
+
+    monkeypatch.setattr(imp, "_secure", _boom)
+    monkeypatch.setattr(imp, "read_rows", _boom)
+
+    assert imp.main() == 1
     assert "NOT RUNNING" in capsys.readouterr().out
 
 

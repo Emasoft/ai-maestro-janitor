@@ -5,6 +5,21 @@ description: Import the owner's long-lived Claude Code OAuth keys from ~/.claude
 
 # Janitor import-oauth-tokens
 
+> [!WARNING]
+> **Filed keys are INERT right now, and this command's success message does not say so.**
+> A `setup-token` key has no refreshToken and 403s on the usage endpoint, and BOTH rotators
+> currently read that 403 as a dead credential. So a key imported today is classified dead on
+> sight: the janitor's `cmd_auto` takes its 401/403 death path, which bypasses the usage-based
+> switch trigger, and rotates away every tick — one switch per minute, destroying the prompt
+> cache continuously. **Importing keys before that is fixed makes the rotator worse, not
+> better.**
+>
+> Two changes clear this, neither of them landed: the janitor's stay-put branch must gate on
+> slot type (`refreshToken is None` ⇒ a 403 is expected and non-fatal; **401 stays fatal for
+> every slot**), and ai-maestro must gate its two `degraded` push sites the same way.
+> Tracked in `TRDD-BMITQ2MN`. **Tell the user this before running the import**, and delete
+> this block once the janitor half lands.
+
 ## Overview
 
 Reads ONE file — `~/.claude/oauth_keys/claude_code_oauth_long_lived_keys.csv`, one

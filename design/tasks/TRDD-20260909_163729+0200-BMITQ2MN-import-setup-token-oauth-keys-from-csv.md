@@ -9,7 +9,7 @@ task-type: feature
 scope: project
 project-id: ai-maestro-janitor
 min-approval-requirement: none
-implementation-commits: [f4457513]
+implementation-commits: [f4457513, 780c811d]
 relevant-rules: []
 ---
 
@@ -27,11 +27,20 @@ pass, ruff clean, mypy clean, pyright 0 errors.
   single-account filer (`extract_token`, `account_status`, `setup_token_blob` made public).
 - `tests/test_slot_capture_token.py` — 39 cases.
 
-**NEXT ACTION:** two small changes are under adversarial review and not yet written —
-(1) `run_import` in the test module does not stub `imp.gs.global_state_dir`, so the `main()`
-tests read the REAL machine-wide state dir and would fail if a real ai-maestro rotation tick
-held its lock during a run; (2) the skill's exit-code table documents `1` as "every row was
-rejected, or none parsed", which is false — the lock-refusal path also returns `1`.
+**DONE 2026-09-09 in `780c811d`** (both were reviewed before writing, and the review caught
+that the second fix reproduced the defect it was fixing): `run_import` now stubs
+`imp.gs.global_state_dir` to a SUBDIR of `tmp_path`, so the `main()` tests no longer read the
+real machine-wide state dir; and the skill's exit-code row for `1` now names all four paths
+that return it, not three. Gate re-run green after both.
+
+**NEXT ACTION — the ship-blocker, and it is not a code defect.** `/janitor-import-oauth-tokens`
+currently files keys that neither rotator will use: the janitor's stay-put branch is unwritten
+and both ai-maestro sites are unauthorised proposals. So the command's visible effect is
+"imported N accounts" while its actual effect is to load the rotator with slots it classifies
+dead on sight, driving the once-a-minute thrash that destroys the prompt cache. **The skill
+does not say this.** Either land the slot-type gate first, or the skill states plainly that
+filed keys are inert until it does. Owner's call; the second is done as of `780c811d`'s
+successor so the command cannot mislead in the meantime.
 
 **BLOCKED / OWNER DECISION OUTSTANDING:** see "The live cross-repo hazard" below. Filing keys
 is close to a no-op while both rotators classify a setup-token slot as dead on sight. The
@@ -46,10 +55,16 @@ theirs and must go through an issue or PR, never a direct edit.
   **Do not restate this as "credential death surfaces as 401" full stop.** That generalises
   from ONE control. A revoked grant, a suspended account and a withdrawn client are different
   server paths and could plausibly answer 403; none was measured. The design does not depend
-  on the general claim — the slot-type gate is safe because its leniency reaches only
-  no-refresh slots, where a wrong verdict costs nothing (with no refresh grant the recovery is
-  a human re-mint either way) — which is exactly why the residual is safe to leave open. Close
-  it by measuring one non-corrupted-token death mode, or record it as accepted exposure.
+  on the general claim, but it is NOT free — an earlier version of this line said a wrong
+  verdict "costs nothing, because the recovery is a human re-mint either way", and that is
+  **false**. It swaps recovering the CREDENTIAL for recovering SERVICE, and service is the
+  rotator's whole job. The honest form: **if the generalisation is wrong, this change converts
+  a working rotation into a permanent pin on a dead live credential, for as long as it stays
+  live.** Today a revoked no-refresh slot's 403 is fatal, so the tick rotates to a healthy
+  alternate and the user keeps working; with the gate it holds, logs a deliberate hold that
+  reads as correct, and healthy alternates idle. That exposure is accepted only because no
+  no-refresh slot exists in this vault yet. Close it by measuring one non-corrupted-token
+  death mode (a revoked grant, a suspended account), or record it as accepted.
 - *"Treat an empty server lockfile as held (`if not raw.strip(): return -1`)."* Overturned by
   reading `~/ai-maestro/lib/server-lockfile.ts:60-63`: the server itself reclaims an empty
   file (`if (!Number.isInteger(pid) || pid <= 0) return true // empty / corrupt file →
@@ -162,7 +177,44 @@ anything.
 **This narrows the write window; it does not close it.** A tick that starts mid-import still
 races, and there is no mechanism available to either side that would close it without a native
 addon in ai-maestro (ruled out by its Node-22 ABI constraint) or a shared lock protocol
-neither currently implements.
+neither currently implements. **So the refusal is a courtesy, not a guarantee** — it sees only
+a tick that was already running when the check ran. Stopping the ai-maestro server first is
+the only sound way to be sure, and the skill's stdout must not offer it as a co-equal
+alternative to "re-run in a minute".
+
+### An undeclared cross-repo dependency, named here because nothing else names it
+
+`server_tick_holder()` returns `None` for an empty or corrupt lockfile. That is only SAFE
+because ai-maestro's `isStale` reclaims such a file (`if (!Number.isInteger(pid) || pid <= 0)
+return true`). **If that predicate ever changes to treat an empty file as held — a defensible
+hardening for them — their tick would wait while this importer files straight through it.**
+Their change would be locally correct and would break this caller silently.
+
+Nothing detects that break: not the 39 tests (they stub `global_state_dir` and never read a
+real ai-maestro lockfile), not the gate, not CI. The only thing standing between that change
+and a silently orphaned slot is the peer session's promise to message us if `isStale` moves —
+a promise held in a transcript, not in either repo. The durable fix is one comment in
+ai-maestro's source naming this out-of-repo reader; ask for it on their card, since that file
+is theirs.
+
+### The blob shape both gates rest on — MEASURED 2026-09-09
+
+Both gates test the same field (`oauthOf(b).refreshToken` on their side, `refreshToken is
+None` on ours), and neither had been checked against what the importer actually writes. Traced
+end to end: `setup_token_blob` sets `"refreshToken": None`; `write_slot` does `inner =
+_oauth(blob)` and re-wraps it, preserving the inner dict verbatim; both the keychain path and
+the plaintext fallback serialise with `json.dumps(blob, separators=(",", ":"))`. So the field
+is **present with the JSON value `null`** — not absent, not `""`, not a placeholder string,
+not nested differently. `null` is falsy in TypeScript and round-trips to `None` in Python, so
+**both gates fire.** Had it been a placeholder, both would have silently never fired while
+both cards still read as correct.
+
+### The two gates are a ONE-WAY DOOR — intended, and worth stating
+
+ai-maestro's gate forbids rotating ONTO a no-refresh slot; ours forbids rotating OFF one. A
+no-refresh credential that becomes live by any route — a manual `/login`, an import — then has
+exactly one exit: a 401. That is the intended design, not an oversight, and it is recorded so
+it is not rediscovered as a bug.
 
 ## Secret handling
 
@@ -181,10 +233,35 @@ neither currently implements.
 - [x] a key is only filed after a real 200, or filed with an explicit `unverified` note
 - [x] the live swap requires a proven key, except when the live credential is already expired
 - [x] gate green: 39 tests, ruff, mypy, pyright
-- [ ] `main()` tests are isolated from the real machine-wide state dir
-- [ ] the skill's exit-code table matches what `main()` actually returns
+- [x] `main()` tests are isolated from the real machine-wide state dir (`780c811d`)
+- [x] the skill's exit-code table matches what `main()` actually returns (`780c811d`)
+- [x] the blob's `refreshToken` shape is measured, not assumed, so both gates provably fire
+- [ ] the skill says filed keys are inert until the stay-put branch lands
+- [ ] `main()`'s refusal path is tested — that it returns BEFORE `_secure()` and `read_rows()`,
+      which is what "the key file was never read" promises the user. The six
+      `server_tick_holder()` tests cover the predicate and structurally cannot cover this
 - [ ] the stay-put branch lands, so filing a key is not a no-op
 - [ ] the ai-maestro degraded-selection hazard is raised with that project (issue or PR only)
+- [ ] ai-maestro's `isStale` carries a comment naming this repo's `server_tick_holder` as an
+      out-of-repo reader (their file, their card)
+
+## Corrections to this card's own commit messages
+
+Recorded because a commit message cannot be rewritten, and both are the same error:
+
+- `f4457513` states `count_tokens` **"does not share the inference rate limit"** as a property
+  of the API. The evidence is one measurement — three accounts, one occasion, two of which
+  429'd on `/v1/messages` while `count_tokens` returned 200. That is consistent with a
+  separate limit, and equally with the same limiter accounting a cheaper call differently, or
+  with the 429s simply lapsing between the two calls. The defensible claim is "did not share
+  it in the one measurement taken."
+- `780c811d` frames its TRDD corrections as **"verified first-hand in ai-maestro's tree"**.
+  True of the three code facts. But "which makes it the worse of the two" about site 2 is a
+  judgement about relative reachability, not something read out of the file — reasonable, and
+  not verified, sitting inside a sentence whose frame claims verification.
+
+Both are the same over-generalisation the peer caught in the 401 claim, made in the same
+session. The pattern to watch: one measurement stated as a property.
 
 ## Approval log
 
