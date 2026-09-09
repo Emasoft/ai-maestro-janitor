@@ -3,7 +3,7 @@ trdd-id: 2SKHJ8NR
 title: The stale-index-lock guard self-matches a shell whose command string mentions git, so it refuses forever when invoked from any sh -c wrapper
 column: testing
 created: 2026-09-08T22:46:17+0200
-updated: 2026-09-09T11:58:49+0200
+updated: 2026-09-09T11:59:50+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -41,14 +41,15 @@ eht: []
   whitespace (`fields = line.split()`, line 410) and matches "basename of ANY token equal to
   `git`" — by design to avoid substring hits — so the word `git` anywhere in the wrapped
   command matches. The shell's cwd is the repo, so `_live_git_holds` fails closed on it. The
-  regression test in box 1 is what turns this inference into a measurement.
-- **Why it matters:** every caller that reaches the guard through a wrapper whose command
-  text mentions git — Claude Code's Bash tool, a CI `run:` step executed via `sh -c`, a
-  Makefile recipe — is refused deterministically, not transiently. Whether the production
-  path (dispatch.py → detector under a heartbeat fire) carries `git` in any argv is
-  UNVERIFIED — nobody printed the detector's argv from a fire; confirm before claiming that
-  heartbeat fires pass. A human or agent recovering by hand cannot, unless the command text
-  avoids a bare `git` token. This is lesson [1] of
+  regression test in box 1 turned this inference into a measurement (2026-09-09).
+- **Why it matters (before `9c3af0f2`):** every caller that reached the guard through a
+  wrapper whose command text mentioned git — Claude Code's Bash tool, a CI `run:` step
+  executed via `sh -c`, a Makefile recipe — WAS refused deterministically, not transiently.
+  Whether the production path (dispatch.py → detector under a heartbeat fire) carries `git`
+  in any argv remains UNMEASURED (see NEXT ACTION) — nobody printed the detector's argv from
+  a fire; it no longer matters for correctness after `9c3af0f2`, only for completing the
+  original diagnosis. A human or agent recovering by hand could not, unless the command
+  text avoided a bare `git` token. This is lesson [1] of
   `git-index-lock-orphan-recovery` in a fourth dress: liveness of a process that is not a
   git writer read as holding.
 - **Fix shape (decided by this session; two reviews found no writer it drops):** match the
@@ -170,3 +171,9 @@ eht: []
   `git_utils.py`; "wrapper" defined once; the old matcher's source cited as a reproducible
   `git show`. Also disclosed: the round-2 NEXT ACTION (run controls a and b) was replaced by
   the four measured results, not merely extended.
+- 2026-09-09T11:59:50+0200 — Second post-write review (fork-identified): the Why-it-matters
+  paragraph rewritten to past tense with the fix commit named, and its closing instruction
+  restated as an UNMEASURED bookkeeping item that no longer bears on correctness after
+  `9c3af0f2` — so STATE no longer presents the refusal as live above a DONE bullet that says
+  it is fixed; the Cause paragraph's tense fixed ("turned … into a measurement"). Further
+  wording goes to the owner, not another round.
