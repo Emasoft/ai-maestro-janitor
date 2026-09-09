@@ -41,9 +41,15 @@ theirs and must go through an issue or PR, never a direct edit.
 **SUPERSEDED — do not act on these, they were wrong:**
 - *"Widen `usage_probe.http_get` to return the 403 body so the rotator can distinguish
   `oauth_scope_insufficient` from a real refusal."* Overturned: a deliberately corrupted
-  bearer token returns **401**, not 403. Genuine credential death already surfaces as 401,
-  which is already fatal — so gating on slot type alone is equally good and needs no change
-  to a frozen contract.
+  bearer token returns **401**, not 403, so that death mode is already fatal without any body
+  read — gating on slot type alone is equally good and needs no change to a frozen contract.
+  **Do not restate this as "credential death surfaces as 401" full stop.** That generalises
+  from ONE control. A revoked grant, a suspended account and a withdrawn client are different
+  server paths and could plausibly answer 403; none was measured. The design does not depend
+  on the general claim — the slot-type gate is safe because its leniency reaches only
+  no-refresh slots, where a wrong verdict costs nothing (with no refresh grant the recovery is
+  a human re-mint either way) — which is exactly why the residual is safe to leave open. Close
+  it by measuring one non-corrupted-token death mode, or record it as accepted exposure.
 - *"Treat an empty server lockfile as held (`if not raw.strip(): return -1`)."* Overturned by
   reading `~/ai-maestro/lib/server-lockfile.ts:60-63`: the server itself reclaims an empty
   file (`if (!Number.isInteger(pid) || pid <= 0) return true // empty / corrupt file →
@@ -85,23 +91,48 @@ User-Agent turned the genuine 403 into a 429 and every key filed unvalidated —
 included. That single misclassification is the root cause of the whole User-Agent defect
 class.
 
-## The live cross-repo hazard (verified in `~/ai-maestro/lib/oauth-rotator/tick.ts`)
+## The live cross-repo hazard (read first-hand in `~/ai-maestro/lib/oauth-rotator/tick.ts`)
 
-The network-down branch pushes a slot into `degraded` with **no refreshToken check**:
+Selection among `degraded` is max expiry-hours
+(`for (const c of degraded) if (c[2] > target[2]) target = c`), and a setup-token blob's
+fabricated one-year `expiresAt` outranks every real slot. **Two** sites push into `degraded`
+without testing `refreshToken`, and the second is the dangerous one.
+
+**Site 1 — the probe-else branch (network down).** Reached only when the live blob is
+**locally expired**; the ai-maestro peer supplied that precondition and it is confirmed: with
+the network down and the live token still valid locally, the tick logs *"usage unreachable
+(status N) but token still valid locally; staying put"* and returns before the loop. An
+earlier version of this card asserted "the first network-down tick after an import selects the
+slot that cannot refresh" — that was missing this precondition and overstated the hazard.
+
+**Site 2 — the `unread` fall-through (network UP).** Materially worse, because it needs no
+outage at all:
 
 ```ts
-} else {
-  const eh = expiresInH(b)
-  if (eh === null) continue
-  degraded.push([email, b, eh])
+const unread = st2 === 0 && (o2.reason === 'cooldown' || o2.reason === 'lock_contended')
+if (st2 !== 200 && st2 !== 429 && !unread) {        // SKIPPED when unread
+  ...
+  if (oauthOf(b).refreshToken && eh !== null && !blobLocallyExpired(b)) degraded.push(...)
+  continue                                           // ← this site HAS the test
+}
+if (st2 !== 200) {
+  if (st2 !== 429) {
+    const eh = expiresInH(b)
+    if (eh !== null && !blobLocallyExpired(b)) degraded.push([email, b, eh])   // ← NO test
+  }
+  continue
 }
 ```
 
-while the sibling branch ~35 lines above has
-`if (oauthOf(b).refreshToken && eh !== null && !blobLocallyExpired(b)) degraded.push(...)`.
-Selection is max expiry-hours (`for (const c of degraded) if (c[2] > target[2]) target = c`),
-and a setup-token blob's fabricated one-year `expiresAt` outranks every real slot. So the
-first network-down tick after an import selects the slot that cannot refresh.
+A probe in `cooldown` or `lock_contended` returns status 0, so `unread` is true, the refresh
+block is skipped, and control reaches the untested push. A setup-token blob is not
+`blobLocallyExpired` (its `expiresAt` is a year out), so it enters `degraded` and wins the
+ranking — during ordinary operation, on a probe cooldown, which is common rather than rare.
+
+Both sites are ai-maestro's to fix. That project is not ours to edit: issue or PR only. The
+peer holds cards `TRDD-WLHP34KZ` (the ranking inversion, both sites) and `TRDD-W11LAPSC` (the
+403 thrash loop), both at `column: proposal` and unauthorised — nothing is written to
+`tick.ts`.
 
 ## The stay-put branch (the janitor half, NOT yet implemented)
 

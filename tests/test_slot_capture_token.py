@@ -219,6 +219,17 @@ def run_import(tmp_path, monkeypatch):
         filed: list[str] = []
 
         monkeypatch.setattr(sys, "argv", ["import_oauth_tokens.py", "--csv", str(csv)])
+        # main()'s FIRST action reads gs.global_state_dir() for the ai-maestro server lock.
+        # Without this stub these tests read the REAL machine-wide state dir and fail whenever
+        # a live rotation tick holds it — a pass that depends on the host. A subdir, not
+        # tmp_path itself, so the state dir is never aliased to the dir holding keys.csv.
+        #
+        # This hard-wires the lock-not-held path, so do NOT add a main()-level lock test on
+        # top of it: with no lock the run proceeds, files nothing, and returns 1 — the SAME
+        # code the refusal returns, so `rc == 1` would pass for the wrong reason. The six
+        # server_tick_holder() tests below cover the lock directly, which is the right level;
+        # if a main()-level one is ever really needed, assert on the stdout line, never on rc.
+        monkeypatch.setattr(imp.gs, "global_state_dir", lambda: tmp_path / "state")
         monkeypatch.setattr(imp.rotator, "load_state", lambda: dict(state))
         monkeypatch.setattr(imp.sct, "account_status",
                             lambda t: (statuses.get(t, "ok"), "stub"))

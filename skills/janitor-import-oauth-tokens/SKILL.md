@@ -77,12 +77,17 @@ file exists, everything from here is mechanical.
 | code | meaning |
 |---|---|
 | 0 | at least one slot was filed. Any failures are named on stdout |
-| 1 | nothing was filed — every row was rejected, or none parsed |
+| 1 | nothing was filed. Stdout says which of four: an ai-maestro rotation tick held its lock (the key file was never read), no usable rows parsed, two rows carried the same token, or every row was rejected |
 | 2 | no key file, or a bad argument |
 
 A partial import exits 0 on purpose. The accounts that landed are usable immediately, and
 re-running the whole import to chase one bad row would redo keychain writes that were already
 correct.
+
+Exit 1 deliberately does not separate *"your input was examined and rejected"* from *"your
+input was never examined"* — the lock case is the second, and the fix for it is to re-run
+unchanged rather than to edit the file. A human reads which one from stdout. If something ever
+scripts this command, that is the distinction worth adding a code for.
 
 ## Notes
 
