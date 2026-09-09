@@ -3,7 +3,7 @@ trdd-id: 2SKHJ8NR
 title: The stale-index-lock guard self-matches a shell whose command string mentions git, so it refuses forever when invoked from any sh -c wrapper
 column: testing
 created: 2026-09-08T22:46:17+0200
-updated: 2026-09-09T11:52:53+0200
+updated: 2026-09-09T11:58:49+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -80,32 +80,36 @@ eht: []
   both; new code 77 passed over `tests/test_git_index_lock_recovery.py`,
   `tests/test_git_index_lock_e2e.py`, `tests/test_stale_index_lock_detector.py` plus three
   of the guard's caller test files (the invocation lives in the session's task output, not
-  in the repo). ruff, mypy, pyright artefacts from 2026-09-08 23:13 are clean (mypy: `1
-  source file`, so scoped to `git_utils.py`; comment-only edits followed; the publish gate
+  in the repo). ruff, mypy, pyright artefacts from 2026-09-08 23:13 are clean (mypy reported
+  `1 source file` — which one is not recorded; comment-only edits followed; the publish gate
   re-runs all three tree-wide). Live probe at the lib level from a Bash-tool shell whose
   command text mentioned git printed `matched pids: []` in the background run launched by
   the 2026-09-08 session (exited 0; its output carries no clock line).
 - **Detector-level controls (2026-09-09; throwaway repos under the session scratchpad, a
   fresh 0-byte `.git/index.lock` each, `CLAUDE_PLUGIN_OPTION_STALE_INDEX_LOCK_MIN_AGE=0`,
   fresh `<repo>/.janitor/state` — there is no separate state-dir knob, the state dir derives
-  from `CLAUDE_PROJECT_DIR`):** (a) git-free wrapper → the detector printed its `Removed a
+  from `CLAUDE_PROJECT_DIR`):** (a) git-free wrapper (wrapper = the Bash-tool zsh whose `-c` string is the command text,
+  the same shape as the 2026-09-08 refusal) → the detector printed its `Removed a
   stale .git/index.lock` line, lock gone (shows the detector removes at all; dispatch's
   actual argv is still unread from a fire, so the production-path claim stays a stand-in).
   (b) wrapper whose text carried a bare `git` token but whose cwd was OUTSIDE the repo →
   same outcome, NOT discriminating: `_live_git_holds` excludes a matched pid whose cwd
   resolves outside `repo_root` (this card's own box 2 said so; a review round forgot it).
   (c) child `sh -c 'sleep 60 # git'` with cwd INSIDE → same outcome, NOT discriminating
-  either: sh tail-execs into `sleep 60`, so no `git` token reaches the ps table — the design
-  this card's box 2 originally proposed has that hole. (d) child `/bin/sh -c 'sleep 60; :
+  either: on this host's `/bin/sh` the shell tail-exec'd into `sleep 60` (ps line `sleep 60`,
+  no `git` token) — the design this card's box 2 originally proposed has that hole here and
+  may elsewhere. (d) child `/bin/sh -c 'sleep 60; :
   git'` with cwd INSIDE (two commands keep sh alive; ps line `/bin/sh -c sleep 60; : git`,
   the only git-bearing line in the saved snapshot): the OLD `_live_git_pids` (from
-  `01637fba`) replayed on that snapshot returned `[60722]` (the child), the NEW returned
+  `git show 01637fba:scripts/lib/git_utils.py`) replayed on that snapshot returned `[60722]` (the child), the NEW returned
   `[]`, and the new-code detector printed its Removed line and the lock was gone. The old
   DETECTOR was not run end to end; the old rule's refusal is measured at unit level (2 failed
   by name) and at matcher level on this live snapshot. Reports:
   `reports/colony/20260909_113921+0200-unit{3,4,5,6}-*.md` (gitignored, this machine).
-- **NEXT ACTION:** none open on this card; closure (`testing` → `complete`) is the owner's
-  call.
+- **NEXT ACTION:** none blocking closure; one deliberately unmeasured item — the detector's
+  argv under a real heartbeat fire (Why it matters, above) — is left as a stand-in and would
+  need one `ps` snapshot during a fire to close; the owner decides whether closure
+  (`testing` → `complete`) waits for it.
 
 ## Acceptance
 
@@ -159,3 +163,10 @@ eht: []
   control results and the correction of the "discriminating run" wording were added after
   round 2 from measured output, not re-reviewed before the write (disclosed in the session
   reply). Tier 0, no publish.
+- 2026-09-09T11:58:49+0200 — Post-write review (fork-identified, not a new round): the sh
+  tail-exec claim scoped to this host; NEXT ACTION names the one deliberately unmeasured item
+  instead of "none open" (the Why-it-matters paragraph still says UNVERIFIED, and the two
+  lines contradicted each other); mypy's `1 source file` no longer inferred to be
+  `git_utils.py`; "wrapper" defined once; the old matcher's source cited as a reproducible
+  `git show`. Also disclosed: the round-2 NEXT ACTION (run controls a and b) was replaced by
+  the four measured results, not merely extended.
