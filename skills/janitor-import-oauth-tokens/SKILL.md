@@ -1,6 +1,6 @@
 ---
 name: janitor-import-oauth-tokens
-description: Import the owner's long-lived Claude Code OAuth keys from ~/.claude/oauth_keys/claude_code_oauth_long_lived_keys.csv into the rotator's encrypted slots, and adopt the new key for the account that is live right now (no session restart). Runs unattended — no TTY, no prompt, no browser. Use after the user has minted keys with /login then `claude setup-token` and pasted them into that file, or whenever they say "import my oauth tokens", "I added a new token", "load the keys csv", "the rotator does not know my new key". Trigger with /janitor-import-oauth-tokens.
+description: Import the owner's long-lived Claude Code OAuth keys from ~/.claude/oauth_keys/claude_code_oauth_long_lived_keys.csv into the rotator's encrypted slots, and adopt the new key for the account that is live right now (no session restart). Runs unattended — no TTY, no prompt, no browser. Use after the user has minted keys with /login and then the CLI's `setup-token` subcommand and pasted them into that file, or whenever they say "import my oauth tokens", "I added a new token", "load the keys csv", "the rotator does not know my new key". Trigger with /janitor-import-oauth-tokens.
 ---
 
 # Janitor import-oauth-tokens
@@ -84,7 +84,7 @@ file exists, everything from here is mechanical.
    - An `IGNORED` line means the file has a typo. Tell the user the line number. Never print
      the line's contents, since field 2 is a secret.
    - A `WARNING` about a shared credential means `/login` was on one account while
-     `claude setup-token` ran for another. That account's key must be re-minted in
+     the `setup-token` mint ran for another. That account's key must be re-minted in
      login-then-mint order, or the rotator will spend one subscription under two names.
 
 4. **Confirm the roster.** `env -u CLAUDE_PLUGIN_DATA python3

@@ -1,6 +1,6 @@
 ---
 name: janitor-refresh-cc-logins
-description: Re-stock the rotator with a long-lived OAuth key per account. Walks the user through /login then `claude setup-token` per account, has them paste each key into the keys CSV, then imports the file with /janitor-import-oauth-tokens. INTERACTIVE — login and mint need a passkey prompt and a Cloudflare challenge, so it PAUSES for the user; never select it in a cron or headless context. Use on an oauth-login-needed / oauth-cookie-reminder nudge, when a slot's refresh is dead, or when "had to rotate manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-cc-logins, "reauth my accounts".
+description: Re-stock the rotator with a long-lived OAuth key per account. Walks the user through /login and then the CLI's `setup-token` subcommand per account, has them paste each key into the keys CSV, then imports the file with /janitor-import-oauth-tokens. INTERACTIVE — login and mint need a passkey prompt and a Cloudflare challenge, so it PAUSES for the user; never select it in a cron or headless context. Use on an oauth-login-needed / oauth-cookie-reminder nudge, when a slot's refresh is dead, or when "had to rotate manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-cc-logins, "reauth my accounts".
 ---
 
 # Janitor refresh-cc-logins
@@ -105,10 +105,8 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
    > 6. Click **Authenticate**. The page confirms you are authenticated.
    > 7. Go back to Claude Code and press Enter to confirm.
    > 8. Open a new terminal window (or exit Claude Code first).
-   > 9. Run:
-   >    ```bash
-   >    claude setup-token
-   >    ```
+   > 9. Run `claude` with the `setup-token` subcommand — in your own terminal, never through
+   >    the agent (the mint is the human's step; the agent only imports the result).
    > 10. The browser opens again. Click **Authenticate**.
    > 11. Back in the terminal, the command finishes and prints a **1-year** OAuth key. It
    >     prints ONCE — copy it now.
