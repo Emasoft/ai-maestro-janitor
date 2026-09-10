@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - **oauth:** Run the real mutation; withdraw two false claims from the card (TRDD-BMITQ2MN) (979e4d1)
 - **ci:** Smoke wall clock 60→240 s for the stampless first fire (TRDD-TWF7DXXR) (5347836)
 - **skills:** Word the setup-token mint as the human's step, so CPV's credential-theft rule stops reading it as an agent invocation (TRDD-BMITQ2MN) (1c797cf)
+- **tests:** Move fixture e-mail domains to the reserved .test TLD (TRDD-BMITQ2MN) (9ef139d)
 
 ### Documentation
 
@@ -48,6 +49,7 @@ All notable changes to this project will be documented in this file.
 - **memory:** Janitor repair pass on 4 PROJECT pages — two "See also" sections moved below their atoms, four atom descriptions shortened to the length cap (46c6bcb)
 - **claude-md:** Wikimem index digest refreshed by the janitor after the git-index-lock page changed (TRDD-2SKHJ8NR) (8f5c04c)
 - **memory:** Commit the atomize+repair passes' output, which the agents left uncommitted (2dd7600)
+- Bump version to 3.5.0 (a4bfee6)
 ## [3.4.15] — 2026-09-08
 
 ### Bug Fixes
@@ -2597,13 +2599,6 @@ All notable changes to this project will be documented in this file.
 - **209:** Fragment the fake token literal per the secret-hygiene gate (fab6666)
 ## [2.4.0] — 2026-08-05
 
-### Miscellaneous Tasks
-
-- Align version to the remote's 2.3.1 before re-cutting the release (4175e59)
-- README badge to 2.3.1 — completes the version alignment (31ea21d)
-- Bump version to 2.4.0 (c48fe81)
-## [2.3.1] — 2026-08-05
-
 ### Bug Fixes
 
 - **trdd:** A DONE next-action line no longer masks the pending ones (TRDD-N7NZOYAK) (77b9ba2)
@@ -2680,12 +2675,6 @@ All notable changes to this project will be documented in this file.
 - **dirty-tree:** Stop recommending 'git stash' — it silently swallows other agents' work ([#188](https://github.com/Emasoft/ai-maestro-janitor/issues/188)) (83d38a5)
 - **report-to-trdd:** Accept the abstain marker the curator ACTUALLY writes ([#121](https://github.com/Emasoft/ai-maestro-janitor/issues/121)) (5312a2a)
 - **trigger:** The presence gate DEFERS to a busy pane instead of abandoning the send (62ff1ca)
-- **rules:** De-vendor lean-ctx from the shipped heartbeat-protocol rule ([#10](https://github.com/Emasoft/ai-maestro-janitor/issues/10)) ([#202](https://github.com/Emasoft/ai-maestro-janitor/issues/202)) (5bab427)
-- **tickets:** A human-refused proposal suppresses re-proposal until its evidence changes ([#203](https://github.com/Emasoft/ai-maestro-janitor/issues/203)) (3c565fe)
-- **detectors:** Two structural false-positive modes in the memory detectors ([#204](https://github.com/Emasoft/ai-maestro-janitor/issues/204)) (a2ad775)
-- **rules:** The shipped byline template must carry no @ — a bare handle pages a real account ([#198](https://github.com/Emasoft/ai-maestro-janitor/issues/198)) ([#205](https://github.com/Emasoft/ai-maestro-janitor/issues/205)) (d7bb754)
-- **detectors:** The dirty-tree nudge must never recommend a bare git stash ([#206](https://github.com/Emasoft/ai-maestro-janitor/issues/206)) (812da1d)
-- **tests:** The suite must pass from a clean /tmp clone — three env-coupled defects ([#207](https://github.com/Emasoft/ai-maestro-janitor/issues/207)) (413723c)
 
 ### Documentation
 
@@ -2850,9 +2839,10 @@ All notable changes to this project will be documented in this file.
 - **cpv:** Pin v5.1.4 — a second release overtook the pin mid-publish (ff3118f)
 - **manifest:** Declare cpv.canon none — RC-SHIP-BINARY-ONLY-STRICT does not fit this plugin (1e787ac)
 - Bump version to 2.4.0 (b209238)
-- Lock pyyaml in the dev extra (follow-up to #207 — the resolution moved with pyproject and the publish gate refuses a dirty tree) ([#208](https://github.com/Emasoft/ai-maestro-janitor/issues/208)) (b33c55a)
 - Bump version to 2.4.0 (2482bfe)
-- Bump version to 2.3.1 (cf0de33)
+- Align version to the remote's 2.3.1 before re-cutting the release (4175e59)
+- README badge to 2.3.1 — completes the version alignment (31ea21d)
+- Bump version to 2.4.0 (c48fe81)
 
 ### Revert
 
@@ -2869,6 +2859,21 @@ All notable changes to this project will be documented in this file.
 - **rules:** Pin that every FULL REFERENCE pointer resolves (TRDD-none) (c468a92)
 - **memory:** Record the falsification result — 1 of the 5 new tests proves the filter (03b09b7)
 - **issue-catalog:** Reconcile the refused-suppression assertion with the merged contract (feb3002)
+## [2.3.1] — 2026-08-05
+
+### Bug Fixes
+
+- **rules:** De-vendor lean-ctx from the shipped heartbeat-protocol rule ([#10](https://github.com/Emasoft/ai-maestro-janitor/issues/10)) ([#202](https://github.com/Emasoft/ai-maestro-janitor/issues/202)) (5bab427)
+- **tickets:** A human-refused proposal suppresses re-proposal until its evidence changes ([#203](https://github.com/Emasoft/ai-maestro-janitor/issues/203)) (3c565fe)
+- **detectors:** Two structural false-positive modes in the memory detectors ([#204](https://github.com/Emasoft/ai-maestro-janitor/issues/204)) (a2ad775)
+- **rules:** The shipped byline template must carry no @ — a bare handle pages a real account ([#198](https://github.com/Emasoft/ai-maestro-janitor/issues/198)) ([#205](https://github.com/Emasoft/ai-maestro-janitor/issues/205)) (d7bb754)
+- **detectors:** The dirty-tree nudge must never recommend a bare git stash ([#206](https://github.com/Emasoft/ai-maestro-janitor/issues/206)) (812da1d)
+- **tests:** The suite must pass from a clean /tmp clone — three env-coupled defects ([#207](https://github.com/Emasoft/ai-maestro-janitor/issues/207)) (413723c)
+
+### Miscellaneous Tasks
+
+- Lock pyyaml in the dev extra (follow-up to #207 — the resolution moved with pyproject and the publish gate refuses a dirty tree) ([#208](https://github.com/Emasoft/ai-maestro-janitor/issues/208)) (b33c55a)
+- Bump version to 2.3.1 (cf0de33)
 ## [2.3.0] — 2026-08-02
 
 ### Documentation
