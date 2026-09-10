@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.0] — 2026-09-10
+
+### Bug Fixes
+
+- **git-utils:** The live-git matcher reads only the executable token, so a shell whose -c string mentions git no longer holds the stale-lock guard closed (TRDD-2SKHJ8NR) (9c3af0f)
+- **oauth:** Isolate the import tests from the real state dir; stop the exit-code table lying (TRDD-BMITQ2MN) (780c811)
+- **oauth:** Say filed keys are inert; name the cross-repo coupling; test the refusal ORDER (TRDD-BMITQ2MN) (bc85bf6)
+- **oauth:** Run the real mutation; withdraw two false claims from the card (TRDD-BMITQ2MN) (979e4d1)
+- **ci:** Smoke wall clock 60→240 s for the stampless first fire (TRDD-TWF7DXXR) (5347836)
+- **skills:** Word the setup-token mint as the human's step, so CPV's credential-theft rule stops reading it as an agent invocation (TRDD-BMITQ2MN) (1c797cf)
+
+### Documentation
+
+- Add TRDD-TWF7DXXR — CI Smoke red on 3.4.15: dispatch.py first fire takes 108s in a fresh clone, trdd-state-reconciliation alone 75s over 416 cards (code unchanged since 3.4.14) (dd64309)
+- **TWF7DXXR:** STATE re-worded to its evidence — board size withdrawn as the cause, step timings and the shared-lib seam added (review of dd643096) (24b9e1b)
+- **TWF7DXXR:** Board growth is "not explained", not "not the cause"; seven subprocess calls, git_utils chain unchecked; 09-03-board timing is option 1's first step (post-write review of 24b9e1b1) (0210d52)
+- **TWF7DXXR:** The code-vs-cards measurement holds the scripts at HEAD — a worktree at 4326519d would swap board and scripts together (confirmation review of 0210d527) (30a76cc)
+- **TWF7DXXR:** The 09-03-board recipe uses no-overlay restore, commits the board, and labels the slow outcome three-way (review of 30a76cc3) (63295a4)
+- **TWF7DXXR:** Separating measurement taken — HEAD board 119 s vs 09-03 board 73 s under HEAD scripts; the cost is content-driven, and the code path grew regardless of board (49c0995)
+- Add TRDD-2SKHJ8NR — the stale-index-lock guard self-matches a shell whose -c string mentions git, refusing forever from any sh -c wrapper (ac727c1)
+- **2SKHJ8NR:** The card no longer calls an undisplayed token "measured" — the probe line was truncated before the git token; by-hand detector run marked as the same self-match; production-path claim marked unverified (TRDD-2SKHJ8NR) (f595994)
+- **2SKHJ8NR:** Second review round — the by-hand detector run is a conditional, not a shown self-match; "the probe itself" is "consistent with", with etime 00:00 as the evidence; the split is the matcher's, not ps's; box 2 cannot pass for the wrong reason (TRDD-2SKHJ8NR) (2209d3e)
+- **2SKHJ8NR:** Round 2's own over-claim corrected — the by-hand detector run's timestamp is not in evidence, so too-young is not excluded; the control names the detector's real knob (TRDD-2SKHJ8NR) (b46464d)
+- **7MGJYLY5:** Four constrained cards carry their relationship line to the owner ruling — CONSISTENT WITH the R each touches, none delivers the context-fill trigger (TRDD-7MGJYLY5) (59d6f50)
+- **7MGJYLY5:** 1QJIZFFW needs a scope change on R3, OES0NN3F conflicts with R2 — both recorded in their STATE, owner decision pending; box 1 ticked (TRDD-7MGJYLY5) (01637fb)
+- **7MGJYLY5:** Three relationship lines say what was measured — "no context-fill trigger found (read + grep, not a full read)", "one mention (grep count)", box 1 names how the bodies were read (TRDD-7MGJYLY5) (e577266)
+- **memory:** Git-index-lock-orphan-recovery gains lesson [^4] — a shell whose -c string mentions git read as a live holder, the fourth self-match form (TRDD-2SKHJ8NR) (442e379)
+- **2SKHJ8NR:** The card records the landed fix — implementation-commits 9c3af0f2, column testing, boxes 1–3 ticked, four detector-level controls with what each did and did not show (TRDD-2SKHJ8NR) (c3e0a76)
+- **2SKHJ8NR:** Post-write review — sh tail-exec claim scoped to this host, NEXT ACTION names the one unmeasured item, mypy scope not inferred, wrapper defined (TRDD-2SKHJ8NR) (f3044e0)
+- **2SKHJ8NR:** STATE no longer presents the refusal as live — Why-it-matters in past tense with the fix named, the argv item restated as bookkeeping after 9c3af0f2 (TRDD-2SKHJ8NR) (0c02cc3)
+- Add TRDD-BMITQ2MN — the OAuth setup-token CSV importer, and its two open decisions (e637f17)
+- Add TRDD-3O3EMO8U — the memory agent reports commits that never happened (577b47d)
+- Correct TRDD-3O3EMO8U — the diff never proved the trims; the report does (f91b3e9)
+- TRDD-3O3EMO8U to backburner; close the two gaps by measuring them (91bf150)
+- **TWF7DXXR:** Option 2 landed as 5347836f — column testing, boxes 2/4, box 3 N/A; BMITQ2MN gains 1c797cfe (TRDD-TWF7DXXR) (11d5764)
+
+### Features
+
+- **oauth:** /janitor-import-oauth-tokens — bulk-import setup-token keys from the CSV (f445751)
+- **oauth:** Stay put on a setup-token slot's expected 403 — the gate that makes imported keys usable (TRDD-BMITQ2MN) (1adcf17)
+
+### Miscellaneous Tasks
+
+- **memory:** Janitor repair pass on 4 PROJECT pages — two "See also" sections moved below their atoms, four atom descriptions shortened to the length cap (46c6bcb)
+- **claude-md:** Wikimem index digest refreshed by the janitor after the git-index-lock page changed (TRDD-2SKHJ8NR) (8f5c04c)
+- **memory:** Commit the atomize+repair passes' output, which the agents left uncommitted (2dd7600)
 ## [3.4.15] — 2026-09-08
 
 ### Bug Fixes
@@ -418,6 +464,7 @@ All notable changes to this project will be documented in this file.
 - Refresh the CLAUDE.md wikimem index (66 pages) (6659cf0)
 - **memory:** Repair pass on 5 PROJECT pages — 4 inverted-tier-shape fixes (roster gains Applies to; findings, scopes-and-format, tooling-and-protocol retagged component) + 16 over-cap atom descs trimmed to 200 chars (747b8be)
 - Bump version to 3.4.15 (634758c)
+- Bump version to 3.4.15 (8c07f50)
 
 ### Refactor
 
