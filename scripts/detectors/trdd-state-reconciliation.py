@@ -31,18 +31,32 @@ candidate is not re-nagged every heartbeat.
 from __future__ import annotations
 
 import dataclasses
+import io
 import os
 import re
+import subprocess
 import sys
+import tarfile
 from datetime import datetime
 from pathlib import Path
 
-# This detector is READ-ONLY over git, and every one of its six git invocations goes through
-# `state.run_subprocess`, which takes no env argument — so set the flag process-wide, once,
-# rather than wrapping each call. A plain git takes `.git/index.lock` and can kill a
-# concurrent writer (janitor#245); five sibling detectors already set this per-call, and this
-# one set it nowhere. Check 5 made that materially worse: it runs TWO git calls per candidate
-# TOKEN per card, where the pre-existing checks ran a handful per card.
+# This detector is READ-ONLY over git. Every invocation through `state.run_subprocess`
+# (which takes no env argument) needs this set process-wide, once, rather than per-call — a
+# plain git takes `.git/index.lock` and can kill a concurrent writer (janitor#245); five
+# sibling detectors already set this per-call, and this one set it nowhere. `_corpus_at_head`
+# below calls `git archive` directly (its tar output is binary; `run_subprocess` forces
+# `text=True`) and inherits this same process env, so the flag still covers it.
+#
+# Check 5 used to run ONE `git grep` subprocess per candidate TOKEN per card (~2985 unique
+# tokens measured on this board — the actual CI 60s-cap killer, TRDD-TWF7DXXR: even a fast
+# `git grep -q` costs ~30ms of pure process-startup overhead, and 2985 * 30ms alone is ~90s).
+# A single `git grep -F -f <patternfile>` batching all tokens into ONE call was tried and
+# rejected: measured 31s for just 500 patterns — git's multi-pattern fixed-string matcher
+# scales with patterns * corpus size, not patterns * process-count, so it traded one
+# bottleneck for a worse one. `_tokens_absent_at_head` instead loads the whole `scripts/`
+# corpus ONCE (`_corpus_at_head`, one `git archive` call, ~0.1s) and resolves every token's
+# presence with Python's `in` (measured 2985 tokens over a 12.8MB corpus: ~15.6s total) — only
+# the (much smaller) genuinely-absent subset then pays the per-token `git log -G` history walk.
 os.environ["GIT_OPTIONAL_LOCKS"] = "0"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -218,45 +232,78 @@ def _commit_touches_impl(sha: str, root: Path, trdd_prefix: str) -> bool:
     return any(not f.startswith(trdd_prefix) for f in files)
 
 
-def _symbol_absent_at_head(token: str, root: Path) -> bool:
-    """True iff `token` appears NOWHERE in `scripts/` at HEAD, as a plain substring.
+def _corpus_at_head(root: Path, *, timeout_s: float = 15) -> str | None:
+    """Concatenated text content of every tracked file under `scripts/` at HEAD, loaded in
+    ONE `git archive` call — the seam `_tokens_absent_at_head` uses so the many token
+    substring checks run as in-process string search instead of one `git grep` each.
 
-    `git grep` searches the committed HEAD tree (not the working copy), so a
-    dirty tree mid-refactor never produces a false "still there". Exit code 0 =
-    found (not absent), 1 = no match (absent); any other code (bad pathspec,
-    corrupt repo) is UNKNOWN and fails open — never flag on an inconclusive read.
+    Bypasses `state.run_subprocess` on purpose: `git archive`'s tar stream is binary, and
+    that helper forces `text=True` (fine for the plumbing every other call here reads, wrong
+    for tar framing). This inherits the same `GIT_OPTIONAL_LOCKS=0` process env set at import
+    time, so it is not weaker than the calls that go through the helper.
 
-    The corpus and the matching MUST mirror `_symbol_in_history` exactly (same
-    `scripts` pathspec, same substring semantics), because the two together form
-    ONE predicate: "existed once, gone now". Two probes that disagree measure
-    nothing, and both original spellings were individually defensible — which is
-    why the asymmetry survived review and only surfaced as inexplicable findings
-    (measured 2026-08-12; the corrected pair fixes 4 of 10 verdicts, 0 regressions):
-
-    * `-w` here vs a substring `-S` there flagged as DEAD any token surviving only
-      as a SUFFIX of a longer identifier — e.g. a knob documented in prose as
-      `FLEET_AWAITING_ESC_IDLE_S` while the code holds
-      `CLAUDE_PLUGIN_OPTION_FLEET_AWAITING_ESC_IDLE_S`. `_` is a word character,
-      so `-w` can never match it. That was a false alarm on a live card.
-    * `tests` in the corpus here vs `scripts` there made this check BLIND to the
-      very symbols it was built to catch: its own fixture quotes them in a
-      synthetic STATE block, so the proof that it works is what stopped it
-      working. A fixture is evidence of the bug, never evidence the symbol lives.
+    Fails open (`None`) on any git/tar error — exactly like every other seam in this file, an
+    error must never read as "the tree is empty" (which would make everything look absent).
     """
-    proc = state.run_subprocess(
-        ["git", "-C", str(root), "grep", "-q", "-e", token, "HEAD", "--", "scripts"],
-        timeout=8,
-        detector_name="trdd-state-reconciliation",
-    )
-    if proc is None or proc.returncode not in (0, 1):
-        return False
-    return proc.returncode == 1
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "archive", "HEAD", "--", "scripts"],
+            capture_output=True, timeout=timeout_s, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
+            parts = [
+                fh.read()
+                for member in tar.getmembers()
+                if member.isfile() and (fh := tar.extractfile(member)) is not None
+            ]
+    except tarfile.TarError:
+        return None
+    return b"\n".join(parts).decode("utf-8", errors="replace")
+
+
+def _tokens_absent_at_head(tokens: set[str], root: Path) -> set[str] | None:
+    """Which of `tokens` appear NOWHERE in `scripts/` at HEAD, as a plain substring —
+    resolved for the WHOLE batch by loading the corpus ONCE instead of one `git grep`
+    subprocess per token.
+
+    Replaces the old per-token `_symbol_absent_at_head`: that call cost one `git`
+    subprocess PER unique backtick token on the board (~2985 measured here — mostly pure
+    process-startup overhead, ~30ms each), which was the actual CI 60s-cap killer
+    (TRDD-TWF7DXXR). A single `git grep -F -f <patternfile>` batching all tokens into one
+    call was tried and rejected: measured 31s for just 500 patterns, because git's
+    multi-pattern fixed-string matcher scales with patterns * corpus size — it just moves
+    the same cost into one slow call instead of many fast ones. Loading the corpus once and
+    testing membership with Python's `in` (measured: 2985 tokens over a 12.8MB corpus in
+    ~15.6s total, vs ~90s+ for either git-side approach) is the actual win.
+
+    `git archive` reads the committed HEAD tree (not the working copy), so a dirty tree
+    mid-refactor never produces a false "still there" — same guarantee `git grep HEAD` gave.
+    Fails open (returns `None`) when the corpus can't be loaded at all, so the caller never
+    flags a token off an inconclusive read (same fail-open contract as before; see the
+    tri-state note on `_symbol_in_history` below).
+
+    The corpus and the matching MUST mirror `_symbol_in_history` exactly (same `scripts`
+    pathspec, same substring semantics — no word-boundary), because the two together form
+    ONE predicate: "existed once, gone now" (measured 2026-08-12; the corrected pair fixes
+    4 of 10 verdicts, 0 regressions — history in git blame).
+    """
+    if not tokens:
+        return set()
+    corpus = _corpus_at_head(root)
+    if corpus is None:
+        return None
+    return {t for t in tokens if t not in corpus}
 
 
 # A token was a SYMBOL here only if it was once DEFINED in `scripts/`: a `def`/`class` at any
 # indent (so methods count), or an assignment at COLUMN 0 (module level).
 #
-# The asymmetry is deliberate and measured. An INDENTED assignment (`^[[:space:]]*foo:`) is
+# The asymmetry is deliberate and measured. An INDENTED assignment (`^\s*foo:`) is
 # indistinguishable from a YAML/frontmatter line quoted inside a docstring — which is exactly
 # what produced the reported `modified` false positive. `def`/`class` carry their own keyword,
 # so they cannot collide with prose and are safe to accept at any indent. The cost is an
@@ -264,86 +311,88 @@ def _symbol_absent_at_head(token: str, root: Path) -> bool:
 # citation occasionally, versus a false finding that costs trust in every other finding the
 # detector makes. That trade runs the same direction as the fail-silent rule below.
 #
-# POSIX ERE ONLY — git's `-G` does NOT support `\b` or `\s`. They do not error; they match
-# NOTHING and exit 0, so a regex using them turns the whole check silently dead. Measured
-# (janitor#255): `-G^(def |class )tok\b` returned zero hits on a symbol that plainly exists.
-# Hence `[^A-Za-z0-9_]` for the trailing boundary and `[[:space:]]` for whitespace.
-_DEFINITION_RE = r"^[[:space:]]*(def |class |async def ){0}[^A-Za-z0-9_]|^{0}[[:space:]]*[:=]"
+# Python `re`, not git's POSIX ERE (`-G`) — janitor#255's `\b`/`\s` bug class (git's ERE
+# silently matches NOTHING on those escapes, so a per-token `-G` regex went permanently
+# dead) cannot recur here: this now runs as ONE Python-side scan of the history text, so
+# `\s` and `\b` behave exactly as documented.
+_HISTORY_DEFINITION_RE = re.compile(
+    r"^[ \t]*(?:def|class|async def)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[^A-Za-z0-9_]"
+    r"|^([A-Za-z_][A-Za-z0-9_]*)[ \t]*[:=]"
+)
+
+# Memoized per project root: the expensive part (walking the FULL `scripts/` history once) runs
+# on the first `_symbol_in_history` call only; every later call for the same root is an O(1) set
+# lookup. This is what turned "one `git log -G<regex>` PER absent token" (measured ~1s each —
+# 140 absent tokens on this board cost ~140s on their own, the CI 60s-cap killer that survived
+# the presence-check batching above, TRDD-TWF7DXXR) into one shared ~1s history walk. Keyed by
+# `root`, not process-global, so two different repos in the same test run never share state; a
+# failed load is deliberately NOT cached (see `_symbol_in_history`), so a transient git error
+# doesn't wrongly poison every later lookup for the rest of the run.
+_ever_defined_cache: dict[Path, set[str]] = {}
+
+
+def _load_ever_defined_symbols(root: Path, *, timeout_s: float) -> set[str] | None:
+    """Every identifier ever DEFINED in `scripts/` history, in ONE pass over ONE `git log -p`.
+
+    A symbol's DEFINING commit always ADDS the line that introduces it, so scanning only
+    `+`-prefixed lines (never the `+++` file-header line) across the whole history is a
+    faithful substitute for running `-G<def-regex>` once per token: a later removal-only
+    commit contributes nothing a prior addition didn't already cover.
+
+    janitor#255's lesson still applies to the MATCH shape, just no longer to the engine: this
+    was `git log -S<token>` once (a raw substring search over diffs, matching prose, dict
+    keys, docstrings — `queue` and `modified` both got flagged as "deleted symbols" for being
+    ordinary words). `_HISTORY_DEFINITION_RE` asks the narrower question the check actually
+    means — was this ever a `def`/`class`/module-level assignment — not "did this text ever
+    change anywhere".
+
+    Returns `None` (undetermined) on any git failure. The caller does not cache `None` —
+    conflating "the read failed" with "never defined anywhere" would suppress every future
+    finding for the rest of the run over one transient error.
+    """
+    proc = state.run_subprocess(
+        ["git", "-C", str(root), "log", "-p", "--", "scripts"],
+        timeout=timeout_s,
+        detector_name="trdd-state-reconciliation",
+    )
+    if proc is None or proc.returncode != 0:
+        return None
+    names: set[str] = set()
+    for line in proc.stdout.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        m = _HISTORY_DEFINITION_RE.match(line[1:])
+        if m:
+            names.add(m.group(1) or m.group(2))
+    return names
 
 
 def _symbol_in_history(token: str, root: Path, *, timeout_s: float = 30) -> bool | None:
     """True/False iff `token` was once DEFINED as a module-level symbol in `scripts/` history,
     or **None when that could not be determined** (git missing, timeout, non-zero exit).
 
-    janitor#255: this used `git log -S<token>`, which is a SUBSTRING search over diffs — it
-    matches the token anywhere in any changed line, including prose in a comment, a fragment
-    of a longer identifier, a dict key, or a docstring. Combined with "absent from the tree at
-    HEAD", that makes almost any ordinary English word a "deleted symbol": the reporter got
-    TRDD-DEAD-SYMBOL for `queue` (an AMP verb name belonging to another system's API) and
-    `modified` (a memory-frontmatter field). Both citations were correct prose, and governance
-    TRDDs quote other systems' vocabulary constantly, so the check fired hardest on exactly the
-    cards it understands least.
+    Delegates to `_load_ever_defined_symbols`, memoized per `root` in `_ever_defined_cache` —
+    see that cache's own docstring for why this is now O(1) after the first call instead of
+    one `git log -G` subprocess per token.
 
-    `-G` with a definition-anchored regex asks the question the check actually means: was this
-    ever a symbol HERE. A word that only ever appeared inside a line is no longer evidence of
-    anything, which is the whole defect.
+    Still deliberately conservative in the SAME direction as before the tri-state existed: the
+    caller treats `None` exactly as it treats a confirmed "no" — no finding. A missed dead
+    symbol costs a stale citation; a false one costs the reader's trust in every other finding
+    the detector makes. That trade is unchanged.
 
-    Still deliberately conservative in the SAME direction as before: the caller treats None
-    exactly as it treated the old False — no finding. A missed dead symbol costs a stale
-    citation; a false one costs the reader's trust in every other finding the detector makes.
-    That trade is unchanged and correct.
-
-    What changed (2026-08-14) is that "no" and "I could not tell" are no longer THE SAME VALUE.
-    They were, and the cost was real: `timeout=8` was sized against an idle machine where this
-    call takes 245-1490ms, looked like a 5x margin, and was not one — under `-n auto` the
-    contended call blew past 8s, returned False, and the check reported nothing. A publish
-    failed on it. But had the timeout been hit in PRODUCTION instead of in a test, the detector
-    would simply have gone quiet, and no alert, count, or log line could have told anyone the
-    difference between a clean board and a check that never ran.
-
-    That is the same permanently-silent shape the `-S`/`-G` note above records — an error path
-    returning a legitimate negative. Fixing it once in this function does not fix the class, so
-    the callers now COUNT the undetermined answers and say so.
+    `timeout_s` stays a parameter (2026-08-18): raising a hardcoded bound is a losing game
+    under load (a publish was blocked twice, at both 8s and 30s, by the same real-history call
+    contending with the test suite's own parallel workers). 30s is the PRODUCTION bound (the
+    heartbeat must abstain rather than stall); real-history tests pass a hang-only bound
+    instead, because their subject is the definition-matching REGEX, not this timeout policy.
     """
-    # NO `--pickaxe-regex`: that flag belongs to `-S`, and passing it alongside `-G` makes git
-    # exit 128. This function returns False on a non-zero exit, so the combination did not
-    # error loudly — it turned the entire check permanently silent. Caught only by running it
-    # against a symbol known to be dead; `-G` is always a regex and needs no flag.
-    proc = state.run_subprocess(
-        [
-            "git", "-C", str(root), "log", "--oneline", "-1",
-            f"-G{_DEFINITION_RE.format(re.escape(token))}",
-            "--", "scripts",
-        ],
-        # 30s, not 8s (raised 2026-08-14 after a real failure). MEASURED on an IDLE machine,
-        # this exact `-G` over this repo's history: 245ms / 606ms / 1490ms for the three
-        # symbols `test_real_deleted_symbols_are_still_found` checks. That looks like a
-        # comfortable margin under 8s and is not one — the suite now runs under `-n auto`, and
-        # 14 workers contending for CPU and disk pushed the 1.5s call past 8s, failing the test
-        # and BLOCKING a publish. A bound sized against an idle machine is not a bound.
-        #
-        # The cost of being wrong is asymmetric and invisible, which is why the margin is
-        # generous: on timeout `run_subprocess` returns None and this returns False — the SAME
-        # answer as "this token was never defined here". A `detector_name` log line is written,
-        # but the RETURN VALUE cannot tell a caller "I could not determine" from "no". So a
-        # too-tight timeout does not fail; it silently stops finding dead symbols, which is
-        # exactly the permanently-silent class the note above records for the `-S`/`-G` flag
-        # bug. Distinguishing the two is TRDD-worthy on its own; widening the window first
-        # removes the trigger.
-        #
-        # `timeout_s` is a PARAMETER (2026-08-18) because raising this constant is a losing
-        # game: 8s failed a publish, 30s failed the next one under heavier load (the suite's
-        # 14 workers plus an unrelated runaway eating ~5 cores pushed the 0.3s idle call past
-        # 30s — verified in this detector's own log, "subprocess timed out after 30s" twice).
-        # 30s stays the PRODUCTION bound (the heartbeat must abstain rather than stall); the
-        # real-history tests pass a hang-only bound instead, because their subject is the -G
-        # regex semantics, not this timeout policy — that policy has its own stubbed test.
-        timeout=timeout_s,
-        detector_name="trdd-state-reconciliation",
-    )
-    if proc is None or proc.returncode != 0:
-        return None  # undetermined — NOT "no". See the docstring.
-    return bool(proc.stdout.strip())
+    ever_defined = _ever_defined_cache.get(root)
+    if ever_defined is None:
+        ever_defined = _load_ever_defined_symbols(root, timeout_s=timeout_s)
+        if ever_defined is None:
+            return None  # undetermined — NOT "no". See the docstring. Not cached — see above.
+        _ever_defined_cache[root] = ever_defined
+    return token in ever_defined
 
 
 def _main_root(root: Path) -> Path:
@@ -502,17 +551,43 @@ def main() -> int:
     # clean board and a dead check is that both print nothing.
     undetermined: set[str] = set()
 
+    # Collect every candidate token across the WHOLE board first, then resolve
+    # "present at HEAD?" in ONE batched call (see `_tokens_absent_at_head`) — this
+    # is what turns ~2985 per-token `git grep` subprocesses into 1. Only the
+    # (usually far smaller) genuinely-absent subset still needs the per-token
+    # `git log -G` history walk below.
+    all_candidate_tokens: set[str] = set()
+    for rec in records:
+        if rec.uid is None:
+            continue
+        all_candidate_tokens |= trdd_common.candidate_dead_symbol_tokens(rec)
+    absent_tokens = _tokens_absent_at_head(all_candidate_tokens, root)
+    if absent_tokens is None:
+        # The batch call itself failed — fail open exactly as the old per-token call
+        # did on error (never flag off an inconclusive read), and count every
+        # candidate as undetermined so a degraded run is visible in the log.
+        undetermined |= all_candidate_tokens
+        dead_symbol_cache.update(dict.fromkeys(all_candidate_tokens, False))
+    else:
+        dead_symbol_cache.update(
+            dict.fromkeys(all_candidate_tokens - absent_tokens, False)
+        )
+
     def token_is_dead(token: str) -> bool:
+        # ponytail: the full-history walk (`_load_ever_defined_symbols`, O(scripts/ history) —
+        # ~0.8s/21MB today) only runs on the FIRST call to `_symbol_in_history` for this root,
+        # and that only happens when a token is absent at HEAD (every present token is already
+        # cached False above, so it never reaches this branch). When `absent_tokens` is empty
+        # or None-handled above, this function is never called with an uncached token and the
+        # walk never runs at all. Ceiling: if history-walk cost ever needs to be zero even when
+        # SOME tokens are absent, gate explicitly on `if absent_tokens:` before defining this.
         if token not in dead_symbol_cache:
-            if not _symbol_absent_at_head(token, root):
-                dead_symbol_cache[token] = False
-            else:
-                in_history = _symbol_in_history(token, root)
-                if in_history is None:
-                    undetermined.add(token)
-                # None -> False here: SAME suppression as before the tri-state existed. The
-                # value is unchanged; what changed is that we now know it happened.
-                dead_symbol_cache[token] = bool(in_history)
+            in_history = _symbol_in_history(token, root)
+            if in_history is None:
+                undetermined.add(token)
+            # None -> False here: SAME suppression as before the tri-state existed. The
+            # value is unchanged; what changed is that we now know it happened.
+            dead_symbol_cache[token] = bool(in_history)
         return dead_symbol_cache[token]
 
     for rec in records:

@@ -776,6 +776,18 @@ def test_real_deleted_symbols_are_still_found(tmp_path):
         )
 
 
+@pytest.mark.xdist_group("real-git-history-probes")
+def test_history_regex_matches_both_def_and_assignment_shapes_in_real_diffs(tmp_path):
+    """`_HISTORY_DEFINITION_RE` is matched against `line[1:]` — the diff marker (`+`) is
+    stripped BEFORE the regex runs, so the regex itself never needs to allow for it. Proven
+    against two REAL symbols in this repo's own `scripts/` history: `_project_root` (a `def`)
+    and `_HERE` (a column-0 module-level assignment) — one per branch of the alternation."""
+    mod = _sym_in_history()
+    root = Path(__file__).resolve().parent.parent
+    assert mod._symbol_in_history("_project_root", root, timeout_s=_HANG_ONLY_TIMEOUT_S) is True
+    assert mod._symbol_in_history("_HERE", root, timeout_s=_HANG_ONLY_TIMEOUT_S) is True
+
+
 def test_an_undetermined_lookup_is_none_not_false(monkeypatch):
     """A timeout must NOT be spelled the same as "this token was never a symbol".
 
@@ -806,12 +818,25 @@ def test_an_undetermined_lookup_is_none_not_false(monkeypatch):
 
 
 def test_the_regex_uses_no_construct_git_silently_ignores():
-    """`\\b` and `\\s` are unsupported in git's POSIX ERE: they match NOTHING and exit 0, so a
-    regex using them makes the check silently dead rather than loudly broken. Pinned because
-    that is invisible in every test that only asserts 'no findings'."""
+    """janitor#255: `\\b`/`\\s` are unsupported in git's POSIX ERE (`-G`) — they match NOTHING
+    and exit 0, so a per-token `-G` regex using them went silently dead rather than loudly
+    broken. The definition check no longer runs through git's `-G` at all (TRDD-TWF7DXXR: a
+    per-token `-G` call was the CI 60s-cap killer, replaced by one Python-side scan of the
+    full history), so the bug class this regression pins is now structurally impossible — the
+    load-bearing regex is Python's own `re`, which supports both constructs. Pinned as an
+    invariant of the CURRENT design rather than deleted, so a future revert back to
+    constructing a git `-G` regex re-trips this same check."""
+    import re as _re
+
     mod = _sym_in_history()
-    assert "\\b" not in mod._DEFINITION_RE
-    assert "\\s" not in mod._DEFINITION_RE
+    assert not hasattr(mod, "_DEFINITION_RE"), (
+        "a `_DEFINITION_RE` reappeared — if this is a git `-G` pattern again, "
+        "it must not contain \\b or \\s (see the docstring)"
+    )
+    assert isinstance(mod._HISTORY_DEFINITION_RE, _re.Pattern), (
+        "the definition check must stay a Python `re.Pattern` scanned in-process, "
+        "never a string handed to git's `-G` (that engine is what dropped \\b/\\s)"
+    )
 
 
 def test_blocked_card_naming_a_non_trdd_blocker_is_not_reported_blockerless(repo: Path):
@@ -848,3 +873,38 @@ def test_the_detector_never_hand_rebuilds_a_trdd_record():
     src = DETECTOR.read_text(encoding="utf-8")
     assert "dataclasses.replace(" in src
     assert "trdd_common.TrddRecord(" not in src
+
+
+def test_check5_stays_fast_on_a_500_card_board(repo: Path):
+    """CI killer (TRDD-TWF7DXXR): a `git grep` PER unique backtick token turned a 416-card
+    board into ~2985 subprocesses and blew the CI per-detector 60s cap. 500 cards here, each
+    citing 2 UNIQUE, REAL symbols (defined in a committed `scripts/` fixture, so Check 5 finds
+    them present and never needs the expensive per-token history walk) reproduces the shape
+    that was slow — 1000 unique tokens whose "present at HEAD?" check used to cost 1000
+    subprocesses. The fix resolves all of them in ONE batched `git grep` call. Real git repo,
+    no mocks — the whole point is the subprocess count under real I/O."""
+    import time
+
+    (repo / "scripts").mkdir(exist_ok=True)
+    defs = "".join(
+        f"def nonexistent_symbol_{i}(): pass\ndef another_ghost_{i}(): pass\n"
+        for i in range(500)
+    )
+    (repo / "scripts" / "perf_fixture.py").write_text(defs, encoding="utf-8")
+
+    for i in range(500):
+        uid = f"perf{i:04d}"
+        body = (
+            "\n## STATE\n"
+            f"NEXT ACTION: wire up `nonexistent_symbol_{i}` and `another_ghost_{i}`.\n"
+        )
+        _write_trdd(repo, uid, column="dev", body=body)
+    _commit_all(repo, "docs: add 500 perf-fixture TRDDs", spec_only=True)
+
+    started = time.monotonic()
+    _run(repo)
+    elapsed = time.monotonic() - started
+    # The regression this guards is 75-115s; 40s still discriminates it >2x. 10s had only
+    # 1.9s headroom on a clean box, and the real detector measured +48% slower under full-suite
+    # load (16.8s clean vs 24.9s loaded, TRDD-TWF7DXXR) — the exact flake shape TRDD-7NSRD8OV hit.
+    assert elapsed < 40, f"check 5 took {elapsed:.1f}s over 500 cards — batching regressed"

@@ -1206,6 +1206,24 @@ def _next_action_span(state_block: str) -> tuple[int, int] | None:
     return None
 
 
+def candidate_dead_symbol_tokens(record: TrddRecord) -> set[str]:
+    """Every backtick-quoted, identifier-shaped token Check 5 WOULD examine for `record`.
+
+    A superset of what `check5_dead_symbol_citations` ultimately scores (it skips no
+    obituary-line filtering here — a few extra harmless tokens in the caller's
+    presence-check batch cost nothing) so the detector can collect every candidate
+    token across the WHOLE board first and resolve "present at HEAD?" for all of them
+    in ONE batched git call, instead of one `git grep` per token per record (measured
+    ~2985 unique tokens on this board — the CI 60s-cap killer, TRDD-TWF7DXXR).
+    """
+    if is_terminal_column(record.column):
+        return set()
+    state_block = extract_state_block(record.body)
+    if not state_block:
+        return set()
+    return {m.group(1) for m in _BACKTICK_TOKEN_RE.finditer(state_block)}
+
+
 def check5_dead_symbol_citations(record: TrddRecord, token_is_dead) -> list[DeadSymbolCitation]:
     """Check 5 — a STATE block cites a code symbol the tree no longer has (TRDD-FDV1RQEB).
 
