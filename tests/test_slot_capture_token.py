@@ -176,14 +176,17 @@ def test_setup_token_blob_carries_no_refresh_token():
     assert blob["claudeAiOauth"]["expiresAt"] > 0
 
 
+# Fixture addresses live on the reserved `.test` TLD (RFC 2606). publish.py's G1b
+# personal-address gate rejects any real-looking domain added to the tree, and it was right
+# to: `x.com` is somebody's domain. Do not "simplify" these back to `.com` — the push blocks.
 def test_import_reports_every_row_it_drops(tmp_path, capsys):
     """A malformed CSV line is announced with its line number, never silently skipped."""
     csv = tmp_path / "keys.csv"
-    csv.write_text("email,token\nnot-an-email,%s\nc@d.com,short\ne@f.com,%s\n"
+    csv.write_text("email,token\nnot-an-email,%s\nc@d.test,short\ne@f.test,%s\n"
                    % ("x" * 40, "y" * 40), encoding="utf-8")
     rows = imp.read_rows(csv)
     out = capsys.readouterr().out
-    assert rows == [("e@f.com", "y" * 40)]
+    assert rows == [("e@f.test", "y" * 40)]
     # Assert per line, not on a total: a count breaks the moment a second diagnostic per row
     # is added, which would look like a regression in the wrong place.
     for line_no in (1, 2, 3):
@@ -194,7 +197,7 @@ def test_import_never_prints_a_token(tmp_path, capsys):
     """No parse path may echo field 2 — it is the secret."""
     secret = "z" * 40
     csv = tmp_path / "keys.csv"
-    csv.write_text("bad-line-no-comma\na@b.com,%s\n" % secret, encoding="utf-8")
+    csv.write_text("bad-line-no-comma\na@b.test,%s\n" % secret, encoding="utf-8")
     imp.read_rows(csv)
     assert secret not in capsys.readouterr().out
 
@@ -267,7 +270,7 @@ def run_import(tmp_path, monkeypatch):
 def test_import_refuses_a_file_with_two_identical_tokens(run_import, capsys):
     """The same token on two lines means one account was minted twice — file nothing."""
     rc, filed, switched = run_import(
-        "a@x.com,%s\nb@x.com,%s\n" % (TOK_A, TOK_A), state={}, statuses={})
+        "a@x.test,%s\nb@x.test,%s\n" % (TOK_A, TOK_A), state={}, statuses={})
     assert (rc, filed, switched) == (1, [], [])
     assert "SAME token" in capsys.readouterr().out
 
@@ -275,19 +278,19 @@ def test_import_refuses_a_file_with_two_identical_tokens(run_import, capsys):
 def test_import_switches_the_live_account_when_its_verified_key_changed(run_import):
     """A verified new key for the account already live is installed in place."""
     rc, filed, switched = run_import(
-        "a@x.com,%s\n" % TOK_A,
-        state={"live_email": "a@x.com", "live_fp": "stale-fp"}, statuses={TOK_A: "ok"})
-    assert (rc, filed, switched) == (0, ["a@x.com"], ["a@x.com"])
+        "a@x.test,%s\n" % TOK_A,
+        state={"live_email": "a@x.test", "live_fp": "stale-fp"}, statuses={TOK_A: "ok"})
+    assert (rc, filed, switched) == (0, ["a@x.test"], ["a@x.test"])
 
 
 def test_import_will_not_install_an_unverified_key_over_a_working_one(run_import, capsys):
     """Nobody answered for the key, and the live credential still works — do not swap."""
     rc, filed, switched = run_import(
-        "a@x.com,%s\n" % TOK_A,
-        state={"live_email": "a@x.com", "live_fp": "stale-fp"},
+        "a@x.test,%s\n" % TOK_A,
+        state={"live_email": "a@x.test", "live_fp": "stale-fp"},
         statuses={TOK_A: "unverified"}, live_expired=False)
     assert switched == []
-    assert filed == ["a@x.com"], "an unverified key is still FILED — only the swap is refused"
+    assert filed == ["a@x.test"], "an unverified key is still FILED — only the swap is refused"
     assert rc == 0
     assert "NOT verified" in capsys.readouterr().out
 
@@ -295,18 +298,18 @@ def test_import_will_not_install_an_unverified_key_over_a_working_one(run_import
 def test_import_installs_an_unverified_key_when_the_live_one_is_already_expired(run_import):
     """Unknown beats known-dead: an expired live credential has nothing left to protect."""
     rc, filed, switched = run_import(
-        "a@x.com,%s\n" % TOK_A,
-        state={"live_email": "a@x.com", "live_fp": "stale-fp"},
+        "a@x.test,%s\n" % TOK_A,
+        state={"live_email": "a@x.test", "live_fp": "stale-fp"},
         statuses={TOK_A: "unverified"}, live_expired=True)
-    assert switched == ["a@x.com"]
+    assert switched == ["a@x.test"]
     assert rc == 0
 
 
 def test_import_skips_the_swap_when_the_live_credential_is_already_that_key(run_import, capsys):
     """Re-running must not rewrite the keychain with the credential already in use."""
     rc, filed, switched = run_import(
-        "a@x.com,%s\n" % TOK_A,
-        state={"live_email": "a@x.com", "live_fp": _fp(TOK_A)}, statuses={TOK_A: "ok"})
+        "a@x.test,%s\n" % TOK_A,
+        state={"live_email": "a@x.test", "live_fp": _fp(TOK_A)}, statuses={TOK_A: "ok"})
     assert switched == []
     assert "already this key" in capsys.readouterr().out
 
@@ -314,25 +317,25 @@ def test_import_skips_the_swap_when_the_live_credential_is_already_that_key(run_
 def test_import_never_switches_to_an_account_that_is_not_live(run_import):
     """Importing a non-live account's key files it and touches the live credential not at all."""
     rc, filed, switched = run_import(
-        "b@x.com,%s\n" % TOK_B,
-        state={"live_email": "a@x.com", "live_fp": "stale-fp"}, statuses={TOK_B: "ok"})
-    assert (rc, filed, switched) == (0, ["b@x.com"], [])
+        "b@x.test,%s\n" % TOK_B,
+        state={"live_email": "a@x.test", "live_fp": "stale-fp"}, statuses={TOK_B: "ok"})
+    assert (rc, filed, switched) == (0, ["b@x.test"], [])
 
 
 def test_import_partial_success_exits_zero_and_names_what_failed(run_import, capsys):
     """One revoked key among good ones is reported, not turned into a whole-run failure."""
     rc, filed, switched = run_import(
-        "a@x.com,%s\nb@x.com,%s\n" % (TOK_A, TOK_B),
+        "a@x.test,%s\nb@x.test,%s\n" % (TOK_A, TOK_B),
         state={}, statuses={TOK_A: "ok", TOK_B: "bad"})
     assert rc == 0, "an agent must not retry the whole import because one key was revoked"
-    assert filed == ["a@x.com"]
-    assert "not filed: b@x.com" in capsys.readouterr().out
+    assert filed == ["a@x.test"]
+    assert "not filed: b@x.test" in capsys.readouterr().out
 
 
 def test_import_exits_one_when_nothing_could_be_filed(run_import):
     """Every key refused means nothing landed — that is the failure the exit code is for."""
     rc, filed, switched = run_import(
-        "a@x.com,%s\n" % TOK_A, state={}, statuses={TOK_A: "bad"})
+        "a@x.test,%s\n" % TOK_A, state={}, statuses={TOK_A: "bad"})
     assert (rc, filed) == (1, [])
 
 
@@ -403,7 +406,7 @@ def test_server_lock_check_never_removes_or_creates_the_lockfile(tmp_path, monke
 def test_import_refuses_while_a_live_tick_holds_the_lock(tmp_path, monkeypatch, capsys):
     """main() stops before touching the CSV or the keychain when a tick is running."""
     csv = tmp_path / "keys.csv"
-    csv.write_text("a@x.com,%s\n" % ("a" * 40), encoding="utf-8")
+    csv.write_text("a@x.test,%s\n" % ("a" * 40), encoding="utf-8")
     csv.chmod(0o600)
     monkeypatch.setattr(sys, "argv", ["import_oauth_tokens.py", "--csv", str(csv)])
     monkeypatch.setattr(imp, "server_tick_holder", lambda: 4242)
@@ -425,7 +428,7 @@ def test_refusal_precedes_chmodding_or_reading_the_key_file(tmp_path, monkeypatc
     below them.
     """
     csv = tmp_path / "keys.csv"
-    csv.write_text("a@x.com,%s\n" % ("a" * 40), encoding="utf-8")
+    csv.write_text("a@x.test,%s\n" % ("a" * 40), encoding="utf-8")
     csv.chmod(0o600)
     state = tmp_path / "state"
     state.mkdir()
