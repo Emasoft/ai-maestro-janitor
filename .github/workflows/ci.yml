@@ -244,13 +244,18 @@ jobs:
           CLAUDE_PROJECT_DIR: ${{ github.workspace }}
           CLAUDE_PLUGIN_ROOT: ${{ github.workspace }}
         run: |
-          # The heartbeat is bounded by per-detector timeouts (5–30s);
-          # a top-level wall clock of 60s is plenty even on a cold
-          # GitHub runner with no uv cache.
-          timeout 60 ./scripts/dispatch.py || rc=$?
-          # rc=0 → silent (no drift); rc=124 → hit the 60s wall clock,
+          # This is a FIRST fire: the fresh clone has no last-run stamps, so every
+          # detector runs, not just the due ones. Measured 2026-09-08 (TRDD-TWF7DXXR)
+          # LOCALLY: 108–119 s on the 416-card board, trdd-state-reconciliation alone
+          # 75 s; the runner's own cost is unmeasured (it was killed at 60 s). The
+          # earlier 60 s budget assumed the per-detector timeouts (5–30 s) bounded a
+          # fire, which a first fire is not. 240 s is ~2x the local figure — chosen,
+          # not derived; the job's timeout-minutes (15) covers it. Making the detector
+          # cheap per fire is still open on the same card; this only keeps the smoke honest.
+          timeout 240 ./scripts/dispatch.py || rc=$?
+          # rc=0 → silent (no drift); rc=124 → hit the 240s wall clock,
           # which is a CI failure signal worth surfacing.
-          [ "${rc:-0}" -eq 124 ] && { echo "::error::dispatch.py exceeded 60s wall clock"; exit 1; } || true
+          [ "${rc:-0}" -eq 124 ] && { echo "::error::dispatch.py exceeded 240s wall clock"; exit 1; } || true
 
       - name: Smoke-run each hook
         env:
