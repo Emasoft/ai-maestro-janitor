@@ -1,9 +1,9 @@
 ---
 trdd-id: TWF7DXXR
 title: CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
-column: testing
+column: dev
 created: 2026-09-08T21:09:12+0200
-updated: 2026-09-10T09:52:37+0200
+updated: 2026-09-10T19:35:00+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -13,7 +13,7 @@ labels: [ci, smoke, dispatch, detector-performance, release-3.4.15]
 relevant-rules: [6]
 priority: high
 npt: []
-eht: []
+eht: [HTFUWAU9]
 implementation-commits: [5347836f]
 ---
 
@@ -98,7 +98,7 @@ implementation-commits: [5347836f]
   `.github/` workflows; the USER's recorded pick in the Approval log is the approval at any
   tier. PRRD S6.1 applies: a detector MUST NOT block the heartbeat or the other detectors.
   Re-run CI on main after the fix.
-- **DECIDED 2026-09-10 — USER pick: option 2 now, option 1 stays open on this card.**
+- **DECIDED 2026-09-10 — USER pick: option 2 now, option 1 is now this fix.**
   `.github/workflows/ci.yml` smoke budget 60 s → 240 s: ~2× the LOCAL 108–119 s first-fire
   measurement above (the runner's own cost is unmeasured — it was killed at 60 s), chosen,
   not derived; a 124 at 240 s would be a LOWER BOUND on the runner, not a measurement —
@@ -116,9 +116,29 @@ implementation-commits: [5347836f]
   is a SUM of capped detectors, so option 1 buys less than this card implies. One task per
   card; the user's "stays open" is honoured by the work staying open on its own card. Red at
   240 s ⇒ a lower bound, not a measurement — back to `dev`, `time` the step.
+- **2026-09-10 (this fire) — CI Smoke red AGAIN at 12:33:58Z, 3.5.0.** The 240 s `dispatch.py`
+  step (option 2, `5347836f`) PASSED; the SEPARATE per-detector strict-smoke loop's own 60 s
+  cap killed `trdd-state-reconciliation` instead (started 12:32:58Z, killed 12:33:58Z) —
+  option 2 never touched that cap. Root-cause fix landed in the detector (option 1, this
+  card): Check 5's per-token `git grep` (presence at HEAD) and per-token `git log -G`
+  (history walk) were BOTH O(unique-tokens) subprocess calls; on this board that is 442
+  candidate tokens, ~140 of them genuinely absent. The `-G` walk alone measured ~1s/call —
+  ~140s on its own, worse than the 60s cap by itself. Batched both: `_tokens_absent_at_head`
+  loads the whole `scripts/` corpus ONCE (`git archive`, ~0.1s) and tests membership with
+  Python's `in` (~15.6s for 442 tokens); `_symbol_in_history` now delegates to
+  `_load_ever_defined_symbols`, which walks the FULL history ONCE (`git log -p`, ~0.8s) and
+  extracts every ever-defined identifier into a set, memoized per root — O(1) per token
+  after the first call. Measured on the real board: `--one-shot` now takes ~16.8s (was
+  ~75–115s), under the 20s bound acceptance box 3 asks for. Box 1 stays unticked until CI is
+  green on the next release; option 1 is now this fix, not future work.
 - **Gotcha:** the local heartbeat in the real project does NOT show this, because its
   last-run stamps keep the detector on its cadence; the cost appears on a stampless first
   fire. Reproduce with a fresh clone, never by deleting stamps in the live project.
+- **2026-09-10 (follow-ups) — fix implemented and tested locally** (16.8s clean, 24.9s
+  loaded); card stays `dev` until CI Smoke on the next publish is green — that run is the
+  box-3 (≤20s) measurement that counts.
+- **2026-09-10T19:35 — 46cf9a7b — mode bits on 12 hooks found in the same CI log; the Smoke
+  hook loop had never executed them. Hook-loop Traceback gap → TRDD-HTFUWAU9.**
 
 ## Evidence files (gitignored, this host)
 
