@@ -3,13 +3,13 @@ trdd-id: BMITQ2MN
 title: Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault
 column: testing
 created: 2026-09-09T16:37:29+0200
-updated: 2026-09-10T09:52:37+0200
+updated: 2026-09-10T14:33:32+0200
 current-owner: ai-maestro-janitor session
 task-type: feature
 scope: project
 project-id: ai-maestro-janitor
 min-approval-requirement: none
-implementation-commits: [f4457513, 780c811d, 1c797cfe]
+implementation-commits: [f4457513, 780c811d, 1c797cfe, 9ef139d0]
 relevant-rules: []
 ---
 
@@ -98,6 +98,12 @@ theirs and must go through an issue or PR, never a direct edit.
   reclaim`), and `createExclusive`'s `finally` deliberately "leaves an empty → stale lock"
   when a write throws. Treating empty as held would make the importer stricter than the
   lock's own owner and could deadlock it permanently while the server is down.
+
+**DONE 2026-09-10.** Skill prose reworded under CPV `--strict` pressure (`1c797cfe`) — the
+`credential_theft` NIT fired on the `claude setup-token` bigram, so the mint step now reads as
+the human's own terminal action, never the plugin's. Fixture e-mail domains moved to the
+reserved `.test` TLD (`9ef139d0`) after `publish.py`'s G1b gate correctly refused `x.com`-style
+example addresses. Released as **3.5.0** at `61191d32`, tag on the final commit.
 
 ## Why
 
