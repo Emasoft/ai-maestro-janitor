@@ -3,13 +3,13 @@ trdd-id: BMITQ2MN
 title: Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault
 column: testing
 created: 2026-09-09T16:37:29+0200
-updated: 2026-09-09T16:37:29+0200
+updated: 2026-09-10T09:52:37+0200
 current-owner: ai-maestro-janitor session
 task-type: feature
 scope: project
 project-id: ai-maestro-janitor
 min-approval-requirement: none
-implementation-commits: [f4457513, 780c811d]
+implementation-commits: [f4457513, 780c811d, 1c797cfe]
 relevant-rules: []
 ---
 

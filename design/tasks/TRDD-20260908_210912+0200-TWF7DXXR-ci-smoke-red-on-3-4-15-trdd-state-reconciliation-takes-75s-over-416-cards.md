@@ -1,9 +1,9 @@
 ---
 trdd-id: TWF7DXXR
 title: CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
-column: todo
+column: testing
 created: 2026-09-08T21:09:12+0200
-updated: 2026-09-08T22:34:36+0200
+updated: 2026-09-10T09:52:37+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -14,6 +14,7 @@ relevant-rules: [6]
 priority: high
 npt: []
 eht: []
+implementation-commits: [5347836f]
 ---
 
 # CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
@@ -97,6 +98,24 @@ eht: []
   `.github/` workflows; the USER's recorded pick in the Approval log is the approval at any
   tier. PRRD S6.1 applies: a detector MUST NOT block the heartbeat or the other detectors.
   Re-run CI on main after the fix.
+- **DECIDED 2026-09-10 — USER pick: option 2 now, option 1 stays open on this card.**
+  `.github/workflows/ci.yml` smoke budget 60 s → 240 s: ~2× the LOCAL 108–119 s first-fire
+  measurement above (the runner's own cost is unmeasured — it was killed at 60 s), chosen,
+  not derived; a 124 at 240 s would be a LOWER BOUND on the runner, not a measurement —
+  add `time` to the step before choosing again.
+  The step comment now says a first fire runs
+  every detector (the old "5–30 s per-detector timeouts bound it" premise was false for a
+  stampless fire). The Smoke job's `timeout-minutes: 15` is untouched and covers it. Option 3
+  not taken. Shipped as `5347836f` (ci.yml only; budget and the local measurement both in
+  its message — box 2 ticked, box 4 ticked). Box 3 is N/A under option 2 (its own text says
+  "If option 1"). Box 1 is decided by the CI Smoke of the release that carries `5347836f`:
+  column `testing` until that verdict; green ⇒ tick box 1, close this card `complete` on
+  option 2 and mint a derived card (this one as `parent-trdd`) for option 1 — make
+  `trdd-state-reconciliation` cheap per fire (PRRD S6.1), and first settle whether dispatch
+  caps a detector at 30 s: if it does, the 75 s figure is `--one-shot`'s and the CI overrun
+  is a SUM of capped detectors, so option 1 buys less than this card implies. One task per
+  card; the user's "stays open" is honoured by the work staying open on its own card. Red at
+  240 s ⇒ a lower bound, not a measurement — back to `dev`, `time` the step.
 - **Gotcha:** the local heartbeat in the real project does NOT show this, because its
   last-run stamps keep the detector on its cadence; the cost appears on a stampless first
   fire. Reproduce with a fresh clone, never by deleting stamps in the live project.
@@ -113,14 +132,16 @@ eht: []
 
 - [ ] The CI `Smoke` job is green on main for the commit that lands the fix (a re-run of
       `8c07f50f` does not count).
-- [ ] A first fire of `dispatch.py` on a fresh clone of this repo completes under the smoke
-      budget; the budget and the measurement are both stated in the fixing commit (under
+- [x] A first fire of `dispatch.py` on a fresh clone of this repo completes under the smoke
+      budget; the budget and the measurement are both stated in the fixing commit (ticked
+      2026-09-10 on the stated-measurement clause only — `5347836f` states both; whether the
+      RUNNER completes under 240 s is box 1's verdict, not this one's) (under
       option 2 the budget is chosen, so this box then only checks that the measurement is
       stated; under option 3 it measures the reduced first fire).
 - [ ] If option 1: `trdd-state-reconciliation --one-shot` on a fresh clone with the current
       board finishes in a stated, measured time of at most 20 s (one third of the 60 s smoke
       budget — chosen, not measured).
-- [ ] The chosen option (1, 2, 3 or a combination) is recorded in the STATE block.
+- [x] The chosen option (1, 2, 3 or a combination) is recorded in the STATE block.
 
 ## Approval log
 
@@ -149,3 +170,12 @@ eht: []
 - 2026-09-08T22:34:36+0200 — Option 1's separating measurement taken (see STATE): HEAD
   board 119 s vs 09-03 board 73 s under HEAD scripts, both rc=0. Both the code path and the
   changed cards exceed the budget. No option chosen yet — the USER's pick.
+- 2026-09-10T09:14:00+0200 — USER pick recorded: answered "Raise smoke budget" (option 2,
+  60 s → 240 s, option 1 kept open) to the in-session question that offered options 1, 2, 3
+  and "publish with red Smoke". This line is the Tier-2 approval for the
+  `.github/workflows/ci.yml` edit. Column → `dev`.
+- 2026-09-10T09:31:00+0200 — Landed as `5347836f`; column → `testing` pending the CI Smoke
+  verdict on the next release (the one that carries it). Boxes 2 and 4 ticked, box 3 N/A
+  under option 2. On green: tick box 1, close this card `complete` on option 2, and mint a
+  derived card for option 1 with this one as `parent-trdd` — one task per card; "stays open"
+  is honoured by the work staying open on its own card. On red at 240 s: back to `dev`.
