@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import memory_outcome  # noqa: E402
 import state  # noqa: E402
 import trdd_common  # noqa: E402
 
@@ -150,21 +151,10 @@ _MEMORY_NOOP_RE = re.compile(
 # KNOWN AND ACCEPTED: legacy reports whose prose uses an unlisted spelling still nag. That is the
 # cost of refusing the fourth patch, it is bounded (`_MAX_LISTED`), and it decays as the old
 # reports age out — whereas another regex widening would have re-armed the same trap.
-_MEMORY_OUTCOME_RE = re.compile(
-    # why: phase M-c widened the curator's marker to `noop reason=no-work` / `noop
-    # reason=failed` so the report can carry WHY it abstained without a second regex.
-    # group(1) stays noop|mutation for the existing boolean read; group(2) (the reason) is
-    # accepted as ANY token (`\S+`), not pinned to the two literals -- REVIEW FINDING
-    # 2026-09-15: this file never reads group(2), so pinning it would make a well-formed,
-    # appended `noop reason=<unlisted-token> -->` marker fail the WHOLE regex (the literal
-    # text after `reason=` cannot be consumed by the optional group OR skipped), silently
-    # demoting a PRESENT marker to "absent" and contradicting this file's own documented
-    # invariant that an explicit marker always wins over the prose fallback. Literal
-    # pinning belongs to memory-maintenance.py's own separate `_MEMORY_OUTCOME_RE`, which
-    # DOES gate on the reason value and validates it explicitly rather than in the regex.
-    r"<!--\s*janitor-outcome:\s*(noop|mutation)(?:\s+reason=(\S+))?\s*-->",
-    re.IGNORECASE,
-)
+#
+# The marker regex itself lives in `memory_outcome.py` — shared with memory-maintenance.py,
+# which used to carry a diverging, stricter copy that silently failed to match well-formed
+# markers (review finding, 2026-09-15).
 _MARKER_SCAN_BYTES = 64 * 1024  # the marker is APPENDED at pass end, so scan the whole report
 _NOOP_SCAN_BYTES = 4096  # prose fallback only: the legacy outcome wording is in the opening lines
 _FRESH_GRACE_S = 90  # skip reports written in the last 90s (may be mid-write)
@@ -222,12 +212,12 @@ def _is_memory_noop_report(rep: Path, reports_dir: Path) -> bool:
     )
     # why: the marker is APPENDED at pass end, but an agent report may also QUOTE the
     # contract string in prose earlier in the body (e.g. explaining the two-value
-    # vocabulary) — coordinator review, 2026-09-15. Anchor on the LAST occurrence in the
-    # window, never `.search()`'s first hit, so a quoted example never overrides the
-    # real, appended verdict.
-    markers = list(_MEMORY_OUTCOME_RE.finditer(window))
-    if markers:
-        return markers[-1].group(1).lower() == "noop"
+    # vocabulary) — coordinator review, 2026-09-15. `parse_outcome` anchors on the LAST
+    # occurrence in the window, never the first hit, so a quoted example never overrides
+    # the real, appended verdict.
+    parsed = memory_outcome.parse_outcome(window)
+    if parsed is not None:
+        return parsed[0] == "noop"
     # No marker: a legacy report (or a curator that skipped the closing block). Fall back to the
     # prose forms, over the SAME opening window as before so this path's behaviour is unchanged —
     # widening the window here would let form 3 (a bare `# … abstained` H1) match a heading deep

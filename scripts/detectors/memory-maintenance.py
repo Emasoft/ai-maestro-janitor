@@ -82,7 +82,6 @@ import errno
 import fcntl
 import json
 import os
-import re
 import secrets
 import sys
 import time
@@ -98,6 +97,7 @@ import dedupe  # noqa: E402
 import global_state  # noqa: E402
 import memory_content_precheck  # noqa: E402
 import memory_dispatch_claim  # noqa: E402
+import memory_outcome  # noqa: E402
 import memory_scopes  # noqa: E402
 import memory_settings  # noqa: E402
 import memory_txn  # noqa: E402
@@ -373,11 +373,7 @@ def _split_max_bytes() -> int:
     except (ValueError, TypeError):
         return 0
 
-_MEMORY_OUTCOME_RE = re.compile(
-    r"<!--\s*janitor-outcome:\s*(noop|mutation)(?:\s+reason=([a-z-]+))?\s*-->",
-    re.IGNORECASE,
-)
-_NOOP_TAIL_SCAN_BYTES = 200  # the outcome marker is APPENDED as the last line of the report
+_NOOP_TAIL_SCAN_BYTES = 512  # the outcome marker is APPENDED as the last line of the report
 
 
 def _no_recent_noop(chore: str, scope: str, root: Path, now: int, interval_s: float) -> bool:
@@ -433,13 +429,14 @@ def _no_recent_noop(chore: str, scope: str, root: Path, now: int, interval_s: fl
             tail = fh.read().decode("utf-8", errors="replace")
     except OSError:
         return True
-    marker = _MEMORY_OUTCOME_RE.search(tail)
-    if marker is None:
+    parsed = memory_outcome.parse_outcome(tail)
+    if parsed is None:
         return True
     # Only `noop reason=no-work` suppresses. A `mutation`, a `noop reason=failed`
     # (the pass gave up, it did not find "nothing to do"), and a bare old-format
     # `noop` (no reason=... suffix) all fail OPEN — see the docstring above.
-    if marker.group(1).lower() != "noop" or (marker.group(2) or "").lower() != "no-work":
+    outcome, reason = parsed
+    if outcome != "noop" or reason != memory_outcome.REASON_NO_WORK:
         return True
     age_s = now - mtime
     if age_s < interval_s:
