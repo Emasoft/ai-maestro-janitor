@@ -80,7 +80,8 @@ uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore s
 It prints the `(intervention, scope, root)` the scheduler stamped when it emitted your
 marker, and atomically hands that dispatch to you alone. `$SCOPE_ROOT` below is the
 `root` it printed. **The path is ABSOLUTE on purpose** — your cwd as a spawned agent
-is not guaranteed to be the project root.
+is not guaranteed to be the project root. Also capture the `CLAIM_ID=<id>` it
+prints last (closes the claim).
 
 **Any non-zero exit, an unreadable file, or a chore name other than `split`: STOP and
 report that** — do not pick a scope yourself, do not re-derive what is due, and **do
@@ -228,6 +229,14 @@ SUCCESS = `commit` exits 0. A verify FAIL or precondition error has already abor
 surface FAILED. Lock contention is a normal abstain, not a failure. Exact surfacing lines, the
 abort command, and the idempotency rule:
 [split-plan-details.md#exit--retry--rollback-contract-step-6](references/split-plan-details.md#exit--retry--rollback-contract-step-6).
+
+### 7. Close the claim
+
+Report ends `<!-- janitor-outcome: mutation|noop -->`, then:
+
+```bash
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete "$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"
+```
 
 ## Hard invariants (every SPLIT pass enforces)
 

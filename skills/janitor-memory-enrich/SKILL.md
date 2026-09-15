@@ -64,7 +64,8 @@ changes `ocd`, never merges/splits/deletes.
    ```
 
    It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute path —
-   your cwd as a spawned agent is not the project root). Never read the legacy
+   your cwd as a spawned agent is not the project root). Also capture the `CLAIM_ID=<id>`
+   line it prints last — you need it to close the claim. Never read the legacy
    `memory-maint-pending.json` slot. A USER-named scope is the one exception.
 
    Three outcomes, and the middle one is easy to get wrong:
@@ -142,4 +143,11 @@ that still flags is not done — fix it or refuse it; never leave it half-widene
 ## Report
 
 One line + a report path under `reports/janitor-memory-enrich/`. Name the scope, pages
-touched, phrases added, duplicates removed, and any refusals.
+touched, phrases added, duplicates removed, and any refusals. End the report with
+`<!-- janitor-outcome: mutation -->` (or `noop`), then close the claim:
+
+```bash
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete "$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"
+```
+
+Unclosed, it expires as MEMPASS-STALE-CLAIM after 6h and re-dispatches.

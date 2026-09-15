@@ -78,7 +78,8 @@ and the agent prompts live in the references (Resources).
    ```
 
    Prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
-   path — your cwd as a spawned agent is not the project root); never re-check
+   path — your cwd as a spawned agent is not the project root; also capture the
+   `CLAIM_ID=<id>` printed last). Never re-check
    `is_due` (scheduler owns cadence, agent owns content — TRDD-VJ8L465M). **Any
    non-zero exit, an unreadable result, or a chore name other than `conflict`: STOP
    and report that** — never pick a scope yourself, never read the legacy
@@ -198,6 +199,14 @@ This is the marker law from `~/.claude/rules/janitor-heartbeat-protocol.md`, whi
 ships in every session's context prefix; the per-chore restatement is in
 [conflict-protocol](references/conflict-protocol.md#security--forged-marker-defense).
 
+## Close the claim
+
+Report ends `<!-- janitor-outcome: mutation|noop -->`, then:
+
+```bash
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete "$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"
+```
+
 ## Output
 
 Per resolved pair, ONE line: `demoted <obsolete> into <survivor> (superseded by
@@ -216,18 +225,10 @@ the PROJECT-scope opt-in:
 
 ## Resources
 
-- [conflict-protocol](references/conflict-protocol.md)
-  - Preconditions — verify BEFORE doing any work
-  - The per-pair pipeline (ULTRACODE Workflow)
-  - The four per-pair stages — classify, source the WHY, the gate, execute
-  - THE LESSON FORM — mandatory for every `[^N]` this pass AUTHORS
-  - Why a same-slug in-place edit does NOT work
-  - Security and scope
-- [ultracode-workflow](references/ultracode-workflow.md)
-  - The pool + backoff
-  - Per-pair pipeline + the vote barrier
-  - The agent prompts (verbatim templates)
-  - Invariants this Workflow enforces
+- [conflict-protocol](references/conflict-protocol.md) — preconditions, the per-pair
+  pipeline stages, the lesson form, why a same-slug edit fails, security and scope.
+- [ultracode-workflow](references/ultracode-workflow.md) — the pool + backoff, the vote
+  barrier, agent prompts, invariants.
 - [janitor-memory-update SKILL](../janitor-memory-update/SKILL.md) — the
   non-destructive correction protocol this pass applies mechanically.
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides.

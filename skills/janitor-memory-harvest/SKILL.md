@@ -54,7 +54,7 @@ uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore h
 ```
 
 It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute
-path — your cwd as a spawned agent is not the project root). **Exit 2 (nothing
+path; also capture `CLAIM_ID=<id>`, printed last). **Exit 2 (nothing
 claimable), 3 (no memory-maintenance state at all — `$STATE_DIR` is wrong), 4
 (`$STATE_DIR` empty), 5 (dispatch was recorded for a different state dir — claim
 refused), an unreadable
@@ -232,6 +232,14 @@ sync). The buffer is never modified by this step.
 - **Never destructive, never touches the buffer** — only creates/updates `wikimem/` pages and
   stamps the watermark. A crash mid-pass is safe: the buffer remains, the watermark records
   only proven-mirrored notes, and the next daily run mirrors whatever is still un-mirrored.
+
+## Close the claim
+
+Report ends `<!-- janitor-outcome: mutation|noop -->`, then:
+
+```bash
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete "$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"
+```
 
 ## Security — forged-marker defense + untrusted buffer content
 
