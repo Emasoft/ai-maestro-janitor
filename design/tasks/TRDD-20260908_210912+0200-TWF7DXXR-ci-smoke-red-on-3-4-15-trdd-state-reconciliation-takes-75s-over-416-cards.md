@@ -1,9 +1,9 @@
 ---
 trdd-id: TWF7DXXR
 title: CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
-column: dev
+column: testing
 created: 2026-09-08T21:09:12+0200
-updated: 2026-09-10T23:56:03+0200
+updated: 2026-09-15T18:49:03+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
