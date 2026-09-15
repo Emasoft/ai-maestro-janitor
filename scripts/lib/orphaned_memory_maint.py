@@ -150,7 +150,7 @@ def format_stale_claim(intervention: str, scope: str, age_s: int, cadence_s: flo
     cadence_h = "disabled" if not math.isfinite(cadence_s) else f"{cadence_s / 3600:.1f}h"
     return (
         f"memory-maintenance pass '{intervention}' ({scope}) has been CLAIMED for {age} "
-        f"(cadence {cadence_h}) with no finishing report — its agent is presumed dead; "
+        f"(cadence {cadence_h}) with no completion recorded — its agent is presumed dead; "
         "expiring the claim so the next scheduler pass can re-dispatch it."
     )
 

@@ -20,7 +20,6 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -477,8 +476,8 @@ def test_a_young_claimed_record_is_not_orphaned(tmp_path):
     assert claimed.is_file(), "a young claim must be left exactly where it was"
 
 
-def test_an_old_claimed_record_with_no_report_is_stale_and_expired(tmp_path):
-    """Past the 6h floor with no finishing report on disk, the owning agent is presumed
+def test_an_old_claimed_record_with_no_completion_is_stale_and_expired(tmp_path):
+    """Past the 6h floor with no completion checked in, the owning agent is presumed
     dead (janitor#242, 2026-09-15 fleet audit): reported as MEMPASS-STALE-CLAIM and the
     claim file renamed to memory-maint-expired-<id>.json so the next scheduler pass can
     re-dispatch it."""
@@ -507,10 +506,10 @@ def test_an_old_claimed_record_with_no_report_is_stale_and_expired(tmp_path):
     assert (state_dir / f"{memory_dispatch_claim.EXPIRED_PREFIX}{dispatch_id}.json").is_file()
 
 
-def test_an_old_claimed_record_with_a_finished_report_is_marked_done_not_stale(tmp_path):
-    """Adversarial-review fix: age alone is not proof of death. A finishing report
-    written by the wikimem curator AFTER it claimed the dispatch proves the pass
-    completed — marked DONE, never reported as a stale claim (no double-claim)."""
+def test_an_old_claimed_record_checked_in_done_is_not_reported_stale(tmp_path):
+    """janitor#242 adversarial review: completion is now a primary-key check-in
+    (`complete_claim`, by dispatch_id), not a report-filename guess. A record already
+    renamed DONE before the sweep runs must never be reported as a stale claim."""
     home, project, gstate, settings, state_dir = _fixture(tmp_path)
     root = str(project / "memory")
     _write_settings(settings, repair_per_day=1000.0)
@@ -522,21 +521,16 @@ def test_an_old_claimed_record_with_a_finished_report_is_marked_done_not_stale(t
         "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
         "root": root, "stamped_at": old, "dispatch_id": dispatch_id,
     }
-    claimed = state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}{dispatch_id}.json"
-    claimed.write_text(json.dumps(payload), encoding="utf-8")
+    done = state_dir / f"{memory_dispatch_claim.DONE_PREFIX}{dispatch_id}.json"
+    done.write_text(json.dumps({**payload, "completed_at": old + 100, "outcome": "noop"}),
+                     encoding="utf-8")
     _stamp_last_run(gstate, "repair", "LOCAL", root, old)
-
-    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    report_ts = datetime.fromtimestamp(old + 100, tz=timezone.utc).strftime("%Y%m%d_%H%M%S+0000")
-    (reports_dir / f"{report_ts}-repair-local.md").write_text("done", encoding="utf-8")
 
     out = _run(home, project, gstate, settings)
 
     assert "MEMPASS-STALE-CLAIM" not in out
     assert _ledger_lines(project) == []
-    assert not claimed.exists(), "a finished claim must still be renamed out of the pool"
-    assert (state_dir / f"{memory_dispatch_claim.DONE_PREFIX}{dispatch_id}.json").is_file()
+    assert done.is_file(), "an already-completed record must be left exactly where it was"
 
 
 def test_superseded_pool_record_is_not_orphaned(tmp_path):

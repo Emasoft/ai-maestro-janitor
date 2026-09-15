@@ -471,10 +471,13 @@ def test_expire_stale_claims_expires_a_dead_claim_with_no_report(tmp_path, monke
     assert (tmp_path / f"{mdc.EXPIRED_PREFIX}{dispatch_id}.json").is_file()
 
 
-def test_expire_stale_claims_marks_a_finished_pass_done_not_expired(tmp_path, monkeypatch):
-    """A `janitor-memory-subconscious-agent` report written AFTER the claim's
-    `stamped_at` proves the pass completed — DONE, never expired, so a fresh agent
-    can never double-claim a dispatch that already finished."""
+def test_expire_stale_claims_never_looks_at_reports_anymore(tmp_path, monkeypatch):
+    """janitor#242 adversarial review: a finishing report used to be read as proof of
+    completion, but the correlation was by filename coincidence, not a primary key — a
+    split report's `<ts>-split-<scope>-<page-slug>.md` shape never matches it, a manual
+    run writes the identical shape as a scheduled one, and the scope's case can differ.
+    A report on disk (however plausible) must no longer mark a claim DONE — only an
+    explicit `complete_claim` by dispatch_id does that now."""
     _fixed_cadence(monkeypatch)
     project = tmp_path / "project"
     state_dir = project / ".janitor" / "state"
@@ -490,9 +493,79 @@ def test_expire_stale_claims_marks_a_finished_pass_done_not_expired(tmp_path, mo
     acted = mdc.expire_stale_claims(state_dir, now=epoch + 30_000, max_age_s=0)
 
     assert len(acted) == 1
-    assert acted[0]["status"] == "done" and acted[0]["dispatch_id"] == dispatch_id
+    assert acted[0]["status"] == "expired" and acted[0]["dispatch_id"] == dispatch_id
+    assert (state_dir / f"{mdc.EXPIRED_PREFIX}{dispatch_id}.json").is_file()
+
+
+def test_expire_stale_claims_local_cadence_faster_than_floor_still_waits_for_floor(tmp_path, monkeypatch):
+    """LOCAL cadence 4h, factor 1 (`cadence_threshold` = 4h) → the record must still
+    survive to the 6h `_STALE_CLAIM_FLOOR_S`, not expire at 4h — the floor is a HARD
+    MINIMUM regardless of how fast the record's own chore cadence is."""
+    monkeypatch.setattr(mdc.memory_settings, "interval_s_for", lambda chore: 4 * 3600)
+    epoch = 1_000_000
+    p = _claimed(tmp_path, epoch, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+
+    just_past_cadence = mdc.expire_stale_claims(tmp_path, now=epoch + 5 * 3600, max_age_s=0)
+    assert just_past_cadence == [], "must not expire at 5h — before the 6h floor"
+    assert p.is_file()
+
+    past_floor = mdc.expire_stale_claims(tmp_path, now=epoch + 6 * 3600 + 1, max_age_s=0)
+    assert len(past_floor) == 1 and past_floor[0]["dispatch_id"] == dispatch_id
     assert not p.exists()
-    assert (state_dir / f"{mdc.DONE_PREFIX}{dispatch_id}.json").is_file()
+
+
+def test_complete_claim_renames_claimed_to_done_with_outcome(tmp_path):
+    """The primary-key check-in: a claimed record becomes a done one, carrying the
+    outcome and a completion timestamp — the only way a claim is now marked finished."""
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+
+    assert mdc.complete_claim(tmp_path, dispatch_id, "mutation", now=1_000_500) is True
+
+    assert not p.exists()
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    assert done.is_file()
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["outcome"] == "mutation"
+    assert payload["completed_at"] == 1_000_500
+
+
+def test_complete_claim_unknown_id_returns_false(tmp_path):
+    """A dispatch_id naming neither a claimed nor a done record is unknown — the CLI
+    must exit non-zero rather than silently succeed."""
+    assert mdc.complete_claim(tmp_path, "999-doesnotexist", "noop") is False
+
+
+def test_complete_claim_is_idempotent(tmp_path):
+    """Completing an already-done id twice must succeed both times — a retry after a
+    lost reply, or a duplicate `complete` call, is not an error."""
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    assert mdc.complete_claim(tmp_path, dispatch_id, "noop") is True
+    assert mdc.complete_claim(tmp_path, dispatch_id, "noop") is True
+
+
+def test_complete_cli_prints_claim_id_and_completes(tmp_path):
+    """End-to-end: a real claim prints CLAIM_ID=<id>, and the `complete` subcommand
+    (given that id) renames the record DONE."""
+    _dispatch(tmp_path, 1_000_000, "repair")
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
+    assert proc.returncode == 0, proc.stderr
+    claim_id_lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("CLAIM_ID=")]
+    assert len(claim_id_lines) == 1, proc.stdout
+    dispatch_id = claim_id_lines[0].split("=", 1)[1]
+    assert dispatch_id == "1000000-abcd1234"
+
+    proc2 = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path), "--outcome", "noop"])
+    assert proc2.returncode == 0, proc2.stderr
+    assert (tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json").is_file()
+
+
+def test_complete_cli_unknown_id_exits_nonzero(tmp_path):
+    """The CLI surface of the unknown-id case must also fail loudly, not silently."""
+    proc = _run_cli(["complete", "999-doesnotexist", "--state-dir", str(tmp_path), "--outcome", "noop"])
+    assert proc.returncode == 2, proc.stderr
 
 
 def test_every_memory_skill_passes_its_own_chore(tmp_path):

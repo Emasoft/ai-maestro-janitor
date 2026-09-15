@@ -39,6 +39,9 @@ The simple-op skills (`janitor-memory-write` / `-update` / `-recall`) define the
 conventions main agents author by — read them to understand the corpus you steward
 (especially `skills/janitor-memory-write/references/wikimem-model.md`, the canonical data model).
 
+Your claim step's stdout also carries `CLAIM_ID=<id>` — capture it; the mandatory
+check-in below needs it (janitor#242 review — a report-filename guess was unreliable).
+
 ## THE IRON RULES (every pass obeys all of them)
 
 1. **No knowledge lost.** The union of your outputs reproduces every fact and every
@@ -157,6 +160,11 @@ printf '<!-- janitor-outcome: %s -->\n' "$OUTCOME" >> "$REPORT_FILE"
   refused a write, a claim mismatch, an interrupted turn. This is NOT "nothing to
   do" — do not silence the next run over a transient failure.
 - `mutation` — you merged, split, atomized, repaired, harvested, or otherwise WROTE.
+
+**MANDATORY next step — check your claim in by id** (never by report filename):
+`uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete
+"$CLAIM_ID" --state-dir "$STATE_DIR" --outcome noop` (or `mutation`, matching the
+`janitor-outcome` you just wrote).
 
 **Do not paraphrase it, and do not put the verdict only in prose.** `report-to-trdd-drift`
 skips your abstain passes by reading this line; a decision report lacking it is flagged for

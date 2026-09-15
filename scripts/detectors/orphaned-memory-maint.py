@@ -87,10 +87,10 @@ def _evaluate_and_emit(
 def _check_claimed_pool(state_dir: Path, seen: Path, now: int) -> None:
     """Claimed dispatches whose owning agent may be dead (janitor#242, 2026-09-15 fleet
     audit: 11 such records aged 16h-5d). `memory_dispatch_claim.expire_stale_claims` does
-    the actual per-record decision (its own chore's cadence x factor, the 6h floor, and
-    the finished-report check) and the rename; this just reports the ones it EXPIRED as
-    a MEMPASS-STALE-CLAIM finding. A record it marked DONE was a live pass that finished
-    cleanly in the meantime — never a finding."""
+    the actual per-record decision (its own chore's cadence x factor, the 6h floor) and
+    the rename; this just reports the ones it EXPIRED as a MEMPASS-STALE-CLAIM finding.
+    A record explicitly checked in via `complete_claim` (the `complete` subcommand) is
+    renamed DONE before it ever reaches this sweep — never a finding."""
     try:
         acted = memory_dispatch_claim.expire_stale_claims(state_dir, now, 0)
     except Exception as exc:  # noqa: BLE001 - a sweep failure must never break the fire

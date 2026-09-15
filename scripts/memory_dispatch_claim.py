@@ -63,9 +63,6 @@ _EXPIRED_KEEP = 20  # mirrors memory-maintenance.py's own keep-20 prune for pend
 # how short its chore's own cadence x factor is.
 _STALE_CLAIM_FLOOR_S = 6 * 3600
 
-# The reports dir the wikimem curator writes to — see `_reports_dir_for`.
-_REPORTS_SUBDIR = Path("reports") / "janitor-memory-subconscious-agent"
-
 # The known chores, derived from the one place that already enumerates them (never
 # duplicated here) — `--chore` must be one of these, never empty (see main()).
 CHORES: tuple[str, ...] = tuple(memory_settings.INTERVENTIONS)
@@ -238,52 +235,39 @@ def _retire_legacy_mirror(state_dir: Path, dispatch_id: str) -> None:
             return
 
 
-def _reports_dir_for(state_dir: Path) -> Path:
-    """The wikimem curator's report directory for the project owning `state_dir`, assuming
-    the standard `<project>/.janitor/state` layout. When that assumption doesn't hold (a
-    bare directory in a test, or an unusual layout) the returned path simply won't exist,
-    and `_pass_finished_since` degrades to "no evidence found" — the safe direction: a
-    genuinely finished pass is then treated as (still possibly) live, never the reverse."""
-    return state_dir.parent.parent / _REPORTS_SUBDIR
+def complete_claim(state_dir: Path, dispatch_id: str, outcome: str, *, now: int | None = None) -> bool:
+    """Mark a claimed dispatch DONE by its own dispatch_id — the primary-key check-in
+    that replaces the report-filename correlation `_pass_finished_since` used to guess
+    at (janitor#242 adversarial review, 2026-09-15): a report carries no claim id, a
+    split report is named `<ts>-split-<scope>-<page-slug>.md` (never matches the exact
+    `-<chore>-<scope>` shape the old check assumed), the scope token's case could differ
+    from the record's, a manual chore run writes the exact same filename shape as a
+    scheduled one, and `reports/` is per-PROJECT while a USER/LOCAL claim's state_dir is
+    not. The pass that finished is the one thing that actually knows it finished — so it
+    says so, by id, instead of the claim script inferring it from a filename that was
+    never designed to be machine-readable evidence.
 
-
-def _pass_finished_since(reports_dir: Path, chore: str, scope: str, since_epoch: int) -> bool:
-    """True iff a `janitor-memory-subconscious-agent` report for `chore` (and, best-effort,
-    `scope`) was written strictly after `since_epoch` — i.e. the pass that claimed this
-    dispatch already finished and wrote its report, so the claim is DONE, not stale.
-
-    Report filenames are `<local-ts+tz>-<chore>-<scope-or-slug>.md` (agent-reports-location
-    convention). Matched on the `-<chore>-` marker plus a case-insensitive scope prefix
-    check; a report with no recognisable scope segment (e.g. a "no-claimable-dispatch"
-    report) simply won't match a non-empty `scope`, which is the safe miss.
-
-    ponytail: matched by chore+scope filename only, never by `root` — the report filename
-    convention doesn't encode it. `reports_dir` is this claim's OWN project's reports dir
-    (`_reports_dir_for`), so a cross-PROJECT collision can't happen; the residual risk is
-    two DIFFERENT USER-scope roots processed by the SAME project's heartbeat writing
-    same-named `<chore>-user...md` reports close together, which could mark the wrong
-    root's claim done. Not a data-loss risk (renamed, never deleted) and not observed in
-    practice; tighten (embed root in the report filename) if it ever is.
+    Idempotent: completing an already-done id is success, not an error — a retry after a
+    lost reply, or a duplicate `complete` call, must not fail. Returns False only when
+    `dispatch_id` names neither a claimed nor an already-done record — an unknown id,
+    which the CLI reports and exits non-zero for.
     """
-    if not reports_dir.is_dir():
-        return False
-    scope_l = (scope or "").strip().lower()
-    marker = f"-{chore}-"
-    for entry in reports_dir.iterdir():
-        name = entry.name
-        if not name.endswith(".md") or marker not in name:
-            continue
-        ts_str, _, rest = name[: -len(".md")].partition(marker)
-        try:
-            report_epoch = int(datetime.strptime(ts_str, "%Y%m%d_%H%M%S%z").timestamp())
-        except ValueError:
-            continue
-        if report_epoch <= since_epoch:
-            continue
-        if scope_l and not rest.lower().startswith(scope_l):
-            continue
+    done_path = state_dir / f"{DONE_PREFIX}{dispatch_id}.json"
+    if done_path.is_file():
         return True
-    return False
+    claimed_path = state_dir / f"{CLAIMED_PREFIX}{dispatch_id}.json"
+    try:
+        payload = json.loads(claimed_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    payload["completed_at"] = now if now is not None else int(datetime.now().timestamp())
+    payload["outcome"] = outcome
+    try:
+        done_path.write_text(json.dumps(payload), encoding="utf-8")
+        claimed_path.unlink()
+    except OSError:
+        return False
+    return True
 
 
 def _prune_named(state_dir: Path, prefix: str, *, keep: int = _EXPIRED_KEEP) -> None:
@@ -303,30 +287,30 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
     2026-09-15 fleet audit: 11 claimed records aged 16h-5d, permanently un-reclaimable —
     a claim has no "consumed" flag once its agent dies, so the slot was gone for good).
 
-    Age alone is not proof of death (the adversarial review that caught this): a real
-    consolidate pass over a large corpus can legitimately hold a claim for hours, so
-    naive age-only expiry would let a fresh agent double-claim a dispatch a LIVE agent is
-    still working. Two-step, in order, per claimed record:
+    A finished pass now checks itself in BY DISPATCH ID via `complete_claim` (the
+    `memory_dispatch_claim.py complete` subcommand), the moment its report is written —
+    that rename to `memory-maint-done-<id>.json` happens THERE, not here (the report-
+    filename correlation this function used to do itself was a coincidence match, not a
+    primary key — see `complete_claim`'s docstring for the failure modes it had). This
+    function's only remaining job is the DEATH-PRESUMPTION path: age alone is not proof
+    of death (the adversarial review that caught the original version), so a claimed
+    record still sitting here (never explicitly completed) is only expired once its age
+    exceeds `max(max_age_s, THIS RECORD'S OWN cadence x factor, _STALE_CLAIM_FLOOR_S)`.
+    The per-record cadence (not one blanket value swept over every file) is what stops a
+    fast chore's threshold from expiring a different, slower chore's still-healthy claim;
+    `max_age_s` is a caller-supplied additional floor (pass 0 to let each record's own
+    chore decide).
 
-      1. If a `janitor-memory-subconscious-agent` report for this record's chore+scope was
-         written AFTER its `stamped_at`, the pass finished — rename to
-         `memory-maint-done-<id>.json` and print `MEMPASS-DONE <id> <chore>`. Never
-         re-dispatched, never counted as stale.
-      2. Otherwise, expire (rename to `memory-maint-expired-<id>.json`, print
-         `MEMPASS-EXPIRED <id> <chore> age=<s>`) only once age exceeds
-         `max(max_age_s, THIS RECORD'S OWN cadence x factor, _STALE_CLAIM_FLOOR_S)`.
-         The per-record cadence (not one blanket value swept over every file) is what
-         stops a fast chore's threshold from expiring a different, slower chore's still-
-         healthy claim; `max_age_s` is a caller-supplied additional floor (pass 0 to let
-         each record's own chore decide); the 6h floor protects a live pass on a fast
-         cadence regardless of either.
+    # why: `_STALE_CLAIM_FLOOR_S` (6h) is a HARD MINIMUM regardless of the record's own
+    # cadence x factor — a LOCAL scope's `LOCAL_FACTOR` of 1 means a chore cadence faster
+    # than 6h (e.g. 4h) would otherwise expire a claim before a real pass could plausibly
+    # finish it; the floor overrides that, never the reverse.
 
     Malformed/unreadable claimed files are left alone — a different, already-reported
     finding (MEMPASS-MALFORMED), not this function's job to clean up. Returns one dict per
-    record acted on: `{"dispatch_id", "intervention", "status": "done"|"expired", ...}`
-    (an "expired" entry also carries "age_s" and "cadence_s" for the caller's finding).
+    record expired: `{"dispatch_id", "intervention", "status": "expired", "age_s",
+    "cadence_s", "scope"}`.
     """
-    reports_dir = _reports_dir_for(state_dir)
     acted: list[dict] = []
     for path in sorted(state_dir.glob(f"{CLAIMED_PREFIX}*.json")):
         payload, malformed = omm.read_record(path)
@@ -335,17 +319,6 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
         dispatch_id = path.name[len(CLAIMED_PREFIX):-len(".json")]
         chore = payload["intervention"]
         scope = payload["scope"]
-        stamped_at = int(payload["stamped_at"])
-
-        if _pass_finished_since(reports_dir, chore, scope, stamped_at):
-            target = state_dir / f"{DONE_PREFIX}{dispatch_id}.json"
-            try:
-                path.rename(target)
-            except OSError:
-                continue  # lost the race — leave it for the next sweep
-            print(f"MEMPASS-DONE {dispatch_id} {chore}")
-            acted.append({"dispatch_id": dispatch_id, "intervention": chore, "status": "done"})
-            continue
 
         try:
             cadence_s = memory_settings.interval_s_for(chore)
@@ -382,8 +355,37 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
     _prune_named(state_dir, EXPIRED_PREFIX)
     return acted
 
+def _run_complete(argv: list[str]) -> int:
+    """`complete <dispatch_id> --state-dir <dir> --outcome noop|mutation` — the CLI
+    surface for `complete_claim` (see its docstring for why a dispatch checks itself in
+    by id instead of the claim script inferring completion from a report filename)."""
+    ap = argparse.ArgumentParser(
+        prog="memory_dispatch_claim.py complete",
+        description="Mark a claimed memory-maintenance dispatch DONE, by dispatch_id.",
+    )
+    ap.add_argument("dispatch_id")
+    ap.add_argument("--state-dir", required=True)
+    ap.add_argument("--outcome", required=True, choices=("noop", "mutation"))
+    args = ap.parse_args(argv)
+    state_dir = Path(args.state_dir)
+    if complete_claim(state_dir, args.dispatch_id, args.outcome):
+        return 0
+    print(
+        f"memory_dispatch_claim: no claimed (or already-done) dispatch "
+        f"{args.dispatch_id!r} in {state_dir}",
+        file=sys.stderr,
+    )
+    return 2
+
 
 def main() -> int:
+    # `complete` is a distinct sub-mode (janitor#242 review) checked BEFORE the claim
+    # parser below is built — it never collides with `--chore` (required there, absent
+    # here), and no existing caller ever passes "complete" as its first argument.
+    argv = sys.argv[1:]
+    if argv and argv[0] == "complete":
+        return _run_complete(argv[1:])
+
     ap = argparse.ArgumentParser(description=__doc__)
     # default=None (not "") so an EXPLICITLY empty --state-dir is distinguishable from
     # "not given at all" (TRDD-N1CPV1QV part (c)) — a bare falsy check below would treat
@@ -396,7 +398,7 @@ def main() -> int:
                          "REQUIRED: a chore-blind claim let a [janitor-memory-split] fire "
                          "consume a queued 'consolidate' record and burn 236k tokens "
                          "(2026-09-15 fleet audit)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.state_dir is not None and args.state_dir.strip() == "":
         print(
@@ -450,6 +452,11 @@ def main() -> int:
         print(f"no claimable memory-maintenance dispatch in {state_dir}{hint}", file=sys.stderr)
         return 2
     print(json.dumps(payload))
+    # A SEPARATE, greppable line (never folded into the JSON above) so a skill can
+    # `grep '^CLAIM_ID='` for the id it must pass to `complete` later, without ever
+    # having to parse the JSON — and so every existing parser of the JSON line keeps
+    # seeing exactly the same bytes it always has.
+    print(f"CLAIM_ID={payload.get('dispatch_id', '')}")
     return 0
 
 
