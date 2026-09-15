@@ -71,8 +71,11 @@ def authority() -> str | None:
 
 
 def main() -> int:
+    # why: owner reported "failed disarms" with no log to diagnose from (2026-09-15) — every
+    # outcome (recorded, unverified, or a write failure) must leave a line in the janitor log.
     why = authority()
     if why is None:
+        state.log_line("disarm-guard", "DISARM_UNVERIFIED: no authority (no fresh user intent, no kill-switch)")
         print("DISARM_UNVERIFIED")
         return 0
     flag = state.state_dir() / state.DISARMED_FLAG
@@ -80,6 +83,7 @@ def main() -> int:
         state.init_state()
         state.atomic_write(flag, str(int(time.time())))
     except OSError as e:
+        state.log_line("disarm-guard", f"DISARM_UNVERIFIED: could not write the flag: {e}")
         print(f"DISARM_UNVERIFIED (could not write the flag: {e})")
         return 0
     # Clear the persistent, machine-global "armed forever" claim (TRDD-TUIBWHT7) whenever a
@@ -90,6 +94,7 @@ def main() -> int:
         gs.clear_armed()
     except OSError:
         pass
+    state.log_line("disarm-guard", f"DISARM_RECORDED:{why}")
     print(f"DISARM_RECORDED:{why}")
     return 0
 

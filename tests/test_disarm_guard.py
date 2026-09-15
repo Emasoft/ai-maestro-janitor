@@ -115,3 +115,26 @@ def test_the_intent_is_spent_so_one_request_disarms_once(project: Path, gstate: 
     _flag(project).unlink()
     assert _run(project, gstate) == "DISARM_UNVERIFIED", "the token must be spent, not standing"
     assert not _flag(project).exists()
+
+
+def _log_text(project: Path) -> str:
+    log = project / ".janitor" / "logs" / "disarm-guard.log"
+    return log.read_text() if log.exists() else ""
+
+
+def test_a_recorded_disarm_leaves_a_log_line(project: Path, gstate: Path) -> None:
+    """The owner reported 'failed disarms' with no log to diagnose from — a RECORDED outcome
+    must leave a line an operator can grep for."""
+    sdir = project / ".janitor" / "state"
+    user_intent.record_intent_from_prompt("/janitor-disarm", state_dir=sdir)
+    assert _run(project, gstate).startswith("DISARM_RECORDED:user-asked")
+    assert "DISARM_RECORDED:user-asked" in _log_text(project)
+
+
+def test_an_unverified_disarm_leaves_a_log_line_with_the_reason(project: Path, gstate: Path) -> None:
+    """An UNVERIFIED outcome (no authority) must also be logged, with the reason it was refused —
+    that is the case the owner could not previously diagnose at all."""
+    assert _run(project, gstate) == "DISARM_UNVERIFIED"
+    log = _log_text(project)
+    assert "DISARM_UNVERIFIED" in log
+    assert "no authority" in log

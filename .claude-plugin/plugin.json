@@ -33,9 +33,9 @@
     },
     "heartbeat_cron": {
       "title": "Heartbeat Cron Expression",
-      "description": "Standard 5-field cron for the janitor heartbeat \u2014 the INITIAL cadence baked at /janitor-arm. Default: \"*/5 * * * *\". When heartbeat_cadence_dynamic is on (default), the dispatcher AUTO-TIERS from here: it writes the desired cron to .janitor/state/desired-cadence.cron and re-arms (via the [janitor-renew] marker) to a FAST/MID/SLOW cadence chosen from live state, so the fixed value here converges within 1-2 fires. Set heartbeat_cadence_dynamic=false to pin this fixed cadence and disable tiering.",
+      "description": "Standard 5-field cron for the janitor heartbeat \u2014 a fixed cadence, no auto-tiering. Default: \"*/15 * * * *\", chosen because every fire is a billed model turn; a project can override it via .janitor/state/desired-cadence.cron.",
       "type": "string",
-      "default": "*/5 * * * *",
+      "default": "*/15 * * * *",
       "sensitive": false
     },
     "heartbeat_cadence_dynamic": {

@@ -74,6 +74,10 @@ after you have made it.
    - Guard printed `DISARM_UNVERIFIED` → append `— opt-out NOT recorded (no user request seen), so
      the fleet guardian may re-arm this project. To make it stick, type /janitor-disarm yourself.`
 
+5. **Verify the disarm actually took.** Run `CronList` once more and count jobs whose `prompt`
+   starts with `[janitor-heartbeat]`. Any remaining ⇒ the disarm FAILED — say so plainly instead
+   of reporting step 4's line as success.
+
 ## Output
 
 One line. Removes two files from this project's `.janitor/state/` (`heartbeat-armed-at.ts`,
