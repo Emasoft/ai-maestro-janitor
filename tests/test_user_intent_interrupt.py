@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
 
+import terminal_trigger  # noqa: E402
 import user_intent  # noqa: E402
 
 NOW = 1_784_000_000.0
@@ -261,3 +262,135 @@ def test_multi_doubling_window_growth_still_finds_the_interrupt(tmp_path: Path, 
     assert 29.0 <= age <= 31.0
     assert len(calls) > 1, "the test must actually force multiple window-doubling iterations"
     assert len(set(calls)) > 1, "must actually try more than one distinct window size"
+
+
+# --- self-sent echoes must not be mistaken for "the user is back" (owner finding 2026-09-15):
+# a `[janitor-resume]`-style injected command lands in the transcript as an ordinary `type: user`
+# record, indistinguishable in SHAPE from a real human prompt -- the record shape below is
+# `_prompt_record`'s (this module's own real-transcript-verified shape, see the module docstring),
+# e.g. verbatim: {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text":
+# "/janitor-resume"}]}, "timestamp": "..."} -- only the `text` differs from `_prompt_record`'s
+# other callers. ---
+
+
+def test_self_sent_echo_after_interrupt_does_not_end_the_cooldown(tmp_path: Path) -> None:
+    """An injected `/janitor-resume` landing as a `type: user` record must NOT look like "the
+    user is back": the cooldown from the earlier real interrupt must still apply."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(60), _prompt_record(10, "/janitor-resume")])
+    stamps = tmp_path / "self-send.%1.stamps.json"
+    terminal_trigger._stamp_self_sent(stamps, "/janitor-resume", NOW - 10)
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t, state_dir=tmp_path)
+
+    assert age is not None, "the self-sent echo must be skipped, not treated as the user's return"
+    assert 59.0 <= age <= 61.0
+
+
+def test_self_sent_echo_survives_verified_send_retry_latency(tmp_path: Path) -> None:
+    """A stamp 15s before the transcript record (outside the old 10s window, inside the current
+    30s one) is still recognized as this session's own echo -- the gap between the SEND-time
+    stamp and the SUBMIT-time transcript record can exceed 10s on a verified-send retry (issue
+    #306: 14:28:07 timeout, 14:28:15 landed) before even counting submit latency."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(60), _prompt_record(10, "/janitor-resume")])
+    stamps = tmp_path / "self-send.%1.stamps.json"
+    terminal_trigger._stamp_self_sent(stamps, "/janitor-resume", NOW - 10 - 15)
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t, state_dir=tmp_path)
+
+    assert age is not None, "a 15s-old stamp is still within the 30s match window"
+    assert 59.0 <= age <= 61.0
+
+
+def test_a_real_human_prompt_still_ends_the_cooldown_even_with_stamps_present(tmp_path: Path) -> None:
+    """A genuinely different, un-stamped human prompt still ends the cooldown -- the exclusion
+    is narrow (exact text + a matching stamp), not a blanket "ignore all newer user records"."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(60), _prompt_record(10, "let's keep going")])
+    stamps = tmp_path / "self-send.%1.stamps.json"
+    terminal_trigger._stamp_self_sent(stamps, "/janitor-resume", NOW - 10)  # different command
+
+    assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t, state_dir=tmp_path) is None
+
+
+def test_self_sent_stamp_outside_the_match_window_does_not_exclude(tmp_path: Path) -> None:
+    """A stamp for the SAME command text, but far outside the `_SELF_SENT_MATCH_WINDOW_S`
+    window, is a coincidence, not this send's own echo -- must not exclude it."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(60), _prompt_record(10, "/janitor-resume")])
+    stamps = tmp_path / "self-send.%1.stamps.json"
+    terminal_trigger._stamp_self_sent(stamps, "/janitor-resume", NOW - 500)  # way outside ±30s
+
+    assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t, state_dir=tmp_path) is None
+
+
+def test_no_stamps_file_no_exclusion(tmp_path: Path) -> None:
+    """No self-send stamps file at all -> the record is a real user prompt, cooldown ends."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(60), _prompt_record(10, "/janitor-resume")])
+
+    assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t, state_dir=tmp_path) is None
+
+
+# --- the backward scan must not stop on the FIRST old timestamp; only a streak of 3 CONSECUTIVE
+# user/assistant records counts (owner finding 2026-09-15: an attachment/task-notification record
+# can carry a timestamp OLDER than its real position in the file). ---
+
+
+def test_single_out_of_order_old_attachment_does_not_hide_a_real_interrupt(tmp_path: Path) -> None:
+    """One `attachment`-type record with an implausibly old timestamp, sitting between the tail
+    and a real in-window interrupt, must not stop the scan: it is not a user/assistant record,
+    so it never counts toward the old-streak at all."""
+    t = tmp_path / "session.jsonl"
+    attachment = {
+        "type": "attachment",
+        "message": {"role": "user", "content": "some file attachment"},
+        "timestamp": _iso(NOW - 9999),  # implausibly old, out of true file order
+    }
+    lines = [json.dumps(_interrupt_record(30)), json.dumps(attachment)]
+    t.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t)
+
+    assert age is not None
+    assert 29.0 <= age <= 31.0
+
+
+def test_two_consecutive_old_assistant_records_do_not_stop_the_scan(tmp_path: Path) -> None:
+    """Two consecutive old `assistant`-role records (below the `_OLD_STREAK_LIMIT` of 3) must
+    not stop the scan before it reaches a real, in-window interrupt sitting behind them."""
+    t = tmp_path / "session.jsonl"
+    old_assistant = [
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": f"old reply {i}"},
+            "timestamp": _iso(NOW - 9999 - i),
+        }
+        for i in range(2)
+    ]
+    lines = [json.dumps(_interrupt_record(30)), *[json.dumps(r) for r in old_assistant]]
+    t.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t)
+
+    assert age is not None
+    assert 29.0 <= age <= 31.0
+
+
+def test_three_consecutive_old_assistant_records_stop_the_scan(tmp_path: Path) -> None:
+    """A streak of 3 CONSECUTIVE old `assistant`-role records DOES stop the scan (returns None),
+    proving `_OLD_STREAK_LIMIT` is actually enforced and not merely never reached."""
+    t = tmp_path / "session.jsonl"
+    old_assistant = [
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": f"old reply {i}"},
+            "timestamp": _iso(NOW - 9999 - i),
+        }
+        for i in range(3)
+    ]
+    lines = [json.dumps(_interrupt_record(30)), *[json.dumps(r) for r in old_assistant]]
+    t.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None

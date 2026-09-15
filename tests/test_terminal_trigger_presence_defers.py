@@ -216,10 +216,43 @@ def test_an_injection_attempted_10min_after_an_interrupt_proceeds(tmp_path):
     assert sent == ["Enter"]
 
 
-def test_esc_first_hard_send_bypasses_the_interrupt_cooldown(tmp_path, monkeypatch):
-    """A hard send (`esc_first=True` -- fleet-recovery unwedge, model-fallback) must proceed even
-    while inside the interrupt cooldown: that flag means the session's own just-issued
-    Esc/Ctrl-C is EXPECTED, not a reason to defer the very command meant to recover from it."""
+def test_esc_first_alone_does_not_bypass_the_interrupt_cooldown(tmp_path, monkeypatch):
+    """`esc_first=True` with no `bypass_interrupt_cooldown` (the `compact_trigger.py --hard`
+    shape, owner finding 2026-09-15, #306) must still DEFER: that caller never sent the Esc
+    as a recovery from a real interrupt, so `esc_first` alone must not skip the cooldown."""
+    transcript = _interrupt_transcript(tmp_path, 30)  # inside the default 300s cooldown
+    logged: list[str] = []
+    monkeypatch.setattr(tt.state, "log_line", lambda _name, msg: logged.append(msg))
+    slept: list[float] = []
+    reads = 0
+
+    def _reader(_t):
+        nonlocal reads
+        reads += 1
+        return _pane("")
+
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/janitor-arm",
+        type_fn=lambda: None, submit_fn=lambda: None,
+        reader=_reader, is_typing=lambda _t: False,
+        transcript_path=str(transcript),
+        sleeper=slept.append, clock=lambda: 0.0,
+        quiet_s=1.0, retry_s=1.0, giveup_s=2.0,
+        esc_first=True,
+    )
+
+    assert ok is False, why
+    assert reads == 0, "the pane must never be read while an interrupt cooldown is active"
+    assert slept and all(d == 1.0 for d in slept)
+    assert any("inject deferred" in m and "interrupted" in m for m in logged), logged
+
+
+def test_bypass_interrupt_cooldown_flag_bypasses_it(tmp_path, monkeypatch):
+    """A hard-recovery send (`bypass_interrupt_cooldown=True` -- fleet-recovery unwedge,
+    model-fallback) must proceed even while inside the interrupt cooldown: that flag means
+    the session's own just-issued Esc/Ctrl-C is EXPECTED, not a reason to defer the very
+    command meant to recover from it. Passed alongside `esc_first=True`, matching the real
+    caller shape (`send_verified(..., esc_first=True, bypass_interrupt_cooldown=True)`)."""
     transcript = _interrupt_transcript(tmp_path, 30)  # inside the default 300s cooldown
     logged: list[str] = []
     monkeypatch.setattr(tt.state, "log_line", lambda _name, msg: logged.append(msg))
@@ -233,8 +266,9 @@ def test_esc_first_hard_send_bypasses_the_interrupt_cooldown(tmp_path, monkeypat
         transcript_path=str(transcript),
         sleeper=lambda _s: None, clock=lambda: 0.0,
         esc_first=True,
+        bypass_interrupt_cooldown=True,
     )
 
     assert ok is True, why
     assert sent == ["Enter"]
-    assert any("interrupt cooldown bypassed" in m and "hard send" in m for m in logged), logged
+    assert any("interrupt cooldown bypassed" in m for m in logged), logged

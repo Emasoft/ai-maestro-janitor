@@ -77,7 +77,12 @@ def _request_model_opus() -> str:
     if terminal["kind"] == "unknown":
         return "not-automatable"
     try:
-        sent, _why = terminal_trigger.send_verified(terminal, "/model opus", esc_first=True)
+        # why: this call is itself part of rotation/recovery (a post-rotation model
+        # switch when no Fable headroom remains) -- it must land even inside the
+        # self-send interrupt cooldown, same as the rotation send it follows.
+        sent, _why = terminal_trigger.send_verified(
+            terminal, "/model opus", esc_first=True, bypass_interrupt_cooldown=True,
+        )
     except Exception:  # noqa: BLE001 — keystroke failure must not block the rotation
         return "not-automatable"
     return "typed" if sent else "not-automatable"

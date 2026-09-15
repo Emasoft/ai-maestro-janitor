@@ -204,11 +204,18 @@ def main() -> int:
     # original ESC-first type-and-submit. ESC-first on an erroring pane ends the turn
     # before the command exists and the menu then swallows the slash command.
     true_error = bool(pane) and session_liveness.is_retry_wedge(pane or "")
+    # `bypass_interrupt_cooldown=True`: this switch IS the recovery from the session's own
+    # exhausted-model/retry state, so a just-issued Esc/Ctrl-C in the transcript must not defer
+    # it (owner finding 2026-09-15, #306 -- `esc_first` alone no longer implies this bypass).
     try:
         if true_error:
-            sent, why = terminal_trigger.send_model_switch_true_error(terminal, command)
+            sent, why = terminal_trigger.send_model_switch_true_error(
+                terminal, command, bypass_interrupt_cooldown=True,
+            )
         else:
-            sent, why = terminal_trigger.send_verified(terminal, command, esc_first=True)
+            sent, why = terminal_trigger.send_verified(
+                terminal, command, esc_first=True, bypass_interrupt_cooldown=True,
+            )
     except Exception as exc:  # noqa: BLE001 — an injection fault must not break the heartbeat
         state.log_line(_LOG, f"inject raised: {exc!r}")
         return 0

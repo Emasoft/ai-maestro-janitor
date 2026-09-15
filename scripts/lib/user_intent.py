@@ -507,6 +507,54 @@ def _interrupt_text(rec: Mapping) -> str | None:
     return None
 
 
+
+# Consecutive same-type (user/assistant) records the backward scan must see OLDER than the
+# cooldown window before it stops widening -- NOT the first old timestamp it meets. An
+# attachment/task-notification record can carry a timestamp OLDER than its true position in the
+# file (owner finding 2026-09-15): stopping on the very first old `ts` let one such out-of-order
+# record hide a real, in-window interrupt sitting just behind it. Only `user`/`assistant` role
+# records count toward the streak; other types are skipped without affecting it.
+_OLD_STREAK_LIMIT = 3
+
+# How close (seconds) a `type: user` transcript record's text must land to this session's OWN
+# `terminal_trigger` self-send stamp for the SAME command text to be treated as an echo of our
+# own injection rather than the human typing (owner finding 2026-09-15: an injected
+# `/janitor-resume` looked exactly like "the user is back" and ended the cooldown for every other
+# injector). 30s, not 10s: the stamp is written at SEND time but the transcript record lands at
+# SUBMIT time, and a verified-send retry (issue #306: 14:28:07 timeout, 14:28:15 landed -- 8s on
+# the retry alone, before submit latency) can exceed a 10s window outright. Generous relative to
+# typical injection + retry latency, tight enough that an unrelated earlier command a minute
+# later is not mistaken for the same send.
+_SELF_SENT_MATCH_WINDOW_S = 30.0
+_SELF_SEND_STAMPS_GLOB = "self-send.*.stamps.json"
+
+
+def _is_self_sent_echo(text: str, ts: int | None, state_dir: Path) -> bool:
+    """True when `text` matches a command THIS session's own `terminal_trigger` verified-sender
+    stamped within `_SELF_SENT_MATCH_WINDOW_S` of `ts` -- i.e. the record is an echo of our own
+    injection landing in the transcript as a `type: user` record, not the human typing.
+
+    Reads `terminal_trigger._stamp_self_sent`'s `self-send.<pane>.stamps.json` files (one per
+    pane, `{command: epoch}`) -- globbed rather than a single fixed name because a project may
+    have more than one live pane, each with its own stamp file. `ts is None` fails CLOSED (False,
+    the pre-fix behaviour): with no timestamp there is no window to verify, and treating an
+    unstamped/untimed record as an echo on a text-only coincidence would be the false-exclusion
+    this window guards against."""
+    if ts is None:
+        return False
+    for stamps_path in sorted(state_dir.glob(_SELF_SEND_STAMPS_GLOB)):
+        try:
+            data = json.loads(stamps_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        stamp = data.get(text)
+        if isinstance(stamp, (int, float)) and abs(ts - stamp) <= _SELF_SENT_MATCH_WINDOW_S:
+            return True
+    return False
+
+
 def recently_interrupted(
     project_dir: str | Path,
     window_s: int | None = None,
@@ -514,35 +562,48 @@ def recently_interrupted(
     *,
     transcript_path: str | Path | None = None,
     home: Path | None = None,
+    state_dir: Path | None = None,
 ) -> float | None:
     """Seconds since the newest Esc/Ctrl-C interrupt in the SESSION-SCOPED transcript, or None
     when none happened within `window_s` (default `resolve_interrupt_cooldown_s()`), the
     session is unknown, or a NEWER ordinary user prompt shows the user is already back.
 
     `transcript_path` MUST be the caller's own session (a hook's `transcript_path`, or
-    `JANITOR_TRANSCRIPT_PATH` threaded through by `terminal_trigger`) — there is deliberately
+    `JANITOR_TRANSCRIPT_PATH` threaded through by `terminal_trigger`) -- there is deliberately
     NO fallback to "the newest transcript under this project's slug": two live sessions of the
     same project must never share a cooldown just because one of them typed more recently and
     so owns the newer file. When no session is known, this SKIPS the cooldown (logged) rather
-    than guess at one — a caller with no session identity has no interrupt to defer for.
+    than guess at one -- a caller with no session identity has no interrupt to defer for.
 
     The scan walks the transcript BACKWARDS in growing 64 KB windows, bounded by TIME (not a
     fixed byte cap): it keeps widening the window until it finds the interrupt marker, finds an
-    ordinary user prompt newer than any interrupt (the user is back — see below), or reaches a
-    record older than `now - window_s` (everything before is older still). A single fixed-size
-    tail read would let one large tool-result line written just after the Esc push the marker
-    out of the window entirely.
+    ordinary user prompt newer than any interrupt (the user is back -- see below), or sees
+    `_OLD_STREAK_LIMIT` CONSECUTIVE `user`/`assistant`-role records older than `now - window_s`
+    (everything of that role before them is older still). A single fixed-size tail read would
+    let one large tool-result line written just after the Esc push the marker out of the window
+    entirely; stopping on the FIRST old timestamp (rather than a streak) would let one
+    out-of-order attachment/task-notification record -- these can carry a timestamp earlier than
+    their real position in the file -- hide a real, in-window interrupt sitting just behind it.
+    Only `user`/`assistant` records count toward that streak; every other type is skipped
+    without affecting it.
 
     A newer plain user-role text block that is NOT the exact interrupt marker means the user
-    resumed typing after the interrupt, so the cooldown ends immediately (returns None) — this
-    is an EXACT match against the marker text (never a prefix): a compaction summary that
-    merely quotes the phrase must not be mistaken for a live interrupt.
+    resumed typing after the interrupt, so the cooldown ends immediately (returns None) --
+    this is an EXACT match against the marker text (never a prefix): a compaction summary that
+    merely quotes the phrase must not be mistaken for a live interrupt. EXCEPT when that text is
+    itself an ECHO of a command THIS session self-sent (`_is_self_sent_echo`, via
+    `terminal_trigger`'s stamp files): an injected `/janitor-resume` lands in the transcript as
+    an ordinary `type: user` record, and without this check it would look exactly like "the user
+    is back" and end the cooldown for every other queued injector (owner finding 2026-09-15).
+    Such a record is skipped -- neither an interrupt nor proof of the user's return -- and the
+    backward scan continues.
 
-    Fails OPEN (returns None) on any unreadable/missing transcript or unparseable content — this
-    is the CALLER's decision to make (defer or not), never a hard error over a breadcrumb.
+    Fails OPEN (returns None) on any unreadable/missing transcript or unparseable content --
+    this is the CALLER's decision to make (defer or not), never a hard error over a breadcrumb.
     """
     resolved_window = resolve_interrupt_cooldown_s() if window_s is None else window_s
     resolved_now = time.time() if now is None else now
+    sd = state.state_dir() if state_dir is None else state_dir
     _ = home  # kept for signature compatibility with existing callers/tests; no longer used
 
     if transcript_path is None:
@@ -570,22 +631,24 @@ def recently_interrupted(
         # Re-scan the WHOLE window every growth step, not just the newly-revealed prefix:
         # `_tail_bytes` decides whether to drop a guessed-truncated first line purely from
         # `size > max_bytes` on THIS call, so the exact line boundaries shift between windows
-        # of different size — a "just scan what's new" diff would silently trust that the tail
+        # of different size -- a "just scan what's new" diff would silently trust that the tail
         # is byte-for-byte stable across windows, which it is not guaranteed to be. Re-scanning
         # is idempotent (same record, same verdict) and the window only grows a handful of
         # times before hitting the whole-file fallback, so the extra work is bounded and cheap;
         # a wrong verdict from a misaligned diff is not an acceptable trade for it.
+        consecutive_old = 0  # reset each growth step: this re-scans the window from its own tail
         for raw in reversed(lines):
             try:
                 rec = json.loads(raw)
             except ValueError:
-                continue  # malformed line — keep walking back for an earlier valid record
+                continue  # malformed line -- keep walking back for an earlier valid record
             if not isinstance(rec, dict):
                 continue
             ts = token_history.parse_ts(rec.get("timestamp", ""))
             text = _interrupt_text(rec)
             if text is not None:
-                if text.strip() in INTERRUPT_MARKERS:
+                stripped = text.strip()
+                if stripped in INTERRUPT_MARKERS:
                     if ts is None:
                         try:
                             ts = int(transcript.stat().st_mtime)
@@ -599,13 +662,23 @@ def recently_interrupted(
                         )
                         return age
                     return None  # newest interrupt already outside the window
-                # A newer, non-interrupt user prompt found before any interrupt: the user is
-                # back — the cooldown is over regardless of any earlier interrupt.
+                if _is_self_sent_echo(stripped, ts, sd):
+                    # Our own injected command echoed back as a `type: user` record -- not
+                    # evidence the user is back, and not an interrupt. Keep scanning backward.
+                    continue
+                # A newer, non-interrupt, non-self-sent user prompt found before any interrupt:
+                # the user is back -- the cooldown is over regardless of any earlier interrupt.
                 return None
-            if ts is not None and ts < deadline_ts:
-                # This record (whatever it is) is already older than the window — everything
-                # before it is older still, so there is nothing left worth reading further back.
-                return None
+            role = rec.get("type")
+            if role in ("user", "assistant") and ts is not None:
+                if ts < deadline_ts:
+                    consecutive_old += 1
+                    if consecutive_old >= _OLD_STREAK_LIMIT:
+                        # Everything of this role before this streak is older still -- nothing
+                        # left worth reading further back.
+                        return None
+                    continue
+                consecutive_old = 0  # an in-window role record breaks the old-streak
         if window_bytes >= size:
             return None
         window_bytes = min(window_bytes * 2, size)

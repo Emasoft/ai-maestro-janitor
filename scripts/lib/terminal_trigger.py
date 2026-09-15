@@ -716,6 +716,7 @@ def inject_until_sent(
     clock=time.monotonic,
     transcript_path: str | None = None,
     esc_first: bool = False,
+    bypass_interrupt_cooldown: bool = False,
 ) -> tuple[bool, str]:
     """Keep trying until the command is actually SENT. Returns (sent, why).
 
@@ -753,10 +754,17 @@ def inject_until_sent(
     `type_fn` / `submit_fn` / `clear_fn` are injected so the decision logic is testable without
     a terminal, and so the caller keeps ownership of which channel actually types.
 
-    `esc_first=True` marks a HARD send (fleet-recovery unwedge of a frozen/retry_wedged
-    session, the model-fallback switch) and BYPASSES the interrupt-cooldown check below: the
-    session is expected to carry a just-issued Esc/Ctrl-C, and that is exactly the wedged state
-    this send exists to recover from, not a reason to defer it.
+    `esc_first=True` sends an ESC before typing, for a pane that may be mid-render or holding a
+    selection menu. It does NOT by itself bypass the interrupt-cooldown check below (owner
+    finding 2026-09-15, #306): `compact_trigger.py --hard` also sets `esc_first`, and it never
+    sent that Esc as a recovery from a real interrupt, so keying the bypass on `esc_first`
+    let a routine hard `/compact` skip a cooldown it should have honoured.
+
+    `bypass_interrupt_cooldown=True` is the SEPARATE, explicit flag for that: it marks a HARD
+    send that IS a fleet-recovery unwedge of a frozen/retry_wedged session, or the
+    model-fallback switch -- the session is expected to carry a just-issued Esc/Ctrl-C, and
+    that is exactly the wedged state such a send exists to recover from, not a reason to defer
+    it. Only those two callers pass it; every other caller leaves it False.
     """
     # FAIL-DIRECTION AUDIT of this gate (TRDD-D2DD5GO8): the probe is `typing_now`, whose
     # None means the machine-wide HID signal is BLINDED on a platform where it exists (ioreg
@@ -808,27 +816,31 @@ def inject_until_sent(
     typing_probe = _default_is_typing if is_typing is None else is_typing
 
     def _recently_interrupted() -> float | None:
-        """`recently_interrupted(...)` age, or None — an Esc/Ctrl-C interrupt is NOT a keystroke
+        """`recently_interrupted(...)` age, or None -- an Esc/Ctrl-C interrupt is NOT a keystroke
         the typing probe above can see (owner complaint 2026-09-15: "esc key unable to stop the
-        current agent from running" — the queued command typed itself the moment the pane went
+        current agent from running" -- the queued command typed itself the moment the pane went
         idle right after the user hit Esc). Same lazy-import + never-raises shape as
         `_default_is_typing` so a broken probe degrades to "not interrupted", never to a crash.
 
-        Skipped entirely when `esc_first` is True: that flag marks a HARD send (fleet-recovery
-        unwedge of a frozen/retry_wedged session, the model-fallback switch) — exactly the case
-        where a just-issued Esc/Ctrl-C is expected and must NOT defer the very send meant to
-        recover from it.
+        Skipped entirely when `bypass_interrupt_cooldown` is True: that flag marks a HARD send
+        (fleet-recovery unwedge of a frozen/retry_wedged session, the model-fallback switch) --
+        exactly the case where a just-issued Esc/Ctrl-C is expected and must NOT defer the very
+        send meant to recover from it. Deliberately SEPARATE from `esc_first` (TRDD, owner
+        finding 2026-09-15, the #306 injector): `esc_first` ALSO fires from `compact_trigger.py
+        --hard`, a caller that never sent that Esc as a recovery -- keying the bypass on
+        `esc_first` let a routine hard `/compact` skip the cooldown it exists to enforce. Only a
+        caller that explicitly asserts "I am recovering from my own interrupt" may bypass.
 
-        `transcript_path` (the explicit kwarg) wins; else `JANITOR_TRANSCRIPT_PATH` — set by a
+        `transcript_path` (the explicit kwarg) wins; else `JANITOR_TRANSCRIPT_PATH` -- set by a
         hook-aware caller (resume/clear/compact trigger's `--transcript-path`) into its own
         `os.environ` before calling `send_self_command`, which spawns its detached child WITHOUT
         an explicit `env=` override, so the child inherits it (`_fire_detached_verified`/
         `_fire_detached_steps`). Neither given → `recently_interrupted` skips the cooldown
-        (session unknown) rather than guessing at one — the documented, honest gap left by the
+        (session unknown) rather than guessing at one -- the documented, honest gap left by the
         hooks (out of this change's file scope) not yet passing `--transcript-path` through.
         """
-        if esc_first:
-            state.log_line("terminal_trigger", "interrupt cooldown bypassed: hard send")
+        if bypass_interrupt_cooldown:
+            state.log_line("terminal_trigger", "interrupt cooldown bypassed: hard recovery send")
             return None
         try:
             import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
@@ -1196,6 +1208,7 @@ def send_verified(
     command: str,
     *,
     esc_first: bool = False,
+    bypass_interrupt_cooldown: bool = False,
     giveup_s: float | None = None,
     sleeper=time.sleep,
     reader=None,
@@ -1203,7 +1216,7 @@ def send_verified(
     still_wanted=None,
 ) -> tuple[bool, str]:
     """Type ONE command into `terminal` under the three ratified rules. Returns (sent, why).
-    `still_wanted` is forwarded to `inject_until_sent` — re-asked on EVERY iteration of the
+    `still_wanted` is forwarded to `inject_until_sent` -- re-asked on EVERY iteration of the
     field wait, so a caller whose command is only valid under a condition (the self-send's
     type-time guard: "a resume flag still exists") is cancelled the moment it stops holding,
     not only checked once before a wait that can last minutes.
@@ -1211,7 +1224,7 @@ def send_verified(
     The single-command sibling of `run_chained_inject`, for callers that need a verified
     self-injection with no fresh-session gate: the model-fallback switch (TRDD-QE390SJA) and
     the post-rotation unblock (TRDD-UA4FAX67). Use THIS, never
-    `send_self_command(respect_user_presence=True)` — that is the retired one-shot
+    `send_self_command(respect_user_presence=True)` -- that is the retired one-shot
     presence-cancel (see this module's notes and [[claude-code-esc-input-semantics]]).
 
     `esc_first` sends ESC before typing, for a pane that may be mid-render or holding a
@@ -1220,14 +1233,17 @@ def send_verified(
     retries are governed by rules 1-3, and re-ESCing on each pass would be an extra keystroke
     into a pane the user may have just started typing in.
 
-    `esc_first` is ALSO forwarded to `inject_until_sent` as its hard-send flag, bypassing the
-    interrupt-cooldown check there: a caller passing `esc_first=True` is already telling us it
-    just sent (or is about to send) an Esc/Ctrl-C on purpose, so that interrupt must not defer
-    the very command meant to recover from it.
+    `bypass_interrupt_cooldown` is forwarded to `inject_until_sent` as ITS SEPARATE
+    hard-send-recovery flag (owner finding 2026-09-15, #306): `esc_first` alone no longer
+    bypasses the interrupt-cooldown check there, because `esc_first` is also set by callers
+    (e.g. `compact_trigger.py --hard`) that never sent that Esc as a recovery from a real
+    interrupt. Pass `bypass_interrupt_cooldown=True` only when the caller is itself the
+    recovery from a just-issued Esc/Ctrl-C (a fleet-recovery unwedge, the model-fallback
+    switch) -- everyone else leaves it False.
 
     `reader`/`is_typing` are the same injectable seams `inject_until_sent` exposes, forwarded
     only when given: they are bound as DEFAULT ARGUMENTS there, so a caller (or a test) that
-    swaps the module attribute alone would silently keep the original — passing them through
+    swaps the module attribute alone would silently keep the original -- passing them through
     explicitly is what makes this function drivable without a live pane.
     """
     if build_type_only_steps(terminal, command) is None or build_submit_steps(terminal) is None:
@@ -1247,7 +1263,8 @@ def send_verified(
     return inject_until_sent(
         terminal, command,
         type_fn=_runner(command), submit_fn=_submit, clear_fn=_clear,
-        giveup_s=giveup_s, sleeper=sleeper, esc_first=esc_first, **extra,
+        giveup_s=giveup_s, sleeper=sleeper, esc_first=esc_first,
+        bypass_interrupt_cooldown=bypass_interrupt_cooldown, **extra,
     )
 
 
@@ -1271,6 +1288,7 @@ def send_model_switch_true_error(
     sleeper=time.sleep,
     reader=None,
     is_typing=None,
+    bypass_interrupt_cooldown: bool = False,
 ) -> tuple[bool, str]:
     """The OWNER-RATIFIED actuation for a model switch while the session is in a TRUE error
     state (owner, 2026-09-02 21:05, superseding the 2026-08-15 order once the janitor's own
@@ -1293,6 +1311,10 @@ def send_model_switch_true_error(
     the rewind menu), so an undetected menu within `menu_wait_s` means we stop after the
     submit and report it — the caller's three-state badge confirm still tells the truth
     downstream. Returns (sent, why); `sent` reflects the COMMAND injection only.
+
+    `bypass_interrupt_cooldown` is forwarded verbatim to the `send_verified` call below --
+    the model-fallback switch is one of the two legitimate callers of that flag (owner
+    finding 2026-09-15, #306); see `send_verified`'s own docstring.
     """
     label = terminal.get("pane") or terminal.get("session_id") or terminal.get("kind", "?")
     esc = build_esc_only_steps(terminal)
@@ -1333,6 +1355,7 @@ def send_model_switch_true_error(
     sent, why = send_verified(
         terminal, command, esc_first=False,
         giveup_s=giveup_s, sleeper=sleeper, reader=reader, is_typing=is_typing,
+        bypass_interrupt_cooldown=bypass_interrupt_cooldown,
     )
     if not sent:
         return False, why
