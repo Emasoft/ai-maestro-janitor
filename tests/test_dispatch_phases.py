@@ -156,7 +156,7 @@ def test_main_self_disarms_when_globally_disarmed(env_isolation: dict, monkeypat
     gs.set_kill_switch("disarmed")
 
     ran: list[str] = []
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: ran.append(name))
     monkeypatch.setattr(
         dispatch.gs,
         "ensure_daemon_running",
@@ -187,7 +187,7 @@ def test_main_ignores_a_stale_global_pause_flag(env_isolation: dict, monkeypatch
     (cd / "global-pause.flag").write_text("stale", encoding="utf-8")
 
     ran: list[str] = []
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: ran.append(name))
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
     monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
@@ -1302,7 +1302,7 @@ def test_main_full_fire_runs_the_whole_roster_with_a_retired_sentinel_present(
 
     ran: list[str] = []
     ensured: list[bool] = []
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: ran.append(name))
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: ensured.append(True))
 
     out = _capture_stdout(dispatch.main)
@@ -1350,7 +1350,7 @@ def test_main_under_kill_switch_self_disarms_even_with_a_retired_sentinel(
     (state.state_dir() / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
 
     ran: list[str] = []
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: ran.append(name))
     monkeypatch.setattr(
         dispatch.gs,
         "spawn_daemon_detached",
@@ -1773,7 +1773,7 @@ def test_main_full_mode_default_on_nudges(env_isolation: dict, monkeypatch: pyte
     state.init_state()
     _make_idle_and_stale(state)
 
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
     monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
@@ -1794,7 +1794,7 @@ def test_main_full_mode_nudges_THROUGH_the_retired_sentinel(env_isolation: dict,
     _make_idle_and_stale(state)
     (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
     monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
@@ -1816,7 +1816,7 @@ def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detector
 
     ran: list[str] = []
     daemon_calls: list[str] = []
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: ran.append(name))
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: daemon_calls.append("called"))
     monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
@@ -1842,7 +1842,7 @@ def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(env_isola
     state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 10))
     (sd / "keep-going").write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: pytest.fail("detectors must not run"))
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: pytest.fail("detectors must not run"))
     monkeypatch.setattr(
         dispatch.gs,
         "ensure_daemon_running",
@@ -1866,7 +1866,7 @@ def test_main_compact_resume_short_circuits_before_keep_going_nudge(env_isolatio
     _arm_compact_flag(state, "continue TRDD-abcd1234")
     (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: pytest.fail("detectors must not run"))
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: pytest.fail("detectors must not run"))
     monkeypatch.setattr(
         dispatch.gs,
         "ensure_daemon_running",
@@ -2937,7 +2937,7 @@ def test_main_call_site_fail_open_second_layer(env_isolation: dict, monkeypatch:
 
     gs.init_global_state()
     state.init_state()
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
     def _raise() -> None:
@@ -3117,7 +3117,7 @@ def test_main_idle_fire_emits_quiet(env_isolation: dict, monkeypatch: pytest.Mon
     _isolate_home(env_isolation, monkeypatch)
     sd = _seed_state_dir(dispatch)
     (sd / "last-resume.ts").write_text(str(int(time.time())))  # mutes the keep-going nudge
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
     out = _capture_stdout(dispatch.main)
@@ -3135,7 +3135,7 @@ def test_main_action_fire_does_not_emit_quiet(env_isolation: dict, monkeypatch: 
 
     _seed_state_dir(dispatch)  # no resume stamp → the nudge is eligible to fire
     _make_idle_and_stale(_st)  # idle user + one stale agent → the gate lets it through
-    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval, **kw: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
     out = _capture_stdout(dispatch.main)
@@ -3836,11 +3836,12 @@ def test_clear_resume_consumes_when_session_id_matches(
     assert out.startswith("[janitor-resume]"), f"a matching session id must still resume, got {out!r}"
 
 
-def test_clear_resume_discards_on_session_id_mismatch(
+def test_clear_resume_resumes_anyway_on_session_id_mismatch(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """(sub-step 4) A flag stamped for a DIFFERENT session must be discarded, not
-    resumed against this one — a defensive guard against a shared/misdirected state dir."""
+    """(sub-step 4) A flag stamped for a DIFFERENT session must still resume — whether
+    /clear changes the session id is unmeasured, so the check fails OPEN and only logs
+    the mismatch instead of discarding the very resume it exists to deliver."""
     dispatch = _import_dispatch()
     import state
 
@@ -3848,10 +3849,11 @@ def test_clear_resume_discards_on_session_id_mismatch(
     state.atomic_write(state.state_dir() / "resume-after-clear.session-id.txt", "sess-abc123")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-different")
     out = _capture_stdout(dispatch._phase_clear_resume)
-    assert out == "", f"a session-id mismatch must discard the flag silently, got {out!r}"
+    assert out.startswith("[janitor-resume]"), f"a session-id mismatch must still resume, got {out!r}"
+    log_line = (state.log_dir() / "dispatch.log").read_text(encoding="utf-8")
+    assert "session id differs" in log_line, f"the mismatch must be logged, got {log_line!r}"
     sd = state.state_dir()
-    assert not (sd / "resume-after-clear.flag").exists(), "mismatched flag must be discarded"
-    assert not (sd / "resume-after-clear.session-id.txt").exists()
+    assert not (sd / "resume-after-clear.flag").exists(), "the flag is consumed on the success path, same as a match"
 
 
 def test_clear_resume_consumes_when_no_session_id_stamp(
@@ -3990,3 +3992,258 @@ def test_clear_resume_still_lists_a_fresh_live_agent(env_isolation: dict) -> Non
     _add_pending_agent(state, "fresh-agent-2", stale=False)
     out = _capture_stdout(dispatch._phase_clear_resume)
     assert "fresh-agent-2" in out, f"a fresh agent must still be named on clear-resume, got {out!r}"
+
+
+# ---------- Phase 0.8: user-interrupt cooldown (TRDD-6P0KUSO9) -------------
+
+
+def _session_transcript_file(home: Path, project_dir: Path, session_id: str) -> Path:
+    """Where `_session_transcript_path` will look, given the SAME slug rule it uses."""
+    import memory_scopes
+
+    slug = memory_scopes.project_slug(str(project_dir))
+    p = home / ".claude" / "projects" / slug / f"{session_id}.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _iso(epoch: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(epoch)) + ".000Z"
+
+
+def _write_interrupt_transcript(path: Path, age_s: float, *, now: float) -> None:
+    """A one-record transcript whose sole record is the exact Esc marker text
+    `recently_interrupted` matches, `age_s` seconds before `now`."""
+    record = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
+        "timestamp": _iso(now - age_s),
+    }
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+
+def test_session_transcript_path_matches_the_shared_slug_rule(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-6P0KUSO9 addendum) `_session_transcript_path()` must resolve to
+    `~/.claude/projects/<slug>/<session-id>.jsonl` using the SAME slug rule
+    `memory_scopes.project_slug` applies — not a re-derived one — even when the
+    project path contains an underscore (the character most likely to expose a
+    divergent slugging scheme)."""
+    dispatch = _import_dispatch()
+    import memory_scopes
+
+    project_dir = env_isolation["project"] / "under_score_project"
+    project_dir.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
+    session_id = "sess-slug-check"
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+
+    # Independent expectation, not routed through memory_scopes.project_slug: the
+    # slug rule dashes every non-alphanumeric char, so this exact string is what a
+    # correct implementation must produce for this path — a wrong-but-self-consistent
+    # slugger (e.g. one that only dashes "/") would fail this, unlike a bare
+    # `memory_scopes.project_slug(...) == memory_scopes.project_slug(...)` check.
+    expected_slug = re.sub(r"[^A-Za-z0-9]", "-", str(project_dir))
+    assert expected_slug == memory_scopes.project_slug(str(project_dir)), (
+        "test's independent expectation drifted from memory_scopes.project_slug's own rule"
+    )
+    transcript = _session_transcript_file(Path.home(), project_dir, session_id)
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    resolved = dispatch._session_transcript_path()
+    expected_path = Path.home() / ".claude" / "projects" / expected_slug / f"{session_id}.jsonl"
+    assert resolved == expected_path, f"expected {expected_path!r}, got {resolved!r}"
+
+
+def test_session_transcript_path_is_none_without_a_session_id(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown session (no `CLAUDE_CODE_SESSION_ID`) must fail open to None
+    rather than guess at a transcript path."""
+    dispatch = _import_dispatch()
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    assert dispatch._session_transcript_path() is None
+
+
+def test_interrupt_cooldown_goes_quiet_on_a_recent_esc(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-6P0KUSO9 addendum) An Esc 60s ago, inside the default 300s cooldown, reports
+    True and logs the age itself — it no longer prints [janitor-quiet] directly, because
+    the narrowed cooldown only gates the cue phases and lets main()'s own end-of-fire
+    `_emit_quiet_if_idle()` decide (a detector might still fire an action this turn)."""
+    dispatch = _import_dispatch()
+    import state
+
+    home = Path.home()
+    session_id = "sess-interrupt-1"
+    now = time.time()
+    transcript = _session_transcript_file(home, env_isolation["project"], session_id)
+    _write_interrupt_transcript(transcript, 60, now=now)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+
+    out = _capture_stdout(dispatch._phase_interrupt_cooldown)
+
+    assert out.strip() == "", f"the phase itself must print nothing now, got {out!r}"
+    log_path = state.log_dir() / "dispatch.log"
+    assert log_path.is_file(), "the cooldown decision must be logged"
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "heartbeat: cooldown active, user interrupted" in log_text and "s ago" in log_text, (
+        f"log must record the interrupt age, got {log_text!r}"
+    )
+
+
+def test_interrupt_cooldown_returns_false_once_the_esc_has_aged_out(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An Esc 10 minutes ago is past the default 300s cooldown — the fire proceeds
+    normally (the phase reports False, no suppression)."""
+    dispatch = _import_dispatch()
+
+    home = Path.home()
+    session_id = "sess-interrupt-2"
+    now = time.time()
+    transcript = _session_transcript_file(home, env_isolation["project"], session_id)
+    _write_interrupt_transcript(transcript, 600, now=now)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+
+    result = dispatch._phase_interrupt_cooldown()
+
+    assert result is False, "an interrupt outside the cooldown window must not suppress the fire"
+
+
+def test_interrupt_cooldown_carve_out_still_resumes_a_rate_limit_recovery(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-6P0KUSO9 carve-out) A fresh Esc AND a pending rate-limit recovery: the
+    recovery still gets through — an overnight 429 clear must never be swallowed by
+    the interrupt cooldown."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    state.atomic_write(sd / "rate-limited.flag", "1")
+    state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 30))
+
+    home = Path.home()
+    session_id = "sess-interrupt-3"
+    now = time.time()
+    transcript = _session_transcript_file(home, env_isolation["project"], session_id)
+    _write_interrupt_transcript(transcript, 5, now=now)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+
+    out = _capture_stdout(dispatch._phase_interrupt_cooldown)
+
+    assert out.startswith("[janitor-resume]"), (
+        f"a pending rate-limit recovery must survive the interrupt cooldown, got {out!r}"
+    )
+    assert not (sd / "rate-limited.flag").exists(), "the recovery must still consume its flag"
+
+
+def test_interrupt_cooldown_no_suppression_when_session_is_unknown(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No CLAUDE_CODE_SESSION_ID at all (the common cron-fire shape today) must never
+    silence the heartbeat forever — the phase reports False and logs why."""
+    dispatch = _import_dispatch()
+    import state
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+
+    result = dispatch._phase_interrupt_cooldown()
+
+    assert result is False, "an unknown session must never suppress the fire"
+    log_text = (state.log_dir() / "dispatch.log").read_text(encoding="utf-8")
+    assert "heartbeat: interrupt check skipped, session unknown" in log_text
+
+
+def test_main_suppresses_a_pending_clear_resume_during_the_interrupt_cooldown(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-6P0KUSO9, integration) A fresh Esc must beat a pending post-/clear resume
+    cue too — main() goes quiet instead of surfacing [janitor-resume]. The detector
+    roster is stubbed out here (it is exercised for real by the two tests below) so
+    this test stays about cue suppression, not detector behaviour."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-abcd1234")
+    home = Path.home()
+    session_id = "sess-interrupt-4"
+    now = time.time()
+    transcript = _session_transcript_file(home, env_isolation["project"], session_id)
+    _write_interrupt_transcript(transcript, 5, now=now)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
+    monkeypatch.setattr(dispatch, "_DETECTORS", [])
+
+    out = _capture_stdout(dispatch.main)
+
+    assert out.strip() == "[janitor-quiet]", f"a pending clear-resume must be suppressed, got {out!r}"
+
+
+def test_main_still_runs_a_due_non_memory_detector_during_the_interrupt_cooldown(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-6P0KUSO9 addendum, integration) The narrowed cooldown must NOT go blind —
+    a due, non-memory detector still runs and its output still reaches stdout even
+    while a recent Esc suppresses every cue phase."""
+    dispatch = _import_dispatch()
+
+    home = Path.home()
+    session_id = "sess-interrupt-5"
+    now = time.time()
+    transcript = _session_transcript_file(home, env_isolation["project"], session_id)
+    _write_interrupt_transcript(transcript, 5, now=now)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
+    monkeypatch.setattr(dispatch, "_DETECTORS", [("fake-detector", 1, "FAKE_DETECTOR_INTERVAL")])
+    monkeypatch.setattr(dispatch, "_detector_is_due", lambda name, interval: True)
+    ran: list[str] = []
+
+    def _fake_run_detector(name: str, interval: int, *, cooldown_active: bool = False) -> None:
+        ran.append(name)
+        print(f"[URGENT] fake finding from {name}")
+
+    monkeypatch.setattr(dispatch, "_run_detector", _fake_run_detector)
+
+    out = _capture_stdout(dispatch.main)
+
+    assert ran == ["fake-detector"], f"the due detector must still run inside the cooldown, got {ran!r}"
+    assert "fake finding from fake-detector" in out, f"its output must still reach stdout, got {out!r}"
+
+
+def test_run_detector_filters_a_memory_chore_marker_when_cooldown_active(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(TRDD-6P0KUSO9 addendum) `_run_detector("memory-maintenance", ..., cooldown_active=True)`
+    must strip a `[janitor-memory-*]` marker from the detector's stdout unconditionally —
+    spawning a memory-chore agent is exactly the "work restarting underneath the owner"
+    the cooldown exists to stop, even though the detector process itself still runs (a
+    detector never producing any OTHER output line here, so the whole stdout is filtered
+    to nothing)."""
+    dispatch = _import_dispatch()
+
+    class _FakeCompleted:
+        returncode = 0
+        stdout = "[janitor-memory-consolidate]\n"
+
+    def _fake_run(*args: object, **kwargs: object) -> _FakeCompleted:
+        return _FakeCompleted()
+
+    script = dispatch._HERE / "detectors" / "memory-maintenance.py"
+    assert script.is_file(), f"expected the real detector script to exist at {script}"
+
+    with __import__("unittest.mock", fromlist=["patch"]).patch.object(
+        dispatch.subprocess, "run", _fake_run
+    ):
+        out = _capture_stdout(
+            lambda: dispatch._run_detector("memory-maintenance", 1, cooldown_active=True)
+        )
+
+    assert "[janitor-memory-consolidate]" not in out, (
+        f"a memory-chore marker must be filtered during the cooldown, got {out!r}"
+    )

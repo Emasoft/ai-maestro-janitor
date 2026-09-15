@@ -65,9 +65,11 @@ import dedupe  # noqa: E402
 import findings_ledger  # noqa: E402  -- the quiet heartbeat's pull-model sink
 import global_state as gs  # noqa: E402
 import memory_dispatch_claim  # noqa: E402  -- TRDD-LDSCQ0NU relay-time claim-pool gate
+import memory_scopes  # noqa: E402  -- shared project_slug rule (TRDD-6P0KUSO9 transcript resolution)
 import session_liveness  # noqa: E402  -- SSOT for the `FIRED rearm → iterm` evidence parse
 import state  # noqa: E402
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
+import user_intent  # noqa: E402  -- TRDD-6P0KUSO9 recently_interrupted cooldown check
 import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD-T198DT1W)
 
 # Detector roster: (name, default cadence in seconds, env-var override).
@@ -765,9 +767,9 @@ def _defang_foreign_markers(detector: str, text: str) -> str:
 _MEMORY_MARKER_RE = re.compile(r"\[janitor-memory-([a-z0-9-]+)\]")
 
 
-def _suppress_stale_memory_markers(text: str) -> str:
+def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
     """Drop a bare `[janitor-memory-<chore>]` line whose claim pool is empty
-    (TRDD-LDSCQ0NU / janitor#300).
+    (TRDD-LDSCQ0NU / janitor#300), or every such line unconditionally when `force`.
 
     This is the RELAY-time gate, not a duplicate of the scheduler's own
     write-then-verify check in `memory-maintenance.py::_run` — that check reads its
@@ -783,6 +785,14 @@ def _suppress_stale_memory_markers(text: str) -> str:
     process re-checking the same-project pool right before the marker leaves the
     heartbeat is the latest point any machine code can still catch that race,
     before the session reading this stdout decides to spawn an agent.
+
+    `force=True` is the interrupt-cooldown call site (TRDD-6P0KUSO9 addendum): a fire
+    suppressed for the user's Esc/Ctrl-C must not spawn a memory-chore agent either,
+    regardless of whether the pool is claimable — the disqualifier there is "the user
+    is mid-interaction", not "a peer already claimed it", so the claim-pool lookup is
+    skipped entirely and no MEMORY-MARKER-SUPPRESSED finding is recorded (this is
+    expected behaviour every cooldown fire, not a scheduler/pool disagreement worth a
+    finding).
 
     Reuses `memory_dispatch_claim.candidates()` + `payload_matches_chore` — the
     EXACT predicate `claim_one` applies — never a re-implementation of "claimable".
@@ -800,6 +810,12 @@ def _suppress_stale_memory_markers(text: str) -> str:
             out.append(line)
             continue
         chore = m.group(1)
+        if force:
+            state.log_line(
+                "dispatch",
+                f"memory-dispatch: marker for {chore} suppressed — interrupt cooldown active",
+            )
+            continue
         claimable = False
         for p in memory_dispatch_claim.candidates(state_dir):
             try:
@@ -920,7 +936,7 @@ def _record_default_outcome(name: str, outcome: str, started: int) -> None:
     state.record_outcome(name, outcome)
 
 
-def _run_detector(name: str, interval: int) -> None:
+def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) -> None:
     script = _HERE / "detectors" / f"{name}.py"
     if not script.is_file():
         state.log_line("dispatch", f"detector '{name}' missing at {script}")
@@ -1002,7 +1018,7 @@ def _run_detector(name: str, interval: int) -> None:
         # scheduler wrote it (a peer session's agent claimed it in the interim) —
         # after this, the marker is heartbeat stdout and the session decides to spawn.
         if name == "memory-maintenance":
-            out = _suppress_stale_memory_markers(out)
+            out = _suppress_stale_memory_markers(out, force=cooldown_active)
         sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, out)))
         sys.stdout.flush()
     if proc.returncode != 0:
@@ -1312,6 +1328,75 @@ def _phase_rate_limit_recovery() -> bool:
     return True
 
 
+
+def _session_transcript_path() -> Path | None:
+    """The current cron fire's OWN transcript, or None when the session is unknown.
+
+    dispatch.py runs from the cron stub with no hook payload, so there is no
+    `transcript_path` handed in the way a hook gets one. `CLAUDE_CODE_SESSION_ID`
+    (the same env var `_phase_clear_resume` already reads) is the only session
+    identity a fire has; transcripts live at `~/.claude/projects/<slug>/<session-id>.jsonl`,
+    `memory_scopes.project_slug` being the ONE shared slug rule (do not re-derive it here).
+    Best-effort: a missing env var or a transcript absent on disk both resolve to None so
+    `recently_interrupted` can fail open rather than guess at a session (TRDD-6P0KUSO9).
+    """
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
+        return None
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    slug = memory_scopes.project_slug(project_dir)
+    path = Path.home() / ".claude" / "projects" / slug / f"{session_id}.jsonl"
+    return path if path.is_file() else None
+
+
+def _phase_interrupt_cooldown() -> bool:
+    """Return True if this fire is in the post-Esc/Ctrl-C cooldown window.
+
+    TRDD-6P0KUSO9 (narrowed by its addendum): a heartbeat fire that lands seconds after
+    the owner hit Esc must not restart work underneath them — but "work" means the
+    CUE-emitting phases (clear-resume, compact-resume, the proactive-idle-compact and
+    idle-clear nudges, the keep-going nudge), not the whole fire. `main()` skips exactly
+    those when this returns True; the detector roster, the presence breadcrumb, and the
+    fire-epoch log line all still run — a cooldown is not blindness. The memory-chore
+    detector still runs too, but `_run_detector` forces every `[janitor-memory-*]`
+    marker in its output off (see `_suppress_stale_memory_markers(force=True)`), since
+    spawning a memory-chore agent is exactly the kind of "work restarting underneath the
+    owner" this cooldown exists to prevent.
+
+    Does NOT print `[janitor-quiet]` itself any more — that decision is deferred to
+    `main()`'s own end-of-fire `_emit_quiet_if_idle()` call, because a detector that
+    still runs during the cooldown might yet fire a real action this same turn (in
+    which case a quiet token printed here would already be a lie).
+
+    CARVE-OUT: `_phase_rate_limit_recovery` still runs even inside the cooldown — an
+    overnight 429 recovery must not be lost just because the owner also hit Esc earlier.
+    It is called HERE (not left to `main()`'s own later call site) so the resume cue is
+    emitted immediately; `main()` checks the module `_decision_fired` sentinel right
+    after calling this phase and, if it is set, still returns 0 for the resume's clean,
+    detector-free attention — same outcome as before this phase was narrowed. That later
+    call site is flag-gated and therefore idempotent (see its own docstring) and is
+    skipped altogether while the cooldown is active, since this call already answered it.
+
+    Unknown session (no `CLAUDE_CODE_SESSION_ID`, or no matching transcript on disk) is
+    treated as "no suppression" — a fire with no session identity has no interrupt to
+    defer for, and MUST NOT be silenced forever by a missing env var.
+    """
+    transcript = _session_transcript_path()
+    if transcript is None:
+        state.log_line("dispatch", "heartbeat: interrupt check skipped, session unknown")
+        return False
+    age = user_intent.recently_interrupted(
+        os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(),
+        transcript_path=transcript,
+    )
+    if age is None:
+        return False
+    if _phase_rate_limit_recovery():
+        return True
+    state.log_line("dispatch", f"heartbeat: cooldown active, user interrupted {int(age)}s ago")
+    return True
+
+
 def _phase_compact_resume() -> bool:
     """Return True if a [janitor-resume] line was emitted for a post-compact resume.
 
@@ -1498,11 +1583,13 @@ def _phase_clear_resume() -> bool:
     same env var, so an armed-but-ancient flag is swept instead of resumed.
 
     SESSION-SCOPED once armed (TRDD-2MLFZ7DL sub-step 4): `on-session-start.py` stamps the
-    observing session's id into a sidecar alongside `clear-observed.ts`. `/clear` never
-    changes the session id (see above), so in the ordinary flow this can never mismatch —
-    it exists as a defensive check against a shared/misdirected state dir. Fail-open: an
-    absent stamp, or no readable `CLAUDE_CODE_SESSION_ID` for THIS process, skips the check
-    rather than discarding a flag that might be perfectly good.
+    observing session's id into a sidecar alongside `clear-observed.ts`. Whether `/clear`
+    changes the session id is UNMEASURED — a handoff-clear verify report in this repo found
+    the cron destroyed and recreated by `/clear`, and per-session log tags differ across a
+    clear, so the earlier "same session id" claim was an assumption, not a measurement. Given
+    that gap this check is FAIL-OPEN on a mismatch too: it logs and resumes anyway rather than
+    risk discarding the very resume it exists to deliver. An absent stamp, or no readable
+    `CLAUDE_CODE_SESSION_ID` for THIS process, also never blocks the resume.
     """
     sd = state.state_dir()
     flag = sd / "resume-after-clear.flag"
@@ -1557,8 +1644,10 @@ def _phase_clear_resume() -> bool:
         )
         return False
 
-    # TRDD-2MLFZ7DL sub-step 4: discard on a session-id MISMATCH — see the docstring for
-    # why this is fail-open (an absent stamp or an absent current id never discards).
+    # TRDD-2MLFZ7DL sub-step 4: FAIL OPEN on a session-id mismatch — see the docstring for
+    # why "/clear never changes the session id" is unmeasured, not assumed. A mismatch is
+    # logged and the resume proceeds anyway; nothing is deleted here, so both the match and
+    # the mismatch path fall through to the same downstream cleanup below.
     session_file = sd / "resume-after-clear.session-id.txt"
     try:
         stamped_session = session_file.read_text(encoding="utf-8").strip() if session_file.is_file() else ""
@@ -1566,17 +1655,11 @@ def _phase_clear_resume() -> bool:
         stamped_session = ""
     current_session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if stamped_session and current_session and stamped_session != current_session:
-        for stale in (flag, since_file, session_file):
-            try:
-                stale.unlink()
-            except FileNotFoundError:
-                pass
         state.log_line(
             "dispatch",
-            f"clear-resume: session id mismatch (flag={stamped_session[:8]}, "
-            f"current={current_session[:8]}), discarding",
+            f"clear-resume: session id differs (flag={stamped_session[:8]}, "
+            f"current={current_session[:8]}), resuming anyway (unmeasured across /clear)",
         )
-        return False
 
     try:
         directive = flag.read_text(encoding="utf-8")
@@ -3835,57 +3918,82 @@ def main() -> int:
     except Exception:  # noqa: BLE001 - a broken import must not stop the heartbeat
         pass
 
-    # Phase 0.9: post-CLEAR resume (TRDD-Z582IKIR P1). Runs FIRST among the resume
-    # phases because it is the only one gated on an event the others cannot observe:
-    # `clear-observed.ts`, stamped by SessionStart(source=clear). Ordering it first is
-    # what lets the two phases below stop deleting `resume-after-clear.*` as "subsumed"
-    # — that deletion consumed a PRE-marker and silently stranded the fresh session. A
-    # /clear genuinely obsoletes a pending compact / rate-limit marker, so this phase
-    # clears those instead, and exactly one [janitor-resume] is still emitted.
-    if _phase_clear_resume():
+    # Phase 0.8: user-interrupt cooldown (TRDD-6P0KUSO9, narrowed by its addendum). This
+    # used to exit the WHOLE fire; now it only gates the CUE phases below (every phase
+    # that would restart work or nudge the owner underneath them) — the detector roster,
+    # the presence breadcrumb (already run, above), and the fire-epoch log line all still
+    # run regardless. `cooldown_active` is threaded into the detector loop too, so the
+    # memory-maintenance detector's own markers are force-suppressed for this fire.
+    cooldown_active = _phase_interrupt_cooldown()
+    if cooldown_active and _decision_fired:
+        # The carve-out inside `_phase_interrupt_cooldown` already emitted its own
+        # [janitor-resume] for a pending rate-limit recovery — give it the same clean,
+        # detector-free attention every other resume phase gets, exactly as before this
+        # phase was narrowed.
         return 0
 
-    # Phase 1: rate-limit recovery — if a [janitor-resume] was emitted,
-    # skip drift detectors this fire so resume gets clean attention.
-    if _phase_rate_limit_recovery():
-        return 0
+    if not cooldown_active:
+        # Phase 0.9: post-CLEAR resume (TRDD-Z582IKIR P1). Runs FIRST among the resume
+        # phases because it is the only one gated on an event the others cannot observe:
+        # `clear-observed.ts`, stamped by SessionStart(source=clear). Ordering it first is
+        # what lets the two phases below stop deleting `resume-after-clear.*` as "subsumed"
+        # — that deletion consumed a PRE-marker and silently stranded the fresh session. A
+        # /clear genuinely obsoletes a pending compact / rate-limit marker, so this phase
+        # clears those instead, and exactly one [janitor-resume] is still emitted.
+        if _phase_clear_resume():
+            return 0
 
-    # Phase 1.1: post-compact resume. A context compaction leaves the REPL idle;
-    # without this nudge an unattended session stalls forever after the watchdog
-    # (or a native auto-compact) compacts. The PostCompact hook drops
-    # resume-after-compact.flag; we surface it as a single [janitor-resume] cue
-    # exactly once and return early — like rate-limit recovery — so the resume
-    # gets clean attention with no detector noise this fire.
-    if _phase_compact_resume():
-        return 0
+        # Phase 1: rate-limit recovery — if a [janitor-resume] was emitted,
+        # skip drift detectors this fire so resume gets clean attention. Skipped
+        # altogether while `cooldown_active` — `_phase_interrupt_cooldown` already called
+        # this same flag-gated function above and it answered False (else `_decision_fired`
+        # would have returned this fire already), so re-checking here would be a no-op.
+        if _phase_rate_limit_recovery():
+            return 0
 
-    # Phase 1.2: PREVENTIVE cold-compact (TRDD-D3PROACT). The reactive paths above shrink a
-    # large context only AFTER a cold fire already paid the 2× write; this one shrinks it
-    # PROACTIVELY during a cheap warm idle fire, so the next cold event is cheap. Gated on a
-    # genuinely-idle session (user absent, nothing pending) + a large context. Returns early
-    # like the resume phases so the fire stays minimal before the queued /compact runs. It sits
-    # AFTER the resume phases, which own the reactive cold case.
-    if _phase_proactive_idle_compact():
-        return 0
+        # Phase 1.1: post-compact resume. A context compaction leaves the REPL idle;
+        # without this nudge an unattended session stalls forever after the watchdog
+        # (or a native auto-compact) compacts. The PostCompact hook drops
+        # resume-after-compact.flag; we surface it as a single [janitor-resume] cue
+        # exactly once and return early — like rate-limit recovery — so the resume
+        # gets clean attention with no detector noise this fire.
+        if _phase_compact_resume():
+            return 0
 
-    # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons).
+        # Phase 1.2: PREVENTIVE cold-compact (TRDD-D3PROACT). The reactive paths above shrink a
+        # large context only AFTER a cold fire already paid the 2× write; this one shrinks it
+        # PROACTIVELY during a cheap warm idle fire, so the next cold event is cheap. Gated on a
+        # genuinely-idle session (user absent, nothing pending) + a large context. Returns early
+        # like the resume phases so the fire stays minimal before the queued /compact runs. It sits
+        # AFTER the resume phases, which own the reactive cold case.
+        if _phase_proactive_idle_compact():
+            return 0
+
+    # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons). Still runs during the
+    # cooldown — a silent cron-expiry renewal is not "work restarting", it is keeping the
+    # heartbeat itself alive.
     _phase_heartbeat_renew()
 
-    # Phase 1.5a: never-stop keep-going nudge (TRDD-TKNSTP82 Part B). Placed AFTER the
-    # renew phase so the cron is already kept alive, and BEFORE the detector roster it
-    # does not gate. It emits UNCONDITIONALLY — the opt-in flag and its off-switch are
-    # gone (owner directive 2026-07-31); see the phase's own docstring for why, and for
-    # the single time-bounded dedupe that remains. A prior rate-limit/compact resume
-    # already returned earlier in this function, so this phase is naturally skipped
-    # whenever one of those already fired this turn.
-    # Phase 1.5a0: long-idle CLEAR nudge (owner directive 2026-08-02). Placed immediately
-    # BEFORE the keep-going nudge so that on a fire where both would speak, the clear
-    # instruction is read first — "shrink, then continue" is the right order, and the
-    # keep-going nudge deliberately still fires so the session does not go silent. It does
-    # NOT early-return: the detector roster runs exactly as before.
-    _phase_idle_clear_nudge()
+    if not cooldown_active:
+        # Phase 1.5a: never-stop keep-going nudge (TRDD-TKNSTP82 Part B). Placed AFTER the
+        # renew phase so the cron is already kept alive, and BEFORE the detector roster it
+        # does not gate. It emits UNCONDITIONALLY — the opt-in flag and its off-switch are
+        # gone (owner directive 2026-07-31); see the phase's own docstring for why, and for
+        # the single time-bounded dedupe that remains. A prior rate-limit/compact resume
+        # already returned earlier in this function, so this phase is naturally skipped
+        # whenever one of those already fired this turn.
+        # Phase 1.5a0: long-idle CLEAR nudge (owner directive 2026-08-02). Placed immediately
+        # BEFORE the keep-going nudge so that on a fire where both would speak, the clear
+        # instruction is read first — "shrink, then continue" is the right order, and the
+        # keep-going nudge deliberately still fires so the session does not go silent. It does
+        # NOT early-return: the detector roster runs exactly as before.
+        #
+        # Both nudges are skipped for the duration of the interrupt cooldown — nudging the
+        # owner to keep going or to /clear is exactly the "work restarting underneath them"
+        # TRDD-6P0KUSO9 exists to prevent.
+        _phase_idle_clear_nudge()
 
-    _phase_keep_going_nudge()
+        _phase_keep_going_nudge()
 
     # Phase 1.5a2: previous-fire cost record (janitor#78, opt-in). Logs, never prints;
     # the phase's docstring carries the why.
@@ -3969,7 +4077,7 @@ def main() -> int:
         if in_harness and not _detector_runs_in_harness(name):
             continue
         interval = state.coerce_int(os.environ.get(env_var), default_interval)
-        _run_detector(name, interval)
+        _run_detector(name, interval, cooldown_active=cooldown_active)
 
     # D5 (TRDD-82JRK0CY): the terminal full-mode no-action exit. Emit [janitor-quiet]
     # iff no action marker fired this fire (detector drift lines do NOT count as an
