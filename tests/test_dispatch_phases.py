@@ -3763,3 +3763,230 @@ def test_keep_going_nudge_payload_carries_the_board(env_isolation: dict) -> None
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert "[janitor-resume]" in out
     assert "TRDD-DDDD4444" in out
+
+
+# ---------- TRDD-2MLFZ7DL: pending-agent liveness lifted to the lib, zero-agent gate,
+# resume-flag max-age bounds, session-id scoping, tool-wait grace window --------------
+
+
+def test_phase_clear_resume_armed_but_ancient_flag_is_swept(env_isolation: dict) -> None:
+    """(sub-step 3) An ARMED flag older than the max-age bound must be swept, not
+    resumed — measured incident: a cue fired 426768s after its own /clear because only
+    the NOT-armed sweep ever checked age."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR", age_s=86400 + 60)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out == "", f"an armed-but-ancient flag must not resume, got {out!r}"
+    sd = state.state_dir()
+    assert not (sd / "resume-after-clear.flag").exists(), "flag must be swept"
+    assert not (sd / "resume-after-clear.ts").exists(), "sidecar must be swept too"
+
+
+def test_phase_clear_resume_armed_and_fresh_still_resumes(env_isolation: dict) -> None:
+    """Control case for sub-step 3: a fresh ARMED flag is unaffected by the new bound."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR", age_s=60)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out.startswith("[janitor-resume]"), f"a fresh armed flag must still resume, got {out!r}"
+
+
+def test_phase_compact_resume_expired_flag_is_swept(env_isolation: dict) -> None:
+    """(sub-step 3) A post-compact flag older than the max-age bound must be swept."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_compact_flag(state, "continue TRDD-abcd1234", age_s=86400 + 60)
+    out = _capture_stdout(dispatch._phase_compact_resume)
+    assert out == "", f"an expired compact flag must not resume, got {out!r}"
+    sd = state.state_dir()
+    assert not (sd / "resume-after-compact.flag").exists(), "flag must be swept"
+    assert not (sd / "resume-after-compact.ts").exists(), "sidecar must be swept too"
+
+
+def test_phase_compact_resume_respects_custom_max_age_env(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lowered CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S sweeps a flag that would
+    otherwise still be within the default 86400s bound."""
+    dispatch = _import_dispatch()
+    import state
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S", "60")
+    _arm_compact_flag(state, "continue TRDD-abcd1234", age_s=120)
+    out = _capture_stdout(dispatch._phase_compact_resume)
+    assert out == "", f"a custom, lower max-age must be honored, got {out!r}"
+
+
+def test_clear_resume_consumes_when_session_id_matches(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(sub-step 4) A stamped session id equal to the CURRENT process's id resumes
+    normally — the common case, since /clear never changes the session id."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    state.atomic_write(state.state_dir() / "resume-after-clear.session-id.txt", "sess-abc123")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-abc123")
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out.startswith("[janitor-resume]"), f"a matching session id must still resume, got {out!r}"
+
+
+def test_clear_resume_discards_on_session_id_mismatch(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(sub-step 4) A flag stamped for a DIFFERENT session must be discarded, not
+    resumed against this one — a defensive guard against a shared/misdirected state dir."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    state.atomic_write(state.state_dir() / "resume-after-clear.session-id.txt", "sess-abc123")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-different")
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out == "", f"a session-id mismatch must discard the flag silently, got {out!r}"
+    sd = state.state_dir()
+    assert not (sd / "resume-after-clear.flag").exists(), "mismatched flag must be discarded"
+    assert not (sd / "resume-after-clear.session-id.txt").exists()
+
+
+def test_clear_resume_consumes_when_no_session_id_stamp(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(sub-step 4) No session-id sidecar at all (older stamp / no stdin payload) → the
+    check is skipped, fail-open, and the resume proceeds exactly as before this change."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-anything")
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out.startswith("[janitor-resume]"), f"an absent stamp must not block the resume, got {out!r}"
+
+
+def test_gate_zero_agents_and_dev_card_nudges(env_isolation: dict) -> None:
+    """(sub-step 2) No pending agents at all, user idle, but a card sits in `dev` → the
+    board is the tie-breaker and the nudge fires."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_idle(state, ago_s=3600)
+    _write_trdd(env_isolation["project"], "DEVCARD1", "dev")
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.startswith("[janitor-resume]\n"), (
+        f"a dev card with zero pending agents must still nudge, got {out!r}"
+    )
+    assert "TRDD-DEVCARD1" in out
+
+
+def test_gate_zero_agents_and_no_dev_card_suppresses(env_isolation: dict) -> None:
+    """(sub-step 2) No pending agents, no dev card → genuinely nothing to say, so the
+    nudge is suppressed instead of firing a content-free "all 0 agents live" cue."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_idle(state, ago_s=3600)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out == "", f"zero agents and an empty board must suppress the nudge, got {out!r}"
+
+
+def test_rate_limit_recovery_lists_only_stale_agents_not_live_ones(env_isolation: dict) -> None:
+    """(sub-step 5) A live (fresh-transcript) agent must never be named in the
+    resume-directive listing; a genuinely stale one still is."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    state.atomic_write(sd / "rate-limited.flag", "1")
+    state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 30))
+    _add_pending_agent(state, "fresh-agent", stale=False)
+    _add_pending_agent(state, "stale-agent", stale=True, age_s=1200)
+
+    out = _capture_stdout(dispatch._phase_rate_limit_recovery)
+    assert "stale-agent" in out, f"a stale agent must be named, got {out!r}"
+    assert "fresh-agent" not in out, f"a live agent must never be named, got {out!r}"
+
+
+def _add_pending_agent_tool_wait(state, agent_id: str, *, age_s: int) -> None:
+    """Register a pending agent whose transcript's LAST line is an assistant message
+    carrying a tool_use block — a "waiting on a tool" shape, backdated `age_s`."""
+    import os
+
+    import pending_agents
+
+    agent_dir = state.state_dir() / "agents" / agent_id
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    transcript = agent_dir / f"agent-{agent_id}.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    when = time.time() - age_s
+    os.utime(transcript, (when, when))
+    pending_agents.add(agent_id, "test agent", agent_dir=str(agent_dir))
+
+
+def test_tool_use_wait_is_live_within_the_grace_window(env_isolation: dict) -> None:
+    """(coordinator addendum) An agent stale by the plain 900s mtime threshold, but whose
+    last transcript entry is a tool_use, is still LIVE at 20 minutes (1200s) old — inside
+    KEEP_GOING_TOOL_WAIT_S (1500s default, sized above the 20-minute worker Bash ceiling)."""
+    import pending_agents
+    import state
+
+    state.init_state()
+    _add_pending_agent_tool_wait(state, "tool-wait-agent", age_s=20 * 60)
+    entries = pending_agents.load_pending()
+    assert len(entries) == 1
+    assert pending_agents.agent_is_live(entries[0], int(time.time()), 900) is True, (
+        "a 20-minute-old tool_use wait must still count as live"
+    )
+
+
+def test_tool_use_wait_expires_past_the_grace_window(env_isolation: dict) -> None:
+    """(coordinator addendum) Past KEEP_GOING_TOOL_WAIT_S (1500s) even a tool-wait entry
+    is stale — at 30 minutes (1800s) old."""
+    import pending_agents
+    import state
+
+    state.init_state()
+    _add_pending_agent_tool_wait(state, "tool-wait-agent-2", age_s=30 * 60)
+    entries = pending_agents.load_pending()
+    assert len(entries) == 1
+    assert pending_agents.agent_is_live(entries[0], int(time.time()), 900) is False, (
+        "a 30-minute-old tool_use wait must be reported stale"
+    )
+
+
+def test_compact_resume_still_lists_a_fresh_live_agent(env_isolation: dict) -> None:
+    """(review finding, TRDD-2MLFZ7DL phase-R) Unlike the rate-limit list, a
+    compact/clear resume must list EVERY non-stopped agent unconditionally — the
+    session's own memory of its background agents was just wiped, so a live-but-quiet
+    agent must not be silently omitted from the one cue that names what to resume."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_compact_flag(state, "continue TRDD-abcd1234")
+    _add_pending_agent(state, "fresh-agent", stale=False)
+    out = _capture_stdout(dispatch._phase_compact_resume)
+    assert "fresh-agent" in out, f"a fresh agent must still be named on compact-resume, got {out!r}"
+
+
+def test_clear_resume_still_lists_a_fresh_live_agent(env_isolation: dict) -> None:
+    """Same guarantee as above, for the clear-resume phase."""
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    _add_pending_agent(state, "fresh-agent-2", stale=False)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert "fresh-agent-2" in out, f"a fresh agent must still be named on clear-resume, got {out!r}"

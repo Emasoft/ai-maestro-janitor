@@ -1141,6 +1141,16 @@ def _phase_log_retention() -> None:
 def _pending_agent_directive_lines() -> list[str]:
     """W1 (TRDD-82OP4EN9): SendMessage-resume lines for in-flight background agents.
 
+    Lists EVERY non-stopped agent, unconditionally — used by `_phase_compact_resume`
+    and `_phase_clear_resume`, the two moments the session's OWN memory of its
+    background agents is wiped. TRDD-2MLFZ7DL sub-step 5's stale-only filter is
+    deliberately NOT applied here (review finding, TRDD-2MLFZ7DL phase-R): a
+    live-but-momentarily-quiet agent (transcript untouched for a few minutes, well
+    within a normal turn) would otherwise be silently dropped from the one cue whose
+    entire job is "here's what you were running" — see `_pending_agent_directive_lines_stale_only`
+    for the narrower filtered variant the acceptance criterion actually asked for
+    (the RATE-LIMIT resume list specifically).
+
     Lazy import + blanket except: the resume phases are the load-bearing
     night-survival path — a manifest bug must degrade to "no agent lines",
     never kill the [janitor-resume] emission itself.
@@ -1149,6 +1159,27 @@ def _pending_agent_directive_lines() -> list[str]:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
         return pending_agents.directive_lines()
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _pending_agent_directive_lines_stale_only() -> list[str]:
+    """TRDD-2MLFZ7DL sub-step 5: names only agents `pending_agents.stale_agents(...)`
+    returns (dead or stale) — used ONLY by `_phase_rate_limit_recovery`, the exact
+    scope the acceptance box named ("the rate-limit resume list only names agents
+    whose transcript is stale or absent"). Unlike a compact/clear resume, a rate-limit
+    recovery does not wipe the session's own memory of what it was running, so there
+    is no symmetrical reason to widen this to every non-stopped agent.
+
+    Lazy import + blanket except, same fail-open contract as the sibling above."""
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        now = int(time.time())
+        threshold = _keep_going_agent_stale_threshold()
+        entries = pending_agents.load_pending(now)
+        stale = pending_agents.stale_agents(entries, now, threshold)
+        return pending_agents.directive_lines(now, entries=stale)
     except Exception:  # noqa: BLE001
         return []
 
@@ -1181,7 +1212,7 @@ def _pending_agent_count() -> int:
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
-        return len([e for e in pending_agents.pending() if not e.get("stopped")])
+        return len(pending_agents.load_pending())
     except Exception:  # noqa: BLE001
         return 0
 
@@ -1251,7 +1282,10 @@ def _phase_rate_limit_recovery() -> bool:
     # resume instead of hoping the model re-reads its transcript (2026-07-08:
     # four forks died at the 5h cap and needed a manual "resume"). These lines are
     # untrusted-shaped (an agent description), so _emit_decision defangs each.
-    _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
+    # TRDD-2MLFZ7DL sub-step 5: stale/dead agents ONLY — see
+    # `_pending_agent_directive_lines_stale_only`'s docstring for why this phase
+    # (unlike compact/clear resume) is the one the acceptance box actually named.
+    _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines_stale_only()])
 
     # Also clear any pending post-COMPACT resume flag: a rate-limit resume cue already
     # says "resume the pending task", which subsumes it — both describe the SAME
@@ -1294,9 +1328,30 @@ def _phase_compact_resume() -> bool:
 
     Mirrors _phase_rate_limit_recovery: emit + clear + return True so main()
     skips the drift detectors this fire and the resume cue gets clean attention.
+
+    BOUNDED (TRDD-2MLFZ7DL sub-step 3): mirrors `_phase_clear_resume`'s ARMED-branch
+    bound — an abandoned flag (the hook wrote it, then something else consumed the
+    session before the next heartbeat ever fired) must not resume a compaction that
+    is no longer the session's live state, arbitrarily long after the fact.
     """
     flag = state.state_dir() / "resume-after-compact.flag"
     if not flag.is_file():
+        return False
+
+    since_file = state.state_dir() / "resume-after-compact.ts"
+    now = int(time.time())
+    expired, expiry_age, max_age = _resume_flag_expired(
+        flag, since_file, now, 86400, "CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S"
+    )
+    if expired:
+        for stale in (flag, since_file):
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                pass
+        state.log_line(
+            "dispatch", f"compact-resume: flag expired ({expiry_age}s > {max_age}s), not resuming"
+        )
         return False
 
     try:
@@ -1310,8 +1365,6 @@ def _phase_compact_resume() -> bool:
     if len(directive) > 280:
         directive = directive[:277] + "..."
 
-    since_file = state.state_dir() / "resume-after-compact.ts"
-    now = int(time.time())
     age = max(0, now - state.read_int_state(since_file, now))
 
     # F7 (wikimem audit): bare marker line + prose payload — see
@@ -1381,6 +1434,22 @@ def _fresh_summary_note(sd: Path) -> str:
     )
 
 
+def _resume_flag_expired(
+    flag: Path, since_file: Path, now: int, default_max_age: int, env_var: str
+) -> tuple[bool, int, int]:
+    """(expired, age_s, max_age_s) for a pre-consumption resume flag, bounded by `env_var`
+    (default `default_max_age`). TRDD-2MLFZ7DL sub-step 3: shared by the compact- and
+    clear-resume ARMED branches, which used to consume an armed flag unconditionally
+    regardless of age (measured 2026-09-15: a clear-resume cue fired 426768s after its
+    own /clear). Age falls back to the FLAG's own mtime when the sidecar is missing or
+    garbage (reads as 0) — the same fallback `_phase_clear_resume`'s NOT-armed sweep
+    already uses, so a missing sidecar is never mistaken for "just written"."""
+    max_age = state.coerce_int(os.environ.get(env_var), default_max_age)
+    written_at = state.read_int_state(since_file, 0)
+    age = now - (written_at or state.file_mtime(flag))
+    return (max_age > 0 and age > max_age), age, max_age
+
+
 def _phase_clear_resume() -> bool:
     """Return True if a [janitor-resume] line was emitted for a post-CLEAR resume.
 
@@ -1414,12 +1483,26 @@ def _phase_clear_resume() -> bool:
     routine `[janitor-renew]` re-arm changes them too, so a renew in the pre-clear window
     would arm the flag early — the same bug via a different path. The session id does NOT
     change at all: /clear keeps the SAME process and session (see the SessionStart hook's
-    own dedupe comment), so it cannot discriminate.
+    own dedupe comment), so it cannot discriminate — which is why the session-id check
+    below is a MISMATCH guard, not the arming signal itself.
 
     Runs FIRST among the resume phases in main(): it can no longer fire prematurely, and
     a /clear genuinely obsoletes any pending post-compact / rate-limit marker (they
     describe the context that /clear destroyed), so it consumes those — keeping the
     exactly-one-cue property, in the direction that is actually sound.
+
+    BOUNDED once armed too (TRDD-2MLFZ7DL sub-step 3): the NOT-armed branch below already
+    sweeps an abandoned PRE-clear flag by age, but once armed the flag used to be consumed
+    unconditionally regardless of how stale the OBSERVATION itself had become — measured
+    2026-09-15, a cue fired 426768s (~5 days) after its own /clear. Bounded the same way,
+    same env var, so an armed-but-ancient flag is swept instead of resumed.
+
+    SESSION-SCOPED once armed (TRDD-2MLFZ7DL sub-step 4): `on-session-start.py` stamps the
+    observing session's id into a sidecar alongside `clear-observed.ts`. `/clear` never
+    changes the session id (see above), so in the ordinary flow this can never mismatch —
+    it exists as a defensive check against a shared/misdirected state dir. Fail-open: an
+    absent stamp, or no readable `CLAUDE_CODE_SESSION_ID` for THIS process, skips the check
+    rather than discarding a flag that might be perfectly good.
     """
     sd = state.state_dir()
     flag = sd / "resume-after-clear.flag"
@@ -1456,6 +1539,43 @@ def _phase_clear_resume() -> bool:
                 except FileNotFoundError:
                     pass
             state.log_line("dispatch", f"swept an abandoned pre-/clear resume flag ({age}s old)")
+        return False
+
+    # ARMED. TRDD-2MLFZ7DL sub-step 3: bound this branch the same way the NOT-armed sweep
+    # above already is — see the docstring for the measured incident this guards against.
+    expired, expiry_age, max_age = _resume_flag_expired(
+        flag, since_file, now, 86400, "CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S"
+    )
+    if expired:
+        for stale in (flag, since_file):
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                pass
+        state.log_line(
+            "dispatch", f"clear-resume: flag expired ({expiry_age}s > {max_age}s), not resuming"
+        )
+        return False
+
+    # TRDD-2MLFZ7DL sub-step 4: discard on a session-id MISMATCH — see the docstring for
+    # why this is fail-open (an absent stamp or an absent current id never discards).
+    session_file = sd / "resume-after-clear.session-id.txt"
+    try:
+        stamped_session = session_file.read_text(encoding="utf-8").strip() if session_file.is_file() else ""
+    except OSError:
+        stamped_session = ""
+    current_session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if stamped_session and current_session and stamped_session != current_session:
+        for stale in (flag, since_file, session_file):
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                pass
+        state.log_line(
+            "dispatch",
+            f"clear-resume: session id mismatch (flag={stamped_session[:8]}, "
+            f"current={current_session[:8]}), discarding",
+        )
         return False
 
     try:
@@ -1500,6 +1620,7 @@ def _phase_clear_resume() -> bool:
     for p in (
         flag,
         since_file,
+        session_file,
         sd / "resume-after-compact.flag",
         sd / "resume-after-compact.ts",
         sd / "rate-limited.flag",
@@ -3110,36 +3231,44 @@ def _keep_going_agent_stale_threshold() -> int:
 def _any_pending_agent_stale(now: int) -> bool:
     """True iff at least one non-stopped pending agent is NOT visibly working.
 
-    "Not visibly working" = its transcript is missing OR older than the configured stale
-    threshold. `stopped: true` entries (a deliberate TaskStop) are excluded — they are not
-    "an agent the session is waiting on". No non-stopped entries at all means there is
-    nothing to prove is stale, so this returns False (the caller combines it with the
-    user-idle check; a solo session with zero background agents is unaffected by this
-    check alone).
+    Lifted onto `pending_agents.load_pending`/`stale_agents` (TRDD-2MLFZ7DL sub-step 1) — the
+    mtime + tool-wait liveness logic itself now lives in the lib as `agent_is_live`, so this
+    wrapper is just "is that set non-empty".
 
-    Fail-open toward STALE, never toward fresh: an unresolvable transcript path or an
-    unreadable stat means "cannot prove this agent is working", and the whole point of the
-    pulse is to never go silent on an unproven assumption.
+    Fail-open toward STALE, never toward fresh: a manifest bug degrades to "cannot prove any
+    agent is working", and the whole point of the pulse is to never go silent on an unproven
+    assumption.
     """
     try:
         import pending_agents  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
 
         threshold = _keep_going_agent_stale_threshold()
-        entries = [e for e in pending_agents.pending(now) if not e.get("stopped")]
+        entries = pending_agents.load_pending(now)
         if not entries:
             return False
-        for entry in entries:
-            path = pending_agents.resolve_transcript(entry)
-            if not path:
-                return True
-            try:
-                mtime = int(Path(path).stat().st_mtime)
-            except OSError:
-                return True
-            if now - mtime >= threshold:
+        return bool(pending_agents.stale_agents(entries, now, threshold))
+    except Exception:  # noqa: BLE001 - a manifest bug must never suppress the pulse
+        return True
+
+
+def _dev_column_has_cards() -> bool:
+    """True iff at least one open TRDD sits in `dev` (TRDD-2MLFZ7DL sub-step 2) — the
+    signal the keep-going gate falls back to when there are ZERO pending agents to judge
+    stale/live. Reuses `_board_summary_bit`'s column scan, narrowed to one column.
+
+    Fail-OPEN (True) on any read fault, matching every other check in the gate: an
+    unreadable board must never be the reason the night-survival pulse goes quiet."""
+    try:
+        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+        for _scope, path in trdd_common.trdd_files("tasks", str(state.project_root())):
+            if not trdd_common.extract_uid(path.name):
+                continue
+            _, column = trdd_common.parse_trdd_state(path)
+            if column == "dev":
                 return True
         return False
-    except Exception:  # noqa: BLE001 - a manifest bug must never suppress the pulse
+    except Exception:  # noqa: BLE001 - a board read must never silence the pulse
         return True
 
 
@@ -3163,7 +3292,9 @@ def _phase_keep_going_nudge() -> None:
           -> fail OPEN to idle, an unattended session must still be nudged).
       (b) AGENT STALE — `_any_pending_agent_stale` shows at least one non-stopped
           pending agent whose transcript is missing or older than
-          `_keep_going_agent_stale_threshold()` (default 900s).
+          `_keep_going_agent_stale_threshold()` (default 900s). ZERO pending agents
+          (TRDD-2MLFZ7DL sub-step 2) is NOT the same claim as "every agent is live" —
+          see `_dev_column_has_cards` for the fallback signal that case uses instead.
     Neither check is a new off-switch: both fail OPEN (toward emitting the nudge) on any
     read error, and there is still no lever that silences the pulse on purpose — see below.
 
@@ -3200,12 +3331,21 @@ def _phase_keep_going_nudge() -> None:
     # only PROOF that a human is present AND every pending agent is alive suppresses it.
     idle_s = _user_idle_seconds(now)
     user_idle = idle_s is None or idle_s >= _keep_going_user_idle_threshold()
-    if user_idle and not _any_pending_agent_stale(now):
-        agent_total = _pending_agent_count()
-        state.log_line("dispatch", f"keep-going: suppressed (all {agent_total} agents live)")
-        return
     if not user_idle:
         state.log_line("dispatch", f"keep-going: suppressed (user active {idle_s}s ago)")
+        return
+    # TRDD-2MLFZ7DL sub-step 2 (H-a's open question): with ZERO pending agents,
+    # `_any_pending_agent_stale` trivially returns False ("nothing to prove is stale"),
+    # which used to land in the exact same suppression branch as "every agent is live" —
+    # a session that genuinely finished its work and a session with an open `dev` card
+    # nobody is touching were indistinguishable. The board itself is the tie-breaker.
+    agent_total = _pending_agent_count()
+    if agent_total == 0:
+        if not _dev_column_has_cards():
+            state.log_line("dispatch", "keep-going: suppressed (no pending agents, no dev card)")
+            return
+    elif not _any_pending_agent_stale(now):
+        state.log_line("dispatch", f"keep-going: suppressed (all {agent_total} agents live)")
         return
     # D5 (TRDD-82JRK0CY): the bare [janitor-resume] token + its single prose note are
     # emitted together at the end via _emit_decision (auto-flush + payload defang). This
@@ -3252,7 +3392,7 @@ def _phase_keep_going_nudge() -> None:
                 bits.append("read .janitor/state/resume-directive.txt for the current target")
     except OSError:
         pass
-    n = _pending_agent_count()
+    n = agent_total
     if n:
         # Advisory, not imperative (TRDD-PGN5XSHA): the janitor has no TaskStop hook, so a
         # deliberately killed agent CANNOT be auto-detected here — one of these `n` may be an

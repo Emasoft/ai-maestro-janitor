@@ -78,13 +78,13 @@ def _arm(project: Path, *, age_s: int = 0) -> Path:
 
 
 def _arm_continuity(project: Path, **overrides: object) -> Path:
-    """Same flag/.ts arm as `_arm`, PLUS a `precompact-continuity.json` record.
+    """Same flag/.ts arm as `_arm`, PLUS a `precompact-continuity.json` record AND the
+    `precompact-last-trigger.json` stamp naming `trigger=="auto"`.
 
-    `_inject_post_compact_handoff` prefers the continuity record over the prose
-    handoff whenever it is newer than `precompact-handoff.md` — which this fixture
-    never writes, so any continuity record here is "newer" by construction (the
-    real gate this exercises, TRDD-7MGJYLY5): a `trigger=="auto"` compaction wrote
-    NO prose, only the small machine-readable record.
+    `_inject_post_compact_handoff` decides manual-vs-auto by the last-trigger STAMP
+    (the ordering-hole fix, review finding on TRDD-7MGJYLY5) — never by comparing file
+    mtimes — so the fixture must write that stamp itself rather than relying on a
+    continuity record simply existing.
     """
     sd = _arm(project)
     record = {
@@ -98,6 +98,10 @@ def _arm_continuity(project: Path, **overrides: object) -> Path:
         **overrides,
     }
     (sd / "precompact-continuity.json").write_text(json.dumps(record), encoding="utf-8")
+    (sd / "precompact-last-trigger.json").write_text(
+        json.dumps({"trigger": "auto", "written_at": time.time(), "session_id": "sid-1"}),
+        encoding="utf-8",
+    )
     return sd
 
 
@@ -349,3 +353,64 @@ def test_the_same_compaction_injects_the_nudge_only_once(tmp_path: Path) -> None
     assert proc1.stdout.count(BANNER) == 1, "positive control failed — fixture is broken"
     proc2 = _run()
     assert proc2.stdout.count(BANNER) == 0
+
+
+def test_manual_then_debounced_auto_still_injects_the_nudge_not_the_prose(tmp_path: Path) -> None:
+    """THE ORDERING HOLE (review fix, TRDD-7MGJYLY5): a manual `/compact` writes the
+    prose handoff (newer mtime than any earlier continuity record), but if the LAST
+    trigger PreCompact actually stamped is "auto" (a debounced auto firing after the
+    manual one — no continuity re-write, but the stamp still updates), the resumed
+    turn must get the NUDGE, never the 44 KB prose — the exact case an mtime comparison
+    gets backwards."""
+    project, env = _project(tmp_path)
+    sd = _arm_continuity(project)  # writes the prose fixture, the continuity record, and the stamp
+    # Simulate the debounced-auto-after-manual sequence: the prose file is now made
+    # newer than the continuity record (as a real debounced firing would leave it),
+    # while the stamp still says the LAST trigger PreCompact saw was "auto".
+    prose = next(sd.glob("agent-handoff-*.md"))
+    now = time.time()
+    os.utime(prose, (now + 10, now + 10))
+    os.utime(sd / "precompact-continuity.json", (now, now))
+    assert prose.stat().st_mtime > (sd / "precompact-continuity.json").stat().st_mtime, (
+        "fixture assumption broken — the prose file must be the newer one"
+    )
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOK)],
+        input=json.dumps({"source": "compact", "session_id": "sid-1", "transcript_path": ""}),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(project),
+    )
+    assert "Traceback" not in proc.stderr, f"hook crashed:\n{proc.stderr[:2000]}"
+    assert BANNER in proc.stdout, "positive control failed — nothing was injected"
+    assert BODY_MARKER not in proc.stdout, (
+        "the newer-mtime prose file was injected despite the stamp saying trigger=auto"
+    )
+    assert "agent-1" in proc.stdout, "the nudge (from the stamp-selected continuity record) is missing"
+
+
+def test_auto_trigger_with_missing_continuity_record_gets_minimal_nudge(tmp_path: Path) -> None:
+    """The stamp says "auto" but `precompact-continuity.json` itself is missing or
+    unparsable — still an auto compaction, so the fallback is a minimal nudge with no
+    lists, never the (possibly stale or absent) prose path."""
+    project, env = _project(tmp_path)
+    sd = _arm(project)
+    (sd / "precompact-last-trigger.json").write_text(
+        json.dumps({"trigger": "auto", "written_at": time.time(), "session_id": "sid-1"}),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOK)],
+        input=json.dumps({"source": "compact", "session_id": "sid-1", "transcript_path": ""}),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(project),
+    )
+    assert "Traceback" not in proc.stderr, f"hook crashed:\n{proc.stderr[:2000]}"
+    assert BANNER in proc.stdout, "positive control failed — nothing was injected"
+    assert BODY_MARKER not in proc.stdout, "the prose body must never be injected on an auto stamp"
+    assert "resume your previous tasks" in proc.stdout

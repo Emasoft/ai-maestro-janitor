@@ -118,3 +118,14 @@ def test_no_other_source_is_mistaken_for_a_clear(tmp_path: Path, source: str) ->
     # not "clear", which is all this test needs.
     assert f"source={source}" in log, f"the hook did not reach the source branch{_diagnosis(sd)}"
     assert not (sd / "clear-observed.ts").exists(), f"source={source!r} is not a /clear"
+
+
+def test_a_clear_also_stamps_the_observing_session_id(tmp_path: Path) -> None:
+    """TRDD-2MLFZ7DL sub-step 4: alongside `clear-observed.ts`, SessionStart records the
+    OBSERVING session's id (from the hook's own stdin payload) so `_phase_clear_resume`
+    can discard a flag that arose from a different session (a shared/misdirected state
+    dir). The fixture's payload always carries `session_id: "sid-1"`."""
+    sd = _run_session_start(tmp_path, source="clear")
+    stamp = sd / "resume-after-clear.session-id.txt"
+    assert stamp.is_file(), "the observing session id must be stamped" + _diagnosis(sd)
+    assert stamp.read_text(encoding="utf-8").strip() == "sid-1"

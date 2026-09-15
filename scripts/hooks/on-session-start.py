@@ -421,8 +421,33 @@ _COMPACT_HANDOFF_MAX_AGE_S = 86400
 # the continuity record below, a manual/unknown-trigger compaction writes ONLY the
 # prose `precompact-handoff.md`. Filenames duplicated here rather than imported —
 # same convention as `post-compact-resume.py:76`'s own `_HANDOFF_FILENAME` copy.
-_PRECOMPACT_HANDOFF_FILENAME = "precompact-handoff.md"
 _PRECOMPACT_CONTINUITY_FILENAME = "precompact-continuity.json"
+# Written by PreCompact on EVERY firing (auto or manual, even when the auto continuity
+# record itself is debounced away) — see pre-compact-handoff.py's own comment. This is
+# what decides manual-vs-auto below, never a file-mtime comparison (the ordering-hole
+# fix, review finding on TRDD-7MGJYLY5).
+_PRECOMPACT_LAST_TRIGGER_FILENAME = "precompact-last-trigger.json"
+# Single source of truth for the minimal auto-compaction nudge — used both as
+# `_continuity_nudge`'s own opening line and as the whole-body fallback when the
+# stamp says "auto" but `precompact-continuity.json` itself is missing/unparsable
+# (review fix on TRDD-7MGJYLY5: two literal copies of this sentence would drift).
+_AUTO_COMPACT_MINIMAL_NUDGE = "Context was auto-compacted by the harness; resume your previous tasks."
+
+
+def _last_precompact_trigger(path: Path) -> str | None:
+    """The `trigger` field PreCompact last stamped, or None if the stamp is absent or
+    unparsable (degrades to the manual/prose path, same as no stamp ever existed).
+    Fail-open: never raises."""
+    import json  # noqa: PLC0415 - stdlib, local per this module's import convention
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    trigger = data.get("trigger")
+    return trigger if isinstance(trigger, str) else None
 
 
 def _continuity_nudge(path: Path) -> str | None:
@@ -450,7 +475,7 @@ def _continuity_nudge(path: Path) -> str | None:
     # pre-compact-handoff.py) so a stale or hand-edited record still renders bounded.
     _AGENTS_SHOWN = 5
     _FILES_SHOWN = 5
-    lines = ["Context was auto-compacted by the harness; resume your previous tasks."]
+    lines = [_AUTO_COMPACT_MINIMAL_NUDGE]
     trdds = data.get("inflight_trdds")
     if isinstance(trdds, list) and trdds:
         lines.append("In-flight TRDDs: " + ", ".join(str(t) for t in trdds[:3]))
@@ -536,23 +561,25 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     marker = written_at or state.file_mtime(flag)
     if stamp.is_file() and state.coerce_int(stamp.read_text(encoding="utf-8"), 0) >= marker:
         return  # already injected for THIS compaction
-    body = _handoff_body(state, sd)
     # A `trigger=="auto"` compaction wrote NO prose this time — only the small
-    # continuity record (owner ruling TRDD-7MGJYLY5). Whichever of the two PreCompact
-    # can produce has the NEWER mtime tells us which compaction just ran: if the
-    # continuity record is newer than the prose handoff, nudge from it instead.
-    # `state.file_mtime` truncates to whole SECONDS (documented at :522 above), so a
-    # same-second tie resolves to the PROSE (strict `>`) — a known, unlogged
-    # tradeoff (review finding), not a guaranteed-correct disambiguation; accepted
-    # because the two writes racing into the same second requires two compactions
-    # of the same session within ~1s of each other.
-    continuity_path = sd / _PRECOMPACT_CONTINUITY_FILENAME
-    continuity_mtime = state.file_mtime(continuity_path)
-    prose_mtime = state.file_mtime(sd / _PRECOMPACT_HANDOFF_FILENAME)
-    if continuity_mtime and continuity_mtime > prose_mtime:
-        body = _continuity_nudge(continuity_path)
-    if body is None:
-        return
+    # continuity record (owner ruling TRDD-7MGJYLY5). Which compaction just ran is
+    # decided by the `_LAST_TRIGGER_FILENAME` stamp PreCompact ALWAYS writes (even when
+    # the auto continuity record itself was debounced), never by comparing file mtimes
+    # (the ordering-hole fix, review finding on TRDD-7MGJYLY5): a manual /compact
+    # (writes the prose) followed within the debounce window by a debounced auto firing
+    # (no continuity write) would otherwise leave the prose file the newer one,
+    # injecting the full prose handoff on an auto path — exactly what this fix prevents.
+    last_trigger = _last_precompact_trigger(sd / _PRECOMPACT_LAST_TRIGGER_FILENAME)
+    if last_trigger == "auto":
+        body = _continuity_nudge(sd / _PRECOMPACT_CONTINUITY_FILENAME)
+        if body is None:
+            # Stamp says auto but the continuity record is missing/unparsable — still
+            # an auto compaction, so never fall back to the (possibly stale) prose path.
+            body = _AUTO_COMPACT_MINIMAL_NUDGE
+    else:
+        body = _handoff_body(state, sd)
+        if body is None:
+            return
     # Print BEFORE stamping: "injected twice" is recoverable, "injected never" is invisible.
     # The print can raise (a non-UTF-8 stdout); `main()` absorbs it, the stamp is skipped, and
     # the next re-entry retries. Detail and measurements: TRDD-OES0NN3F.
@@ -721,6 +748,18 @@ def main() -> int:
             # ever raising into session start.
             _slog(state, "session-start", f"clear-observed stamp failed: {exc!r}")
             print(f"[on-session-start] clear-observed stamp failed: {exc!r}", file=sys.stderr)
+        # TRDD-2MLFZ7DL sub-step 4: stamp the OBSERVING session's id alongside
+        # clear-observed.ts, so dispatch.py's `_phase_clear_resume` can discard a flag
+        # arising from a different session (a shared/misdirected state dir). Best-effort
+        # and non-fatal — an empty `session_id` (older harness, no stdin payload) simply
+        # writes nothing, which `_phase_clear_resume` treats as "skip the check".
+        if session_id:
+            try:
+                state.atomic_write(
+                    state.state_dir() / "resume-after-clear.session-id.txt", session_id
+                )
+            except Exception as exc:  # noqa: BLE001 -- never break session start
+                _slog(state, "session-start", f"clear session-id stamp failed: {exc!r}")
         try:
             _inject_post_clear_handoff(state)
         except Exception as exc:  # noqa: BLE001 -- never break session start

@@ -61,6 +61,8 @@ try:
 except ImportError:  # imported as ``lib.pending_agents`` (hooks put scripts/ on path)
     from lib import state  # type: ignore[no-redef]
 
+import os
+
 MANIFEST_NAME = "pending-agents.json"
 _LOCK_NAME = "pending-agents.lock"
 
@@ -440,7 +442,94 @@ def pending_external(now: int | None = None, *, state_dir: Path | None = None) -
     return [e for e in pending(now, state_dir=state_dir) if not is_janitor_agent(e)]
 
 
-def directive_lines(now: int | None = None) -> list[str]:
+# The tool-wait grace window (coordinator addendum, TRDD-2MLFZ7DL): an agent whose LAST
+# transcript entry is an assistant message carrying a tool_use block is BLOCKED ON A TOOL,
+# not dead — the sanctioned Bash timeout for a worker is 20 minutes (1200s), so a 900s
+# (KEEP_GOING_AGENT_STALE_DEFAULT) staleness threshold would call every long test run a
+# dead agent and the nudge would tell the model to resume something that is still running.
+# 1500s (25 min) clears the 20-minute ceiling with margin; past it even a tool wait counts
+# as stale.
+_KEEP_GOING_TOOL_WAIT_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_TOOL_WAIT_S"
+KEEP_GOING_TOOL_WAIT_S = 1500
+
+
+def _last_transcript_entry_has_tool_use(path: str) -> bool:
+    """True iff the LAST JSON line of the transcript is an assistant message whose content
+    includes a `tool_use` block — i.e. the agent is waiting on a tool result, not idle.
+    Fail-closed (False) on any read/parse fault: an unreadable transcript proves nothing
+    about a tool wait, and `agent_is_live` already treats that case as not-live via the
+    plain mtime check below it."""
+    try:
+        last = ""
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    last = line
+        if not last:
+            return False
+        rec = json.loads(last)
+        if not isinstance(rec, dict) or rec.get("type") != "assistant":
+            return False
+        content = rec.get("message", {}).get("content") if isinstance(rec.get("message"), dict) else None
+        if not isinstance(content, list):
+            return False
+        return any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content)
+    except Exception:  # noqa: BLE001 - a transcript-format change must never crash a heartbeat
+        return False
+
+
+def load_pending(now: int | None = None, *, state_dir: Path | None = None) -> list[dict]:
+    """Non-`stopped` live entries — the set every liveness/staleness check reasons about.
+    Lifted out of dispatch.py (H-a, TRDD-2MLFZ7DL sub-step 1): the same
+    `[e for e in pending(...) if not e.get("stopped")]` filter used to be duplicated at
+    each call site; this is the one place it lives now."""
+    return [e for e in pending(now, state_dir=state_dir) if not e.get("stopped")]
+
+
+def agent_is_finished(entry: dict) -> bool:
+    """True iff this entry represents work the session is no longer waiting on — today
+    that is exactly the deliberate-`TaskStop` case (TRDD-PGN5XSHA). `load_pending` already
+    excludes these; this predicate exists so a caller holding an entry from `pending()`
+    (unfiltered) can ask the same question without re-deriving the filter."""
+    return bool(entry.get("stopped", False))
+
+
+def agent_is_live(entry: dict, now: int, stale_s: int) -> bool:
+    """True iff this non-finished entry looks like it is still making progress.
+
+    Fail-open toward NOT LIVE (i.e. toward reporting staleness) on every "cannot prove it
+    is working" case — an unresolvable transcript path, an unreadable stat — mirroring the
+    fail-open direction `_any_pending_agent_stale` always used: the night-survival pulse
+    must never go quiet on an unproven assumption.
+
+    A transcript younger than `stale_s` is live outright. One older than `stale_s` but not
+    yet past `KEEP_GOING_TOOL_WAIT_S`, whose LAST entry is an assistant message waiting on a
+    tool, is ALSO live — see `_last_transcript_entry_has_tool_use` for why.
+    """
+    path = resolve_transcript(entry)
+    if not path:
+        return False
+    try:
+        mtime = int(Path(path).stat().st_mtime)
+    except OSError:
+        return False
+    age = now - mtime
+    if age < stale_s:
+        return True
+    tool_wait = state.coerce_int(os.environ.get(_KEEP_GOING_TOOL_WAIT_ENV), KEEP_GOING_TOOL_WAIT_S)
+    if age < tool_wait and _last_transcript_entry_has_tool_use(path):
+        return True
+    return False
+
+
+def stale_agents(entries: list[dict], now: int, stale_s: int) -> list[dict]:
+    """The subset of `entries` that is neither finished nor visibly live — the "resume this"
+    set every caller (the keep-going gate, the resume-directive listing) actually wants."""
+    return [e for e in entries if not agent_is_finished(e) and not agent_is_live(e, now, stale_s)]
+
+
+def directive_lines(now: int | None = None, *, entries: list[dict] | None = None) -> list[str]:
     """Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
 
     CONSUMING read (#75): each listed entry spends one nudge from its budget, and
@@ -452,23 +541,33 @@ def directive_lines(now: int | None = None) -> list[str]:
     Ids/descriptions come from hook payloads (model-adjacent, untrusted), so
     both are defanged via ``sanitize_for_drift_line`` — a crafted description
     cannot inject a fake ``[janitor-…]`` marker line into the resume turn.
+
+    `entries`, when given (TRDD-2MLFZ7DL sub-step 5), restricts which agentIds may be
+    listed — the caller passes `stale_agents(...)` so a resume cue never invites a
+    SendMessage to an agent that is demonstrably still working. `None` (the default)
+    keeps the original behavior: every non-stopped entry is a candidate. Either way
+    the nudge-spend below still runs against the FULL manifest, so an agent excluded
+    from this listing keeps its nudge budget untouched.
     """
     try:
         t = int(now if now is not None else time.time())
         with _locked():
-            entries = _load_unlocked(t)
+            all_entries = _load_unlocked(t)
             # TRDD-PGN5XSHA: a `stopped` entry was a deliberate decision, not something to
             # nudge a resume of — excluded from BOTH the listing and the nudge spend below.
-            candidates = [e for e in entries if not e["stopped"]]
+            candidates = [e for e in all_entries if not e["stopped"]]
+            if entries is not None:
+                allowed = {e["agentId"] for e in entries}
+                candidates = [e for e in candidates if e["agentId"] in allowed]
             listed = candidates[-MAX_DIRECTIVE_AGENTS:]
             if not listed:
                 return []
             lines = [_directive_line(e) for e in listed]
             shown = {e["agentId"] for e in listed}
-            for e in entries:
+            for e in all_entries:
                 if e["agentId"] in shown:
                     e["nudges"] += 1
-            _save_unlocked(entries)
+            _save_unlocked(all_entries)
     except Exception:  # noqa: BLE001 - the resume phases must never die on a manifest bug
         return []
     # One shared note (not per-line — token economy). It must NOT claim the ping is
