@@ -46,7 +46,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
-import memory_outcome  # noqa: E402
 import memory_settings  # noqa: E402
 import orphaned_memory_maint as omm  # noqa: E402
 import state  # noqa: E402
@@ -237,7 +236,7 @@ def _retire_legacy_mirror(state_dir: Path, dispatch_id: str) -> None:
 
 
 def complete_claim(
-    state_dir: Path, dispatch_id: str, outcome: str, reason: str | None = None, *, now: int | None = None
+    state_dir: Path, dispatch_id: str, report: str, *, now: int | None = None
 ) -> bool:
     """Mark a claimed dispatch DONE by its own dispatch_id — the primary-key check-in
     that replaces the report-filename correlation `_pass_finished_since` used to guess
@@ -250,10 +249,10 @@ def complete_claim(
     says so, by id, instead of the claim script inferring it from a filename that was
     never designed to be machine-readable evidence.
 
-    `outcome`/`reason` are recorded as-is (the CLI derives them from the pass's own
-    report — see `_run_complete` — rather than trusting a caller-supplied flag, so an
-    "unknown" outcome from a missing/unparsable marker is still a completed claim, never
-    a refused one).
+    `report` is the pass's own report path, recorded as-is on the done record for
+    provenance — this function never opens it. A check-in is evidence the pass ran, not
+    a verdict on what the report says (see `_run_complete`, which never refuses on an
+    unreadable report either).
 
     Idempotent: completing an already-done id is success, not an error — a retry after a
     lost reply, or a duplicate `complete` call, must not fail. Returns False only when
@@ -269,8 +268,7 @@ def complete_claim(
     except (OSError, ValueError):
         return False
     payload["completed_at"] = now if now is not None else int(datetime.now().timestamp())
-    payload["outcome"] = outcome
-    payload["outcome_reason"] = reason
+    payload["report"] = report
     try:
         done_path.write_text(json.dumps(payload), encoding="utf-8")
         claimed_path.unlink()
@@ -365,62 +363,33 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
     return acted
 
 
-_OUTCOME_TAIL_SCAN_BYTES = 512  # mirrors memory-maintenance.py's own _NOOP_TAIL_SCAN_BYTES —
-# the outcome marker is APPENDED as the last line of the report, so only the tail matters.
-
-
-def _outcome_from_report(report_path: Path) -> tuple[str, str | None]:
-    """Read the report's `<!-- janitor-outcome: ... -->` marker (last occurrence, last
-    `_OUTCOME_TAIL_SCAN_BYTES` bytes) via the shared `memory_outcome` parser.
-
-    Only a MISSING marker degrades to `outcome="unknown"` — a report that exists and was
-    read but simply never got the marker appended (janitor#259 covers when that happens).
-    An UNREADABLE report (`--report` typo'd, wrong `$REPORT_FILE`, permissions) is a
-    caller bug, not an abstain, and is raised as `OSError` instead of silently degrading:
-    conflating the two would make a mistyped path indistinguishable, in the done record,
-    from a genuine "the agent wrote no marker" — exactly the audit trail this feature
-    exists to build (adversarial review, 2026-09-15, of the first version of this
-    function, which returned `"unknown"` for both cases)."""
-    with report_path.open("rb") as fh:
-        fh.seek(0, os.SEEK_END)
-        size = fh.tell()
-        fh.seek(max(0, size - _OUTCOME_TAIL_SCAN_BYTES))
-        tail = fh.read().decode("utf-8", errors="replace")
-    parsed = memory_outcome.parse_outcome(tail)
-    if parsed is None:
-        print(
-            f"memory_dispatch_claim: no janitor-outcome marker found in {report_path} — "
-            "recording outcome=unknown",
-            file=sys.stderr,
-        )
-        return "unknown", None
-    return parsed
-
-
 def _run_complete(argv: list[str]) -> int:
     """`complete <dispatch_id> --state-dir <dir> --report <path>` — the CLI surface for
     `complete_claim` (see its docstring for why a dispatch checks itself in by id instead
-    of the claim script inferring completion from a report filename). The outcome is read
-    from the report's own `<!-- janitor-outcome: ... -->` marker rather than trusted as a
-    caller-supplied flag — the marker and the check-in were previously two independent
-    claims that could disagree; `--outcome` duplicated what the report already states."""
+    of the claim script inferring completion from a report filename). `--report` is
+    recorded as-is on the done record for provenance; its content is never read."""
     ap = argparse.ArgumentParser(
         prog="memory_dispatch_claim.py complete",
         description="Mark a claimed memory-maintenance dispatch DONE, by dispatch_id.",
     )
     ap.add_argument("dispatch_id")
     ap.add_argument("--state-dir", required=True)
-    ap.add_argument("--report", required=True, help="path to the report carrying the janitor-outcome marker")
+    ap.add_argument("--report", required=True, help="path to the pass's report (recorded, not parsed)")
     args = ap.parse_args(argv)
     state_dir = Path(args.state_dir)
+    # why: an unreadable/missing report is evidence about the report, not about whether
+    # the pass ran — refusing to close the claim here would leave it open until the 6h
+    # expiry and re-dispatch a pass that already finished, filing a spurious HIGH finding
+    # (janitor#242 review, 2026-09-15). The claim closes either way; only the stderr line
+    # differs.
     try:
-        outcome, reason = _outcome_from_report(Path(args.report))
-    except OSError as exc:
-        # A caller bug (typo'd path, wrong $REPORT_FILE), not an abstain — fail loudly
-        # rather than record an "unknown" outcome indistinguishable from a genuine one.
-        print(f"memory_dispatch_claim: could not read report {args.report!r} ({exc})", file=sys.stderr)
-        return 6
-    if complete_claim(state_dir, args.dispatch_id, outcome, reason):
+        Path(args.report).open("rb").close()
+    except OSError:
+        print(
+            f"memory_dispatch_claim: complete: report unreadable ({args.report}), closed as unknown",
+            file=sys.stderr,
+        )
+    if complete_claim(state_dir, args.dispatch_id, args.report):
         return 0
     print(
         f"memory_dispatch_claim: no claimed (or already-done) dispatch "

@@ -515,26 +515,27 @@ def test_expire_stale_claims_local_cadence_faster_than_floor_still_waits_for_flo
     assert not p.exists()
 
 
-def test_complete_claim_renames_claimed_to_done_with_outcome(tmp_path):
+def test_complete_claim_renames_claimed_to_done_with_report(tmp_path):
     """The primary-key check-in: a claimed record becomes a done one, carrying the
-    outcome and a completion timestamp — the only way a claim is now marked finished."""
+    report path and a completion timestamp — the only way a claim is now marked finished."""
     p = _claimed(tmp_path, 1_000_000, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
 
-    assert mdc.complete_claim(tmp_path, dispatch_id, "mutation", now=1_000_500) is True
+    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/report.md", now=1_000_500) is True
 
     assert not p.exists()
     done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
     assert done.is_file()
     payload = json.loads(done.read_text(encoding="utf-8"))
-    assert payload["outcome"] == "mutation"
+    assert payload["report"] == "/tmp/report.md"
     assert payload["completed_at"] == 1_000_500
+    assert "outcome" not in payload
 
 
 def test_complete_claim_unknown_id_returns_false(tmp_path):
     """A dispatch_id naming neither a claimed nor a done record is unknown — the CLI
     must exit non-zero rather than silently succeed."""
-    assert mdc.complete_claim(tmp_path, "999-doesnotexist", "noop") is False
+    assert mdc.complete_claim(tmp_path, "999-doesnotexist", "/tmp/report.md") is False
 
 
 def test_complete_claim_is_idempotent(tmp_path):
@@ -542,15 +543,14 @@ def test_complete_claim_is_idempotent(tmp_path):
     lost reply, or a duplicate `complete` call, is not an error."""
     p = _claimed(tmp_path, 1_000_000, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
-    assert mdc.complete_claim(tmp_path, dispatch_id, "noop") is True
-    assert mdc.complete_claim(tmp_path, dispatch_id, "noop") is True
+    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/report.md") is True
+    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/report.md") is True
 
 
 def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
     """End-to-end: a real claim prints CLAIM_ID=<id> as the LAST stdout line (so a
     positional reader of the earlier lines is unaffected), and the `complete`
-    subcommand (given that id + the report carrying the marker) renames the record
-    DONE."""
+    subcommand (given that id + the report path) renames the record DONE."""
     _dispatch(tmp_path, 1_000_000, "repair")
     proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
     assert proc.returncode == 0, proc.stderr
@@ -566,40 +566,30 @@ def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
     done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
     assert done.is_file()
     payload = json.loads(done.read_text(encoding="utf-8"))
-    assert payload["outcome"] == "noop"
-    assert payload["outcome_reason"] == "no-work"
+    assert payload["report"] == str(report)
+    assert "outcome" not in payload
 
 
-def test_complete_cli_missing_marker_records_outcome_unknown(tmp_path):
-    """A report with no `janitor-outcome` marker must not block the check-in — it is
-    still completed, just recorded as `outcome: unknown` so the gap stays visible."""
+def test_complete_cli_unreadable_report_still_closes_the_claim(tmp_path):
+    """A typo'd/missing `--report` path is evidence about the report, not about whether
+    the pass ran — refusing to close the claim would leave it open until the 6h expiry
+    and re-dispatch a pass that already finished. The claim closes; only the stderr
+    line marks the report as unreadable."""
     p = _claimed(tmp_path, 1_000_000, "repair")
     dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
-    report = tmp_path / "report.md"
-    report.write_text("pass notes, no marker\n", encoding="utf-8")
-
-    proc = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path), "--report", str(report)])
-
-    assert proc.returncode == 0, proc.stderr
-    assert "recording outcome=unknown" in proc.stderr
-    payload = json.loads((tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json").read_text(encoding="utf-8"))
-    assert payload["outcome"] == "unknown"
-
-
-def test_complete_cli_unreadable_report_fails_loudly(tmp_path):
-    """A typo'd/missing `--report` path is a caller bug, not an abstain — it must exit
-    non-zero and never record `outcome=unknown` for a report that was never actually
-    read (that would make a mistyped path indistinguishable from a genuine no-marker
-    report in the done record)."""
-    p = _claimed(tmp_path, 1_000_000, "repair")
-    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    missing_report = tmp_path / "does-not-exist.md"
 
     proc = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path),
-                      "--report", str(tmp_path / "does-not-exist.md")])
+                      "--report", str(missing_report)])
 
-    assert proc.returncode == 6, proc.stderr
-    assert not (tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json").exists()
-    assert p.is_file(), "the claim must stay claimed, not be silently completed"
+    assert proc.returncode == 0, proc.stderr
+    assert f"report unreadable ({missing_report})" in proc.stderr
+    assert "closed as unknown" in proc.stderr
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    assert done.is_file()
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == str(missing_report)
+    assert not p.exists()
 
 
 def test_complete_cli_unknown_id_exits_nonzero(tmp_path):
