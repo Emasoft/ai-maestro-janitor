@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: dev
 created: 2026-09-15T18:47:30+0200
-updated: 2026-09-15T20:18:48+0200
+updated: 2026-09-15T20:23:46+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -19,7 +19,7 @@ scope: project
 project-id: ai-maestro-janitor
 npt: []
 eht: []
-implementation-commits: [30994579, 505f22ee, dcd5ba79, 87fc61f2]
+implementation-commits: [30994579, 505f22ee, dcd5ba79, 87fc61f2, 55c74f62]
 ---
 
 # Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
@@ -36,6 +36,16 @@ Owner's words verbatim: "the current janitor is making a mess.. multiple clear c
 - R (queued) — age bound on armed clear/compact resume cues.
 - C-b (queued) — turn-boundary clear at ~750k gated on no live agents; PreToolUse /compact removed.
 - E-2 (queued) — heartbeat honours the interrupt cooldown.
+M-a: COMMITTED (dcd5ba79) — noop-pass suppression for one cadence.
+M-c: IN FLIGHT — uncommitted worker edits pending review.
+M-d: IN FLIGHT — uncommitted worker edits pending review.
+H-a: IN FLIGHT — uncommitted worker edits pending review.
+C-a: IN FLIGHT — uncommitted worker edits pending review (87fc61f2 landed the Smoke hook-loop fix; C-a continuity nudge itself still uncommitted).
+E-1: IN FLIGHT — uncommitted worker edits pending review (tests/test_user_intent_interrupt.py untracked).
+R: QUEUED — see child TRDD (resume-cue age bound).
+C-b: QUEUED — see child TRDD (turn-boundary clear replaces mid-turn compact).
+E-2: QUEUED — see child TRDD (heartbeat honours user-interrupt cooldown).
+Child ids: R=2MLFZ7DL, C-b=11GAS4LC, E-2=6P0KUSO9.
 
 ## Evidence
 
@@ -65,3 +75,4 @@ compact point 866k = 900000 window - 34k overhead; #306's /compact injection com
 ## STATE
 
 NEXT ACTION: land R, C-b, E-2, then publish 3.5.1, then re-file the child cards from docs_dev/churn-cards-draft/ with measured acceptance criteria.
+Column dev is true only while a session is actively dispatching workers on this card; at handoff re-column to todo.
