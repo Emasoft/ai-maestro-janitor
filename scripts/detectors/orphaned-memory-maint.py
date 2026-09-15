@@ -84,6 +84,41 @@ def _evaluate_and_emit(
     print(line, flush=True)
 
 
+def _check_claimed_pool(state_dir: Path, seen: Path, now: int) -> None:
+    """Claimed dispatches whose owning agent may be dead (janitor#242, 2026-09-15 fleet
+    audit: 11 such records aged 16h-5d). `memory_dispatch_claim.expire_stale_claims` does
+    the actual per-record decision (its own chore's cadence x factor, the 6h floor, and
+    the finished-report check) and the rename; this just reports the ones it EXPIRED as
+    a MEMPASS-STALE-CLAIM finding. A record it marked DONE was a live pass that finished
+    cleanly in the meantime — never a finding."""
+    try:
+        acted = memory_dispatch_claim.expire_stale_claims(state_dir, now, 0)
+    except Exception as exc:  # noqa: BLE001 - a sweep failure must never break the fire
+        state.log_line("orphaned-memory-maint", f"expire_stale_claims failed: {exc}")
+        return
+
+    for record in acted:
+        if record["status"] != "expired":
+            continue
+        dispatch_id = record["dispatch_id"]
+        msg = omm.format_stale_claim(
+            record["intervention"], record["scope"], record["age_s"], record["cadence_s"],
+        )
+        key = f"claim:{dispatch_id}"
+        line = dedupe.emit_once(seen, key, f"[orphaned-memory-maint] {msg}")
+        if line is None:
+            continue  # already alerted for this exact expiry
+        try:
+            findings_ledger.record(
+                sev="HIGH", code="MEMPASS-STALE-CLAIM", src="orphaned-memory-maint",
+                msg=msg, now=now,
+            )
+        except Exception as exc:  # noqa: BLE001
+            state.log_line("orphaned-memory-maint", f"ledger write failed: {exc}")
+        state.log_line("orphaned-memory-maint", f"recorded MEMPASS-STALE-CLAIM for {key}")
+        print(line, flush=True)
+
+
 def _check_pool(state_dir: Path, seen: Path, now: int, default_factor: int, local_factor: int) -> None:
     """The per-dispatch claim pool (TRDD-IB5B14QQ): `memory-maintenance.py::_write_pending`
     writes one immutable `memory-maint-pending-<dispatch_id>.json` per dispatch, on top of
@@ -193,6 +228,11 @@ def main() -> int:
     # The pool is independent of the legacy slot's state, so it is always checked,
     # even when the legacy slot is itself malformed.
     _check_pool(state_dir, seen, now, default_factor, local_factor)
+
+    # A dead agent's claim never re-arms on its own (unlike an unclaimed pending
+    # record, which just sits there and gets checked by _check_pool above) — nothing
+    # else in the pipeline ever revisits a memory-maint-claimed-*.json file.
+    _check_claimed_pool(state_dir, seen, now)
 
     state.rotate_log_if_big("orphaned-memory-maint")
     return 0

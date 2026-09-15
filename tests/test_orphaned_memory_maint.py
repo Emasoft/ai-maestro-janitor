@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -448,29 +449,94 @@ def test_orphan_finding_not_duplicated_within_cadence_window(tmp_path):
     assert len(_ledger_lines(project)) == 1
 
 
-def test_claimed_pool_record_is_not_orphaned(tmp_path):
-    """A CLAIMED record (renamed out of the pool by `memory_dispatch_claim.claim_one`)
-    must never be read as pending — the whole point of the rename is that it is no
-    longer sitting where `candidates()` looks."""
+def test_a_young_claimed_record_is_not_orphaned(tmp_path):
+    """A CLAIMED record well within the 6h stale-claim floor (`memory_dispatch_claim
+    ._STALE_CLAIM_FLOOR_S`) must not be reported or touched. Pre-floor this record
+    (500s old, cadence 86.4s) WOULD have been flagged stale immediately — exactly the
+    double-claim risk the adversarial review caught: a real pass can legitimately hold
+    a claim far longer than its own chore's cadence."""
     home, project, gstate, settings, state_dir = _fixture(tmp_path)
     root = str(project / "memory")
     _write_settings(settings, repair_per_day=1000.0)
     now = int(time.time())
     old = now - 500
     state_dir.mkdir(parents=True, exist_ok=True)
+    dispatch_id = "3333333333-cccccccc"
     payload = {
         "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
-        "root": root, "stamped_at": old, "dispatch_id": "3333333333-cccccccc",
+        "root": root, "stamped_at": old, "dispatch_id": dispatch_id,
     }
-    (state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}3333333333-cccccccc.json").write_text(
-        json.dumps(payload), encoding="utf-8",
-    )
+    claimed = state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}{dispatch_id}.json"
+    claimed.write_text(json.dumps(payload), encoding="utf-8")
     _stamp_last_run(gstate, "repair", "LOCAL", root, old)
 
     out = _run(home, project, gstate, settings)
 
     assert out == ""
     assert _ledger_lines(project) == []
+    assert claimed.is_file(), "a young claim must be left exactly where it was"
+
+
+def test_an_old_claimed_record_with_no_report_is_stale_and_expired(tmp_path):
+    """Past the 6h floor with no finishing report on disk, the owning agent is presumed
+    dead (janitor#242, 2026-09-15 fleet audit): reported as MEMPASS-STALE-CLAIM and the
+    claim file renamed to memory-maint-expired-<id>.json so the next scheduler pass can
+    re-dispatch it."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    old = now - 30_000  # ~8.3h — past the 6h floor
+    state_dir.mkdir(parents=True, exist_ok=True)
+    dispatch_id = "3333333333-cccccccc"
+    payload = {
+        "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
+        "root": root, "stamped_at": old, "dispatch_id": dispatch_id,
+    }
+    claimed = state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}{dispatch_id}.json"
+    claimed.write_text(json.dumps(payload), encoding="utf-8")
+    _stamp_last_run(gstate, "repair", "LOCAL", root, old)
+
+    out = _run(home, project, gstate, settings)
+
+    assert "presumed dead" in out
+    lines = _ledger_lines(project)
+    assert len(lines) == 1
+    assert json.loads(lines[0])["code"] == "MEMPASS-STALE-CLAIM"
+    assert not claimed.exists(), "the dead claim must be renamed away"
+    assert (state_dir / f"{memory_dispatch_claim.EXPIRED_PREFIX}{dispatch_id}.json").is_file()
+
+
+def test_an_old_claimed_record_with_a_finished_report_is_marked_done_not_stale(tmp_path):
+    """Adversarial-review fix: age alone is not proof of death. A finishing report
+    written by the wikimem curator AFTER it claimed the dispatch proves the pass
+    completed — marked DONE, never reported as a stale claim (no double-claim)."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    old = now - 30_000
+    state_dir.mkdir(parents=True, exist_ok=True)
+    dispatch_id = "3333333333-cccccccc"
+    payload = {
+        "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
+        "root": root, "stamped_at": old, "dispatch_id": dispatch_id,
+    }
+    claimed = state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}{dispatch_id}.json"
+    claimed.write_text(json.dumps(payload), encoding="utf-8")
+    _stamp_last_run(gstate, "repair", "LOCAL", root, old)
+
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_ts = datetime.fromtimestamp(old + 100, tz=timezone.utc).strftime("%Y%m%d_%H%M%S+0000")
+    (reports_dir / f"{report_ts}-repair-local.md").write_text("done", encoding="utf-8")
+
+    out = _run(home, project, gstate, settings)
+
+    assert "MEMPASS-STALE-CLAIM" not in out
+    assert _ledger_lines(project) == []
+    assert not claimed.exists(), "a finished claim must still be renamed out of the pool"
+    assert (state_dir / f"{memory_dispatch_claim.DONE_PREFIX}{dispatch_id}.json").is_file()
 
 
 def test_superseded_pool_record_is_not_orphaned(tmp_path):

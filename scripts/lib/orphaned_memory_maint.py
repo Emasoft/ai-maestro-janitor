@@ -138,6 +138,23 @@ def is_orphaned(age_s: int, cadence_s: float, *, factor: int = DEFAULT_FACTOR) -
     return age_s >= cadence_s * factor
 
 
+def format_stale_claim(intervention: str, scope: str, age_s: int, cadence_s: float) -> str:
+    """One ledger-ready line for a CLAIMED (not merely pending) dispatch that has
+    outlived several cadences of its own chore — the agent that claimed it is presumed
+    dead (janitor#242, 2026-09-15 fleet audit: 11 such records aged 16h-5d, permanently
+    un-reclaimable). Distinct wording from `format_finding` because the remedy differs:
+    a claim expires via `memory_dispatch_claim.expire_stale_claims`, it is not something
+    a human restarts a session to re-dispatch."""
+    hours = age_s / 3600.0
+    age = f"{hours:.1f}h" if hours < 48 else f"{hours / 24:.1f}d"
+    cadence_h = "disabled" if not math.isfinite(cadence_s) else f"{cadence_s / 3600:.1f}h"
+    return (
+        f"memory-maintenance pass '{intervention}' ({scope}) has been CLAIMED for {age} "
+        f"(cadence {cadence_h}) with no finishing report — its agent is presumed dead; "
+        "expiring the claim so the next scheduler pass can re-dispatch it."
+    )
+
+
 def format_finding(intervention: str, scope: str, age_s: int, cadence_s: float) -> str:
     """One ledger-ready line. LOCAL gets its own wording (#238) so the reader restarts
     the session instead of waiting for a rescue that cannot come."""

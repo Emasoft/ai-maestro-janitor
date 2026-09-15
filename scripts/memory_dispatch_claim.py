@@ -38,17 +38,37 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import memory_settings  # noqa: E402
+import orphaned_memory_maint as omm  # noqa: E402
 import state  # noqa: E402
 
 PENDING_PREFIX = "memory-maint-pending-"
 CLAIMED_PREFIX = "memory-maint-claimed-"
+EXPIRED_PREFIX = "memory-maint-expired-"
+DONE_PREFIX = "memory-maint-done-"
 LEGACY_NAME = "memory-maint-pending.json"
+_EXPIRED_KEEP = 20  # mirrors memory-maintenance.py's own keep-20 prune for pending/claimed
+# janitor#242 (2026-09-15 fleet audit + adversarial review): a real consolidate pass over a
+# large corpus can legitimately hold a claim for hours, so age-only expiry using a fast
+# chore's own cadence would let a fresh agent double-claim a dispatch a LIVE agent is still
+# working. This floor is the minimum age ANY claim must reach before expiry, regardless of
+# how short its chore's own cadence x factor is.
+_STALE_CLAIM_FLOOR_S = 6 * 3600
+
+# The reports dir the wikimem curator writes to — see `_reports_dir_for`.
+_REPORTS_SUBDIR = Path("reports") / "janitor-memory-subconscious-agent"
+
+# The known chores, derived from the one place that already enumerates them (never
+# duplicated here) — `--chore` must be one of these, never empty (see main()).
+CHORES: tuple[str, ...] = tuple(memory_settings.INTERVENTIONS)
 
 
 def _dispatch_epoch(path: Path) -> tuple[int, str]:
@@ -73,18 +93,19 @@ def candidates(state_dir: Path) -> list[Path]:
 
 
 def payload_matches_chore(payload: object, chore: str) -> bool:
-    """True iff `payload` is a well-formed dispatch record for `chore` (any chore
-    when `chore` is empty). Factored out of `claim_one`'s loop (TRDD-LDSCQ0NU) so
-    `is_claimable` below checks a record with the EXACT SAME predicate a real claim
-    would use, instead of a hand-rolled duplicate that could quietly drift from it."""
+    """True iff `payload` is a well-formed dispatch record whose `intervention` is
+    exactly `chore`. No chore-blind branch: an empty or mismatched `chore` matches
+    nothing, on purpose — a `[janitor-memory-split]` fire once claimed a queued
+    `consolidate` record this way and burned 236k tokens (2026-09-15 fleet audit).
+    Factored out of `claim_one`'s loop (TRDD-LDSCQ0NU) so `is_claimable` below
+    checks a record with the EXACT SAME predicate a real claim would use, instead
+    of a hand-rolled duplicate that could quietly drift from it."""
     if not isinstance(payload, dict):
         return False
-    if chore and str(payload.get("intervention") or "") != chore:
-        return False
-    return True
+    return str(payload.get("intervention") or "") == chore
 
 
-def is_claimable(state_dir: Path, dispatch_id: str, chore: str = "") -> bool:
+def is_claimable(state_dir: Path, dispatch_id: str, chore: str) -> bool:
     """Read-only: would `claim_one(state_dir, chore)` be ABLE to claim the
     per-dispatch record named `dispatch_id`, right now? Never renames, never
     consumes — this is a verification read, not a claim.
@@ -123,23 +144,21 @@ class StateDirMismatch(Exception):
 
 
 def claim_one(
-    state_dir: Path, chore: str = "", expected_state_dir: Path | None = None
+    state_dir: Path, chore: str, expected_state_dir: Path | None = None
 ) -> dict | None:
-    """Atomically claim the oldest unclaimed dispatch and return its payload, else None.
+    """Atomically claim the oldest unclaimed dispatch matching `chore`, else None.
 
     `chore` (janitor#275, and the root cause of #280 and #273) restricts the claim to
-    dispatches whose `intervention` matches. Without it the claim is FIFO-by-age and
-    chore-BLIND, while every caller is chore-SPECIFIC: the heartbeat emits one marker
-    (`[janitor-memory-atomize]`, say) and the agent it spawns loads that chore's skill.
-    If the queue head belongs to a different chore, that agent claimed and consumed an
-    assignment it cannot perform — the queue head is renamed out of the pool, so the
-    dispatch that CAN be performed is orphaned and the wrong agent does nothing useful.
-    Measured on this host as a permanently wedged atomize dispatch (janitor#273).
-
-    Empty `chore` keeps the historical chore-blind behaviour, deliberately: an older
-    installed skill that has not learned the flag must keep working rather than start
-    claiming nothing. A filtered claim is strictly narrower, so it can never consume a
-    dispatch the unfiltered one would have left alone.
+    dispatches whose `intervention` matches — REQUIRED, never blind. Every caller is
+    chore-SPECIFIC: the heartbeat emits one marker (`[janitor-memory-atomize]`, say) and
+    the agent it spawns loads that chore's skill. If the queue head belongs to a
+    different chore, that agent claimed and consumed an assignment it cannot perform —
+    the queue head is renamed out of the pool, so the dispatch that CAN be performed is
+    orphaned and the wrong agent does nothing useful. Measured on this host as a
+    permanently wedged atomize dispatch (janitor#273), and again 2026-09-15 as a
+    `[janitor-memory-split]` fire consuming a queued `consolidate` record (236k tokens
+    burned) — the FIFO-blind fallback this function used to fall back to on an empty
+    `chore` is gone; call it with the exact chore or not at all.
 
     Reads BEFORE renaming: a rename we won is unrecoverable for anyone else, so if the read
     then failed the assignment would be lost with nothing left to point at it.
@@ -219,6 +238,151 @@ def _retire_legacy_mirror(state_dir: Path, dispatch_id: str) -> None:
             return
 
 
+def _reports_dir_for(state_dir: Path) -> Path:
+    """The wikimem curator's report directory for the project owning `state_dir`, assuming
+    the standard `<project>/.janitor/state` layout. When that assumption doesn't hold (a
+    bare directory in a test, or an unusual layout) the returned path simply won't exist,
+    and `_pass_finished_since` degrades to "no evidence found" — the safe direction: a
+    genuinely finished pass is then treated as (still possibly) live, never the reverse."""
+    return state_dir.parent.parent / _REPORTS_SUBDIR
+
+
+def _pass_finished_since(reports_dir: Path, chore: str, scope: str, since_epoch: int) -> bool:
+    """True iff a `janitor-memory-subconscious-agent` report for `chore` (and, best-effort,
+    `scope`) was written strictly after `since_epoch` — i.e. the pass that claimed this
+    dispatch already finished and wrote its report, so the claim is DONE, not stale.
+
+    Report filenames are `<local-ts+tz>-<chore>-<scope-or-slug>.md` (agent-reports-location
+    convention). Matched on the `-<chore>-` marker plus a case-insensitive scope prefix
+    check; a report with no recognisable scope segment (e.g. a "no-claimable-dispatch"
+    report) simply won't match a non-empty `scope`, which is the safe miss.
+
+    ponytail: matched by chore+scope filename only, never by `root` — the report filename
+    convention doesn't encode it. `reports_dir` is this claim's OWN project's reports dir
+    (`_reports_dir_for`), so a cross-PROJECT collision can't happen; the residual risk is
+    two DIFFERENT USER-scope roots processed by the SAME project's heartbeat writing
+    same-named `<chore>-user...md` reports close together, which could mark the wrong
+    root's claim done. Not a data-loss risk (renamed, never deleted) and not observed in
+    practice; tighten (embed root in the report filename) if it ever is.
+    """
+    if not reports_dir.is_dir():
+        return False
+    scope_l = (scope or "").strip().lower()
+    marker = f"-{chore}-"
+    for entry in reports_dir.iterdir():
+        name = entry.name
+        if not name.endswith(".md") or marker not in name:
+            continue
+        ts_str, _, rest = name[: -len(".md")].partition(marker)
+        try:
+            report_epoch = int(datetime.strptime(ts_str, "%Y%m%d_%H%M%S%z").timestamp())
+        except ValueError:
+            continue
+        if report_epoch <= since_epoch:
+            continue
+        if scope_l and not rest.lower().startswith(scope_l):
+            continue
+        return True
+    return False
+
+
+def _prune_named(state_dir: Path, prefix: str, *, keep: int = _EXPIRED_KEEP) -> None:
+    """Keep only the newest `keep` files under `prefix` — mirrors memory-maintenance.py's
+    own keep-20 prune for pending/claimed files, applied here because `done`/`expired` are
+    new prefixes nothing else in the pipeline sweeps."""
+    files = sorted(state_dir.glob(f"{prefix}*.json"))
+    for stale in (files[:-keep] if len(files) > keep else []):
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+
+def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dict]:
+    """Reclaim claimed dispatches whose owning agent is provably gone (janitor#242,
+    2026-09-15 fleet audit: 11 claimed records aged 16h-5d, permanently un-reclaimable —
+    a claim has no "consumed" flag once its agent dies, so the slot was gone for good).
+
+    Age alone is not proof of death (the adversarial review that caught this): a real
+    consolidate pass over a large corpus can legitimately hold a claim for hours, so
+    naive age-only expiry would let a fresh agent double-claim a dispatch a LIVE agent is
+    still working. Two-step, in order, per claimed record:
+
+      1. If a `janitor-memory-subconscious-agent` report for this record's chore+scope was
+         written AFTER its `stamped_at`, the pass finished — rename to
+         `memory-maint-done-<id>.json` and print `MEMPASS-DONE <id> <chore>`. Never
+         re-dispatched, never counted as stale.
+      2. Otherwise, expire (rename to `memory-maint-expired-<id>.json`, print
+         `MEMPASS-EXPIRED <id> <chore> age=<s>`) only once age exceeds
+         `max(max_age_s, THIS RECORD'S OWN cadence x factor, _STALE_CLAIM_FLOOR_S)`.
+         The per-record cadence (not one blanket value swept over every file) is what
+         stops a fast chore's threshold from expiring a different, slower chore's still-
+         healthy claim; `max_age_s` is a caller-supplied additional floor (pass 0 to let
+         each record's own chore decide); the 6h floor protects a live pass on a fast
+         cadence regardless of either.
+
+    Malformed/unreadable claimed files are left alone — a different, already-reported
+    finding (MEMPASS-MALFORMED), not this function's job to clean up. Returns one dict per
+    record acted on: `{"dispatch_id", "intervention", "status": "done"|"expired", ...}`
+    (an "expired" entry also carries "age_s" and "cadence_s" for the caller's finding).
+    """
+    reports_dir = _reports_dir_for(state_dir)
+    acted: list[dict] = []
+    for path in sorted(state_dir.glob(f"{CLAIMED_PREFIX}*.json")):
+        payload, malformed = omm.read_record(path)
+        if malformed or payload is None:
+            continue
+        dispatch_id = path.name[len(CLAIMED_PREFIX):-len(".json")]
+        chore = payload["intervention"]
+        scope = payload["scope"]
+        stamped_at = int(payload["stamped_at"])
+
+        if _pass_finished_since(reports_dir, chore, scope, stamped_at):
+            target = state_dir / f"{DONE_PREFIX}{dispatch_id}.json"
+            try:
+                path.rename(target)
+            except OSError:
+                continue  # lost the race — leave it for the next sweep
+            print(f"MEMPASS-DONE {dispatch_id} {chore}")
+            acted.append({"dispatch_id": dispatch_id, "intervention": chore, "status": "done"})
+            continue
+
+        try:
+            cadence_s = memory_settings.interval_s_for(chore)
+        except ValueError:
+            # ponytail: a renamed/retired chore makes this claim immortal (never expired,
+            # matching is_orphaned's "disabled never orphans" convention) rather than
+            # fail-loud — log it so a stuck claim under a dead chore name is at least
+            # visible, upgrade to a MEMPASS finding if this is ever seen in practice.
+            state.log_line(
+                "memory_dispatch_claim",
+                f"claimed dispatch {dispatch_id} has unknown intervention {chore!r} — "
+                "never expiring it on cadence grounds",
+            )
+            cadence_s = math.inf
+        factor = omm.factor_for_scope(scope)
+        cadence_threshold = cadence_s * factor if math.isfinite(cadence_s) else math.inf
+        threshold = max(max_age_s, cadence_threshold, _STALE_CLAIM_FLOOR_S)
+
+        age_s = omm.pending_age_s(payload, now=now)
+        if age_s < threshold:
+            continue
+        target = state_dir / f"{EXPIRED_PREFIX}{dispatch_id}.json"
+        try:
+            path.rename(target)
+        except OSError:
+            continue  # lost the race — leave it for the next sweep
+        print(f"MEMPASS-EXPIRED {dispatch_id} {chore} age={age_s}")
+        acted.append({
+            "dispatch_id": dispatch_id, "intervention": chore, "status": "expired",
+            "age_s": age_s, "cadence_s": cadence_s, "scope": scope,
+        })
+
+    _prune_named(state_dir, DONE_PREFIX)
+    _prune_named(state_dir, EXPIRED_PREFIX)
+    return acted
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     # default=None (not "") so an EXPLICITLY empty --state-dir is distinguishable from
@@ -227,10 +391,11 @@ def main() -> int:
     ap.add_argument("--state-dir", default=None, help="override the project's .janitor/state")
     ap.add_argument("--peek", action="store_true",
                     help="report the next claimable dispatch WITHOUT claiming it")
-    ap.add_argument("--chore", default="",
+    ap.add_argument("--chore", required=True, choices=CHORES,
                     help="claim ONLY a dispatch whose intervention matches (janitor#275) — "
-                         "the marker-routed agent knows which chore it was launched for, so "
-                         "it must not consume another chore's assignment")
+                         "REQUIRED: a chore-blind claim let a [janitor-memory-split] fire "
+                         "consume a queued 'consolidate' record and burn 236k tokens "
+                         "(2026-09-15 fleet audit)")
     args = ap.parse_args()
 
     if args.state_dir is not None and args.state_dir.strip() == "":

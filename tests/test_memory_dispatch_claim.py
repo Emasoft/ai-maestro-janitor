@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -31,22 +32,33 @@ def _dispatch(sd: Path, epoch: int, intervention: str, scope: str = "LOCAL") -> 
     return p
 
 
+def _claimed(sd: Path, epoch: int, intervention: str, scope: str = "LOCAL") -> Path:
+    """A CLAIMED (not pending) per-dispatch record, for `expire_stale_claims` tests."""
+    p = sd / f"{mdc.CLAIMED_PREFIX}{epoch}-abcd1234.json"
+    p.write_text(json.dumps({
+        "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
+        "scope": scope, "root": f"/tmp/{scope.lower()}/memory", "stamped_at": epoch,
+        "dispatch_id": f"{epoch}-abcd1234",
+    }), encoding="utf-8")
+    return p
+
+
 def test_claim_returns_the_oldest_dispatch_first(tmp_path):
     """Newest-first would starve the dispatch that has already waited longest."""
-    _dispatch(tmp_path, 2000, "consolidate")
+    _dispatch(tmp_path, 2000, "repair")
     _dispatch(tmp_path, 1000, "repair")
-    got = mdc.claim_one(tmp_path)
-    assert got is not None and got["intervention"] == "repair"
+    got = mdc.claim_one(tmp_path, "repair")
+    assert got is not None and got["dispatch_id"] == "1000-abcd1234"
 
 
 def test_a_claimed_dispatch_is_never_handed_out_twice(tmp_path):
     """One assignment, one agent. The second caller must get the OTHER dispatch, not a
     second copy of the first."""
     _dispatch(tmp_path, 1000, "repair")
-    _dispatch(tmp_path, 2000, "consolidate")
-    first, second, third = (mdc.claim_one(tmp_path) for _ in range(3))
-    assert first is not None and first["intervention"] == "repair"
-    assert second is not None and second["intervention"] == "consolidate"
+    _dispatch(tmp_path, 2000, "repair")
+    first, second, third = (mdc.claim_one(tmp_path, "repair") for _ in range(3))
+    assert first is not None and first["dispatch_id"] == "1000-abcd1234"
+    assert second is not None and second["dispatch_id"] == "2000-abcd1234"
     assert third is None
 
 
@@ -56,7 +68,9 @@ def test_concurrent_claimers_never_collide(tmp_path):
     for i in range(8):
         _dispatch(tmp_path, 1000 + i, f"chore{i}")
     with ThreadPoolExecutor(max_workers=8) as pool:
-        got = [f.result() for f in [pool.submit(mdc.claim_one, tmp_path) for _ in range(8)]]
+        got = [f.result() for f in [
+            pool.submit(mdc.claim_one, tmp_path, f"chore{i}") for i in range(8)
+        ]]
     ids = [g["dispatch_id"] for g in got if g]
     assert len(ids) == 8, "every dispatch must be claimed"
     assert len(set(ids)) == 8, f"a dispatch was handed to two claimers: {ids}"
@@ -66,7 +80,7 @@ def test_an_in_flight_claim_cannot_be_repointed_by_a_later_dispatch(tmp_path):
     """The exact janitor#242 scenario: a repair is claimed, then a consolidate is dispatched
     to the same root 367s later. The repair's own record must be byte-identical afterwards."""
     _dispatch(tmp_path, 1000, "repair")
-    claimed = mdc.claim_one(tmp_path)
+    claimed = mdc.claim_one(tmp_path, "repair")
     assert claimed is not None
     before = Path(claimed["claimed_path"]).read_bytes()
     _dispatch(tmp_path, 1367, "consolidate")
@@ -79,7 +93,7 @@ def test_an_in_flight_claim_cannot_be_repointed_by_a_later_dispatch(tmp_path):
 def test_no_dispatch_means_None_and_never_a_guess(tmp_path):
     """janitor#150: an agent that guesses runs a pass nobody scheduled on a scope nobody
     chose. Absence must stay absence."""
-    assert mdc.claim_one(tmp_path) is None
+    assert mdc.claim_one(tmp_path, "repair") is None
 
 
 def test_the_legacy_single_slot_is_not_a_fallback(tmp_path):
@@ -88,7 +102,7 @@ def test_the_legacy_single_slot_is_not_a_fallback(tmp_path):
     (tmp_path / mdc.LEGACY_NAME).write_text(
         json.dumps({"intervention": "consolidate", "scope": "LOCAL", "root": "/tmp/x"}),
         encoding="utf-8")
-    assert mdc.claim_one(tmp_path) is None
+    assert mdc.claim_one(tmp_path, "consolidate") is None
 
 
 def test_an_unreadable_record_is_skipped_not_consumed(tmp_path):
@@ -97,7 +111,7 @@ def test_an_unreadable_record_is_skipped_not_consumed(tmp_path):
     bad = tmp_path / f"{mdc.PENDING_PREFIX}1000-deadbeef.json"
     bad.write_text("{not json", encoding="utf-8")
     _dispatch(tmp_path, 2000, "repair")
-    got = mdc.claim_one(tmp_path)
+    got = mdc.claim_one(tmp_path, "repair")
     assert got is not None and got["intervention"] == "repair"
     assert bad.is_file(), "the corrupt record must stay put for the orphan detector"
 
@@ -138,7 +152,7 @@ def test_claiming_retires_the_legacy_mirror_of_that_dispatch(tmp_path):
     p = _dispatch(tmp_path, 1700000000, "atomize")
     _mirror(tmp_path, p)
 
-    got = mdc.claim_one(tmp_path)
+    got = mdc.claim_one(tmp_path, "atomize")
 
     assert got is not None and got["intervention"] == "atomize"
     assert not (tmp_path / mdc.LEGACY_NAME).exists(), (
@@ -156,7 +170,7 @@ def test_claiming_an_older_dispatch_leaves_a_newer_mirror_alone(tmp_path):
     _mirror(tmp_path, new)  # the scheduler's mirror always describes the newest
     assert old.exists()
 
-    got = mdc.claim_one(tmp_path)
+    got = mdc.claim_one(tmp_path, "atomize")
 
     assert got is not None and got["intervention"] == "atomize", "oldest-first is unchanged"
     mirrored = json.loads((tmp_path / mdc.LEGACY_NAME).read_text(encoding="utf-8"))
@@ -174,7 +188,7 @@ def test_retiring_the_mirror_did_not_make_it_claimable(tmp_path):
         json.dumps({"intervention": "repair", "scope": "LOCAL", "dispatch_id": "x"}),
         encoding="utf-8")
 
-    assert mdc.claim_one(tmp_path) is None
+    assert mdc.claim_one(tmp_path, "repair") is None
     assert (tmp_path / mdc.LEGACY_NAME).exists()
 
 
@@ -221,13 +235,14 @@ def test_no_matching_chore_claims_NOTHING_rather_than_the_wrong_thing(tmp_path):
     assert mdc.claim_one(tmp_path, "atomize") is not None, "the atomize dispatch must survive"
 
 
-def test_an_empty_chore_keeps_the_historical_chore_blind_behaviour(tmp_path):
-    """Back-compat, deliberately: an installed skill that predates the flag must keep
-    working rather than silently start claiming nothing. A filtered claim is strictly
-    narrower, so it can never consume what the unfiltered one would have left."""
+def test_an_empty_chore_matches_nothing_now(tmp_path):
+    """The chore-blind FIFO fallback is gone: a `[janitor-memory-split]` fire once
+    claimed a queued `consolidate` record this way and burned 236k tokens (2026-09-15
+    fleet audit). An empty chore must claim NOTHING, never fall back to FIFO."""
     _dispatch(tmp_path, 100, "atomize")
     got = mdc.claim_one(tmp_path, "")
-    assert got is not None and got["intervention"] == "atomize"
+    assert got is None
+    assert mdc.claim_one(tmp_path, "atomize") is not None, "the record must still be there"
 
 
 def test_is_claimable_true_for_a_freshly_written_matching_dispatch(tmp_path):
@@ -317,7 +332,7 @@ def _run_cli(args: list[str], env: dict[str, str] | None = None) -> subprocess.C
 def test_rejects_empty_state_dir_argument():
     """An EXPLICITLY empty --state-dir must be a distinct error, never a silent
     fallback to cwd resolution (part (c))."""
-    proc = _run_cli(["--state-dir", ""])
+    proc = _run_cli(["--chore", "repair", "--state-dir", ""])
     assert proc.returncode == 4, proc.stderr
     assert "empty" in proc.stderr
 
@@ -326,7 +341,7 @@ def test_refuses_when_state_dir_unresolved_and_no_pool(tmp_path):
     """No --state-dir given AND the cwd-resolved directory holds zero
     `memory-maint-*` files of either kind gets its OWN exit code, distinct from
     the ordinary 'nothing claimable' exit 2 (part (d))."""
-    proc = _run_cli([], env={"CLAUDE_PROJECT_DIR": str(tmp_path)})
+    proc = _run_cli(["--chore", "repair"], env={"CLAUDE_PROJECT_DIR": str(tmp_path)})
     assert proc.returncode == 3, proc.stderr
     assert "no memory-maintenance state at all" in proc.stderr
 
@@ -338,7 +353,7 @@ def test_explicit_state_dir_with_no_pool_also_exits_3(tmp_path):
     obtained. Previously this silently returned the ordinary 'nothing claimable'
     exit 2, which is exactly the code a verbatim-placeholder --state-dir produced
     (TRDD-N1CPV1QV part (e)) — a wrong path must never look like a correct abstain."""
-    proc = _run_cli(["--state-dir", str(tmp_path)])
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
     assert proc.returncode == 3, proc.stderr
     assert "--state-dir given" in proc.stderr
 
@@ -348,9 +363,25 @@ def test_explicit_placeholder_like_state_dir_exits_3_not_2():
     --state-dir must exit 3, not the 'nothing claimable' exit 2 every skill
     treats as a correct abstain."""
     placeholder = "<the absolute path from the STATE_DIR=<path> line of your spawn prompt>"
-    proc = _run_cli(["--state-dir", placeholder])
+    proc = _run_cli(["--chore", "repair", "--state-dir", placeholder])
     assert proc.returncode == 3, proc.stderr
     assert "--state-dir given" in proc.stderr
+
+
+def test_claim_with_empty_chore_exits_2():
+    """An empty --chore must be refused (argparse `choices=CHORES`) before any
+    state-dir work runs — no chore-blind fallback from the CLI either."""
+    proc = _run_cli(["--chore", ""])
+    assert proc.returncode == 2, proc.stderr
+
+
+def test_claim_with_a_chore_that_has_no_pending_record_hands_out_nothing(tmp_path):
+    """A chore with no matching record must abstain even while another chore's
+    dispatch sits right there in the same pool — never the wrong thing."""
+    _dispatch(tmp_path, 100, "atomize")
+    proc = _run_cli(["--chore", "consolidate", "--state-dir", str(tmp_path)])
+    assert proc.returncode == 2, proc.stderr
+    assert "no claimable memory-maintenance dispatch" in proc.stderr
 
 
 def test_claim_one_refuses_a_foreign_state_dir(tmp_path):
@@ -396,6 +427,72 @@ def test_claim_one_accepts_a_record_with_no_state_dir_field(tmp_path):
     _dispatch(tmp_path, 100, "split")  # helper never sets state_dir
     got = mdc.claim_one(tmp_path, "split", expected_state_dir=tmp_path.resolve())
     assert got is not None, "a missing state_dir field must never refuse the claim"
+
+
+# ---------------------------------------------------------------------------
+# `expire_stale_claims` (janitor#242, 2026-09-15 fleet audit + adversarial review):
+# a claim has no "consumed" flag once its agent dies, so age alone must never be
+# proof of death — a real pass can legitimately hold a claim past its own cadence.
+# ---------------------------------------------------------------------------
+
+
+def _fixed_cadence(monkeypatch, seconds: float = 100.0) -> None:
+    """Pin every chore's cadence to a small fixed value so the 6h floor is what
+    actually governs — deterministic regardless of this host's real memory-settings
+    (a fresh checkout defaults `repair_per_day` to 1/day = 86400s, which would make
+    these tests pass or fail depending on whatever settings the running machine has)."""
+    monkeypatch.setattr(mdc.memory_settings, "interval_s_for", lambda chore: seconds)
+
+
+def test_expire_stale_claims_leaves_a_young_claim_alone(tmp_path, monkeypatch):
+    """Younger than the 6h floor (`_STALE_CLAIM_FLOOR_S`) must never be touched,
+    however short its own chore's cadence."""
+    _fixed_cadence(monkeypatch)
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    acted = mdc.expire_stale_claims(tmp_path, now=1_000_000 + 500, max_age_s=0)
+    assert acted == []
+    assert p.is_file()
+
+
+def test_expire_stale_claims_expires_a_dead_claim_with_no_report(tmp_path, monkeypatch):
+    """Past the floor with no finishing report on disk: the owning agent is presumed
+    dead — renamed to memory-maint-expired-<id>.json so the next scheduler pass can
+    re-dispatch it."""
+    _fixed_cadence(monkeypatch)
+    epoch = 1_000_000
+    p = _claimed(tmp_path, epoch, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+
+    acted = mdc.expire_stale_claims(tmp_path, now=epoch + 30_000, max_age_s=0)
+
+    assert len(acted) == 1
+    assert acted[0]["status"] == "expired" and acted[0]["dispatch_id"] == dispatch_id
+    assert not p.exists()
+    assert (tmp_path / f"{mdc.EXPIRED_PREFIX}{dispatch_id}.json").is_file()
+
+
+def test_expire_stale_claims_marks_a_finished_pass_done_not_expired(tmp_path, monkeypatch):
+    """A `janitor-memory-subconscious-agent` report written AFTER the claim's
+    `stamped_at` proves the pass completed — DONE, never expired, so a fresh agent
+    can never double-claim a dispatch that already finished."""
+    _fixed_cadence(monkeypatch)
+    project = tmp_path / "project"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    epoch = 1_000_000
+    p = _claimed(state_dir, epoch, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    ts = datetime.fromtimestamp(epoch + 100, tz=timezone.utc).strftime("%Y%m%d_%H%M%S+0000")
+    (reports_dir / f"{ts}-repair-local.md").write_text("done", encoding="utf-8")
+
+    acted = mdc.expire_stale_claims(state_dir, now=epoch + 30_000, max_age_s=0)
+
+    assert len(acted) == 1
+    assert acted[0]["status"] == "done" and acted[0]["dispatch_id"] == dispatch_id
+    assert not p.exists()
+    assert (state_dir / f"{mdc.DONE_PREFIX}{dispatch_id}.json").is_file()
 
 
 def test_every_memory_skill_passes_its_own_chore(tmp_path):
