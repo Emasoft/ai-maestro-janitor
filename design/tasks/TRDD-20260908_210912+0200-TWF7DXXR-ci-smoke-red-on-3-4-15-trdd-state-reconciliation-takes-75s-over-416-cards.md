@@ -3,7 +3,7 @@ trdd-id: TWF7DXXR
 title: CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
 column: dev
 created: 2026-09-08T21:09:12+0200
-updated: 2026-09-10T19:35:00+0200
+updated: 2026-09-10T23:56:03+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -14,12 +14,14 @@ relevant-rules: [6]
 priority: high
 npt: []
 eht: [HTFUWAU9]
-implementation-commits: [5347836f]
+implementation-commits: [5347836f, 46cf9a7b, f0fde2be]
 ---
 
 # CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-08
+
+- finding-count delta old→new on the 421-card board: 4→4 (literal-vs-regex change has zero effect here).
 
 - **Release 3.4.15 is published** (publish attempt 6, all 11 gates green). The publish's
   post-release gate ran `claude plugin install ai-maestro-janitor@ai-maestro-plugins --scope
