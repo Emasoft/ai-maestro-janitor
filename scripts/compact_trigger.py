@@ -160,6 +160,15 @@ def main() -> int:
         "bound nests strictly inside it instead of outliving it (AM8JD9SG F9). Expiring early "
         "is safe: it degrades to the local tmux keystroke path.",
     )
+    ap.add_argument(
+        "--transcript-path",
+        default=None,
+        help=(
+            "this session's own transcript (e.g. the Stop hook's `transcript_path`) — "
+            "session-scopes the ESC-interrupt cooldown check so two live sessions of the same "
+            "project never share one (see terminal_trigger.inject_until_sent)"
+        ),
+    )
     args = ap.parse_args()
 
     directive = args.directive.strip()
@@ -182,14 +191,15 @@ def main() -> int:
     # half-typed prompt this cancel was protecting is already protected, and protected better:
     # the old cancel left an over-full context un-compacted with no retry, which is how a session
     # reaches the ~999k wall where `/compact` itself can no longer run.
-    sent = terminal_trigger.send_self_command(
-        commands,
-        delay_s=args.delay,
-        esc_first=esc_first,
-        dry_run=args.dry_run,
-        respect_user_presence=False,
-        aimaestro_resolve_timeout_s=args.resolve_timeout,
-    )
+    with terminal_trigger.scoped_transcript_path_env(args.transcript_path):
+        sent = terminal_trigger.send_self_command(
+            commands,
+            delay_s=args.delay,
+            esc_first=esc_first,
+            dry_run=args.dry_run,
+            respect_user_presence=False,
+            aimaestro_resolve_timeout_s=args.resolve_timeout,
+        )
     if sent.startswith("FIRED:"):
         print("COMPACT_FIRED")
     elif sent.startswith("DRY_RUN:"):

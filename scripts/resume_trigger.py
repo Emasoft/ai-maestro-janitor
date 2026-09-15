@@ -59,6 +59,15 @@ def main() -> int:
         action="store_true",
         help="print the plan, but do NOT fire osascript (for tests)",
     )
+    ap.add_argument(
+        "--transcript-path",
+        default=None,
+        help=(
+            "this session's own transcript (the PostCompact hook's own `transcript_path`) — "
+            "session-scopes the ESC-interrupt cooldown check so two live sessions of the same "
+            "project never share one (see terminal_trigger.inject_until_sent)"
+        ),
+    )
     args = ap.parse_args()
 
     # SELF-CANCEL when there is nothing to resume (user report 2026-07-17: repeated
@@ -101,11 +110,12 @@ def main() -> int:
     # pane lands a few seconds late rather than never. `abort_unless_any` remains the correct
     # cancel here, and it cancels on the RIGHT evidence: the flags being gone means some other
     # path already resumed, which presence never implied.
-    sent = terminal_trigger.send_self_command(
-        RESUME_CMD, delay_s=args.delay, esc_first=False, dry_run=args.dry_run,
-        abort_unless_any=pending_flags or None,
-        respect_user_presence=False,
-    )
+    with terminal_trigger.scoped_transcript_path_env(args.transcript_path):
+        sent = terminal_trigger.send_self_command(
+            RESUME_CMD, delay_s=args.delay, esc_first=False, dry_run=args.dry_run,
+            abort_unless_any=pending_flags or None,
+            respect_user_presence=False,
+        )
     if sent.startswith("FIRED:"):
         print("RESUME_FIRED")
     elif sent.startswith("DRY_RUN:"):

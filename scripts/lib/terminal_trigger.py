@@ -41,6 +41,7 @@ the child as data — a child that got reparented to init couldn't re-resolve it
 from __future__ import annotations
 
 import base64
+import contextlib
 import fcntl
 import json
 import os
@@ -49,7 +50,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -665,6 +666,38 @@ def wait_until_pane_free(
         sleeper(quiet_s)
 
 
+_TRANSCRIPT_PATH_ENV = "JANITOR_TRANSCRIPT_PATH"
+
+
+@contextlib.contextmanager
+def scoped_transcript_path_env(path: str | None) -> Iterator[None]:
+    """Set `JANITOR_TRANSCRIPT_PATH` in `os.environ` for the duration of the `with` block,
+    restoring whatever was there before on exit — never a plain `os.environ[...] = ...`
+    with no cleanup.
+
+    Why this exists instead of passing the path as a normal argument: `send_self_command`'s
+    detached child is spawned via `subprocess.Popen([...])` with NO explicit `env=` in either
+    `_fire_detached_verified` or `_fire_detached_steps`, so the child inherits whatever
+    `os.environ` looks like at the moment `Popen()` is called — that snapshot is taken
+    synchronously, inside the `with` block, so restoring immediately afterward cannot affect
+    an already-spawned child. Without this cleanup the var would leak for the rest of the
+    process's life (a real hazard for any test suite that calls one of the CLI trigger
+    scripts' `main()` more than once in the same pytest process, or for any future caller
+    that imports these as a library instead of running them as `__main__`)."""
+    if not path:
+        yield
+        return
+    prior = os.environ.get(_TRANSCRIPT_PATH_ENV)
+    os.environ[_TRANSCRIPT_PATH_ENV] = path
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop(_TRANSCRIPT_PATH_ENV, None)
+        else:
+            os.environ[_TRANSCRIPT_PATH_ENV] = prior
+
+
 def inject_until_sent(
     terminal: Mapping[str, str],
     command: str,
@@ -681,6 +714,7 @@ def inject_until_sent(
     still_wanted=None,
     sleeper=time.sleep,
     clock=time.monotonic,
+    transcript_path: str | None = None,
 ) -> tuple[bool, str]:
     """Keep trying until the command is actually SENT. Returns (sent, why).
 
@@ -767,6 +801,31 @@ def inject_until_sent(
 
     typing_probe = _default_is_typing if is_typing is None else is_typing
 
+    def _recently_interrupted() -> float | None:
+        """`recently_interrupted(...)` age, or None — an Esc/Ctrl-C interrupt is NOT a keystroke
+        the typing probe above can see (owner complaint 2026-09-15: "esc key unable to stop the
+        current agent from running" — the queued command typed itself the moment the pane went
+        idle right after the user hit Esc). Same lazy-import + never-raises shape as
+        `_default_is_typing` so a broken probe degrades to "not interrupted", never to a crash.
+
+        `transcript_path` (the explicit kwarg) wins; else `JANITOR_TRANSCRIPT_PATH` — set by a
+        hook-aware caller (resume/clear/compact trigger's `--transcript-path`) into its own
+        `os.environ` before calling `send_self_command`, which spawns its detached child WITHOUT
+        an explicit `env=` override, so the child inherits it (`_fire_detached_verified`/
+        `_fire_detached_steps`). Neither given → `recently_interrupted` falls back to the
+        newest-by-mtime transcript under the project's slug — two live sessions of the same
+        project can then briefly share a cooldown, which is the documented, honest gap left by
+        the hooks (out of this change's file scope) not yet passing `--transcript-path` through.
+        """
+        try:
+            import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
+
+            project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+            tp = transcript_path or os.environ.get(_TRANSCRIPT_PATH_ENV) or None
+            return user_intent.recently_interrupted(project_dir, transcript_path=tp)
+        except Exception:  # noqa: BLE001 - a broken probe must never block the inject path
+            return None
+
     giveup_s = _inject_giveup_s() if giveup_s is None else giveup_s
     deadline = clock() + giveup_s
     last = "not attempted"
@@ -810,6 +869,14 @@ def inject_until_sent(
                 state.log_line("terminal_trigger", f"inject cancelled: {wanted_why}")
                 _clear_leftover_command()
                 return False, f"cancelled — {wanted_why}"
+
+        interrupt_age = _recently_interrupted()
+        if interrupt_age is not None:
+            window = user_intent.resolve_interrupt_cooldown_s()
+            last = f"user interrupted {interrupt_age:.0f}s ago (cooldown {window:.0f}s) — deferring"
+            state.log_line("terminal_trigger", f"inject deferred: {last}")
+            sleeper(quiet_s)
+            continue
 
         if typing_probe(terminal):
             last = f"user typed within {quiet_s:.0f}s — deferring"

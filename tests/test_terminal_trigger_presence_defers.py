@@ -136,3 +136,81 @@ def test_dry_run_bypasses_the_gate_entirely(monkeypatch):
 )
 def test_budget_knob_parsing(raw, expected):
     assert tt._presence_wait_budget_s({"CLAUDE_PLUGIN_OPTION_PRESENCE_WAIT_S": raw}) == expected
+
+
+# --- ESC-interrupt cooldown DEFERS an injection the same way typing does (owner complaint
+# 2026-09-15: "esc key unable to stop the current agent from running" — Esc produces no
+# keystroke the typing probe can see, so a queued self-injector typed itself the moment the pane
+# went idle). Real `.jsonl` transcripts on disk, no mocking of `recently_interrupted` itself. ---
+
+import json  # noqa: E402
+import time  # noqa: E402
+
+_NBSP = " "
+
+
+def _pane(field: str) -> str:
+    """A capture shaped like a real one (see test_terminal_trigger_readback): box rule,
+    marker + NBSP + field, box rule — `extract_prompt_field` only recognizes this shape."""
+    return "out\n" + "─" * 40 + f"\n❯{_NBSP}{field}\n" + "─" * 40 + "\n"
+
+
+def _interrupt_transcript(tmp_path: Path, age_s: float) -> Path:
+    t = tmp_path / "session.jsonl"
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - age_s)) + ".000Z"
+    rec = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
+        "timestamp": ts,
+    }
+    t.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    return t
+
+
+def test_an_injection_attempted_30s_after_an_interrupt_defers_and_logs(tmp_path, monkeypatch):
+    """An Esc/Ctrl-C interrupt 30s ago is inside the default 300s cooldown -> the injector
+    defers on every attempt (never reaches the typing probe or the reader) and logs it."""
+    transcript = _interrupt_transcript(tmp_path, 30)
+    logged: list[str] = []
+    monkeypatch.setattr(tt.state, "log_line", lambda _name, msg: logged.append(msg))
+    slept: list[float] = []
+    reads = 0
+
+    def _reader(_t):
+        nonlocal reads
+        reads += 1
+        return _pane("")
+
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/janitor-arm",
+        type_fn=lambda: None, submit_fn=lambda: None,
+        reader=_reader, is_typing=lambda _t: False,
+        transcript_path=str(transcript),
+        sleeper=slept.append, clock=lambda: 0.0,
+        quiet_s=1.0, retry_s=1.0, giveup_s=2.0,
+    )
+
+    assert ok is False, why
+    assert reads == 0, "the pane must never be read while an interrupt cooldown is active"
+    assert slept and all(d == 1.0 for d in slept), "must defer in quiet_s steps, same as typing"
+    assert any("inject deferred" in m and "interrupted" in m for m in logged), logged
+
+
+def test_an_injection_attempted_10min_after_an_interrupt_proceeds(tmp_path):
+    """An interrupt 10 minutes ago is outside the default 300s cooldown -> the injector
+    proceeds normally and the command is sent."""
+    transcript = _interrupt_transcript(tmp_path, 600)
+    sent: list[str] = []
+    # empty (pre-type) -> shows our command (settle poll) -> empty (post-Enter confirm)
+    reads = iter([_pane(""), _pane("/janitor-arm"), _pane("")])
+
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/janitor-arm",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        reader=lambda _t: next(reads, _pane("")), is_typing=lambda _t: False,
+        transcript_path=str(transcript),
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+    )
+
+    assert ok is True, why
+    assert sent == ["Enter"]

@@ -674,6 +674,15 @@ def main() -> int:
         help="write the resume state + print the two-phase plan, but fire NOTHING "
         "(for tests — the real /clear would wipe the developer's own pane)",
     )
+    ap.add_argument(
+        "--transcript-path",
+        default=None,
+        help=(
+            "this session's own transcript — session-scopes the ESC-interrupt cooldown check "
+            "so two live sessions of the same project never share one "
+            "(see terminal_trigger.inject_until_sent)"
+        ),
+    )
     args = ap.parse_args()
 
     # 1. Resolve the resume directive. A missing --directive falls back to a pointer at the
@@ -777,6 +786,14 @@ def main() -> int:
     # session unarmed. `--clear-settle` is retained only as the CHANNEL-UNAVAILABLE fallback
     # below; the chain itself gates on `clear-observed.ts`, not on that clock.
     if terminal_trigger.channel_is_readable(terminal):
+        # Same seam `_spawn_chain`'s own docstring prescribes for `CLAUDE_PROJECT_DIR`: an
+        # explicit per-child `env=` dict, never a bare `os.environ[...] = ...` in this
+        # long-lived parent — that mutation would clobber every later plugin call in the same
+        # process (CPV's CLAUDE_RESERVED_ENV_POISON / ENV_INJECTION class).
+        chain_env = (
+            {**os.environ, "JANITOR_TRANSCRIPT_PATH": args.transcript_path}
+            if args.transcript_path else None
+        )
         _spawn_chain({
             "delay": delay,
             "terminal": terminal,
@@ -785,7 +802,7 @@ def main() -> int:
             "state_dir": str(_project_root() / ".janitor" / "state"),
             "gate_baseline": _gate_baseline(),
             "directive": directive,
-        })
+        }, env=chain_env)
         print("CLEAR_CHAIN_SPAWNED")
         return 0
 
@@ -797,8 +814,12 @@ def main() -> int:
     mpath = _write_clear_marker(directive)
     print(f"DIRECTIVE_WRITTEN {dpath}")
     print(f"CLEAR_MARKER_WRITTEN {mpath}")
-    status_a = _fire_phase([CLEAR_CMD], delay=delay, dry_run=args.dry_run)
-    status_b = _fire_phase(list(_BOOTSTRAP_CMDS), delay=delay + settle, dry_run=args.dry_run)
+    # `_fire_phase` -> `send_self_command` has no per-child `env=` seam (unlike `_spawn_chain`
+    # above), so this legacy fallback path uses the scoped, self-restoring env override instead
+    # of a bare `os.environ[...] = ...`.
+    with terminal_trigger.scoped_transcript_path_env(args.transcript_path):
+        status_a = _fire_phase([CLEAR_CMD], delay=delay, dry_run=args.dry_run)
+        status_b = _fire_phase(list(_BOOTSTRAP_CMDS), delay=delay + settle, dry_run=args.dry_run)
     # Both phases share the same pane, so they degrade together: if the pane isn't
     # automatable, NEITHER fired. The resume state is still recorded, so a manual
     # /clear + /janitor-arm still auto-resumes.

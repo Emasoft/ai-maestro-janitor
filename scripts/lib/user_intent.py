@@ -41,11 +41,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import memory_scopes  # noqa: E402  -- sibling lib; leaf-safe (no cycle back through terminal_trigger)
 import state  # noqa: E402
+import token_history  # noqa: E402  -- sibling lib; leaf-safe, provides parse_ts
 
 # How long a recorded intent stays valid. The user types `/janitor-disarm`, the skill runs seconds
 # later — this only has to bridge that gap. Generous, but far short of "the rest of the session".
 INTENT_TTL_S = 600  # 10 minutes
+
+# An Esc/Ctrl-C interrupt produces NO keystroke the typing probe (`typing_now`) can see, so a
+# queued self-injector types over "I just stopped it" the moment the pane goes idle (owner
+# complaint 2026-09-15). This is the marker Claude Code itself writes as a `type: user` transcript
+# record on every interrupt — matched by PREFIX because it has (at least) two live variants
+# (`[Request interrupted by user]` on a bare Esc, `[Request interrupted by user for tool use]`
+# mid-tool-call), verified against real transcripts before coding against it.
+INTERRUPT_MARKER_PREFIX = "[Request interrupted by user"
+INTERRUPT_COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_INTERRUPT_COOLDOWN_S"
+DEFAULT_INTERRUPT_COOLDOWN_S = 300
 
 # How long after the user's last PROMPT SUBMIT we still consider them PRESENT at the terminal.
 #
@@ -430,3 +442,144 @@ def injection_allowed(
             consume_intent(verb, state_dir)
             return True, f"user explicitly asked ({verb})"
     return False, "user is present and did not ask"
+
+
+def resolve_interrupt_cooldown_s(env: Mapping[str, str] | None = None) -> int:
+    """The interrupt-cooldown window in seconds — overridable via `INTERRUPT_COOLDOWN_ENV`.
+
+    Public (unlike `_resolve_idle_s`) because `terminal_trigger` needs the SAME number it fed to
+    `recently_interrupted` to log a meaningful cooldown value, not just "deferred, window unknown".
+    A non-int or a value <=0 coerces back to the default, same defend-the-floor shape as
+    `_resolve_idle_s`."""
+    e = os.environ if env is None else env
+    raw = e.get(INTERRUPT_COOLDOWN_ENV)
+    if raw is None:
+        return DEFAULT_INTERRUPT_COOLDOWN_S
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_INTERRUPT_COOLDOWN_S
+    return val if val > 0 else DEFAULT_INTERRUPT_COOLDOWN_S
+
+
+def _tail_bytes(path: Path, max_bytes: int = 64 * 1024) -> list[str]:
+    """The last `max_bytes` of `path` as non-blank text lines. Empty list on any I/O failure.
+
+    A near-duplicate of `fleet_scan._tail_lines` — NOT imported from there because `fleet_scan`
+    imports `terminal_trigger`, which imports THIS module: importing `fleet_scan` here would be a
+    straight import cycle (fleet_scan -> terminal_trigger -> user_intent -> fleet_scan). Small,
+    stable, and cheap enough to duplicate rather than restructure three modules to share it."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > max_bytes:
+                fh.seek(size - max_bytes)
+            data = fh.read(max_bytes + 1)
+    except OSError:
+        return []
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if len(lines) > 1 and size > max_bytes:
+        lines = lines[1:]  # first line is almost certainly truncated mid-record
+    return [ln for ln in lines if ln.strip()]
+
+
+def _interrupt_text(rec: Mapping) -> str | None:
+    """The flattened text of a `type: user` transcript record's `message.content`, or None.
+
+    `content` is either a bare string or a list of `{"type": "text", "text": ...}` blocks —
+    verified against real `~/.claude/projects/*/*.jsonl` transcripts before writing this."""
+    if rec.get("type") != "user":
+        return None
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, Mapping) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [b.get("text") for b in content if isinstance(b, Mapping) and isinstance(b.get("text"), str)]
+        return "\n".join(p for p in parts if p) or None
+    return None
+
+
+def _newest_transcript(project_dir: str, home: Path) -> Path | None:
+    """The newest `*.jsonl` transcript for a project's harness slug, or None on any failure."""
+    try:
+        slug = memory_scopes.project_slug(project_dir)
+        transcripts = list((home / ".claude" / "projects" / slug).glob("*.jsonl"))
+        if not transcripts:
+            return None
+        return max(transcripts, key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def recently_interrupted(
+    project_dir: str | Path,
+    window_s: int | None = None,
+    now: float | None = None,
+    *,
+    transcript_path: str | Path | None = None,
+    home: Path | None = None,
+) -> float | None:
+    """Seconds since the newest Esc/Ctrl-C interrupt in the relevant transcript, or None when
+    none happened within `window_s` (default `resolve_interrupt_cooldown_s()`).
+
+    `transcript_path`, when given, is used directly — this is the SESSION-scoped path (a hook's
+    own `transcript_path`/`session_id`), and it must win over any other transcript: two live
+    sessions of the same project must not share a cooldown just because one of them typed more
+    recently and so owns the newer file. Only when no session is known does this fall back to the
+    newest-by-mtime transcript under the project's slug dir (logged, so a false negative from
+    picking the wrong session is diagnosable after the fact).
+
+    Fails OPEN (returns None) on any unreadable/missing transcript or unparseable content — this
+    is the CALLER's decision to make (defer or not), never a hard error over a breadcrumb.
+    """
+    resolved_window = resolve_interrupt_cooldown_s() if window_s is None else window_s
+    resolved_now = time.time() if now is None else now
+    home = Path.home() if home is None else home
+
+    transcript: Path | None
+    if transcript_path is not None:
+        transcript = Path(transcript_path)
+        source = "session-scoped transcript_path"
+        if not transcript.is_file():
+            state.log_line("user_intent", f"recently_interrupted: {source} not found: {transcript}")
+            return None
+    else:
+        transcript = _newest_transcript(str(project_dir), home)
+        source = "newest-by-mtime fallback (no session known)"
+        if transcript is None:
+            return None
+
+    tail = _tail_bytes(transcript)
+    if not tail:
+        state.log_line("user_intent", f"recently_interrupted: unreadable transcript ({source}): {transcript}")
+        return None
+
+    for raw in reversed(tail):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue  # malformed tail line — keep walking back for an earlier valid record
+        if not isinstance(rec, dict):
+            continue
+        text = _interrupt_text(rec)
+        if text is None or not text.strip().startswith(INTERRUPT_MARKER_PREFIX):
+            continue
+        ts = token_history.parse_ts(rec.get("timestamp", ""))
+        if ts is None:
+            try:
+                ts = int(transcript.stat().st_mtime)
+            except OSError:
+                continue
+        age = max(0.0, resolved_now - ts)
+        # This is the NEWEST interrupt (we walked backwards from the tail's end) — if it is
+        # already outside the window, every earlier interrupt is older still, so there is
+        # nothing left to find.
+        if age <= resolved_window:
+            state.log_line(
+                "user_intent",
+                f"recently_interrupted: hit via {source} ({transcript}), age={age:.0f}s",
+            )
+            return age
+        return None
+    return None
