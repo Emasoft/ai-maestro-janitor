@@ -96,6 +96,30 @@ _MEM_RECENT_WINDOW_S = 86_400  # a memory page counts as "recently updated" with
 _MEM_MAX_FILES = 8             # cap the recent-memory section
 _MEM_ATOMS_COLLAPSE = 5        # > this many atoms in one file → list the FILE, not the atoms
 
+# --- trigger=="auto" continuity record (TRDD-7MGJYLY5) ---------------------------------
+# Owner ruling: an autocompaction needs no summarization/handoff — the harness already
+# does that — the janitor only nudges the resumed turn toward its prior work. So a
+# harness autocompact writes a SMALL machine-readable record instead of the prose
+# handoff above; only a manual/unknown-trigger compaction still gets the prose.
+CONTINUITY_FILENAME = "precompact-continuity.json"
+# Debounce applies ONLY to trigger=="auto" (coordinator addendum to TRDD-7MGJYLY5): a
+# manual /compact typed twice on purpose must write both times. Measured 2026-09-15
+# (TRDD-ANIME2SVG): 7 auto firings in 48s for one real compaction.
+_CONTINUITY_DEBOUNCE_WINDOW_S = 120
+# "Active" skills = loaded recently enough to matter to the resumed turn — a skill
+# loaded an hour ago is not active, and the nudge must not tell the model to re-load a
+# dozen skills (coordinator addendum): scan only the last N ASSISTANT turns, cap the
+# distinct-name list.
+_ACTIVE_SKILLS_TURN_WINDOW = 10
+_ACTIVE_SKILLS_MAX = 5
+_OPEN_FILES_MAX = 50
+# Uncapped background_agents was a real bug (review finding, TRDD-7MGJYLY5): the nudge's
+# ≤15-line render is a single END-OF-LIST slice, so a session with many live agents could
+# silently truncate the active_skills/open_files sections entirely, and — because
+# `pending_agents.pending()` is OLDEST-first — keep the STALEST agents while dropping the
+# newest (most relevant) ones. Cap + reverse to newest-first at the source instead.
+_BACKGROUND_AGENTS_MAX = 5
+
 # Files under a memory dir that are NOT wiki notes — never list them here (the librarian's
 # reorg/index files regenerate constantly, and MEMORY.md is the HARNESS's own file, a
 # coexisting system the janitor only bridges to, never a wiki note to summarize).
@@ -499,6 +523,222 @@ def _format_memory_rows(
     return lines
 
 
+def _tool_use_blocks_tail(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> list[dict]:
+    """All ASSISTANT `tool_use` blocks in the transcript TAIL, oldest-first, fail-open [].
+
+    Same tail-seek/decode/skip-malformed-line contract as `_recent_turns` — the
+    transcript can be many MB, and a parser fault must never break the handoff.
+    """
+    if not transcript_path:
+        return []
+    path = Path(transcript_path)
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            seeked = size > tail_bytes
+            if seeked:
+                fh.seek(size - tail_bytes)
+            raw = fh.read()
+    except OSError:
+        return []
+    lines = raw.decode("utf-8", errors="replace").splitlines()
+    if seeked and lines:
+        lines = lines[1:]  # drop the probably-partial first line after the tail seek
+    blocks: list[dict] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict) or obj.get("type") != "assistant":
+            continue
+        message = obj.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        blocks.extend(b for b in content if isinstance(b, dict) and b.get("type") == "tool_use")
+    return blocks
+
+
+def _assistant_tool_use_turns(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> list[list[dict]]:
+    """`tool_use` blocks GROUPED BY assistant transcript entry (one entry = one turn),
+    oldest-first, fail-open []. Needed (unlike the flat `_tool_use_blocks_tail`) so
+    "active skills" can be scoped by TURN RECENCY, not by raw tool-call count."""
+    if not transcript_path:
+        return []
+    path = Path(transcript_path)
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            seeked = size > tail_bytes
+            if seeked:
+                fh.seek(size - tail_bytes)
+            raw = fh.read()
+    except OSError:
+        return []
+    lines = raw.decode("utf-8", errors="replace").splitlines()
+    if seeked and lines:
+        lines = lines[1:]
+    turns: list[list[dict]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict) or obj.get("type") != "assistant":
+            continue
+        message = obj.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        turns.append([b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"])
+    return turns
+
+
+def _active_skills_from_transcript(
+    transcript_path: str,
+    turn_window: int = _ACTIVE_SKILLS_TURN_WINDOW,
+    max_skills: int = _ACTIVE_SKILLS_MAX,
+) -> list[str]:
+    """Distinct `Skill` tool_use names within the last `turn_window` ASSISTANT turns,
+    most-recent first, capped at `max_skills` (coordinator addendum to TRDD-7MGJYLY5):
+    a skill loaded many turns ago is not "active", and the nudge must not tell the
+    resumed turn to re-load a dozen skills. Fail-open: never raises.
+
+    LITERAL READING (review finding, flag for the coordinator rather than a fix): one
+    "turn" here is one raw JSONL `type=="assistant"` transcript entry, per
+    `_assistant_tool_use_turns`. In an agentic tool-call loop a single USER-VISIBLE
+    exchange can span many such entries (one per tool call), so this window can cover
+    a much shorter span of real conversation than "10 conversational turns" might
+    suggest. Chosen because it needs no extra state to define a "conversational turn"
+    boundary; revisit if the nudge is observed excluding a skill that "obviously" was
+    just used.
+    """
+    turns = _assistant_tool_use_turns(transcript_path)[-turn_window:]
+    names: list[str] = []
+    seen: set[str] = set()
+    for blocks in reversed(turns):
+        for block in reversed(blocks):
+            if block.get("name") != "Skill":
+                continue
+            tool_input = block.get("input")
+            name = ""
+            if isinstance(tool_input, dict):
+                name = str(tool_input.get("command", "") or tool_input.get("skill", "") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+            if len(names) >= max_skills:
+                return names
+    return names
+
+
+def _open_files_from_transcript(transcript_path: str, limit: int = _OPEN_FILES_MAX) -> list[str]:
+    """Distinct file paths from the last `limit` `Read`/`Edit` tool_use entries,
+    most-recent first. MENTIONED only — the resumed turn is told these files were
+    open, never asked to re-read them (owner ruling TRDD-7MGJYLY5)."""
+    blocks = [b for b in _tool_use_blocks_tail(transcript_path) if b.get("name") in ("Read", "Edit")]
+    paths: list[str] = []
+    seen: set[str] = set()
+    for block in reversed(blocks[-limit:]):
+        tool_input = block.get("input")
+        path_str = str(tool_input.get("file_path", "") or "").strip() if isinstance(tool_input, dict) else ""
+        if not path_str or path_str in seen:
+            continue
+        seen.add(path_str)
+        paths.append(path_str)
+    return paths
+
+
+def _inflight_trdd_ids(project_root: Path, git_root: Path | None) -> list[str]:
+    """`TRDD-<uid8>` ids of the in-flight tasks, newest first — id only, no title/STATE
+    (the continuity record is a small pointer, not a second prose handoff)."""
+    ids: list[str] = []
+    for _updated, name, _title, _text in _inflight_trdds(project_root, git_root):
+        m = _UID_RE.search(name)
+        if m:
+            ids.append(f"TRDD-{m.group(1)}")
+    return ids
+
+
+def _background_agents(state_dir: Path | None) -> list[dict[str, str]]:
+    """Live (non-`stopped`) background agents from `pending-agents.json`, as
+    `{agentId, description}` — enough for a `SendMessage` resume, no more. Capped at
+    `_BACKGROUND_AGENTS_MAX`, NEWEST first — `pending_agents.pending()` is
+    oldest-first, so this both bounds the nudge render and keeps the agents most
+    likely to still matter (review finding: an uncapped, oldest-first list let a busy
+    session's nudge exhaust its line budget on stale agents). Fail-open: any
+    import/read fault (missing lib, corrupt manifest) degrades to []."""
+    try:
+        from lib import pending_agents  # noqa: PLC0415 - local package, best-effort
+
+        entries = pending_agents.pending(state_dir=state_dir)
+    except Exception:  # noqa: BLE001 - a manifest fault must never break the hook
+        return []
+    live = [
+        {"agentId": str(e.get("agentId", "")), "description": str(e.get("description", ""))}
+        for e in entries
+        if isinstance(e, dict) and not e.get("stopped")
+    ]
+    return list(reversed(live[-_BACKGROUND_AGENTS_MAX:]))
+
+
+def _build_continuity_record(
+    project_root: Path,
+    trigger: str,
+    transcript_path: str,
+    session_id: str,
+    cwd: str,
+    state_dir: Path | None,
+) -> dict:
+    """The trigger=="auto" continuity record: on-disk facts only, no prose. Every
+    field is best-effort/fail-open by construction of the helpers it calls."""
+    git_root = _resolve_git_root(project_root, cwd)
+    return {
+        "written_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+        "session_id": session_id,
+        "trigger": trigger or "unknown",
+        "inflight_trdds": _inflight_trdd_ids(project_root, git_root),
+        "background_agents": _background_agents(state_dir),
+        "active_skills": _active_skills_from_transcript(transcript_path),
+        "open_files": _open_files_from_transcript(transcript_path),
+    }
+
+
+def _file_mtime(path: Path) -> float:
+    """`path`'s mtime, or 0.0 if it doesn't exist — stdlib-only (no `lib.state`
+    dependency, since this hook must degrade even when the state lib fails to import)."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _debounced(sd: Path, session_id: str, now: float) -> bool:
+    """True iff the last trigger=="auto" continuity write for this SAME session was
+    < `_CONTINUITY_DEBOUNCE_WINDOW_S` ago (measured 7 firings in 48s on one real
+    compaction, TRDD-TWF7DXXR/TRDD-ANIME2SVG). Debounce applies ONLY to `auto` — a
+    manual `/compact` typed twice on purpose must write both times (coordinator
+    addendum to TRDD-7MGJYLY5), so a DIFFERENT session_id, or no prior record, never
+    debounces."""
+    path = sd / CONTINUITY_FILENAME
+    mtime = _file_mtime(path)
+    if not mtime or (now - mtime) >= _CONTINUITY_DEBOUNCE_WINDOW_S:
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("session_id") == session_id
+
+
 def _build_handoff(
     project_root: Path, plugin_root: str, trigger: str, transcript_path: str = "", cwd: str = ""
 ) -> str:
@@ -623,24 +863,54 @@ def _build_handoff(
     return "\n".join(out) + "\n"
 
 
-def _emit_system_message(handoff_path: Path) -> None:
+def _emit_system_message(path: Path, *, continuity: bool = False) -> None:
     """Best-effort breadcrumb for the SAME-turn summarizer.
 
     PreCompact cannot inject into the compacted context, but a `systemMessage` is
     a supported common field. We NEVER set `decision` (that would block), and we
-    always exit 0 — so this is advisory-only.
+    always exit 0 — so this is advisory-only. `continuity=True` (trigger=="auto")
+    points at the small machine-readable record instead of the prose handoff.
     """
-    payload = {
-        "systemMessage": (
+    text = (
+        f"[janitor] A continuity record was written to {path} (harness autocompact — "
+        "no prose handoff this time, per TRDD-7MGJYLY5). It names in-flight TRDDs, "
+        "live background agents, recently-active skills, and files that were open."
+        if continuity
+        else (
             "[janitor] An authoritative filesystem-derived handoff was written to "
-            f"{handoff_path}. Prior transcript summaries may contain HALLUCINATED "
+            f"{path}. Prior transcript summaries may contain HALLUCINATED "
             "state — after compaction, treat every technical claim in the summary as "
             "UNVERIFIED until checked against that handoff and the TRDD STATE blocks."
         )
-    }
+    )
+    payload = {"systemMessage": text}
     try:
         print(json.dumps(payload))
     except (OSError, ValueError):
+        pass
+
+
+def _atomic_write(state, path: Path, text: str) -> None:  # noqa: ANN001 - local module type
+    """Write `text` to `path` atomically, using `lib.state` when available, else an
+    inline atomic-by-rename write (mirrors `state.atomic_write`) so a missing state
+    lib never costs us the write."""
+    if state is not None:
+        state.atomic_write(path, text)
+    else:
+        tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+
+
+def _log(state, message: str) -> None:  # noqa: ANN001 - local module type
+    """Best-effort log line via `lib.state`, else stderr. Never raises — a logging
+    fault must never break the hook."""
+    try:
+        if state is not None:
+            state.log_line("pre-compact-handoff", message)
+        else:
+            print(f"[pre-compact-handoff] {message}", file=sys.stderr)
+    except Exception:  # noqa: BLE001
         pass
 
 
@@ -657,6 +927,7 @@ def main() -> int:
     cwd_fallback = ""
     trigger = ""
     transcript_path = ""
+    session_id = ""
     if raw.strip():
         try:
             payload = json.loads(raw)
@@ -667,6 +938,8 @@ def main() -> int:
                 trigger = str(payload.get("trigger", "") or "")
                 # transcript_path → the VERBATIM recent-conversation section.
                 transcript_path = str(payload.get("transcript_path", "") or "")
+                # session_id → the debounce key + the continuity record's own field.
+                session_id = str(payload.get("session_id", "") or "")
         except (ValueError, TypeError):
             cwd_fallback = ""
 
@@ -703,26 +976,32 @@ def main() -> int:
             sd = project_dir / ".janitor" / "state"
             sd.mkdir(parents=True, exist_ok=True)
 
-        handoff = _build_handoff(project_dir, plugin_root, trigger, transcript_path, cwd_fallback)
-        handoff_path = sd / HANDOFF_FILENAME
-
-        if state is not None:
-            state.atomic_write(handoff_path, handoff)
-            try:
-                state.log_line(
-                    "pre-compact-handoff",
-                    f"handoff written ({len(handoff)} bytes, trigger={trigger or 'unknown'})",
-                )
-            except Exception:  # noqa: BLE001
-                pass
+        now = time.time()
+        if trigger == "auto":
+            # Harness autocompact: the harness ALREADY summarizes and hands the next
+            # turn a resume point (owner ruling TRDD-7MGJYLY5 — "no need of
+            # summarization or handoff, the harness does this automatically"). Only a
+            # small machine-readable continuity record is written, so the janitor can
+            # NUDGE the resumed turn toward its in-flight work instead of duplicating
+            # the harness's own summary.
+            if _debounced(sd, session_id, now):
+                age = now - _file_mtime(sd / CONTINUITY_FILENAME)
+                _log(state, f"handoff debounced ({age:.0f}s)")
+                return 0
+            record = _build_continuity_record(
+                project_dir, trigger, transcript_path, session_id, cwd_fallback, sd
+            )
+            continuity_json = json.dumps(record, ensure_ascii=False)
+            continuity_path = sd / CONTINUITY_FILENAME
+            _atomic_write(state, continuity_path, continuity_json)
+            _log(state, f"continuity written ({len(continuity_json)} bytes, trigger=auto)")
+            _emit_system_message(continuity_path, continuity=True)
         else:
-            # Inline atomic-by-rename write (mirrors state.atomic_write) so a missing
-            # state lib never costs us the handoff.
-            tmp = handoff_path.with_suffix(handoff_path.suffix + f".tmp.{os.getpid()}")
-            tmp.write_text(handoff, encoding="utf-8")
-            os.replace(tmp, handoff_path)
-
-        _emit_system_message(handoff_path)
+            handoff = _build_handoff(project_dir, plugin_root, trigger, transcript_path, cwd_fallback)
+            handoff_path = sd / HANDOFF_FILENAME
+            _atomic_write(state, handoff_path, handoff)
+            _log(state, f"handoff written ({len(handoff)} bytes, trigger={trigger or 'unknown'})")
+            _emit_system_message(handoff_path)
     except Exception as exc:  # noqa: BLE001 - a hook fault must NEVER block compaction
         # Best-effort log, then swallow. Never raise, never set decision, never exit 2.
         try:

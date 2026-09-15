@@ -478,6 +478,17 @@ def _thinking_turn() -> dict:
     return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "h"}]}}
 
 
+def _tool_use_turn(name: str, **tool_input: object) -> dict:
+    """An assistant turn containing exactly one `tool_use` block."""
+    return {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "name": name, "input": tool_input}],
+        },
+    }
+
+
 def _write_jsonl(path: Path, entries: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
 
@@ -700,3 +711,184 @@ def test_build_handoff_no_transcript_degrades_conversation(tmp_path: Path) -> No
     handoff = hook._build_handoff(tmp_path, str(_PROJECT_ROOT), "auto")  # transcript_path default ""
     assert "## Recent conversation" in handoff
     assert "(recent conversation unavailable)" in handoff
+
+
+# ---------- trigger=="auto" continuity record (TRDD-7MGJYLY5) --------------
+
+def test_active_skills_from_transcript_scopes_to_last_turns_and_caps(tmp_path: Path) -> None:
+    """Only `Skill` calls within the last `_ACTIVE_SKILLS_TURN_WINDOW` ASSISTANT turns
+    count, capped at `_ACTIVE_SKILLS_MAX` distinct names (coordinator addendum to
+    TRDD-7MGJYLY5): a skill loaded many turns ago is not "active"."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    entries = [_tool_use_turn("Skill", command="stale-skill")]  # pushed outside the window below
+    entries += [_amsg(f"filler {i}") for i in range(hook._ACTIVE_SKILLS_TURN_WINDOW)]
+    entries += [_tool_use_turn("Skill", command=f"skill-{i}") for i in range(hook._ACTIVE_SKILLS_MAX + 2)]
+    _write_jsonl(tx, entries)
+    names = hook._active_skills_from_transcript(str(tx))
+    assert "stale-skill" not in names, "a skill outside the turn window must not be 'active'"
+    assert len(names) == hook._ACTIVE_SKILLS_MAX
+    assert names[0] == f"skill-{hook._ACTIVE_SKILLS_MAX + 1}"  # most-recent first
+
+
+def test_open_files_from_transcript_dedupes_recent_read_edit(tmp_path: Path) -> None:
+    """Distinct `Read`/`Edit` file_paths, most-recent first; a repeat path counts once."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _tool_use_turn("Read", file_path="/a.py"),
+        _tool_use_turn("Edit", file_path="/b.py"),
+        _tool_use_turn("Bash", command="ls"),  # not Read/Edit — excluded
+        _tool_use_turn("Read", file_path="/a.py"),  # repeat — deduped
+        _tool_use_turn("Edit", file_path="/c.py"),
+    ])
+    paths = hook._open_files_from_transcript(str(tx))
+    assert paths == ["/c.py", "/a.py", "/b.py"]
+
+
+def test_debounced_true_within_window_same_session(tmp_path: Path) -> None:
+    """A second `trigger=="auto"` write within the window for the SAME session debounces."""
+    hook = _hook()
+    (tmp_path / hook.CONTINUITY_FILENAME).write_text(
+        json.dumps({"session_id": "s1"}), encoding="utf-8"
+    )
+    assert hook._debounced(tmp_path, "s1", time.time()) is True
+
+
+def test_debounced_false_different_session(tmp_path: Path) -> None:
+    """A DIFFERENT session_id must never debounce — debounce is per-session."""
+    hook = _hook()
+    (tmp_path / hook.CONTINUITY_FILENAME).write_text(
+        json.dumps({"session_id": "s1"}), encoding="utf-8"
+    )
+    assert hook._debounced(tmp_path, "s2", time.time()) is False
+
+
+def test_debounced_false_after_window(tmp_path: Path) -> None:
+    """Past the debounce window the record is stale and must not suppress a write."""
+    hook = _hook()
+    path = tmp_path / hook.CONTINUITY_FILENAME
+    path.write_text(json.dumps({"session_id": "s1"}), encoding="utf-8")
+    old = time.time() - hook._CONTINUITY_DEBOUNCE_WINDOW_S - 5
+    os.utime(path, (old, old))
+    assert hook._debounced(tmp_path, "s1", time.time()) is False
+
+
+def _run_precompact(project: Path, payload: dict) -> subprocess.CompletedProcess:
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(project),
+    }
+    return subprocess.run(
+        [sys.executable, str(_HOOK_PATH)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def test_hook_subprocess_trigger_auto_writes_continuity_not_prose(tmp_path: Path) -> None:
+    """Real run: trigger="auto" writes precompact-continuity.json and NOT the prose
+    precompact-handoff.md (owner ruling TRDD-7MGJYLY5 — the harness already
+    auto-summarizes; the janitor only needs a small machine-readable continuity record)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _init_git_repo(project)
+    proc = _run_precompact(project, {
+        "session_id": "sess-auto-1",
+        "cwd": str(project),
+        "transcript_path": str(project / "transcript.jsonl"),
+        "trigger": "auto",
+        "hook_event_name": "PreCompact",
+    })
+    assert proc.returncode == 0, f"hook must always exit 0; stderr={proc.stderr!r}"
+    sd = project / ".janitor" / "state"
+    continuity = sd / "precompact-continuity.json"
+    prose = sd / "precompact-handoff.md"
+    assert continuity.exists(), f"continuity record not written; stderr={proc.stderr!r}"
+    assert not prose.exists(), "trigger=auto must NOT write the prose handoff"
+    data = json.loads(continuity.read_text(encoding="utf-8"))
+    assert data["session_id"] == "sess-auto-1"
+    assert data["trigger"] == "auto"
+    for key in ("inflight_trdds", "background_agents", "active_skills", "open_files"):
+        assert key in data
+
+
+def test_hook_subprocess_trigger_auto_second_firing_is_debounced(tmp_path: Path) -> None:
+    """Two auto firings within 120s for the SAME session must not double-write; the
+    second logs 'debounced' (measured 7 firings in 48s on one real compaction,
+    TRDD-TWF7DXXR)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _init_git_repo(project)
+    payload = {
+        "session_id": "sess-debounce-1",
+        "cwd": str(project),
+        "transcript_path": "",
+        "trigger": "auto",
+        "hook_event_name": "PreCompact",
+    }
+    proc1 = _run_precompact(project, payload)
+    assert proc1.returncode == 0, f"stderr={proc1.stderr!r}"
+    continuity = project / ".janitor" / "state" / "precompact-continuity.json"
+    assert continuity.exists(), "positive control failed — fixture is broken"
+    first_bytes = continuity.read_bytes()
+    proc2 = _run_precompact(project, payload)
+    assert proc2.returncode == 0, f"stderr={proc2.stderr!r}"
+    assert continuity.read_bytes() == first_bytes, "debounced firing must not rewrite the record"
+    log = project / ".janitor" / "logs" / "pre-compact-handoff.log"
+    assert log.is_file(), "positive control failed — no log at all"
+    assert "debounced" in log.read_text(encoding="utf-8")
+
+
+def test_hook_subprocess_manual_trigger_twice_writes_both_times(tmp_path: Path) -> None:
+    """A manual /compact typed twice on purpose must write BOTH times — debounce
+    applies ONLY to trigger=="auto" (coordinator addendum to TRDD-7MGJYLY5)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _init_git_repo(project)
+    payload = {
+        "session_id": "sess-manual-1",
+        "cwd": str(project),
+        "transcript_path": "",
+        "trigger": "manual",
+        "hook_event_name": "PreCompact",
+    }
+    proc1 = _run_precompact(project, payload)
+    assert proc1.returncode == 0, f"stderr={proc1.stderr!r}"
+    proc2 = _run_precompact(project, payload)
+    assert proc2.returncode == 0, f"stderr={proc2.stderr!r}"
+    log = project / ".janitor" / "logs" / "pre-compact-handoff.log"
+    text = log.read_text(encoding="utf-8")
+    assert text.count("handoff written") == 2, "manual trigger must never be debounced"
+    assert "debounced" not in text
+
+
+def test_background_agents_caps_and_keeps_newest(tmp_path: Path) -> None:
+    """`_background_agents` caps at `_BACKGROUND_AGENTS_MAX`, NEWEST first — a review
+    finding: an uncapped, oldest-first list let a busy session's nudge exhaust its
+    line budget on stale agents instead of the ones still likely to matter.
+
+    `ts` increases with array position here (review finding: `pending_agents.pending()`
+    preserves on-disk ARRAY order, it does not sort by `ts` — matching real usage,
+    where `add()` appends, so array position IS chronological). Distinct, increasing
+    `ts` values make this a genuine recency check, not one that would pass by array
+    position alone if a future change made ordering `ts`-based instead."""
+    hook = _hook()
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    total = hook._BACKGROUND_AGENTS_MAX + 3
+    entries = [
+        {"agentId": f"agent-{i}", "description": f"task {i}", "ts": now - (total - i), "nudges": 0, "stopped": False}
+        for i in range(total)
+    ]
+    (sd / "pending-agents.json").write_text(json.dumps(entries), encoding="utf-8")
+    result = hook._background_agents(sd)
+    assert len(result) == hook._BACKGROUND_AGENTS_MAX
+    assert result[0]["agentId"] == f"agent-{total - 1}"  # newest first
+    stale_id = "agent-0"
+    assert all(a["agentId"] != stale_id for a in result), "the oldest agent must be dropped"

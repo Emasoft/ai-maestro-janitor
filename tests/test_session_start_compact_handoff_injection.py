@@ -77,6 +77,30 @@ def _arm(project: Path, *, age_s: int = 0) -> Path:
     return sd
 
 
+def _arm_continuity(project: Path, **overrides: object) -> Path:
+    """Same flag/.ts arm as `_arm`, PLUS a `precompact-continuity.json` record.
+
+    `_inject_post_compact_handoff` prefers the continuity record over the prose
+    handoff whenever it is newer than `precompact-handoff.md` — which this fixture
+    never writes, so any continuity record here is "newer" by construction (the
+    real gate this exercises, TRDD-7MGJYLY5): a `trigger=="auto"` compaction wrote
+    NO prose, only the small machine-readable record.
+    """
+    sd = _arm(project)
+    record = {
+        "written_at": "2026-09-15T00:00:00+0200",
+        "session_id": "sid-1",
+        "trigger": "auto",
+        "inflight_trdds": ["TRDD-ABCDEF01"],
+        "background_agents": [{"agentId": "agent-1", "description": "do the thing"}],
+        "active_skills": ["tldr-code"],
+        "open_files": ["/tmp/does-not-exist-on-disk-xyz.py"],
+        **overrides,
+    }
+    (sd / "precompact-continuity.json").write_text(json.dumps(record), encoding="utf-8")
+    return sd
+
+
 def _injections(project: Path, env: dict[str, str], *, source: str = "compact") -> int:
     """Run the hook once; return how many times it injected the handoff."""
     proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
@@ -273,3 +297,55 @@ def test_an_empty_handoff_injects_nothing(tmp_path: Path) -> None:
     assert "post-compact handoff injection failed" not in log.read_text(encoding="utf-8"), (
         "the injection crashed — this silence is a swallowed exception, not an empty body"
     )
+
+
+def test_a_newer_continuity_record_injects_a_nudge_not_the_prose_body(tmp_path: Path) -> None:
+    """trigger=="auto": pre-compact-handoff.py wrote NO prose, only the small
+    machine-readable continuity record (TRDD-7MGJYLY5). The injected content must be
+    the NUDGE — naming a live background agent, a recently-active skill, and a
+    mentioned-not-read file path — never the prose BODY_MARKER, and the mentioned
+    file must never actually be opened.
+    """
+    project, env = _project(tmp_path)
+    _arm_continuity(project)
+    missing_path = "/tmp/does-not-exist-on-disk-xyz.py"
+    assert not Path(missing_path).exists(), "fixture assumption broken — path must not exist"
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOK)],
+        input=json.dumps({"source": "compact", "session_id": "sid-1", "transcript_path": ""}),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(project),
+    )
+    assert "Traceback" not in proc.stderr, f"hook crashed:\n{proc.stderr[:2000]}"
+    assert BANNER in proc.stdout, "positive control failed — nothing was injected"
+    assert BODY_MARKER not in proc.stdout, "the prose body was injected instead of the nudge"
+    assert "agent-1" in proc.stdout and "do the thing" in proc.stdout, "no background agent named"
+    assert "tldr-code" in proc.stdout, "no active skill named"
+    assert missing_path in proc.stdout, "no open-file path mentioned"
+    assert not Path(missing_path).exists(), "mentioning the path must never create/open it"
+
+
+def test_the_same_compaction_injects_the_nudge_only_once(tmp_path: Path) -> None:
+    """The nudge path shares the SAME dedupe stamp as the prose path — one injection
+    per compaction, regardless of which content was injected."""
+    project, env = _project(tmp_path)
+    _arm_continuity(project)
+
+    def _run() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 -- fixed argv, no shell
+            [sys.executable, str(HOOK)],
+            input=json.dumps({"source": "compact", "session_id": "sid-1", "transcript_path": ""}),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+            cwd=str(project),
+        )
+
+    proc1 = _run()
+    assert proc1.stdout.count(BANNER) == 1, "positive control failed — fixture is broken"
+    proc2 = _run()
+    assert proc2.stdout.count(BANNER) == 0

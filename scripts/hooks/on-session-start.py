@@ -416,6 +416,66 @@ def _handoff_body(state, sd: Path) -> str | None:  # noqa: ANN001 - local module
 _COMPACT_MAX_AGE_ENV = "CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S"
 _COMPACT_HANDOFF_MAX_AGE_S = 86400
 
+# The two files `pre-compact-handoff.py` (PreCompact) can write for one compaction —
+# EXCLUSIVE per compaction (owner ruling TRDD-7MGJYLY5): `trigger=="auto"` writes ONLY
+# the continuity record below, a manual/unknown-trigger compaction writes ONLY the
+# prose `precompact-handoff.md`. Filenames duplicated here rather than imported —
+# same convention as `post-compact-resume.py:76`'s own `_HANDOFF_FILENAME` copy.
+_PRECOMPACT_HANDOFF_FILENAME = "precompact-handoff.md"
+_PRECOMPACT_CONTINUITY_FILENAME = "precompact-continuity.json"
+
+
+def _continuity_nudge(path: Path) -> str | None:
+    """Render `precompact-continuity.json` as a short resume NUDGE.
+
+    Owner ruling TRDD-7MGJYLY5: an autocompaction needs no summarization/handoff — the
+    harness already does that — the janitor only nudges the agent to resume its prior
+    work: which background agents are still live, which skills were recently active,
+    and which files were open (MENTIONED, never re-read). Fail-open: any parse fault
+    (missing/corrupt record) returns None, same as an absent prose handoff.
+    """
+    import json  # noqa: PLC0415 - stdlib, local per this module's import convention
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    # PER-SECTION budgets (review finding: a single END-OF-LIST slice let one long
+    # section — background_agents had no upstream cap — silently swallow every
+    # section after it, e.g. active_skills/open_files vanishing whenever agents alone
+    # filled the line budget). Each cap below is a defensive MIRROR of the upstream
+    # cap (`_BACKGROUND_AGENTS_MAX`/`_ACTIVE_SKILLS_MAX`/`MAX_TRDDS` in
+    # pre-compact-handoff.py) so a stale or hand-edited record still renders bounded.
+    _AGENTS_SHOWN = 5
+    _FILES_SHOWN = 5
+    lines = ["Context was auto-compacted by the harness; resume your previous tasks."]
+    trdds = data.get("inflight_trdds")
+    if isinstance(trdds, list) and trdds:
+        lines.append("In-flight TRDDs: " + ", ".join(str(t) for t in trdds[:3]))
+    agents = data.get("background_agents")
+    if isinstance(agents, list) and agents:
+        lines.append("Live background agents (resume via SendMessage):")
+        for a in agents[:_AGENTS_SHOWN]:
+            if isinstance(a, dict):
+                lines.append(f"  - {a.get('agentId', '?')} — {a.get('description', '')}")
+    skills = data.get("active_skills")
+    if isinstance(skills, list) and skills:
+        lines.append("Active skills to re-load: " + ", ".join(str(s) for s in skills[:5]))
+    files = data.get("open_files")
+    if isinstance(files, list) and files:
+        lines.append(
+            "Files that were open (mentioned, not read — do NOT re-read them unless the "
+            "task needs them):"
+        )
+        for f in files[:_FILES_SHOWN]:
+            lines.append(f"  - {f}")
+    # Every section above is individually capped to fit within 15 lines by
+    # construction (1 + 1 + 1+5 + 1 + 1+5 = 15); this slice is a SAFETY NET, not the
+    # primary mechanism — it no longer silently drops whole trailing sections.
+    return "\n".join(lines[:15])
+
 
 def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module type
     """Put the handoff INTO context after a COMPACTION, the way `/clear` already does.
@@ -477,6 +537,20 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     if stamp.is_file() and state.coerce_int(stamp.read_text(encoding="utf-8"), 0) >= marker:
         return  # already injected for THIS compaction
     body = _handoff_body(state, sd)
+    # A `trigger=="auto"` compaction wrote NO prose this time — only the small
+    # continuity record (owner ruling TRDD-7MGJYLY5). Whichever of the two PreCompact
+    # can produce has the NEWER mtime tells us which compaction just ran: if the
+    # continuity record is newer than the prose handoff, nudge from it instead.
+    # `state.file_mtime` truncates to whole SECONDS (documented at :522 above), so a
+    # same-second tie resolves to the PROSE (strict `>`) — a known, unlogged
+    # tradeoff (review finding), not a guaranteed-correct disambiguation; accepted
+    # because the two writes racing into the same second requires two compactions
+    # of the same session within ~1s of each other.
+    continuity_path = sd / _PRECOMPACT_CONTINUITY_FILENAME
+    continuity_mtime = state.file_mtime(continuity_path)
+    prose_mtime = state.file_mtime(sd / _PRECOMPACT_HANDOFF_FILENAME)
+    if continuity_mtime and continuity_mtime > prose_mtime:
+        body = _continuity_nudge(continuity_path)
     if body is None:
         return
     # Print BEFORE stamping: "injected twice" is recoverable, "injected never" is invisible.
