@@ -3334,10 +3334,14 @@ def _any_pending_agent_stale(now: int) -> bool:
         return True
 
 
-def _dev_column_has_cards() -> bool:
-    """True iff at least one open TRDD sits in `dev` (TRDD-2MLFZ7DL sub-step 2) — the
-    signal the keep-going gate falls back to when there are ZERO pending agents to judge
-    stale/live. Reuses `_board_summary_bit`'s column scan, narrowed to one column.
+def _board_has_workable_cards() -> bool:
+    """True iff at least one open TRDD sits in `dev` or `todo` (TRDD-2MLFZ7DL sub-step 2,
+    widened TRDD-V3BQT7QE) — the signal the keep-going gate falls back to when there are
+    ZERO pending agents to judge stale/live. `todo` counts too: the overnight queue is
+    driven from `todo` (universal-kanban.md — finishing a card means pulling the next
+    one), so a manifest with zero pending agents but an open `todo` card is still
+    workable, not finished. Reuses `_board_summary_bit`'s column scan, narrowed to these
+    two columns.
 
     Fail-OPEN (True) on any read fault, matching every other check in the gate: an
     unreadable board must never be the reason the night-survival pulse goes quiet."""
@@ -3348,7 +3352,7 @@ def _dev_column_has_cards() -> bool:
             if not trdd_common.extract_uid(path.name):
                 continue
             _, column = trdd_common.parse_trdd_state(path)
-            if column == "dev":
+            if column in {"dev", "todo"}:
                 return True
         return False
     except Exception:  # noqa: BLE001 - a board read must never silence the pulse
@@ -3377,7 +3381,7 @@ def _phase_keep_going_nudge() -> None:
           pending agent whose transcript is missing or older than
           `_keep_going_agent_stale_threshold()` (default 900s). ZERO pending agents
           (TRDD-2MLFZ7DL sub-step 2) is NOT the same claim as "every agent is live" —
-          see `_dev_column_has_cards` for the fallback signal that case uses instead.
+          see `_board_has_workable_cards` for the fallback signal that case uses instead.
     Neither check is a new off-switch: both fail OPEN (toward emitting the nudge) on any
     read error, and there is still no lever that silences the pulse on purpose — see below.
 
@@ -3417,15 +3421,16 @@ def _phase_keep_going_nudge() -> None:
     if not user_idle:
         state.log_line("dispatch", f"keep-going: suppressed (user active {idle_s}s ago)")
         return
-    # TRDD-2MLFZ7DL sub-step 2 (H-a's open question): with ZERO pending agents,
-    # `_any_pending_agent_stale` trivially returns False ("nothing to prove is stale"),
-    # which used to land in the exact same suppression branch as "every agent is live" —
-    # a session that genuinely finished its work and a session with an open `dev` card
-    # nobody is touching were indistinguishable. The board itself is the tie-breaker.
+    # TRDD-2MLFZ7DL sub-step 2 (H-a's open question), widened TRDD-V3BQT7QE: with ZERO
+    # pending agents, `_any_pending_agent_stale` trivially returns False ("nothing to
+    # prove is stale"), which used to land in the exact same suppression branch as
+    # "every agent is live" — a session that genuinely finished its work and a session
+    # with an open `dev`/`todo` card nobody is touching were indistinguishable. The
+    # board itself is the tie-breaker.
     agent_total = _pending_agent_count()
     if agent_total == 0:
-        if not _dev_column_has_cards():
-            state.log_line("dispatch", "keep-going: suppressed (no pending agents, no dev card)")
+        if not _board_has_workable_cards():
+            state.log_line("dispatch", "keep-going: suppressed (no pending agents, no dev/todo card)")
             return
     elif not _any_pending_agent_stale(now):
         state.log_line("dispatch", f"keep-going: suppressed (all {agent_total} agents live)")

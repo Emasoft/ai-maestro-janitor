@@ -494,11 +494,14 @@ def test_keep_going_nudge_quiet_when_board_and_manifest_both_empty(iso, capsys) 
 
     INVERTED (TRDD-TWF7DXXR, 2026-09-15): this used to assert the generic fallback line fired
     unconditionally on an empty manifest. `_phase_keep_going_nudge` now has an explicit gate —
-    with ZERO pending agents, `_dev_column_has_cards()` decides whether there is anything to
-    resume at all (see its docstring + TRDD-2MLFZ7DL sub-step 2). The `iso` fixture's project
-    has no `design/tasks/` directory, so the scan finds nothing and the gate is False: a session
-    that genuinely finished its work and has no dev card open must NOT be nudged. See
-    `test_keep_going_nudge_fires_when_a_dev_card_is_open` for the case where a card exists."""
+    with ZERO pending agents, `_board_has_workable_cards()` decides whether there is anything
+    to resume at all (see its docstring + TRDD-2MLFZ7DL sub-step 2, widened TRDD-V3BQT7QE).
+    The `iso` fixture's project has no `design/tasks/` directory, so the scan finds nothing
+    and the gate is False. Note the residual gap this leaves: a session mid-task with no
+    card, no directive and no pending agent gets no nudge either — trivial same-session work
+    needs no card by rule, and the cost of that gap is one skipped fire, not a stuck session.
+    See `test_keep_going_nudge_fires_when_a_dev_card_is_open` for the case where a card
+    exists, and `test_keep_going_nudge_fires_when_only_a_todo_card_is_open` for `todo`."""
     dispatch = _import_dispatch()
     dispatch._phase_keep_going_nudge()
     out = capsys.readouterr().out
@@ -506,22 +509,49 @@ def test_keep_going_nudge_quiet_when_board_and_manifest_both_empty(iso, capsys) 
 
 
 def test_keep_going_nudge_fires_when_a_dev_card_is_open(iso, capsys) -> None:
-    """A `dev` card open with zero pending agents is exactly the fallback signal
-    `_dev_column_has_cards()` exists for (TRDD-2MLFZ7DL sub-step 2): the nudge must still fire,
-    and — because a `dev` card also falls inside `_WORK_COLUMNS` — the enriched board-summary
-    bit rides on the same line rather than the bare no-off-lever fallback text. What survives
-    from issue #74 is that neither branch may ever re-name a retired off-lever: sessions were
-    running `/janitor-keep-going off` while merely BLOCKED ON A HUMAN DECISION — exactly when
-    the guard matters most — so no wording here may hand back that command or the retired
-    'maintenance' mode."""
+    """Two open `dev` cards with zero pending agents is exactly the fallback signal
+    `_board_has_workable_cards()` exists for (TRDD-2MLFZ7DL sub-step 2): the nudge must still
+    fire, and — because `dev` also falls inside `_WORK_COLUMNS` — the enriched board-summary
+    bit rides on the same line rather than the bare no-off-lever fallback text, naming the
+    real count rather than a coincidental "1". What survives from issue #74 is that neither
+    branch may ever re-name a retired off-lever: sessions were running `/janitor-keep-going
+    off` while merely BLOCKED ON A HUMAN DECISION — exactly when the guard matters most — so
+    no wording here may hand back that command or the retired 'maintenance' mode."""
     project = iso["project"]
     tasks = project / "design" / "tasks"
     tasks.mkdir(parents=True, exist_ok=True)
-    (tasks / "TRDD-20260101_000000+0000-DEVCARD1-x.md").write_text(
+    for uid in ("DEVCARD1", "DEVCARD2"):
+        (tasks / f"TRDD-20260101_000000+0000-{uid}-x.md").write_text(
+            "---\n"
+            f"trdd-id: {uid}\n"
+            "title: x\n"
+            "column: dev\n"
+            "created: 2026-01-01T00:00:00+0000\n"
+            "updated: 2026-01-01T00:00:00+0000\n"
+            "---\n\nbody\n",
+            encoding="utf-8",
+        )
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out
+    assert "open board:" in out and "2 in dev" in out
+    assert "/janitor-keep-going off" not in out
+    assert "maintenance" not in out.lower(), "no retired mode may be named"
+
+
+def test_keep_going_nudge_fires_when_only_a_todo_card_is_open(iso, capsys) -> None:
+    """`todo` is a workable column too (TRDD-V3BQT7QE): the overnight queue is driven from
+    `todo`, not just `dev`, so an open `todo` card with zero pending agents must still
+    nudge — `_board_has_workable_cards()` widened from `dev`-only to `{dev, todo}`."""
+    project = iso["project"]
+    tasks = project / "design" / "tasks"
+    tasks.mkdir(parents=True, exist_ok=True)
+    (tasks / "TRDD-20260101_000000+0000-TODOCRD1-x.md").write_text(
         "---\n"
-        "trdd-id: DEVCARD1\n"
+        "trdd-id: TODOCRD1\n"
         "title: x\n"
-        "column: dev\n"
+        "column: todo\n"
         "created: 2026-01-01T00:00:00+0000\n"
         "updated: 2026-01-01T00:00:00+0000\n"
         "---\n\nbody\n",
@@ -531,7 +561,7 @@ def test_keep_going_nudge_fires_when_a_dev_card_is_open(iso, capsys) -> None:
     dispatch._phase_keep_going_nudge()
     out = capsys.readouterr().out
     assert "[janitor-resume]" in out
-    assert "open board:" in out and "1 in dev" in out
+    assert "1 in todo" in out
     assert "/janitor-keep-going off" not in out
     assert "maintenance" not in out.lower(), "no retired mode may be named"
 
