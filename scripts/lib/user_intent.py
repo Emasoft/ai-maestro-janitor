@@ -41,7 +41,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import memory_scopes  # noqa: E402  -- sibling lib; leaf-safe (no cycle back through terminal_trigger)
 import state  # noqa: E402
 import token_history  # noqa: E402  -- sibling lib; leaf-safe, provides parse_ts
 
@@ -52,12 +51,20 @@ INTENT_TTL_S = 600  # 10 minutes
 # An Esc/Ctrl-C interrupt produces NO keystroke the typing probe (`typing_now`) can see, so a
 # queued self-injector types over "I just stopped it" the moment the pane goes idle (owner
 # complaint 2026-09-15). This is the marker Claude Code itself writes as a `type: user` transcript
-# record on every interrupt — matched by PREFIX because it has (at least) two live variants
-# (`[Request interrupted by user]` on a bare Esc, `[Request interrupted by user for tool use]`
-# mid-tool-call), verified against real transcripts before coding against it.
-INTERRUPT_MARKER_PREFIX = "[Request interrupted by user"
+# record on every interrupt — it has (at least) two live variants (`[Request interrupted by
+# user]` on a bare Esc, `[Request interrupted by user for tool use]` mid-tool-call), verified
+# against real transcripts before coding against it. Matched EXACTLY, never by prefix: a
+# compaction summary that merely QUOTES the phrase must not count as a real interrupt.
+INTERRUPT_MARKERS = (
+    "[Request interrupted by user]",
+    "[Request interrupted by user for tool use]",
+)
 INTERRUPT_COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_INTERRUPT_COOLDOWN_S"
 DEFAULT_INTERRUPT_COOLDOWN_S = 300
+# The initial (and doubling-step) size of `recently_interrupted`'s backward scan window. A
+# module constant, not a local literal, so a test can shrink it to force multiple doublings
+# without needing a multi-hundred-KB fixture transcript.
+_INTERRUPT_SCAN_CHUNK_BYTES = 64 * 1024
 
 # How long after the user's last PROMPT SUBMIT we still consider them PRESENT at the terminal.
 #
@@ -500,18 +507,6 @@ def _interrupt_text(rec: Mapping) -> str | None:
     return None
 
 
-def _newest_transcript(project_dir: str, home: Path) -> Path | None:
-    """The newest `*.jsonl` transcript for a project's harness slug, or None on any failure."""
-    try:
-        slug = memory_scopes.project_slug(project_dir)
-        transcripts = list((home / ".claude" / "projects" / slug).glob("*.jsonl"))
-        if not transcripts:
-            return None
-        return max(transcripts, key=lambda p: p.stat().st_mtime)
-    except OSError:
-        return None
-
-
 def recently_interrupted(
     project_dir: str | Path,
     window_s: int | None = None,
@@ -520,66 +515,97 @@ def recently_interrupted(
     transcript_path: str | Path | None = None,
     home: Path | None = None,
 ) -> float | None:
-    """Seconds since the newest Esc/Ctrl-C interrupt in the relevant transcript, or None when
-    none happened within `window_s` (default `resolve_interrupt_cooldown_s()`).
+    """Seconds since the newest Esc/Ctrl-C interrupt in the SESSION-SCOPED transcript, or None
+    when none happened within `window_s` (default `resolve_interrupt_cooldown_s()`), the
+    session is unknown, or a NEWER ordinary user prompt shows the user is already back.
 
-    `transcript_path`, when given, is used directly — this is the SESSION-scoped path (a hook's
-    own `transcript_path`/`session_id`), and it must win over any other transcript: two live
-    sessions of the same project must not share a cooldown just because one of them typed more
-    recently and so owns the newer file. Only when no session is known does this fall back to the
-    newest-by-mtime transcript under the project's slug dir (logged, so a false negative from
-    picking the wrong session is diagnosable after the fact).
+    `transcript_path` MUST be the caller's own session (a hook's `transcript_path`, or
+    `JANITOR_TRANSCRIPT_PATH` threaded through by `terminal_trigger`) — there is deliberately
+    NO fallback to "the newest transcript under this project's slug": two live sessions of the
+    same project must never share a cooldown just because one of them typed more recently and
+    so owns the newer file. When no session is known, this SKIPS the cooldown (logged) rather
+    than guess at one — a caller with no session identity has no interrupt to defer for.
+
+    The scan walks the transcript BACKWARDS in growing 64 KB windows, bounded by TIME (not a
+    fixed byte cap): it keeps widening the window until it finds the interrupt marker, finds an
+    ordinary user prompt newer than any interrupt (the user is back — see below), or reaches a
+    record older than `now - window_s` (everything before is older still). A single fixed-size
+    tail read would let one large tool-result line written just after the Esc push the marker
+    out of the window entirely.
+
+    A newer plain user-role text block that is NOT the exact interrupt marker means the user
+    resumed typing after the interrupt, so the cooldown ends immediately (returns None) — this
+    is an EXACT match against the marker text (never a prefix): a compaction summary that
+    merely quotes the phrase must not be mistaken for a live interrupt.
 
     Fails OPEN (returns None) on any unreadable/missing transcript or unparseable content — this
     is the CALLER's decision to make (defer or not), never a hard error over a breadcrumb.
     """
     resolved_window = resolve_interrupt_cooldown_s() if window_s is None else window_s
     resolved_now = time.time() if now is None else now
-    home = Path.home() if home is None else home
+    _ = home  # kept for signature compatibility with existing callers/tests; no longer used
 
-    transcript: Path | None
-    if transcript_path is not None:
-        transcript = Path(transcript_path)
-        source = "session-scoped transcript_path"
-        if not transcript.is_file():
-            state.log_line("user_intent", f"recently_interrupted: {source} not found: {transcript}")
-            return None
-    else:
-        transcript = _newest_transcript(str(project_dir), home)
-        source = "newest-by-mtime fallback (no session known)"
-        if transcript is None:
-            return None
-
-    tail = _tail_bytes(transcript)
-    if not tail:
-        state.log_line("user_intent", f"recently_interrupted: unreadable transcript ({source}): {transcript}")
+    if transcript_path is None:
+        state.log_line("user_intent", "recently_interrupted: interrupt cooldown skipped: session unknown")
         return None
 
-    for raw in reversed(tail):
-        try:
-            rec = json.loads(raw)
-        except ValueError:
-            continue  # malformed tail line — keep walking back for an earlier valid record
-        if not isinstance(rec, dict):
-            continue
-        text = _interrupt_text(rec)
-        if text is None or not text.strip().startswith(INTERRUPT_MARKER_PREFIX):
-            continue
-        ts = token_history.parse_ts(rec.get("timestamp", ""))
-        if ts is None:
+    transcript = Path(transcript_path)
+    if not transcript.is_file():
+        state.log_line("user_intent", f"recently_interrupted: session-scoped transcript_path not found: {transcript}")
+        return None
+
+    try:
+        size = transcript.stat().st_size
+    except OSError:
+        state.log_line("user_intent", f"recently_interrupted: unreadable transcript: {transcript}")
+        return None
+
+    deadline_ts = resolved_now - resolved_window
+    window_bytes = min(_INTERRUPT_SCAN_CHUNK_BYTES, size) if size else 0
+    while True:
+        lines = _tail_bytes(transcript, window_bytes) if window_bytes else []
+        if not lines:
+            state.log_line("user_intent", f"recently_interrupted: unreadable transcript: {transcript}")
+            return None
+        # Re-scan the WHOLE window every growth step, not just the newly-revealed prefix:
+        # `_tail_bytes` decides whether to drop a guessed-truncated first line purely from
+        # `size > max_bytes` on THIS call, so the exact line boundaries shift between windows
+        # of different size — a "just scan what's new" diff would silently trust that the tail
+        # is byte-for-byte stable across windows, which it is not guaranteed to be. Re-scanning
+        # is idempotent (same record, same verdict) and the window only grows a handful of
+        # times before hitting the whole-file fallback, so the extra work is bounded and cheap;
+        # a wrong verdict from a misaligned diff is not an acceptable trade for it.
+        for raw in reversed(lines):
             try:
-                ts = int(transcript.stat().st_mtime)
-            except OSError:
+                rec = json.loads(raw)
+            except ValueError:
+                continue  # malformed line — keep walking back for an earlier valid record
+            if not isinstance(rec, dict):
                 continue
-        age = max(0.0, resolved_now - ts)
-        # This is the NEWEST interrupt (we walked backwards from the tail's end) — if it is
-        # already outside the window, every earlier interrupt is older still, so there is
-        # nothing left to find.
-        if age <= resolved_window:
-            state.log_line(
-                "user_intent",
-                f"recently_interrupted: hit via {source} ({transcript}), age={age:.0f}s",
-            )
-            return age
-        return None
-    return None
+            ts = token_history.parse_ts(rec.get("timestamp", ""))
+            text = _interrupt_text(rec)
+            if text is not None:
+                if text.strip() in INTERRUPT_MARKERS:
+                    if ts is None:
+                        try:
+                            ts = int(transcript.stat().st_mtime)
+                        except OSError:
+                            continue
+                    age = max(0.0, resolved_now - ts)
+                    if age <= resolved_window:
+                        state.log_line(
+                            "user_intent",
+                            f"recently_interrupted: hit ({transcript}), age={age:.0f}s",
+                        )
+                        return age
+                    return None  # newest interrupt already outside the window
+                # A newer, non-interrupt user prompt found before any interrupt: the user is
+                # back — the cooldown is over regardless of any earlier interrupt.
+                return None
+            if ts is not None and ts < deadline_ts:
+                # This record (whatever it is) is already older than the window — everything
+                # before it is older still, so there is nothing left worth reading further back.
+                return None
+        if window_bytes >= size:
+            return None
+        window_bytes = min(window_bytes * 2, size)

@@ -715,6 +715,7 @@ def inject_until_sent(
     sleeper=time.sleep,
     clock=time.monotonic,
     transcript_path: str | None = None,
+    esc_first: bool = False,
 ) -> tuple[bool, str]:
     """Keep trying until the command is actually SENT. Returns (sent, why).
 
@@ -751,6 +752,11 @@ def inject_until_sent(
 
     `type_fn` / `submit_fn` / `clear_fn` are injected so the decision logic is testable without
     a terminal, and so the caller keeps ownership of which channel actually types.
+
+    `esc_first=True` marks a HARD send (fleet-recovery unwedge of a frozen/retry_wedged
+    session, the model-fallback switch) and BYPASSES the interrupt-cooldown check below: the
+    session is expected to carry a just-issued Esc/Ctrl-C, and that is exactly the wedged state
+    this send exists to recover from, not a reason to defer it.
     """
     # FAIL-DIRECTION AUDIT of this gate (TRDD-D2DD5GO8): the probe is `typing_now`, whose
     # None means the machine-wide HID signal is BLINDED on a platform where it exists (ioreg
@@ -808,15 +814,22 @@ def inject_until_sent(
         idle right after the user hit Esc). Same lazy-import + never-raises shape as
         `_default_is_typing` so a broken probe degrades to "not interrupted", never to a crash.
 
+        Skipped entirely when `esc_first` is True: that flag marks a HARD send (fleet-recovery
+        unwedge of a frozen/retry_wedged session, the model-fallback switch) — exactly the case
+        where a just-issued Esc/Ctrl-C is expected and must NOT defer the very send meant to
+        recover from it.
+
         `transcript_path` (the explicit kwarg) wins; else `JANITOR_TRANSCRIPT_PATH` — set by a
         hook-aware caller (resume/clear/compact trigger's `--transcript-path`) into its own
         `os.environ` before calling `send_self_command`, which spawns its detached child WITHOUT
         an explicit `env=` override, so the child inherits it (`_fire_detached_verified`/
-        `_fire_detached_steps`). Neither given → `recently_interrupted` falls back to the
-        newest-by-mtime transcript under the project's slug — two live sessions of the same
-        project can then briefly share a cooldown, which is the documented, honest gap left by
-        the hooks (out of this change's file scope) not yet passing `--transcript-path` through.
+        `_fire_detached_steps`). Neither given → `recently_interrupted` skips the cooldown
+        (session unknown) rather than guessing at one — the documented, honest gap left by the
+        hooks (out of this change's file scope) not yet passing `--transcript-path` through.
         """
+        if esc_first:
+            state.log_line("terminal_trigger", "interrupt cooldown bypassed: hard send")
+            return None
         try:
             import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
 
@@ -1207,6 +1220,11 @@ def send_verified(
     retries are governed by rules 1-3, and re-ESCing on each pass would be an extra keystroke
     into a pane the user may have just started typing in.
 
+    `esc_first` is ALSO forwarded to `inject_until_sent` as its hard-send flag, bypassing the
+    interrupt-cooldown check there: a caller passing `esc_first=True` is already telling us it
+    just sent (or is about to send) an Esc/Ctrl-C on purpose, so that interrupt must not defer
+    the very command meant to recover from it.
+
     `reader`/`is_typing` are the same injectable seams `inject_until_sent` exposes, forwarded
     only when given: they are bound as DEFAULT ARGUMENTS there, so a caller (or a test) that
     swaps the module attribute alone would silently keep the original — passing them through
@@ -1229,7 +1247,7 @@ def send_verified(
     return inject_until_sent(
         terminal, command,
         type_fn=_runner(command), submit_fn=_submit, clear_fn=_clear,
-        giveup_s=giveup_s, sleeper=sleeper, **extra,
+        giveup_s=giveup_s, sleeper=sleeper, esc_first=esc_first, **extra,
     )
 
 

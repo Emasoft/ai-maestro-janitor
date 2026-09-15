@@ -214,3 +214,27 @@ def test_an_injection_attempted_10min_after_an_interrupt_proceeds(tmp_path):
 
     assert ok is True, why
     assert sent == ["Enter"]
+
+
+def test_esc_first_hard_send_bypasses_the_interrupt_cooldown(tmp_path, monkeypatch):
+    """A hard send (`esc_first=True` -- fleet-recovery unwedge, model-fallback) must proceed even
+    while inside the interrupt cooldown: that flag means the session's own just-issued
+    Esc/Ctrl-C is EXPECTED, not a reason to defer the very command meant to recover from it."""
+    transcript = _interrupt_transcript(tmp_path, 30)  # inside the default 300s cooldown
+    logged: list[str] = []
+    monkeypatch.setattr(tt.state, "log_line", lambda _name, msg: logged.append(msg))
+    sent: list[str] = []
+    reads = iter([_pane(""), _pane("/janitor-arm"), _pane("")])
+
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/janitor-arm",
+        type_fn=lambda: None, submit_fn=lambda: sent.append("Enter"),
+        reader=lambda _t: next(reads, _pane("")), is_typing=lambda _t: False,
+        transcript_path=str(transcript),
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+        esc_first=True,
+    )
+
+    assert ok is True, why
+    assert sent == ["Enter"]
+    assert any("interrupt cooldown bypassed" in m and "hard send" in m for m in logged), logged
