@@ -102,6 +102,10 @@ def test_every_walking_detector_is_classified() -> None:
         "cross-scope-reference-drift.py", "subagent-scope-drift.py", "stale-task.py",
         "task-pr-mismatch.py", "report-to-trdd-drift.py", "subagent-report.py",
         "memory-maintenance.py", "memory-scope-leak.py", "janitor-self-integrity.py",
+        # orphaned-memory-maint.py glob()s .janitor/state/ for memory-maint-*.json claim
+        # records (memory_dispatch_claim.DONE_PREFIX) — janitor state, not the project
+        # tree; no supply-chain verdict to make (TRDD-V3BQT7QE).
+        "orphaned-memory-maint.py",
         "memory-librarian.py", "trdd-drift.py", "trdd-reminder.py",
         "trdd-state-reconciliation.py", "memgrep-index-health.py", "wikimem-syntax.py",
         "memorize-nudge.py", "project-map-drift.py", "why-in-commits.py",

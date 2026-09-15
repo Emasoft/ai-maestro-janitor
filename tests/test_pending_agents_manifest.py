@@ -489,25 +489,51 @@ def test_keep_going_nudge_points_at_pending_agents_and_directive(iso, capsys) ->
     assert "pending-agents.json" in out
 
 
-def test_keep_going_nudge_generic_when_nothing_pending(iso, capsys) -> None:
-    """No directive + empty manifest → the generic fallback line, which names NO off-lever.
+def test_keep_going_nudge_quiet_when_board_and_manifest_both_empty(iso, capsys) -> None:
+    """No directive + empty manifest + empty board → the gate suppresses the nudge entirely.
 
-    INVERTED: the phase used to take a `mode` and had a second, maintenance-specific fallback
-    that told the agent to WAIT and named `/janitor-maintenance-mode off` as the human's exit.
-    Maintenance is gone (owner directive 2026-07-31) and with it the branch — one nudge, one
-    wording, no mode to reason about.
+    INVERTED (TRDD-TWF7DXXR, 2026-09-15): this used to assert the generic fallback line fired
+    unconditionally on an empty manifest. `_phase_keep_going_nudge` now has an explicit gate —
+    with ZERO pending agents, `_dev_column_has_cards()` decides whether there is anything to
+    resume at all (see its docstring + TRDD-2MLFZ7DL sub-step 2). The `iso` fixture's project
+    has no `design/tasks/` directory, so the scan finds nothing and the gate is False: a session
+    that genuinely finished its work and has no dev card open must NOT be nudged. See
+    `test_keep_going_nudge_fires_when_a_dev_card_is_open` for the case where a card exists."""
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" not in out, "an empty board + empty manifest must stay quiet"
 
-    What survives from issue #74 is the rule that produced both variants: the line must not name
-    a command that switches the nudge off. Sessions were running `/janitor-keep-going off` while
-    merely BLOCKED ON A HUMAN DECISION — exactly when the guard matters most — so "say so briefly
-    and stop" is the whole of the correct response."""
+
+def test_keep_going_nudge_fires_when_a_dev_card_is_open(iso, capsys) -> None:
+    """A `dev` card open with zero pending agents is exactly the fallback signal
+    `_dev_column_has_cards()` exists for (TRDD-2MLFZ7DL sub-step 2): the nudge must still fire,
+    and — because a `dev` card also falls inside `_WORK_COLUMNS` — the enriched board-summary
+    bit rides on the same line rather than the bare no-off-lever fallback text. What survives
+    from issue #74 is that neither branch may ever re-name a retired off-lever: sessions were
+    running `/janitor-keep-going off` while merely BLOCKED ON A HUMAN DECISION — exactly when
+    the guard matters most — so no wording here may hand back that command or the retired
+    'maintenance' mode."""
+    project = iso["project"]
+    tasks = project / "design" / "tasks"
+    tasks.mkdir(parents=True, exist_ok=True)
+    (tasks / "TRDD-20260101_000000+0000-DEVCARD1-x.md").write_text(
+        "---\n"
+        "trdd-id: DEVCARD1\n"
+        "title: x\n"
+        "column: dev\n"
+        "created: 2026-01-01T00:00:00+0000\n"
+        "updated: 2026-01-01T00:00:00+0000\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
     dispatch = _import_dispatch()
     dispatch._phase_keep_going_nudge()
     out = capsys.readouterr().out
     assert "[janitor-resume]" in out
+    assert "open board:" in out and "1 in dev" in out
     assert "/janitor-keep-going off" not in out
     assert "maintenance" not in out.lower(), "no retired mode may be named"
-    assert "no off-switch" in out, "the line must say plainly that there is nothing to run"
 
 
 def test_keep_going_nudge_names_a_pending_agent(iso, capsys) -> None:
