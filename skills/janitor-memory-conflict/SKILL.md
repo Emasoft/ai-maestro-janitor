@@ -201,8 +201,9 @@ ships in every session's context prefix; the per-chore restatement is in
 
 ## Close the claim
 
-Report ends `<!-- janitor-outcome: mutation|noop -->`, then close per
-[close-claim.md](references/close-claim.md) (chore=`conflict`).
+Report ends `<!-- janitor-outcome: mutation|noop -->`. Read
+[close-claim.md](references/close-claim.md) and run its two commands to close the claim
+(chore=`conflict`).
 
 ## Output
 

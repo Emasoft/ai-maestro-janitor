@@ -232,8 +232,9 @@ abort command, and the idempotency rule:
 
 ### 7. Close the claim
 
-Report ends `<!-- janitor-outcome: mutation|noop -->`, then close per
-[close-claim.md](references/close-claim.md) (chore=`split`).
+Report ends `<!-- janitor-outcome: mutation|noop -->`. Read
+[close-claim.md](references/close-claim.md) and run its two commands to close the claim
+(chore=`split`).
 
 ## Hard invariants (every SPLIT pass enforces)
 

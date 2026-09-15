@@ -144,15 +144,17 @@ that still flags is not done — fix it or refuse it; never leave it half-widene
 
 One line + a report path under `reports/janitor-memory-enrich/`. Name the scope, pages
 touched, phrases added, duplicates removed, and any refusals. End the report with
-`<!-- janitor-outcome: mutation -->` (or `noop`). Record the report path in the SAME Bash
-call that wrote it (fresh shell ⇒ `$CLAIM_ID`/`$REPORT_FILE` are empty by the time
-`complete` runs), then close the claim:
+`<!-- janitor-outcome: mutation -->` (or `noop`). `set-report` runs in the SAME Bash call that
+just wrote `$REPORT_FILE` (its vars are still alive here); `complete` runs later with
+STATE_DIR RETYPED as the literal path from the spawn prompt, and only adds `--chore enrich
+--scope <literal scope from the claim step's output>` if it exits 2 saying more than one claim
+is current:
 
 ```bash
 uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-  set-report --state-dir "$STATE_DIR" --chore enrich --scope "$SCOPE" "$REPORT_FILE"
+  set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
 uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-  complete --state-dir "$STATE_DIR" --chore enrich --scope "$SCOPE"
+  complete --state-dir "$STATE_DIR"
 ```
 
 Unclosed, it expires as MEMPASS-STALE-CLAIM after 6h and re-dispatches.

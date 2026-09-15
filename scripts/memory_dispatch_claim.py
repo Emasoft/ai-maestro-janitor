@@ -87,6 +87,40 @@ def _parse_current_claim_filename(name: str) -> tuple[str, str] | None:
     if len(parts) != 2 or not parts[0] or not parts[1]:
         return None
     return parts[0], parts[1]
+
+
+def _resolve_current_claim_chore_scope(state_dir: Path, cmd: str) -> tuple[str, str] | int:
+    """Resolve (chore, scope) from the single in-flight `memory-maint-current-claim.*`
+    marker in state_dir, for a caller (`set-report` or `complete`) that was given neither
+    `--chore` nor `--scope`. Returns the pair on success, or prints a diagnostic and
+    returns an int exit code (2) on zero or multiple matches — shared so `set-report` and
+    arg-less `complete` resolve ambiguity identically (2026-09-15 addendum)."""
+    matches = sorted(state_dir.glob(f"{_CURRENT_CLAIM_PREFIX}*{_CURRENT_SUFFIX}"))
+    if not matches:
+        print(
+            f"memory_dispatch_claim: {cmd}: no --chore/--scope given and no current "
+            f"claim recorded in {state_dir}",
+            file=sys.stderr,
+        )
+        return 2
+    if len(matches) > 1:
+        listing = ", ".join(m.name for m in matches)
+        print(
+            f"memory_dispatch_claim: {cmd}: multiple in-flight claims present "
+            f"({listing}) — pass --chore and --scope to pick one",
+            file=sys.stderr,
+        )
+        return 2
+    parsed = _parse_current_claim_filename(matches[0].name)
+    if parsed is None:
+        print(
+            f"memory_dispatch_claim: {cmd}: malformed current-claim marker "
+            f"{matches[0].name!r} in {state_dir}",
+            file=sys.stderr,
+        )
+        return 2
+    return parsed
+
 _EXPIRED_KEEP = 20  # mirrors memory-maintenance.py's own keep-20 prune for pending/claimed
 # janitor#242 (2026-09-15 fleet audit + adversarial review): a real consolidate pass over a
 # large corpus can legitimately hold a claim for hours, so age-only expiry using a fast
@@ -445,26 +479,55 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
 
 
 def _run_set_report(argv: list[str]) -> int:
-    """`set-report <path> --state-dir <dir> --chore <chore> --scope <scope>` — records the
+    """`set-report <path> --state-dir <dir> [--chore <chore> --scope <scope>]` — records the
     current pass's report path to disk, keyed by chore+scope, so a later argument-less
     `complete` can pick it up. Exists because shell variables set in one Bash tool call do
     not survive into the next one (2026-09-15 addendum) — a recipe calls this right after
     computing its report path, in the SAME Bash call, so the value is never lost to a later
-    call's fresh shell. `--chore`/`--scope` are REQUIRED (not optional, unlike `complete`'s):
-    this is the write side, and the curator always knows both from its own claim output at
-    the point it calls this — there's nothing to fall back to here."""
+    call's fresh shell.
+
+    `--chore`/`--scope` are now OPTIONAL, matching arg-less `complete` (janitor#242
+    MEMPASS-REPORT-MISSING, 2026-09-15): no chore skill defines a `$SCOPE` shell variable,
+    so a required `--scope` was always being called with an empty string, keying the report
+    to `(chore, "")` while `claim_one` keyed the claim to `(chore, <real scope>)` — the
+    report was silently unfindable by `complete`. Passing neither flag resolves the single
+    in-flight claim via `_resolve_current_claim_chore_scope` (exit 2 if zero or multiple are
+    in flight). Passing exactly one of the two is always an error, as is an empty string for
+    either — a silently-empty scope is the exact bug this fixes, so it must fail loud, not
+    fall back."""
     ap = argparse.ArgumentParser(
         prog="memory_dispatch_claim.py set-report",
         description="Record the current pass's report path for a later argument-less `complete`.",
     )
     ap.add_argument("path")
     ap.add_argument("--state-dir", required=True)
-    ap.add_argument("--chore", required=True, choices=CHORES)
-    ap.add_argument("--scope", required=True)
+    ap.add_argument("--chore", default=None, choices=CHORES)
+    ap.add_argument("--scope", default=None)
     args = ap.parse_args(argv)
     state_dir = Path(args.state_dir)
+
+    if args.scope is not None and args.scope == "":
+        print("memory_dispatch_claim: set-report: empty --scope", file=sys.stderr)
+        return 2
+    if (args.chore is None) != (args.scope is None):
+        print(
+            "memory_dispatch_claim: set-report: --chore and --scope must be given "
+            "together, or neither",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.chore is None:
+        resolved = _resolve_current_claim_chore_scope(state_dir, "set-report")
+        if isinstance(resolved, int):
+            return resolved
+        chore, scope = resolved
+    else:
+        assert args.scope is not None  # guaranteed by the together-or-neither check above
+        chore, scope = args.chore, args.scope
+
     try:
-        (state_dir / _current_report_filename(args.chore, args.scope)).write_text(
+        (state_dir / _current_report_filename(chore, scope)).write_text(
             _resolve_report_path(args.path), encoding="utf-8"
         )
     except OSError as exc:
@@ -485,12 +548,15 @@ def _run_complete(argv: list[str]) -> int:
     calls, and shell variables do not survive that boundary. The fallback files are keyed
     by chore+scope (never a single global slot) so two curators in flight on the same
     state_dir — e.g. a LOCAL and a PROJECT scope pass running at once — cannot clobber
-    each other's pending id or report. When `dispatch_id` is omitted: if exactly one
-    `memory-maint-current-claim.<chore>.<scope>.txt` file exists, that one is used
-    unambiguously; if more than one exists, `--chore`/`--scope` are REQUIRED to pick one
-    (exit 2 with the listing otherwise). Passing `dispatch_id` explicitly still works
-    exactly as before, with no chore/scope needed — the report fallback then derives
-    chore+scope from the CLAIMED record itself (it already carries both)."""
+    each other's pending id or report. When `dispatch_id` is omitted, `--chore`/`--scope`
+    must be given together or neither (mismatched pair is exit 2, same rule `set-report`
+    enforces) — given both, they pick the claim directly; given neither,
+    `_resolve_current_claim_chore_scope` picks the single in-flight claim unambiguously
+    (exit 2 if zero or multiple are in flight). Passing `dispatch_id` explicitly still
+    works exactly as before, with `--chore`/`--scope` fully optional and independent of
+    each other — the report fallback then derives whichever is missing from the CLAIMED
+    record itself (it already carries both). An empty `--scope` is always an error
+    (exit 2) rather than a silent empty-string key."""
     ap = argparse.ArgumentParser(
         prog="memory_dispatch_claim.py complete",
         description="Mark a claimed memory-maintenance dispatch DONE, by dispatch_id.",
@@ -503,9 +569,20 @@ def _run_complete(argv: list[str]) -> int:
     args = ap.parse_args(argv)
     state_dir = Path(args.state_dir)
 
+    if args.scope is not None and args.scope == "":
+        print("memory_dispatch_claim: complete: empty --scope", file=sys.stderr)
+        return 2
+
     dispatch_id = args.dispatch_id
     chore, scope = args.chore, args.scope
     if not dispatch_id:
+        if (chore is None) != (scope is None):
+            print(
+                "memory_dispatch_claim: complete: --chore and --scope must be given "
+                "together, or neither, when no dispatch_id is given",
+                file=sys.stderr,
+            )
+            return 2
         if chore and scope:
             claim_file = state_dir / _current_claim_filename(chore, scope)
             try:
@@ -513,27 +590,13 @@ def _run_complete(argv: list[str]) -> int:
             except OSError:
                 dispatch_id = ""
         else:
-            matches = sorted(state_dir.glob(f"{_CURRENT_CLAIM_PREFIX}*{_CURRENT_SUFFIX}"))
-            if not matches:
-                print(
-                    "memory_dispatch_claim: complete: no dispatch_id given and no current "
-                    f"claim recorded in {state_dir}",
-                    file=sys.stderr,
-                )
-                return 2
-            if len(matches) > 1:
-                listing = ", ".join(m.name for m in matches)
-                print(
-                    "memory_dispatch_claim: complete: multiple in-flight claims present "
-                    f"({listing}) — pass --chore and --scope to pick one",
-                    file=sys.stderr,
-                )
-                return 2
-            parsed = _parse_current_claim_filename(matches[0].name)
-            if parsed is not None:
-                chore, scope = parsed
+            resolved = _resolve_current_claim_chore_scope(state_dir, "complete")
+            if isinstance(resolved, int):
+                return resolved
+            chore, scope = resolved
+            claim_file = state_dir / _current_claim_filename(chore, scope)
             try:
-                dispatch_id = matches[0].read_text(encoding="utf-8").strip()
+                dispatch_id = claim_file.read_text(encoding="utf-8").strip()
             except OSError:
                 dispatch_id = ""
         if not dispatch_id:

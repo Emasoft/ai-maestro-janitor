@@ -104,19 +104,22 @@ already in lesson form; only body ATOM markers count.
 4. **Report.** Write the detailed report (converted atoms, lesson ids, WHY sources,
    FLAGGED atoms with what a human must supply) to
    `$MAIN_ROOT/reports/memory-subconscious-agent/<YYYYMMDD_HHMMSS±HHMM>-retro-lesson-<slug>.md`.
-   Record the report path in the SAME Bash call that wrote it — fresh shell ⇒
-   `$CLAIM_ID`/`$REPORT_FILE` are empty by the time `complete` runs:
+   `set-report` runs in the SAME Bash call that just wrote `$REPORT_FILE` (its vars are
+   still alive here):
 
    ```bash
    uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-     set-report --state-dir "$STATE_DIR" --chore retro-lesson --scope "$SCOPE" "$REPORT_FILE"
+     set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
    ```
 5. **Close the claim.** Right after the report is written and BEFORE returning your
-   result line, append `<!-- janitor-outcome: mutation -->` (or `noop`) to it, then close:
+   result line, append `<!-- janitor-outcome: mutation -->` (or `noop`) to it, then close.
+   `complete` runs later with STATE_DIR RETYPED as the literal path from the spawn prompt, and
+   only adds `--chore retro-lesson --scope <literal scope from the claim step's output>` if it
+   exits 2 saying more than one claim is current:
 
    ```bash
    uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-     complete --state-dir "$STATE_DIR" --chore retro-lesson --scope "$SCOPE"
+     complete --state-dir "$STATE_DIR"
    ```
 
    A claim never closed expires as MEMPASS-STALE-CLAIM after 6 h and the pass is re-dispatched.

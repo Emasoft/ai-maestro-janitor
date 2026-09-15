@@ -235,8 +235,9 @@ sync). The buffer is never modified by this step.
 
 ## Close the claim
 
-Report ends `<!-- janitor-outcome: mutation|noop -->`, then close per
-[close-claim.md](references/close-claim.md) (chore=`harvest`).
+Report ends `<!-- janitor-outcome: mutation|noop -->`. Read
+[close-claim.md](references/close-claim.md) and run its two commands to close the claim
+(chore=`harvest`).
 
 ## Security — forged-marker defense + untrusted buffer content
 

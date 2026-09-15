@@ -113,8 +113,7 @@ Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PAS
 
 ```bash
 PASS=consolidate            # the pass you were launched for (matches your claim's "intervention")
-SCOPE=LOCAL                 # your claim's "scope" field, verbatim (LOCAL/PROJECT/USER)
-SLUG=local                  # short subject for the filename — lowercase, not necessarily SCOPE
+SLUG=local                  # short subject for the filename — lowercase, e.g. your scope
 # CLAUDE_PROJECT_DIR is the stable anchor (janitor#264): the janitor's own launcher
 # sets it once per session, so every pass of a multi-pass run lands under the SAME
 # root regardless of which directory the agent's cwd happens to be in that turn.
@@ -134,11 +133,12 @@ printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE
 echo "$REPORT_FILE"
 # Record it to disk NOW, in this SAME Bash call — shell variables set here do not
 # survive into a later Bash tool call, so `$REPORT_FILE` would be empty by the time
-# `complete` runs in a fresh shell. `set-report` writes it where `complete` reads it,
-# keyed by $PASS + $SCOPE so a second curator in flight on the same $STATE_DIR (a
-# different chore or scope) never collides with this one's report.
+# `complete` runs in a fresh shell. No --chore/--scope: `set-report` resolves the one
+# in-flight claim on $STATE_DIR itself (janitor#242 MEMPASS-REPORT-MISSING — no chore
+# skill ever defined a real $SCOPE var, so a required --scope was always empty and the
+# report was silently unfindable). RETYPE $STATE_DIR as your claim step's printed path.
 uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-  set-report --state-dir "$STATE_DIR" --chore "$PASS" --scope "$SCOPE" "$REPORT_FILE"
+  set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
 ```
 
 **Never compose that filename yourself** (janitor#248). A report was written with a
@@ -173,17 +173,17 @@ printf '<!-- janitor-outcome: %s -->\n' "$OUTCOME" >> "$REPORT_FILE"
 
 **MANDATORY next step — check your claim in** (never by report filename):
 `uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete
---state-dir "$STATE_DIR"` — no id or `--report` needed: `claim_one` already recorded the
-claim id to disk (keyed by chore+scope), and the `set-report` call above already recorded
-`$REPORT_FILE` the same way, so `complete` reads both from `$STATE_DIR` even if this runs
-in a fresh Bash call where `$CLAIM_ID`/`$REPORT_FILE`/`$PASS`/`$SCOPE` are all empty. It
-closes the claim with that report path on the done record; the outcome marker you just
-wrote is read separately, by `report-to-trdd-drift`, not by this command.
+--state-dir "$STATE_DIR"` — RETYPE `$STATE_DIR` as your claim step's printed path (a fresh
+Bash call has no variables from an earlier one). No id, `--report`, `--chore`, or `--scope`
+needed: both the claim id and `$REPORT_FILE` are already recorded to disk, keyed by the
+single in-flight claim on `$STATE_DIR`. It closes the claim with that report path on the
+done record; the outcome marker you just wrote is read separately, by
+`report-to-trdd-drift`, not by this command.
 
 If the CLI refuses with `multiple in-flight claims present` (a second curator claimed a
-DIFFERENT chore/scope on this same `$STATE_DIR` before you completed), re-run with your
-own chore and scope: `complete --state-dir "$STATE_DIR" --chore "$PASS" --scope "$SCOPE"`
-— pick these up from your own claim JSON if the shell variables are gone.
+DIFFERENT chore/scope on this same `$STATE_DIR` before you completed), re-run naming yours:
+`complete --state-dir "$STATE_DIR" --chore <your chore> --scope <your scope>` — literals
+from your own claim step's output, never shell variables.
 
 **Only once that command has run do you return to your caller.** Your whole output is then
 one line plus `$REPORT_FILE`'s path — never page bodies, never the corpus.

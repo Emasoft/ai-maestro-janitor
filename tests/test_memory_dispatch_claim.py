@@ -687,6 +687,68 @@ def test_set_report_writes_resolved_path_keyed_by_chore_scope(tmp_path, monkeypa
     stored = (tmp_path / mdc._current_report_filename("repair", "LOCAL")).read_text(encoding="utf-8")
     assert stored == str(other_cwd / "reports" / "x.md")
 
+def test_claim_then_argless_set_report_then_argless_complete_carries_the_report(tmp_path, monkeypatch):
+    """The real recipe shape (janitor#242 MEMPASS-REPORT-MISSING): `claim_one` keys its
+    claim marker by the REAL scope; `set-report` with no --chore/--scope must resolve the
+    same single in-flight claim, not key the report under an empty scope the two verbs
+    then fail to agree on."""
+    monkeypatch.chdir(tmp_path)
+    _dispatch(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    got = mdc.claim_one(tmp_path, "repair")
+    assert got is not None
+    report = tmp_path / "report.md"
+    report.write_text("notes\n", encoding="utf-8")
+
+    rc = mdc._run_set_report(["report.md", "--state-dir", str(tmp_path)])
+    assert rc == 0
+
+    rc = mdc._run_complete(["--state-dir", str(tmp_path)])
+    assert rc == 0
+    done = tmp_path / f"{mdc.DONE_PREFIX}{got['dispatch_id']}.json"
+    assert done.is_file()
+    recorded = json.loads(done.read_text(encoding="utf-8"))
+    assert recorded.get("report") == str(tmp_path / "report.md")
+
+
+def test_set_report_with_two_in_flight_claims_and_no_flags_exits_2(tmp_path):
+    """Two curators in flight (different chore/scope) -> an argument-less `set-report`
+    refuses to guess which one the report belongs to."""
+    _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    _claimed(tmp_path, 1_000_001, "atomize", scope="PROJECT")
+    (tmp_path / mdc._current_claim_filename("repair", "LOCAL")).write_text("x", encoding="utf-8")
+    (tmp_path / mdc._current_claim_filename("atomize", "PROJECT")).write_text("y", encoding="utf-8")
+
+    rc = mdc._run_set_report(["report.md", "--state-dir", str(tmp_path)])
+    assert rc == 2
+
+
+def test_set_report_rejects_empty_scope(tmp_path):
+    """An explicit but empty `--scope` is a fail-fast error, never a silent empty-string
+    key — that silent key is exactly what caused MEMPASS-REPORT-MISSING."""
+    rc = mdc._run_set_report(
+        ["report.md", "--state-dir", str(tmp_path), "--chore", "repair", "--scope", ""]
+    )
+    assert rc == 2
+
+
+def test_complete_rejects_empty_scope(tmp_path):
+    """`complete --scope ""` is a fail-fast error too, for the same reason as set-report."""
+    rc = mdc._run_complete(["--state-dir", str(tmp_path), "--chore", "repair", "--scope", ""])
+    assert rc == 2
+
+
+def test_set_report_rejects_chore_without_scope(tmp_path):
+    """Exactly one of --chore/--scope given is always an error — never a silent
+    fall-through that resolves the other from the ambiguity path."""
+    rc = mdc._run_set_report(["report.md", "--state-dir", str(tmp_path), "--chore", "repair"])
+    assert rc == 2
+
+
+def test_complete_rejects_scope_without_chore(tmp_path):
+    """Same mismatch guard on `complete`, the other way round: --scope with no --chore."""
+    rc = mdc._run_complete(["--state-dir", str(tmp_path), "--scope", "LOCAL"])
+    assert rc == 2
+
 
 def test_complete_falls_back_to_the_single_in_flight_claim_file(tmp_path):
     """Exactly ONE keyed current-claim file on disk -> `complete --state-dir <dir>` alone
