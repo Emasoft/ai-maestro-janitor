@@ -39,8 +39,10 @@ The simple-op skills (`janitor-memory-write` / `-update` / `-recall`) define the
 conventions main agents author by — read them to understand the corpus you steward
 (especially `skills/janitor-memory-write/references/wikimem-model.md`, the canonical data model).
 
-Your claim step's stdout also carries `CLAIM_ID=<id>` — capture it; the mandatory
-check-in below needs it (janitor#242 review — a report-filename guess was unreliable).
+Your claim step's stdout also carries `CLAIM_ID=<id>` — `claim_one` records it to disk
+for you (janitor#242 review — a report-filename guess was unreliable), so the mandatory
+check-in below reads it back without needing this variable to survive into a later
+Bash call.
 
 ## THE IRON RULES (every pass obeys all of them)
 
@@ -110,8 +112,9 @@ Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PAS
 `SLUG`); you never type the timestamp:
 
 ```bash
-PASS=consolidate            # the pass you were launched for
-SLUG=local                  # scope / short subject
+PASS=consolidate            # the pass you were launched for (matches your claim's "intervention")
+SCOPE=LOCAL                 # your claim's "scope" field, verbatim (LOCAL/PROJECT/USER)
+SLUG=local                  # short subject for the filename — lowercase, not necessarily SCOPE
 # CLAUDE_PROJECT_DIR is the stable anchor (janitor#264): the janitor's own launcher
 # sets it once per session, so every pass of a multi-pass run lands under the SAME
 # root regardless of which directory the agent's cwd happens to be in that turn.
@@ -129,6 +132,13 @@ REPORT_DIR="$MAIN_ROOT/reports/janitor-memory-subconscious-agent"; mkdir -p "$RE
 REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
 printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"
 echo "$REPORT_FILE"
+# Record it to disk NOW, in this SAME Bash call — shell variables set here do not
+# survive into a later Bash tool call, so `$REPORT_FILE` would be empty by the time
+# `complete` runs in a fresh shell. `set-report` writes it where `complete` reads it,
+# keyed by $PASS + $SCOPE so a second curator in flight on the same $STATE_DIR (a
+# different chore or scope) never collides with this one's report.
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+  set-report --state-dir "$STATE_DIR" --chore "$PASS" --scope "$SCOPE" "$REPORT_FILE"
 ```
 
 **Never compose that filename yourself** (janitor#248). A report was written with a
@@ -161,11 +171,19 @@ printf '<!-- janitor-outcome: %s -->\n' "$OUTCOME" >> "$REPORT_FILE"
   do" — do not silence the next run over a transient failure.
 - `mutation` — you merged, split, atomized, repaired, harvested, or otherwise WROTE.
 
-**MANDATORY next step — check your claim in by id** (never by report filename):
+**MANDATORY next step — check your claim in** (never by report filename):
 `uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete
-"$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"` — it records `$REPORT_FILE`'s
-path on the claim's done record and closes it; the outcome marker you just wrote is read
-separately, by `report-to-trdd-drift`, not by this command.
+--state-dir "$STATE_DIR"` — no id or `--report` needed: `claim_one` already recorded the
+claim id to disk (keyed by chore+scope), and the `set-report` call above already recorded
+`$REPORT_FILE` the same way, so `complete` reads both from `$STATE_DIR` even if this runs
+in a fresh Bash call where `$CLAIM_ID`/`$REPORT_FILE`/`$PASS`/`$SCOPE` are all empty. It
+closes the claim with that report path on the done record; the outcome marker you just
+wrote is read separately, by `report-to-trdd-drift`, not by this command.
+
+If the CLI refuses with `multiple in-flight claims present` (a second curator claimed a
+DIFFERENT chore/scope on this same `$STATE_DIR` before you completed), re-run with your
+own chore and scope: `complete --state-dir "$STATE_DIR" --chore "$PASS" --scope "$SCOPE"`
+— pick these up from your own claim JSON if the shell variables are gone.
 
 **Only once that command has run do you return to your caller.** Your whole output is then
 one line plus `$REPORT_FILE`'s path — never page bodies, never the corpus.

@@ -532,6 +532,50 @@ def test_complete_claim_renames_claimed_to_done_with_report(tmp_path):
     assert "outcome" not in payload
 
 
+def test_complete_claim_normalizes_relative_report_against_cwd(tmp_path, monkeypatch):
+    """A relative report path is stored resolved against the cwd at complete time —
+    MEMPASS-REPORT-MISSING checks this path from any project's cwd, so a relative
+    path recorded by a curator with a different cwd would resolve against the wrong
+    project (review 2026-09-15)."""
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    other_cwd = tmp_path / "cwd"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+
+    assert mdc.complete_claim(tmp_path, dispatch_id, "reports/x.md") is True
+
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == str(other_cwd / "reports" / "x.md")
+
+
+def test_complete_claim_expands_home_in_report_path(tmp_path, monkeypatch):
+    """A `~`-prefixed report path is expanded to an absolute home-relative path."""
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert mdc.complete_claim(tmp_path, dispatch_id, "~/x/report.md") is True
+
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == str(tmp_path / "x" / "report.md")
+
+
+def test_complete_claim_empty_report_stays_empty(tmp_path):
+    """An empty report string is stored as-is, unchanged — the orphan detector's own
+    missing-report check is what should flag it, not a resolved cwd path."""
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+
+    assert mdc.complete_claim(tmp_path, dispatch_id, "") is True
+
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == ""
+
+
 def test_complete_claim_unknown_id_returns_false(tmp_path):
     """A dispatch_id naming neither a claimed nor a done record is unknown — the CLI
     must exit non-zero rather than silently succeed."""
@@ -611,3 +655,197 @@ def test_every_memory_skill_passes_its_own_chore(tmp_path):
         if "memory_dispatch_claim.py" in text and f"--chore {chore}" not in text:
             missing.append(chore)
     assert not missing, f"these skills claim without naming their chore: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# File-backed claim/report handoff (2026-09-15 addendum): shell variables set in one
+# Bash tool call do not survive into a later one, so `claim_one` and `complete` fall
+# back to disk when the id/report argument is omitted.
+# ---------------------------------------------------------------------------
+
+def test_claim_one_writes_keyed_current_claim_file(tmp_path):
+    """A successful claim drops its id into a chore+scope-KEYED file, so a later
+    argument-less `complete` in a fresh shell can still find it — and a second curator
+    claiming a DIFFERENT chore/scope gets its own file, never this one's."""
+    _dispatch(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    got = mdc.claim_one(tmp_path, "repair")
+    assert got is not None
+    claim_file = tmp_path / mdc._current_claim_filename("repair", "LOCAL")
+    assert claim_file.read_text(encoding="utf-8") == got["dispatch_id"]
+
+
+def test_set_report_writes_resolved_path_keyed_by_chore_scope(tmp_path, monkeypatch):
+    """`set-report` resolves and stores the path the same way `complete_claim` would,
+    under the chore+scope-keyed filename."""
+    other_cwd = tmp_path / "cwd"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+    rc = mdc._run_set_report(
+        ["reports/x.md", "--state-dir", str(tmp_path), "--chore", "repair", "--scope", "LOCAL"]
+    )
+    assert rc == 0
+    stored = (tmp_path / mdc._current_report_filename("repair", "LOCAL")).read_text(encoding="utf-8")
+    assert stored == str(other_cwd / "reports" / "x.md")
+
+
+def test_complete_falls_back_to_the_single_in_flight_claim_file(tmp_path):
+    """Exactly ONE keyed current-claim file on disk -> `complete --state-dir <dir>` alone
+    finds it unambiguously, no --chore/--scope needed."""
+    p = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    (tmp_path / mdc._current_claim_filename("repair", "LOCAL")).write_text(
+        dispatch_id, encoding="utf-8"
+    )
+    report = tmp_path / "report.md"
+    report.write_text("notes\n", encoding="utf-8")
+
+    rc = mdc._run_complete(["--state-dir", str(tmp_path), "--report", str(report)])
+
+    assert rc == 0
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    assert done.is_file()
+
+
+def test_complete_with_no_id_and_no_current_claim_file_exits_2(tmp_path):
+    """No dispatch_id given and no keyed current-claim file on disk -> a clear exit 2,
+    not a silent no-op or a crash."""
+    rc = mdc._run_complete(["--state-dir", str(tmp_path)])
+    assert rc == 2
+
+
+def test_complete_with_two_in_flight_claims_requires_chore_and_scope(tmp_path):
+    """TWO curators in flight on the same state_dir (different chore/scope) -> an
+    argument-less `complete` refuses ambiguity with exit 2 and a listing, rather than
+    guessing and closing the WRONG one's claim."""
+    p1 = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    id1 = p1.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    p2 = _claimed(tmp_path, 1_000_001, "atomize", scope="PROJECT")
+    id2 = p2.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    (tmp_path / mdc._current_claim_filename("repair", "LOCAL")).write_text(id1, encoding="utf-8")
+    (tmp_path / mdc._current_claim_filename("atomize", "PROJECT")).write_text(id2, encoding="utf-8")
+
+    proc = _run_cli(["complete", "--state-dir", str(tmp_path)])
+    assert proc.returncode == 2
+    assert "multiple in-flight claims" in proc.stderr
+
+    rc = mdc._run_complete(
+        ["--state-dir", str(tmp_path), "--chore", "atomize", "--scope", "PROJECT"]
+    )
+    assert rc == 0
+    assert (tmp_path / f"{mdc.DONE_PREFIX}{id2}.json").is_file()
+    assert not (tmp_path / f"{mdc.DONE_PREFIX}{id1}.json").is_file()
+
+
+def test_complete_falls_back_to_current_report_file_via_claimed_record(tmp_path):
+    """No `--report` given, and dispatch_id given EXPLICITLY (no --chore/--scope) ->
+    chore+scope are derived from the CLAIMED record itself to find the keyed report
+    file (written by `set-report`)."""
+    p = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    report = tmp_path / "report.md"
+    report.write_text("notes\n", encoding="utf-8")
+    (tmp_path / mdc._current_report_filename("repair", "LOCAL")).write_text(
+        str(report), encoding="utf-8"
+    )
+
+    rc = mdc._run_complete([dispatch_id, "--state-dir", str(tmp_path)])
+
+    assert rc == 0
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == str(report)
+
+
+def test_complete_with_no_report_and_no_current_report_file_closes_as_empty(tmp_path):
+    """No `--report` given and no keyed current-report file on disk -> the claim still
+    closes, with an empty report string (same as an explicit empty `--report`)."""
+    p = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+
+    rc = mdc._run_complete([dispatch_id, "--state-dir", str(tmp_path)])
+
+    assert rc == 0
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == ""
+
+
+def test_complete_explicit_args_still_override_the_files(tmp_path):
+    """Explicit dispatch_id + --report win over whatever is sitting in the keyed
+    current-* files — the fallback is only for when the argument is omitted."""
+    p = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    (tmp_path / mdc._current_claim_filename("repair", "LOCAL")).write_text(
+        "wrong-id", encoding="utf-8"
+    )
+    (tmp_path / mdc._current_report_filename("repair", "LOCAL")).write_text(
+        "/wrong/report.md", encoding="utf-8"
+    )
+    report = tmp_path / "report.md"
+    report.write_text("notes\n", encoding="utf-8")
+
+    rc = mdc._run_complete([dispatch_id, "--state-dir", str(tmp_path), "--report", str(report)])
+
+    assert rc == 0
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == str(report)
+
+
+def test_complete_claim_removes_its_own_keyed_files_on_success(tmp_path):
+    """Cleanup on completion (2026-09-15 review): a stale keyed file left forever means
+    every chore+scope pair ever claimed permanently blocks the 'exactly one in-flight
+    claim' fast path — `complete_claim` must remove the marker it owns once done."""
+    p = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    claim_marker = tmp_path / mdc._current_claim_filename("repair", "LOCAL")
+    report_marker = tmp_path / mdc._current_report_filename("repair", "LOCAL")
+    claim_marker.write_text(dispatch_id, encoding="utf-8")
+    report_marker.write_text("/tmp/x.md", encoding="utf-8")
+
+    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/x.md") is True
+
+    assert not claim_marker.exists()
+    assert not report_marker.exists()
+
+
+def test_complete_claim_leaves_a_newer_same_key_marker_alone(tmp_path):
+    """If a SECOND claim of the same chore+scope overwrote the marker with its OWN
+    (newer) dispatch_id before the first one completes, the first one's cleanup must
+    NOT delete the newer claim's still-live pointer."""
+    p1 = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    id1 = p1.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    claim_marker = tmp_path / mdc._current_claim_filename("repair", "LOCAL")
+    claim_marker.write_text(id1, encoding="utf-8")
+    # A second, newer claim of the SAME chore+scope overwrites the marker.
+    newer_id = "1000005-newer99"
+    claim_marker.write_text(newer_id, encoding="utf-8")
+
+    assert mdc.complete_claim(tmp_path, id1, "/tmp/x.md") is True
+
+    assert claim_marker.read_text(encoding="utf-8") == newer_id
+
+
+def test_complete_fast_path_survives_a_prior_completed_chore(tmp_path):
+    """Regression for the cleanup fix: after ONE chore+scope has already been claimed
+    and completed, a fresh claim of a DIFFERENT chore+scope must still be the ONLY
+    keyed file on disk — an argument-less `complete` must not see the old one and
+    report a false ambiguity."""
+    _dispatch(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    got1 = mdc.claim_one(tmp_path, "repair")
+    assert got1 is not None
+    report1 = tmp_path / "r1.md"
+    report1.write_text("x\n", encoding="utf-8")
+    assert mdc.complete_claim(tmp_path, got1["dispatch_id"], str(report1)) is True
+
+    _dispatch(tmp_path, 1_000_001, "atomize", scope="PROJECT")
+    got2 = mdc.claim_one(tmp_path, "atomize")
+    assert got2 is not None
+    report2 = tmp_path / "r2.md"
+    report2.write_text("y\n", encoding="utf-8")
+
+    rc = mdc._run_complete(["--state-dir", str(tmp_path), "--report", str(report2)])
+
+    assert rc == 0
+    done = tmp_path / f"{mdc.DONE_PREFIX}{got2['dispatch_id']}.json"
+    assert done.is_file()
