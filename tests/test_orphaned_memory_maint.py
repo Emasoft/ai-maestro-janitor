@@ -517,9 +517,15 @@ def test_an_old_claimed_record_checked_in_done_is_not_reported_stale(tmp_path):
     old = now - 30_000
     state_dir.mkdir(parents=True, exist_ok=True)
     dispatch_id = "3333333333-cccccccc"
+    # A real `report` (this test predates the field but production `complete_claim`
+    # always writes one) so the report-missing check stays silent and this test
+    # only exercises the stale-claim concern it is named for.
+    report = project / "reports" / "old-claim-report.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("ok", encoding="utf-8")
     payload = {
         "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
-        "root": root, "stamped_at": old, "dispatch_id": dispatch_id,
+        "root": root, "stamped_at": old, "dispatch_id": dispatch_id, "report": str(report),
     }
     done = state_dir / f"{memory_dispatch_claim.DONE_PREFIX}{dispatch_id}.json"
     done.write_text(json.dumps({**payload, "completed_at": old + 100, "outcome": "noop"}),
@@ -616,6 +622,79 @@ def test_done_record_with_missing_report_alarms_once(tmp_path):
     out2 = _run(home, project, gstate, settings)
     assert out2 == ""
     assert len(_ledger_lines(project)) == 1
+
+
+
+def test_done_record_with_empty_report_string_alarms(tmp_path):
+    """A claim closed with `--report ""` must alarm, not read as healthy: `Path("")`
+    resolves to `Path(".")`, which always exists, so a naive existence check on an
+    empty string silently passes."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    _write_done(
+        state_dir, dispatch_id="8888888888-aaaaaaaa", intervention="repair", scope="LOCAL",
+        root=root, stamped_at=now - 100, completed_at=now - 50, report="",
+    )
+
+    out = _run(home, project, gstate, settings)
+
+    assert "report is missing" in out
+    assert "an empty report path was recorded" in out
+    lines = _ledger_lines(project)
+    assert len(lines) == 1
+    assert '"MEMPASS-REPORT-MISSING"' in lines[0]
+
+
+def test_done_record_with_no_report_key_alarms(tmp_path):
+    """A done record written without a `report` key at all (an even older or
+    hand-crafted shape) must still alarm rather than being silently skipped as
+    an unrelated older-shape record."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    state_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
+        "root": root, "stamped_at": now - 100, "dispatch_id": "9999999999-bbbbbbbb",
+        "completed_at": now - 50,
+    }
+    (state_dir / f"{memory_dispatch_claim.DONE_PREFIX}9999999999-bbbbbbbb.json").write_text(
+        json.dumps(payload), encoding="utf-8",
+    )
+
+    out = _run(home, project, gstate, settings)
+
+    assert "report is missing" in out
+    assert "no report was recorded" in out
+    lines = _ledger_lines(project)
+    assert len(lines) == 1
+    assert '"MEMPASS-REPORT-MISSING"' in lines[0]
+
+
+def test_done_record_whose_report_path_is_a_directory_alarms(tmp_path):
+    """A `report` path that exists but is a directory, not a file, must still
+    alarm -- `Path.is_file()` (not `.exists()`) is what guards against this."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    report_dir = project / "reports" / "not-a-file"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    _write_done(
+        state_dir, dispatch_id="1010101010-cccccccc", intervention="repair", scope="LOCAL",
+        root=root, stamped_at=now - 100, completed_at=now - 50, report=str(report_dir),
+    )
+
+    out = _run(home, project, gstate, settings)
+
+    assert "report is missing" in out
+    assert str(report_dir) in out
+    lines = _ledger_lines(project)
+    assert len(lines) == 1
+    assert '"MEMPASS-REPORT-MISSING"' in lines[0]
 
 
 def test_done_record_older_than_7_days_is_not_reported(tmp_path):

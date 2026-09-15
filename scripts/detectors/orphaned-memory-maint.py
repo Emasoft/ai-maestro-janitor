@@ -147,22 +147,36 @@ def _check_done_pool(state_dir: Path, seen: Path, now: int) -> None:
             continue  # not this checks job -- pool-malformed handling already covers it
 
         completed_at = payload.get("completed_at")
-        report = payload.get("report")
-        if not isinstance(completed_at, (int, float)) or not isinstance(report, str):
+        if not isinstance(completed_at, (int, float)):
             continue  # older done shape or a foreign write -- not this checks concern
 
         age_s = max(0, now - int(completed_at))
         if age_s > 7 * 24 * 3600:
             continue  # older than 7 days -- not this checks concern any more
 
-        if Path(report).exists():
-            continue
+        # WHY: report="" makes Path(report) == Path(".") which always exists, so the
+        # old `Path(report).exists()` check never fired for a claim closed without
+        # --report (48a29226's exact case). Treat absent / empty / non-file the same
+        # way -- all three are "the report is missing", just with a different detail.
+        # A non-str, non-None value (int/list/dict) is a distinct, genuinely foreign
+        # shape -- name its type rather than mislabeling it "empty" (review finding).
+        report = payload.get("report")
+        if report is None:
+            detail = "no report was recorded"
+        elif not isinstance(report, str):
+            detail = f"report field has unexpected type: {type(report).__name__}"
+        elif not report:
+            detail = "an empty report path was recorded"
+        elif not Path(report).is_file():
+            detail = report
+        else:
+            continue  # report is a real, existing file -- healthy
 
         intervention = payload["intervention"]
         scope = payload["scope"]
         msg = (
             f"memory-maintenance pass {dispatch_id!r} ({intervention}, {scope}) checked in "
-            f"but its report is missing: {report}"
+            f"but its report is missing: {detail}"
         )
         key = f"report-missing:{dispatch_id}"
         line = dedupe.emit_once(seen, key, f"[orphaned-memory-maint] {msg}")
