@@ -82,6 +82,7 @@ import errno
 import fcntl
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -372,6 +373,75 @@ def _split_max_bytes() -> int:
     except (ValueError, TypeError):
         return 0
 
+_MEMORY_OUTCOME_RE = re.compile(
+    r"<!--\s*janitor-outcome:\s*(noop|mutation)\s*-->",
+    re.IGNORECASE,
+)
+_NOOP_TAIL_SCAN_BYTES = 200  # the outcome marker is APPENDED as the last line of the report
+
+
+def _no_recent_noop(chore: str, scope: str, root: Path, now: int, interval_s: float) -> bool:
+    """Third AND gate on `_first_due_intervention`: False (NOT due) only when the
+    newest janitor-memory-subconscious-agent report for this (chore, scope) is a
+    proven `noop` younger than the chore's own cadence -- otherwise True (fail OPEN).
+
+    Without this, a chore that just ABSTAINED (0 mutations, e.g. 56 pages read, 4
+    refusals, no legal merge) got re-emitted on the very next heartbeat because the
+    refusal-filter suppression in `memory_content_precheck` only covers a scope where
+    EVERY moved page is refusal-covered -- a genuine "nothing to do this pass" verdict
+    from the agent itself was not fed back to the scheduler (2026-09-15: consolidate
+    re-emitted 35 min after an abstain on the same scope, ~236k tokens for nothing).
+
+    Fails OPEN (returns True / due) on: no report dir, no matching report, a
+    `mutation` outcome, or a report whose tail carries no parseable marker -- a
+    missing/malformed report must never permanently silence a chore. Only an
+    unambiguous, fresh `noop` suppresses, and only until the chore's own cadence
+    interval elapses, at which point it is tried again regardless."""
+    # NOTE (review finding): `root` is unused here by design — LOCAL/USER report
+    # dirs are keyed by (chore, scope) only, matching the agent's own filename
+    # convention, and PROJECT-scope reports have exactly one root per project
+    # anyway. It stays in the signature for symmetry with the other two gates,
+    # which DO need the concrete root.
+    #
+    # NOTE (review finding): `state.project_root()` is THIS session's project,
+    # not necessarily the project whose heartbeat last dispatched a LOCAL/USER
+    # chore (the agent's own MAIN_ROOT is computed the same way, at report-write
+    # time, from whatever session fired it). A cross-project mismatch means this
+    # gate finds nothing and fails OPEN — the safe direction: it never wrongly
+    # suppresses, it can only fail to suppress a genuine same-project repeat.
+    reports_dir = state.project_root() / "reports" / f"janitor-memory-{chore}"
+    if not reports_dir.is_dir():
+        return True
+    candidates = list(reports_dir.glob(f"*-{chore}-{scope.lower()}.md"))
+    if not candidates:
+        return True
+    # Pick newest by mtime, not by filename sort — the timestamp segment embeds a
+    # `%z` UTC offset that can vary (DST, host), so lexical order is not
+    # guaranteed to match wall-clock order.
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        mtime = newest.stat().st_mtime
+        with newest.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - _NOOP_TAIL_SCAN_BYTES))
+            tail = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return True
+    marker = _MEMORY_OUTCOME_RE.search(tail)
+    if marker is None:
+        return True
+    if marker.group(1).lower() != "noop":
+        return True
+    age_s = now - mtime
+    if age_s < interval_s:
+        state.log_line(
+            "memory-maintenance",
+            f"{chore} {scope} suppressed, last pass noop {age_s:.0f}s ago < cadence {interval_s:.0f}s",
+        )
+        return False
+    return True
+
 
 def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
     """The first intervention for (scope, root) that is BOTH cadence-due AND has
@@ -410,11 +480,16 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
         last_run = memory_settings.read_last_run(intervention, scope, root)
         if last_run > 0:
             stamp_age = float(now - last_run)
-        if memory_content_precheck.content_has_work(
+        if not memory_content_precheck.content_has_work(
             intervention, root, split_max_bytes=split_cap, scope=scope,
             last_stats=last_fp, stamp_age_s=stamp_age,
         ):
-            return intervention
+            continue
+        # RECENT-NOOP gate (2026-09-15): the agent's own machine verdict from its
+        # last report beats a fresh fingerprint/age heuristic — see _no_recent_noop.
+        if not _no_recent_noop(intervention, scope, root, now, memory_settings.interval_s_for(intervention)):
+            continue
+        return intervention
     return None
 
 

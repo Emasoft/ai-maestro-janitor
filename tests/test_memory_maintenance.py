@@ -1161,3 +1161,89 @@ def test_write_pending_supersede_rewrites_legacy_slot_to_new_id(tmp_path, monkey
 
     legacy = json.loads((tmp_path / mm.PENDING_LEGACY_NAME).read_text(encoding="utf-8"))
     assert legacy["dispatch_id"] == second["dispatch_id"]
+
+
+# --------------------------------------------------------------------------- #
+# _no_recent_noop — the RECENT-NOOP gate (2026-09-15): re-emitting a chore
+# 35 min after its own agent reported a `noop` (abstain, 0 mutations) burned
+# ~236k tokens for a verdict that could not have changed. See _load_mm above
+# for the module-loading pattern this reuses.
+# --------------------------------------------------------------------------- #
+
+def _write_report(project_root: Path, chore: str, scope: str, outcome: str, mtime: float) -> Path:
+    """Write a report file shaped like the janitor-memory-subconscious-agent's own
+    output (`<ts>-<chore>-<scope>.md`, ending in the `janitor-outcome` marker) and
+    force its mtime, so age comparisons in the gate are deterministic."""
+    report_dir = project_root / "reports" / f"janitor-memory-{chore}"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report = report_dir / f"20260101_000000+0000-{chore}-{scope.lower()}.md"
+    report.write_text(
+        f"# {chore} pass\n\nnothing to report\n\n<!-- janitor-outcome: {outcome} -->\n",
+        encoding="utf-8",
+    )
+    os.utime(report, (mtime, mtime))
+    return report
+
+
+def test_no_recent_noop_suppresses_a_fresh_noop_report(tmp_path, monkeypatch):
+    """A `noop` report younger than the chore's cadence must suppress the chore
+    (gate returns False / not due)."""
+    mm = _load_mm(monkeypatch, tmp_path / "state")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
+    now = 100_000
+    _write_report(project_root, "consolidate", "LOCAL", "noop", mtime=now - 100)
+    assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is False
+
+
+def test_no_recent_noop_allows_a_stale_noop_report(tmp_path, monkeypatch):
+    """A `noop` report OLDER than the chore's cadence must not suppress it — the
+    chore is due again once its own interval has elapsed regardless of the past
+    abstain."""
+    mm = _load_mm(monkeypatch, tmp_path / "state")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
+    now = 100_000
+    _write_report(project_root, "consolidate", "LOCAL", "noop", mtime=now - 7200)
+    assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is True
+
+
+def test_no_recent_noop_allows_a_mutation_report(tmp_path, monkeypatch):
+    """A `mutation` outcome (the pass actually changed the corpus) never suppresses
+    — only a proven `noop` does."""
+    mm = _load_mm(monkeypatch, tmp_path / "state")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
+    now = 100_000
+    _write_report(project_root, "consolidate", "LOCAL", "mutation", mtime=now - 100)
+    assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is True
+
+
+def test_no_recent_noop_allows_when_no_report_dir_exists(tmp_path, monkeypatch):
+    """No report directory at all (chore never ran) must fail OPEN — due."""
+    mm = _load_mm(monkeypatch, tmp_path / "state")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
+    now = 100_000
+    assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is True
+
+
+def test_no_recent_noop_allows_a_report_missing_the_outcome_marker(tmp_path, monkeypatch):
+    """A report with no `janitor-outcome` marker (unparseable / a stale-format
+    report) must fail OPEN — a missing marker can never permanently silence a
+    chore."""
+    mm = _load_mm(monkeypatch, tmp_path / "state")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
+    now = 100_000
+    report_dir = project_root / "reports" / "janitor-memory-consolidate"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report = report_dir / "20260101_000000+0000-consolidate-local.md"
+    report.write_text("# consolidate pass\n\nno marker here\n", encoding="utf-8")
+    os.utime(report, (now - 100, now - 100))
+    assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is True
