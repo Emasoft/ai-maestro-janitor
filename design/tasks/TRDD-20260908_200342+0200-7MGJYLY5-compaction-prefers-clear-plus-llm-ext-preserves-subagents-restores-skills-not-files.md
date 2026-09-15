@@ -3,7 +3,7 @@ trdd-id: 7MGJYLY5
 title: Janitor compaction prefers clear plus llm-ext at turn boundaries, preserves subagents, restores skills not files
 column: todo
 created: 2026-09-08T20:03:42+0200
-updated: 2026-09-15T20:40:12+0200
+updated: 2026-09-15T20:54:28+0200
 current-owner: janitor-session
 task-type: feature
 min-approval-requirement: none
@@ -137,3 +137,4 @@ All at `column: testing` on 2026-09-08 unless noted:
 ## ⏵ STATE
 
 2026-09-15: active-skills recording mechanism = distinct Skill tool_use names across the whole transcript, most recent first, cap 8 (pre-compact-handoff.py); box 6 is implemented by that rule; box 3 and box 5 landed in a96f7ef1 + this phase; boxes 2 and 4 belong to TRDD-11GAS4LC
+2026-09-15: box 6 scope — captured: Skill tool_use names and slash-typed skill commands from the transcript (8 oldest, budget 8 MB/1 s); NOT captured: modes declared by a SessionStart hook (e.g. PONYTAIL MODE ACTIVE) — those re-declare themselves on the next SessionStart and need no restore

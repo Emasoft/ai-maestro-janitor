@@ -718,18 +718,50 @@ def test_build_handoff_no_transcript_degrades_conversation(tmp_path: Path) -> No
 def test_active_skills_from_transcript_finds_distant_skill_and_caps(tmp_path: Path) -> None:
     """A `Skill` call from FAR earlier in the transcript still counts as "active" (review
     fix on TRDD-7MGJYLY5: a turn-count window missed a mode skill like /ponytail loaded
-    long before it); distinct names are capped at `_ACTIVE_SKILLS_MAX`, most-recent
-    first."""
+    long before it); distinct names are capped at `_ACTIVE_SKILLS_MAX`, keeping the
+    OLDEST names (the mode skill survives) and dropping the newest ones over the cap."""
     hook = _hook()
     tx = tmp_path / "t.jsonl"
-    entries = [_tool_use_turn("Skill", command="ponytail")]  # far in the past
+    entries = [_tool_use_turn("Skill", command="ponytail")]  # far in the past, oldest
     entries += [_amsg(f"filler {i}") for i in range(400)]  # 400 turns later — no window excludes it
     entries += [_tool_use_turn("Skill", command=f"skill-{i}") for i in range(hook._ACTIVE_SKILLS_MAX + 2)]
     _write_jsonl(tx, entries)
     names = hook._active_skills_from_transcript(str(tx))
     assert len(names) == hook._ACTIVE_SKILLS_MAX
-    assert names[0] == f"skill-{hook._ACTIVE_SKILLS_MAX + 1}"  # most-recent first
-    assert "ponytail" not in names, "cap reached by nearer skills before the scan reaches it"
+    assert names[0] == "ponytail", "oldest-activated name is kept and listed first"
+    assert f"skill-{hook._ACTIVE_SKILLS_MAX + 1}" not in names, "newest names dropped over the cap"
+    assert f"skill-{hook._ACTIVE_SKILLS_MAX}" not in names, "newest names dropped over the cap"
+
+
+def test_active_skills_from_transcript_slash_typed_command(tmp_path: Path) -> None:
+    """A user-typed `/ponytail` line counts as an active skill; harness verbs and
+    janitor-internal commands do not."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    entries = [
+        _umsg("/ponytail full"),
+        _umsg("/clear"),
+        _umsg("/janitor-arm"),
+        _umsg("/resume"),  # a harness built-in NOT in the original 4-entry denylist
+        _amsg("ack"),
+    ]
+    _write_jsonl(tx, entries)
+    names = hook._active_skills_from_transcript(str(tx))
+    assert names == ["ponytail"]
+
+
+def test_active_skills_from_transcript_budget_cuts_scan_keeps_partial(tmp_path: Path) -> None:
+    """A byte budget smaller than the transcript stops the backward scan early but keeps
+    whatever distinct names it already found (fail-open, never crashes, never scans past
+    budget)."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    entries = [_tool_use_turn("Skill", command="early-skill")]
+    entries += [_amsg("x" * 5000) for _ in range(50)]  # pushes "early-skill" out of a tiny budget
+    entries += [_tool_use_turn("Skill", command="late-skill")]
+    _write_jsonl(tx, entries)
+    names = hook._active_skills_from_transcript(str(tx), max_scan_bytes=200)
+    assert names == ["late-skill"], "budget cut before reaching the early skill — partial result kept"
 
 
 def test_active_skills_from_transcript_reads_backward_in_chunks(tmp_path: Path) -> None:

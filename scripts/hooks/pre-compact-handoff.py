@@ -114,12 +114,34 @@ _LAST_TRIGGER_FILENAME = "precompact-last-trigger.json"
 # manual /compact typed twice on purpose must write both times. Measured 2026-09-15
 # (TRDD-ANIME2SVG): 7 auto firings in 48s for one real compaction.
 _CONTINUITY_DEBOUNCE_WINDOW_S = 120
-# "Active" skills = every distinct `Skill` tool_use name across the WHOLE transcript,
-# most-recent first, capped — a turn-count window misses a MODE skill (e.g. /ponytail)
-# activated long before the window (review finding on TRDD-7MGJYLY5). Read backward in
-# fixed-size chunks so a long transcript is never loaded whole into memory.
+# "Active" skills = every distinct `Skill` tool_use name (or user-typed `/skill` slash
+# command) across the WHOLE transcript, oldest-activated first, capped — a turn-count
+# window misses a MODE skill (e.g. /ponytail) activated long before the window (review
+# finding on TRDD-7MGJYLY5). Read backward in fixed-size chunks so a long transcript is
+# never loaded whole into memory, bounded by a byte/time budget so the scan can never
+# outrun the PreCompact hook's own timeout (hooks.json: 15s) on a huge transcript.
 _ACTIVE_SKILLS_MAX = 8
 _ACTIVE_SKILLS_CHUNK_BYTES = 65_536
+_ACTIVE_SKILLS_SCAN_MAX_BYTES = 8 * 1024 * 1024
+_ACTIVE_SKILLS_SCAN_MAX_S = 1.0
+# A user-typed slash command (`/ponytail`) is a plain text turn, never a `Skill`
+# tool_use — matched separately. Harness verbs and janitor-internal commands are
+# excluded; anything else is accepted as-is (no cheap plugin-skills-directory listing
+# is wired into this hook to filter further).
+_SLASH_SKILL_RE = re.compile(r"^/([A-Za-z0-9_:-]+)")
+# Every Claude Code BUILT-IN slash command (not a project skill) — review finding on
+# TRDD-7MGJYLY5: a 4-entry list left /resume, /model, /cost, etc. uncaught, so an
+# ordinary session's harness commands crowded a real mode skill (e.g. /ponytail) out
+# of the 8-slot cap. This list is the harness's documented command set, not a skill
+# directory listing (none is cheaply available to this hook).
+_SLASH_SKILL_EXCLUDE = frozenset(
+    {
+        "add-dir", "agents", "bug", "clear", "compact", "config", "cost", "doctor",
+        "export", "exit", "help", "hooks", "ide", "init", "login", "logout", "mcp",
+        "memory", "model", "output-style", "permissions", "pr_comments", "quit",
+        "resume", "review", "rewind", "status", "statusline", "todos", "vim",
+    }
+)
 _OPEN_FILES_MAX = 20
 # Uncapped background_agents was a real bug (review finding, TRDD-7MGJYLY5): the nudge's
 # ≤15-line render is a single END-OF-LIST slice, so a session with many live agents could
@@ -575,15 +597,27 @@ def _active_skills_from_transcript(
     transcript_path: str,
     max_skills: int = _ACTIVE_SKILLS_MAX,
     chunk_bytes: int = _ACTIVE_SKILLS_CHUNK_BYTES,
+    max_scan_bytes: int = _ACTIVE_SKILLS_SCAN_MAX_BYTES,
+    max_scan_s: float = _ACTIVE_SKILLS_SCAN_MAX_S,
 ) -> list[str]:
-    """Distinct `Skill` tool_use names across the WHOLE transcript, most-recent first,
-    capped at `max_skills` (review fix on TRDD-7MGJYLY5: a turn-count window misses a
-    MODE skill — e.g. /ponytail — activated long before the window; a fresh-invocation
-    skill used minutes ago and a still-active mode skill loaded hours ago are equally
-    "active" for the resumed turn). Reads the transcript BACKWARD in `chunk_bytes`
-    slices — never the whole file at once, however long the session ran — and stops as
-    soon as `max_skills` distinct names are found or the file is exhausted. Fail-open:
-    never raises."""
+    """Distinct `Skill` tool_use names AND user-typed `/skill-name` slash commands,
+    oldest-activated first, capped at `max_skills` (review fix on TRDD-7MGJYLY5: a
+    turn-count window misses a MODE skill — e.g. /ponytail — activated long before the
+    window; a fresh-invocation skill used minutes ago and a still-active mode skill
+    loaded hours ago are equally "active" for the resumed turn).
+
+    Reads the transcript BACKWARD in `chunk_bytes` slices — never the whole file at
+    once, however long the session ran — bounded by `max_scan_bytes`/`max_scan_s`
+    (default 8 MB / 1 s) so a multi-GB transcript can never blow the ~15 s PreCompact
+    hook timeout (hooks.json). Collects ALL distinct names found within that budget,
+    then keeps the `max_skills` OLDEST (mode skills are typically activated earliest
+    and must survive the cap even when many fresh skills ran after them) and reverses
+    to activation order. A slash-typed command (`/ponytail`) is a user-role text turn,
+    never a `Skill` tool_use, so it is matched separately by regex; every documented
+    Claude Code BUILT-IN command (`_SLASH_SKILL_EXCLUDE`) and janitor-internal commands
+    (`/janitor-*`) are excluded — no cheap plugin-skills-directory listing is wired
+    into this hook, so any other slash token is accepted as-is. Fail-open: never
+    raises."""
     if not transcript_path:
         return []
     path = Path(transcript_path)
@@ -591,9 +625,11 @@ def _active_skills_from_transcript(
         size = path.stat().st_size
     except OSError:
         return []
-    names: list[str] = []
+    names: list[str] = []  # backward-scan discovery order == newest-activated first
     seen: set[str] = set()
     pos = size
+    scanned = 0
+    deadline = time.monotonic() + max_scan_s
     carry = b""  # partial line (RAW BYTES) left over from the START of the chunk read so
     # far. Splitting on the byte b"\n" BEFORE decoding — never decode-then-split — is
     # load-bearing: a UTF-8 continuation byte is never 0x0A, so a multi-byte character
@@ -601,7 +637,14 @@ def _active_skills_from_transcript(
     # two halves of its raw bytes back together before either side is decoded. Decoding
     # each chunk independently (the earlier, wrong shape) would run `errors="replace"` on
     # each half separately and silently corrupt any name whose bytes crossed a boundary.
-    while pos > 0 and len(names) < max_skills:
+    while pos > 0:
+        if scanned >= max_scan_bytes or time.monotonic() >= deadline:
+            print(
+                f"[pre-compact-handoff] active-skills scan cut at {scanned} bytes "
+                f"(budget {max_scan_bytes}B/{max_scan_s}s) — keeping partial results",
+                file=sys.stderr,
+            )
+            break
         start = max(0, pos - chunk_bytes)
         try:
             with path.open("rb") as fh:
@@ -609,6 +652,7 @@ def _active_skills_from_transcript(
                 raw = fh.read(pos - start)
         except OSError:
             break
+        scanned += len(raw)
         data = raw + carry
         lines = data.split(b"\n")
         # lines[0] may be a partial line split mid-record at the chunk boundary — carry
@@ -623,29 +667,39 @@ def _active_skills_from_transcript(
                 obj = json.loads(line)
             except (ValueError, TypeError):
                 continue
-            if not isinstance(obj, dict) or obj.get("type") != "assistant":
+            if not isinstance(obj, dict):
                 continue
             message = obj.get("message")
             content = message.get("content") if isinstance(message, dict) else None
-            if not isinstance(content, list):
-                continue
-            for block in reversed(content):
-                if not isinstance(block, dict) or block.get("type") != "tool_use":
-                    continue
-                if block.get("name") != "Skill":
-                    continue
-                tool_input = block.get("input")
-                name = ""
-                if isinstance(tool_input, dict):
-                    name = str(tool_input.get("command", "") or tool_input.get("skill", "") or "").strip()
-                if not name or name in seen:
-                    continue
-                seen.add(name)
-                names.append(name)
-                if len(names) >= max_skills:
-                    return names
+            obj_type = obj.get("type")
+            if obj_type == "assistant" and isinstance(content, list):
+                for block in reversed(content):
+                    if not isinstance(block, dict) or block.get("type") != "tool_use":
+                        continue
+                    if block.get("name") != "Skill":
+                        continue
+                    tool_input = block.get("input")
+                    name = ""
+                    if isinstance(tool_input, dict):
+                        name = str(tool_input.get("command", "") or tool_input.get("skill", "") or "").strip()
+                    if name and name not in seen:
+                        seen.add(name)
+                        names.append(name)
+            elif obj_type == "user":
+                text = _extract_text(content).strip()
+                m = _SLASH_SKILL_RE.match(text)
+                if m:
+                    token = m.group(1)
+                    if token not in _SLASH_SKILL_EXCLUDE and not token.startswith("janitor-") and token not in seen:
+                        seen.add(token)
+                        names.append(token)
         pos = start
-    return names
+    # `names` is newest-activated-first. Keep the `max_skills` OLDEST (the tail of
+    # this list) so an early-loaded mode skill survives the cap, then reverse to
+    # activation (oldest-first) order for the caller.
+    oldest = names[-max_skills:] if len(names) > max_skills else names
+    oldest.reverse()
+    return oldest
 
 
 def _open_files_from_transcript(
