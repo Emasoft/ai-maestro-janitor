@@ -274,7 +274,12 @@ jobs:
           fail=0
           for h in scripts/hooks/*.py; do
             echo "=== $h ==="
-            out=$(timeout 30 ./"$h" </dev/null 2>&1); rc=$?
+            # rc reset + `|| rc=$?` : under `bash -e` (the runner default for
+            # `run:` steps) a bare `out=$(failing_cmd)` aborts the whole step
+            # before `rc=$?` runs, so the first hook that legitimately
+            # declines (non-zero exit) would kill the loop.
+            rc=0
+            out=$(timeout 30 ./"$h" </dev/null 2>&1) || rc=$?
             printf '%s\n' "$out"
             if [ "$rc" -eq 124 ]; then
               echo "::error::$h exceeded 30s wall clock"; fail=1
