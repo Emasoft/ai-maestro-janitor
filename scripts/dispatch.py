@@ -3334,29 +3334,108 @@ def _any_pending_agent_stale(now: int) -> bool:
         return True
 
 
+def _board_workable_ids() -> frozenset[str]:
+    """The id set of every open TRDD sitting in `dev` or `todo` (TRDD-2MLFZ7DL sub-step 2,
+    widened TRDD-V3BQT7QE, deduped F-3/TRDD-V3BQT7QE). Single scan shared by
+    `_board_has_workable_cards` (existence) and `_board_nudge_signature_changed` below
+    (identity, for the once-per-board-state dedup) — one board read, two callers.
+
+    Raises on any read fault (never fails "empty") so both callers can tell "the board
+    could not be read" apart from "the board is genuinely empty" and fail open correctly."""
+    import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+    ids: set[str] = set()
+    for _scope, path in trdd_common.trdd_files("tasks", str(state.project_root())):
+        uid = trdd_common.extract_uid(path.name)
+        if not uid:
+            continue
+        _, column = trdd_common.parse_trdd_state(path)
+        if column in {"dev", "todo"}:
+            ids.add(uid)
+    return frozenset(ids)
+
+
 def _board_has_workable_cards() -> bool:
-    """True iff at least one open TRDD sits in `dev` or `todo` (TRDD-2MLFZ7DL sub-step 2,
-    widened TRDD-V3BQT7QE) — the signal the keep-going gate falls back to when there are
-    ZERO pending agents to judge stale/live. `todo` counts too: the overnight queue is
-    driven from `todo` (universal-kanban.md — finishing a card means pulling the next
-    one), so a manifest with zero pending agents but an open `todo` card is still
-    workable, not finished. Reuses `_board_summary_bit`'s column scan, narrowed to these
-    two columns.
+    """True iff at least one open TRDD sits in `dev` or `todo` — the signal the keep-going
+    gate falls back to when there are ZERO pending agents to judge stale/live. `todo`
+    counts too: the overnight queue is driven from `todo` (universal-kanban.md —
+    finishing a card means pulling the next one), so a manifest with zero pending agents
+    but an open `todo` card is still workable, not finished.
 
     Fail-OPEN (True) on any read fault, matching every other check in the gate: an
     unreadable board must never be the reason the night-survival pulse goes quiet."""
     try:
-        import trdd_common  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
-
-        for _scope, path in trdd_common.trdd_files("tasks", str(state.project_root())):
-            if not trdd_common.extract_uid(path.name):
-                continue
-            _, column = trdd_common.parse_trdd_state(path)
-            if column in {"dev", "todo"}:
-                return True
-        return False
+        return bool(_board_workable_ids())
     except Exception:  # noqa: BLE001 - a board read must never silence the pulse
         return True
+
+
+_BOARD_NUDGE_STAMP_FILE = "keep-going-board-nudge-stamp.json"
+
+
+def _last_user_prompt_epoch() -> int | None:
+    """Raw `last_user_input_epoch` from the cross-plugin presence breadcrumb, or None when
+    unreadable/absent/malformed. Same source as `_user_idle_seconds`, but returns the
+    epoch itself rather than an elapsed count, so `_board_nudge_signature_changed` can
+    tell whether a NEW user prompt landed since the last board nudge, independent of the
+    caller's own `now`."""
+    try:
+        raw = json.loads(state.user_presence_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("last_user_input_epoch")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    return value
+
+
+def _board_nudge_signature_changed(sd: Path, ids: frozenset[str]) -> bool:
+    """True iff the ZERO-pending-agent board fallback should nudge this fire: the `dev`/
+    `todo` id set differs from the last nudge, or a user prompt landed since (F-3,
+    TRDD-V3BQT7QE).
+
+    WHY: with zero pending agents, `_board_has_workable_cards()` alone re-nudged on
+    EVERY ~15-minute fire while a `todo`/`dev` card sat untouched because nobody could
+    start it (needs a human, or the owner said "queue it") — 30+ turns overnight for a
+    board that never moved. This persists `{signature, prompt_epoch}` in one stamp file
+    so an unchanged board with an idle user nudges AT MOST ONCE; a user prompt strictly
+    newer than the stamped one resets the dedup even when the board itself did not move,
+    because the user re-engaging is itself a reason to re-anchor the nudge. The pending-
+    agent (non-zero) path is untouched — this only gates the zero-agent fallback.
+
+    Fail-open toward nudging: an unreadable/corrupt stamp reads as "no prior nudge",
+    never as "already nudged", and a failed write is swallowed — costs one extra nudge
+    next fire, never a silenced one."""
+    stamp_file = sd / _BOARD_NUDGE_STAMP_FILE
+    signature = ",".join(sorted(ids))
+    prompt_epoch = _last_user_prompt_epoch()
+    prev_signature: str | None = None
+    prev_prompt_epoch: int | None = None
+    try:
+        raw = json.loads(stamp_file.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            sig = raw.get("signature")
+            prev_signature = sig if isinstance(sig, str) else None
+            pe = raw.get("prompt_epoch")
+            prev_prompt_epoch = pe if isinstance(pe, int) and not isinstance(pe, bool) else None
+    except (OSError, ValueError):
+        pass
+    first_time = prev_signature is None
+    signature_changed = not first_time and prev_signature != signature
+    prompt_advanced = prompt_epoch is not None and (
+        prev_prompt_epoch is None or prompt_epoch > prev_prompt_epoch
+    )
+    changed = first_time or signature_changed or prompt_advanced
+    if changed:
+        try:
+            state.atomic_write(
+                stamp_file, json.dumps({"signature": signature, "prompt_epoch": prompt_epoch})
+            )
+        except OSError:
+            pass
+    return changed
 
 
 def _phase_keep_going_nudge() -> None:
@@ -3395,6 +3474,16 @@ def _phase_keep_going_nudge() -> None:
     A guard that can be silenced invisibly is not a guard; the failure mode it exists to
     prevent (a session going quiet unattended) is exactly the state it was left in.
 
+    KNOWN TRADE-OFF (F-3/TRDD-V3BQT7QE review): the zero-pending-agent board dedup below
+    `return`s before `_attention_summary()`/`_attention_gate()` ever run, so a card that
+    newly enters `blocked` (or another attention-worthy column) while the `dev`/`todo`
+    signature itself is unchanged gets no nudge until that signature next changes. This
+    is not new — the pre-existing `not _board_has_workable_cards()` branch already skipped
+    the attention clause on a fully empty board — the dedup only widens how often the same
+    class of skip applies (to the equally common "one unchanged workable card" case). Left
+    as-is rather than coupling the two independently-cadenced mechanisms, which would need
+    to peek `_attention_gate`'s stateful counter without spending it.
+
     Firing is bounded, not a runaway: each fire is one already-scheduled heartbeat turn and
     the nudge adds a single line to it. Re-firing on EVERY due heartbeat that passes the
     gate is the whole "never stop" point — a one-time nudge would miss a session idle
@@ -3429,8 +3518,18 @@ def _phase_keep_going_nudge() -> None:
     # board itself is the tie-breaker.
     agent_total = _pending_agent_count()
     if agent_total == 0:
-        if not _board_has_workable_cards():
+        try:
+            workable_ids: frozenset[str] | None = _board_workable_ids()
+        except Exception:  # noqa: BLE001 - an unreadable board must never go quiet
+            workable_ids = None
+        if workable_ids is not None and not workable_ids:
             state.log_line("dispatch", "keep-going: suppressed (no pending agents, no dev/todo card)")
+            return
+        if workable_ids is not None and not _board_nudge_signature_changed(sd, workable_ids):
+            state.log_line(
+                "dispatch",
+                f"keep-going: board unchanged since last nudge ({len(workable_ids)} cards) — quiet",
+            )
             return
     elif not _any_pending_agent_stale(now):
         state.log_line("dispatch", f"keep-going: suppressed (all {agent_total} agents live)")

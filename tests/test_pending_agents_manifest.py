@@ -566,6 +566,85 @@ def test_keep_going_nudge_fires_when_only_a_todo_card_is_open(iso, capsys) -> No
     assert "maintenance" not in out.lower(), "no retired mode may be named"
 
 
+def _write_task_card(tasks_dir: Path, uid: str, column: str) -> None:
+    """Write one minimal open TRDD card at `column` — shared by the board-dedup tests below."""
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    (tasks_dir / f"TRDD-20260101_000000+0000-{uid}-x.md").write_text(
+        "---\n"
+        f"trdd-id: {uid}\n"
+        "title: x\n"
+        f"column: {column}\n"
+        "created: 2026-01-01T00:00:00+0000\n"
+        "updated: 2026-01-01T00:00:00+0000\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+
+def test_keep_going_nudge_board_dedup_quiet_on_second_fire(iso, capsys) -> None:
+    """F-3 (TRDD-V3BQT7QE): a `todo` card nobody can start yet must not re-nudge on every
+    ~15-minute fire. First fire nudges (and stamps the board signature); the very next
+    fire against the SAME unchanged board is quiet — this is the fix for the owner's
+    "multiple resume, unnecessary resume" complaint (30+ identical nudges overnight)."""
+    project = iso["project"]
+    _write_task_card(project / "design" / "tasks", "TODOCRD1", "todo")
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" in capsys.readouterr().out
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" not in out, f"unchanged board must stay quiet on 2nd fire: {out!r}"
+
+
+def test_keep_going_nudge_board_dedup_fires_when_a_new_card_appears(iso, capsys) -> None:
+    """A NEW card entering `dev`/`todo` changes the board signature, so dedup must not
+    swallow it — the dedup mutes an UNCHANGED board, never a growing one."""
+    project = iso["project"]
+    tasks = project / "design" / "tasks"
+    _write_task_card(tasks, "TODOCRD1", "todo")
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" in capsys.readouterr().out
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" not in capsys.readouterr().out
+    _write_task_card(tasks, "DEVCARD1", "dev")
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out, f"a new card must re-nudge despite the dedup: {out!r}"
+
+
+def test_keep_going_nudge_board_dedup_resets_on_newer_user_prompt(iso, capsys, monkeypatch) -> None:
+    """A user prompt strictly newer than the one stamped at the last nudge resets the
+    dedup even though the board itself did not move — the user re-engaging is itself a
+    reason to re-anchor the nudge (F-3, TRDD-V3BQT7QE)."""
+    state = iso["state"]
+    monkeypatch.setenv("HOME", str(iso["project"].parent / "fake-home"))
+    project = iso["project"]
+    _write_task_card(project / "design" / "tasks", "TODOCRD1", "todo")
+    now = int(time.time())
+    presence = state.user_presence_path()
+    presence.parent.mkdir(parents=True, exist_ok=True)
+
+    def _write_presence(epoch: int) -> None:
+        presence.write_text(
+            json.dumps({"last_user_input_epoch": epoch, "source": "janitor", "written_at_epoch": now}),
+            encoding="utf-8",
+        )
+
+    _write_presence(now - 900)  # old enough to be idle (>= 600s threshold)
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" in capsys.readouterr().out
+
+    dispatch._phase_keep_going_nudge()  # same board, same prompt epoch -> quiet
+    assert "[janitor-resume]" not in capsys.readouterr().out
+
+    _write_presence(now - 700)  # newer prompt, still old enough to stay idle
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out, f"a newer user prompt must reset the dedup: {out!r}"
+
+
 def test_keep_going_nudge_names_a_pending_agent(iso, capsys) -> None:
     """DEFAULT-ON (user 2026-07-16): every fire nudges, and when a background agent is pending the
     manifest pointer ENRICHES the nudge (W4) instead of being wasted on a silent fire."""
