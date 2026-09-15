@@ -151,7 +151,18 @@ _MEMORY_NOOP_RE = re.compile(
 # cost of refusing the fourth patch, it is bounded (`_MAX_LISTED`), and it decays as the old
 # reports age out — whereas another regex widening would have re-armed the same trap.
 _MEMORY_OUTCOME_RE = re.compile(
-    r"<!--\s*janitor-outcome:\s*(noop|mutation)\s*-->",
+    # why: phase M-c widened the curator's marker to `noop reason=no-work` / `noop
+    # reason=failed` so the report can carry WHY it abstained without a second regex.
+    # group(1) stays noop|mutation for the existing boolean read; group(2) (the reason) is
+    # accepted as ANY token (`\S+`), not pinned to the two literals -- REVIEW FINDING
+    # 2026-09-15: this file never reads group(2), so pinning it would make a well-formed,
+    # appended `noop reason=<unlisted-token> -->` marker fail the WHOLE regex (the literal
+    # text after `reason=` cannot be consumed by the optional group OR skipped), silently
+    # demoting a PRESENT marker to "absent" and contradicting this file's own documented
+    # invariant that an explicit marker always wins over the prose fallback. Literal
+    # pinning belongs to memory-maintenance.py's own separate `_MEMORY_OUTCOME_RE`, which
+    # DOES gate on the reason value and validates it explicitly rather than in the regex.
+    r"<!--\s*janitor-outcome:\s*(noop|mutation)(?:\s+reason=(\S+))?\s*-->",
     re.IGNORECASE,
 )
 _MARKER_SCAN_BYTES = 64 * 1024  # the marker is APPENDED at pass end, so scan the whole report
@@ -209,9 +220,14 @@ def _is_memory_noop_report(rep: Path, reports_dir: Path) -> bool:
         text if len(text) <= 2 * _MARKER_SCAN_BYTES
         else text[:_MARKER_SCAN_BYTES] + "\n" + text[-_MARKER_SCAN_BYTES:]
     )
-    marker = _MEMORY_OUTCOME_RE.search(window)
-    if marker is not None:
-        return marker.group(1).lower() == "noop"
+    # why: the marker is APPENDED at pass end, but an agent report may also QUOTE the
+    # contract string in prose earlier in the body (e.g. explaining the two-value
+    # vocabulary) — coordinator review, 2026-09-15. Anchor on the LAST occurrence in the
+    # window, never `.search()`'s first hit, so a quoted example never overrides the
+    # real, appended verdict.
+    markers = list(_MEMORY_OUTCOME_RE.finditer(window))
+    if markers:
+        return markers[-1].group(1).lower() == "noop"
     # No marker: a legacy report (or a curator that skipped the closing block). Fall back to the
     # prose forms, over the SAME opening window as before so this path's behaviour is unchanged —
     # widening the window here would let form 3 (a bare `# … abstained` H1) match a heading deep

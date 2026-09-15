@@ -1193,20 +1193,46 @@ def test_no_recent_noop_suppresses_a_fresh_noop_report(tmp_path, monkeypatch):
     project_root.mkdir()
     monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
     now = 100_000
-    _write_report(project_root, "consolidate", "LOCAL", "noop", mtime=now - 100)
+    _write_report(project_root, "consolidate", "LOCAL", "noop reason=no-work", mtime=now - 100)
     assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is False
 
 
 def test_no_recent_noop_allows_a_stale_noop_report(tmp_path, monkeypatch):
-    """A `noop` report OLDER than the chore's cadence must not suppress it — the
-    chore is due again once its own interval has elapsed regardless of the past
-    abstain."""
+    """A `noop reason=no-work` report OLDER than the chore's cadence must not
+    suppress it — the chore is due again once its own interval has elapsed
+    regardless of the past abstain."""
     mm = _load_mm(monkeypatch, tmp_path / "state")
     project_root = tmp_path / "project"
     project_root.mkdir()
     monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
     now = 100_000
-    _write_report(project_root, "consolidate", "LOCAL", "noop", mtime=now - 7200)
+    _write_report(project_root, "consolidate", "LOCAL", "noop reason=no-work", mtime=now - 7200)
+    assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is True
+
+
+def test_no_recent_noop_allows_a_failed_noop_report(tmp_path, monkeypatch):
+    """A `noop reason=failed` report must NOT suppress — a pass that abandoned
+    (tool error, memgrep refusal, claim mismatch, interruption) is not the same
+    as a proven "nothing to do", and treating it as such would silence the chore
+    for a whole cadence over a transient failure (review finding, 2026-09-15)."""
+    mm = _load_mm(monkeypatch, tmp_path / "state")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
+    now = 100_000
+    _write_report(project_root, "consolidate", "LOCAL", "noop reason=failed", mtime=now - 100)
+    assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is True
+
+
+def test_no_recent_noop_allows_a_bare_old_format_noop_report(tmp_path, monkeypatch):
+    """A bare `noop` (old format, no `reason=` suffix) must fail OPEN — it cannot
+    be told apart from an abandoned pass, so it must never suppress."""
+    mm = _load_mm(monkeypatch, tmp_path / "state")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(mm.state, "project_root", lambda: project_root)
+    now = 100_000
+    _write_report(project_root, "consolidate", "LOCAL", "noop", mtime=now - 100)
     assert mm._no_recent_noop("consolidate", "LOCAL", tmp_path, now, interval_s=3600) is True
 
 

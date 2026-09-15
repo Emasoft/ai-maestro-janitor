@@ -147,12 +147,15 @@ When the pass is finished, run this as the LAST thing you do to the report. Fill
 word, and it must be one of exactly two:
 
 ```bash
-OUTCOME=noop                # EXACTLY `noop` or `mutation` — never any other word
+OUTCOME='noop reason=no-work'   # EXACTLY one of the three forms below — never any other word
 printf '<!-- janitor-outcome: %s -->\n' "$OUTCOME" >> "$REPORT_FILE"
 ```
 
-- `noop` — you changed NOTHING in the corpus (abstained, nothing due, no qualifying
-  candidate, 0 mutations). Whatever you called it in the prose, it is `noop` here.
+- `noop reason=no-work` — the candidate step found nothing to do, or every
+  candidate was judged and refused (0 mutations, a genuine "nothing due" pass).
+- `noop reason=failed` — you stopped for any OTHER reason: a tool error, memgrep
+  refused a write, a claim mismatch, an interrupted turn. This is NOT "nothing to
+  do" — do not silence the next run over a transient failure.
 - `mutation` — you merged, split, atomized, repaired, harvested, or otherwise WROTE.
 
 **Do not paraphrase it, and do not put the verdict only in prose.** `report-to-trdd-drift`

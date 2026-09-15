@@ -487,6 +487,100 @@ class TestRenamedCuratorDir(unittest.TestCase):
             self.assertIn("[report-to-trdd]", out)
             self.assertIn("consolidate-merge-plan.md", out)
 
+    # --- phase M-c: the marker now optionally carries `reason=<token>` -----------------
+    #
+    # agents/janitor-memory-subconscious-agent.md phase M-c widened the curator's own
+    # marker from bare `noop` to `noop reason=no-work` / `noop reason=failed`, so the
+    # report can carry WHY it abstained. Group(1) (noop|mutation) is unchanged; the reason
+    # is an optional, ignored suffix from this detector's point of view.
+
+    def test_marker_noop_reason_no_work_still_exempts(self):
+        """phase M-c's `noop reason=no-work` form must classify identically to bare `noop`."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260915_090000+0200-consolidate-no-work.md")
+            rep.write_text(
+                "<!-- generated: 2026-09-15T09:00:00+0200 -->\n"
+                "# CONSOLIDATE pass\n\n## Outcome\n\nNothing due this pass.\n\n"
+                "<!-- janitor-outcome: noop reason=no-work -->\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_marker_noop_reason_failed_still_exempts(self):
+        """phase M-c's `noop reason=failed` form must also classify as noop — the reason is
+        an informational suffix, not a second outcome."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260915_091000+0200-consolidate-failed.md")
+            rep.write_text(
+                "<!-- generated: 2026-09-15T09:10:00+0200 -->\n"
+                "# CONSOLIDATE pass\n\n## Outcome\n\nThe pass failed before completing.\n\n"
+                "<!-- janitor-outcome: noop reason=failed -->\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_marker_mutation_unaffected_by_the_optional_reason_group(self):
+        """`mutation` must still flag exactly as before now that a reason suffix is
+        optionally accepted after either verb — this guards the mutation side of the
+        widened pattern, not just the noop side."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260915_092000+0200-consolidate-merge-plan.md")
+            rep.write_text(
+                "<!-- generated: 2026-09-15T09:20:00+0200 -->\n"
+                "# CONSOLIDATE pass — merge plan\n\n"
+                "## Outcome\n\nMERGED the security-trio pages.\n\n"
+                "<!-- janitor-outcome: mutation -->\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertIn("[report-to-trdd]", out)
+            self.assertIn("consolidate-merge-plan.md", out)
+
+    def test_last_marker_wins_when_the_body_quotes_the_contract_string(self):
+        """coordinator review, 2026-09-15: an agent report may QUOTE the marker contract in
+        its own prose (explaining the two-value vocabulary) before appending the REAL
+        verdict at pass end. The classification must follow the LAST occurrence in the
+        window, not `.search()`'s first hit — otherwise a quoted `mutation` example
+        earlier in the body would wrongly flag a report whose real, appended verdict is
+        `noop`."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260915_093000+0200-consolidate-quoted-contract.md")
+            rep.write_text(
+                "<!-- generated: 2026-09-15T09:30:00+0200 -->\n"
+                "# CONSOLIDATE pass\n\n"
+                "## Judgment\n\nThe pass verdict uses one of two forms, e.g. "
+                "`<!-- janitor-outcome: mutation -->` when pages are merged. This pass "
+                "found nothing to merge.\n\n"
+                "<!-- janitor-outcome: noop reason=no-work -->\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
+    def test_marker_unrecognised_reason_still_classifies_by_the_verb(self):
+        """REVIEW FINDING 2026-09-15: this file never reads group(2) (the reason), so the
+        reason token is accepted as ANY word (`\\S+`), not pinned to the two literals the
+        agent contract defines. A well-formed, appended `noop reason=<unlisted-token>`
+        marker must still classify by its `noop|mutation` verb — an unrecognised reason
+        must NOT make the whole marker invisible and silently fall the report through to
+        the (here misleading) prose path. Proven with prose that reads as a MUTATION
+        ("MERGED pages") while the real, appended verdict is `noop` — if the marker were
+        invisible this would wrongly fall through to the prose fallback, which does not
+        even match noop wording, and the report would be (wrongly) flagged."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp, "janitor-memory-consolidate")
+            rep = (root / "reports/janitor-memory-consolidate"
+                   / "20260915_094000+0200-consolidate-unknown-reason.md")
+            rep.write_text(
+                "<!-- generated: 2026-09-15T09:40:00+0200 -->\n"
+                "# CONSOLIDATE pass\n\n## Outcome\n\nMERGED nothing; considered and skipped.\n\n"
+                "<!-- janitor-outcome: noop reason=weird-token -->\n")
+            _aged(rep)
+            self.assertEqual(_run(root).strip(), "")
+
     def test_absent_marker_still_uses_the_prose_fallback(self):
         """Legacy reports predate the marker, so removing the prose forms would re-nag ~59 of
         them at once. An absent marker must fall through to the unchanged prose path."""

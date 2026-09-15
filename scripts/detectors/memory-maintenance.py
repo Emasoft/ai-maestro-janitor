@@ -374,7 +374,7 @@ def _split_max_bytes() -> int:
         return 0
 
 _MEMORY_OUTCOME_RE = re.compile(
-    r"<!--\s*janitor-outcome:\s*(noop|mutation)\s*-->",
+    r"<!--\s*janitor-outcome:\s*(noop|mutation)(?:\s+reason=([a-z-]+))?\s*-->",
     re.IGNORECASE,
 )
 _NOOP_TAIL_SCAN_BYTES = 200  # the outcome marker is APPENDED as the last line of the report
@@ -383,7 +383,8 @@ _NOOP_TAIL_SCAN_BYTES = 200  # the outcome marker is APPENDED as the last line o
 def _no_recent_noop(chore: str, scope: str, root: Path, now: int, interval_s: float) -> bool:
     """Third AND gate on `_first_due_intervention`: False (NOT due) only when the
     newest janitor-memory-subconscious-agent report for this (chore, scope) is a
-    proven `noop` younger than the chore's own cadence -- otherwise True (fail OPEN).
+    proven `noop reason=no-work` younger than the chore's own cadence -- otherwise
+    True (fail OPEN).
 
     Without this, a chore that just ABSTAINED (0 mutations, e.g. 56 pages read, 4
     refusals, no legal merge) got re-emitted on the very next heartbeat because the
@@ -393,10 +394,14 @@ def _no_recent_noop(chore: str, scope: str, root: Path, now: int, interval_s: fl
     re-emitted 35 min after an abstain on the same scope, ~236k tokens for nothing).
 
     Fails OPEN (returns True / due) on: no report dir, no matching report, a
-    `mutation` outcome, or a report whose tail carries no parseable marker -- a
-    missing/malformed report must never permanently silence a chore. Only an
-    unambiguous, fresh `noop` suppresses, and only until the chore's own cadence
-    interval elapses, at which point it is tried again regardless."""
+    `mutation` outcome, a bare/old-format `noop` with no reason, a
+    `noop reason=failed` (the pass ABANDONED for a tool error / memgrep refusal /
+    claim mismatch / interruption -- not the same as "nothing to do", and treating
+    it as such would silence the chore for a whole cadence over a transient failure
+    -- review finding, 2026-09-15), or a report whose tail carries no parseable
+    marker. Only an unambiguous, fresh `noop reason=no-work` suppresses, and only
+    until the chore's own cadence interval elapses, at which point it is tried
+    again regardless."""
     # NOTE (review finding): `root` is unused here by design — LOCAL/USER report
     # dirs are keyed by (chore, scope) only, matching the agent's own filename
     # convention, and PROJECT-scope reports have exactly one root per project
@@ -431,7 +436,10 @@ def _no_recent_noop(chore: str, scope: str, root: Path, now: int, interval_s: fl
     marker = _MEMORY_OUTCOME_RE.search(tail)
     if marker is None:
         return True
-    if marker.group(1).lower() != "noop":
+    # Only `noop reason=no-work` suppresses. A `mutation`, a `noop reason=failed`
+    # (the pass gave up, it did not find "nothing to do"), and a bare old-format
+    # `noop` (no reason=... suffix) all fail OPEN — see the docstring above.
+    if marker.group(1).lower() != "noop" or (marker.group(2) or "").lower() != "no-work":
         return True
     age_s = now - mtime
     if age_s < interval_s:
