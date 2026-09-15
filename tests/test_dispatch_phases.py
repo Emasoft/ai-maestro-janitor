@@ -45,6 +45,12 @@ def env_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     # one-time [janitor-renew] noise — was retired by TRDD-BRHJHWW0: mid-session tier flips
     # were re-arming the cron several times an hour. Nothing left in main() reads
     # CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC any more, so there is no env var to set.
+    # HOME isolation (TRDD-TWF7DXXR): `state.user_presence_path()` resolves off `Path.home()`,
+    # independent of the two dirs above — without this override every test in this file would
+    # read the REAL `~/.aimaestro/state/user-presence.json`, whose `last_user_input_epoch` is
+    # whatever this very machine's session last wrote (often seconds old), making the
+    # keep-going gate's user-idle check flip nondeterministically per host/run.
+    monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
 
     # Force-reload so module-level path resolution picks up the env.
     for mod in ("dispatch", "global_state", "state"):
@@ -1291,6 +1297,7 @@ def test_main_full_fire_runs_the_whole_roster_with_a_retired_sentinel_present(
 
     gs.init_global_state()
     state.init_state()
+    _make_idle_and_stale(state)
     (state.state_dir() / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
 
     ran: list[str] = []
@@ -1365,6 +1372,69 @@ _KEEP_GOING_LINE = (
     "or you are blocked on a human decision, say so briefly and stop; there is no "
     "off-switch to run and none is needed"
 )
+# The gate (TRDD-TWF7DXXR) requires a real stale pending agent to fire, and any such entry
+# is ALSO advertised by `n = _pending_agent_count()`'s bit — so a test that satisfies the
+# gate via `_make_idle_and_stale` (one agent, id "test-agent") can never reach the bare
+# `_KEEP_GOING_LINE` fallback (that fallback fires only when `bits` is fully empty). This is
+# the line those tests get instead, with zero other bits (no directive/board/attention) set.
+_KEEP_GOING_LINE_ONE_STALE_AGENT = (
+    "continue your pending task (keep-going mode) — 1 background agent(s) pending — before "
+    "resuming any via SendMessage, confirm each is still wanted (one may be an agent you "
+    "deliberately stopped) (ids in .janitor/state/pending-agents.json)"
+)
+
+
+def _make_user_idle(state, *, ago_s: int = 3700) -> None:
+    """Write the machine-global user-presence breadcrumb `ago_s` seconds in the past
+    (default well past the 600s default threshold) — makes `_user_idle_seconds` report a
+    genuine idle user instead of the fail-open-to-idle "no file" default, so tests that
+    also want to prove the ACTIVE-user suppression path can call `_make_user_active` and
+    get a real, non-default reading."""
+    now = int(time.time())
+    path = state.user_presence_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"last_user_input_epoch": now - ago_s, "source": "test", "written_at_epoch": now}
+        ),
+        encoding="utf-8",
+    )
+
+
+def _make_user_active(state, *, ago_s: int = 60) -> None:
+    """Write the breadcrumb `ago_s` seconds in the past (default well under the 600s
+    threshold) — a genuinely ACTIVE user, for the suppression-path tests."""
+    _make_user_idle(state, ago_s=ago_s)
+
+
+def _add_pending_agent(
+    state, agent_id: str, *, stale: bool, stopped: bool = False, age_s: int = 1800
+) -> None:
+    """Register one `pending-agents.json` entry with a real transcript file, fresh (10s
+    old) or stale (`age_s` old, default 1800s — past the 900s default threshold)."""
+    import os  # noqa: PLC0415 - local import, mirrors `_write_directive`'s style below
+
+    import pending_agents
+
+    agent_dir = state.state_dir() / "agents" / agent_id
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    transcript = agent_dir / f"agent-{agent_id}.jsonl"
+    transcript.write_text('{"type": "assistant"}\n', encoding="utf-8")
+    if stale:
+        when = time.time() - age_s
+        os.utime(transcript, (when, when))
+    pending_agents.add(agent_id, "test agent", agent_dir=str(agent_dir))
+    if stopped:
+        pending_agents.mark_stopped(agent_id)
+
+
+def _make_idle_and_stale(state, *, agent_id: str = "test-agent") -> None:
+    """The default fixture for tests written before the keep-going gate existed: idle
+    user + one stale pending agent, i.e. the ONE combination the gate always nudges on."""
+    _make_user_idle(state)
+    _add_pending_agent(state, agent_id, stale=True)
+
+
 def test_phase_keep_going_nudge_default_on_no_flag(env_isolation: dict) -> None:
     """DEFAULT-ON (user 2026-07-16): no flag, no opt-out → nudges anyway. Keeping an unattended
     session working is the janitor's #1 job, so the nudge is the default, not opt-in."""
@@ -1372,8 +1442,11 @@ def test_phase_keep_going_nudge_default_on_no_flag(env_isolation: dict) -> None:
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"default-on nudge expected, got {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT], (
+        f"default-on nudge expected, got {out!r}"
+    )
 
 
 def test_phase_keep_going_nudge_has_NO_off_switch(
@@ -1398,9 +1471,10 @@ def test_phase_keep_going_nudge_has_NO_off_switch(
     (state.state_dir() / "maintenance-mode").write_text("x", encoding="utf-8")
     (state.state_dir() / "paused").write_text("x", encoding="utf-8")
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
+    _make_idle_and_stale(state)
 
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], (
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT], (
         f"a retired off-switch still changes the never-stop nudge: {out!r}"
     )
 
@@ -1417,6 +1491,7 @@ def test_the_nudge_never_offers_a_way_to_turn_itself_off(env_isolation: dict) ->
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert "/janitor-keep-going" not in out, f"the nudge must not name a retired off-switch: {out!r}"
     assert "maintenance" not in out.lower(), f"the nudge must not name a retired mode: {out!r}"
@@ -1444,6 +1519,7 @@ def test_a_fresh_directive_naming_no_trdd_is_still_cited(env_isolation: dict) ->
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     _write_directive(state, "read .janitor/state/agent-handoff.md FIRST, then resume.", age_s=60)
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert "resume-directive.txt" in out, f"a fresh directive must still be cited: {out!r}"
@@ -1463,6 +1539,7 @@ def test_a_directive_that_has_sat_for_hours_stops_being_cited(env_isolation: dic
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     _write_directive(
         state,
         "the work is COMPLETE and shipped (v13.3.0 + v13.3.1) — nothing left to do.",
@@ -1482,6 +1559,7 @@ def test_the_nudge_still_fires_after_the_directive_ages_out(env_isolation: dict)
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     _write_directive(state, "stale pointer with no TRDD in it", age_s=6 * 3600)
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert out.strip(), "the nudge must still emit its generic form"
@@ -1509,11 +1587,12 @@ def test_phase_keep_going_nudge_refires_every_call_absent_a_recent_resume(env_is
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
 
     first = _capture_stdout(dispatch._phase_keep_going_nudge)
     second = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert first == second, "the nudge must re-fire identically on every call, no dedupe"
-    assert first.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
+    assert first.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT]
 
 
 def test_the_retired_knob_no_longer_restores_opt_in(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1525,8 +1604,11 @@ def test_the_retired_knob_no_longer_restores_opt_in(env_isolation: dict, monkeyp
 
     state.init_state()
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
+    _make_idle_and_stale(state)
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"the retired knob still silenced it: {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT], (
+        f"the retired knob still silenced it: {out!r}"
+    )
 
 
 def _write_trdd(project: Path, uid8: str, column: str) -> None:
@@ -1556,6 +1638,7 @@ def test_phase_keep_going_nudge_degrades_once_the_named_trdd_is_terminal(env_iso
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     _write_trdd(env_isolation["project"], "ABCD1234", "complete")
     (state.state_dir() / "resume-directive.txt").write_text(
         "continue TRDD-ABCD1234 (shipped work) — read its STATE block first, then proceed.",
@@ -1563,7 +1646,7 @@ def test_phase_keep_going_nudge_degrades_once_the_named_trdd_is_terminal(env_iso
     )
 
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], (
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT], (
         f"a directive naming a shipped TRDD must degrade to the generic nudge, got {out!r}"
     )
 
@@ -1576,6 +1659,7 @@ def test_phase_keep_going_nudge_still_cites_a_live_directive(env_isolation: dict
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     _write_trdd(env_isolation["project"], "ABCD1234", "dev")
     (state.state_dir() / "resume-directive.txt").write_text(
         "continue TRDD-ABCD1234 (still in progress) — read its STATE block first.",
@@ -1595,6 +1679,7 @@ def test_phase_keep_going_nudge_directive_with_no_trdd_ref_still_cited(env_isola
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     (state.state_dir() / "resume-directive.txt").write_text(
         "read .janitor/state/agent-handoff.md FIRST, then resume your prior in-flight task.",
         encoding="utf-8",
@@ -1602,6 +1687,79 @@ def test_phase_keep_going_nudge_directive_with_no_trdd_ref_still_cited(env_isola
 
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert "resume-directive.txt" in out, f"an unverifiable directive must still be cited, got {out!r}"
+
+
+# ---------- THE GATE (TRDD-TWF7DXXR): idle-user AND stale-agent, both required -----------
+
+
+def test_gate_suppresses_when_user_typed_recently(env_isolation: dict) -> None:
+    """(1) User typed 60s ago (well under the 600s threshold) → the nudge is suppressed
+    regardless of any pending agent's state — condition (a) alone fails the gate."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_active(state, ago_s=60)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out == "", f"an active user must suppress the nudge, got {out!r}"
+
+
+def test_gate_suppresses_when_the_only_pending_agent_is_fresh(env_isolation: dict) -> None:
+    """(2) User idle 1h, one pending agent whose transcript is 10s old → the agent is
+    visibly working, so the nudge is suppressed even though the user is idle."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_idle(state, ago_s=3600)
+    _add_pending_agent(state, "fresh-agent", stale=False)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out == "", f"a fresh pending agent must suppress the nudge, got {out!r}"
+
+
+def test_gate_fires_when_idle_and_one_agent_is_stale(env_isolation: dict) -> None:
+    """(3) User idle 1h, one pending agent stale 20 minutes → BOTH gate conditions hold, so
+    the nudge fires AND still carries the board bit (the gate changes only whether the
+    nudge fires, never what it says once it does)."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_idle(state, ago_s=3600)
+    _add_pending_agent(state, "stale-agent", stale=True, age_s=1200)
+    _card(env_isolation["project"] / "design" / "tasks", "GATE0001", "todo")
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.startswith("[janitor-resume]\n"), f"idle + stale agent must nudge, got {out!r}"
+    assert "TRDD-GATE0001" in out, f"the board bit must still ride the gated nudge, got {out!r}"
+
+
+def test_gate_suppresses_when_the_only_pending_agent_is_stopped(env_isolation: dict) -> None:
+    """(4) User idle, the only pending-agent entry is `stopped: true` → a deliberately
+    stopped agent is not "waiting on", so there is nothing to prove stale and the nudge is
+    suppressed."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_idle(state, ago_s=3600)
+    _add_pending_agent(state, "stopped-agent", stale=True, stopped=True)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out == "", f"a stopped-only manifest must suppress the nudge, got {out!r}"
+
+
+def test_gate_fires_when_presence_file_is_missing_and_agent_is_stale(env_isolation: dict) -> None:
+    """(5) No user-presence breadcrumb at all (never written) + one stale pending agent →
+    the missing presence file fails OPEN to idle, so the gate still fires."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    assert not state.user_presence_path().exists(), "precondition: no breadcrumb written"
+    _add_pending_agent(state, "stale-agent-2", stale=True)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.startswith("[janitor-resume]\n"), (
+        f"a missing presence file must fail open to idle and still nudge, got {out!r}"
+    )
 
 
 def test_main_full_mode_default_on_nudges(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1613,6 +1771,7 @@ def test_main_full_mode_default_on_nudges(env_isolation: dict, monkeypatch: pyte
 
     gs.init_global_state()
     state.init_state()
+    _make_idle_and_stale(state)
 
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
@@ -1632,6 +1791,7 @@ def test_main_full_mode_nudges_THROUGH_the_retired_sentinel(env_isolation: dict,
 
     gs.init_global_state()
     state.init_state()
+    _make_idle_and_stale(state)
     (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
 
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
@@ -1651,6 +1811,7 @@ def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detector
 
     gs.init_global_state()
     state.init_state()
+    _make_idle_and_stale(state)
     (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
 
     ran: list[str] = []
@@ -1660,7 +1821,9 @@ def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detector
     monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
     out = _capture_stdout(dispatch.main)
-    assert out.splitlines()[:2] == ["[janitor-resume]", _KEEP_GOING_LINE], f"nudge must lead the output, got {out!r}"
+    assert out.splitlines()[:2] == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT], (
+        f"nudge must lead the output, got {out!r}"
+    )
     assert len(ran) > 0, "keep-going in FULL mode must still run the due detector roster"
     assert daemon_calls == ["called"], "keep-going in FULL mode must still lazy-spawn the daemon"
 
@@ -2306,6 +2469,7 @@ def test_compact_resume_then_nudge_emits_only_one_resume_cue(env_isolation: dict
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     sd = state.state_dir()
     (sd / "resume-after-compact.flag").write_text("continue TRDD-ABCD1234", encoding="utf-8")
 
@@ -2353,6 +2517,7 @@ def test_keep_going_dedupe_is_the_only_skip_and_it_is_mode_free(env_isolation: d
     import state
 
     state.init_state()
+    _make_idle_and_stale(state)
     sd = state.state_dir()
     (sd / "maintenance-mode").write_text("set by an older janitor", encoding="utf-8")
     dispatch._stamp_resume(sd, int(time.time()))
@@ -2361,7 +2526,7 @@ def test_keep_going_dedupe_is_the_only_skip_and_it_is_mode_free(env_isolation: d
     # Next fire past the window: it nudges again, unconditionally.
     dispatch._stamp_resume(sd, int(time.time()) - (dispatch._KEEP_GOING_RESUME_DEDUPE_S + 1))
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT]
 
 
 # ---------- Phase 1.5a2b: the self-COST alarm (was the self-budget throttle) ----------
@@ -2966,7 +3131,10 @@ def test_main_action_fire_does_not_emit_quiet(env_isolation: dict, monkeypatch: 
     dispatch = _import_dispatch()
 
     _isolate_home(env_isolation, monkeypatch)
-    _seed_state_dir(dispatch)  # no resume stamp → the nudge fires
+    import state as _st
+
+    _seed_state_dir(dispatch)  # no resume stamp → the nudge is eligible to fire
+    _make_idle_and_stale(_st)  # idle user + one stale agent → the gate lets it through
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
@@ -3408,6 +3576,7 @@ def test_keep_going_nudge_prints_the_attention_clause(env_isolation: dict) -> No
     import state as _st
 
     _st.init_state()
+    _make_idle_and_stale(_st)
     tasks = env_isolation["project"] / "design" / "tasks"
     _card_blocked_by(tasks, "STUCK001", "blocked", "[owner-decision-approve-the-migration]")
 
@@ -3587,6 +3756,9 @@ def test_outcome_stamp_distinguishes_decline_from_completion(
 def test_keep_going_nudge_payload_carries_the_board(env_isolation: dict) -> None:
     """End-to-end: the emitted [janitor-resume] payload names the open cards."""
     dispatch = _import_dispatch()
+    import state as _st
+
+    _make_idle_and_stale(_st)
     _card(env_isolation["project"] / "design" / "tasks", "DDDD4444", "todo")
     out = _capture_stdout(dispatch._phase_keep_going_nudge)
     assert "[janitor-resume]" in out

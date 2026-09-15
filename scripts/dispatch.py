@@ -3058,15 +3058,114 @@ def _open_issues_bit() -> str:
     except (OSError, ValueError):
         return ""
 
+_KEEP_GOING_USER_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_USER_IDLE_S"
+_KEEP_GOING_USER_IDLE_DEFAULT = 600
+_KEEP_GOING_AGENT_STALE_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_AGENT_STALE_S"
+_KEEP_GOING_AGENT_STALE_DEFAULT = 900
+
+
+def _user_idle_seconds(now: int) -> int | None:
+    """Seconds since the last genuine user prompt, or None when unreadable/absent.
+
+    Reads the cross-plugin breadcrumb `state.user_presence_path()`
+    (`last_user_input_epoch`, bumped only by a real user prompt — never a cron
+    `[janitor-...]` fire). None covers every "cannot tell" case (missing file, corrupt
+    JSON, wrong shape, non-int/bool field) so the caller can fail OPEN to idle without
+    pretending it knows a real value.
+    """
+    try:
+        raw = json.loads(state.user_presence_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("last_user_input_epoch")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    return max(0, now - value)
+
+
+def _keep_going_user_idle_threshold() -> int:
+    """The configured USER-IDLE threshold (default 600s), never <= 0."""
+    threshold = state.coerce_int(
+        os.environ.get(_KEEP_GOING_USER_IDLE_ENV, ""),
+        _KEEP_GOING_USER_IDLE_DEFAULT,
+        detector_name="keep-going-nudge",
+        var_name=_KEEP_GOING_USER_IDLE_ENV,
+    )
+    return threshold if threshold > 0 else _KEEP_GOING_USER_IDLE_DEFAULT
+
+
+def _keep_going_agent_stale_threshold() -> int:
+    """The configured AGENT-STALE threshold (default 900s), never <= 0."""
+    threshold = state.coerce_int(
+        os.environ.get(_KEEP_GOING_AGENT_STALE_ENV, ""),
+        _KEEP_GOING_AGENT_STALE_DEFAULT,
+        detector_name="keep-going-nudge",
+        var_name=_KEEP_GOING_AGENT_STALE_ENV,
+    )
+    return threshold if threshold > 0 else _KEEP_GOING_AGENT_STALE_DEFAULT
+
+
+def _any_pending_agent_stale(now: int) -> bool:
+    """True iff at least one non-stopped pending agent is NOT visibly working.
+
+    "Not visibly working" = its transcript is missing OR older than the configured stale
+    threshold. `stopped: true` entries (a deliberate TaskStop) are excluded — they are not
+    "an agent the session is waiting on". No non-stopped entries at all means there is
+    nothing to prove is stale, so this returns False (the caller combines it with the
+    user-idle check; a solo session with zero background agents is unaffected by this
+    check alone).
+
+    Fail-open toward STALE, never toward fresh: an unresolvable transcript path or an
+    unreadable stat means "cannot prove this agent is working", and the whole point of the
+    pulse is to never go silent on an unproven assumption.
+    """
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy, mirrors the sibling helpers here
+
+        threshold = _keep_going_agent_stale_threshold()
+        entries = [e for e in pending_agents.pending(now) if not e.get("stopped")]
+        if not entries:
+            return False
+        for entry in entries:
+            path = pending_agents.resolve_transcript(entry)
+            if not path:
+                return True
+            try:
+                mtime = int(Path(path).stat().st_mtime)
+            except OSError:
+                return True
+            if now - mtime >= threshold:
+                return True
+        return False
+    except Exception:  # noqa: BLE001 - a manifest bug must never suppress the pulse
+        return True
+
 
 def _phase_keep_going_nudge() -> None:
-    """Emit a never-stop continue-nudge to keep an unattended session working. UNCONDITIONAL.
+    """Emit a never-stop continue-nudge to keep an unattended session working — but ONLY
+    when there is nobody visibly making progress: the USER is idle AND at least one
+    pending background agent looks stalled (TRDD-TWF7DXXR).
 
     WHY (TRDD-TKNSTP82 Part B, user 2026-07-02; DEFAULT-ON user 2026-07-16): a healthy
     heartbeat detects drift and re-arms dead crons, but on its own it never tells an
     idle agent to keep working — so an unattended fleet went silent overnight even
     though the janitor was firing the whole time. This phase EMITS a resume-shaped nudge
     but does NOT early-return — the detector roster downstream runs exactly as before.
+
+    THE GATE (TRDD-TWF7DXXR, measured 2026-09-15): firing unconditionally on every due
+    heartbeat produced 4 identical "continue" cues in 25 minutes while every pending
+    agent was alive and working — pure churn, not survival. The gate is TWO checks,
+    BOTH required:
+      (a) USER IDLE — `_user_idle_seconds` shows no real prompt within
+          `_keep_going_user_idle_threshold()` (default 600s; missing/unreadable presence
+          -> fail OPEN to idle, an unattended session must still be nudged).
+      (b) AGENT STALE — `_any_pending_agent_stale` shows at least one non-stopped
+          pending agent whose transcript is missing or older than
+          `_keep_going_agent_stale_threshold()` (default 900s).
+    Neither check is a new off-switch: both fail OPEN (toward emitting the nudge) on any
+    read error, and there is still no lever that silences the pulse on purpose — see below.
 
     THERE IS NO OFF SWITCH, and that is the point (owner directive 2026-07-31: *"we need
     to remove the very option of disabling the janitor features"*). It used to have two —
@@ -3079,25 +3178,40 @@ def _phase_keep_going_nudge() -> None:
     prevent (a session going quiet unattended) is exactly the state it was left in.
 
     Firing is bounded, not a runaway: each fire is one already-scheduled heartbeat turn and
-    the nudge adds a single line to it. Re-firing on EVERY due heartbeat is the whole
-    "never stop" point — a one-time nudge would miss a session idle across several fires.
-    Exactly ONE exception survives, and it is a de-duplicator rather than a mute: the
-    single fire immediately after a rate-limit / post-compact resume cue, which already
-    said "continue" and carried the directive too. See _keep_going_muted_by_recent_resume.
+    the nudge adds a single line to it. Re-firing on EVERY due heartbeat that passes the
+    gate is the whole "never stop" point — a one-time nudge would miss a session idle
+    across several fires. Exactly ONE exception survives beyond the gate, and it is a
+    de-duplicator rather than a mute: the single fire immediately after a rate-limit /
+    post-compact resume cue, which already said "continue" and carried the directive too.
+    See _keep_going_muted_by_recent_resume.
     """
     sd = state.state_dir()
+    now = int(time.time())
     # DEDUPE (TRDD-QW6RVAKN) — the ONE case that skips a nudge. It does not
     # weaken "always nudges": we are deferring to a [janitor-resume] cue that fired ONE
     # heartbeat ago and carried a resume DIRECTIVE — a strictly stronger nudge than this
     # generic one. Repeating it is duplication, not survival; the nudge resumes next fire.
     # It is time-bounded (~1 fire) and self-clearing, which is what separates it from the
     # sticky sentinels this phase no longer has.
-    if _keep_going_muted_by_recent_resume(sd, int(time.time())):
+    if _keep_going_muted_by_recent_resume(sd, now):
+        return
+    # THE GATE (TRDD-TWF7DXXR) — see docstring. Both checks fail OPEN (toward emitting),
+    # so a broken presence file or an unreadable manifest can never silence the pulse;
+    # only PROOF that a human is present AND every pending agent is alive suppresses it.
+    idle_s = _user_idle_seconds(now)
+    user_idle = idle_s is None or idle_s >= _keep_going_user_idle_threshold()
+    if user_idle and not _any_pending_agent_stale(now):
+        agent_total = _pending_agent_count()
+        state.log_line("dispatch", f"keep-going: suppressed (all {agent_total} agents live)")
+        return
+    if not user_idle:
+        state.log_line("dispatch", f"keep-going: suppressed (user active {idle_s}s ago)")
         return
     # D5 (TRDD-82JRK0CY): the bare [janitor-resume] token + its single prose note are
     # emitted together at the end via _emit_decision (auto-flush + payload defang). This
-    # phase does NOT early-return — see the docstring — but funneling it keeps the marker
-    # shape uniform and marks the fire non-quiet so _emit_quiet_if_idle stays silent.
+    # phase does NOT early-return once the gate above is passed — see the docstring — but
+    # funneling it keeps the marker shape uniform and marks the fire non-quiet so
+    # _emit_quiet_if_idle stays silent.
     # W4 (TRDD-82OP4EN9): point the nudge at the ACTUAL pending work when we can
     # name it — a generic "continue" lets an idle session answer "nothing to do"
     # and stall; a pointer to the directive file / the pending-agents manifest
