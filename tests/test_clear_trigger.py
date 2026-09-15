@@ -12,6 +12,7 @@ import importlib.util as _u
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -373,3 +374,131 @@ def test_malformed_iterm_id_refuses_to_fire(tmp_path: Path) -> None:
     assert "CLEAR_FIRED" not in proc.stdout
     assert (_state_dir(p) / "resume-after-clear.flag").is_file()
     assert not Path("/tmp/pwned_clear").exists(), "the AppleScript injection must never execute"
+
+
+# ---------- TRDD-11GAS4LC addendum: the third `_still_wanted` cancel + land logging -------
+#
+# The chain can defer for minutes (`inject_until_sent`) between the Stop hook's decision and
+# the verified Enter, so a background agent spawned meanwhile, or a fresh interrupt, must be
+# able to cancel a /clear that is still in flight. These drive `_run_chain_payload` directly
+# (base64 JSON payload, exactly what `_spawn_chain` hands the detached child), with
+# `terminal_trigger.run_chained_inject` replaced by a capture so no real keystroke or pane
+# I/O ever happens, and `pending_agents`/`user_intent`/`token_meter` faked via `sys.modules`
+# (the chain imports them lazily by name).
+
+
+def _chain_payload(tmp_path: Path, *, directive: str = "resume") -> str:
+    import base64
+    import json as _json
+
+    payload = {
+        "delay": 0.0,
+        "terminal": {"kind": "tmux"},
+        "first": "/clear",
+        "then": ["/janitor-arm", "/janitor-resume"],
+        "state_dir": str(tmp_path / ".janitor" / "state"),
+        "gate_baseline": 0,
+        "directive": directive,
+    }
+    return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
+
+
+def _capture_still_wanted(mod, monkeypatch) -> dict:
+    """Replace `terminal_trigger.run_chained_inject` with a capture of the callbacks
+    `_run_chain_payload` builds, instead of running any real pane I/O."""
+    captured: dict = {}
+
+    def _fake(_terminal, **kwargs):
+        captured["still_wanted"] = kwargs["still_wanted"]
+        captured["pre_submit_first"] = kwargs["pre_submit_first"]
+        return True, "ok"
+
+    monkeypatch.setattr(mod.terminal_trigger, "run_chained_inject", _fake)
+    return captured
+
+
+def test_still_wanted_cancels_on_a_live_agent(tmp_path: Path, monkeypatch) -> None:
+    """A background agent (review fork, lean-worker) spawned after the verdict must still
+    be able to cancel a /clear that has not landed yet."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+
+    fake_pa = types.ModuleType("pending_agents")
+    fake_pa.load_pending = lambda now=None, *, state_dir=None: [{"id": "a1"}]  # type: ignore[attr-defined]
+    fake_pa.agent_is_live = lambda entry, now, stale_s: True  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pending_agents", fake_pa)
+
+    rc = mod._run_chain_payload(_chain_payload(tmp_path))
+    assert rc == 0
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "agent(s) live" in why
+
+
+def test_still_wanted_cancels_on_a_recent_interrupt(tmp_path: Path, monkeypatch) -> None:
+    """A bare Esc/Ctrl-C with no completed turn yet trips neither `_user_came_back` nor a
+    live-agent check -- only the interrupt-cooldown check catches it."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+
+    fake_pa = types.ModuleType("pending_agents")
+    fake_pa.load_pending = lambda now=None, *, state_dir=None: []  # type: ignore[attr-defined]
+    fake_pa.agent_is_live = lambda entry, now, stale_s: False  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pending_agents", fake_pa)
+
+    fake_ui = types.ModuleType("user_intent")
+    fake_ui.recently_interrupted = lambda *a, **kw: 12.0  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "user_intent", fake_ui)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "interrupted" in why
+
+
+def test_cancel_at_land_gets_its_own_distinct_log_line(tmp_path: Path, monkeypatch) -> None:
+    """A `still_wanted`-cancelled chain logs `clear cancelled at land: <reason>` on top of
+    the plain FAILED line, so the miss rate is greppable on its own."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    monkeypatch.setattr(
+        mod.terminal_trigger,
+        "run_chained_inject",
+        lambda _t, **_kw: (False, "cancelled — the session took a real turn"),
+    )
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    assert any("clear cancelled at land: the session took a real turn" in ln for ln in logs), logs
+
+
+def test_persist_resume_state_logs_context_size_at_land(tmp_path: Path, monkeypatch) -> None:
+    """The moment /clear actually lands (immediately before the verified Enter), the
+    context size at that instant is logged -- this can be minutes after the Stop hook's
+    own decision, and the gap is otherwise unmeasurable."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    monkeypatch.setenv("JANITOR_TRANSCRIPT_PATH", str(tmp_path / "t.jsonl"))
+
+    fake_tm = types.ModuleType("token_meter")
+    fake_tm.latest_context_size = lambda _p: 760_000  # type: ignore[attr-defined]
+    fake_tm.default_window = lambda *a, **kw: 900_000  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "token_meter", fake_tm)
+
+    captured = _capture_still_wanted(mod, monkeypatch)
+    mod._run_chain_payload(_chain_payload(tmp_path))
+    captured["pre_submit_first"]()
+
+    assert any("clear landing at 760000 tokens (84% of window)" in ln for ln in logs), logs

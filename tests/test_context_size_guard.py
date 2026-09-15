@@ -7,12 +7,11 @@ Two units under test:
   * scripts/hooks/pre-tool-context-usage.py — the PreToolUse guard's pure decision
     functions + the in-process main() flow (gate / advisory / enforce / fail-open).
 
-SAFETY: the enforcement tier shells out to compact_trigger.py, which would fire a
-real ESC->/compact on the developer's OWN pane. EVERY test that reaches enforcement
-monkeypatches `_run_compact_trigger`, so the real keystroke is NEVER sent. The
-in-process main() tests patch sys.stdin/sys.stdout + `_run_compact_trigger` — no
-subprocess, no uv, no pane touched. Real code, no mocked behaviour of the unit
-itself.
+SAFETY (TRDD-11GAS4LC / issue #306): the enforcement tier used to shell out to
+compact_trigger.py, typing a real ESC->/compact on the developer's OWN pane; that
+mid-turn injection has been DELETED outright (it raced the harness's own auto-compact).
+Enforcement is now a pure decision (deny or None) with no subprocess and nothing to
+monkeypatch for safety — the in-process main() tests patch only sys.stdin/sys.stdout.
 """
 
 from __future__ import annotations
@@ -342,34 +341,17 @@ def test_enforce_hardstop_zero_disables(tmp_path: Path) -> None:
     assert mod._maybe_enforce(95, 950000, str(tmp_path), hardstop_pct=0, autocompact=True, now=0) is None
 
 
-def test_run_compact_trigger_argv_requests_hard(tmp_path: Path, monkeypatch) -> None:
-    """The >=85% enforcement tier must pass --hard explicitly (TRDD-0GPQROC1): the
-    trigger's CLI default became soft/enqueue, but this is the emergency wall — the
-    ESC-now semantics have to be requested. Captures the REAL argv by intercepting
-    subprocess.run inside the hook module; no keystroke is ever sent."""
+# NOTE (TRDD-11GAS4LC / issue #306): `test_run_compact_trigger_argv_requests_hard`,
+# `test_enforce_no_iterm_degrades_to_advisory` and `test_enforce_trigger_exception_is_none`
+# were REMOVED here. All three exercised `_run_compact_trigger` (the subprocess that typed
+# ESC+/compact into the pane) and the NO_ITERM/exception fallbacks around it -- that whole
+# mechanism is deleted. `_maybe_enforce` is now a pure decision with no subprocess call to
+# monkeypatch, no terminal-availability fallback, and nothing that can raise.
+
+
+def test_enforce_fires_deny_above_cap(tmp_path: Path) -> None:
+    """Above the cap -> deny, and the mark suppresses re-deny within the dedupe window."""
     mod = _import_hook()
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "compact_trigger.py").write_text("# stub\n", encoding="utf-8")
-    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(tmp_path))
-    captured: list[list[str]] = []
-
-    class _Done:
-        stdout = "COMPACT_FIRED"
-
-    def _fake_run(argv, **_kw):
-        captured.append(list(argv))
-        return _Done()
-
-    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
-    assert mod._run_compact_trigger(90) == "COMPACT_FIRED"
-    assert len(captured) == 1
-    assert "--hard" in captured[0], "enforcement auto-compact must request the ESC path"
-
-
-def test_enforce_fires_deny_on_compact_fired(tmp_path: Path, monkeypatch) -> None:
-    """Above the cap with a fired compaction -> deny, and the mark suppresses re-deny."""
-    mod = _import_hook()
-    monkeypatch.setattr(mod, "_run_compact_trigger", lambda _pct: "COMPACT_FIRED")
     d = mod._maybe_enforce(90, 900000, str(tmp_path), hardstop_pct=85, autocompact=True, now=500)
     assert d is not None
     assert d["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -378,33 +360,11 @@ def test_enforce_fires_deny_on_compact_fired(tmp_path: Path, monkeypatch) -> Non
     assert mod._maybe_enforce(90, 900000, str(tmp_path), hardstop_pct=85, autocompact=True, now=520) is None
 
 
-def test_enforce_no_iterm_degrades_to_advisory(tmp_path: Path, monkeypatch) -> None:
-    """No automatable terminal -> None (advisory), and NOT marked (a later fire is allowed)."""
-    mod = _import_hook()
-    monkeypatch.setattr(mod, "_run_compact_trigger", lambda _pct: "NO_ITERM")
-    assert mod._maybe_enforce(90, 900000, str(tmp_path), hardstop_pct=85, autocompact=True, now=0) is None
-    assert mod._recently_compacted(str(tmp_path), now=1) is False
-
-
-def test_enforce_recently_compacted_short_circuits(tmp_path: Path, monkeypatch) -> None:
-    """A recent mark short-circuits BEFORE the trigger runs (no compact spam)."""
+def test_enforce_recently_compacted_short_circuits(tmp_path: Path) -> None:
+    """A recent mark short-circuits the deny (no deny spam within the dedupe window)."""
     mod = _import_hook()
     mod._mark_compacted(str(tmp_path), now=100)
-    called: list[int] = []
-    monkeypatch.setattr(mod, "_run_compact_trigger", lambda pct: called.append(pct) or "COMPACT_FIRED")
     assert mod._maybe_enforce(90, 900000, str(tmp_path), hardstop_pct=85, autocompact=True, now=110) is None
-    assert called == []
-
-
-def test_enforce_trigger_exception_is_none(tmp_path: Path, monkeypatch) -> None:
-    """A crashing trigger never crashes/blocks the tool -> None (fail-open)."""
-    mod = _import_hook()
-
-    def _boom(_pct: int) -> str:
-        raise RuntimeError("nope")
-
-    monkeypatch.setattr(mod, "_run_compact_trigger", _boom)
-    assert mod._maybe_enforce(90, 900000, str(tmp_path), hardstop_pct=85, autocompact=True, now=0) is None
 
 
 # ---------- _deny / _advisory shapes ---------------------------------------
@@ -477,11 +437,6 @@ def test_main_advisory_when_enforcement_disabled(tmp_path: Path, monkeypatch, ca
     # deleting the var breaks the test on a dev box too — the dependency is real, so it
     # must be pinned, not removed.
     monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
-
-    def _boom(_pct: int) -> str:
-        raise AssertionError("compact must NOT fire when autocompact is disabled")
-
-    monkeypatch.setattr(mod, "_run_compact_trigger", _boom)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_payload(transcript=tp))))
     assert mod.main() == 0
     hs = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
@@ -490,33 +445,24 @@ def test_main_advisory_when_enforcement_disabled(tmp_path: Path, monkeypatch, ca
 
 
 def test_main_enforces_deny_near_cap(tmp_path: Path, monkeypatch, capsys) -> None:
-    """Near the cap with autocompact on (default) -> deny, trigger called with the pct."""
+    """Near the cap with autocompact on (default) -> deny, no subprocess involved
+    (TRDD-11GAS4LC / issue #306: the mid-turn ESC+/compact injection is gone)."""
     mod = _import_hook()
     tp = _write_transcript(tmp_path / "t.jsonl", [_assistant(inp=10000, cache_read=900000)])  # 910000 -> 91%
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_CONTEXT_AUTOCOMPACT_ENABLED", raising=False)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    fired: list[int] = []
-    monkeypatch.setattr(mod, "_run_compact_trigger", lambda pct: fired.append(pct) or "COMPACT_FIRED")
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_payload(transcript=tp))))
-    assert mod.main() == 0
-    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert fired == [91]
-
-
-def test_main_no_iterm_degrades_to_advisory_near_cap(tmp_path: Path, monkeypatch, capsys) -> None:
-    """Near the cap but no terminal -> advisory only, never a stuck deny."""
-    mod = _import_hook()
-    tp = _write_transcript(tmp_path / "t.jsonl", [_assistant(inp=10000, cache_read=900000)])  # 91%
-    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED", raising=False)
-    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_CONTEXT_AUTOCOMPACT_ENABLED", raising=False)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setattr(mod, "_run_compact_trigger", lambda _pct: "NO_ITERM")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_payload(transcript=tp))))
     assert mod.main() == 0
     hs = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
-    assert "additionalContext" in hs
-    assert "permissionDecision" not in hs
+    assert hs["permissionDecision"] == "deny"
+    assert "end your turn now" in hs["permissionDecisionReason"]
+
+
+# NOTE (TRDD-11GAS4LC / issue #306): `test_main_no_iterm_degrades_to_advisory_near_cap` was
+# REMOVED here -- it tested the NO_ITERM fallback of the deleted subprocess trigger. There
+# is no terminal-availability path left in enforcement to degrade from: above the hardstop
+# main() always denies (see test_main_enforces_deny_near_cap above).
 
 
 def test_resolve_context_rejects_a_window_smaller_than_the_tokens_it_holds(tmp_path: Path) -> None:

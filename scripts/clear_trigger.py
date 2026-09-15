@@ -289,6 +289,13 @@ _GATE_STAMP = "clear-observed.ts"
 # is what left this session un-shrunk for 4+ hours on 2026-08-16.
 _CLEAR_CHAIN_GIVEUP_S = 3600.0
 _CHAIN_LOCK = "clear-chain.lock"
+# Addendum, TRDD-11GAS4LC / issue #306: `inject_until_sent` can DEFER the actual Enter on
+# /clear for minutes while the pane is busy, so the gates the Stop hook checked at DECISION
+# time (a live agent, a fresh interrupt) can go stale before the LAND. 900s mirrors
+# dispatch._KEEP_GOING_AGENT_STALE_DEFAULT -- an agent whose transcript is younger than
+# that is "still working" everywhere else in this codebase; using a different number here
+# would let dispatch call an agent live while this chain called the same one dead.
+_AGENT_LIVE_STALE_S = 900
 
 
 def came_back_since(verdict_ts: int, idle_s: int, now: int) -> bool:
@@ -363,6 +370,21 @@ def _run_chain_payload(payload_b64: str) -> int:
         _write_directive(directive)
         _write_clear_marker(directive)
         persisted["done"] = True
+        # TRDD-11GAS4LC addendum: log the context size at the exact moment /clear lands
+        # (not at the Stop hook's earlier decision) — the two can be minutes apart while
+        # this chain defers on a busy pane, and without this the miss between "decided"
+        # and "landed" is unmeasurable.
+        try:
+            import token_meter  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+            transcript = os.environ.get("JANITOR_TRANSCRIPT_PATH") or ""
+            tokens = token_meter.latest_context_size(transcript) if transcript else None
+            if tokens is not None:
+                window = token_meter.default_window()
+                pct = int(tokens * 100 / window) if window else 0
+                state.log_line("clear-trigger", f"clear landing at {tokens} tokens ({pct}% of window)")
+        except Exception:  # noqa: BLE001 — telemetry must never block the verified Enter
+            pass
 
     def _clear_still_wanted() -> tuple[bool, str]:
         # Owner directive 2026-08-16: while the pane is busy (the user is typing), do NOT give
@@ -429,12 +451,46 @@ def _run_chain_payload(payload_b64: str) -> int:
                            "decided — the user is back")
         return True, f"still idle ({idle_s}s, no turn since the verdict)"
 
+    def _agents_and_interrupt_ok() -> tuple[bool, str]:
+        # THIRD cancel, TRDD-11GAS4LC addendum (issue #306 review): `_user_came_back` only
+        # catches a COMPLETED human turn — a background agent spawned AFTER the verdict (a
+        # review-gate fork, a new lean-worker) is still running with no turn to detect, and a
+        # bare Esc/Ctrl-C interrupt with no new turn yet trips neither. Both must still be
+        # able to stop a /clear that is minutes from landing while `inject_until_sent` defers
+        # on a busy pane. Fail-open on any probe fault, same asymmetry as the two cancels
+        # above: an unmeasurable state keeps waiting, it never authorizes a cancel.
+        try:
+            import pending_agents  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+            now = int(time.time())
+            entries = pending_agents.load_pending(now)
+            live = [e for e in entries if pending_agents.agent_is_live(e, now, _AGENT_LIVE_STALE_S)]
+            if live:
+                return False, f"{len(live)} agent(s) live"
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import user_intent  # noqa: PLC0415
+
+            secs = user_intent.recently_interrupted(
+                os.environ.get("CLAUDE_PROJECT_DIR") or ".",
+                transcript_path=os.environ.get("JANITOR_TRANSCRIPT_PATH") or None,
+            )
+            if secs is not None:
+                return False, f"interrupted {int(secs)}s ago — within the cooldown"
+        except Exception:  # noqa: BLE001
+            pass
+        return True, "no live agents, no recent interrupt"
+
     def _still_wanted() -> tuple[bool, str]:
-        """Both cancels. The activity check runs for EVERY trigger; the cache check only for a
-        chain fired BECAUSE the cache was cold."""
+        """Three cancels. The activity + agent/interrupt checks run for EVERY trigger; the
+        cache check only for a chain fired BECAUSE the cache was cold."""
         back_ok, back_why = _user_came_back()
         if not back_ok:
             return False, back_why
+        agents_ok, agents_why = _agents_and_interrupt_ok()
+        if not agents_ok:
+            return False, agents_why
         if not data.get("cache_gated"):
             return True, back_why
         return _clear_still_wanted()
@@ -462,6 +518,12 @@ def _run_chain_payload(payload_b64: str) -> int:
             still_wanted=_still_wanted,
         )
         state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
+        # TRDD-11GAS4LC addendum: a distinct, greppable line for the specific case this
+        # review added gates for — cancelled by `_still_wanted` at (or near) the verified
+        # Enter, as opposed to a plain give-up on the giveup_s clock — so the miss rate
+        # between the Stop hook's decision and the actual land is measurable on its own.
+        if not ok and why.startswith("cancelled — "):
+            state.log_line("clear-trigger", f"clear cancelled at land: {why[len('cancelled — '):]}")
         if not ok:
             # 2026-08-02 review finding: the old cleanup here unconditionally unlinked
             # resume-after-clear.{flag,ts} AND resume-directive.txt on ANY chain failure.
@@ -536,6 +598,7 @@ def spawn_shrink_chain(
     directive: str,
     delay: float = 2.0,
     settle_between_s: float = 0.0,
+    transcript_path: str | None = None,
 ) -> tuple[bool, str]:
     """Run the verified `/clear` chain with a CALLER-SUPPLIED bootstrap. Returns (spawned, why).
 
@@ -554,6 +617,11 @@ def spawn_shrink_chain(
     Returns (False, why) when the pane cannot be read back; the caller must then fall back to
     its own non-shrinking path rather than clear blind — an unverifiable `/clear` is the one
     unrecoverable command in this system.
+
+    `transcript_path` (TRDD-11GAS4LC addendum): threaded into the detached child's env as
+    `JANITOR_TRANSCRIPT_PATH`, the same seam `main()`'s `--transcript-path` uses. Without it
+    the child's interrupt-cooldown check (`_agents_and_interrupt_ok`) has no session to scope
+    to and skips itself — a caller that knows its own transcript (a Stop hook) should pass it.
     """
     terminal = terminal_trigger.self_terminal(os.environ)
     if not terminal_trigger.channel_is_readable(terminal):
@@ -575,6 +643,9 @@ def spawn_shrink_chain(
         if not ok:
             print(f"HANDOFF_NOT_CONCISE {','.join(reasons)}", file=sys.stderr)
 
+    chain_env = (
+        {**os.environ, "JANITOR_TRANSCRIPT_PATH": transcript_path} if transcript_path else None
+    )
     _spawn_chain({
         "delay": delay,
         "terminal": terminal,
@@ -584,7 +655,7 @@ def spawn_shrink_chain(
         "gate_baseline": _gate_baseline(),
         "directive": directive,
         "settle_between_s": settle_between_s,
-    })
+    }, env=chain_env)
     return True, "chain spawned"
 
 

@@ -15,19 +15,94 @@ early return lived in the hook, so a unit test of the pure parser could never ha
 
 from __future__ import annotations
 
+import importlib.util as _u
 import json
+import os
 import subprocess
 import sys
+import types
 import unittest
+import unittest.mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "scripts" / "lib"))
 
 import token_meter  # noqa: E402
 
 HOOK = REPO / "scripts" / "hooks" / "on-stop-token-meter.py"
+
+
+def _import_meter_hook():
+    # The hook filename has dashes, so it cannot be a normal import — load it by path.
+    spec = _u.spec_from_file_location("on_stop_token_meter_under_test", str(HOOK))
+    assert spec is not None and spec.loader is not None
+    mod = _u.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # runs the module body; main() is NOT called (name != __main__)
+    return mod
+
+
+class _FakeState:
+    """Collects log_line calls instead of writing to disk."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def log_line(self, name: str, message: str) -> None:
+        self.lines.append(f"[{name}] {message}")
+
+
+class _FakeTokenMeter:
+    """Stands in for the real token_meter module: fixed context size, real default_window."""
+
+    def __init__(self, tokens: int) -> None:
+        self._tokens = tokens
+
+    def latest_context_size(self, _transcript_path: str):
+        return self._tokens
+
+    def default_window(self, env=None) -> int:
+        return token_meter.default_window(env)
+
+
+def _fake_pending_agents_module(*, live_count: int) -> types.ModuleType:
+    mod = types.ModuleType("pending_agents")
+
+    def load_pending(now=None, *, state_dir=None):
+        return [{"id": f"agent-{i}"} for i in range(live_count)]
+
+    def agent_is_live(entry, now, stale_s):
+        return True
+
+    mod.load_pending = load_pending  # type: ignore[attr-defined]
+    mod.agent_is_live = agent_is_live  # type: ignore[attr-defined]
+    return mod
+
+
+def _fake_user_intent_module(*, interrupted_secs) -> types.ModuleType:
+    mod = types.ModuleType("user_intent")
+
+    def recently_interrupted(project_dir, window_s=None, now=None, *, transcript_path=None, home=None):
+        return interrupted_secs
+
+    mod.recently_interrupted = recently_interrupted  # type: ignore[attr-defined]
+    return mod
+
+
+def _fake_clear_trigger_module(*, spawned: bool = True, why: str = "chain spawned") -> types.ModuleType:
+    mod = types.ModuleType("clear_trigger")
+    mod.BOOTSTRAP_CMDS = ("/janitor-arm", "/janitor-resume")  # type: ignore[attr-defined]
+    calls: list[dict] = []
+
+    def spawn_shrink_chain(*, then, directive, delay=2.0, settle_between_s=0.0, transcript_path=None):
+        calls.append({"then": list(then), "directive": directive, "transcript_path": transcript_path})
+        return spawned, why
+
+    mod.spawn_shrink_chain = spawn_shrink_chain  # type: ignore[attr-defined]
+    mod._calls = calls  # type: ignore[attr-defined]
+    return mod
 
 _HB = "[janitor-heartbeat]\n/path/to/dispatcher-stub.py\nSurface stdout verbatim..."
 _USER = "/janitor-arm"
@@ -162,6 +237,82 @@ class TestRecordShape(unittest.TestCase):
             self.assertEqual(report["count"], 4)
             self.assertEqual(report["heartbeat_turns"], 3, "the 2 legacy records must count as heartbeats, not interactive")
             self.assertEqual(report["user_turns"], 1)
+
+
+class TestTurnBoundaryClear(unittest.TestCase):
+    """TRDD-11GAS4LC / issue #306: the Stop hook, not the PreToolUse guard, decides
+    whether to launch a turn-boundary /clear. These drive `_maybe_clear` in-process with
+    fake `state`/`token_meter` (explicit params) and fake `pending_agents`/`user_intent`/
+    `clear_trigger` injected via `sys.modules` (the hook imports them lazily by name)."""
+
+    def setUp(self) -> None:
+        self.mod = _import_meter_hook()
+        self._saved_modules = {
+            name: sys.modules.get(name) for name in ("pending_agents", "user_intent", "clear_trigger")
+        }
+
+    def tearDown(self) -> None:
+        for name, mod in self._saved_modules.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
+
+    def test_clear_point_is_below_the_harness_forced_compact_point(self) -> None:
+        """A test reads the value the harness actually has (CLAUDE_CODE_AUTO_COMPACT_WINDOW)
+        and asserts the clear point is below it."""
+        with unittest.mock.patch.dict("os.environ", {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}):
+            window = self.mod._harness_window(dict(os.environ), token_meter)
+            self.assertEqual(window, 900000)
+            clear_at = self.mod._pct_tokens(window, self.mod._DEFAULT_CLEAR_AT_PCT)
+            self.assertLess(clear_at, window - self.mod._COMPACT_SUMMARY_OVERHEAD)
+            self.assertLess(clear_at, window)
+
+    def test_700k_of_900k_does_not_clear(self) -> None:
+        state = _FakeState()
+        tm = _FakeTokenMeter(700_000)
+        with unittest.mock.patch.dict("os.environ", {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}):
+            self.mod._maybe_clear("/proj", "/proj/t.jsonl", state, tm)
+        self.assertEqual(state.lines, [], "700k of 900k is below the 83% clear point — no clear, no log")
+
+    def test_760k_with_a_live_agent_defers_and_logs(self) -> None:
+        sys.modules["pending_agents"] = _fake_pending_agents_module(live_count=1)
+        state = _FakeState()
+        tm = _FakeTokenMeter(760_000)
+        with unittest.mock.patch.dict("os.environ", {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}):
+            self.mod._maybe_clear("/proj", "/proj/t.jsonl", state, tm)
+        self.assertTrue(any("clear deferred" in ln and "agent(s) live" in ln for ln in state.lines), state.lines)
+
+    def test_830k_with_a_live_agent_clears_past_the_ceiling(self) -> None:
+        """830k of 900k = 92.2%, past the default 92% ceiling — clears regardless."""
+        sys.modules["pending_agents"] = _fake_pending_agents_module(live_count=1)
+        sys.modules["clear_trigger"] = fake_ct = _fake_clear_trigger_module()
+        state = _FakeState()
+        tm = _FakeTokenMeter(830_000)
+        with unittest.mock.patch.dict("os.environ", {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}):
+            self.mod._maybe_clear("/proj", "/proj/t.jsonl", state, tm)
+        self.assertEqual(len(fake_ct._calls), 1, "past the ceiling the chain must be launched regardless of a live agent")
+        self.assertTrue(any("past ceiling" in ln for ln in state.lines), state.lines)
+
+    def test_760k_with_a_recent_interrupt_defers(self) -> None:
+        sys.modules["pending_agents"] = _fake_pending_agents_module(live_count=0)
+        sys.modules["user_intent"] = _fake_user_intent_module(interrupted_secs=30.0)
+        state = _FakeState()
+        tm = _FakeTokenMeter(760_000)
+        with unittest.mock.patch.dict("os.environ", {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}):
+            self.mod._maybe_clear("/proj", "/proj/t.jsonl", state, tm)
+        self.assertTrue(any("clear deferred" in ln and "interrupted" in ln for ln in state.lines), state.lines)
+
+    def test_760k_with_no_agent_and_no_interrupt_launches_the_chain(self) -> None:
+        sys.modules["pending_agents"] = _fake_pending_agents_module(live_count=0)
+        sys.modules["user_intent"] = _fake_user_intent_module(interrupted_secs=None)
+        sys.modules["clear_trigger"] = fake_ct = _fake_clear_trigger_module()
+        state = _FakeState()
+        tm = _FakeTokenMeter(760_000)
+        with unittest.mock.patch.dict("os.environ", {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}):
+            self.mod._maybe_clear("/proj", "/proj/t.jsonl", state, tm)
+        self.assertEqual(len(fake_ct._calls), 1)
+        self.assertEqual(fake_ct._calls[0]["transcript_path"], "/proj/t.jsonl")
 
 
 if __name__ == "__main__":

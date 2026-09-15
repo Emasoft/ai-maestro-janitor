@@ -19,11 +19,14 @@ Two tiers:
     (60/70) capacity chatter duplicated it; one advisory band remains directly below
     enforcement as the compact-at-a-natural-boundary runway. Restore the old behavior
     with CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT=60.
-  * ENFORCEMENT (≥ HARDSTOP_PCT, default 85%, gated by AUTOCOMPACT_ENABLED) — run
-    compact_trigger.py (records a resume directive + queues ESC+/compact on the pane)
-    and DENY this tool call so the turn ends cleanly for /compact; post-compact-resume
-    then continues the work at a reduced context. Native auto-compact under-fires on the
-    1M window, so the janitor enforces the compaction here.
+  * ENFORCEMENT (≥ HARDSTOP_PCT, default 85%, gated by AUTOCOMPACT_ENABLED) — DENY this
+    tool call so the turn ends cleanly. issue #306 / TRDD-11GAS4LC: this tier used to ALSO
+    type ESC+/compact into the pane (compact_trigger.py) from mid-turn, racing the
+    harness's own auto-compact (fleet observation: compaction fired at 866k =
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW(900000) minus its ~34k summary overhead). The owner
+    ruling (TRDD-7MGJYLY5) prefers a turn-boundary /clear over a mid-turn /compact race:
+    this hook now only ends the turn; the Stop hook (on-stop-token-meter.py) decides, AT
+    the boundary, whether to run the external clear chain.
 
 Context source (robust, statusline-INDEPENDENT):
   1. the statusline snapshot <project>/.claude/janitor/context-usage.<sid>.json (carries
@@ -35,11 +38,9 @@ Context source (robust, statusline-INDEPENDENT):
 
 SAFETY (this hook fires on EVERY tool call in EVERY session — USER scope):
   * DEFAULT-ON, but every error path FAILS OPEN (return 0 → allow the tool).
-  * The enforcement DENY fires ONLY when compact_trigger actually queued a compact
-    (COMPACT_FIRED). With no automatable terminal (NO_ITERM) or any error it degrades to
-    the advisory — NEVER a stuck "denied with no way to compact". A short dedupe window
-    means it triggers/denies at most once per compaction episode (no deny-after-resume
-    loop, no /compact spam).
+  * The enforcement DENY (TRDD-11GAS4LC / issue #306) is a pure decision now -- no
+    subprocess, no compact_trigger, no keystroke injection. A short dedupe window means
+    it denies at most once per _AUTOCOMPACT_DEDUPE_S window (no deny-after-resume loop).
 
 issue #79 (2026-07): agentlensPro's raw-body cache-break measurement showed the janitor's
 no-matcher PreToolUse `additionalContext` nudges as the #2 cause of prompt-cache
@@ -57,7 +58,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -376,71 +376,29 @@ def _advisory_tier(pct: int) -> str:
     return f"suggest:{(pct // 10) * 10}"
 
 
-def _run_compact_trigger(pct: int) -> str:
-    """Queue ESC+/compact on this session's pane via compact_trigger.py. Returns its
-    one-word result ('COMPACT_FIRED' | 'NO_ITERM') or 'ERROR'. argv subprocess (NOT the
-    agent's Bash) → lean-ctx never gates it; the terminal env is inherited so the trigger
-    can target this very pane."""
-    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
-    if not plugin_root:
-        return "ERROR"
-    script = Path(plugin_root) / "scripts" / "compact_trigger.py"
-    if not script.is_file():
-        return "ERROR"
-    # TRDD-YRPUSIFY: bucket the % here too — this directive is later surfaced as a
-    # [janitor-resume] injection, so keep it on the same cache-stable surface.
-    directive = f"resume your in-flight task — the context-size guard auto-compacted at {_bucket_pct(pct)} to stop the per-turn token bleed; re-check the TRDD board / your handoff first."
-    try:
-        # --hard: this is the >=85% EMERGENCY tier — the deny below is already cutting
-        # the turn, and the ESC is the point (compact NOW, before the context wall).
-        # The trigger's CLI default is soft/enqueue since TRDD-0GPQROC1, so the
-        # emergency semantics must be requested explicitly.
-        # EVERY BOUND HERE NESTS INSIDE THIS HOOK'S REGISTERED BUDGET (AM8JD9SG F9). This hook is
-        # registered at 5 s in `hooks.json`; it used to wait 8 s on this subprocess, which in turn
-        # allowed a 5 s ai-maestro resolution inside it — each inner bound LARGER than the one
-        # containing it. The harness therefore killed the hook first on any slow path, the
-        # `COMPACT_FIRED` the DENY below keys on never arrived, and the guard silently did nothing
-        # at the exact moment it was supposed to act. Now: 2.0 s resolve < 4 s subprocess < 5 s
-        # registration. Do NOT raise either number without raising the registration first — that
-        # ordering IS the fix, not the specific values. Expiring early is safe by construction:
-        # the trigger degrades to the local tmux/iTerm path, and the guard re-fires next tool call.
-        r = subprocess.run(
-            [
-                "uv", "run", "--script", "--quiet", str(script), "--hard",
-                "--resolve-timeout", "2.0", "--directive", directive,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=4,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "ERROR"
-    out = (r.stdout or "").strip().upper()
-    if "COMPACT_FIRED" in out:
-        return "COMPACT_FIRED"
-    if "NO_ITERM" in out:
-        return "NO_ITERM"
-    return "ERROR"
-
-
 def _deny(pct: int, tokens) -> dict:
     # TRDD-YRPUSIFY (cache-stability): bucket the % + token size so the deny reason is
     # byte-identical for any tool call in the same occupancy band. The dedupe window
-    # already limits this to ~once per compaction episode, but bucketing keeps it uniform
-    # with the advisory/prepare surfaces. (`_bucket_tokens` already prefixes "~".)
+    # already limits this to ~once per compaction episode.
+    #
+    # issue #306 / TRDD-11GAS4LC: this hook used to ALSO type ESC+/compact into the pane
+    # from a PreToolUse hook (_run_compact_trigger, removed) at the same 85% trip point the
+    # hardstop uses, racing the harness's own auto-compact (CLAUDE_CODE_AUTO_COMPACT_WINDOW
+    # minus its ~34k summary overhead) — a fleet observation caught compaction firing at
+    # 866k = 900000-34000 while THIS hook was independently trying to force one too. The
+    # owner ruling (TRDD-7MGJYLY5) is a turn-boundary /clear, not a mid-turn /compact race:
+    # this hook now ONLY ends the turn (deny) so the Stop hook (on-stop-token-meter.py) can
+    # decide, AT THE BOUNDARY, whether to run the external clear chain. No subprocess, no
+    # keystroke injection, no race — just "stop now".
     pct_b = _bucket_pct(pct)
-    size = _bucket_tokens(tokens) if isinstance(tokens, int) else pct_b
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": (
-                f"[context-guard] Context is at {pct_b} ({size}) — every turn now re-reads the "
-                "whole context, burning ~its size in tokens PER TURN. Auto-compacting now to "
-                "stop the bleed: END THIS TURN so /compact can run; post-compact-resume will "
-                "continue your task at a reduced context. (Disable: "
-                "CLAUDE_PLUGIN_OPTION_CONTEXT_AUTOCOMPACT_ENABLED=false; move the trip point: "
-                "CLAUDE_PLUGIN_OPTION_CONTEXT_HARDSTOP_PCT.)"
+                f"context at {pct_b} — end your turn now; the janitor clears at the turn "
+                "boundary. (Disable: CLAUDE_PLUGIN_OPTION_CONTEXT_AUTOCOMPACT_ENABLED=false; "
+                "move the trip point: CLAUDE_PLUGIN_OPTION_CONTEXT_HARDSTOP_PCT.)"
             ),
         },
     }
@@ -451,24 +409,20 @@ def _advisory(line: str) -> dict:
 
 
 def _maybe_enforce(pct: int, tokens, project_dir: str, *, hardstop_pct: int, autocompact: bool, now: int) -> dict | None:
-    """Near the cap, FORCE a compaction and return the DENY dict; else None (→ advisory).
+    """Near the cap, DENY the tool call so the turn ends cleanly; else None (-> advisory).
 
-    Triggers + denies at most ONCE per compaction episode: if a compact was already queued
-    in the dedupe window (or compaction didn't drop us below the cap) it returns None so the
-    caller falls through to the advisory — never deny-forever, never stuck. The DENY is
-    returned ONLY when compact_trigger actually queued a compact (COMPACT_FIRED); a missing
-    terminal (NO_ITERM) / any error → None. Fail-open by construction."""
+    Denies at most ONCE per _AUTOCOMPACT_DEDUPE_S window (`_recently_compacted`/
+    `_mark_compacted` — names kept from the removed compact-injection era; they still gate
+    the SAME dedupe window, now for the deny message rather than a keystroke). issue #306 /
+    TRDD-11GAS4LC: no subprocess is run here any more -- ending the turn is the whole
+    action; the Stop hook (on-stop-token-meter.py) is what decides, at the turn boundary,
+    whether to run the external clear chain."""
     if not (autocompact and hardstop_pct > 0 and pct >= hardstop_pct):
         return None
-    try:
-        if _recently_compacted(project_dir, now):
-            return None
-        if _run_compact_trigger(pct) == "COMPACT_FIRED":
-            _mark_compacted(project_dir, now)
-            return _deny(pct, tokens)
-    except Exception:  # noqa: BLE001 — enforcement must never crash/block the tool
+    if _recently_compacted(project_dir, now):
         return None
-    return None
+    _mark_compacted(project_dir, now)
+    return _deny(pct, tokens)
 
 
 def main() -> int:

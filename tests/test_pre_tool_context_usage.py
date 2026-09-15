@@ -218,13 +218,49 @@ def test_threshold_env_override(tmp_path: Path) -> None:
 
 
 def test_no_permission_decision_emitted(tmp_path: Path) -> None:
-    """The advisory hook must NEVER emit permissionDecision (would alter tool flow)."""
+    """The advisory tier (below the 85% hardstop) must NEVER emit permissionDecision
+    (would alter tool flow) -- 82% is above the 80% suggest band but below the default
+    85% hardstop, where enforcement's own deny is the correct, DIFFERENT behavior (see
+    test_hardstop_denies_and_ends_the_turn below, TRDD-11GAS4LC)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 82, "tokens": 820_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
+    out = json.loads(proc.stdout)
+    assert "permissionDecision" not in out["hookSpecificOutput"], "advisory-only: permissionDecision must be absent so the tool's permission flow is untouched"
+    assert "permissionDecision" not in out
+
+
+def test_hardstop_denies_and_ends_the_turn(tmp_path: Path) -> None:
+    """TRDD-11GAS4LC / issue #306: above the hardstop the hook ONLY denies the tool call
+    (no subprocess, no /compact keystroke injection -- that race was removed); the deny
+    reason names the current context band and tells the agent to end its turn."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 90, "tokens": 900_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
     out = json.loads(proc.stdout)
-    assert "permissionDecision" not in out["hookSpecificOutput"], "advisory-only: permissionDecision must be absent so the tool's permission flow is untouched"
-    assert "permissionDecision" not in out
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "end your turn now" in hso["permissionDecisionReason"]
+    assert "~90%" in hso["permissionDecisionReason"]
+
+
+def test_86pct_denies_with_no_injection_attempted(tmp_path: Path) -> None:
+    """TRDD-11GAS4LC / issue #306: at 86% (above the default 85% hardstop) the hook denies
+    with the "end your turn now" message and attempts NO keystroke injection whatsoever --
+    proven by the injecting function no longer existing on the module at all, not merely by
+    it not being called."""
+    mod = _import_hook()
+    assert not hasattr(mod, "_run_compact_trigger"), "the mid-turn /compact injector must be gone, not merely unused"
+    assert not hasattr(mod, "subprocess"), "no subprocess import should remain once nothing shells out"
+
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 86, "tokens": 860_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
+    out = json.loads(proc.stdout)
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "end your turn now" in hso["permissionDecisionReason"]
+    assert "~85%" in hso["permissionDecisionReason"]  # 86 floored to the 5-pt band
 
 
 # ---------- TRDD-K1RJUYGK: the advisory must be LATCHED, not per-tool-call --------------
@@ -416,42 +452,9 @@ def test_latch_fails_closed_when_it_cannot_be_recorded(tmp_path: Path) -> None:
         state.chmod(0o700)
 
 
-def test_every_inner_timeout_nests_inside_this_hooks_registered_budget() -> None:
-    """The hook's subprocess cap and the ai-maestro resolve cap it passes must BOTH be strictly
-    smaller than its own `hooks.json` timeout (AM8JD9SG F9).
-
-    This is the one shape that made the guard silently useless: registered 5 s, subprocess cap
-    8 s, ai-maestro resolution 5 s inside that — every inner bound LARGER than the one containing
-    it, so on any slow path the harness killed the hook before `compact_trigger` could answer and
-    the `COMPACT_FIRED` the enforcement DENY keys on never arrived. Nothing errored; the guard
-    just did nothing at the moment it was meant to act, which is why only a mechanical check
-    catches it. Derived from the real files rather than pinned to today's numbers, so raising the
-    registration legitimately raises the ceiling for the others.
-    """
-    import re
-
-    hooks = json.loads((_PROJECT_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-    registered = [
-        h["timeout"]
-        for matchers in hooks.get("hooks", {}).values()
-        for m in matchers
-        for h in m.get("hooks", [])
-        if "pre-tool-context-usage.py" in h.get("command", "") and "timeout" in h
-    ]
-    assert len(registered) == 1, f"expected exactly one registration, got {registered}"
-    budget = float(registered[0])
-
-    src = (_PROJECT_ROOT / "scripts" / "hooks" / "pre-tool-context-usage.py").read_text(
-        encoding="utf-8"
-    )
-    subproc_caps = [float(m) for m in re.findall(r"\btimeout=(\d+(?:\.\d+)?)", src)]
-    assert subproc_caps, "no subprocess timeout found — the check would pass vacuously"
-    resolve_caps = [float(m) for m in re.findall(r'"--resolve-timeout",\s*"(\d+(?:\.\d+)?)"', src)]
-    assert resolve_caps, "no --resolve-timeout found — the check would pass vacuously"
-
-    for cap in subproc_caps:
-        assert cap < budget, f"subprocess timeout={cap} is not inside the {budget}s registration"
-    for cap in resolve_caps:
-        assert cap < min(subproc_caps), (
-            f"--resolve-timeout {cap} is not inside the {min(subproc_caps)}s subprocess cap"
-        )
+# NOTE (TRDD-11GAS4LC / issue #306): `test_every_inner_timeout_nests_inside_this_hooks_
+# registered_budget` was REMOVED here. It guarded the nesting of a subprocess timeout and
+# a `--resolve-timeout` flag that only existed inside `_run_compact_trigger` -- the
+# mid-turn ESC+/compact injection that raced the harness's own auto-compact and has been
+# deleted outright (this hook now only DENIES at the hardstop; the Stop hook decides on a
+# turn-boundary /clear). There is no subprocess and no nested timeout left to check.
