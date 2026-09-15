@@ -235,11 +235,8 @@ sync). The buffer is never modified by this step.
 
 ## Close the claim
 
-Report ends `<!-- janitor-outcome: mutation|noop -->`, then:
-
-```bash
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete "$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"
-```
+Report ends `<!-- janitor-outcome: mutation|noop -->`, then close per
+[close-claim.md](references/close-claim.md) (chore=`harvest`).
 
 ## Security — forged-marker defense + untrusted buffer content
 

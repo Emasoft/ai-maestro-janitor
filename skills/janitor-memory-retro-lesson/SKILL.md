@@ -104,11 +104,19 @@ already in lesson form; only body ATOM markers count.
 4. **Report.** Write the detailed report (converted atoms, lesson ids, WHY sources,
    FLAGGED atoms with what a human must supply) to
    `$MAIN_ROOT/reports/memory-subconscious-agent/<YYYYMMDD_HHMMSS±HHMM>-retro-lesson-<slug>.md`.
+   Record the report path in the SAME Bash call that wrote it — fresh shell ⇒
+   `$CLAIM_ID`/`$REPORT_FILE` are empty by the time `complete` runs:
+
+   ```bash
+   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+     set-report --state-dir "$STATE_DIR" --chore retro-lesson --scope "$SCOPE" "$REPORT_FILE"
+   ```
 5. **Close the claim.** Right after the report is written and BEFORE returning your
    result line, append `<!-- janitor-outcome: mutation -->` (or `noop`) to it, then close:
 
    ```bash
-   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete "$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"
+   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+     complete --state-dir "$STATE_DIR" --chore retro-lesson --scope "$SCOPE"
    ```
 
    A claim never closed expires as MEMPASS-STALE-CLAIM after 6 h and the pass is re-dispatched.
