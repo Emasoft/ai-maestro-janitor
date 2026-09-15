@@ -121,6 +121,52 @@ def _resolve_current_claim_chore_scope(state_dir: Path, cmd: str) -> tuple[str, 
         return 2
     return parsed
 
+
+def _clear_current_markers_if_owned(state_dir: Path, chore: str, scope: str, dispatch_id: str) -> None:
+    """Unlink the keyed `current-claim`/`current-report` markers for (chore, scope) only if
+    the claim marker still names `dispatch_id` — shared by `complete_claim` and
+    `expire_stale_claims` (2026-09-15 review) so a NEWER same-chore+scope claim's marker,
+    already overwritten with a different dispatch id while this one was in flight, is never
+    deleted out from under it. Silent no-op on any I/O error (best-effort cleanup)."""
+    claim_marker = state_dir / _current_claim_filename(chore, scope)
+    try:
+        still_current = claim_marker.read_text(encoding="utf-8").strip() == dispatch_id
+    except OSError:
+        still_current = False
+    if not still_current:
+        return
+    for marker in (claim_marker, state_dir / _current_report_filename(chore, scope)):
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+
+
+def _require_claim_in_flight(state_dir: Path, chore: str, scope: str, cmd: str) -> int | None:
+    """Confirm the keyed `current-claim` marker for (chore, scope) still names a live
+    `memory-maint-claimed-<id>.json` record (2026-09-15 review, part b): `set-report`
+    resolves (chore, scope) from that marker, but the marker itself outlives the claim it
+    once named — `complete`/`expire_stale_claims` only clear it when THEY still find it
+    current, so a marker pointing at an already-completed or expired dispatch is otherwise
+    silently accepted. Checked on BOTH the arg-less and the explicit --chore/--scope paths,
+    since an explicit pair can name a done claim just as easily as a resolved one. Returns
+    None when the claim is genuinely in flight, else prints one diagnostic and returns the
+    exit code 2 the caller should return."""
+    claim_marker = state_dir / _current_claim_filename(chore, scope)
+    try:
+        dispatch_id = claim_marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        dispatch_id = ""
+    if dispatch_id and (state_dir / f"{CLAIMED_PREFIX}{dispatch_id}.json").is_file():
+        return None
+    shown_id = dispatch_id or "<none>"
+    print(
+        f"memory_dispatch_claim: {cmd}: claim {shown_id} for {chore}/{scope} "
+        "is not in flight (expired or done)",
+        file=sys.stderr,
+    )
+    return 2
+
 _EXPIRED_KEEP = 20  # mirrors memory-maintenance.py's own keep-20 prune for pending/claimed
 # janitor#242 (2026-09-15 fleet audit + adversarial review): a real consolidate pass over a
 # large corpus can legitimately hold a claim for hours, so age-only expiry using a fast
@@ -366,29 +412,14 @@ def complete_claim(
     # place forever, EVERY chore+scope pair that has ever been claimed once accumulates
     # its own permanent file, so the "exactly one keyed file exists" fast path `complete`
     # relies on stops being usable after the second distinct chore+scope has ever run —
-    # not a rare race, a near-certain regression after normal repeated use. Matched on
-    # dispatch_id first (same "never cleared blindly" pattern as `_retire_legacy_mirror`):
-    # a SECOND same-chore+scope claim may have already overwritten the marker with a
-    # NEWER dispatch's id while this one was in flight, and that newer claim's marker
-    # must survive this cleanup untouched. The report marker's OWN content is never
-    # separately checked — its deletion rides on the claim marker's match, which is
-    # only safe because `claim_one` always writes its own claim marker at claim time
-    # (2026-09-15 review, part b): a future change decoupling that ordering would
-    # silently reintroduce deleting a newer claim's already-set report.
+    # not a rare race, a near-certain regression after normal repeated use. Shared with
+    # `expire_stale_claims` via `_clear_current_markers_if_owned` (2026-09-15 review,
+    # part b) so a crashed curator's markers are cleared the same way whether the
+    # dispatch finished normally or was reclaimed as dead.
     chore_value = str(payload.get("intervention") or "")
     scope_value = str(payload.get("scope") or "")
     if chore_value and scope_value:
-        claim_marker = state_dir / _current_claim_filename(chore_value, scope_value)
-        try:
-            still_current = claim_marker.read_text(encoding="utf-8").strip() == dispatch_id
-        except OSError:
-            still_current = False
-        if still_current:
-            for marker in (claim_marker, state_dir / _current_report_filename(chore_value, scope_value)):
-                try:
-                    marker.unlink()
-                except OSError:
-                    pass
+        _clear_current_markers_if_owned(state_dir, chore_value, scope_value, dispatch_id)
     return True
 
 
@@ -429,9 +460,12 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
     # finish it; the floor overrides that, never the reverse.
 
     Malformed/unreadable claimed files are left alone — a different, already-reported
-    finding (MEMPASS-MALFORMED), not this function's job to clean up. Returns one dict per
-    record expired: `{"dispatch_id", "intervention", "status": "expired", "age_s",
-    "cadence_s", "scope"}`.
+    finding (MEMPASS-MALFORMED), not this function's job to clean up. Expiring a claim
+    also clears its keyed `current-claim`/`current-report` markers (2026-09-15 review,
+    part b) — left behind, a crashed curator's markers would wedge every future arg-less
+    `set-report`/`complete` for that (chore, scope) pair against a claim that no longer
+    exists. Returns one dict per record expired: `{"dispatch_id", "intervention",
+    "status": "expired", "age_s", "cadence_s", "scope"}`.
     """
     acted: list[dict] = []
     for path in sorted(state_dir.glob(f"{CLAIMED_PREFIX}*.json")):
@@ -467,6 +501,7 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
             path.rename(target)
         except OSError:
             continue  # lost the race — leave it for the next sweep
+        _clear_current_markers_if_owned(state_dir, chore, scope, dispatch_id)
         print(f"MEMPASS-EXPIRED {dispatch_id} {chore} age={age_s}")
         acted.append({
             "dispatch_id": dispatch_id, "intervention": chore, "status": "expired",
@@ -494,7 +529,12 @@ def _run_set_report(argv: list[str]) -> int:
     in-flight claim via `_resolve_current_claim_chore_scope` (exit 2 if zero or multiple are
     in flight). Passing exactly one of the two is always an error, as is an empty string for
     either — a silently-empty scope is the exact bug this fixes, so it must fail loud, not
-    fall back."""
+    fall back.
+
+    Either way, the resolved (chore, scope) must still name an in-flight claim
+    (`_require_claim_in_flight`, 2026-09-15 review, part b) — a key marker left behind by a
+    completed or expired dispatch would otherwise let a report silently attach to a claim
+    that no longer exists."""
     ap = argparse.ArgumentParser(
         prog="memory_dispatch_claim.py set-report",
         description="Record the current pass's report path for a later argument-less `complete`.",
@@ -525,6 +565,10 @@ def _run_set_report(argv: list[str]) -> int:
     else:
         assert args.scope is not None  # guaranteed by the together-or-neither check above
         chore, scope = args.chore, args.scope
+
+    guard = _require_claim_in_flight(state_dir, chore, scope, "set-report")
+    if guard is not None:
+        return guard
 
     try:
         (state_dir / _current_report_filename(chore, scope)).write_text(

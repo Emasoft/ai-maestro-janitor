@@ -676,7 +676,14 @@ def test_claim_one_writes_keyed_current_claim_file(tmp_path):
 
 def test_set_report_writes_resolved_path_keyed_by_chore_scope(tmp_path, monkeypatch):
     """`set-report` resolves and stores the path the same way `complete_claim` would,
-    under the chore+scope-keyed filename."""
+    under the chore+scope-keyed filename — for an EXPLICIT --chore/--scope naming a
+    genuinely in-flight claim (2026-09-15 review, part b: set-report now refuses when
+    the pair does not name a live claimed record)."""
+    p = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    (tmp_path / mdc._current_claim_filename("repair", "LOCAL")).write_text(
+        dispatch_id, encoding="utf-8"
+    )
     other_cwd = tmp_path / "cwd"
     other_cwd.mkdir()
     monkeypatch.chdir(other_cwd)
@@ -911,3 +918,101 @@ def test_complete_fast_path_survives_a_prior_completed_chore(tmp_path):
     assert rc == 0
     done = tmp_path / f"{mdc.DONE_PREFIX}{got2['dispatch_id']}.json"
     assert done.is_file()
+
+
+# ---------------------------------------------------------------------------
+# Stale keyed markers after a crashed curator (2026-09-15 review of 2edbe39d, part b):
+# `expire_stale_claims` used to reclaim a dead claim without ever unlinking the keyed
+# `current-claim`/`current-report` markers it left behind, wedging every later arg-less
+# `set-report`/`complete` for a DIFFERENT chore behind a "multiple in-flight claims"
+# refusal forever. And `set-report` resolved (chore, scope) from a marker without ever
+# checking the claim it named was still alive.
+# ---------------------------------------------------------------------------
+
+def test_expiring_a_crashed_claim_clears_its_markers_so_a_new_chore_can_close_arg_less(tmp_path, monkeypatch):
+    """(a) claim -> simulate a crash (claimed record left behind with its markers) ->
+    expire_stale_claims -> both keyed markers are gone, and a second claim on a
+    DIFFERENT chore then closes arg-less with rc 0 (the bug: it used to see two key
+    markers and exit 2 forever)."""
+    _fixed_cadence(monkeypatch)
+    epoch = 1_000_000
+    p = _claimed(tmp_path, epoch, "repair", scope="LOCAL")
+    dead_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    claim_marker = tmp_path / mdc._current_claim_filename("repair", "LOCAL")
+    report_marker = tmp_path / mdc._current_report_filename("repair", "LOCAL")
+    claim_marker.write_text(dead_id, encoding="utf-8")
+    report_marker.write_text("/tmp/dead.md", encoding="utf-8")
+
+    acted = mdc.expire_stale_claims(tmp_path, now=epoch + 30_000, max_age_s=0)
+    assert len(acted) == 1 and acted[0]["dispatch_id"] == dead_id
+    assert not claim_marker.exists()
+    assert not report_marker.exists()
+
+    _dispatch(tmp_path, epoch + 1, "atomize", scope="PROJECT")
+    got = mdc.claim_one(tmp_path, "atomize")
+    assert got is not None
+    rc = mdc._run_complete(["--state-dir", str(tmp_path)])
+    assert rc == 0
+    assert (tmp_path / f"{mdc.DONE_PREFIX}{got['dispatch_id']}.json").is_file()
+
+
+def test_expiring_an_old_claim_leaves_a_newer_same_key_marker_alone(tmp_path, monkeypatch):
+    """(b) a NEWER same-chore+scope claim overwrote the marker with its own id before the
+    older claim expired -> expiring the older one must not delete the newer marker."""
+    _fixed_cadence(monkeypatch)
+    epoch = 1_000_000
+    p = _claimed(tmp_path, epoch, "repair", scope="LOCAL")
+    old_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    claim_marker = tmp_path / mdc._current_claim_filename("repair", "LOCAL")
+    claim_marker.write_text(old_id, encoding="utf-8")
+    newer_id = "1000005-newer99"
+    claim_marker.write_text(newer_id, encoding="utf-8")
+
+    acted = mdc.expire_stale_claims(tmp_path, now=epoch + 30_000, max_age_s=0)
+
+    assert len(acted) == 1 and acted[0]["dispatch_id"] == old_id
+    assert claim_marker.read_text(encoding="utf-8") == newer_id
+
+
+def test_set_report_against_an_expired_claims_marker_exits_2(tmp_path, monkeypatch):
+    """(c) set-report against a key marker whose claim was expired -> rc 2 with the
+    'not in flight' message, resolved arg-less."""
+    _fixed_cadence(monkeypatch)
+    epoch = 1_000_000
+    p = _claimed(tmp_path, epoch, "repair", scope="LOCAL")
+    dead_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    claim_marker = tmp_path / mdc._current_claim_filename("repair", "LOCAL")
+    claim_marker.write_text(dead_id, encoding="utf-8")
+    # Expire the claim WITHOUT going through expire_stale_claims (whose own cleanup is
+    # covered by (a)/(b) above) — simulate the marker surviving some other way, e.g. a
+    # manual `complete` that raced the marker write.
+    (tmp_path / f"{mdc.CLAIMED_PREFIX}{dead_id}.json").unlink()
+
+    rc = mdc._run_set_report(["report.md", "--state-dir", str(tmp_path)])
+
+    assert rc == 2
+
+
+def test_set_report_with_explicit_flags_naming_a_done_claim_exits_2(tmp_path):
+    """(d) set-report with explicit --chore/--scope naming a done (no longer claimed)
+    dispatch -> rc 2, not a silent write to a claim that no longer exists."""
+    p = _claimed(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    (tmp_path / mdc._current_claim_filename("repair", "LOCAL")).write_text(
+        dispatch_id, encoding="utf-8"
+    )
+    assert mdc.complete_claim(tmp_path, dispatch_id, "/tmp/x.md") is True
+    # complete_claim's own cleanup already unlinked the marker (it still named this
+    # dispatch_id at completion time) — re-write it here to SIMULATE a marker that was
+    # never cleaned up (e.g. a manual restore, or a race where the cleanup step itself
+    # lost). The guard under test does not care how the marker got there; only that it
+    # names a dispatch_id with no matching claimed record.
+    (tmp_path / mdc._current_claim_filename("repair", "LOCAL")).write_text(
+        dispatch_id, encoding="utf-8"
+    )
+
+    rc = mdc._run_set_report(
+        ["report.md", "--state-dir", str(tmp_path), "--chore", "repair", "--scope", "LOCAL"]
+    )
+
+    assert rc == 2
