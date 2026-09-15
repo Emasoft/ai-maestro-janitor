@@ -546,25 +546,67 @@ def test_complete_claim_is_idempotent(tmp_path):
     assert mdc.complete_claim(tmp_path, dispatch_id, "noop") is True
 
 
-def test_complete_cli_prints_claim_id_and_completes(tmp_path):
-    """End-to-end: a real claim prints CLAIM_ID=<id>, and the `complete` subcommand
-    (given that id) renames the record DONE."""
+def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
+    """End-to-end: a real claim prints CLAIM_ID=<id> as the LAST stdout line (so a
+    positional reader of the earlier lines is unaffected), and the `complete`
+    subcommand (given that id + the report carrying the marker) renames the record
+    DONE."""
     _dispatch(tmp_path, 1_000_000, "repair")
     proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
     assert proc.returncode == 0, proc.stderr
-    claim_id_lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("CLAIM_ID=")]
-    assert len(claim_id_lines) == 1, proc.stdout
-    dispatch_id = claim_id_lines[0].split("=", 1)[1]
+    lines = [ln for ln in proc.stdout.splitlines() if ln]
+    assert lines[-1].startswith("CLAIM_ID="), proc.stdout
+    dispatch_id = lines[-1].split("=", 1)[1]
     assert dispatch_id == "1000000-abcd1234"
 
-    proc2 = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path), "--outcome", "noop"])
+    report = tmp_path / "report.md"
+    report.write_text("pass notes\n<!-- janitor-outcome: noop reason=no-work -->\n", encoding="utf-8")
+    proc2 = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path), "--report", str(report)])
     assert proc2.returncode == 0, proc2.stderr
-    assert (tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json").is_file()
+    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    assert done.is_file()
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["outcome"] == "noop"
+    assert payload["outcome_reason"] == "no-work"
+
+
+def test_complete_cli_missing_marker_records_outcome_unknown(tmp_path):
+    """A report with no `janitor-outcome` marker must not block the check-in — it is
+    still completed, just recorded as `outcome: unknown` so the gap stays visible."""
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    report = tmp_path / "report.md"
+    report.write_text("pass notes, no marker\n", encoding="utf-8")
+
+    proc = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path), "--report", str(report)])
+
+    assert proc.returncode == 0, proc.stderr
+    assert "recording outcome=unknown" in proc.stderr
+    payload = json.loads((tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json").read_text(encoding="utf-8"))
+    assert payload["outcome"] == "unknown"
+
+
+def test_complete_cli_unreadable_report_fails_loudly(tmp_path):
+    """A typo'd/missing `--report` path is a caller bug, not an abstain — it must exit
+    non-zero and never record `outcome=unknown` for a report that was never actually
+    read (that would make a mistyped path indistinguishable from a genuine no-marker
+    report in the done record)."""
+    p = _claimed(tmp_path, 1_000_000, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+
+    proc = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path),
+                      "--report", str(tmp_path / "does-not-exist.md")])
+
+    assert proc.returncode == 6, proc.stderr
+    assert not (tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json").exists()
+    assert p.is_file(), "the claim must stay claimed, not be silently completed"
 
 
 def test_complete_cli_unknown_id_exits_nonzero(tmp_path):
     """The CLI surface of the unknown-id case must also fail loudly, not silently."""
-    proc = _run_cli(["complete", "999-doesnotexist", "--state-dir", str(tmp_path), "--outcome", "noop"])
+    report = tmp_path / "report.md"
+    report.write_text("<!-- janitor-outcome: noop reason=no-work -->\n", encoding="utf-8")
+    proc = _run_cli(["complete", "999-doesnotexist", "--state-dir", str(tmp_path), "--report", str(report)])
     assert proc.returncode == 2, proc.stderr
 
 

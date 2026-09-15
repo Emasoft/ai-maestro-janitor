@@ -163,8 +163,12 @@ printf '<!-- janitor-outcome: %s -->\n' "$OUTCOME" >> "$REPORT_FILE"
 
 **MANDATORY next step — check your claim in by id** (never by report filename):
 `uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete
-"$CLAIM_ID" --state-dir "$STATE_DIR" --outcome noop` (or `mutation`, matching the
-`janitor-outcome` you just wrote).
+"$CLAIM_ID" --state-dir "$STATE_DIR" --report "$REPORT_FILE"` — it reads the outcome back
+out of the `janitor-outcome` marker you just wrote, so there is nothing left to duplicate
+or get out of sync with it.
+
+**Only once that command has run do you return to your caller.** Your whole output is then
+one line plus `$REPORT_FILE`'s path — never page bodies, never the corpus.
 
 **Do not paraphrase it, and do not put the verdict only in prose.** `report-to-trdd-drift`
 skips your abstain passes by reading this line; a decision report lacking it is flagged for
