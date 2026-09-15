@@ -555,3 +555,82 @@ def test_superseded_pool_record_is_not_orphaned(tmp_path):
 
     assert out == ""
     assert _ledger_lines(project) == []
+
+
+
+# -- done-pool report-missing check (c0cbf97d review) ------------------------
+
+
+def _write_done(
+    state_dir: Path, *, dispatch_id: str, intervention: str, scope: str, root: str,
+    stamped_at: int, completed_at: int, report: str,
+) -> None:
+    state_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
+        "scope": scope, "root": root, "stamped_at": stamped_at, "dispatch_id": dispatch_id,
+        "completed_at": completed_at, "report": report,
+    }
+    (state_dir / f"{memory_dispatch_claim.DONE_PREFIX}{dispatch_id}.json").write_text(
+        json.dumps(payload), encoding="utf-8",
+    )
+
+
+def test_done_record_with_existing_report_is_silent(tmp_path):
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    report = project / "reports" / "repair-report.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("ok", encoding="utf-8")
+    _write_done(
+        state_dir, dispatch_id="5555555555-eeeeeeee", intervention="repair", scope="LOCAL",
+        root=root, stamped_at=now - 100, completed_at=now - 50, report=str(report),
+    )
+
+    out = _run(home, project, gstate, settings)
+
+    assert out == ""
+    assert _ledger_lines(project) == []
+
+
+def test_done_record_with_missing_report_alarms_once(tmp_path):
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    missing_report = str(project / "reports" / "does-not-exist.md")
+    _write_done(
+        state_dir, dispatch_id="6666666666-ffffffff", intervention="repair", scope="LOCAL",
+        root=root, stamped_at=now - 100, completed_at=now - 50, report=missing_report,
+    )
+
+    out1 = _run(home, project, gstate, settings)
+    assert "report is missing" in out1
+    lines = _ledger_lines(project)
+    assert len(lines) == 1
+    assert '"MEMPASS-REPORT-MISSING"' in lines[0]
+
+    # Second fire on the same done record: deduped, no second ledger entry.
+    out2 = _run(home, project, gstate, settings)
+    assert out2 == ""
+    assert len(_ledger_lines(project)) == 1
+
+
+def test_done_record_older_than_7_days_is_not_reported(tmp_path):
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    missing_report = str(project / "reports" / "does-not-exist.md")
+    _write_done(
+        state_dir, dispatch_id="7777777777-99999999", intervention="repair", scope="LOCAL",
+        root=root, stamped_at=now - 9 * 24 * 3600, completed_at=now - 8 * 24 * 3600,
+        report=missing_report,
+    )
+
+    out = _run(home, project, gstate, settings)
+
+    assert out == ""
+    assert _ledger_lines(project) == []

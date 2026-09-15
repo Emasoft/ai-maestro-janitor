@@ -119,6 +119,66 @@ def _check_claimed_pool(state_dir: Path, seen: Path, now: int) -> None:
         print(line, flush=True)
 
 
+def _check_done_pool(state_dir: Path, seen: Path, now: int) -> None:
+    """Done records whose recorded `report` path does not exist on disk (c0cbf97d review):
+    `complete_claim` now closes a claim even when `--report` is unreadable, storing whatever
+    path it was given verbatim. A typo/moved report then closes SILENTLY — the claim reads
+    as healthy forever after. This does not reopen the claim (the pass itself DID run and
+    check in); it only flags the mismatch so a human can look. Bounded to records completed
+    within the last 7 days, or until pruned by `_prune_named`'s keep-20 policy, whichever
+    is sooner -- a busy corpus can retire a done record before 7 days elapse, and this
+    check simply never sees it (an old miss is not this heartbeats concern any more); and
+    deduped per dispatch_id (the state file `seen` already gives us fire-once for free) so
+    a permanently-missing report does not repeat every heartbeat."""
+    try:
+        pool = sorted(state_dir.glob(f"{memory_dispatch_claim.DONE_PREFIX}*.json"))
+    except OSError as exc:
+        state.log_line("orphaned-memory-maint", f"done pool read failed: {exc}")
+        return
+
+    for path in pool:
+        dispatch_id = path.name[len(memory_dispatch_claim.DONE_PREFIX):-len(".json")]
+        try:
+            payload, malformed = omm.read_record(path)
+        except Exception as exc:  # noqa: BLE001 - a done-pool read failure must never break the fire
+            state.log_line("orphaned-memory-maint", f"done record read failed: {exc}")
+            continue
+        if malformed or payload is None:
+            continue  # not this checks job -- pool-malformed handling already covers it
+
+        completed_at = payload.get("completed_at")
+        report = payload.get("report")
+        if not isinstance(completed_at, (int, float)) or not isinstance(report, str):
+            continue  # older done shape or a foreign write -- not this checks concern
+
+        age_s = max(0, now - int(completed_at))
+        if age_s > 7 * 24 * 3600:
+            continue  # older than 7 days -- not this checks concern any more
+
+        if Path(report).exists():
+            continue
+
+        intervention = payload["intervention"]
+        scope = payload["scope"]
+        msg = (
+            f"memory-maintenance pass {dispatch_id!r} ({intervention}, {scope}) checked in "
+            f"but its report is missing: {report}"
+        )
+        key = f"report-missing:{dispatch_id}"
+        line = dedupe.emit_once(seen, key, f"[orphaned-memory-maint] {msg}")
+        if line is None:
+            continue  # already alerted for this exact id
+        try:
+            findings_ledger.record(
+                sev="LOW", code="MEMPASS-REPORT-MISSING", src="orphaned-memory-maint",
+                msg=msg, now=now,
+            )
+        except Exception as exc:  # noqa: BLE001
+            state.log_line("orphaned-memory-maint", f"ledger write failed: {exc}")
+        state.log_line("orphaned-memory-maint", f"recorded MEMPASS-REPORT-MISSING for {key}")
+        print(line, flush=True)
+
+
 def _check_pool(state_dir: Path, seen: Path, now: int, default_factor: int, local_factor: int) -> None:
     """The per-dispatch claim pool (TRDD-IB5B14QQ): `memory-maintenance.py::_write_pending`
     writes one immutable `memory-maint-pending-<dispatch_id>.json` per dispatch, on top of
@@ -233,6 +293,10 @@ def main() -> int:
     # record, which just sits there and gets checked by _check_pool above) — nothing
     # else in the pipeline ever revisits a memory-maint-claimed-*.json file.
     _check_claimed_pool(state_dir, seen, now)
+
+    # A checked-in claim never gets revisited by anything else -- this is the only
+    # place a missing report on a done record would ever surface (c0cbf97d review).
+    _check_done_pool(state_dir, seen, now)
 
     state.rotate_log_if_big("orphaned-memory-maint")
     return 0
