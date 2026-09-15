@@ -120,28 +120,30 @@ _CONTINUITY_DEBOUNCE_WINDOW_S = 120
 # finding on TRDD-7MGJYLY5). Read backward in fixed-size chunks so a long transcript is
 # never loaded whole into memory, bounded by a byte/time budget so the scan can never
 # outrun the PreCompact hook's own timeout (hooks.json: 15s) on a huge transcript.
-_ACTIVE_SKILLS_MAX = 8
+def _env_int(name: str, default: int) -> int:
+    """Read an integer env-var override, falling back to `default` on anything else
+    (unset, blank, or unparsable) — a bad override must degrade, never crash the
+    module at import time."""
+    try:
+        return int(os.environ.get(name, "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+_ACTIVE_SKILLS_LINE_MAX_BYTES = 400  # a rendered nudge line stays greppable/short past this
 _ACTIVE_SKILLS_CHUNK_BYTES = 65_536
-_ACTIVE_SKILLS_SCAN_MAX_BYTES = 8 * 1024 * 1024
+_ACTIVE_SKILLS_SCAN_MAX_BYTES = _env_int("CLAUDE_PLUGIN_OPTION_ACTIVE_SKILLS_SCAN_MAX_BYTES", 8 * 1024 * 1024)
 _ACTIVE_SKILLS_SCAN_MAX_S = 1.0
 # A user-typed slash command (`/ponytail`) is a plain text turn, never a `Skill`
-# tool_use — matched separately. Harness verbs and janitor-internal commands are
-# excluded; anything else is accepted as-is (no cheap plugin-skills-directory listing
-# is wired into this hook to filter further).
+# tool_use — matched separately, and only against the FIRST non-empty line of the
+# user block (a pasted path or a heartbeat stub-path line elsewhere in the block must
+# never be mistaken for a command). The token is accepted only if it is in the
+# allowlist built from a real skill directory name or a harness builtin — see
+# `_plugin_skill_names`/`_HARNESS_SKILL_BUILTINS` below.
 _SLASH_SKILL_RE = re.compile(r"^/([A-Za-z0-9_:-]+)")
-# Every Claude Code BUILT-IN slash command (not a project skill) — review finding on
-# TRDD-7MGJYLY5: a 4-entry list left /resume, /model, /cost, etc. uncaught, so an
-# ordinary session's harness commands crowded a real mode skill (e.g. /ponytail) out
-# of the 8-slot cap. This list is the harness's documented command set, not a skill
-# directory listing (none is cheaply available to this hook).
-_SLASH_SKILL_EXCLUDE = frozenset(
-    {
-        "add-dir", "agents", "bug", "clear", "compact", "config", "cost", "doctor",
-        "export", "exit", "help", "hooks", "ide", "init", "login", "logout", "mcp",
-        "memory", "model", "output-style", "permissions", "pr_comments", "quit",
-        "resume", "review", "rewind", "status", "statusline", "todos", "vim",
-    }
-)
+# Harness MODE commands (`/ponytail`, etc.) are never a real project skill directory,
+# so they need their own small builtin allowlist alongside the plugin's own skills/.
+_HARNESS_SKILL_BUILTINS = frozenset({"ponytail", "colony", "caveman", "distill"})
 _OPEN_FILES_MAX = 20
 # Uncapped background_agents was a real bug (review finding, TRDD-7MGJYLY5): the nudge's
 # ≤15-line render is a single END-OF-LIST slice, so a session with many live agents could
@@ -592,32 +594,90 @@ def _tool_use_blocks_tail(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -
         blocks.extend(b for b in content if isinstance(b, dict) and b.get("type") == "tool_use")
     return blocks
 
+def _plugin_skill_names() -> frozenset[str]:
+    """Names of this plugin's own `skills/*/` directories — the allowlist source for
+    slash-typed skill detection. Resolves via `CLAUDE_PLUGIN_ROOT` when set (the
+    normal hook environment); falls back to the hook file's own repo root so this
+    still works when the hook is invoked directly (tests, manual runs). Fail-open:
+    a missing/unreadable skills dir → empty set, never raises.
+
+    Includes `/janitor-*` skill directories in the allowlist (they are genuine
+    directories under this plugin's `skills/`, so a slash-typed `/janitor-arm` is a
+    real match) — but `_active_skills_from_transcript` filters `janitor-*` names back
+    out of the ACTIVE list before returning: those are on-demand commands, never a
+    mode to reload after compaction."""
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    base = Path(root) if root else Path(__file__).resolve().parent.parent.parent
+    try:
+        return frozenset(p.name for p in (base / "skills").iterdir() if p.is_dir())
+    except OSError:
+        return frozenset()
+
+
+def _truncate_to_line_budget(names: list[str], line_max_bytes: int) -> list[str]:
+    """`names` is oldest-activated-first. If the comma-joined line would exceed
+    `line_max_bytes`, keep names from the FRONT (the oldest — an early mode skill
+    like /ponytail must survive) and replace the dropped, newer names with a single
+    `…(+N more)` marker so the returned list's joined line always fits the budget."""
+    if not names or len(", ".join(names).encode("utf-8")) <= line_max_bytes:
+        return names
+    kept: list[str] = []
+    total = 0
+    for name in names:
+        piece = name if not kept else ", " + name
+        piece_len = len(piece.encode("utf-8"))
+        if total + piece_len > line_max_bytes:
+            break
+        kept.append(name)
+        total += piece_len
+    remaining = len(names) - len(kept)
+    marker = f"…(+{remaining} more)"
+    while kept and len((", ".join(kept) + ", " + marker).encode("utf-8")) > line_max_bytes:
+        kept.pop()
+        remaining += 1
+        marker = f"…(+{remaining} more)"
+    kept.append(marker)
+    return kept
+
 
 def _active_skills_from_transcript(
     transcript_path: str,
-    max_skills: int = _ACTIVE_SKILLS_MAX,
     chunk_bytes: int = _ACTIVE_SKILLS_CHUNK_BYTES,
     max_scan_bytes: int = _ACTIVE_SKILLS_SCAN_MAX_BYTES,
     max_scan_s: float = _ACTIVE_SKILLS_SCAN_MAX_S,
+    line_max_bytes: int = _ACTIVE_SKILLS_LINE_MAX_BYTES,
 ) -> list[str]:
     """Distinct `Skill` tool_use names AND user-typed `/skill-name` slash commands,
-    oldest-activated first, capped at `max_skills` (review fix on TRDD-7MGJYLY5: a
-    turn-count window misses a MODE skill — e.g. /ponytail — activated long before the
-    window; a fresh-invocation skill used minutes ago and a still-active mode skill
-    loaded hours ago are equally "active" for the resumed turn).
+    oldest-activated first (review fix on TRDD-7MGJYLY5: a turn-count window misses a
+    MODE skill — e.g. /ponytail — activated long before the window; a fresh-invocation
+    skill used minutes ago and a still-active mode skill loaded hours ago are equally
+    "active" for the resumed turn).
 
     Reads the transcript BACKWARD in `chunk_bytes` slices — never the whole file at
     once, however long the session ran — bounded by `max_scan_bytes`/`max_scan_s`
-    (default 8 MB / 1 s) so a multi-GB transcript can never blow the ~15 s PreCompact
-    hook timeout (hooks.json). Collects ALL distinct names found within that budget,
-    then keeps the `max_skills` OLDEST (mode skills are typically activated earliest
-    and must survive the cap even when many fresh skills ran after them) and reverses
-    to activation order. A slash-typed command (`/ponytail`) is a user-role text turn,
-    never a `Skill` tool_use, so it is matched separately by regex; every documented
-    Claude Code BUILT-IN command (`_SLASH_SKILL_EXCLUDE`) and janitor-internal commands
-    (`/janitor-*`) are excluded — no cheap plugin-skills-directory listing is wired
-    into this hook, so any other slash token is accepted as-is. Fail-open: never
-    raises."""
+    (default 8 MB / 1 s, overridable via `CLAUDE_PLUGIN_OPTION_ACTIVE_SKILLS_SCAN_MAX_BYTES`)
+    so a multi-GB transcript can never blow the ~15 s PreCompact hook timeout
+    (hooks.json). Collects every distinct name found within that budget — NO count
+    cap (review fix: a fixed slot count silently dropped a real skill once more than
+    that many were active in one session).
+
+    A slash-typed command is a user-role text turn, never a `Skill` tool_use, so it
+    is matched separately by regex — against ONLY the FIRST non-empty line of the
+    block (a pasted absolute path or a heartbeat stub-path line elsewhere in the same
+    block must never be mistaken for a command). The matched token is accepted only
+    when it is in the allowlist: a real directory under this plugin's own `skills/`
+    (`_plugin_skill_names`), a harness builtin mode command (`_HARNESS_SKILL_BUILTINS`),
+    or a `Skill` tool_use name already seen earlier in this same scan.
+
+    Any name/token starting with `janitor-` is dropped from the returned ACTIVE list
+    (though still recorded in `tool_seen` for slash-token matching) — those are
+    on-demand commands (arm, disarm, findings, memory chores), never a mode to
+    reload after compaction.
+
+    The returned list is truncated to `line_max_bytes` when its comma-joined line
+    would exceed it, keeping the OLDEST names (an early mode skill survives) and
+    replacing the dropped newest names with one `…(+N more)` marker
+    (`_truncate_to_line_budget`). Fail-open: never raises."""
     if not transcript_path:
         return []
     path = Path(transcript_path)
@@ -625,8 +685,14 @@ def _active_skills_from_transcript(
         size = path.stat().st_size
     except OSError:
         return []
+    allowlist = _HARNESS_SKILL_BUILTINS | _plugin_skill_names()
     names: list[str] = []  # backward-scan discovery order == newest-activated first
     seen: set[str] = set()
+    tool_seen: set[str] = set()  # every Skill tool_use name found so far in this scan —
+    # tracked SEPARATELY from `seen` (which also dedupes accepted slash tokens) so a
+    # slash-typed token can still be accepted on the "matches a real Skill call" ground
+    # even though `seen` itself can never satisfy that check (a token already in `seen`
+    # is, by construction, never re-added — checking `seen` there would be dead code).
     pos = size
     scanned = 0
     deadline = time.monotonic() + max_scan_s
@@ -682,24 +748,34 @@ def _active_skills_from_transcript(
                     name = ""
                     if isinstance(tool_input, dict):
                         name = str(tool_input.get("command", "") or tool_input.get("skill", "") or "").strip()
-                    if name and name not in seen:
+                    if name:
+                        tool_seen.add(name)
+                    # why: janitor-* skills are on-demand commands (arm/disarm/findings/
+                    # memory chores) run by hooks or the user, never a mode to reload
+                    # after compaction — never surface them as "active" to resume.
+                    if name and name not in seen and not name.startswith("janitor-"):
                         seen.add(name)
                         names.append(name)
             elif obj_type == "user":
-                text = _extract_text(content).strip()
-                m = _SLASH_SKILL_RE.match(text)
+                first_line = ""
+                for text_line in _extract_text(content).splitlines():
+                    stripped_line = text_line.strip()
+                    if stripped_line:
+                        first_line = stripped_line
+                        break
+                m = _SLASH_SKILL_RE.match(first_line)
                 if m:
                     token = m.group(1)
-                    if token not in _SLASH_SKILL_EXCLUDE and not token.startswith("janitor-") and token not in seen:
+                    if (
+                        token not in seen
+                        and not token.startswith("janitor-")
+                        and (token in allowlist or token in tool_seen)
+                    ):
                         seen.add(token)
                         names.append(token)
         pos = start
-    # `names` is newest-activated-first. Keep the `max_skills` OLDEST (the tail of
-    # this list) so an early-loaded mode skill survives the cap, then reverse to
-    # activation (oldest-first) order for the caller.
-    oldest = names[-max_skills:] if len(names) > max_skills else names
-    oldest.reverse()
-    return oldest
+    names.reverse()  # newest-activated-first → activation (oldest-first) order
+    return _truncate_to_line_budget(names, line_max_bytes)
 
 
 def _open_files_from_transcript(

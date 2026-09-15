@@ -712,43 +712,129 @@ def test_build_handoff_no_transcript_degrades_conversation(tmp_path: Path) -> No
     assert "## Recent conversation" in handoff
     assert "(recent conversation unavailable)" in handoff
 
-
-# ---------- trigger=="auto" continuity record (TRDD-7MGJYLY5) --------------
-
-def test_active_skills_from_transcript_finds_distant_skill_and_caps(tmp_path: Path) -> None:
-    """A `Skill` call from FAR earlier in the transcript still counts as "active" (review
-    fix on TRDD-7MGJYLY5: a turn-count window missed a mode skill like /ponytail loaded
-    long before it); distinct names are capped at `_ACTIVE_SKILLS_MAX`, keeping the
-    OLDEST names (the mode skill survives) and dropping the newest ones over the cap."""
+def test_active_skills_from_transcript_no_count_cap(tmp_path: Path) -> None:
+    """The count cap is REMOVED (review fix, TRDD-7MGJYLY5 follow-up): every distinct
+    `Skill` tool_use name survives, and the joined line comfortably fits the 400-byte
+    budget for a handful of short names — no truncation marker appended."""
     hook = _hook()
     tx = tmp_path / "t.jsonl"
-    entries = [_tool_use_turn("Skill", command="ponytail")]  # far in the past, oldest
-    entries += [_amsg(f"filler {i}") for i in range(400)]  # 400 turns later — no window excludes it
-    entries += [_tool_use_turn("Skill", command=f"skill-{i}") for i in range(hook._ACTIVE_SKILLS_MAX + 2)]
+    entries = [_tool_use_turn("Skill", command=f"skill-{i}") for i in range(9)]
     _write_jsonl(tx, entries)
     names = hook._active_skills_from_transcript(str(tx))
-    assert len(names) == hook._ACTIVE_SKILLS_MAX
-    assert names[0] == "ponytail", "oldest-activated name is kept and listed first"
-    assert f"skill-{hook._ACTIVE_SKILLS_MAX + 1}" not in names, "newest names dropped over the cap"
-    assert f"skill-{hook._ACTIVE_SKILLS_MAX}" not in names, "newest names dropped over the cap"
+    assert len(names) == 9, "no count cap — all nine distinct names survive"
+    assert len(", ".join(names).encode("utf-8")) <= hook._ACTIVE_SKILLS_LINE_MAX_BYTES
+    assert not names[-1].startswith("…"), "well under budget — no truncation marker"
 
 
-def test_active_skills_from_transcript_slash_typed_command(tmp_path: Path) -> None:
-    """A user-typed `/ponytail` line counts as an active skill; harness verbs and
-    janitor-internal commands do not."""
+def test_active_skills_from_transcript_line_budget_truncates_with_marker(tmp_path: Path) -> None:
+    """When the joined line would exceed the byte budget, the OLDEST names are kept (an
+    early mode skill survives the cut) and a single `…(+N more)` marker replaces the
+    dropped newest names — the line stays within budget."""
     hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    entries = [_tool_use_turn("Skill", command="ponytail")]  # oldest — must survive
+    entries += [_tool_use_turn("Skill", command=f"skill-{'x' * 20}-{i}") for i in range(30)]
+    _write_jsonl(tx, entries)
+    names = hook._active_skills_from_transcript(str(tx), line_max_bytes=100)
+    assert names[0] == "ponytail", "oldest name survives the truncation"
+    assert names[-1].startswith("…(+"), "a marker replaces the dropped newest names"
+    assert len(", ".join(names).encode("utf-8")) <= 100
+
+
+def test_active_skills_from_transcript_slash_typed_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user-typed `/skill-name` line is accepted only when it names a REAL skill (a
+    directory under the plugin's own `skills/`) or a harness builtin mode command
+    (`_HARNESS_SKILL_BUILTINS`) — an unrelated or unknown slash word is not."""
+    hook = _hook()
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "skills" / "my-skill").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
     tx = tmp_path / "t.jsonl"
     entries = [
         _umsg("/ponytail full"),
-        _umsg("/clear"),
-        _umsg("/janitor-arm"),
-        _umsg("/resume"),  # a harness built-in NOT in the original 4-entry denylist
+        _umsg("/my-skill"),
+        _umsg("/not-a-real-skill"),
+        _amsg("ack"),
+    ]
+    _write_jsonl(tx, entries)
+    names = hook._active_skills_from_transcript(str(tx))
+    assert names == ["ponytail", "my-skill"]
+
+
+def test_active_skills_from_transcript_excludes_janitor_skills(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`janitor-*` skills (on-demand commands run by hooks/the user, e.g. arm,
+    disarm, findings, memory chores) are never surfaced as an "active mode" to
+    reload after compaction — neither as a `Skill` tool_use nor a slash-typed
+    command — while an unrelated skill still is."""
+    hook = _hook()
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "skills" / "janitor-findings").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
+    tx = tmp_path / "t.jsonl"
+    entries = [
+        _tool_use_turn("Skill", command="janitor-arm"),
+        _umsg("/janitor-findings"),
+        _umsg("/ponytail full"),
         _amsg("ack"),
     ]
     _write_jsonl(tx, entries)
     names = hook._active_skills_from_transcript(str(tx))
     assert names == ["ponytail"]
 
+
+def test_active_skills_from_transcript_path_not_mistaken_for_skill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pasted absolute path (`/Users/x/y/...`) is never mistaken for a slash-typed
+    skill — the leading path segment is not in the allowlist, so it yields nothing."""
+    hook = _hook()
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "skills").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [_umsg("/Users/x/y/some/path"), _amsg("ack")])
+    names = hook._active_skills_from_transcript(str(tx))
+    assert names == []
+
+
+def test_active_skills_from_transcript_slash_only_checks_first_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the FIRST non-empty line of a user text block is tested for a slash-typed
+    skill — a stub-path line (e.g. `/tmp/...`) appearing LATER in a multi-line paste
+    (a heartbeat payload) must never match, even if it would otherwise be a real skill
+    dir name."""
+    hook = _hook()
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "skills" / "tmp").mkdir(parents=True)  # real skill dir named "tmp"
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin_root))
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [_umsg("some heartbeat text\n/tmp/janitor/state.json"), _amsg("ack")])
+    names = hook._active_skills_from_transcript(str(tx))
+    assert names == [], "the first line has no leading slash — the second line is never tested"
+
+
+def test_active_skills_from_transcript_env_scan_budget_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`CLAUDE_PLUGIN_OPTION_ACTIVE_SKILLS_SCAN_MAX_BYTES` overrides the default 8 MB
+    scan budget at import time; a small override still cuts the backward scan early,
+    keeps the partial result, and logs the cutoff to stderr."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_ACTIVE_SKILLS_SCAN_MAX_BYTES", "200")
+    hook = _hook()  # re-imported fresh — the module-level default reads the env now
+    tx = tmp_path / "t.jsonl"
+    entries = [_tool_use_turn("Skill", command="early-skill")]
+    entries += [_amsg("x" * 5000) for _ in range(50)]
+    entries += [_tool_use_turn("Skill", command="late-skill")]
+    _write_jsonl(tx, entries)
+    names = hook._active_skills_from_transcript(str(tx))
+    assert names == ["late-skill"], "the env-overridden budget cut before reaching the early skill"
+    assert "scan cut at" in capsys.readouterr().err
+
+
+# ---------- trigger=="auto" continuity record (TRDD-7MGJYLY5) --------------
 
 def test_active_skills_from_transcript_budget_cuts_scan_keeps_partial(tmp_path: Path) -> None:
     """A byte budget smaller than the transcript stops the backward scan early but keeps
