@@ -33,16 +33,9 @@
     },
     "heartbeat_cron": {
       "title": "Heartbeat Cron Expression",
-      "description": "Standard 5-field cron for the janitor heartbeat \u2014 a fixed cadence, no auto-tiering. Default: \"*/15 * * * *\", chosen because every fire is a billed model turn; a project can override it via .janitor/state/desired-cadence.cron.",
+      "description": "Standard 5-field cron for the janitor heartbeat \u2014 a fixed cadence, no auto-tiering. Default: \"*/15 * * * *\", chosen because every fire is a billed model turn; a project can override it via .janitor/state/desired-cadence.cron. The cron is also the wake-up after a rate-limit recovery, so a longer cadence means a longer worst-case idle after a night-time 429 (15 min at the default); set */5 on a project where recovery latency matters more than fire cost.",
       "type": "string",
       "default": "*/15 * * * *",
-      "sensitive": false
-    },
-    "heartbeat_cadence_dynamic": {
-      "title": "Dynamic TTL-aware heartbeat cadence",
-      "description": "When true (DEFAULT), the dispatcher self-selects the heartbeat cadence each fire (TRDD-0QQX9H0G, issue #83): FAST=*/5 when the session is actively waiting (rate-limited, a pending resume, in-flight background agents, keep-going) \u2014 the same cadence as today, so recovery latency is unchanged; MID=*/15 on recent user activity; SLOW=*/30 (bounded by the real cache-TTL) when idle \u2014 cutting idle heartbeat cost ~6x (a measured quiet fire on a large session \u2248 $0.76; */5 = 12 fires/h vs */30 = 2/h) with NO recovery regression. A tier change is applied by re-arming through the existing [janitor-renew] marker (dispatch cannot call CronCreate itself). When false, the phase is a total no-op and the fixed heartbeat_cron is used unchanged.",
-      "type": "boolean",
-      "default": true,
       "sensitive": false
     },
     "heartbeat_ttl_regime": {
