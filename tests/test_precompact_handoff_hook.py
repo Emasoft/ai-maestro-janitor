@@ -715,35 +715,96 @@ def test_build_handoff_no_transcript_degrades_conversation(tmp_path: Path) -> No
 
 # ---------- trigger=="auto" continuity record (TRDD-7MGJYLY5) --------------
 
-def test_active_skills_from_transcript_scopes_to_last_turns_and_caps(tmp_path: Path) -> None:
-    """Only `Skill` calls within the last `_ACTIVE_SKILLS_TURN_WINDOW` ASSISTANT turns
-    count, capped at `_ACTIVE_SKILLS_MAX` distinct names (coordinator addendum to
-    TRDD-7MGJYLY5): a skill loaded many turns ago is not "active"."""
+def test_active_skills_from_transcript_finds_distant_skill_and_caps(tmp_path: Path) -> None:
+    """A `Skill` call from FAR earlier in the transcript still counts as "active" (review
+    fix on TRDD-7MGJYLY5: a turn-count window missed a mode skill like /ponytail loaded
+    long before it); distinct names are capped at `_ACTIVE_SKILLS_MAX`, most-recent
+    first."""
     hook = _hook()
     tx = tmp_path / "t.jsonl"
-    entries = [_tool_use_turn("Skill", command="stale-skill")]  # pushed outside the window below
-    entries += [_amsg(f"filler {i}") for i in range(hook._ACTIVE_SKILLS_TURN_WINDOW)]
+    entries = [_tool_use_turn("Skill", command="ponytail")]  # far in the past
+    entries += [_amsg(f"filler {i}") for i in range(400)]  # 400 turns later — no window excludes it
     entries += [_tool_use_turn("Skill", command=f"skill-{i}") for i in range(hook._ACTIVE_SKILLS_MAX + 2)]
     _write_jsonl(tx, entries)
     names = hook._active_skills_from_transcript(str(tx))
-    assert "stale-skill" not in names, "a skill outside the turn window must not be 'active'"
     assert len(names) == hook._ACTIVE_SKILLS_MAX
     assert names[0] == f"skill-{hook._ACTIVE_SKILLS_MAX + 1}"  # most-recent first
+    assert "ponytail" not in names, "cap reached by nearer skills before the scan reaches it"
+
+
+def test_active_skills_from_transcript_reads_backward_in_chunks(tmp_path: Path) -> None:
+    """A transcript LARGER than one chunk still finds a skill near the start — the
+    backward chunked reader must carry partial lines across chunk boundaries without
+    dropping or duplicating a record."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    entries = [_tool_use_turn("Skill", command="early-skill")]
+    entries += [_amsg("x" * 5000) for _ in range(50)]  # pad well past one small chunk
+    _write_jsonl(tx, entries)
+    names = hook._active_skills_from_transcript(str(tx), chunk_bytes=512)
+    assert names == ["early-skill"]
+
+
+def test_active_skills_from_transcript_never_corrupts_multibyte_boundary(tmp_path: Path) -> None:
+    """A skill name containing a multi-byte UTF-8 character must survive intact even
+    when a small chunk size forces the chunk boundary to fall mid-character (review
+    fix: splitting on the raw byte b"\\n" BEFORE decoding, not decode-then-split, so a
+    continuation byte — never 0x0A — can never be mistaken for a line break, and
+    `carry` reunites the two raw halves before either is decoded)."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    name = "tldr-café-日本語"
+    _write_jsonl(tx, [_tool_use_turn("Skill", command=name)])
+    names = hook._active_skills_from_transcript(str(tx), chunk_bytes=3)
+    assert names == [name]
+    assert "�" not in "".join(names), "a replacement character means bytes were corrupted"
 
 
 def test_open_files_from_transcript_dedupes_recent_read_edit(tmp_path: Path) -> None:
-    """Distinct `Read`/`Edit` file_paths, most-recent first; a repeat path counts once."""
+    """Distinct `Read`/`Edit` file_paths under the project root, most-recent first; a
+    repeat path counts once."""
     hook = _hook()
     tx = tmp_path / "t.jsonl"
     _write_jsonl(tx, [
-        _tool_use_turn("Read", file_path="/a.py"),
-        _tool_use_turn("Edit", file_path="/b.py"),
+        _tool_use_turn("Read", file_path=str(tmp_path / "a.py")),
+        _tool_use_turn("Edit", file_path=str(tmp_path / "b.py")),
         _tool_use_turn("Bash", command="ls"),  # not Read/Edit — excluded
-        _tool_use_turn("Read", file_path="/a.py"),  # repeat — deduped
-        _tool_use_turn("Edit", file_path="/c.py"),
+        _tool_use_turn("Read", file_path=str(tmp_path / "a.py")),  # repeat — deduped
+        _tool_use_turn("Edit", file_path=str(tmp_path / "c.py")),
     ])
-    paths = hook._open_files_from_transcript(str(tx))
-    assert paths == ["/c.py", "/a.py", "/b.py"]
+    paths = hook._open_files_from_transcript(str(tx), tmp_path)
+    assert paths == [str(tmp_path / "c.py"), str(tmp_path / "a.py"), str(tmp_path / "b.py")]
+
+
+def test_open_files_from_transcript_excludes_scratch_and_outside_paths(tmp_path: Path) -> None:
+    """A `/tmp` path, a `reports/`-nested path, and a path outside the project root are
+    all dropped — a continuity nudge naming scratch/report files is worse than silence
+    (review fix on TRDD-7MGJYLY5)."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    outside = tx.parent.parent / "outside.py"
+    _write_jsonl(tx, [
+        _tool_use_turn("Read", file_path="/tmp/scratch.py"),
+        _tool_use_turn("Read", file_path=str(tmp_path / "reports" / "audit.md")),
+        _tool_use_turn("Read", file_path=str(outside)),
+        _tool_use_turn("Edit", file_path=str(tmp_path / "src" / "real.py")),
+    ])
+    paths = hook._open_files_from_transcript(str(tx), tmp_path)
+    assert paths == [str(tmp_path / "src" / "real.py")]
+
+
+def test_open_files_from_transcript_caps_at_limit(tmp_path: Path) -> None:
+    """More distinct in-scope files than `_OPEN_FILES_MAX` are truncated, newest kept."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    entries = [
+        _tool_use_turn("Read", file_path=str(tmp_path / f"f{i}.py"))
+        for i in range(hook._OPEN_FILES_MAX + 5)
+    ]
+    _write_jsonl(tx, entries)
+    paths = hook._open_files_from_transcript(str(tx), tmp_path)
+    assert len(paths) == hook._OPEN_FILES_MAX
+    assert paths[0] == str(tmp_path / f"f{hook._OPEN_FILES_MAX + 4}.py")  # newest first
 
 
 def test_debounced_true_within_window_same_session(tmp_path: Path) -> None:
@@ -842,6 +903,43 @@ def test_hook_subprocess_trigger_auto_second_firing_is_debounced(tmp_path: Path)
     log = project / ".janitor" / "logs" / "pre-compact-handoff.log"
     assert log.is_file(), "positive control failed — no log at all"
     assert "debounced" in log.read_text(encoding="utf-8")
+
+
+def test_hook_subprocess_manual_then_debounced_auto_stamps_auto_last(tmp_path: Path) -> None:
+    """THE ORDERING HOLE (review fix, TRDD-7MGJYLY5): a manual /compact (writes the
+    prose handoff) followed within the debounce window by a debounced auto firing (no
+    continuity re-write) must still leave `precompact-last-trigger.json` naming "auto"
+    — SessionStart decides manual-vs-auto by this stamp, never by comparing the prose
+    and continuity files' mtimes, which the debounce would otherwise leave stale."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _init_git_repo(project)
+    session = "sess-order-1"
+    manual_payload = {
+        "session_id": session,
+        "cwd": str(project),
+        "transcript_path": "",
+        "trigger": "manual",
+        "hook_event_name": "PreCompact",
+    }
+    auto_payload = {**manual_payload, "trigger": "auto"}
+    # Manual first (prose handoff written), then an auto firing that debounces — the
+    # SAME sequence that used to leave the prose file newer than the continuity record.
+    proc1 = _run_precompact(project, manual_payload)
+    assert proc1.returncode == 0, f"stderr={proc1.stderr!r}"
+    # Pre-seed a continuity record for THIS session so the debounce guard actually
+    # engages on the second firing (debounce keys off an existing same-session record).
+    sd = project / ".janitor" / "state"
+    (sd / "precompact-continuity.json").write_text(
+        json.dumps({"session_id": session}), encoding="utf-8"
+    )
+    proc2 = _run_precompact(project, auto_payload)
+    assert proc2.returncode == 0, f"stderr={proc2.stderr!r}"
+    log = (project / ".janitor" / "logs" / "pre-compact-handoff.log").read_text(encoding="utf-8")
+    assert "debounced" in log, "positive control failed — the auto firing must have debounced"
+    stamp = json.loads((sd / "precompact-last-trigger.json").read_text(encoding="utf-8"))
+    assert stamp["trigger"] == "auto", "the stamp must reflect the LAST firing, even when debounced"
+    assert stamp["session_id"] == session
 
 
 def test_hook_subprocess_manual_trigger_twice_writes_both_times(tmp_path: Path) -> None:

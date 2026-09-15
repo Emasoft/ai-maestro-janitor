@@ -3,7 +3,7 @@ trdd-id: 7MGJYLY5
 title: Janitor compaction prefers clear plus llm-ext at turn boundaries, preserves subagents, restores skills not files
 column: todo
 created: 2026-09-08T20:03:42+0200
-updated: 2026-09-08T23:11:17+0200
+updated: 2026-09-15T20:40:12+0200
 current-owner: janitor-session
 task-type: feature
 min-approval-requirement: none
@@ -115,16 +115,16 @@ All at `column: testing` on 2026-09-08 unless noted:
       autocompact point for the CURRENT setting. A test reads the value the harness actually has
       and asserts the janitor's clear fires below it. (Requirement 1 leaves keying on the variable
       to the implementer, so the test does not vary it.)
-- [ ] The PreCompact / post-autocompact path writes NO summary and NO prose handoff; it emits the
+- [x] The PreCompact / post-autocompact path writes NO summary and NO prose handoff; it emits the
       resume nudge plus, at most, the machine-readable record requirement 2 carves out. A test
       asserts the absence of the summary and prose-handoff files.
 - [ ] A clear with a live background subagent leaves that subagent alive and the resume listing
       names it. A test asserts it against a real subagent, not a mock.
-- [ ] The post-clear restore hook lists previously-open files as paths only and opens none of
+- [x] The post-clear restore hook lists previously-open files as paths only and opens none of
       them, and the restore prompt tells the model "mentioned, not read". A test asserts on the
       hook's file opens and on the prompt text; what the model then does is out of a hook test's
       reach and is not claimed here.
-- [ ] The restore prompt names each skill that was active in the previous session (a skill is not
+- [x] The restore prompt names each skill that was active in the previous session (a skill is not
       a process; naming it in the prompt is the only re-activation the janitor can do). "Active"
       needs a recording mechanism this card does not identify; the implementer names it in the
       STATE block. A test asserts on the prompt text for at least two skills.
@@ -133,3 +133,7 @@ All at `column: testing` on 2026-09-08 unless noted:
 
 - 2026-09-08T20:03:42+0200 — Authored at `todo` from a USER ruling relayed by the ai-maestro
   session. Owner-authorized by the ruling itself; no further approval needed to start.
+
+## ⏵ STATE
+
+2026-09-15: active-skills recording mechanism = distinct Skill tool_use names across the whole transcript, most recent first, cap 8 (pre-compact-handoff.py); box 6 is implemented by that rule; box 3 and box 5 landed in a96f7ef1 + this phase; boxes 2 and 4 belong to TRDD-11GAS4LC

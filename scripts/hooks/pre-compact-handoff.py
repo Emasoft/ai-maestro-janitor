@@ -102,17 +102,25 @@ _MEM_ATOMS_COLLAPSE = 5        # > this many atoms in one file → list the FILE
 # harness autocompact writes a SMALL machine-readable record instead of the prose
 # handoff above; only a manual/unknown-trigger compaction still gets the prose.
 CONTINUITY_FILENAME = "precompact-continuity.json"
+# Written on EVERY PreCompact firing (auto or manual, even when the auto record itself
+# is debounced) — the ordering-hole fix (review finding on TRDD-7MGJYLY5): SessionStart
+# must decide which of the two records to read by WHAT PreCompact SAID it saw, never by
+# comparing file mtimes. A manual /compact (writes the prose handoff) followed within
+# the debounce window by an auto firing (debounced — no continuity write) left the prose
+# file the newer one under the old mtime comparison, so an AUTO compaction injected the
+# full prose handoff — exactly the ruling this feature exists to prevent.
+_LAST_TRIGGER_FILENAME = "precompact-last-trigger.json"
 # Debounce applies ONLY to trigger=="auto" (coordinator addendum to TRDD-7MGJYLY5): a
 # manual /compact typed twice on purpose must write both times. Measured 2026-09-15
 # (TRDD-ANIME2SVG): 7 auto firings in 48s for one real compaction.
 _CONTINUITY_DEBOUNCE_WINDOW_S = 120
-# "Active" skills = loaded recently enough to matter to the resumed turn — a skill
-# loaded an hour ago is not active, and the nudge must not tell the model to re-load a
-# dozen skills (coordinator addendum): scan only the last N ASSISTANT turns, cap the
-# distinct-name list.
-_ACTIVE_SKILLS_TURN_WINDOW = 10
-_ACTIVE_SKILLS_MAX = 5
-_OPEN_FILES_MAX = 50
+# "Active" skills = every distinct `Skill` tool_use name across the WHOLE transcript,
+# most-recent first, capped — a turn-count window misses a MODE skill (e.g. /ponytail)
+# activated long before the window (review finding on TRDD-7MGJYLY5). Read backward in
+# fixed-size chunks so a long transcript is never loaded whole into memory.
+_ACTIVE_SKILLS_MAX = 8
+_ACTIVE_SKILLS_CHUNK_BYTES = 65_536
+_OPEN_FILES_MAX = 20
 # Uncapped background_agents was a real bug (review finding, TRDD-7MGJYLY5): the nudge's
 # ≤15-line render is a single END-OF-LIST slice, so a session with many live agents could
 # silently truncate the active_skills/open_files sections entirely, and — because
@@ -563,97 +571,128 @@ def _tool_use_blocks_tail(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -
     return blocks
 
 
-def _assistant_tool_use_turns(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> list[list[dict]]:
-    """`tool_use` blocks GROUPED BY assistant transcript entry (one entry = one turn),
-    oldest-first, fail-open []. Needed (unlike the flat `_tool_use_blocks_tail`) so
-    "active skills" can be scoped by TURN RECENCY, not by raw tool-call count."""
+def _active_skills_from_transcript(
+    transcript_path: str,
+    max_skills: int = _ACTIVE_SKILLS_MAX,
+    chunk_bytes: int = _ACTIVE_SKILLS_CHUNK_BYTES,
+) -> list[str]:
+    """Distinct `Skill` tool_use names across the WHOLE transcript, most-recent first,
+    capped at `max_skills` (review fix on TRDD-7MGJYLY5: a turn-count window misses a
+    MODE skill — e.g. /ponytail — activated long before the window; a fresh-invocation
+    skill used minutes ago and a still-active mode skill loaded hours ago are equally
+    "active" for the resumed turn). Reads the transcript BACKWARD in `chunk_bytes`
+    slices — never the whole file at once, however long the session ran — and stops as
+    soon as `max_skills` distinct names are found or the file is exhausted. Fail-open:
+    never raises."""
     if not transcript_path:
         return []
     path = Path(transcript_path)
     try:
         size = path.stat().st_size
-        with path.open("rb") as fh:
-            seeked = size > tail_bytes
-            if seeked:
-                fh.seek(size - tail_bytes)
-            raw = fh.read()
     except OSError:
         return []
-    lines = raw.decode("utf-8", errors="replace").splitlines()
-    if seeked and lines:
-        lines = lines[1:]
-    turns: list[list[dict]] = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(obj, dict) or obj.get("type") != "assistant":
-            continue
-        message = obj.get("message")
-        content = message.get("content") if isinstance(message, dict) else None
-        if not isinstance(content, list):
-            continue
-        turns.append([b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"])
-    return turns
-
-
-def _active_skills_from_transcript(
-    transcript_path: str,
-    turn_window: int = _ACTIVE_SKILLS_TURN_WINDOW,
-    max_skills: int = _ACTIVE_SKILLS_MAX,
-) -> list[str]:
-    """Distinct `Skill` tool_use names within the last `turn_window` ASSISTANT turns,
-    most-recent first, capped at `max_skills` (coordinator addendum to TRDD-7MGJYLY5):
-    a skill loaded many turns ago is not "active", and the nudge must not tell the
-    resumed turn to re-load a dozen skills. Fail-open: never raises.
-
-    LITERAL READING (review finding, flag for the coordinator rather than a fix): one
-    "turn" here is one raw JSONL `type=="assistant"` transcript entry, per
-    `_assistant_tool_use_turns`. In an agentic tool-call loop a single USER-VISIBLE
-    exchange can span many such entries (one per tool call), so this window can cover
-    a much shorter span of real conversation than "10 conversational turns" might
-    suggest. Chosen because it needs no extra state to define a "conversational turn"
-    boundary; revisit if the nudge is observed excluding a skill that "obviously" was
-    just used.
-    """
-    turns = _assistant_tool_use_turns(transcript_path)[-turn_window:]
     names: list[str] = []
     seen: set[str] = set()
-    for blocks in reversed(turns):
-        for block in reversed(blocks):
-            if block.get("name") != "Skill":
+    pos = size
+    carry = b""  # partial line (RAW BYTES) left over from the START of the chunk read so
+    # far. Splitting on the byte b"\n" BEFORE decoding — never decode-then-split — is
+    # load-bearing: a UTF-8 continuation byte is never 0x0A, so a multi-byte character
+    # split across a chunk boundary can never straddle a line split, and `carry` glues the
+    # two halves of its raw bytes back together before either side is decoded. Decoding
+    # each chunk independently (the earlier, wrong shape) would run `errors="replace"` on
+    # each half separately and silently corrupt any name whose bytes crossed a boundary.
+    while pos > 0 and len(names) < max_skills:
+        start = max(0, pos - chunk_bytes)
+        try:
+            with path.open("rb") as fh:
+                fh.seek(start)
+                raw = fh.read(pos - start)
+        except OSError:
+            break
+        data = raw + carry
+        lines = data.split(b"\n")
+        # lines[0] may be a partial line split mid-record at the chunk boundary — carry
+        # it into the NEXT (earlier) chunk read, unless this chunk already reached byte 0.
+        carry = lines[0] if start > 0 else b""
+        body_lines = lines[1:] if start > 0 else lines
+        for line_bytes in reversed(body_lines):
+            line = line_bytes.decode("utf-8", errors="replace").strip()
+            if not line:
                 continue
-            tool_input = block.get("input")
-            name = ""
-            if isinstance(tool_input, dict):
-                name = str(tool_input.get("command", "") or tool_input.get("skill", "") or "").strip()
-            if not name or name in seen:
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
                 continue
-            seen.add(name)
-            names.append(name)
-            if len(names) >= max_skills:
-                return names
+            if not isinstance(obj, dict) or obj.get("type") != "assistant":
+                continue
+            message = obj.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in reversed(content):
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                if block.get("name") != "Skill":
+                    continue
+                tool_input = block.get("input")
+                name = ""
+                if isinstance(tool_input, dict):
+                    name = str(tool_input.get("command", "") or tool_input.get("skill", "") or "").strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                names.append(name)
+                if len(names) >= max_skills:
+                    return names
+        pos = start
     return names
 
 
-def _open_files_from_transcript(transcript_path: str, limit: int = _OPEN_FILES_MAX) -> list[str]:
-    """Distinct file paths from the last `limit` `Read`/`Edit` tool_use entries,
-    most-recent first. MENTIONED only — the resumed turn is told these files were
-    open, never asked to re-read them (owner ruling TRDD-7MGJYLY5)."""
+def _open_files_from_transcript(
+    transcript_path: str, project_root: Path, limit: int = _OPEN_FILES_MAX
+) -> list[str]:
+    """Distinct `Read`/`Edit` file_paths, most-recent first, kept only when they sit
+    UNDER `project_root` and are not scratch/report noise — a scratch or report path
+    told to the resumed turn as "open" is worse than not mentioning it (review fix on
+    TRDD-7MGJYLY5). Excludes: any `reports/`- or `*_dev/`-named path segment, and any
+    dotfile/dotdir segment. Capped at `limit`. MENTIONED only — the resumed turn is
+    never asked to re-read them (owner ruling TRDD-7MGJYLY5). Fail-open: a path that
+    can't be resolved is skipped, never raises.
+
+    DELIBERATELY `project_root`, not `git_root` (review churn, TRDD-7MGJYLY5, third
+    pass): widening to `git_root` for the issue #66 nested-repo case (`CLAUDE_PROJECT_DIR`
+    a subdir of the real repo) re-admits whatever sits BETWEEN the two roots, and a
+    denylist of "noise" directory names to compensate matches ANYWHERE in the relative
+    path — excluding a genuinely in-scope file that happens to live under a
+    project-owned `build/`/`vendor/`/`target/` directory. Trading a rare
+    under-inclusion (a file open outside a narrower `project_root`, in the rare nested
+    layout) for a broader false-exclusion risk across every session is the wrong
+    trade; the nested-repo case is accepted as a known, narrow limitation instead."""
     blocks = [b for b in _tool_use_blocks_tail(transcript_path) if b.get("name") in ("Read", "Edit")]
+    try:
+        root = project_root.resolve()
+    except OSError:
+        root = project_root
     paths: list[str] = []
     seen: set[str] = set()
-    for block in reversed(blocks[-limit:]):
+    for block in reversed(blocks):
         tool_input = block.get("input")
         path_str = str(tool_input.get("file_path", "") or "").strip() if isinstance(tool_input, dict) else ""
         if not path_str or path_str in seen:
             continue
+        try:
+            resolved = Path(path_str).resolve()
+            rel_parts = resolved.relative_to(root).parts
+        except (OSError, ValueError):
+            continue  # unresolvable, or not under the project root
+        if any(part.startswith(".") for part in rel_parts):
+            continue
+        if any(part == "reports" or part.endswith("_dev") for part in rel_parts):
+            continue
         seen.add(path_str)
         paths.append(path_str)
+        if len(paths) >= limit:
+            break
     return paths
 
 
@@ -708,7 +747,10 @@ def _build_continuity_record(
         "inflight_trdds": _inflight_trdd_ids(project_root, git_root),
         "background_agents": _background_agents(state_dir),
         "active_skills": _active_skills_from_transcript(transcript_path),
-        "open_files": _open_files_from_transcript(transcript_path),
+        # `project_root`, deliberately not `git_root` (review churn, TRDD-7MGJYLY5,
+        # settled on third pass) — see `_open_files_from_transcript`'s own docstring
+        # for why widening to `git_root` was tried and reverted.
+        "open_files": _open_files_from_transcript(transcript_path, project_root),
     }
 
 
@@ -977,6 +1019,23 @@ def main() -> int:
             sd.mkdir(parents=True, exist_ok=True)
 
         now = time.time()
+        # ALWAYS stamp what trigger PreCompact actually saw — even when the auto record
+        # below is debounced away. SessionStart reads THIS to decide manual-vs-auto,
+        # never file mtimes (the ordering-hole fix, review finding on TRDD-7MGJYLY5): a
+        # manual /compact (prose handoff) followed within the debounce window by a
+        # debounced auto firing (no continuity write) would otherwise leave the prose
+        # file the newer one, injecting 44 KB of prose on an auto path.
+        try:
+            _atomic_write(
+                state,
+                sd / _LAST_TRIGGER_FILENAME,
+                json.dumps(
+                    {"trigger": trigger or "unknown", "written_at": now, "session_id": session_id},
+                    ensure_ascii=False,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - a stamp fault must never block compaction
+            _log(state, f"last-trigger stamp failed: {exc}")
         if trigger == "auto":
             # Harness autocompact: the harness ALREADY summarizes and hands the next
             # turn a resume point (owner ruling TRDD-7MGJYLY5 — "no need of
