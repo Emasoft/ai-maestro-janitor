@@ -47,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import re
+import subprocess  # noqa: E402 (module-level statements above force this out of top-of-file order)
 
 import memory_settings  # noqa: E402
 import orphaned_memory_maint as omm  # noqa: E402
@@ -146,6 +147,38 @@ def _matching_records(
         out.append((path.name[len(prefix):-len(".json")], payload))
     return out
 
+def _reports_dir_candidates(state_dir: Path) -> list[Path]:
+    """Ordered, de-duplicated report-dir candidates for `state_dir`'s project — the
+    MAIN checkout's reports dir first (when `git worktree list` resolves it), then the
+    project's own grandparent reports dir as a fallback (janitor#264: a report written
+    under a linked worktree dies with the branch, so a reader must never rely on the
+    worktree path alone).
+
+    Returns a LIST, not a single path, because the skeleton writer and the matcher
+    (`_find_completion_report`) run in different processes at different times: one call
+    to `git worktree list` can succeed while a later one fails (git missing from PATH,
+    the 5s timeout, a `.git` lock) — if each independently picked ONE resolved path,
+    a skeleton written at the main root would be invisible to a matcher that could only
+    resolve the grandparent (2026-09-16 review of this same TRDD). The writer uses
+    `candidates[0]`; the matcher globs every candidate, so either resolving or not
+    resolving git still finds the same file.
+    """
+    project = state_dir.parent.parent
+    grandparent = project.joinpath(*_REPORT_SUBDIR)
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project), "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        first_line = result.stdout.splitlines()[0]
+        main_root = Path(first_line[len("worktree "):]) if first_line.startswith("worktree ") else None
+    except (OSError, subprocess.SubprocessError, IndexError):
+        main_root = None
+    if main_root is None:
+        return [grandparent]
+    main_reports = main_root.joinpath(*_REPORT_SUBDIR)
+    return [main_reports] if main_reports == grandparent else [main_reports, grandparent]
+
 
 _REPORT_SUBDIR = ("reports", "janitor-memory-subconscious-agent")
 _HEADER_SCAN_LINES = 20
@@ -159,6 +192,10 @@ def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) 
     `state_dir` is `<project>/.janitor/state`, so the project root is its grandparent,
     matching every caller (the real detector's `state.state_dir()`, and this module's
     tests, which never touch `state.project_root()` at all).
+
+    Globs EVERY dir `_reports_dir_candidates` returns (janitor#264 review) — the
+    skeleton may have landed at the main worktree root while THIS call's own
+    `git worktree list` fails, so a single resolved dir is not enough to find it.
 
     The header alone is NOT proof of completion (janitor#242 correction): a chore skill
     writes its `Claim: dispatch_id=...` header at the START of a pass, so it names an
@@ -177,11 +214,13 @@ def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) 
     prefix (dispatch ids are `<epoch>-<hex>`, so a naive substring risks exactly that),
     or prose that merely mentions this id in passing (e.g. a "supersedes" note). The
     lookahead requires the id to end at a non-identifier character."""
-    reports_dir = state_dir.parent.parent.joinpath(*_REPORT_SUBDIR)
-    try:
-        paths = sorted(reports_dir.glob("*.md"))
-    except OSError:
-        return None
+    paths: list[Path] = []
+    for reports_dir in _reports_dir_candidates(state_dir):
+        try:
+            paths.extend(reports_dir.glob("*.md"))
+        except OSError:
+            continue
+    paths = sorted(paths)
     needle_re = re.compile(re.escape(f"dispatch_id={dispatch_id}") + r"(?![\w-])")
     matches: list[tuple[str, bool]] = []
     for path in paths:
@@ -714,17 +753,52 @@ def _run_complete(argv: list[str]) -> int:
     )
     return 2
 
+def _run_report_path(argv: list[str]) -> int:
+    """`report-path --state-dir <dir>` — prints the ONE in-flight claim's recorded
+    `report` field, so a curator READS BACK the path `claim` (or `set-report`) already
+    wrote instead of retyping it (janitor#242 follow-up, 2026-09-16): a mistyped path
+    used to abort the pass with the claim left open, since a missing/garbled header
+    match makes the claim indistinguishable from an orphaned one.
+
+    Resolves the single in-flight CLAIMED record the same way `set-report`/`complete`
+    do when given no `--chore`/`--scope` (reuses `_resolve_claim`), so "which claim"
+    is answered identically everywhere. Prints ONLY the bare path on stdout, nothing
+    else — a caller does `REPORT_FILE="$(... report-path ...)"`, so a second line would
+    corrupt the captured value. Exit 1 (not `_resolve_claim`'s own 2) on zero/multiple
+    claims or an empty/missing `report` field — this verb's one job is "give me the
+    path", and any of those is simply "no path to give"."""
+    ap = argparse.ArgumentParser(
+        prog="memory_dispatch_claim.py report-path",
+        description="Print the in-flight claim's recorded report path.",
+    )
+    ap.add_argument("--state-dir", required=True)
+    args = ap.parse_args(argv)
+    state_dir = Path(args.state_dir)
+
+    resolved = _resolve_claim(state_dir, "report-path", None, None)
+    if isinstance(resolved, int):
+        return 1
+    _dispatch_id, payload = resolved
+    report = str(payload.get("report") or "")
+    if not report:
+        print("memory_dispatch_claim: report-path: claim has no report field", file=sys.stderr)
+        return 1
+    print(report)
+    return 0
+
 
 def main() -> int:
-    # `complete`/`set-report` are distinct sub-modes (janitor#242 review, 2026-09-15
-    # addendum) checked BEFORE the claim parser below is built — neither collides with
-    # `--chore` (required there, absent here), and no existing caller ever passes
-    # "complete" or "set-report" as its first argument.
+    # `complete`/`set-report`/`report-path` are distinct sub-modes (janitor#242 review,
+    # 2026-09-15 addendum; report-path added 2026-09-16) checked BEFORE the claim parser
+    # below is built — none collides with `--chore` (required there, absent here), and
+    # no existing caller ever passes one of these three words as its first argument.
     argv = sys.argv[1:]
     if argv and argv[0] == "complete":
         return _run_complete(argv[1:])
     if argv and argv[0] == "set-report":
         return _run_set_report(argv[1:])
+    if argv and argv[0] == "report-path":
+        return _run_report_path(argv[1:])
 
     ap = argparse.ArgumentParser(description=__doc__)
     # default=None (not "") so an EXPLICITLY empty --state-dir is distinguishable from
@@ -819,7 +893,9 @@ def main() -> int:
         report_path = None
     else:
         skeleton_path = (
-            expected_state_dir.parent.parent.joinpath(*_REPORT_SUBDIR)
+            # candidates[0]: the main-checkout reports dir when git resolved it, else
+            # the grandparent fallback (janitor#264) — see `_reports_dir_candidates`.
+            _reports_dir_candidates(expected_state_dir)[0]
             / f"{datetime.now().astimezone().strftime('%Y%m%d_%H%M%S%z')}-{args.chore}-{scope.lower()}.md"
         )
         skeleton_header = (

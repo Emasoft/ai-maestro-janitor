@@ -898,10 +898,15 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
     `_matching_records`/`CLAIMED_PREFIX`/`_STALE_CLAIM_FLOOR_S` are called directly
     (module-qualified) instead of adding a new public function there. A drop this way
     renders the age as `~Nmin` so `_dedupe_drift_text`'s elapsed-time token regex
-    (`_DRIFT_ELAPSED_TOKEN_RE`) collapses repeat fires into one deduped line instead
-    of appending a fresh seen-file entry every fire (an `(Xh Ym)` render was never
-    recognized by that regex, so dedup never triggered). It also writes a
-    `state.log_line` so the deferral survives once the printed line is deduped away.
+    (`_DRIFT_ELAPSED_TOKEN_RE`) matches it and dedup applies via `dedupe.emit_once` —
+    but that dedup is PERMANENT BY KEY, not a rolling window: once THIS chore's
+    deferral has printed once on this project, `emit_once` never lets it print again
+    for any LATER claim of that same chore (an `(Xh Ym)` render was never recognized
+    by that regex, so dedup never triggered at all, which is the bug this fixed —
+    but the fix means only the FIRST deferral is ever visible on stdout). Every
+    deferral after the first is silent on stdout; only the `state.log_line` call
+    below still records each one, so the deferral history survives in the log even
+    though the printed line does not repeat.
     This is NOT an action: `_decision_fired` is left untouched — `_emit_quiet_if_idle`
     documents `[janitor-quiet]` as compatible with drift lines, and a deferral has
     nothing to spawn.

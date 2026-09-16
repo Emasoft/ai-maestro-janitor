@@ -114,30 +114,40 @@ Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PAS
 ```bash
 PASS=consolidate            # the pass you were launched for (matches your claim's "intervention") -- used only by the fallback below
 SLUG=local                  # short subject for the filename — lowercase, e.g. your scope -- used only by the fallback below
-# RETYPE this as the literal path your claim step printed after `REPORT_FILE=`
-# -- shell vars set in an earlier Bash call do not survive into this one.
-REPORT_FILE="<PASTE THE PATH FROM YOUR CLAIM STEP'S REPORT_FILE= LINE>"
+# RETYPE $STATE_DIR as your claim step's printed path -- shell vars set in an
+# earlier Bash call do not survive into this one. The path itself is READ BACK
+# from the claim record, never retyped by hand (a mistyped path used to abort
+# the pass with the claim left open, since a missing/garbled header match makes
+# the claim indistinguishable from an orphaned one -- janitor#242 follow-up).
+REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+  report-path --state-dir "$STATE_DIR")"
+# Fallback (the write failed, or "report-path" found no in-flight claim to
+# read back): create the file yourself -- this skips the worktree resolution
+# the primary path relies on, it is the rare failure-of-a-failure case, not
+# the one to harden -- and paste the two header lines below verbatim as its
+# first content lines.
+if [ -z "$REPORT_FILE" ] || ! grep -q 'dispatch_id=' "$REPORT_FILE" 2>/dev/null; then
+  REPORT_FILE="${CLAUDE_PROJECT_DIR:-$PWD}/reports/janitor-memory-subconscious-agent/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
+  mkdir -p "$(dirname "$REPORT_FILE")"
+  cat > "$REPORT_FILE" <<'HEADER'
+<PASTE THE TWO HEADER LINES YOUR CLAIM STEP PRINTED, VERBATIM, IN PLACE OF THIS LINE>
+HEADER
+fi
+# A placeholder left in the fallback heredoc has no dispatch_id= line -- refuse rather than record an unfindable report.
+grep -q 'dispatch_id=' "$REPORT_FILE" || { echo "FATAL: report header missing -- the fallback heredoc was not filled in" >&2; exit 1; }
 # MANDATORY header (janitor#I8AAJ3PG): the claim step already CREATED this file
 # with the `<!-- generated -->`, title and `dispatch_id=` lines written, and
 # recorded this same path on your claim -- the orphan sweep in
 # memory_dispatch_claim.py matches your report to your claim by that token.
 # APPEND your report to it; never create a second file for this claim.
-grep -q 'dispatch_id=' "$REPORT_FILE" || { echo "FATAL: header missing -- wrong REPORT_FILE path?" >&2; exit 1; }
 echo "$REPORT_FILE"
 # Idempotent belt-and-braces: the claim step already recorded this path, this
-# just re-confirms it. No --chore/--scope: `set-report` resolves the one
-# in-flight claim on $STATE_DIR itself (janitor#242 MEMPASS-REPORT-MISSING).
-# RETYPE $STATE_DIR as your claim step's printed path.
+# just re-confirms it (and is the ONLY check-in needed after the fallback
+# above). No --chore/--scope: `set-report` resolves the one in-flight claim on
+# $STATE_DIR itself (janitor#242 MEMPASS-REPORT-MISSING).
 uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
   set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
 ```
-
-Fallback: if your claim step printed "REPORT HEADER (paste ..." instead of
-"REPORT FILE created", the write failed -- create the file yourself at
-`${CLAUDE_PROJECT_DIR:-$PWD}/reports/janitor-memory-subconscious-agent/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md`
-(this fallback skips the worktree resolution the primary path relies on — it is
-the rare failure-of-a-failure case, not the one to harden) and paste those two
-header lines verbatim as its first content lines before continuing.
 
 **Never compose that filename yourself** (janitor#248). A report was written with a
 `-0700` offset on a `+0200` host — 1 of 31, wall-clock digits right, offset 9 h wrong,

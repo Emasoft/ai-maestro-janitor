@@ -1313,3 +1313,156 @@ def test_claim_cli_with_a_bare_state_dir_creates_no_report_skeleton(tmp_path):
     assert "REPORT_FILE=" not in proc.stdout
     assert "is not <project>/.janitor/state; no report skeleton created" in proc.stderr
     assert not any(tmp_path.rglob("reports"))
+
+def test_reports_dir_candidates_resolves_via_git_worktree_list(tmp_path):
+    """(j) A plain git repo with no linked worktrees: `git worktree list` names the repo
+    root itself as the sole worktree, so the candidate list collapses to ONE entry — the
+    project's own reports dir (janitor#264)."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+
+    result = mdc._reports_dir_candidates(state_dir)
+    assert result == [project / "reports" / "janitor-memory-subconscious-agent"]
+
+
+def test_reports_dir_candidates_falls_back_when_git_unavailable(tmp_path, monkeypatch):
+    """(k) `git worktree list` raising (git missing from PATH, a timeout, a `.git` lock)
+    must fall back to the project's own grandparent reports dir — never raise, never
+    return an empty list."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+
+    def _boom(*a, **k):
+        raise OSError("git not found")
+
+    monkeypatch.setattr(mdc.subprocess, "run", _boom)
+
+    result = mdc._reports_dir_candidates(state_dir)
+    assert result == [project / "reports" / "janitor-memory-subconscious-agent"]
+
+
+def test_skeleton_lands_at_main_checkout_when_state_dir_is_a_linked_worktree(tmp_path):
+    """(k2) janitor#264, the ACTUAL divergent-root case (2026-09-16 adversarial review
+    of this same TRDD: the OSError-monkeypatch test above only proves resilience in the
+    common single-worktree case, where main root and grandparent already coincide — it
+    is not a regression test for real worktree divergence). `CLAUDE_PROJECT_DIR`
+    pointing at a LINKED worktree puts `state_dir` there too, but the report must land
+    at the MAIN checkout's reports dir, because the worktree (and everything under it)
+    is deleted when the branch is done while the main checkout persists."""
+    main_repo = tmp_path / "main"
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q", "main"], check=True)
+    subprocess.run(["git", "-C", str(main_repo), "config", "user.email", "t@t.test"], check=True)
+    subprocess.run(["git", "-C", str(main_repo), "config", "user.name", "t"], check=True)
+    (main_repo / "f.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(main_repo), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(main_repo), "commit", "-q", "-m", "init"], check=True)
+    worktree = tmp_path / "wt"
+    subprocess.run(
+        ["git", "-C", str(main_repo), "worktree", "add", "-q", str(worktree), "-b", "wtbranch"],
+        check=True,
+    )
+
+    state_dir = worktree / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+    main_reports = main_repo / "reports" / "janitor-memory-subconscious-agent"
+    worktree_reports = worktree / "reports" / "janitor-memory-subconscious-agent"
+    assert next(main_reports.glob("*-repair-local.md"), None) is not None
+    assert not worktree_reports.exists()
+
+    found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
+    assert found is not None
+    assert found[0].startswith(str(main_reports))
+
+
+def test_find_completion_report_survives_matcher_git_failure_same_root(tmp_path, monkeypatch):
+    """(l) Writer resolves git normally (single-worktree repo, main root == grandparent
+    here); the MATCHER's own later `git worktree list` call then fails (git missing,
+    lock, timeout) — since both resolve to the same directory in this repo shape, the
+    matcher must still find the report the writer correctly placed (coordinator
+    amendment on the 28fcd137 review, 2026-09-16): a matcher-side git failure must never
+    make an already-placed report invisible."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    skeleton = next(reports_dir.glob("*-repair-local.md"))
+
+    def _boom(*a, **k):
+        raise OSError("git unavailable")
+
+    monkeypatch.setattr(mdc.subprocess, "run", _boom)
+
+    found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
+    assert found == (str(skeleton), False)
+
+
+def test_report_path_prints_the_recorded_report(tmp_path):
+    """(m) `report-path` prints exactly the claim's recorded report path, so a curator
+    can do `REPORT_FILE="$(... report-path ...)"` instead of retyping it (janitor#242
+    follow-up, 2026-09-16)."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    claim = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert claim.returncode == 0, claim.stderr
+    report_line = next(
+        line for line in claim.stdout.splitlines() if line.startswith("REPORT_FILE=")
+    )
+    expected = report_line[len("REPORT_FILE="):]
+
+    proc = _run_cli(["report-path", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == expected + "\n"
+
+
+def test_report_path_on_empty_state_dir_exits_1_with_empty_stdout(tmp_path):
+    """(n) No claim in flight -> exit 1, empty stdout, one diagnostic line on stderr."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+
+    proc = _run_cli(["report-path", "--state-dir", str(state_dir)])
+    assert proc.returncode == 1
+    assert proc.stdout == ""
+    assert proc.stderr.strip() != ""
+
+
+def test_report_path_stdout_is_exactly_one_line_under_uv_run(tmp_path):
+    """(o) coordinator amendment, 2026-09-16: a curator captures `REPORT_FILE` from an
+    ACTUAL `uv run --script --quiet` invocation (the script's own shebang) — any stray
+    uv banner/notice on stdout would corrupt the captured value just as surely as a
+    resolver warning would. Assert stdout is the path and nothing else."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    claim = subprocess.run(
+        ["uv", "run", "--script", "--quiet", str(_SCRIPT),
+         "--chore", "repair", "--state-dir", str(state_dir)],
+        capture_output=True, text=True,
+    )
+    assert claim.returncode == 0, claim.stderr
+
+    proc = subprocess.run(
+        ["uv", "run", "--script", "--quiet", str(_SCRIPT),
+         "report-path", "--state-dir", str(state_dir)],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.count("\n") == 1
+    assert proc.stdout.splitlines()[0] == proc.stdout.strip()
