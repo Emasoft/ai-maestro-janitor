@@ -244,28 +244,10 @@ verify failures: dropped/reworded lesson(s)` for a human.
 ## Bounds & safety recap
 
 - ONE scope, ONE merge per pass. Default LOCAL+USER; PROJECT opt-in
-  (`edit_project_scope`), staged-not-pushed. Confirm the gate before touching
-  PROJECT:
-  ```bash
-  uv run --quiet - <<PY
-  import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
-  import memory_settings
-  print("project-edit:", "ON" if memory_settings.get("edit_project_scope") else "OFF (skip PROJECT)")
-  PY
-  ```
+  (`edit_project_scope`), staged-not-pushed.
 - Kill-gate: `memory_txn.editor_enabled()` (janitor kill-switch +
   `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED`). `consolidation_per_day=0`
-  disables the pass entirely. Cheap up-front check (`begin` also refuses if
-  disabled, but this avoids wasted work before the claim):
-  ```bash
-  uv run --quiet - <<PY || { echo "wikimem editor disabled — abstain"; exit 0; }
-  import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
-  import memory_txn
-  sys.exit(0 if memory_txn.editor_enabled() else 1)
-  PY
-  ```
-  Heredocs here are UNQUOTED (`<<PY`) so `$JANITOR_ROOT` expands — a quoted
-  `<<'PY'` breaks the import and false-abstains even when the editor IS enabled.
+  disables the pass entirely.
 - Per-scope flock + SHA-256 stale-snapshot guard live INSIDE `commit` — a
   concurrent writer either makes you lose the lock (exit 2 → abstain) or trips the
   stale-hash guard (abort) — you never overwrite a just-written fact.
