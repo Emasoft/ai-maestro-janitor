@@ -1,9 +1,9 @@
 ---
 trdd-id: 3JBPW12E
 title: A rewrite that drops a script's executable bit cannot be committed
-column: dev
+column: complete
 created: 2026-09-16T11:11:33+0200
-updated: 2026-09-16T11:11:33+0200
+updated: 2026-09-16T12:07:35+0200
 current-owner: session
 created-by: session
 task-type: infra
@@ -23,3 +23,12 @@ Symptom: four times today a worker rewrite recreated a tracked script without it
 ## Approval log
 
 - 2026-09-16T11:11:33+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-16T12:07:00+0200 — COMPLETE by session: hook 0092aa0a, refined ac09241a; negative case demonstrated by hand (see box 1). Docstring nit left as a note, not a blocker.
+- 2026-09-16T12:07:35+0200 — COMPLETE by emanuelesabetta. archived → complete.
+
+## Acceptance
+
+- [x] (1) with scripts/dispatch.py chmod 644 and staged, the commit was refused: test_runnable_shebang_scripts_are_executable_in_git failed, the hook printed the chmod hint, rc=1, HEAD unchanged (demonstrated 2026-09-16 12:06 on top of fdf2f22f; bit restored, index 100755)
+- [x] (2) with all bits correct every commit since 0092aa0a printed '3 passed' from the hook and proceeded (10 commits today)
+- [x] (3) publish.py --install-hook installs pre-push and pre-commit through one loop; core.hooksPath=git-hooks routes to the tracked copies (0092aa0a). Known gap: the install_hook docstring still describes .git/hooks copies as the install; a fastedit attempt dropped the def line and was reverted (ac09241a message)
+- [x] (4) the hook adds about 0.2 s (pytest '3 passed in 0.17-0.30s' on every commit today)
