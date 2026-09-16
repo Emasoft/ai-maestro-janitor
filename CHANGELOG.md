@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.5] — 2026-09-16
+
+### Bug Fixes
+
+- **memory:** The claim step prints the finished report header so the curator pastes it instead of substituting placeholders (TRDD-I8AAJ3PG) (3186055)
+- **git-hooks:** Pre-commit needs no temp file; pytest prints on failure, the hint follows (TRDD-3JBPW12E) (ac09241)
+- **heartbeat:** A memory-chore marker is deferred while an unexpired claim for that chore is in flight (TRDD-7ZMQSXO6 criterion a) (6f37f15)
+- **agent:** The curator appends to the report file the claim step created instead of creating its own (TRDD-I8AAJ3PG) (4c46b69)
+- **heartbeat:** A deferred memory marker is one deduped drift line, a log line, and not an action (TRDD-7ZMQSXO6 follow-up) (d52196c)
+- **memory:** The sweep's report matcher prefers the one outcome-marked report when a skeleton and a curator file share a dispatch id; the claim step only writes a skeleton under a real .janitor/state (TRDD-I8AAJ3PG) (28fcd13)
+- **memory:** Report-path takes --chore so a curator reads back its own report; reports-dir candidates and matches dedupe by resolved path (TRDD-I8AAJ3PG) (a5d90fb)
+- **memory:** The worktree-list git call runs with GIT_OPTIONAL_LOCKS=0; the curator retries the report read-back without --chore before creating a file (TRDD-I8AAJ3PG) (de61dff)
+
+### Documentation
+
+- Add TRDD-3JBPW12E -- a rewrite that drops a script's executable bit cannot be committed (6796de5)
+- **TRDD-7ZMQSXO6:** Box (a) ticked, Approval log records the landing, card moved to testing (15c6682)
+- **TRDD-7ZMQSXO6:** Approval log names commit 6f37f157 for box (a) (0e852d5)
+- Close TRDD-3JBPW12E (pre-commit exec-bit hook, negative case demonstrated) and move TRDD-I8AAJ3PG to testing with its landing record (cc77f77)
+- **TRDD-I8AAJ3PG, TRDD-3JBPW12E:** Approval logs record the post-close review corrections (residual single point is the outcome marker; hook timing, list and install caveats) (3ee66d5)
+- **TRDD-I8AAJ3PG:** Approval log supersedes the exit-time close idea with the sweep-side unmarked-report close; two skippable curator steps remain (f9e0753)
+- **TRDD-I8AAJ3PG:** The unmarked-report close is a candidate with a liveness precondition; skippable-step count corrected (956b7c5)
+
+### Features
+
+- **git-hooks:** Pre-commit runs the executable-bit tests so a dropped bit is refused at commit time (TRDD-3JBPW12E) (0092aa0)
+- **memory:** The claim step creates the curator's report file with its header already written (TRDD-I8AAJ3PG) (b90666a)
+- **memory:** Report-path verb reads the curator's report path back from the claim; reports dir resolved to the main checkout for writer and matcher alike (TRDD-I8AAJ3PG) (fdf2f22)
 ## [3.5.4] — 2026-09-16
 
 ### Bug Fixes
@@ -24,6 +52,10 @@ All notable changes to this project will be documented in this file.
 - **TRDD-7ZMQSXO6:** Boxes (b)-(d) ticked against fae97f9d; (a) stays open for the reviewed proposal (e177b68)
 - **TRDD-7ZMQSXO6:** Box (a) rewritten once to the measured, reviewed definition -- claim-record gate in _suppress_stale_memory_markers, plain deferral line, trade-off stated (6cf8e24)
 - **TRDD-7ZMQSXO6:** Approval log records that the final box supersedes the earlier narrowed gate and publish clause (17a4c9e)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.5.4 (d3470f9)
 ## [3.5.3] — 2026-09-16
 
 ### Bug Fixes
