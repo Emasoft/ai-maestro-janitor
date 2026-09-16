@@ -112,42 +112,32 @@ Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PAS
 `SLUG`); you never type the timestamp:
 
 ```bash
-PASS=consolidate            # the pass you were launched for (matches your claim's "intervention")
-SLUG=local                  # short subject for the filename — lowercase, e.g. your scope
-# CLAUDE_PROJECT_DIR is the stable anchor (janitor#264): the janitor's own launcher
-# sets it once per session, so every pass of a multi-pass run lands under the SAME
-# root regardless of which directory the agent's cwd happens to be in that turn.
-# Anchor on CLAUDE_PROJECT_DIR, then resolve THAT repo's MAIN checkout (janitor#264).
-# Two real failure modes, and each single-source form hits one: resolving from the CWD
-# picks whichever nested repo the agent happens to be standing in, so two passes of one
-# chore wrote into two different `reports/` trees; using CLAUDE_PROJECT_DIR alone writes
-# into a LINKED WORKTREE, whose reports die with the branch. Anchoring the git call fixes
-# both — the anchor is stable for the whole session, and `git -C` still resolves a
-# worktree to its main checkout.
-ANCHOR="${CLAUDE_PROJECT_DIR:-$PWD}"
-MAIN_ROOT="$(git -C "$ANCHOR" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
-MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
-REPORT_DIR="$MAIN_ROOT/reports/janitor-memory-subconscious-agent"; mkdir -p "$REPORT_DIR"
-REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
-printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"
-# MANDATORY header (janitor#I8AAJ3PG): the orphan sweep in memory_dispatch_claim.py
-# closes YOUR claim by matching this exact `dispatch_id=` token against the id your
-# claim step printed. No `dispatch_id=` line -> the sweep can never find this report
-# and your claim is left dangling until it expires. <DISPATCH_ID>, <SCOPE>, <ROOT> below
-# are NOT shell variables (nothing here sets them) -- retype them as the three literals
-# your earlier claim step printed to stdout, same as you already retype $STATE_DIR.
-printf '# %s pass -- <SCOPE> scope\n' "$PASS" >> "$REPORT_FILE"
-printf 'Claim: dispatch_id=<DISPATCH_ID>, scope=<SCOPE>, root=<ROOT>\n' >> "$REPORT_FILE"
+PASS=consolidate            # the pass you were launched for (matches your claim's "intervention") -- used only by the fallback below
+SLUG=local                  # short subject for the filename — lowercase, e.g. your scope -- used only by the fallback below
+# RETYPE this as the literal path your claim step printed after `REPORT_FILE=`
+# -- shell vars set in an earlier Bash call do not survive into this one.
+REPORT_FILE="<PASTE THE PATH FROM YOUR CLAIM STEP'S REPORT_FILE= LINE>"
+# MANDATORY header (janitor#I8AAJ3PG): the claim step already CREATED this file
+# with the `<!-- generated -->`, title and `dispatch_id=` lines written, and
+# recorded this same path on your claim -- the orphan sweep in
+# memory_dispatch_claim.py matches your report to your claim by that token.
+# APPEND your report to it; never create a second file for this claim.
+grep -q 'dispatch_id=' "$REPORT_FILE" || { echo "FATAL: header missing -- wrong REPORT_FILE path?" >&2; exit 1; }
 echo "$REPORT_FILE"
-# Record it to disk NOW, in this SAME Bash call — shell variables set here do not
-# survive into a later Bash tool call, so `$REPORT_FILE` would be empty by the time
-# `complete` runs in a fresh shell. No --chore/--scope: `set-report` resolves the one
-# in-flight claim on $STATE_DIR itself (janitor#242 MEMPASS-REPORT-MISSING — no chore
-# skill ever defined a real $SCOPE var, so a required --scope was always empty and the
-# report was silently unfindable). RETYPE $STATE_DIR as your claim step's printed path.
+# Idempotent belt-and-braces: the claim step already recorded this path, this
+# just re-confirms it. No --chore/--scope: `set-report` resolves the one
+# in-flight claim on $STATE_DIR itself (janitor#242 MEMPASS-REPORT-MISSING).
+# RETYPE $STATE_DIR as your claim step's printed path.
 uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
   set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
 ```
+
+Fallback: if your claim step printed "REPORT HEADER (paste ..." instead of
+"REPORT FILE created", the write failed -- create the file yourself at
+`${CLAUDE_PROJECT_DIR:-$PWD}/reports/janitor-memory-subconscious-agent/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md`
+(this fallback skips the worktree resolution the primary path relies on — it is
+the rare failure-of-a-failure case, not the one to harden) and paste those two
+header lines verbatim as its first content lines before continuing.
 
 **Never compose that filename yourself** (janitor#248). A report was written with a
 `-0700` offset on a `+0200` host — 1 of 31, wall-clock digits right, offset 9 h wrong,
