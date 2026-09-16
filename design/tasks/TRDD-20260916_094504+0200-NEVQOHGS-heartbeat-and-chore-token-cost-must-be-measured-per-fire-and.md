@@ -15,6 +15,7 @@ approved: true
 approval-judge: session
 approval-datetime: 2026-09-16T09:45:04+0200
 parent-trdd: V3BQT7QE
+derived: true
 ---
 
 # Heartbeat and chore token cost must be measured per fire and reported weekly

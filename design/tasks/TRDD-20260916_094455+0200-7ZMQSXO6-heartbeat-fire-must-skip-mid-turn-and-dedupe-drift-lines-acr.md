@@ -15,6 +15,7 @@ approved: true
 approval-judge: session
 approval-datetime: 2026-09-16T09:44:55+0200
 parent-trdd: V3BQT7QE
+derived: true
 ---
 
 # Heartbeat fire must skip mid-turn and dedupe drift lines across fires
