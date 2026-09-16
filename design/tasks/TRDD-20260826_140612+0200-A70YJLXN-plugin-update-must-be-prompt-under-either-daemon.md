@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: todo
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-16T12:43:45+0200
+updated: 2026-09-16T12:45:20+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -445,3 +445,4 @@ this, because each actor is behaving correctly by its own contract.
 - 2026-09-05T10:50:00+0200 — RULED option 4 by main-session on the peer's stated rule (ai-maestro hub session, 2026-09-05). Janitor work remaining: (1) the rider the card attached to option 4 — when no armed session exists to raise `version-update-requested.flag`, the lane's degradation to the 4 h floor must be SAID OUT LOUD by the janitor (a heartbeat/status line), not discovered later; (2) the asymmetry documented at the frozen `version-update.last-run.ts` (box 3); (3) a LIVE: measurement of publish→installed latency under the server (box 2). Column blocked -> dev.
 - 2026-09-16T12:35:30+0200 — column → blocked. waits on the peer's landing in ai-maestro#156 (external repo); parked as fleet-ask (triage 2026-09-16)
 - 2026-09-16T12:43:45+0200 — column → todo. ai-maestro#156 is already closed per the card's own STATE, so the peer landing it waited on has happened; the remaining step is to verify that landing, which is work, not a wait (correcting the 2026-09-16 blocked ruling)
+- 2026-09-16T13:10:00+0200 — NEXT ACTION (so the next triage does not move this card a third time): the remaining acceptance is a live observation, not code. At the NEXT release after 3.5.5, do not run claude plugin update by hand; instead confirm the plugin reached the new version promptly under whichever daemon owns version-update (daemon.log shows chore-coordination yielding the chore to the ai-maestro server on this host), evidence = the owning daemon's log line plus claude plugin list showing the new version within one cadence. 3.5.5 itself was updated by hand at 12:45 and cannot serve as the observation. pre-block-column: testing is a leftover from the reverted blocked park and means nothing now.
