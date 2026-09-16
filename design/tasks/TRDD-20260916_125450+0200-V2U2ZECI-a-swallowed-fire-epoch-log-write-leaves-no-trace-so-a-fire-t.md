@@ -3,7 +3,7 @@ trdd-id: V2U2ZECI
 title: A swallowed fire-epoch log write leaves no trace, so a fire that ran looks like a fire that never happened
 column: todo
 created: 2026-09-16T12:54:50+0200
-updated: 2026-09-16T12:59:25+0200
+updated: 2026-09-16T22:18:10+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: session
 approval-datetime: 2026-09-16T12:54:50+0200
+implementation-commits: [3775ac7a, ab0a62c0, 6a5199cd]
 ---
 
 # A swallowed fire-epoch log write leaves no trace, so a fire that ran looks like a fire that never happened
