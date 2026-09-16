@@ -13,7 +13,7 @@ WHAT MAKES IT ZERO-TURN. Three things have to happen for an abandoned session to
 today the model does all three. Here:
 
   1. DECIDE  — `external_clear.should_clear_externally`, from files the session already writes
-     (transcript mtime, `ttl-regime.json`, `armed-cadence.cron`, the presence breadcrumb).
+     (transcript mtime, `armed-cadence.cron`, the presence breadcrumb).
   2. DELEGATE — the `llm-ext session-summary` is composed by the CLEARED session's own
      SessionStart summarizer, out of process and on llm-ext's own free models. Zero tokens from
      THIS session, which is what "zero turn" means — not that no model is involved.
@@ -281,7 +281,7 @@ def _decide(
     gate = {
         "idle_seconds": human_idle_s if human_idle_s is not None else idle_s,
         "last_turn_age_s": last_turn_age,
-        "ttl_minutes": ec.read_ttl_minutes(sd),
+        "ttl_minutes": ec.DEFAULT_TTL_MINUTES,
         "seconds_to_next_fire": ec.seconds_until_next_fire(cron, now),
         "context_tokens": cold_cache_compact.context_tokens_for(newest),
         "min_context": ec.min_context_tokens(),

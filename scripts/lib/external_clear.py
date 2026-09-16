@@ -13,9 +13,9 @@ live in `scripts/external_handoff_clear.py`.
 ## WHY THE TRIGGER IS NOT "the cache is expired"
 
 The card was written as *idle + cache-expired + over-threshold*. Taken literally that lever is
-DEAD on the machine it was written for, measured 2026-08-06: `ttl-regime.json` reports a probed
-60-minute cache TTL and the armed cadence is `*/5 * * * *`, so a fire every 5 minutes keeps the
-cache permanently warm and `cache_expired` is never true. That is the same shape
+DEAD on the machine it was written for, measured 2026-08-06: a probed 60-minute cache TTL regime
+and the armed cadence `*/5 * * * *` means a fire every 5 minutes keeps the cache permanently warm
+and `cache_expired` is never true. That is the same shape
 `cold_cache_compact` burned on twice — "a threshold high enough to never be met is a feature that
 does not exist".
 
@@ -83,10 +83,10 @@ DEFAULT_MIN_CONTEXT_TOKENS = 300_000
 # than this before the next cron fire means the fire lands mid-chain — survivable (the injector
 # waits for a free pane) but it wastes the very fire we were trying to prevent.
 DEFAULT_HEADROOM_SECONDS = 60
-# The prompt-cache TTL used when `ttl-regime.json` is absent/unreadable. 5 minutes is the
-# platform's standard TTL and the SHORT side, so an unknown TTL biases toward "the next fire will
-# miss" → toward acting. That is the safe direction here: the cost of a spurious clear on an
-# abandoned session is one re-read of a link-only handoff.
+# The prompt-cache TTL assumed for the cadence. 5 minutes is the platform's standard TTL and the
+# SHORT side, so this biases toward "the next fire will miss" → toward acting. That is the safe
+# direction here: the cost of a spurious clear on an abandoned session is one re-read of a
+# link-only handoff.
 DEFAULT_TTL_MINUTES = 5
 # The LONGEST prompt-cache TTL the platform offers. Past it no cache survives under ANY regime, so
 # an age beyond this is CERTAINTY rather than an estimate — which is the only thing that may
@@ -111,8 +111,6 @@ CERTAIN_EXPIRY_FLOOR_MINUTES = 60
 # injected anyway. A bloated handoff refills the context the /clear just emptied, which is the
 # entire thing this feature exists to avoid.
 HANDOFF_MAX_BYTES = 4096
-
-_TTL_REGIME_FILE = "ttl-regime.json"
 
 # Trigger names — returned in the verdict and written to the log, so a fire can always be
 # attributed to the rule that caused it.
@@ -1650,23 +1648,14 @@ def terminal_from_record(record: Mapping[str, str]) -> dict[str, str]:
 # --- best-effort readers (never raise) --------------------------------------
 
 
-def read_ttl_minutes(state_dir: Path) -> int:
-    """The probed prompt-cache TTL the dispatcher cached, or `DEFAULT_TTL_MINUTES`.
+def read_ttl_minutes(state_dir: Path) -> int:  # noqa: ARG001 -- kept for caller compat
+    """Always `DEFAULT_TTL_MINUTES` — the TTL-regime probe was retired by TRDD-BRHJHWW0.
 
-    `ttl-regime.json` was written by the dynamic-cadence phase's TTL probe, retired by
-    TRDD-BRHJHWW0 — nothing writes this file any more, so this reader now always falls
-    back to `DEFAULT_TTL_MINUTES`. Left in place (rather than deleted) because a future
-    probe could still populate the same file, and a watcher that runs outside the model
-    has no business spending a subprocess on a probe of its own.
+    Nothing writes a regime file any more, so there is nothing left to read; this stays a
+    function (not an inlined constant) because `scripts/hooks/on-session-start-cold-cache-clear.py`
+    still calls it and is out of this change's scope.
     """
-    import json  # noqa: PLC0415 -- only this reader needs it
-
-    try:
-        data = json.loads((state_dir / _TTL_REGIME_FILE).read_text(encoding="utf-8"))
-        minutes = int(data["minutes"])
-    except (FileNotFoundError, OSError, ValueError, KeyError, TypeError):
-        return DEFAULT_TTL_MINUTES
-    return minutes if minutes > 0 else DEFAULT_TTL_MINUTES
+    return DEFAULT_TTL_MINUTES
 
 
 # --- the zero-token handoff (template fallback) ------------------------------

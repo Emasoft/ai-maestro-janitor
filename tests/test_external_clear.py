@@ -229,20 +229,8 @@ def test_an_empty_record_resolves_to_an_unsupported_channel():
 # --- read_ttl_minutes --------------------------------------------------------
 
 
-def test_ttl_is_read_from_the_dispatchers_own_cache(tmp_path):
-    """The watcher reuses the heartbeat's probed TTL rather than spending its own subprocess."""
-    (tmp_path / "ttl-regime.json").write_text(
-        '{"minutes": 60, "probed_at": 1786027332, "source": "probe"}', encoding="utf-8"
-    )
-    assert ec.read_ttl_minutes(tmp_path) == 60
-
-
-def test_missing_or_garbage_ttl_falls_back_to_the_short_side(tmp_path):
-    """An unknown TTL biases toward 'the next fire will miss', i.e. toward acting."""
-    assert ec.read_ttl_minutes(tmp_path) == ec.DEFAULT_TTL_MINUTES
-    (tmp_path / "ttl-regime.json").write_text("not json", encoding="utf-8")
-    assert ec.read_ttl_minutes(tmp_path) == ec.DEFAULT_TTL_MINUTES
-    (tmp_path / "ttl-regime.json").write_text('{"minutes": 0}', encoding="utf-8")
+def test_ttl_is_always_the_default_since_the_regime_probe_was_retired(tmp_path):
+    """No regime file is ever written any more (TRDD-BRHJHWW0) — the reader always returns the default."""
     assert ec.read_ttl_minutes(tmp_path) == ec.DEFAULT_TTL_MINUTES
 
 
