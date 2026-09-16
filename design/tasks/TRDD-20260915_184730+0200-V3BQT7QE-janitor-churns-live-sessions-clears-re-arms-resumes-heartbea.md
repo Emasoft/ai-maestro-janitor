@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: dev
 created: 2026-09-15T18:47:30+0200
-updated: 2026-09-16T09:51:10+0200
+updated: 2026-09-16T10:10:09+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -65,6 +65,7 @@ Child ids: R=2MLFZ7DL, C-b=11GAS4LC, E-2=6P0KUSO9.
 
 - 2026-09-15T18:47:30+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-15T20:15:01+0200 — column → dev by emanuelesabetta. starting audit work
+- 2026-09-16T10:10:09+0200 — LIVE TEST of the claim rewrite (e24aaf08, shipped 3.5.1/3.5.2): heartbeat emitted [janitor-memory-consolidate]; the curator claimed dispatch 1789491146-5957aca4 (LOCAL), ran the pass (abstained, report written), and returned DONE without ever running set-report/complete — the claim sat CLAIMED. The orchestrator closed it by hand with the 3.5.2 CLI (complete --state-dir … --report …): exit 0, done record written, so the CLI side of e24aaf08 works. Root cause of the two-week orphan streak is therefore the AGENT side: atomize/enrich/repair/retro-lesson SKILL.md carry no close-claim step, and conflict/consolidate/harvest/split carry it only as a link to references/close-claim.md that the Sonnet curator did not follow; the agent.md MANDATORY step was skipped too. Fix dispatched: inline the two close commands as the explicit final numbered step in all 8 skills, and make the claim CLI print the exact complete command as its last line so the curator sees it in its own transcript.
 
 ## Measured (2026-09-15)
 
