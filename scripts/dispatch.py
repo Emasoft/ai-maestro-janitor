@@ -4119,8 +4119,15 @@ def main() -> int:
     # telemetry must never kill a fire.
     try:
         state.log_line("heartbeat-fires", f"fire epoch={int(time.time())}")
-    except Exception:  # noqa: BLE001 -- telemetry only; the fire must proceed
-        pass
+    except Exception as exc:  # noqa: BLE001 -- telemetry only; the fire must proceed
+        # Fail-open is right here (telemetry must never block a fire), but silence
+        # is not: an unlogged fire is indistinguishable from a stub that never ran.
+        # stderr only (never state.log_line) -- it would fail the same path-level
+        # way (TRDD-V2U2ZECI).
+        sys.stderr.write(
+            f"ai-maestro-janitor: heartbeat-fires log append failed "
+            f"({type(exc).__name__}: {exc}); the fire continues\n"
+        )
 
     # D5 (TRDD-82JRK0CY): reset the per-fire decision sentinel. A production fire is one
     # process so this is a no-op there, but tests call main()/phases repeatedly in-process,
