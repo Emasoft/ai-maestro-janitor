@@ -3,7 +3,7 @@ trdd-id: V2U2ZECI
 title: A swallowed fire-epoch log write leaves no trace, so a fire that ran looks like a fire that never happened
 column: complete
 created: 2026-09-16T12:54:50+0200
-updated: 2026-09-16T22:26:35+0200
+updated: 2026-09-16T22:32:17+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -34,6 +34,7 @@ Read the STATE block at the end of this card first (cause unestablished; the fix
 - 2026-09-16T13:02:00+0200 — second and final correction this session: the outcome-stamp discriminator is unsound (stamps are written only by detectors that actually ran; at 12:47 every detector was inside its cadence, so no new stamp is expected under either branch). The discriminating absence is the keep-going line: dispatch.log logged 'keep-going: suppressed (user active 21s ago)' at 12:46:28 and the session was equally active at 12:47, so a main() that ran past the fire-log write would have logged it again; it did not. That excludes 'fail-open append failed, rest of main() normal'. Remaining candidates: (B) a non-silent early return in main() before the write, or (C) the stub's own fallback printed the quiet token without invoking dispatch at all (the fire landed during the 3.5.4 to 3.5.5 cache swap). First step: read the stub's fallback branches, then main()'s early returns; the fix may belong in the stub, not dispatch. Body reworded to say the cause is unestablished.
 - 2026-09-16T22:21:39+0200 — COMPLETE by the session under the 2026-09-03 standing permission. Commits 3775ac7a (stderr line + directory test), ab0a62c0 (guard + decision-token equality test), 6a5199cd (suppress-shaped guards, truncated exception text — this commit also carries the S2RZHXU7 rotate_to change and the archival of N1CPV1QV/LDSCQ0NU/2SKHJ8NR: a commit-boundary slip, disclosed, not rewritten). Acceptance: (1) test present and fails on the old code; (2) ruff/mypy/pyright clean at every commit; (3) demonstrated as decision-token equality clean-vs-directory on the self-disarm path — the quiet token is not producible in-process without a detector sweep, so the body's name is broader than what was proven. Cause unestablished; see STATE.
 - 2026-09-16T22:26:35+0200 — COMPLETE by session. diagnosability fix shipped in the tree; cause recorded as unestablished; acceptance 1-3 evidenced.
+- 2026-09-16T22:32:17+0200 — provenance of the Acceptance checklist: written at close from the body's three acceptance sentences of 2026-09-16 12:54 (the promise predates the work); each box carries its evidence pointer; box 3 is stated in its reachable, narrower form. The fix (3775ac7a, ab0a62c0, 6a5199cd) is on main only — no published version carries it; the running janitor keeps the silent pass until the next publish.py.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-16
 
