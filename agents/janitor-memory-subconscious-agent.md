@@ -130,6 +130,14 @@ MAIN_ROOT="${MAIN_ROOT:-$ANCHOR}"
 REPORT_DIR="$MAIN_ROOT/reports/janitor-memory-subconscious-agent"; mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
 printf '<!-- generated: %s -->\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$REPORT_FILE"
+# MANDATORY header (janitor#I8AAJ3PG): the orphan sweep in memory_dispatch_claim.py
+# closes YOUR claim by matching this exact `dispatch_id=` token against the id your
+# claim step printed. No `dispatch_id=` line -> the sweep can never find this report
+# and your claim is left dangling until it expires. <DISPATCH_ID>, <SCOPE>, <ROOT> below
+# are NOT shell variables (nothing here sets them) -- retype them as the three literals
+# your earlier claim step printed to stdout, same as you already retype $STATE_DIR.
+printf '# %s pass -- <SCOPE> scope\n' "$PASS" >> "$REPORT_FILE"
+printf 'Claim: dispatch_id=<DISPATCH_ID>, scope=<SCOPE>, root=<ROOT>\n' >> "$REPORT_FILE"
 echo "$REPORT_FILE"
 # Record it to disk NOW, in this SAME Bash call — shell variables set here do not
 # survive into a later Bash tool call, so `$REPORT_FILE` would be empty by the time
