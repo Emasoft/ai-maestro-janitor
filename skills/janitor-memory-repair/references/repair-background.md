@@ -9,6 +9,9 @@
 - desc-trim keyword incident (747b8bef)
 - Superseded-atom delimiter mechanics
 - Why `publish-globally` is NOT a repair defect
+- Execution context and what this is
+- EXIT / SUCCESS / idempotency contract
+- Scope
 
 ## Why REPAIR exists
 
@@ -96,3 +99,37 @@ case. The ambiguity is real in the CODE, not in the corpus. The reasons the repa
 (`memory_content_precheck.repair_defect`) still does not carry this check are the durable ones:
 it is gate-silent so it can never cause a dispatch or a loop, and it self-heals on the next
 write. See the rejection comment above `repair_defect` for the full record (TRDD-AO8MPK5D).
+
+## Execution context and what this is
+
+> **Execution context (TRDD-aebedbff):** the janitor dispatches this pass as a DEDICATED
+> background **Sonnet** agent (`janitor-memory-subconscious-agent` — Sonnet, not Opus, per
+> the USER cost decision 2026-06-30) — you ARE that agent. Run the whole pass here in your own
+> context and return only a one-line result + the report path. A wikimem editorial pass is
+> never run inline in a main session (it must not burden CPV or any other session's context).
+
+REPAIR autonomously completes/corrects ONE malformed wikimem page at a time, IN
+PLACE, through the transaction core — additive and structural only (backfills
+metadata, adds the Notes section, fixes tier/links); it never rewrites a fact,
+never changes `ocd`, never merges/splits/deletes. See "Why REPAIR exists" and
+"What REPAIR is (and is not)" above for the full additive-vs-editorial distinction.
+
+## EXIT / SUCCESS / idempotency contract
+
+- **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the txn; PROJECT,
+  if opted-in, staged-not-pushed — rides `publish.py`).
+- **Retry ≤3 then abort** (staging discarded, one-line finding); other pages are
+  independent.
+- **Idempotent + crash-safe:** every run starts with `resume`; a well-formed page
+  is a no-op (nothing to fix → skip it, never write a no-change commit).
+- **Bounded + disable-able:** one scope/pass, top-K pages; `repair_per_day=0` or
+  the kill-switch / `WIKIMEM_EDITOR_ENABLED=off` stops it.
+
+## Scope
+
+ONLY completes/corrects the SHAPE of malformed wikimem pages in ONE memory scope
+per pass, IN PLACE through `memory_txn_cli.py --op repair`. Does NOT create pages
+(`/janitor-memory-write`), merge same-subject pages
+(`/janitor-memory-consolidate`), split oversized pages (`/janitor-memory-split`),
+or resolve contradictions (`/janitor-memory-conflict`). Never moves a page across
+scopes. PROJECT-scope editing is opt-in, never pushed standalone.

@@ -18,6 +18,7 @@ has the runnable steps.
 - Steps 6-10 — the executable sequence (moved from the SKILL body)
 - Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
 - Recording an abstain
+- Candidate selection details
 
 ## Claim exit codes
 
@@ -243,10 +244,28 @@ verify failures: dropped/reworded lesson(s)` for a human.
 ## Bounds & safety recap
 
 - ONE scope, ONE merge per pass. Default LOCAL+USER; PROJECT opt-in
-  (`edit_project_scope`), staged-not-pushed.
+  (`edit_project_scope`), staged-not-pushed. Confirm the gate before touching
+  PROJECT:
+  ```bash
+  uv run --quiet - <<PY
+  import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
+  import memory_settings
+  print("project-edit:", "ON" if memory_settings.get("edit_project_scope") else "OFF (skip PROJECT)")
+  PY
+  ```
 - Kill-gate: `memory_txn.editor_enabled()` (janitor kill-switch +
   `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED`). `consolidation_per_day=0`
-  disables the pass entirely.
+  disables the pass entirely. Cheap up-front check (`begin` also refuses if
+  disabled, but this avoids wasted work before the claim):
+  ```bash
+  uv run --quiet - <<PY || { echo "wikimem editor disabled — abstain"; exit 0; }
+  import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
+  import memory_txn
+  sys.exit(0 if memory_txn.editor_enabled() else 1)
+  PY
+  ```
+  Heredocs here are UNQUOTED (`<<PY`) so `$JANITOR_ROOT` expands — a quoted
+  `<<'PY'` breaks the import and false-abstains even when the editor IS enabled.
 - Per-scope flock + SHA-256 stale-snapshot guard live INSIDE `commit` — a
   concurrent writer either makes you lose the lock (exit 2 → abstain) or trips the
   stale-hash guard (abort) — you never overwrite a just-written fact.
@@ -421,3 +440,26 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
   --intervention consolidate --scope <LOCAL|PROJECT|USER> --root <memdir> \
   --page <A>.md --page <B>.md --reason "<why A and B do NOT merge>"
 ```
+
+## Candidate selection details
+
+Moved here verbatim from the SKILL body (token-budget move) — Step 1's picking
+rule, the privacy guard, and the description-named-singleton special case.
+
+Each group is every SAME-`(tier, type)` page the structural gate + size gate (#210) allow — a
+merge fuses exactly TWO, so pick the pair inside the printed group that most plausibly shares a
+subject (favor the most-recently-modified pair when several look equally plausible). If a group
+has no convincing pair, or the CLI prints nothing, abstain — that is success, not failure.
+
+**Privacy guard:** NEVER open, read, merge, or even name a page whose path contains
+`user-mem/` — that is the user's PRIVATE agent-invisible store; it is not part of the
+curated wiki and must never enter a consolidation (`memory_content_precheck`'s own
+candidate scan already excludes it, but re-verify before touching any printed path).
+
+**Description-named singletons are PRIME candidates (TRDD-NM4TPCQ9).** A page NAMED
+like one memory's description (`implementation-of-…`, `how-to-…`, `fix-for-…`) is
+the recurring agent naming error — one stranded atom. Treat it as candidate A and
+search for its broad TOPIC page (`agents-tracing`) as B. **Survivor rule:** the
+TOPIC-named page survives; the singleton retires (redirect `[[links]]`, ref-count
+footnotes per the move rule). No topic page → abstain and surface
+`[janitor-memory] rename-candidate: <page> (description-named, no topic page)`.
