@@ -342,6 +342,28 @@ def _resolve_report_path(report: str) -> str:
     return os.path.abspath(os.path.expanduser(report)) if report else report
 
 
+def _write_report_on_claimed(state_dir: Path, dispatch_id: str, report: str) -> bool:
+    """Atomically stamp `report` onto dispatch_id's CLAIMED record's `report` field.
+    Shared by `set-report` and the claim step's own skeleton-report bookkeeping
+    (TRDD-I8AAJ3PG) so there is exactly one place that knows how to do this atomically
+    (temp file in the same directory, then `os.replace`). Returns False on a vanished
+    record or a write failure; callers decide whether that is fatal (`set-report` is)
+    or fail-open (the claim step's own skeleton write is)."""
+    claimed_path = state_dir / f"{CLAIMED_PREFIX}{dispatch_id}.json"
+    try:
+        payload = json.loads(claimed_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    payload["report"] = _resolve_report_path(report)
+    tmp_path = claimed_path.with_name(claimed_path.name + ".tmp")
+    try:
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp_path, claimed_path)
+    except OSError:
+        return False
+    return True
+
+
 def complete_claim(
     state_dir: Path, dispatch_id: str, report: str, *, now: int | None = None
 ) -> bool:
@@ -531,13 +553,9 @@ def _run_set_report(argv: list[str]) -> int:
     a silently-empty scope is the exact bug this fixes, so it must fail loud, not fall
     back.
 
-    Writing straight onto the CLAIMED record (2026-09-15 review of `4a5d3434`) retires the
-    separate `current-report` marker file: the record is definitionally in flight (it is
-    what `_resolve_claim` matched against), so there is no separate "is this claim still
-    live" check left to duplicate. The write is atomic — a temp file in the same
-    directory, then `os.replace` — so a reader never observes a half-written record.
-    Exit 2 if the record vanishes between resolving it and writing (completed or expired
-    out from under this call)."""
+    The atomic write itself lives in `_write_report_on_claimed` (shared with the claim
+    step's own skeleton-report bookkeeping, TRDD-I8AAJ3PG) — this function only resolves
+    which claim is being written to and turns a `False` into the right exit code."""
     ap = argparse.ArgumentParser(
         prog="memory_dispatch_claim.py set-report",
         description="Record the current pass's report path onto its CLAIMED record.",
@@ -565,24 +583,13 @@ def _run_set_report(argv: list[str]) -> int:
         return resolved
     dispatch_id, _payload = resolved
 
-    claimed_path = state_dir / f"{CLAIMED_PREFIX}{dispatch_id}.json"
-    try:
-        payload = json.loads(claimed_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    if not _write_report_on_claimed(state_dir, dispatch_id, args.path):
         print(
             f"memory_dispatch_claim: set-report: claim {dispatch_id} vanished before "
             "the report could be recorded",
             file=sys.stderr,
         )
         return 2
-    payload["report"] = _resolve_report_path(args.path)
-    tmp_path = claimed_path.with_name(claimed_path.name + ".tmp")
-    try:
-        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(tmp_path, claimed_path)
-    except OSError as exc:
-        print(f"memory_dispatch_claim: set-report: cannot write to {state_dir}: {exc}", file=sys.stderr)
-        return 1
     return 0
 
 
@@ -775,24 +782,70 @@ def main() -> int:
             if legacy.is_file() else ""
         print(f"no claimable memory-maintenance dispatch in {state_dir}{hint}", file=sys.stderr)
         return 2
+
+    dispatch_id = payload.get("dispatch_id", "")
+    scope = payload.get("scope") or ""
+    root = payload.get("root") or expected_state_dir.parent.parent
+
+    # TRDD-I8AAJ3PG: the curator was told to paste a header block into its OWN report
+    # file, and skipped it — its claim was then reported as orphaned even though the
+    # work was done. Creating the report file HERE, with the header already written,
+    # removes that step entirely: the curator only has to APPEND. Fail OPEN — an
+    # unwritable reports dir must never block a successful claim.
+    skeleton_path = (
+        expected_state_dir.parent.parent.joinpath(*_REPORT_SUBDIR)
+        / f"{datetime.now().astimezone().strftime('%Y%m%d_%H%M%S%z')}-{args.chore}-{scope.lower()}.md"
+    )
+    skeleton_header = (
+        f"<!-- generated: {datetime.now().astimezone().isoformat()} by "
+        "memory_dispatch_claim (claim step) -->\n"
+        f"# {args.chore} pass — {scope} scope\n"
+        f"Claim: dispatch_id={dispatch_id}, scope={scope}, root={root}\n\n"
+    )
+    report_path: Path | None
+    try:
+        skeleton_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            # Exclusive create: two claims for the same chore+scope in the same
+            # wall-clock second would otherwise silently overwrite each other's
+            # skeleton (2026-09-16 adversarial review) — fail loud into the
+            # dispatch_id-suffixed fallback below instead of corrupting a sibling
+            # claim's report.
+            with skeleton_path.open("x", encoding="utf-8") as f:
+                f.write(skeleton_header)
+        except FileExistsError:
+            skeleton_path = skeleton_path.with_name(
+                skeleton_path.stem + f"-{dispatch_id}" + skeleton_path.suffix
+            )
+            with skeleton_path.open("x", encoding="utf-8") as f:
+                f.write(skeleton_header)
+        _write_report_on_claimed(state_dir, dispatch_id, str(skeleton_path))
+        report_path = skeleton_path
+    except OSError as exc:
+        print(f"memory_dispatch_claim: warning: could not create report skeleton: {exc}", file=sys.stderr)
+        report_path = None
+
     print(json.dumps(payload))
     # A SEPARATE, greppable line (never folded into the JSON above) so a skill can
     # `grep '^CLAIM_ID='` for the id it must pass to `complete` later, without ever
     # having to parse the JSON — and so every existing parser of the JSON line keeps
     # seeing exactly the same bytes it always has.
-    print(f"CLAIM_ID={payload.get('dispatch_id', '')}")
-    # The curator template used to ask the agent to retype <DISPATCH_ID>/<SCOPE>/<ROOT>
-    # placeholders into its own printf — a skipped-step-prone agent pastes the literal
-    # placeholder text instead of the real values, so the header matches nothing and the
-    # claim is reported as orphaned in silence. Printing the finished header line here
-    # removes that transcription step entirely (janitor#242 follow-up, 2026-09-16).
-    print("REPORT HEADER (paste as the first content lines of your report file, verbatim):")
-    print(f"  # {args.chore} pass — {payload.get('scope') or ''} scope")
-    print(
-        f"  Claim: dispatch_id={payload.get('dispatch_id', '')}, "
-        f"scope={payload.get('scope') or ''}, "
-        f"root={payload.get('root') or expected_state_dir.parent.parent}"
-    )
+    print(f"CLAIM_ID={dispatch_id}")
+    if report_path is not None:
+        print(f"REPORT_FILE={report_path}")
+        print(
+            "REPORT FILE created with the header already written — APPEND your report "
+            f"to it: {report_path}"
+        )
+    else:
+        # The curator template used to ask the agent to retype <DISPATCH_ID>/<SCOPE>/<ROOT>
+        # placeholders into its own printf — a skipped-step-prone agent pastes the literal
+        # placeholder text instead of the real values, so the header matches nothing and the
+        # claim is reported as orphaned in silence. Printing the finished header line here
+        # removes that transcription step entirely (janitor#242 follow-up, 2026-09-16).
+        print("REPORT HEADER (paste as the first content lines of your report file, verbatim):")
+    print(f"  # {args.chore} pass — {scope} scope")
+    print(f"  Claim: dispatch_id={dispatch_id}, scope={scope}, root={root}")
     # Printed in the claiming agent's OWN transcript (janitor#242 orphaned-claim
     # follow-up, 2026-09-16) — an agent that finishes a pass and never runs `complete`
     # leaves the claim orphaned because the close command lived only in a reference
@@ -814,7 +867,7 @@ def main() -> int:
         # file's own `_run_complete`/`_resolve_claim` already guard the same field with
         # `or ""` (a payload with an explicit `"scope": null` would otherwise print the
         # literal text "None" into a command the curator copy-pastes verbatim).
-        f'--chore {args.chore} --scope {payload.get("scope") or ""})'
+        f'--chore {args.chore} --scope {scope})'
     )
     return 0
 

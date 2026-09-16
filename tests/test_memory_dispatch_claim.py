@@ -682,9 +682,14 @@ def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
     """End-to-end: a real claim prints a `CLAIM_ID=<id>` line a positional `grep
     '^CLAIM_ID='` can find regardless of the close-command hint printed after it
     (janitor#242 follow-up), and the `complete` subcommand (given that id + the
-    report path) renames the record DONE."""
-    _dispatch(tmp_path, 1_000_000, "repair")
-    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
+    report path) renames the record DONE. Nested under a per-test project dir
+    (2026-09-16) — a bare `tmp_path` as `--state-dir` puts the claim step's own
+    report-skeleton write at `tmp_path.parent.parent`, OUTSIDE this test's sandbox
+    and shared with every other test in the same pytest run."""
+    state_dir = tmp_path / "proj" / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair")
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
     assert proc.returncode == 0, proc.stderr
     claim_id_lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("CLAIM_ID=")]
     assert len(claim_id_lines) == 1, proc.stdout
@@ -693,9 +698,9 @@ def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
 
     report = tmp_path / "report.md"
     report.write_text("pass notes\n<!-- janitor-outcome: noop reason=no-work -->\n", encoding="utf-8")
-    proc2 = _run_cli(["complete", dispatch_id, "--state-dir", str(tmp_path), "--report", str(report)])
+    proc2 = _run_cli(["complete", dispatch_id, "--state-dir", str(state_dir), "--report", str(report)])
     assert proc2.returncode == 0, proc2.stderr
-    done = tmp_path / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    done = state_dir / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
     assert done.is_file()
     payload = json.loads(done.read_text(encoding="utf-8"))
     assert payload["report"] == str(report)
@@ -706,20 +711,25 @@ def test_claim_cli_prints_the_close_commands_but_peek_does_not(tmp_path):
     """A curator that claims and never runs `complete` leaves the claim orphaned
     (janitor#242 follow-up) — the claim step must print the exact close commands in
     its own stdout so the agent never has to remember them from a separate doc;
-    `--peek` claims nothing, so it must not print them."""
-    _dispatch(tmp_path, 1_000_000, "repair")
-    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
+    `--peek` claims nothing, so it must not print them. Nested under a per-test
+    project dir (2026-09-16) — see test_complete_cli_prints_claim_id_last_and_completes
+    for why a bare `tmp_path` as `--state-dir` is unsafe now that a successful claim
+    also writes a report skeleton at `state_dir.parent.parent`."""
+    state_dir = tmp_path / "proj" / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair")
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
     assert proc.returncode == 0, proc.stderr
     assert "CLOSE YOUR CLAIM WHEN DONE" in proc.stdout
-    resolved = str(tmp_path.resolve())
+    resolved = str(state_dir.resolve())
     assert f'complete --state-dir "{resolved}"' in proc.stdout, proc.stdout
     assert (
         '(if complete exits 2 with "multiple claims in flight", add '
         "--chore repair --scope LOCAL)" in proc.stdout
     ), proc.stdout
 
-    _dispatch(tmp_path, 2_000_000, "repair")
-    proc2 = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path), "--peek"])
+    _dispatch(state_dir, 2_000_000, "repair")
+    proc2 = _run_cli(["--chore", "repair", "--state-dir", str(state_dir), "--peek"])
     assert proc2.returncode == 0, proc2.stderr
     assert "CLOSE YOUR CLAIM" not in proc2.stdout
 
@@ -729,11 +739,15 @@ def test_claim_cli_prints_a_report_header_with_the_real_values(tmp_path):
     """The curator template used to ask the agent to retype <DISPATCH_ID>/<SCOPE>/<ROOT>
     placeholders into its own printf — a skipped step there writes the literal
     placeholder text, which matches nothing (janitor#242 follow-up). The claim step
-    must print the finished header line so no transcription is needed."""
-    _dispatch(tmp_path, 1_000_000, "repair", scope="LOCAL")
-    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
+    must print the finished header line so no transcription is needed. Nested under a
+    per-test project dir (2026-09-16) — see
+    test_complete_cli_prints_claim_id_last_and_completes for why."""
+    state_dir = tmp_path / "proj" / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
     assert proc.returncode == 0, proc.stderr
-    assert "REPORT HEADER" in proc.stdout
+    assert "REPORT FILE created with the header already written" in proc.stdout
     assert "# repair pass — LOCAL scope" in proc.stdout
     assert (
         "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=/tmp/local/memory"
@@ -1123,3 +1137,98 @@ def test_no_marker_files_are_ever_seeded_or_produced(tmp_path):
     mdc._run_complete(["--state-dir", str(tmp_path)])
     names = [p.name for p in tmp_path.iterdir()]
     assert all("current-claim" not in n and "current-report" not in n for n in names)
+
+
+def test_claim_cli_creates_report_skeleton_with_header(tmp_path):
+    """(a) A successful claim creates the report file up front, at the documented path,
+    with the three header lines the curator would otherwise have to type itself."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    files = sorted(reports_dir.glob("*-repair-local.md"))
+    assert len(files) == 1, files
+    text = files[0].read_text(encoding="utf-8")
+    lines = text.splitlines()
+    assert lines[0].startswith("<!-- generated:")
+    assert lines[1] == "# repair pass — LOCAL scope"
+    assert lines[2] == "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=/tmp/local/memory"
+
+
+def test_claim_cli_records_skeleton_path_on_claimed_record(tmp_path):
+    """(b) The skeleton path lands on the CLAIMED record's `report` field exactly the
+    way `set-report` would record it (absolutized, via `_write_report_on_claimed`)."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+
+    claimed = json.loads(
+        (state_dir / f"{mdc.CLAIMED_PREFIX}1000000-abcd1234.json").read_text(encoding="utf-8")
+    )
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    expected = next(reports_dir.glob("*-repair-local.md"))
+    assert claimed["report"] == str(expected)
+
+
+def test_claim_cli_prints_report_file_line(tmp_path):
+    """(c) `REPORT_FILE=<path>` is printed on its own greppable line after CLAIM_ID."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+
+    report_lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("REPORT_FILE=")]
+    assert len(report_lines) == 1, proc.stdout
+    assert Path(report_lines[0].split("=", 1)[1]).is_file()
+    assert "REPORT FILE created with the header already written" in proc.stdout
+
+
+def test_claim_cli_peek_creates_no_report_file(tmp_path):
+    """(d) `--peek` never claims, so it must never create a report skeleton either."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir), "--peek"])
+    assert proc.returncode == 0, proc.stderr
+    assert not (project / "reports").exists()
+
+
+def test_find_completion_report_matches_claim_skeleton_only_after_outcome_marker(tmp_path):
+    """(e) The claim-step's own skeleton is found by `_find_completion_report` right
+    away (its header matches, like any claim-time header would), but with
+    `has_outcome_marker=False` until the chore skill appends its outcome marker — the
+    caller must not treat a header-only match as a close (janitor#242's own
+    correction)."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    skeleton = next(reports_dir.glob("*-repair-local.md"))
+
+    before = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
+    assert before == (str(skeleton), False)
+
+    skeleton.write_text(
+        skeleton.read_text(encoding="utf-8") + "<!-- janitor-outcome: mutation -->\n",
+        encoding="utf-8",
+    )
+    found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
+    assert found == (str(skeleton), True)
