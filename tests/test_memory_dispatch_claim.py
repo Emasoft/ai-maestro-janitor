@@ -724,6 +724,54 @@ def test_claim_cli_prints_the_close_commands_but_peek_does_not(tmp_path):
     assert "CLOSE YOUR CLAIM" not in proc2.stdout
 
 
+
+def test_claim_cli_prints_a_report_header_with_the_real_values(tmp_path):
+    """The curator template used to ask the agent to retype <DISPATCH_ID>/<SCOPE>/<ROOT>
+    placeholders into its own printf — a skipped step there writes the literal
+    placeholder text, which matches nothing (janitor#242 follow-up). The claim step
+    must print the finished header line so no transcription is needed."""
+    _dispatch(tmp_path, 1_000_000, "repair", scope="LOCAL")
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
+    assert proc.returncode == 0, proc.stderr
+    assert "REPORT HEADER" in proc.stdout
+    assert "# repair pass — LOCAL scope" in proc.stdout
+    assert (
+        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=/tmp/local/memory"
+        in proc.stdout
+    ), proc.stdout
+
+
+def test_peek_does_not_print_a_report_header(tmp_path):
+    """`--peek` never claims, so it must never print a header for a claim that was
+    never made."""
+    _dispatch(tmp_path, 1_000_000, "repair")
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path), "--peek"])
+    assert proc.returncode == 0, proc.stderr
+    assert "REPORT HEADER" not in proc.stdout
+
+
+def test_find_completion_report_matches_an_indented_claim_header(tmp_path):
+    """A curator that pastes the printed header verbatim keeps its 2-space indent
+    (`  Claim: dispatch_id=...`) — the matcher looks for `dispatch_id=<id>` anywhere
+    in the header lines, not a line-anchored `^Claim:`, so the indent must not matter."""
+    project_root = tmp_path
+    state_dir = project_root / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    reports_dir = project_root / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    report = reports_dir / "repair-pass.md"
+    report.write_text(
+        "# repair pass — LOCAL scope\n"
+        "  Claim: dispatch_id=1000000-abcd1234, scope=LOCAL, root=/tmp/local/memory\n"
+        "<!-- janitor-outcome: noop reason=no-work -->\n",
+        encoding="utf-8",
+    )
+    found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
+    assert found is not None
+    assert found[0] == str(report)
+    assert found[1] is True
+
+
 def test_complete_cli_unreadable_report_still_closes_the_claim(tmp_path):
     """A typo'd/missing `--report` path is evidence about the report, not about whether
     the pass ran — refusing to close the claim would leave it open until the 6h expiry

@@ -781,6 +781,18 @@ def main() -> int:
     # having to parse the JSON — and so every existing parser of the JSON line keeps
     # seeing exactly the same bytes it always has.
     print(f"CLAIM_ID={payload.get('dispatch_id', '')}")
+    # The curator template used to ask the agent to retype <DISPATCH_ID>/<SCOPE>/<ROOT>
+    # placeholders into its own printf — a skipped-step-prone agent pastes the literal
+    # placeholder text instead of the real values, so the header matches nothing and the
+    # claim is reported as orphaned in silence. Printing the finished header line here
+    # removes that transcription step entirely (janitor#242 follow-up, 2026-09-16).
+    print("REPORT HEADER (paste as the first content lines of your report file, verbatim):")
+    print(f"  # {args.chore} pass — {payload.get('scope') or ''} scope")
+    print(
+        f"  Claim: dispatch_id={payload.get('dispatch_id', '')}, "
+        f"scope={payload.get('scope') or ''}, "
+        f"root={payload.get('root') or expected_state_dir.parent.parent}"
+    )
     # Printed in the claiming agent's OWN transcript (janitor#242 orphaned-claim
     # follow-up, 2026-09-16) — an agent that finishes a pass and never runs `complete`
     # leaves the claim orphaned because the close command lived only in a reference
