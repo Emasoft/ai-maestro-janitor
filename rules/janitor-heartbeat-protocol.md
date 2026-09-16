@@ -37,7 +37,7 @@ exact-matches `[janitor-resume]`).
 
 | Bare token line | Action |
 |---|---|
-| `[janitor-quiet]` | NO action this fire — reply EMPTY (still surface any drift) |
+| `[janitor-quiet]` | NO action this fire — reply exactly `janitor heartbeat` (still surface any drift) |
 | `[janitor-renew]` | run `/janitor-arm` — renew the cron before its 7-day expiry |
 | `[janitor-reload]` | run `/janitor-reload-plugins` (types `/reload-plugins --force`) |
 | `[janitor-reload-skills]` | run `/janitor-reload-skills` — non-plugin skills (NOT /reload-plugins) |

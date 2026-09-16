@@ -764,6 +764,91 @@ def _defang_foreign_markers(detector: str, text: str) -> str:
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
+
+_DRIFT_DIGIT_RE = re.compile(r"\d+")
+_DRIFT_ELAPSED_TOKEN_RE = re.compile(
+    r"~?\b\d+min\b"
+    r"|\bage=\d+\b"
+    r"|\b\d+(?:\.\d+)?d\b"
+    r"|\b\d+s ago\b"
+    r"|\b\d+ ?(?:min|minutes|h|hours) ago\b"
+)
+
+
+def _drift_dedupe_key(line: str) -> str:
+    """Normalize a drift line for cross-fire dedupe: blank the digits inside ELAPSED-TIME
+    tokens only (`~NNNmin`, `age=NNN`, `NNNd`, `NNNs ago`, `NNN min/minutes/h/hours ago`) --
+    an id or a count (a TRDD id, "8 uncommitted", "37 in testing") is INFORMATION and must
+    stay distinct, or two genuinely different findings would collapse into one. "~390min"
+    and "~371min" re-measuring the SAME underlying condition on a later fire are the only
+    thing this normalizes away (TRDD-7ZMQSXO6)."""
+    def _blank(m: "re.Match[str]") -> str:
+        return _DRIFT_DIGIT_RE.sub("#", m.group(0))
+    return _DRIFT_ELAPSED_TOKEN_RE.sub(_blank, line.strip())
+
+
+_DRIFT_SEEN_FILE_NAME = "drift-lines-seen.txt"
+
+
+def _dedupe_drift_line(name: str, line: str) -> str | None:
+    """Return `line` the first time its normalized form is seen, else None (suppressed).
+
+    Reuses `dedupe.emit_once` (the same permanent, key-based primitive every other
+    per-detector dedup in this file already uses) rather than a bespoke last-fire
+    window -- a repeat suppressed once stays suppressed until the underlying line
+    (post-normalization) actually changes. Bare `[janitor-...]` action markers are
+    NEVER suppressed -- they are the authorization channel, not a drift finding.
+    The key is namespaced by `name` so two different detectors that happen to emit
+    the same normalized text never dedupe against each other.
+
+    A suppressed repeat is NOT written to the findings ledger -- that would
+    reclassify human-facing drift as an advisory. The seen-file itself already
+    records the key; `_dedupe_drift_text` counts suppressions and prints one
+    summary line instead (TRDD-7ZMQSXO6)."""
+    stripped = line.strip()
+    if not stripped:
+        return line
+    if _RESERVED_MARKER_RE.fullmatch(stripped):
+        return line
+    seen_file = state.state_dir() / _DRIFT_SEEN_FILE_NAME
+    key = f"{name}:{_drift_dedupe_key(stripped)}"
+    if dedupe.emit_once(seen_file, key, stripped) is not None:
+        return line
+    return None
+
+
+def _dedupe_drift_text(name: str, text: str) -> str:
+    """Apply `_dedupe_drift_line` to every line of `text`, dropping suppressed repeats.
+
+    A suppressed repeat is never silently gone, but it is also not worth re-announcing
+    every single fire: the trailing summary line prints only when the SUPPRESSED COUNT
+    INCREASED versus the previous fire -- never at zero, never when a condition cleared
+    (the count going down or staying flat says nothing new the reader needs). The
+    previous count is read from and written to a per-detector state file so the
+    comparison survives across fires (TRDD-7ZMQSXO6)."""
+    if not text:
+        return text
+    kept: list[str] = []
+    suppressed = 0
+    for line in text.splitlines():
+        out_line = _dedupe_drift_line(name, line)
+        if out_line is not None:
+            kept.append(out_line)
+        else:
+            suppressed += 1
+    count_file = state.state_dir() / f"drift-lines-suppressed-count-{name}.txt"
+    previous = state.read_int_state(count_file, 0)
+    if suppressed > previous:
+        kept.append(
+            f"({suppressed} drift line(s) unchanged since the last fire were not repeated)"
+        )
+    try:
+        state.atomic_write(count_file, str(suppressed))
+    except OSError:
+        pass
+    return "\n".join(kept) + "\n" if kept else ""
+
+
 _MEMORY_MARKER_RE = re.compile(r"\[janitor-memory-([a-z0-9-]+)\]")
 
 
@@ -944,20 +1029,20 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
     if not os.access(script, os.X_OK):
         # FIX IT, do not report it (TRDD-WP7TCRME Rule 3). A detector that exists but lost its
         # executable bit is the quietest failure this system has: it is skipped on every fire
-        # forever, and the old message called it "missing" — so anyone reading the log went
+        # forever, and the old message called it "missing" -- so anyone reading the log went
         # looking for a deleted file that was sitting right there. Whatever it was meant to
         # detect simply stops being detected, and nothing says so.
         #
         # Single defensible answer, so the janitor takes it: a file in `detectors/` that
         # dispatch is iterating IS meant to be run. There is no second reading of a detector
-        # that should exist but must not execute — that would be a deletion, not a mode.
+        # that should exist but must not execute -- that would be a deletion, not a mode.
         #
         # This happens for real: `orphaned-memory-maint.py` landed at 100644 in 9e75a7d9 and
-        # was dark until a TEST caught it (2026-08-12) — a test that only runs in CI, on a repo
+        # was dark until a TEST caught it (2026-08-12) -- a test that only runs in CI, on a repo
         # checkout, and so says nothing about an INSTALLED plugin whose cache lost the bit.
         try:
             script.chmod(script.stat().st_mode | 0o111)
-            state.log_line("dispatch", f"detector '{name}' was not executable — fixed (chmod +x)")
+            state.log_line("dispatch", f"detector '{name}' was not executable -- fixed (chmod +x)")
         except OSError as exc:
             state.log_line("dispatch", f"detector '{name}' not executable and chmod failed: {exc}")
             return
@@ -967,20 +1052,20 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
     # goes to the detector's own log via state.log_line.
     #
     # A wall-clock `timeout` is mandatory: the detector roster is iterated
-    # in order (main() Phase 2), so a single hung detector — an infinite
+    # in order (main() Phase 2), so a single hung detector -- an infinite
     # pure-Python loop, an un-timed inner subprocess / network / `gh` call,
-    # a blocking flock wait — would wedge THIS fire and starve every detector
+    # a blocking flock wait -- would wedge THIS fire and starve every detector
     # after it, every fire, until the cron process is killed. Mirrors the
     # guard phase (_phase_guard_branch_protection), which already bounds its
     # subprocess. Well-behaved detectors self-limit via state.run_subprocess
-    # (timeout=10s), but that's a convention, not an enforced bound — this is
+    # (timeout=10s), but that's a convention, not an enforced bound -- this is
     # the enforced one.
     timeout = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT"), 120)
     started = int(time.time())
     try:
         # stdout is CAPTURED (not inherited) so the F6 central defang above can
         # neutralize forged reserved markers before they reach the cron turn.
-        # stderr stays inherited — it never carries drift lines.
+        # stderr stays inherited -- it never carries drift lines.
         proc = subprocess.run(
             [str(script), "--one-shot"],
             stdout=subprocess.PIPE,
@@ -989,8 +1074,8 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        state.log_line("dispatch", f"detector '{name}' timed out after {timeout}s — killed")
-        # With a PIPE the partial output is on the exception — print it (defanged)
+        state.log_line("dispatch", f"detector '{name}' timed out after {timeout}s -- killed")
+        # With a PIPE the partial output is on the exception -- print it (defanged)
         # so a slow detector's already-produced findings aren't silently dropped
         # (they used to stream live under capture_output=False).
         partial_raw = exc.stdout
@@ -1000,7 +1085,7 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
         else:
             partial = partial_raw
         if partial:
-            sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, partial)))
+            sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _defang_foreign_markers(name, partial))))
             sys.stdout.flush()
         # Stamp last-run even on timeout so a chronically-slow detector backs
         # off to its cadence instead of re-firing (and re-hanging) every fire.
@@ -1015,11 +1100,11 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
         out = proc.stdout
         # TRDD-LDSCQ0NU / janitor#300: the LAST point machine code can still catch a
         # `[janitor-memory-<chore>]` marker whose claim pool went empty since the
-        # scheduler wrote it (a peer session's agent claimed it in the interim) —
+        # scheduler wrote it (a peer session's agent claimed it in the interim) --
         # after this, the marker is heartbeat stdout and the session decides to spawn.
         if name == "memory-maintenance":
             out = _suppress_stale_memory_markers(out, force=cooldown_active)
-        sys.stdout.write(_quiet_filter(name, _defang_foreign_markers(name, out)))
+        sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _defang_foreign_markers(name, out))))
         sys.stdout.flush()
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")

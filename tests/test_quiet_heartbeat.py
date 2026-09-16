@@ -158,3 +158,14 @@ def test_verbose_opt_out_restores_everything(monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE", "1")
     text = "[trdd-reminder] 7 TRDD(s) currently active\n"
     assert dispatch._quiet_filter("trdd-reminder", text) == text
+
+
+def test_a_quiet_fire_emits_the_bare_token_byte_exact(monkeypatch, capsys):
+    """TRDD-7ZMQSXO6 acceptance (b): when nothing fires, the STUB's own stdout is
+    exactly `[janitor-quiet]\\n` — nothing else. The literal reply "janitor heartbeat"
+    the protocol rule specifies is produced by the RECEIVING MODEL reading that bare
+    token (janitor-heartbeat-protocol.md), not by dispatch.py printing that string
+    itself; this test pins the stub's half of the contract."""
+    monkeypatch.setattr(dispatch, "_decision_fired", False)
+    dispatch._emit_quiet_if_idle()
+    assert capsys.readouterr().out == "[janitor-quiet]\n"
