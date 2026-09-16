@@ -2,6 +2,75 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.1] — 2026-09-16
+
+### Bug Fixes
+
+- **ci:** Make 12 hook scripts executable so the Smoke job actually runs them (TRDD-TWF7DXXR) (46cf9a7)
+- **detectors:** Make trdd-state-reconciliation O(1) per token, not O(n) subprocesses (TRDD-TWF7DXXR) (f0fde2b)
+- **ci:** Smoke hook loop fails on rc 124/126/127 or a Traceback, like the detector loop (TRDD-HTFUWAU9) (3099457)
+- **heartbeat:** 15-min default cadence, disarm writes a log line, disarm skill verifies with CronList (TRDD-V3BQT7QE) (505f22e)
+- **memory:** A recent noop pass suppresses re-dispatch of the same chore for one cadence (TRDD-V3BQT7QE) (dcd5ba7)
+- **ci:** Smoke hook loop survives a declining hook under bash -e (TRDD-HTFUWAU9) (87fc61f)
+- **config:** Remove the retired heartbeat_cadence_dynamic option; heartbeat_cron names the cadence/recovery trade (TRDD-V3BQT7QE) (55c74f6)
+- **memory:** The curator's outcome marker carries a reason, and only a judged no-work noop suppresses re-dispatch (TRDD-V3BQT7QE) (bed3a54)
+- **compaction:** Harness autocompact gets a continuity nudge, not a 44 KB handoff; PreCompact debounced (TRDD-V3BQT7QE, TRDD-7MGJYLY5) (a96f7ef)
+- **heartbeat:** Keep-going resume nudge only when the user is idle and a pending agent is stale or dead (TRDD-V3BQT7QE) (c2cc678)
+- **injection:** Every self-typed command defers for 300 s after the user presses Esc (TRDD-V3BQT7QE) (0ee64b5)
+- **memory:** Claim requires --chore; a claimed dispatch is expired or marked done instead of living forever (TRDD-V3BQT7QE) (eaca556)
+- **memory:** A claim is closed by its own id, not by a report filename that happens to be newer (TRDD-V3BQT7QE) (3cfcb56)
+- **compaction:** PreCompact stamps its last trigger; active skills = every Skill used this session; open files scoped to the project (TRDD-7MGJYLY5, TRDD-V3BQT7QE) (f07f7ed)
+- **memory:** Complete reads the outcome from the report it is handed; CLAIM_ID printed last; agent closes the claim before returning (TRDD-V3BQT7QE) (7219523)
+- **injection:** The interrupt cooldown never blocks a hard unwedge, never guesses the session, and ends when the user types again (TRDD-V3BQT7QE) (293bba6)
+- **resume:** Resume cues expire, are scoped to the session that issued them, and only name agents that are actually stalled (TRDD-2MLFZ7DL, TRDD-V3BQT7QE) (af8ded3)
+- **compaction:** Active-skills scan is budgeted, keeps the earliest activations, and sees slash-typed skills (TRDD-7MGJYLY5, TRDD-V3BQT7QE) (c1bcf97)
+- **memory:** Complete always closes the claim; the done record keeps only completed_at and the report path (TRDD-V3BQT7QE) (c0cbf97)
+- **skills:** Every memory chore skill captures CLAIM_ID and closes its claim with complete --report "$REPORT_FILE" (TRDD-V3BQT7QE) (9efb0fa)
+- **injection:** The cooldown survives the janitor's own typed commands and out-of-order transcript entries; the hard bypass keys on the caller (TRDD-V3BQT7QE) (9c9d3ce)
+- **compaction:** Active-skills list has a byte cap not a count cap, an allowlist for slash-typed skills, and skips janitor commands (TRDD-7MGJYLY5, TRDD-V3BQT7QE) (5efa8d8)
+- **compaction:** The janitor clears at a turn boundary at 83% of the harness window; the mid-turn /compact at 85% is gone (TRDD-11GAS4LC, TRDD-7MGJYLY5, TRDD-V3BQT7QE) (dde5acf)
+- **memory:** A chore closes its claim from a fresh shell through a chore+scope keyed handoff file; report paths are stored absolute (TRDD-V3BQT7QE) (3bf051b)
+- **heartbeat:** A fire inside the user-interrupt cooldown emits only [janitor-quiet]; detectors still run, their chore tokens are defanged (TRDD-6P0KUSO9, TRDD-V3BQT7QE) (7ac1e38)
+- **skills:** Every memory chore closes its claim with the chore+scope keyed set-report/complete pair (TRDD-V3BQT7QE) (cf3a949)
+- **tests:** Restore the executable bit four worker rewrites dropped; keep-going test follows the dev-or-todo gate; classify orphaned-memory-maint (TRDD-V3BQT7QE) (8173c2f)
+- **memory:** Set-report and complete resolve the in-flight claim themselves; no chore skill types a scope variable (TRDD-V3BQT7QE) (2edbe39)
+- **heartbeat:** The zero-agent keep-going gate counts todo cards as well as dev (TRDD-V3BQT7QE) (a252ccb)
+- **memory:** Expiring a claim clears its key markers, and set-report refuses a claim that is no longer in flight (TRDD-V3BQT7QE) (4a5d343)
+- **heartbeat:** The zero-agent board nudge fires once per board state, not every fire (TRDD-V3BQT7QE) (e743553)
+- **memory:** A done record with an empty or absent report path raises MEMPASS-REPORT-MISSING (TRDD-V3BQT7QE) (1774a0f)
+- **heartbeat:** The board-nudge dedup key carries column and attention cards, so a pulled or newly-blocked card re-nudges (TRDD-V3BQT7QE F-4) (af35e93)
+- **memory:** Set-report and complete resolve the in-flight claim from the CLAIMED record itself; the current-claim marker files are retired (TRDD-V3BQT7QE) (e24aaf0)
+
+### Documentation
+
+- BMITQ2MN closes 3.5.0 bookkeeping; lessons on CPV token-theft rule and stale-tag changelog (TRDD-BMITQ2MN) (b8fb1f9)
+- TWF7DXXR STATE for f0fde2be/46cf9a7b; add TRDD-HTFUWAU9 — Smoke hook loop must fail on Traceback (TRDD-TWF7DXXR) (0bd46bc)
+- TWF7DXXR records finding-delta 4→4 and the 46cf9a7b/f0fde2be commits (TRDD-TWF7DXXR) (3947fc4)
+- TWF7DXXR dev → testing, its fix commits are in and CI on 3.5.1 is the pending gate (TRDD-TWF7DXXR) (2ebc9e6)
+- **memory:** Devitalize the setup-token bigram in lesson [^7] so CPV strict stops blocking the publish (2911b4b)
+- Add TRDD-V3BQT7QE — janitor churns live sessions (owner complaint 2026-09-15); lesson on a memory note tripping CPV (270e12d)
+- Add TRDD-2MLFZ7DL, TRDD-11GAS4LC, TRDD-6P0KUSO9 — the three queued churn phases as cards; refresh V3BQT7QE (TRDD-V3BQT7QE) (70183d0)
+- Genericize a peer project's home path in TRDD-6P0KUSO9 so CPV --strict stops flagging a private-path leak (TRDD-V3BQT7QE) (1923f77)
+- Approver rulings on TRDD-HMLS5WE8 (deviations ratified) and TRDD-Q8PNPRTW (waiver refused, measurement ordered) (d84f4fa)
+- **TRDD-HMLS5WE8:** NEXT ACTION points at the one open box; ratification clarified after review (511e909)
+- **TRDD-Q8PNPRTW:** Experiment ruling covers the both-green outcome and fixes n>=2, recorder and host-state check (2660c69)
+- Complete TRDD-HMLS5WE8 -- all acceptance boxes closed, card archived as complete (52adee6)
+- **TRDD-Q8PNPRTW:** The quiet-host precondition names what counts as noise and when the experiment may start (fdf1319)
+- **skills:** Complete TOC embeds in the memory conflict/consolidate/repair skills and move background prose to references to stay under the 5000-token body cap (TRDD-V3BQT7QE) (de60859)
+- **skills:** Keep the two consolidate kill-gate snippets in the SKILL body; only prose stays moved (TRDD-V3BQT7QE) (583ac1a)
+
+### Features
+
+- **memory:** LOW finding when a claim was closed against a report path that does not exist (TRDD-V3BQT7QE) (48a2922)
+
+### Refactor
+
+- **memory:** One parser for the curator outcome marker, shared by the scheduler and the drift reader (TRDD-V3BQT7QE) (51d277a)
+- **external-clear:** Drop the dead TTL-regime probe and its three plugin options (TRDD-V3BQT7QE) (9d10fbc)
+
+### Testing
+
+- **terminal-trigger:** _run_verified_payload aborts when no abort_unless_any guard file survives (TRDD-HMLS5WE8) (24aed43)
 ## [3.5.0] — 2026-09-10
 
 ### Bug Fixes
@@ -50,6 +119,7 @@ All notable changes to this project will be documented in this file.
 - **claude-md:** Wikimem index digest refreshed by the janitor after the git-index-lock page changed (TRDD-2SKHJ8NR) (8f5c04c)
 - **memory:** Commit the atomize+repair passes' output, which the agents left uncommitted (2dd7600)
 - Bump version to 3.5.0 (a4bfee6)
+- Bump version to 3.5.0 (61191d3)
 ## [3.4.15] — 2026-09-08
 
 ### Bug Fixes
