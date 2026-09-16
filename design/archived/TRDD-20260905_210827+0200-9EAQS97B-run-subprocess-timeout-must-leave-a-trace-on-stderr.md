@@ -3,7 +3,7 @@ trdd-id: 9EAQS97B
 title: A fail-open run_subprocess None must also leave one line on stderr
 column: complete
 created: 2026-09-05T21:08:27+0200
-updated: 2026-09-16T22:57:30+0200
+updated: 2026-09-16T23:01:23+0200
 current-owner: janitor-main-session
 assignee: lean-worker
 task-type: bugfix
@@ -114,3 +114,4 @@ quiet-filtered summary the dispatcher hands the agent.
 - 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 - 2026-09-16T22:57:29+0200 — box 4 ticked: tests/test_gh_reply_watch.py run once at loadavg 2.80 (< 20): 14/14 passed, so there were no failing captures and no [run_subprocess] lines to paste (the box's literal ask is vacuously met); tests/test_run_subprocess_fail_open_logging.py 7/7. Box 6 ticked on the publish gate that shipped 8bcd2975 (ancestor of v3.5.5): the pre-push gate's full-suite contract on this host plus GitHub CI Tests green on the 3.5.5 bump (run 35084795588). Report: reports/board-drain/20260916_225530+0200-9EAQS97B-verify.md. COMPLETE by the session under the 2026-09-03 standing permission.
 - 2026-09-16T22:57:30+0200 — COMPLETE by session. all boxes ticked; fix 8bcd2975 shipped in v3.5.5.
+- 2026-09-16T23:01:23+0200 — precision on box 4: the stderr trace is PROVEN by tests/test_run_subprocess_fail_open_logging.py's real-timeout capfd case (7/7); tests/test_gh_reply_watch.py simply produced no failing capture to paste at loadavg 2.8 — 'vacuously met' above means the paste half had nothing to paste, not that the visibility went untested.
