@@ -46,6 +46,16 @@ def test_every_detector_is_executable_in_git():
     )
 
 
+def test_every_hook_is_executable_in_git():
+    """CI's Smoke job execs each scripts/hooks/*.py directly; mode 100644 -> exit 126."""
+    non_exec = _git_mode_644_pyfiles("scripts/hooks")
+    assert not non_exec, (
+        "these hooks are NOT executable in git (mode 100644) — CI Smoke execs "
+        f"`./scripts/hooks/<name>.py` directly and fails with rc=126: {non_exec}. "
+        "Run: chmod +x <file> && git add <file>"
+    )
+
+
 def test_runnable_shebang_scripts_are_executable_in_git():
     """The PEP-723 scripts that are RUN (not just imported) must be executable."""
     runnable = [
