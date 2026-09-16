@@ -1,9 +1,9 @@
 ---
 trdd-id: TASA9ACJ
 title: conftest source manifest walks and sorts the 100k-file memgrep target tree before filtering it out
-column: testing
+column: todo
 created: 2026-09-05T20:27:16+0200
-updated: 2026-09-05T20:42:00+0200
+updated: 2026-09-16T12:33:54+0200
 current-owner: janitor-main-session
 assignee: janitor-main-session
 task-type: bugfix
@@ -114,3 +114,4 @@ subprocesses that card tracks, though it is not shown to be the cause of any spe
 `TimeoutExpired`.
 
 ## Approval log
+- 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

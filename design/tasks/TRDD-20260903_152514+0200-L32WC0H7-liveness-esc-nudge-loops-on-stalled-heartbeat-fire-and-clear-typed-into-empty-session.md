@@ -1,9 +1,9 @@
 ---
 trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
-column: testing
+column: todo
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-04T01:12:00+0200
+updated: 2026-09-16T12:33:53+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -289,5 +289,6 @@ Mechanism, verified in code + transcript:
 - 2026-09-04T00:13:30+0200 — COMPLETE. Reviewed by the janitor main session under the
   owner's standing delegation of the review columns. F0–F6 verified against the code and
   the green full suite; F5 (live observation) explicitly left open and stated on the card.
+- 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 
 ## Notes and lessons learned

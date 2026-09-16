@@ -1,9 +1,9 @@
 ---
 trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
-column: testing
+column: todo
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-05T05:28:26+0200
+updated: 2026-09-16T12:33:54+0200
 review-after: 2026-09-05
 current-owner: janitor-main-session
 task-type: bugfix
@@ -190,5 +190,6 @@ this card still flushes whatever is already queued.
       paperwork.
 
 ## Approval log
+- 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 
 ## Notes and lessons learned

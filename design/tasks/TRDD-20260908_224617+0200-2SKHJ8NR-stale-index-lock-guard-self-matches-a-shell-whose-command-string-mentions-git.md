@@ -1,9 +1,9 @@
 ---
 trdd-id: 2SKHJ8NR
 title: The stale-index-lock guard self-matches a shell whose command string mentions git, so it refuses forever when invoked from any sh -c wrapper
-column: testing
+column: todo
 created: 2026-09-08T22:46:17+0200
-updated: 2026-09-09T11:59:50+0200
+updated: 2026-09-16T12:33:55+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -177,3 +177,4 @@ eht: []
   `9c3af0f2` — so STATE no longer presents the refusal as live above a DONE bullet that says
   it is fixed; the Cause paragraph's tense fixed ("turned … into a measurement"). Further
   wording goes to the owner, not another round.
+- 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

@@ -1,9 +1,9 @@
 ---
 trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
-column: testing
+column: todo
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T22:02:26+0200
+updated: 2026-09-16T12:33:54+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -303,3 +303,7 @@ failure: the claiming agent looking in the wrong directory entirely.
 - [ ] `uv run pytest` full suite still green. (NOT run this session per
       orchestrator instruction; see the sibling card's STATE block for the
       flaky, unrelated `test_dispatch_defang.py` finding.)
+
+## Approval log
+
+- 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

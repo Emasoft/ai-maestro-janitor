@@ -1,9 +1,9 @@
 ---
 trdd-id: LDSCQ0NU
 title: janitor-memory-split marker fires against an empty claim pool costing a full agent spawn to abstain
-column: testing
+column: blocked
 created: 2026-09-05T16:05:02+0200
-updated: 2026-09-05T18:46:10+0200
+updated: 2026-09-16T12:33:50+0200
 current-owner: main-session
 task-type: bugfix
 priority: low
@@ -12,11 +12,12 @@ project-id: ai-maestro-janitor
 min-approval-requirement: none
 labels: [janitor-heartbeat, memory-dispatch, cost]
 relevant-rules: []
-blocked-by: []
+blocked-by: [N1CPV1QV]
 npt: []
 eht: [N1CPV1QV]
 implementation-commits: [9681eb7c, 61dcfdea]
 external-refs: [janitor#300]
+pre-block-column: testing
 ---
 
 # janitor-memory-split marker fires against an empty claim pool costing a full agent spawn to abstain
@@ -176,3 +177,7 @@ it (see CLAUDE.md's `claude plugin update … @…marketplace` step). Testing
 here proves the code, not that "the marker no longer fires on this host".
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-09-16T12:33:50+0200 — column → blocked. stays parked until TRDD-N1CPV1QV lands (triage 2026-09-16)

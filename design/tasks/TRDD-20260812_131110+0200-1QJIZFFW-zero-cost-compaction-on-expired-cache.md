@@ -1,12 +1,11 @@
 ---
 trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
-column: testing
+column: blocked
 created: 2026-08-12T13:11:10+0200
-updated: 2026-09-08T23:00:40+0200
+updated: 2026-09-16T12:33:50+0200
 current-owner: janitor-main-session
 task-type: feature
-approval-tier: 0
 scope: project
 severity: high
 implementation-commits: [df7d4cb3, 169d967d, 295c1243]
@@ -14,6 +13,9 @@ relevant-rules: []
 npt: []
 eht: []
 external-refs: [TRDD-PXP08ZQC, TRDD-31095269, TRDD-D3PROACT, TRDD-WUUR2DFX]
+min-approval-requirement: none
+blocked-by: [BDZG8Y8A]
+pre-block-column: testing
 ---
 
 # Zero-cost compaction on an expired cache
@@ -586,3 +588,4 @@ deliberately, because today it means nothing either way.
 - 2026-09-03T11:17:55+0200 — dev → testing by janitor-main-session acting for USER (delegation
   2026-09-03). Box 4 proven live on the 2026-09-03T05:25:28 automated cycle; only box 5 remains
   (a `--phase after` measurement on a future automated fire) — no code work left.
+- 2026-09-16T12:33:50+0200 — column → blocked. box 5 unsatisfiable until TRDD-BDZG8Y8A lands (triage 2026-09-16)

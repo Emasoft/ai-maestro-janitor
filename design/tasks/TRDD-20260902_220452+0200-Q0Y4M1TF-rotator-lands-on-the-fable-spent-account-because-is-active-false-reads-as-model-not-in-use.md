@@ -1,9 +1,9 @@
 ---
 trdd-id: Q0Y4M1TF
 title: the rotator lands on the Fable-spent account because is_active false reads as model not in use, and a burn projection is allowed to do it
-column: testing
+column: todo
 created: 2026-09-02T22:04:52+0200
-updated: 2026-09-03T11:09:13+0200
+updated: 2026-09-16T12:33:53+0200
 review-after: 2026-09-04
 current-owner: janitor-main-session
 task-type: bugfix
@@ -76,5 +76,6 @@ box's own 24h bar is not yet met. `review-after: 2026-09-04` set (past the 22:22
       Fable, across one full day of rotator.log.
 
 ## Approval log
+- 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 
 ## Notes and lessons learned

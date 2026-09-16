@@ -1,9 +1,9 @@
 ---
 trdd-id: X6I04SAO
 title: the daemon's Python has no CA bundle, so every slot refresh fails TLS and the rotator stays put while the user rotates by hand
-column: testing
+column: todo
 created: 2026-09-02T15:57:54+0200
-updated: 2026-09-03T11:09:13+0200
+updated: 2026-09-16T12:33:53+0200
 review-after: 2026-09-05
 current-owner: main-session
 task-type: bugfix
@@ -130,5 +130,6 @@ scoped switch (util still healthy, no pane was actually wedged/blocked at the ti
       TRDD-NACCL0CB reason, not this card's. Box stays open until both halves hold.)
 
 ## Approval log
+- 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 
 ## Notes and lessons learned

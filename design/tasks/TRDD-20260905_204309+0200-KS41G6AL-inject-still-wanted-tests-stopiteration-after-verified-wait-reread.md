@@ -1,9 +1,9 @@
 ---
 trdd-id: KS41G6AL
 title: test_inject_still_wanted raises StopIteration since the verified wait re-reads the pane through _still_shows_ours
-column: testing
+column: todo
 created: 2026-09-05T20:43:09+0200
-updated: 2026-09-05T21:08:00+0200
+updated: 2026-09-16T12:33:54+0200
 current-owner: janitor-main-session
 assignee: janitor-main-session
 task-type: bugfix
@@ -131,3 +131,4 @@ change trips the test instead of silently passing.
 Full trace + verification commands/output: `reports/board-drain/20260905_210043+0200-KS41G6AL-inject-still-wanted.md`.
 
 ## Approval log
+- 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

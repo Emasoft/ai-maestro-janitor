@@ -1,9 +1,9 @@
 ---
 trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
-column: testing
+column: todo
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-08T23:00:40+0200
+updated: 2026-09-16T12:33:56+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -232,3 +232,7 @@ a release as the card says. R3: subagents are mentioned, not their preservation 
 - Zero model tokens: the handoff is already composed with no model turn (`TRDD-PXP08ZQC`,
   `agent-handoff-compose.log`). This card only changes whether the existing file reaches the
   context.
+
+## Approval log
+
+- 2026-09-16T12:33:56+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

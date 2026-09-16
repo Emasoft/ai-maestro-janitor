@@ -1,9 +1,9 @@
 ---
 trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
-column: testing
+column: todo
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-03T21:45:37+0200
+updated: 2026-09-16T12:33:53+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -146,6 +146,7 @@ to the wrong state.
   "USER delegation 2026-09-03 09:58" and was rewritten in place to "~09:10" in commit
   ada04daf; the delegation preceded the 09:14 approval, 09:58 was a clock error. Recorded
   here because an audit-trail entry must be corrected by appending, not by editing.
+- 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:29:00+0200
 

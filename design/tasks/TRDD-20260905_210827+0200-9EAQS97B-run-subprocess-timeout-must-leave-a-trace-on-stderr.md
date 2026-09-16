@@ -1,9 +1,9 @@
 ---
 trdd-id: 9EAQS97B
 title: A fail-open run_subprocess None must also leave one line on stderr
-column: testing
+column: todo
 created: 2026-09-05T21:08:27+0200
-updated: 2026-09-05T21:52:00+0200
+updated: 2026-09-16T12:33:55+0200
 current-owner: janitor-main-session
 assignee: lean-worker
 task-type: bugfix
@@ -110,3 +110,4 @@ reading the raw fire output should be able to see, without it competing for spac
 quiet-filtered summary the dispatcher hands the agent.
 
 ## Approval log
+- 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

@@ -1,9 +1,9 @@
 ---
 trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
-column: testing
+column: todo
 created: 2026-09-04T18:48:19+0200
-updated: 2026-09-08T23:00:40+0200
+updated: 2026-09-16T12:33:56+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -232,3 +232,4 @@ trading that away.
 ## Approval log
 
 - 2026-09-05T10:38:00+0200 — APPROVED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal): the deferred-push change (defer ~60 s instead of cancelling when the pane is attended). It preserves the no-typing-under-live-fingers floor that the rejected alternative (shrinking `_PROMPT_WINDOW_S`) would have weakened, and it answers the one hard number on the card — 63 of 115 push decisions SUPPRESSED, measured directly. The trigger-attributed split (auto 66% / manual 38%) stays INDICATIVE, as the card itself labels it, and does not bear on the approval. Column restored to `todo`; this is now startable code work.
+- 2026-09-16T12:33:56+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

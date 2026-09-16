@@ -1,9 +1,9 @@
 ---
 trdd-id: Q7X4M2KP
 title: Scheduler must supersede its own unclaimed dispatch record for the same scope root and intervention instead of stacking a new one
-column: testing
+column: todo
 created: 2026-09-05T18:40:37+0200
-updated: 2026-09-05T21:52:00+0200
+updated: 2026-09-16T12:33:54+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -149,3 +149,4 @@ the agent looks in the right directory and the detector can see the pile, the pi
 keeps growing unless the scheduler stops stacking duplicate unclaimed records.
 
 ## Approval log
+- 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

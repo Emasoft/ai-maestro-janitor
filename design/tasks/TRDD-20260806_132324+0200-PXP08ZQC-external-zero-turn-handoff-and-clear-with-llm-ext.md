@@ -1,9 +1,9 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: testing
+column: todo
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-08T23:11:17+0200
+updated: 2026-09-16T12:33:55+0200
 review-after: 2026-09-05
 current-owner: claude-ai-maestro-janitor
 task-type: feature
@@ -471,3 +471,4 @@ equality test now pins producer and checker together so they cannot drift apart 
   2026-09-03). The 2026-09-03T05:25:28 automated cycle proves the cycle-observed half with a
   genuine llm-ext summary; the PASS-table half still needs a `--phase after` capture on a future
   fire. `review-after: 2026-09-05` set; card stays `testing`.
+- 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

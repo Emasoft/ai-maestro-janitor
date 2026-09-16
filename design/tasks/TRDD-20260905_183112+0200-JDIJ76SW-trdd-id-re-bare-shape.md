@@ -1,9 +1,9 @@
 ---
 trdd-id: JDIJ76SW
 title: TRDD filename matcher drops v1-migrated bare TRDD-<8hex>-<slug> cards from detectors and the board count
-column: testing
+column: todo
 created: 2026-09-05T18:31:12+0200
-updated: 2026-09-05T19:03:40+0200
+updated: 2026-09-16T12:33:55+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -158,3 +158,4 @@ base36 ids can be all-digit as well), trading one unmeasured false-positive risk
 real false-negative one. The regex stays as committed.
 
 ## Approval log
+- 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)

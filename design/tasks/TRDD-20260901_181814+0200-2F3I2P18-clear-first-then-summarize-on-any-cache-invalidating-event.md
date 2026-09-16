@@ -1,9 +1,9 @@
 ---
 trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
-column: testing
+column: todo
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-08T23:00:40+0200
+updated: 2026-09-16T12:33:56+0200
 review-after: 2026-09-05
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
@@ -249,3 +249,7 @@ invisible to the gate.
 - The measurement that motivates all of it: the externalized path costs **0 Claude-side tokens**
   (TRDD-79LXF6PJ box 5) — so every write it prevents is pure saving, and every minute it is
   gated behind is pure loss.
+
+## Approval log
+
+- 2026-09-16T12:33:56+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
