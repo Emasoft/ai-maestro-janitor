@@ -1,9 +1,9 @@
 ---
 trdd-id: HTFUWAU9
 title: CI Smoke hook loop must fail on a Traceback like the detector loop does
-column: todo
+column: complete
 created: 2026-09-10T19:31:42+0200
-updated: 2026-09-10T19:31:42+0200
+updated: 2026-09-16T10:40:13+0200
 current-owner: ai-maestro-janitor-f2
 task-type: infra
 min-approval-requirement: none
@@ -66,21 +66,26 @@ permissions, before the workflow gains a Traceback guard.
 
 ## Acceptance
 
-- [ ] The Smoke job's hook loop mirrors the detector loop's shape: capture
+- [x] The Smoke job's hook loop mirrors the detector loop's shape: capture
       each hook's stdout+stderr, and fail the step when the captured output
       contains `Traceback (most recent call last)`, regardless of exit code.
-- [ ] The set of exit codes a hook may legitimately return under a
+- [x] The set of exit codes a hook may legitimately return under a
       closed-stdin, no-payload invocation is decided and documented in the
       workflow (a comment) — e.g. is a non-zero, non-Traceback exit
       (deliberate "hook declines to act, no input") acceptable, or should the
       loop also gate on exit code?
-- [ ] First CI run after landing is expected to be a no-op against the
+- [x] ~~First CI run after landing is expected to be a no-op against the~~ STRUCK 2026-09-16: the premise was inverted by events — the first CI run carrying this guard (3.5.1, 60bedabc, run 35069593528) FAILED on rc=126 for two hooks whose executable bit a worker rewrite had dropped; the guard was right and the hooks were broken. Original expectation continues below:
       12-hook baseline above (all still rc=0, no Traceback) — a regression
       there would mean the fix's own guard is wrong, not that the hooks
       broke.
+- [x] The Smoke hook loop fails the step on rc 124 (hang), rc 126/127 (not executable / not found) and on a Traceback in captured output, regardless of rc — .github/workflows/ci.yml Smoke step (commit 30994579).
+- [x] The loop survives a hook that legitimately declines with a non-zero exit under bash -e (commit 87fc61f2).
+- [x] Proven live: CI run 35069593528 (3.5.1) failed the Smoke job on rc=126 for two hooks that had lost their executable bit; fixed in 18dbb9dd, and tests/test_detector_executable_bits.py now guards the index mode of every hook (0ec065c1).
 
 ## Approval log
 
 - 2026-09-10T19:31:42+0200 — Authored at `todo`, Tier 0 (in-scope CI
   hardening, no baseline/rule deviation). Found while running TRDD-TWF7DXXR's
   closed-stdin hook smoke; see that card's STATE block for the pointer back.
+- 2026-09-16T10:38:49+0200 — COMPLETED by the session acting as approver. The card sat in todo although its code had landed on 2026-09-10/11 (30994579, 87fc61f2); today's 3.5.1 CI failure was the live proof the guard works.
+- 2026-09-16T10:40:13+0200 — COMPLETE by session-as-approver. landed 30994579+87fc61f2; proven live by run 35069593528.
