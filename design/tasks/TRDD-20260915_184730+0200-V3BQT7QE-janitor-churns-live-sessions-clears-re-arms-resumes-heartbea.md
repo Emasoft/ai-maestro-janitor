@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: testing
 created: 2026-09-15T18:47:30+0200
-updated: 2026-09-16T10:31:46+0200
+updated: 2026-09-16T10:39:34+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -18,7 +18,7 @@ priority: high
 scope: project
 project-id: ai-maestro-janitor
 npt: []
-eht: [PA9E2GJ1, 7ZMQSXO6, NEVQOHGS]
+eht: [PA9E2GJ1, 7ZMQSXO6, NEVQOHGS, I8AAJ3PG]
 implementation-commits: [30994579, 505f22ee, dcd5ba79, 87fc61f2, 55c74f62]
 ---
 
@@ -69,6 +69,7 @@ Child ids: R=2MLFZ7DL, C-b=11GAS4LC, E-2=6P0KUSO9.
 - 2026-09-16T10:13:41+0200 — CORRECTION of the live-test entry above (SUPERSEDES its root-cause sentence). Discriminating evidence read afterwards: the curator's transcript contains 25 references to memory_dispatch_claim.py and ZERO set-report or complete invocations — it never attempted to close, so 'ran complete and failed silently' and 'version skew refused it' are both ruled out for this run (its transcript references 3.5.0, 3.5.1 and 3.5.2 plugin paths, mixed). And the claim 'four skills have no close step' was FALSE: atomize, enrich, retro-lesson and repair carry an inline complete --state-dir block (multi-line, which the single-line grep missed); conflict, consolidate, harvest and split are the four that only link references/close-claim.md — cf3a949a (2026-09-15) replaced their inline command with that link. The consolidate curator skipped the link. The by-hand close exercised only the explicit --report path of complete, not the set-report + bare complete pair the recipe promises; that pair is still untested live. The structural guard still missing: the SPAWNER (heartbeat protocol) closing the claim from the agent's returned report path, or the orphan sweep auto-completing a claim whose report exists — filed as a follow-up, not done here.
 - 2026-09-16T10:31:45+0200 — column dev → testing. Shipped: 3.5.1 (60bedabc) and 3.5.2 (191678a2, CI green, installed locally). Landed this session on this card: F-4 nudge key, dead TTL-regime removal, claim resolution from the CLAIMED record, CI exec-bit fix + gate test, claim CLI prints its close block (2bb6c99a), inline close-claim step in all 8 memory skills (42404659, TRDD-0KOIJ3SK complete). Remaining work is in the EHT children PA9E2GJ1 / 7ZMQSXO6 / NEVQOHGS (todo) and one open structural item: a spawner- or sweep-side auto-close of a claim whose report exists — to be filed as its own card. Testing means: the next heartbeat-dispatched memory chore must leave a done record without a hand close; that is the acceptance for this card's memory half.
 - 2026-09-16T10:31:46+0200 — column → testing by session-as-approver. code landed and published; verification is the next live chore closing its own claim
+- 2026-09-16T10:38:54+0200 — 3.5.3 published (93326486) carrying the claim-CLI close block and the inline close step in all 8 memory skills. CAVEAT for the testing acceptance: this session still runs plugin 3.5.0 (the local update to 3.5.2/3.5.3 says 'restart to apply'), so a curator spawned from here reads the OLD skills and runs the OLD claim CLI; the acceptance can only be observed from a session started after the upgrade. Until then a hand close after each chore is expected, not a regression.
 
 ## Measured (2026-09-15)
 
