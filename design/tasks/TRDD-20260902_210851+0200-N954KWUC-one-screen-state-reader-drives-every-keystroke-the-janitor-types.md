@@ -3,7 +3,7 @@ trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
 column: todo
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-16T12:33:53+0200
+updated: 2026-09-16T23:01:24+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -147,6 +147,7 @@ to the wrong state.
   ada04daf; the delegation preceded the 09:14 approval, 09:58 was a clock error. Recorded
   here because an audit-trail entry must be corrected by appending, not by editing.
 - 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-16T23:01:23+0200 — box 4, rotation half OBSERVED: a live rotation on this machine drove another project's pane through the same daemon/actuator and left it at working with no human keystroke (details, project, log path, timestamps: /Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/reports/board-drain/20260916_225815+0200-N954KWUC-live-evidence.md; the actuator code is machine-global — one daemon, one plugin cache — so the pane's project does not matter, but the episode must postdate the install of the P3 commits 30508054/8cb71c3b/e93a9203; earliest stamp in the report: 2026-09-04T13:12:05). No-headroom half: NOT observable — Event.NO_HEADROOM has zero production callers, so even a real all-accounts-spent wall would log nothing; this half is blocked on code, not on weather. 3T9HQEQ6's body does not name the NO_HEADROOM event or pane_policy, so it is NOT established that it will add the caller — no block set; the caller needs an owner (EHT candidate).
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:29:00+0200
 
