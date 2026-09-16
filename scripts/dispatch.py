@@ -3335,10 +3335,17 @@ def _any_pending_agent_stale(now: int) -> bool:
 
 
 def _board_workable_ids() -> frozenset[str]:
-    """The id set of every open TRDD sitting in `dev` or `todo` (TRDD-2MLFZ7DL sub-step 2,
-    widened TRDD-V3BQT7QE, deduped F-3/TRDD-V3BQT7QE). Single scan shared by
-    `_board_has_workable_cards` (existence) and `_board_nudge_signature_changed` below
-    (identity, for the once-per-board-state dedup) — one board read, two callers.
+    """The `"{uid}:{column}"` set of every open TRDD sitting in `dev` or `todo` (TRDD-2MLFZ7DL
+    sub-step 2, widened TRDD-V3BQT7QE, deduped F-3/TRDD-V3BQT7QE, keyed by column
+    F-4/TRDD-V3BQT7QE). Single scan shared by `_board_has_workable_cards` (existence,
+    truthiness only — the key format is transparent to it) and `_board_nudge_signature_changed`
+    below (identity, for the once-per-board-state dedup) — one board read, two callers.
+
+    Column is folded into each id (not just the bare uid) so a card that advances
+    `todo -> dev` (the session pulled the card, exactly what the nudge asked for) is
+    recognized as a board-state change even though the id itself is unchanged; a bare-uid
+    signature could not tell that case apart from "nothing moved" and would leave a
+    stalled `dev` card un-renudged.
 
     Raises on any read fault (never fails "empty") so both callers can tell "the board
     could not be read" apart from "the board is genuinely empty" and fail open correctly."""
@@ -3351,7 +3358,7 @@ def _board_workable_ids() -> frozenset[str]:
             continue
         _, column = trdd_common.parse_trdd_state(path)
         if column in {"dev", "todo"}:
-            ids.add(uid)
+            ids.add(f"{uid}:{column}")
     return frozenset(ids)
 
 
@@ -3391,10 +3398,13 @@ def _last_user_prompt_epoch() -> int | None:
     return value
 
 
-def _board_nudge_signature_changed(sd: Path, ids: frozenset[str]) -> bool:
+def _board_nudge_signature_changed(
+    sd: Path, ids: frozenset[str], attn_signature: str = ""
+) -> bool:
     """True iff the ZERO-pending-agent board fallback should nudge this fire: the `dev`/
-    `todo` id set differs from the last nudge, or a user prompt landed since (F-3,
-    TRDD-V3BQT7QE).
+    `todo` id set (keyed `"uid:column"`, F-4/TRDD-V3BQT7QE) differs from the last nudge,
+    the ATTENTION id set (`attn_signature`, from `_attention_summary()`) differs, or a
+    user prompt landed since (F-3, TRDD-V3BQT7QE).
 
     WHY: with zero pending agents, `_board_has_workable_cards()` alone re-nudged on
     EVERY ~15-minute fire while a `todo`/`dev` card sat untouched because nobody could
@@ -3402,14 +3412,25 @@ def _board_nudge_signature_changed(sd: Path, ids: frozenset[str]) -> bool:
     board that never moved. This persists `{signature, prompt_epoch}` in one stamp file
     so an unchanged board with an idle user nudges AT MOST ONCE; a user prompt strictly
     newer than the stamped one resets the dedup even when the board itself did not move,
-    because the user re-engaging is itself a reason to re-anchor the nudge. The pending-
-    agent (non-zero) path is untouched — this only gates the zero-agent fallback.
+    because the user re-engaging is itself a reason to re-anchor the nudge. The two id
+    sets are folded into one comparison key (`board-ids|attn=attn-signature`, F-4/
+    TRDD-V3BQT7QE) so a card newly entering `blocked`/`human_review`/etc. re-arms the
+    nudge even when the `dev`/`todo` set itself is unchanged — `human_review` is exactly
+    the state where only a human moves the pipeline, and the whole point of the cue is to
+    say so once. The caller passes the SAME `_attention_summary()` result it also uses to
+    build the attention clause — this function never recomputes it. The pending-agent
+    (non-zero) path is untouched — this only gates the zero-agent fallback.
+
+    `prompt_epoch` is sourced from the cross-plugin presence breadcrumb
+    `last_user_input_epoch` (`_last_user_prompt_epoch`) — a janitor self-typed command can
+    also advance it, which is an accepted ceiling (it re-anchors the dedup slightly more
+    often than a strictly human-only prompt would, never less).
 
     Fail-open toward nudging: an unreadable/corrupt stamp reads as "no prior nudge",
     never as "already nudged", and a failed write is swallowed — costs one extra nudge
     next fire, never a silenced one."""
     stamp_file = sd / _BOARD_NUDGE_STAMP_FILE
-    signature = ",".join(sorted(ids))
+    signature = ",".join(sorted(ids)) + "|attn=" + attn_signature
     prompt_epoch = _last_user_prompt_epoch()
     prev_signature: str | None = None
     prev_prompt_epoch: int | None = None
@@ -3436,6 +3457,7 @@ def _board_nudge_signature_changed(sd: Path, ids: frozenset[str]) -> bool:
         except OSError:
             pass
     return changed
+
 
 
 def _phase_keep_going_nudge() -> None:
@@ -3474,15 +3496,16 @@ def _phase_keep_going_nudge() -> None:
     A guard that can be silenced invisibly is not a guard; the failure mode it exists to
     prevent (a session going quiet unattended) is exactly the state it was left in.
 
-    KNOWN TRADE-OFF (F-3/TRDD-V3BQT7QE review): the zero-pending-agent board dedup below
-    `return`s before `_attention_summary()`/`_attention_gate()` ever run, so a card that
-    newly enters `blocked` (or another attention-worthy column) while the `dev`/`todo`
-    signature itself is unchanged gets no nudge until that signature next changes. This
-    is not new — the pre-existing `not _board_has_workable_cards()` branch already skipped
-    the attention clause on a fully empty board — the dedup only widens how often the same
-    class of skip applies (to the equally common "one unchanged workable card" case). Left
-    as-is rather than coupling the two independently-cadenced mechanisms, which would need
-    to peek `_attention_gate`'s stateful counter without spending it.
+    KNOWN TRADE-OFF, NARROWED (F-4/TRDD-V3BQT7QE): the fully-empty-board early return
+    (zero `dev`/`todo` cards) still skips the attention clause outright — unchanged from
+    the pre-existing `not _board_has_workable_cards()` behaviour. The OTHER branch — an
+    unchanged `dev`/`todo` signature — no longer skips it: `_board_nudge_signature_changed`
+    now also compares the ATTENTION id set (`attn_signature` from `_attention_summary()`,
+    computed lazily once below and passed down), so a card newly entering `blocked`/
+    `human_review`/etc. re-arms the nudge even while the workable-card set itself is
+    unchanged. What remains left as-is is only the empty-board case: a board with zero
+    `dev`/`todo` cards returns before either id set is consulted, matching the original
+    trade-off note.
 
     Firing is bounded, not a runaway: each fire is one already-scheduled heartbeat turn and
     the nudge adds a single line to it. Re-firing on EVERY due heartbeat that passes the
@@ -3510,6 +3533,11 @@ def _phase_keep_going_nudge() -> None:
     if not user_idle:
         state.log_line("dispatch", f"keep-going: suppressed (user active {idle_s}s ago)")
         return
+    # `_attention_summary()` re-reads every open TRDD, so it is computed LAZILY — only after
+    # the cheap early returns below (all agents live / empty board), never before them
+    # (review finding on F-4, 2026-09-16) — and exactly ONCE per fire: the zero-agent board
+    # dedup consumes the signature first, the attention clause near the end reuses it.
+    attn: tuple[str, str] | None = None
     # TRDD-2MLFZ7DL sub-step 2 (H-a's open question), widened TRDD-V3BQT7QE: with ZERO
     # pending agents, `_any_pending_agent_stale` trivially returns False ("nothing to
     # prove is stale"), which used to land in the exact same suppression branch as
@@ -3525,7 +3553,10 @@ def _phase_keep_going_nudge() -> None:
         if workable_ids is not None and not workable_ids:
             state.log_line("dispatch", "keep-going: suppressed (no pending agents, no dev/todo card)")
             return
-        if workable_ids is not None and not _board_nudge_signature_changed(sd, workable_ids):
+        attn = _attention_summary()
+        if workable_ids is not None and not _board_nudge_signature_changed(
+            sd, workable_ids, attn[1]
+        ):
             state.log_line(
                 "dispatch",
                 f"keep-going: board unchanged since last nudge ({len(workable_ids)} cards) — quiet",
@@ -3534,6 +3565,9 @@ def _phase_keep_going_nudge() -> None:
     elif not _any_pending_agent_stale(now):
         state.log_line("dispatch", f"keep-going: suppressed (all {agent_total} agents live)")
         return
+    if attn is None:
+        attn = _attention_summary()
+    attn_clause, attn_signature = attn
     # D5 (TRDD-82JRK0CY): the bare [janitor-resume] token + its single prose note are
     # emitted together at the end via _emit_decision (auto-flush + payload defang). This
     # phase does NOT early-return once the gate above is passed — see the docstring — but
@@ -3612,7 +3646,8 @@ def _phase_keep_going_nudge() -> None:
     # it would otherwise dominate every single nudge on a board that has any blocked card at
     # all. Gating is by cadence (every Nth fire) OR by a genuine change in which cards need
     # attention, so a fresh block is still announced within one beat regardless of the cadence.
-    attn_clause, attn_signature = _attention_summary()
+    # `attn_clause`/`attn_signature` come from the single lazy `_attention_summary()` call
+    # above — never recomputed here (F-4/TRDD-V3BQT7QE).
     if attn_clause and _attention_gate(sd, attn_signature):
         bits.append(attn_clause)
     if bits:

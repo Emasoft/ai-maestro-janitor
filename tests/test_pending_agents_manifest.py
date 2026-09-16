@@ -645,6 +645,78 @@ def test_keep_going_nudge_board_dedup_resets_on_newer_user_prompt(iso, capsys, m
     assert "[janitor-resume]" in out, f"a newer user prompt must reset the dedup: {out!r}"
 
 
+
+def test_keep_going_nudge_signature_keys_include_column_so_todo_to_dev_renudges(iso, capsys) -> None:
+    """F-4 (TRDD-V3BQT7QE): a card the session PULLED (`todo` -> `dev`, exactly what the
+    nudge asked for) must re-nudge on the next fire even though the id itself is unchanged
+    — the board-dedup signature is keyed `"uid:column"`, not the bare uid."""
+    project = iso["project"]
+    tasks = project / "design" / "tasks"
+    _write_task_card(tasks, "TODOCRD1", "todo")
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" in capsys.readouterr().out
+
+    _write_task_card(tasks, "TODOCRD1", "dev")  # same card, session pulled it into dev
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out, f"todo->dev must re-nudge despite the same uid: {out!r}"
+
+
+def test_keep_going_nudge_board_dedup_still_quiet_when_truly_unchanged(iso, capsys) -> None:
+    """Regression guard for F-4: an UNCHANGED `dev` card must still be quiet on the very
+    next fire — the column-keyed signature must not turn into a re-nudge-every-time."""
+    project = iso["project"]
+    tasks = project / "design" / "tasks"
+    _write_task_card(tasks, "DEVCARD1", "dev")
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" in capsys.readouterr().out
+
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" not in out, f"unchanged dev card must stay quiet: {out!r}"
+
+
+def test_keep_going_nudge_renudges_on_new_attention_card_despite_unchanged_board(iso, capsys) -> None:
+    """F-4 (TRDD-V3BQT7QE): a card newly entering `human_review` — the state only a human
+    can move — must re-arm the nudge even while the `dev`/`todo` set itself is unchanged.
+    Before this fix the zero-agent board dedup only compared the `dev`/`todo` signature, so
+    a fresh `human_review` card was silenced until the workable-card set itself changed."""
+    project = iso["project"]
+    tasks = project / "design" / "tasks"
+    _write_task_card(tasks, "DEVCARD1", "dev")
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" in capsys.readouterr().out
+
+    dispatch._phase_keep_going_nudge()  # unchanged board -> quiet
+    assert "[janitor-resume]" not in capsys.readouterr().out
+
+    _write_task_card(tasks, "REVCARD1", "human_review")
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out, f"a new human_review card must re-nudge: {out!r}"
+    assert "human_review" in out, f"the attention clause must name it: {out!r}"
+
+
+def test_keep_going_nudge_quiet_again_once_attention_card_is_unchanged(iso, capsys) -> None:
+    """Same `human_review` card, unchanged on the FOLLOWING fire, must go quiet again —
+    the attention-aware signature dedupes exactly like the board one, it does not turn
+    into a permanent re-nudge once an attention card exists."""
+    project = iso["project"]
+    tasks = project / "design" / "tasks"
+    _write_task_card(tasks, "DEVCARD1", "dev")
+    _write_task_card(tasks, "REVCARD1", "human_review")
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge()
+    assert "[janitor-resume]" in capsys.readouterr().out
+
+    dispatch._phase_keep_going_nudge()
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" not in out, f"unchanged board+attention must stay quiet: {out!r}"
+
+
 def test_keep_going_nudge_names_a_pending_agent(iso, capsys) -> None:
     """DEFAULT-ON (user 2026-07-16): every fire nudges, and when a background agent is pending the
     manifest pointer ENRICHES the nudge (W4) instead of being wasted on a silent fire."""
