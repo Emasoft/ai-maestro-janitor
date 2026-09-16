@@ -3,7 +3,7 @@ trdd-id: HXZ8B0IS
 title: A chore-coordination transition must log the liveness file's ts, age and the None reason so an ownership flap attributes itself
 column: complete
 created: 2026-09-05T21:13:51+0200
-updated: 2026-09-16T12:35:27+0200
+updated: 2026-09-16T12:38:17+0200
 implementation-commits: [e9dea96a, a02c58de]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -113,3 +113,4 @@ the hub's to measure; asked in the reply.
 ## Approval log
 - 2026-09-16T12:40:00+0200 — COMPLETE by session: the last box (full suite green at the publish gate) was met by the 3.5.5 release gate (fedb663a, 7130 tests, all gates passed) with this card's code included since a02c58de-era commits; triage 2026-09-16.
 - 2026-09-16T12:35:27+0200 — COMPLETE by session. final box met by the 3.5.5 publish gate.
+- 2026-09-16T12:55:00+0200 — precision: the gate box was first satisfied by the 3.5.1 release gate (60bedabc, 2026-09-15), the first full-suite gate to run green after this code landed; 3.5.5 is merely the release at which someone looked.

@@ -1,9 +1,9 @@
 ---
 trdd-id: S2RZHXU7
 title: A one-call account rotation — the janitor-rotate-account-to skill and the rotate_to.py script it wraps, with headroom-driven target selection when no account is named
-column: testing
+column: todo
 created: 2026-09-06T05:44:34+0200
-updated: 2026-09-06T06:10:00+0200
+updated: 2026-09-16T12:37:56+0200
 implementation-commits: [ae96dd12]
 current-owner: janitor-main-session
 task-type: feature
@@ -96,12 +96,12 @@ requests the model fallback; no candidate exits 3; already-live exit 0.
 
 ## Acceptance
 
-- [ ] `/janitor-rotate-account-to <email>` is one tool call from the skill to a switched
+- [x] `/janitor-rotate-account-to <email>` is one tool call from the skill to a switched
       credential
-- [ ] the no-argument path selects per the spec and is pinned by tests
+- [x] the no-argument path selects per the spec and is pinned by tests
 - [ ] the no-Fable path types `/model opus` first (or reports not-automatable) and is pinned
-- [ ] ruff, mypy, pyright, skill-frontmatter test, rotator tests green
-- [ ] full-suite publish gate green (shared box)
+- [x] ruff, mypy, pyright, skill-frontmatter test, rotator tests green
+- [x] full-suite publish gate green (shared box)
 
 ## Notes
 
@@ -114,3 +114,8 @@ in both cases, which is why Spec §4 forbids any ownership/harness gate. On 2026
 was server-owned and no rotation fired at a Fable wall; the manual switch worked, but finding
 it took ~15 tool calls. A test MUST pin that the script runs to completion with no liveness
 file, no daemon and the chore claimed by a (fake) server.
+
+## Approval log
+
+- 2026-09-16T12:50:00+0200 — boxes 1, 2, 4, 5 ticked on the evidence in reports/board-drain/20260916_123637+0200-S2RZHXU7-box-evidence.md (skill is one call into rotate_to.py; _pick_target ranking pinned by six tests; ruff/mypy/pyright/frontmatter/rotator tests green first-hand; 3.5.5 gate green with ae96dd12 included). Box 3 stays open: the no-Fable path's /model opus typing has only its dispatch pinned (the test mocks _request_model_opus); the real keystroke path via terminal_trigger has zero coverage. Column todo until that test exists — testing was claiming work nobody was doing.
+- 2026-09-16T12:37:56+0200 — column → todo. one open box with a concrete missing test; no session on it (triage 2026-09-16)

@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: blocked
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-16T12:35:30+0200
+updated: 2026-09-16T12:38:17+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -16,6 +16,7 @@ eht: []
 implementation-commits: [3903ca44, ab381b19]
 relevant-rules: []
 pre-block-column: testing
+unblock-when: [issue:ai-maestro#156]
 ---
 
 # The two daemons update the plugin by DIFFERENT mechanisms, and only one is prompt

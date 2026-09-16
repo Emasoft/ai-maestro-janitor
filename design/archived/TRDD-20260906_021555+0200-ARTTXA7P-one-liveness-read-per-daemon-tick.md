@@ -3,7 +3,7 @@ trdd-id: ARTTXA7P
 title: The daemon tick must derive its chore decision and its transition-log line from ONE liveness-file read, not up to three
 column: complete
 created: 2026-09-06T02:15:55+0200
-updated: 2026-09-16T12:35:28+0200
+updated: 2026-09-16T12:38:17+0200
 implementation-commits: [a02c58de]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -94,3 +94,4 @@ what the transition log SAYS; this fixes what it is SAYING IT ABOUT.
 ## Approval log
 - 2026-09-16T12:40:00+0200 — COMPLETE by session: the last box (full suite green at the publish gate) was met by the 3.5.5 release gate (fedb663a) with this card's code included; triage 2026-09-16.
 - 2026-09-16T12:35:28+0200 — COMPLETE by session. final box met by the 3.5.5 publish gate.
+- 2026-09-16T12:55:00+0200 — precision: the gate box was first satisfied by the 3.5.1 release gate (60bedabc, 2026-09-15); 3.5.5 is the release at which someone looked. Parent HXZ8B0IS closed in the same pass; no other EHT open on it.
