@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: testing
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-05T17:15:00+0200
+updated: 2026-09-16T12:44:47+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -18,6 +18,7 @@ npt: []
 eht: [9FONCK33]
 implementation-commits: [5f7f3dba, 57a7f267]
 external-refs: [TRDD-8BXMNQ4T]
+review-after: 2026-09-17
 ---
 
 # Bound total foreground occupancy per daemon beat
@@ -515,3 +516,4 @@ answer is not a better guess; it is naming the missing artifact.**
 ## Approval log
 
 - 2026-09-05T10:40:00+0200 — box 1 RULED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal): the advisor consult is satisfied by the standing rule's both-paths-failed exemption, stated explicitly. Column todo -> dev; candidate 3 (per-beat foreground budget with a survival-floor) is being drafted as a reviewable patch first, candidate 4 (cap session-liveness alone) held as the fallback because the 100 s+ beats it would truncate are still unexplained.
+- 2026-09-16T13:05:00+0200 — stays in testing: box 4 needs a 24h daemon.log window under 3.5.5 to re-run the stall analysis against the 12-stalls/6h22m baseline; review-after 2026-09-17.

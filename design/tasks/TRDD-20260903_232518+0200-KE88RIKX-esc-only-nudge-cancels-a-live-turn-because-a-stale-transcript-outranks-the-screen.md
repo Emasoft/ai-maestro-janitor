@@ -3,7 +3,7 @@ trdd-id: KE88RIKX
 title: the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
 column: testing
 created: 2026-09-03T23:25:18+0200
-updated: 2026-09-04T07:06:00+0200
+updated: 2026-09-16T12:44:46+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -17,6 +17,7 @@ related-trdds: [N954KWUC, L32WC0H7, 8DR0X08A]
 min-approval-requirement: none
 implementation-commits: [fc76c0ca]
 external-refs: []
+review-after: 2026-09-23
 ---
 
 # the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
@@ -329,3 +330,7 @@ filed separately rather than reopened on N954KWUC because that card is terminal-
 `testing` and this is a distinct defect with its own proof. It is `related-trdds:`, NOT
 `parent-trdd:` — a defect in code another card shipped is neither that card's prerequisite (NPT)
 nor its effect-handler (EHT), which is all `parent-trdd:` encodes.
+
+## Approval log
+
+- 2026-09-16T13:05:00+0200 — stays in testing: the last box is a 7-day daemon.log observation under 3.5.5 (REFUSED-by-pane-policy lines present, zero FIRED esc_nudge pane=working lines); review-after 2026-09-23 parks it from drift until then.
