@@ -786,6 +786,8 @@ def _drift_dedupe_key(line: str) -> str:
         return _DRIFT_DIGIT_RE.sub("#", m.group(0))
     return _DRIFT_ELAPSED_TOKEN_RE.sub(_blank, line.strip())
 
+# ponytail: append-only seen-file, O(n) scan per fire; rotate or prune if it ever grows large.
+
 
 _DRIFT_SEEN_FILE_NAME = "drift-lines-seen.txt"
 
