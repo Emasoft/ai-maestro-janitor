@@ -153,18 +153,24 @@ _OUTCOME_RE = re.compile(r"<!--\s*janitor-outcome:\s*(mutation|noop[^>]*)\s*-->"
 
 
 def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) -> tuple[str, bool] | None:
-    """`(report_path, has_outcome_marker)` when EXACTLY ONE report under `state_dir`'s
-    own project — `state_dir` is `<project>/.janitor/state`, so the project root is its
-    grandparent, matching every caller (the real detector's `state.state_dir()`, and this
-    module's tests, which never touch `state.project_root()` at all) — names `dispatch_id`
-    in its `Claim:` header AND was written after the claim (mtime newer than
-    `stamped_at`); `None` on zero or on MORE than one match — an ambiguous or absent
-    signal must never substitute for the cadence-based expiry this backs up.
+    """`(report_path, has_outcome_marker)` for the ONE report that names `dispatch_id`
+    in its `Claim:` header (in the first `_HEADER_SCAN_LINES` lines) AND was written
+    after the claim (mtime newer than `stamped_at`) under `state_dir`'s own project —
+    `state_dir` is `<project>/.janitor/state`, so the project root is its grandparent,
+    matching every caller (the real detector's `state.state_dir()`, and this module's
+    tests, which never touch `state.project_root()` at all).
 
     The header alone is NOT proof of completion (janitor#242 correction): a chore skill
     writes its `Claim: dispatch_id=...` header at the START of a pass, so it names an
-    in-flight report exactly as readily as a finished one. The caller decides what a
-    header match with no outcome marker means (it must NOT be treated as a close).
+    in-flight report exactly as readily as a finished one. Since TRDD-I8AAJ3PG the claim
+    step ALSO creates a header-only skeleton report itself, so a curator still on the old
+    per-agent template that writes its own duplicate header produces a SECOND match for
+    the same dispatch_id — exactly one of the two ever carries the `<!-- janitor-outcome -->`
+    marker written on completion. So: exactly one match -> return it; several matches with
+    exactly one marked -> return that one (the marker disambiguates skeleton from finished
+    report); otherwise (zero matches, or several with zero or 2+ marked) -> `None` — an
+    ambiguous or absent signal must never substitute for the cadence-based expiry this
+    backs up.
 
     Boundary-anchored, not a bare substring (2026-09-16 adversarial review of this same
     TRDD): a plain `needle in text` would also match a LONGER id sharing this one's
@@ -189,9 +195,12 @@ def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) 
         if not needle_re.search(head):
             continue
         matches.append((str(path), bool(_OUTCOME_RE.search(text))))
-    if len(matches) != 1:
-        return None
-    return matches[0]
+    if len(matches) == 1:
+        return matches[0]
+    marked = [m for m in matches if m[1]]
+    if len(marked) == 1:
+        return marked[0]
+    return None
 
 
 def _resolve_claim(
@@ -792,38 +801,54 @@ def main() -> int:
     # work was done. Creating the report file HERE, with the header already written,
     # removes that step entirely: the curator only has to APPEND. Fail OPEN — an
     # unwritable reports dir must never block a successful claim.
-    skeleton_path = (
-        expected_state_dir.parent.parent.joinpath(*_REPORT_SUBDIR)
-        / f"{datetime.now().astimezone().strftime('%Y%m%d_%H%M%S%z')}-{args.chore}-{scope.lower()}.md"
-    )
-    skeleton_header = (
-        f"<!-- generated: {datetime.now().astimezone().isoformat()} by "
-        "memory_dispatch_claim (claim step) -->\n"
-        f"# {args.chore} pass — {scope} scope\n"
-        f"Claim: dispatch_id={dispatch_id}, scope={scope}, root={root}\n\n"
-    )
+    #
+    # The skeleton path is `expected_state_dir.parent.parent / reports/...`, which is
+    # only meaningful when expected_state_dir IS `<project>/.janitor/state` (the shape
+    # every real caller passes). A bare `--state-dir /tmp/x` would otherwise resolve to
+    # `/reports/...` at the filesystem root, and a shallower-but-real dir would write the
+    # skeleton beside some unrelated ancestor where nothing ever purges it. Skip the
+    # skeleton entirely in that case and fall back to the pre-TRDD-I8AAJ3PG "REPORT
+    # HEADER" printout below, which still works with no state-dir shape assumptions.
     report_path: Path | None
-    try:
-        skeleton_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            # Exclusive create: two claims for the same chore+scope in the same
-            # wall-clock second would otherwise silently overwrite each other's
-            # skeleton (2026-09-16 adversarial review) — fail loud into the
-            # dispatch_id-suffixed fallback below instead of corrupting a sibling
-            # claim's report.
-            with skeleton_path.open("x", encoding="utf-8") as f:
-                f.write(skeleton_header)
-        except FileExistsError:
-            skeleton_path = skeleton_path.with_name(
-                skeleton_path.stem + f"-{dispatch_id}" + skeleton_path.suffix
-            )
-            with skeleton_path.open("x", encoding="utf-8") as f:
-                f.write(skeleton_header)
-        _write_report_on_claimed(state_dir, dispatch_id, str(skeleton_path))
-        report_path = skeleton_path
-    except OSError as exc:
-        print(f"memory_dispatch_claim: warning: could not create report skeleton: {exc}", file=sys.stderr)
+    if expected_state_dir.name != "state" or expected_state_dir.parent.name != ".janitor":
+        print(
+            "memory_dispatch_claim: --state-dir is not <project>/.janitor/state; "
+            "no report skeleton created",
+            file=sys.stderr,
+        )
         report_path = None
+    else:
+        skeleton_path = (
+            expected_state_dir.parent.parent.joinpath(*_REPORT_SUBDIR)
+            / f"{datetime.now().astimezone().strftime('%Y%m%d_%H%M%S%z')}-{args.chore}-{scope.lower()}.md"
+        )
+        skeleton_header = (
+            f"<!-- generated: {datetime.now().astimezone().isoformat()} by "
+            "memory_dispatch_claim (claim step) -->\n"
+            f"# {args.chore} pass — {scope} scope\n"
+            f"Claim: dispatch_id={dispatch_id}, scope={scope}, root={root}\n\n"
+        )
+        try:
+            skeleton_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                # Exclusive create: two claims for the same chore+scope in the same
+                # wall-clock second would otherwise silently overwrite each other's
+                # skeleton (2026-09-16 adversarial review) — fail loud into the
+                # dispatch_id-suffixed fallback below instead of corrupting a sibling
+                # claim's report.
+                with skeleton_path.open("x", encoding="utf-8") as f:
+                    f.write(skeleton_header)
+            except FileExistsError:
+                skeleton_path = skeleton_path.with_name(
+                    skeleton_path.stem + f"-{dispatch_id}" + skeleton_path.suffix
+                )
+                with skeleton_path.open("x", encoding="utf-8") as f:
+                    f.write(skeleton_header)
+            _write_report_on_claimed(state_dir, dispatch_id, str(skeleton_path))
+            report_path = skeleton_path
+        except OSError as exc:
+            print(f"memory_dispatch_claim: warning: could not create report skeleton: {exc}", file=sys.stderr)
+            report_path = None
 
     print(json.dumps(payload))
     # A SEPARATE, greppable line (never folded into the JSON above) so a skill can

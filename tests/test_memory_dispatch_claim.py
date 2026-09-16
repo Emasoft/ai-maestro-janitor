@@ -1232,3 +1232,84 @@ def test_find_completion_report_matches_claim_skeleton_only_after_outcome_marker
     )
     found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
     assert found == (str(skeleton), True)
+
+def test_find_completion_report_prefers_the_marked_report_when_two_match(tmp_path):
+    """(f) Two reports for one dispatch_id, both newer than stamped_at, only one carries
+    the outcome marker -> the marked path with `True` (the marker disambiguates the
+    claim-step skeleton from an old-template curator's duplicate header). The marked
+    file is named to sort ALPHABETICALLY FIRST (glob() results are sorted) — a buggy
+    tie-break keyed on list position rather than the marker itself would return the
+    wrong file here, where a position-based bug matching the previous filenames
+    ("a-skeleton.md"/"b-finished.md") would not have been caught."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    marked = reports_dir / "a-finished.md"
+    marked.write_text(
+        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n<!-- janitor-outcome: mutation -->\n",
+        encoding="utf-8",
+    )
+    unmarked = reports_dir / "b-skeleton.md"
+    unmarked.write_text("Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n", encoding="utf-8")
+
+    found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
+    assert found == (str(marked), True)
+
+
+def test_find_completion_report_two_matches_neither_marked_is_ambiguous(tmp_path):
+    """(g) Two reports for one dispatch_id, neither carrying the outcome marker, is
+    ambiguous -> `None` (never guess which one is the real skeleton)."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "a.md").write_text(
+        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n", encoding="utf-8"
+    )
+    (reports_dir / "b.md").write_text(
+        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n", encoding="utf-8"
+    )
+
+    assert mdc._find_completion_report(state_dir, "1000000-abcd1234", 0) is None
+
+
+def test_find_completion_report_two_matches_both_marked_is_ambiguous(tmp_path):
+    """(h) Two reports for one dispatch_id, BOTH carrying the outcome marker, is still
+    ambiguous -> `None` (the marker disambiguates only when exactly one carries it)."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "a.md").write_text(
+        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n<!-- janitor-outcome: mutation -->\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "b.md").write_text(
+        "Claim: dispatch_id=1000000-abcd1234, scope=LOCAL\n<!-- janitor-outcome: mutation -->\n",
+        encoding="utf-8",
+    )
+
+    assert mdc._find_completion_report(state_dir, "1000000-abcd1234", 0) is None
+
+
+def test_claim_cli_with_a_bare_state_dir_creates_no_report_skeleton(tmp_path):
+    """(i) A `--state-dir` that is not `<project>/.janitor/state` (a bare tmp dir, no
+    `.janitor` ancestor) must never write a report skeleton anywhere under or above it —
+    the claim still succeeds via the pre-TRDD-I8AAJ3PG "REPORT HEADER" fallback. Asserts
+    the guard's own stderr line (not just the absent side effect) so this fails if a
+    DIFFERENT cause (e.g. an unrelated OSError) happened to also skip the skeleton."""
+    state_dir = tmp_path / "bare"
+    state_dir.mkdir(parents=True)
+    _dispatch(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(state_dir)])
+    assert proc.returncode == 0, proc.stderr
+    assert "CLAIM_ID=" in proc.stdout
+    assert "REPORT HEADER" in proc.stdout
+    assert "REPORT_FILE=" not in proc.stdout
+    assert "is not <project>/.janitor/state; no report skeleton created" in proc.stderr
+    assert not any(tmp_path.rglob("reports"))
