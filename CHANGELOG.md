@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.3] — 2026-09-16
+
+### Bug Fixes
+
+- **memory:** A successful claim prints the exact set-report and complete commands the curator must run (TRDD-0KOIJ3SK, TRDD-V3BQT7QE) (2bb6c99)
+- **skills:** Every memory chore ends with the inline close-claim step; CLAIM_ID wording matches the CLI's new output order (TRDD-0KOIJ3SK, TRDD-V3BQT7QE) (4240465)
+
+### Documentation
+
+- **TRDD-Q8PNPRTW:** Experiment entry corrected -- malformed summary table named, loadavg fields, the exact claim, and which red reopens the card (e603cab)
+- The three V3BQT7QE children declare derived: true, closing the DERIVED-FLAG-MISSING errors trddgrep validate raised (d84ea60)
+- **TRDD-V3BQT7QE:** Live test of the claim rewrite -- the CLI closes claims, the curator never asked it to (772e7a5)
+- **TRDD-V3BQT7QE:** Live-test root cause corrected from evidence -- the curator never attempted complete, and only four skills are link-only (25cd405)
+- Archive 219 terminal cards that were still sitting in design/tasks (TRDD-CJU6YV6L) (40ccaba)
+- Add TRDD-CJU6YV6L -- archive the terminal cards left in design/tasks and track the remaining validate backlog (bafb611)
+- Complete TRDD-CJU6YV6L -- 219 relocated, 13 open-box terminal cards held back by ruling (7c677f0)
+- Add TRDD-0KOIJ3SK -- every memory chore skill closes its claim inline as its final step (child of TRDD-V3BQT7QE) (8dbb89f)
+- Complete TRDD-0KOIJ3SK -- all eight memory skills close their claim inline; CPV strict clean (1f17752)
+- **TRDD-V3BQT7QE:** Dev -> testing; 3.5.1 and 3.5.2 shipped, remaining work in the three EHT children (3a300f5)
 ## [3.5.2] — 2026-09-16
 
 ### Bug Fixes
@@ -14,6 +33,10 @@ All notable changes to this project will be documented in this file.
 - Add TRDD-PA9E2GJ1, TRDD-7ZMQSXO6, TRDD-NEVQOHGS -- the three churn child cards not yet covered, with measurable acceptance (TRDD-V3BQT7QE) (1635877)
 - **TRDD-V3BQT7QE:** STATE reflects 3.5.1 shipped, the CI exec-bit fix, and the three children as EHTs (3d45253)
 - **TRDD-Q8PNPRTW:** The ordered -n auto vs -n 4 experiment came back all green; blocker cleared, card to testing (db6d14b)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.5.2 (191678a)
 
 ### Testing
 
