@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: dev
 created: 2026-09-15T18:47:30+0200
-updated: 2026-09-15T20:23:46+0200
+updated: 2026-09-16T09:51:10+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
@@ -18,7 +18,7 @@ priority: high
 scope: project
 project-id: ai-maestro-janitor
 npt: []
-eht: []
+eht: [PA9E2GJ1, 7ZMQSXO6, NEVQOHGS]
 implementation-commits: [30994579, 505f22ee, dcd5ba79, 87fc61f2, 55c74f62]
 ---
 
@@ -74,5 +74,5 @@ compact point 866k = 900000 window - 34k overhead; #306's /compact injection com
 
 ## STATE
 
-NEXT ACTION: land R, C-b, E-2, then publish 3.5.1, then re-file the child cards from docs_dev/churn-cards-draft/ with measured acceptance criteria.
+NEXT ACTION (2026-09-16): R, C-b, E-2 landed and 3.5.1 published (60bedabc); CI Smoke went red on two hooks that lost their exec bit (fixed 18dbb9dd + gate test 0ec065c1); children re-filed as eht [PA9E2GJ1, 7ZMQSXO6, NEVQOHGS] (3 drafts covered, 2 landed). Next: publish 3.5.2 with the CI fix, upgrade the local plugin on green CI, watch the first re-dispatched memory chore complete under e24aaf08 (19 claims sat orphaned since ~09-02), then move this card to testing — its remaining work lives in the three children.
 Column dev is true only while a session is actively dispatching workers on this card; at handoff re-column to todo.
