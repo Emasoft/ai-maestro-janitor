@@ -3,7 +3,7 @@ trdd-id: S2RZHXU7
 title: A one-call account rotation — the janitor-rotate-account-to skill and the rotate_to.py script it wraps, with headroom-driven target selection when no account is named
 column: complete
 created: 2026-09-06T05:44:34+0200
-updated: 2026-09-16T22:21:40+0200
+updated: 2026-09-16T22:37:43+0200
 implementation-commits: [ae96dd12, 9d88e2db, 8342337b, 6a5199cd]
 current-owner: janitor-main-session
 task-type: feature
@@ -122,3 +122,5 @@ file, no daemon and the chore claimed by a (fake) server.
 - 2026-09-16T22:18:11+0200 — box 3 ticked: the keystroke half is pinned by three tests in tests/test_rotate_to.py that drive the REAL _request_model_opus through terminal_trigger with only the pane boundary injected (command '/model opus', esc_first, bypass_interrupt_cooldown; no-pane → not-automatable; a raising send → not-automatable with a WARNING line on stderr), mutation-checked (9d88e2db, 8342337b, 6a5199cd); the ORDERING half ('first', before the credential switch) stays pinned by the pre-existing test_no_fable_path_… test that mocks _request_model_opus. A swallowed keystroke failure is no longer silent. COMPLETE by the session under the 2026-09-03 standing permission.
 - 2026-09-16T22:18:11+0200 — COMPLETE by session. all 5 boxes ticked; keystroke path pinned and published-ready.
 - 2026-09-16T22:21:40+0200 — release status: commits 9d88e2db, 8342337b and 6a5199cd are on main and NOT in any published version yet (3.5.5 shipped only ae96dd12); they ride the next publish.py. release-via field: absent. The ORDERING half of box 3 ('first', before the credential switch) is pinned by test_no_fable_path_picks_max_headroom_and_requests_model_fallback  (which mocks _request_model_opus); the keystroke half by the three real-path tests. 6a5199cd also carries the V2U2ZECI dispatch change and three card archivals (commit-boundary slip, disclosed).
+- 2026-09-16T22:37:37+0200 — correction to the 22:2x release-status line above: the ORDERING half of box 3 ('first', before the credential switch) was NOT pinned by test_no_fable_path_picks_max_headroom_and_requests_model_fallback (it asserts the request and the switch happened, not their order). Pinned 2026-09-16 by tests/test_rotate_to.py::test_no_fable_path_requests_model_opus_before_the_switch_is_written (records both calls into one sequence and asserts [request, switch]; mutation-checked), commit 29c38ffd — on main only, rides the next publish.py.
+- 2026-09-16T22:37:42+0200 — scope note on the pin above: what that pins: CALL order on the auto-select no-Fable path — _request_model_opus is invoked before save_state records the switch. What it does not pin: pane-level completion (send_verified dispatches the keystroke; the pane may switch models after the credential is already live — not testable in-process) and the explicit-email path (its ordering was not read).
