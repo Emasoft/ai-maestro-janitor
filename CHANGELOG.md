@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.4] — 2026-09-16
+
+### Bug Fixes
+
+- **heartbeat:** Drift lines repeated from the previous fire are not re-printed; quiet fire is byte-exact; protocol table row agrees with its prose (TRDD-7ZMQSXO6, TRDD-V3BQT7QE) (fae97f9)
+- **memory:** The orphan sweep closes a claim from the curator's own report instead of expiring it (TRDD-I8AAJ3PG, TRDD-V3BQT7QE) (fd8d7d3)
+- **detectors:** Restore the executable bit on orphaned-memory-maint.py dropped by the I8AAJ3PG rewrite (cd786e4)
+- **agent:** The curator's report opens with the Claim: dispatch_id= header the orphan sweep matches on (TRDD-I8AAJ3PG) (8e15b8f)
+- **rules:** Protocol quiet-row shortened to keep the shipped-rules corpus under its 53,700-byte floor cap; drift seen-file ceiling marked in code (c3e0159)
+- **dispatch:** Restore the executable bit on dispatch.py dropped by the ceiling-comment rewrite (publish gate red at tests) (3eaa7ac)
+
+### Documentation
+
+- Complete TRDD-HTFUWAU9 -- the Smoke hook loop guard landed on 09-10 and proved itself on the 3.5.1 CI run (af84a73)
+- Add TRDD-I8AAJ3PG -- the janitor closes a memory-chore claim itself when the curator's report exists (EHT of TRDD-V3BQT7QE) (45c218e)
+- **TRDD-HTFUWAU9:** Approval-log note that the struck box's three continuation lines belong to the struck item (f75cc8d)
+- **TRDD-7ZMQSXO6:** Criterion (a) struck as satisfied by the platform; (b)-(e) redirected onto the existing dedupe (0618cc5)
+- **TRDD-7ZMQSXO6:** Criterion (a) un-struck and redefined on the signal that exists -- live agents in pending-agents.json (b0045ea)
+- **TRDD-7ZMQSXO6:** Criterion (a) narrowed -- defer chore markers only for a live curator or publish, keep the 2MLFZ7DL nudge, print a deferral line (597754b)
+- **TRDD-7ZMQSXO6:** Boxes (b)-(d) ticked against fae97f9d; (a) stays open for the reviewed proposal (e177b68)
+- **TRDD-7ZMQSXO6:** Box (a) rewritten once to the measured, reviewed definition -- claim-record gate in _suppress_stale_memory_markers, plain deferral line, trade-off stated (6cf8e24)
+- **TRDD-7ZMQSXO6:** Approval log records that the final box supersedes the earlier narrowed gate and publish clause (17a4c9e)
 ## [3.5.3] — 2026-09-16
 
 ### Bug Fixes
@@ -21,6 +43,10 @@ All notable changes to this project will be documented in this file.
 - Add TRDD-0KOIJ3SK -- every memory chore skill closes its claim inline as its final step (child of TRDD-V3BQT7QE) (8dbb89f)
 - Complete TRDD-0KOIJ3SK -- all eight memory skills close their claim inline; CPV strict clean (1f17752)
 - **TRDD-V3BQT7QE:** Dev -> testing; 3.5.1 and 3.5.2 shipped, remaining work in the three EHT children (3a300f5)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.5.3 (9332648)
 ## [3.5.2] — 2026-09-16
 
 ### Bug Fixes

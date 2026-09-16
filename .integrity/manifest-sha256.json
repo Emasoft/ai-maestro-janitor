@@ -1,14 +1,14 @@
 {
   "files": {
     "CLAUDE.md": "8725de72309a4e671e7a37b758cefb98505d8257c0e9beac1197e7d4c4b5de53",
-    "README.md": "411f83691e0073c04493e3b410d1a7d0854f93fbf7eef834dff6743d49bd5c77",
+    "README.md": "702a778b8dd131703aba668d0f57e1ba29125c5e7f63696739967fcbc8552bd3",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
     "rules/commit-discipline.md": "5fd50cc42de8f3c9c854de037a618e002eb5523bc0fb8c2f289475815188c068",
     "rules/github-mentions.md": "13657202f76e9d0461a481ec0e4c43f067d61d5cd4038a25a682de44691dc05a",
     "rules/janitor-footprint.md": "fdefc36adf7d38fcf60f450d52e25946718a4d3f5d76a62aa4bb31ba113b264e",
-    "rules/janitor-heartbeat-protocol.md": "8cbf4a032cc49e5fadb002aae2e63237d77bd162ef38fcaced9de1993fbc4f02",
+    "rules/janitor-heartbeat-protocol.md": "99c65122bbed39d4e1cfc915d595199a5b4c20fefdb321aa31a5d824a713e30b",
     "rules/markdown-memory-recall.md": "d694c9e2499e982525a8cc384e9e48adfa7e508330c2e583d6860df81cbb7006",
     "rules/prrd-design-rules.md": "9d8d812c9d87d4ae8e88da31b26c75562497e0aada8dba75f96ca02dd5592766",
     "rules/references/commit-discipline-full.md": "d17ea0fae800b0147ed2dffc83af1c8889656f72fc0c7b1611e8b7281184f282",
