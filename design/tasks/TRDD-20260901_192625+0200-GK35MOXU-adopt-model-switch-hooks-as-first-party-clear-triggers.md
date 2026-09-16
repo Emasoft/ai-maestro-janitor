@@ -3,7 +3,7 @@ trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
 column: blocked
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-16T22:18:12+0200
+updated: 2026-09-16T22:23:19+0200
 review-after: 2026-09-23
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
@@ -12,13 +12,13 @@ scope: project
 project-id: ai-maestro-janitor
 severity: high
 min-approval-requirement: none
-blocked-by: []
+blocked-by: [VT332PJG]
 npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-2F3I2P18]
 pre-block-column: testing
-unblock-when: [decision: owner runs /effort once in a live session and records whether .janitor/state/model-switch-acked.ts advanced]
+unblock-when: []
 ---
 
 # The harness now EMITS the model-change event — stop polling for it
@@ -107,8 +107,8 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
 - [x] PostModelSwitch hook ships in hooks/hooks.json and stamps the ack file (verified by a
       real `/model` switch on this machine, not just a unit test) — hooks.json entry ADDED
       2026-09-03 (CPV upstream issue 222 closed, CPV main now knows the event); `.cpv-version`
-      pin bump is STILL PENDING (orchestrator — see STATE block), and the live `/model`-switch
-      verification is still outstanding (needs an interactive session, not a background worker)
+      pin bumped to v5.16.2 (STATE 2026-09-03); the live `/model`-switch verification is DONE
+      2026-09-16 — six real PostModelSwitch stamp advances in .janitor/logs/external-clear.log (Notes)
 - [x] the external-clear gate fires on the stamp with the consume-on-fire semantics
       (`df26fa12`: third stamp name in `_read_reload_state`; probe/consume tests)
 - [ ] measured whether `/effort` fires the hook; fallback poll retained or retired accordingly,
