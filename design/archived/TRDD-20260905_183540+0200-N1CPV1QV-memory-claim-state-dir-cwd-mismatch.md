@@ -3,7 +3,7 @@ trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
 column: complete
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-16T22:14:32+0200
+updated: 2026-09-16T22:21:40+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -310,3 +310,4 @@ failure: the claiming agent looking in the wrong directory entirely.
 - 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 - 2026-09-16T22:14:31+0200 — box 9 ticked on the publish gate that shipped this card's code: the branch-aware pre-push gate ran uv run pytest on THIS host before each of the five 3.5.1–3.5.5 pushes today (every implementation commit above is an ancestor of v3.5.5), corroborated by GitHub CI run 35084795588 Tests job (Pytest -n auto + daemon-integration serial, whole tests/ tree) SUCCESS on the v3.5.5 bump. No local gate artifact is retained. Ruled by the session under the owner's standing autonomous-drain permission (2026-09-03).
 - 2026-09-16T22:14:32+0200 — COMPLETE by session. all 9 boxes ticked; fix shipped in v3.5.5.
+- 2026-09-16T22:21:40+0200 — precision on the box-9 evidence: the pre-push gate is CONFIGURED to run the suite before a default-branch push and no run of it retained an artifact; 'ran on this host' is therefore the gate's contract, not a retained log. The archival of this card landed in commit 6a5199cd together with code (commit-boundary slip, disclosed, not rewritten).
