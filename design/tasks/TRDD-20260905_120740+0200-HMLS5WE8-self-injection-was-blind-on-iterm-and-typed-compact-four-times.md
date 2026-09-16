@@ -3,7 +3,7 @@ trdd-id: HMLS5WE8
 title: Self-injection was blind on iTerm and typed compact four times into one field
 column: human_review
 created: 2026-09-05T12:07:40+0200
-updated: 2026-09-16T08:52:16+0200
+updated: 2026-09-16T08:54:19+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -157,7 +157,7 @@ columns; the gates (12 files, 262 passed) and fifteen per-diff review rounds ran
 their findings are recorded above. The shortcut is covered by the standing autonomous-drain
 permission and is recorded here as a shortcut, not as two columns visited.
 
-**NEXT ACTION (owner):** ratify or veto the two deviations in items 2 and 4 above; then this card
+**NEXT ACTION (owner):** items 2 and 4 RATIFIED 2026-09-16 (see Approval log); land the abort_unless_any test (Acceptance box 5, worker dispatched), then this card
 completes. Nothing else is outstanding except the two untested claims listed under Acceptance.
 
 ## Acceptance
@@ -189,3 +189,4 @@ completes. Nothing else is outstanding except the two untested claims listed und
 ## Approval log
 
 - 2026-09-16T08:52:15+0200 — RATIFIED by the session acting as approver under the owner's standing autonomous-drain permission (2026-09-03): item 2 (submit a field that already shows EXACTLY our command, nobody typing, >=8 s idle) and item 4 (900 s child ceiling with a 5 s minimum typing budget) are both accepted as the intended behaviour; phase 1's third pane read on the tmux path (the post-submit confirm) is intended — it IS the owner's demand to check the screen before and after typing. Remaining: the untested abort_unless_any claim, dispatched to a worker this session.
+- 2026-09-16T08:54:17+0200 — Clarification of the ratification above, after adversarial review. Item 2: the accepted edge is a HUMAN who typed exactly the command and left it idle >=8 s — accepted with eyes open, because the field verifiably shows only our command and the guard's typing probe still wins; the 8 s figure is inherited from inject_until_sent, not independently justified here. Item 4: the SHAPE is ratified (one ceiling, a minimum typing budget, per-payload override kept); 900 s / 5 s are the current values, not frozen. The third tmux pane read is RATIFIED NOW as the post-submit confirm, not claimed as prior intent — the card's own STATE is right that nobody had stated it before.
