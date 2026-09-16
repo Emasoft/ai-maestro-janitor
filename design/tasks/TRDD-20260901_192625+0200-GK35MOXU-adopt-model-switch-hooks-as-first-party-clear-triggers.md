@@ -1,9 +1,9 @@
 ---
 trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
-column: testing
+column: blocked
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-16T22:14:35+0200
+updated: 2026-09-16T22:18:12+0200
 review-after: 2026-09-23
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
@@ -17,6 +17,8 @@ npt: []
 eht: []
 relevant-rules: []
 external-refs: [TRDD-2F3I2P18]
+pre-block-column: testing
+unblock-when: [decision: owner runs /effort once in a live session and records whether .janitor/state/model-switch-acked.ts advanced]
 ---
 
 # The harness now EMITS the model-change event — stop polling for it
@@ -178,3 +180,4 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
   (COMPLETED) — verified `gh issue view 222 --repo Emasoft/claude-plugins-validation --json state`
   → `CLOSED`. Restored to `pre-block-column: dev` per
   `reports/board-drain/20260903_091543+0200-blocked-cards-audit.md`.
+- 2026-09-16T22:18:12+0200 — column → blocked. waits on one interactive /effort by the owner (box 3); review-after 2026-09-23 is the park form
