@@ -167,6 +167,38 @@ def test_no_fable_path_picks_max_headroom_and_requests_model_fallback(
     assert out == "ROTATED alt-b@example.com fable=99% 5h=10% 7d=20% [model-fallback: not-automatable]"
 
 
+def test_no_fable_path_requests_model_opus_before_the_switch_is_written(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Pins call ORDER: the /model opus keystroke request must happen before save_state
+    records the switch (TRDD-S2RZHXU7 box 3) — not just that both happened."""
+    slots = {"live@example.com": _blob("LIVE"), "alt-a@example.com": _blob("ALT-A"), "alt-b@example.com": _blob("ALT-B")}
+    usages = {
+        "alt-a@example.com": (200, _usage(five=50, seven=60, fable=95)),
+        "alt-b@example.com": (200, _usage(five=10, seven=20, fable=99)),
+    }
+    _wire_state(monkeypatch, live="live@example.com", slots=slots, usages=usages)
+    sequence: list[str] = []
+
+    def _request() -> str:
+        sequence.append("request")
+        return "not-automatable"
+
+    real_save_state = rotator.save_state
+
+    def _save_state(state: dict) -> None:
+        sequence.append("switch")
+        real_save_state(state)
+
+    monkeypatch.setattr(rt, "_request_model_opus", _request)
+    monkeypatch.setattr(rotator, "save_state", _save_state)
+    rc = rt.main(["rotate_to.py"])
+    assert rc == 0
+    # Exactly one switch is expected on this path (a single _pick_target -> _switch_blob
+    # call), so the exact list pins order AND count in one assertion.
+    assert sequence == ["request", "switch"]
+
+
 def test_no_candidate_exits_3(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     """No non-live slot under the account-headroom bar -> NO_TARGET, exit 3, nothing switched."""
     slots = {"live@example.com": _blob("LIVE"), "alt@example.com": _blob("ALT")}
