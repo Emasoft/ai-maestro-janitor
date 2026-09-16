@@ -3,7 +3,7 @@ trdd-id: 7ZMQSXO6
 title: Heartbeat fire must skip mid-turn and dedupe drift lines across fires
 column: testing
 created: 2026-09-16T09:44:55+0200
-updated: 2026-09-16T11:20:56+0200
+updated: 2026-09-16T11:26:30+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -40,3 +40,4 @@ Evidence: GitHub #305, GitHub #301; parent measured 284 heartbeat fires in this 
 - 2026-09-16T10:57:58+0200 — Box (a) rewritten to its FINAL form in 6cf8e24e after a measured proposal review; it SUPERSEDES the gate and publish clause of the NARROWED entry above: the gate is an unexpired CLAIMED record for the same chore (checked inside _suppress_stale_memory_markers, which today reads only the PENDING pool), there is no publish gate, and the deferral is a plain drift line because the reserved-marker regex would drop a new bracket token. Implementation is a follow-up worker once the full suite on fd8d7d34/fae97f9d is green.
 - 2026-09-16T11:20:56+0200 — (a) landed: unexpired-claim gate inside _suppress_stale_memory_markers, plain deferral line, quiet suppressed on a deferral, 4 tests (tests/test_claimed_marker_deferral.py). All four boxes now ticked. Live acceptance still pending for (c): the second 3.5.4 heartbeat must not repeat the [ci-status] line the first one printed and must print the one-time summary; the card completes on that observation (or reopens on its failure). Column → testing.
 - 2026-09-16T11:20:56+0200 — column → testing by session-as-approver. all criteria landed; awaiting the second live fire for (c)
+- 2026-09-16T11:40:00+0200 — (a) code landed as commit 6f37f157 (tests/test_claimed_marker_deferral.py, 4 tests); the landing line above was written minutes before the commit existed — this entry restores the order of the audit trail.
