@@ -885,10 +885,31 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
     EXACT predicate `claim_one` applies — never a re-implementation of "claimable".
     Only `[janitor-memory-*]` lines are inspected; everything else in `text`
     (findings, other markers) passes through unchanged.
+
+    TRDD-7ZMQSXO6 (a): BEFORE the pending-pool check above, also drop the marker
+    while an UNEXPIRED CLAIMED record for the same chore already exists — the
+    scheduler re-dispatching a chore whose earlier claim (by this session or a peer)
+    hasn't expired yet must not spawn a second agent onto the same in-flight work.
+    "Unexpired" reuses the EXACT age/threshold math
+    `memory_dispatch_claim.expire_stale_claims` applies with `max_age_s=0` (the value
+    its only real caller, `orphaned-memory-maint.py`, passes) — never a second,
+    driftable definition of "still in flight". `memory_dispatch_claim.py` is owned by
+    another in-flight worker and must not be touched here, so its private
+    `_matching_records`/`CLAIMED_PREFIX`/`_STALE_CLAIM_FLOOR_S` are called directly
+    (module-qualified) instead of adding a new public function there. A drop this way
+    prints one plain (non-bracket-token) drift line and marks the fire non-quiet via
+    `_decision_fired` directly — never `_emit_decision`, which would print a fresh
+    bare `[janitor-...]` marker this deferral is not authorized to spawn.
     """
     if not text or "[janitor-memory-" not in text:
         return text
+    import math
+
+    import memory_settings
+    import orphaned_memory_maint as omm
+
     state_dir = state.state_dir()
+    now = int(time.time())
     out: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -902,6 +923,31 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
                 "dispatch",
                 f"memory-dispatch: marker for {chore} suppressed — interrupt cooldown active",
             )
+            continue
+        deferred_age_s: int | None = None
+        for _dispatch_id, payload in memory_dispatch_claim._matching_records(
+            state_dir, memory_dispatch_claim.CLAIMED_PREFIX, chore, None
+        ):
+            try:
+                cadence_s = memory_settings.interval_s_for(chore)
+            except ValueError:
+                cadence_s = math.inf
+            factor = omm.factor_for_scope(str(payload.get("scope") or ""))
+            cadence_threshold = cadence_s * factor if math.isfinite(cadence_s) else math.inf
+            threshold = max(0.0, cadence_threshold, memory_dispatch_claim._STALE_CLAIM_FLOOR_S)
+            age_s = omm.pending_age_s(payload, now=now)
+            if age_s < threshold:
+                deferred_age_s = age_s
+                break
+        if deferred_age_s is not None:
+            hours, rem = divmod(deferred_age_s, 3600)
+            minutes = rem // 60
+            out.append(
+                f"deferred [janitor-memory-{chore}]: a {chore} claim is still in "
+                f"flight ({hours}h {minutes}m)"
+            )
+            global _decision_fired
+            _decision_fired = True
             continue
         claimable = False
         for p in memory_dispatch_claim.candidates(state_dir):
