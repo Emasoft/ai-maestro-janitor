@@ -174,10 +174,12 @@ def _reports_dir_candidates(state_dir: Path) -> list[Path]:
     """
     project = state_dir.parent.parent
     grandparent = project.joinpath(*_REPORT_SUBDIR)
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only call — never contend for .git/index.lock (janitor#245)
     try:
         result = subprocess.run(
             ["git", "-C", str(project), "worktree", "list", "--porcelain"],
-            capture_output=True, text=True, timeout=5, check=True,
+            capture_output=True, text=True, timeout=5, check=True, env=git_env,
         )
         first_line = result.stdout.splitlines()[0]
         main_root = Path(first_line[len("worktree "):]) if first_line.startswith("worktree ") else None

@@ -121,11 +121,21 @@ SLUG=local                  # short subject for the filename — lowercase, e.g.
 # the claim indistinguishable from an orphaned one -- janitor#242 follow-up).
 REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
   report-path --state-dir "$STATE_DIR" --chore "$PASS")"
+# Retry once WITHOUT --chore before falling back to create-and-paste: a
+# mistyped $PASS must not fork the report. `_resolve_claim` (memory_dispatch_claim.py)
+# fails CLOSED on ambiguity -- multiple in-flight claims for $STATE_DIR print a
+# diagnostic and return empty, never a guessed path -- so this retry either finds
+# the one true claim or falls through to the fallback exactly like the first
+# lookup would; it can never silently attribute the report to the wrong claim.
+if [ -z "$REPORT_FILE" ] || ! grep -q 'dispatch_id=' "$REPORT_FILE" 2>/dev/null; then
+  REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
+    report-path --state-dir "$STATE_DIR")"
+fi
 # Fallback (the write failed, or "report-path" found no in-flight claim to
-# read back): create the file yourself -- this skips the worktree resolution
-# the primary path relies on, it is the rare failure-of-a-failure case, not
-# the one to harden -- and paste the two header lines below verbatim as its
-# first content lines.
+# read back even without --chore): create the file yourself -- this skips the
+# worktree resolution the primary path relies on, it is the LAST RESORT after
+# both read-backs above, not the one to harden -- and paste the two header
+# lines below verbatim as its first content lines.
 if [ -z "$REPORT_FILE" ] || ! grep -q 'dispatch_id=' "$REPORT_FILE" 2>/dev/null; then
   REPORT_FILE="${CLAUDE_PROJECT_DIR:-$PWD}/reports/janitor-memory-subconscious-agent/$(date +%Y%m%d_%H%M%S%z)-$PASS-$SLUG.md"
   mkdir -p "$(dirname "$REPORT_FILE")"
