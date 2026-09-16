@@ -256,3 +256,63 @@ def test_never_consults_server_chore_ownership(
     rc = rt.main(["rotate_to.py", "alt@example.com"])
     assert rc == 0
     assert saved["live_email"] == "alt@example.com"
+
+
+
+def test_request_model_opus_types_the_real_keystroke_via_terminal_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The REAL `_request_model_opus` (not a mock of it) drives `terminal_trigger.self_terminal`
+    + `send_verified` — pins the exact command and flags typed, not just that the no-Fable
+    branch calls *something* named `_request_model_opus` (test_no_fable_path_... mocks that
+    entirely and so never exercises this)."""
+    sent: list[dict] = []
+    monkeypatch.setattr(rt.terminal_trigger, "self_terminal", lambda: {"kind": "tmux", "pane": "%1"})
+
+    def _send_verified(terminal, command, **kwargs):
+        sent.append({"terminal": terminal, "command": command, **kwargs})
+        return (True, "sent")
+
+    monkeypatch.setattr(rt.terminal_trigger, "send_verified", _send_verified)
+    result = rt._request_model_opus()
+    assert result == "typed"
+    assert len(sent) == 1
+    assert sent[0]["terminal"] == {"kind": "tmux", "pane": "%1"}
+    assert sent[0]["command"] == "/model opus"
+    assert sent[0]["esc_first"] is True
+    assert sent[0]["bypass_interrupt_cooldown"] is True
+
+
+def test_request_model_opus_reports_not_automatable_without_a_pane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No resolvable pane (`self_terminal` -> unknown) -> not-automatable, and `send_verified`
+    is never reached — the keystroke path must not be attempted with nowhere to send it."""
+    called = {"send_verified": False}
+    monkeypatch.setattr(rt.terminal_trigger, "self_terminal", lambda: {"kind": "unknown"})
+
+    def _send_verified(*a, **k):
+        called["send_verified"] = True
+        return (True, "sent")
+
+    monkeypatch.setattr(rt.terminal_trigger, "send_verified", _send_verified)
+    result = rt._request_model_opus()
+    assert result == "not-automatable"
+    assert called["send_verified"] is False
+
+
+
+def test_request_model_opus_survives_a_send_verified_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`send_verified` raising (the keystroke itself failing mid-send) must be swallowed —
+    not-automatable, never propagated — since a rotation that already found its target must
+    not fail over a keystroke (the function's own stated contract)."""
+    monkeypatch.setattr(rt.terminal_trigger, "self_terminal", lambda: {"kind": "tmux", "pane": "%1"})
+
+    def _send_verified(*a, **k):
+        raise RuntimeError("pane vanished mid-send")
+
+    monkeypatch.setattr(rt.terminal_trigger, "send_verified", _send_verified)
+    result = rt._request_model_opus()
+    assert result == "not-automatable"
