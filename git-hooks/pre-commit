@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Pre-commit hook — refuses a commit that would drop a tracked script's
+# executable bit (TRDD-3JBPW12E). A fastedit/Write rewrite recreates a file
+# at mode 644; tests/test_detector_executable_bits.py already detects this
+# from the git index in 0.2s, so run it at commit time instead of catching
+# it later at CI or the publish gate.
+#
+# THIS FILE IS THE SOURCE — edit it here. `publish.py::install_hook` copies
+# it to .git/hooks/pre-commit and sets core.hooksPath=git-hooks (see
+# git-hooks/pre-push for the sibling hook this mirrors).
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+uv run pytest -q -p no:cacheprovider tests/test_detector_executable_bits.py \
+  >/tmp/precommit-execbits.txt 2>&1 || {
+    cat /tmp/precommit-execbits.txt
+    echo "pre-commit: a tracked script lost its executable bit — chmod +x <file> && git add <file>"
+    exit 1
+  }

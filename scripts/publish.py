@@ -774,22 +774,23 @@ def do_bump(root: Path, new_ver: str, dry_run: bool = False) -> bool:
 # -- Hook installer ------------------------------------------------------------
 
 def install_hook(root: Path) -> int:
-    """Copy git-hooks/pre-push to .git/hooks/pre-push and set core.hooksPath."""
-    cprint(f"\\n{BOLD}Installing git hooks...{NC}")
-    source = root / "git-hooks" / "pre-push"
-    if not source.is_file():
-        cprint(f"  {RED}git-hooks/pre-push not found{NC}")
-        return 1
+    """Copy git-hooks/pre-push and git-hooks/pre-commit into .git/hooks/ and set core.hooksPath."""
+    cprint(f"\n{BOLD}Installing git hooks...{NC}")
     git_dir = root / ".git"
     if not git_dir.is_dir():
         cprint(f"  {RED}.git/ not found — is this a git repository?{NC}")
         return 1
     hooks_dir = git_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    dest = hooks_dir / "pre-push"
-    shutil.copy2(source, dest)
-    dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    cprint(f"  {GREEN}Installed: git-hooks/pre-push -> .git/hooks/pre-push{NC}")
+    for hook_name in ("pre-push", "pre-commit"):
+        source = root / "git-hooks" / hook_name
+        if not source.is_file():
+            cprint(f"  {RED}git-hooks/{hook_name} not found{NC}")
+            return 1
+        dest = hooks_dir / hook_name
+        shutil.copy2(source, dest)
+        dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        cprint(f"  {GREEN}Installed: git-hooks/{hook_name} -> .git/hooks/{hook_name}{NC}")
     # Also set core.hooksPath so git finds hooks in git-hooks/ directly
     subprocess.run(["git", "config", "core.hooksPath", "git-hooks"],
                    cwd=str(root), check=False)
