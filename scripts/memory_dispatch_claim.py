@@ -706,6 +706,29 @@ def main() -> int:
     # having to parse the JSON — and so every existing parser of the JSON line keeps
     # seeing exactly the same bytes it always has.
     print(f"CLAIM_ID={payload.get('dispatch_id', '')}")
+    # Printed in the claiming agent's OWN transcript (janitor#242 orphaned-claim
+    # follow-up, 2026-09-16) — an agent that finishes a pass and never runs `complete`
+    # leaves the claim orphaned because the close command lived only in a reference
+    # file it had to remember to open. Spelling it out here, right after the claim
+    # succeeds, needs no memory of a separate doc. `--peek` never claims, so it never
+    # reaches this line.
+    print("CLOSE YOUR CLAIM WHEN DONE (mandatory; an unclosed claim is reported as orphaned):")
+    print(
+        f'  uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" '
+        f'set-report --state-dir "{expected_state_dir}" "<your report file>"'
+    )
+    print(
+        f'  uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" '
+        f'complete --state-dir "{expected_state_dir}"'
+    )
+    print(
+        f'  (if complete exits 2 with "multiple claims in flight", add '
+        # `.get(key, "")` only substitutes on a MISSING key, not a `null` value — this
+        # file's own `_run_complete`/`_resolve_claim` already guard the same field with
+        # `or ""` (a payload with an explicit `"scope": null` would otherwise print the
+        # literal text "None" into a command the curator copy-pastes verbatim).
+        f'--chore {args.chore} --scope {payload.get("scope") or ""})'
+    )
     return 0
 
 

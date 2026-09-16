@@ -592,15 +592,16 @@ def test_complete_claim_is_idempotent(tmp_path):
 
 
 def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
-    """End-to-end: a real claim prints CLAIM_ID=<id> as the LAST stdout line (so a
-    positional reader of the earlier lines is unaffected), and the `complete`
-    subcommand (given that id + the report path) renames the record DONE."""
+    """End-to-end: a real claim prints a `CLAIM_ID=<id>` line a positional `grep
+    '^CLAIM_ID='` can find regardless of the close-command hint printed after it
+    (janitor#242 follow-up), and the `complete` subcommand (given that id + the
+    report path) renames the record DONE."""
     _dispatch(tmp_path, 1_000_000, "repair")
     proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
     assert proc.returncode == 0, proc.stderr
-    lines = [ln for ln in proc.stdout.splitlines() if ln]
-    assert lines[-1].startswith("CLAIM_ID="), proc.stdout
-    dispatch_id = lines[-1].split("=", 1)[1]
+    claim_id_lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("CLAIM_ID=")]
+    assert len(claim_id_lines) == 1, proc.stdout
+    dispatch_id = claim_id_lines[0].split("=", 1)[1]
     assert dispatch_id == "1000000-abcd1234"
 
     report = tmp_path / "report.md"
@@ -612,6 +613,28 @@ def test_complete_cli_prints_claim_id_last_and_completes(tmp_path):
     payload = json.loads(done.read_text(encoding="utf-8"))
     assert payload["report"] == str(report)
     assert "outcome" not in payload
+
+
+def test_claim_cli_prints_the_close_commands_but_peek_does_not(tmp_path):
+    """A curator that claims and never runs `complete` leaves the claim orphaned
+    (janitor#242 follow-up) — the claim step must print the exact close commands in
+    its own stdout so the agent never has to remember them from a separate doc;
+    `--peek` claims nothing, so it must not print them."""
+    _dispatch(tmp_path, 1_000_000, "repair")
+    proc = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path)])
+    assert proc.returncode == 0, proc.stderr
+    assert "CLOSE YOUR CLAIM WHEN DONE" in proc.stdout
+    resolved = str(tmp_path.resolve())
+    assert f'complete --state-dir "{resolved}"' in proc.stdout, proc.stdout
+    assert (
+        '(if complete exits 2 with "multiple claims in flight", add '
+        "--chore repair --scope LOCAL)" in proc.stdout
+    ), proc.stdout
+
+    _dispatch(tmp_path, 2_000_000, "repair")
+    proc2 = _run_cli(["--chore", "repair", "--state-dir", str(tmp_path), "--peek"])
+    assert proc2.returncode == 0, proc2.stderr
+    assert "CLOSE YOUR CLAIM" not in proc2.stdout
 
 
 def test_complete_cli_unreadable_report_still_closes_the_claim(tmp_path):
