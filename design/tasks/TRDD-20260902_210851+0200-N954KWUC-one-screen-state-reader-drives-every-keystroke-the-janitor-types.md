@@ -3,7 +3,7 @@ trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
 column: blocked
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-16T23:06:21+0200
+updated: 2026-09-16T23:09:25+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -153,6 +153,7 @@ to the wrong state.
 - 2026-09-16T23:01:23+0200 — box 4, rotation half OBSERVED: a live rotation on this machine drove another project's pane through the same daemon/actuator and left it at working with no human keystroke (details, project, log path, timestamps: /Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/reports/board-drain/20260916_225815+0200-N954KWUC-live-evidence.md; the actuator code is machine-global — one daemon, one plugin cache — so the pane's project does not matter, but the episode must postdate the install of the P3 commits 30508054/8cb71c3b/e93a9203; earliest stamp in the report: 2026-09-04T13:12:05). No-headroom half: NOT observable — Event.NO_HEADROOM has zero production callers, so even a real all-accounts-spent wall would log nothing; this half is blocked on code, not on weather. 3T9HQEQ6's body does not name the NO_HEADROOM event or pane_policy, so it is NOT established that it will add the caller — no block set; the caller needs an owner (EHT candidate).
 - 2026-09-16T23:06:21+0200 — correction to the 22:5x line: 'cannot occur' and the '3T9HQEQ6 does not name it' proxy are retired. Traced (/Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/reports/board-drain/20260916_230459+0200-N954KWUC-no-headroom-path.md): the no-headroom fallback lives in scripts/detectors/model-fallback.py and types through terminal_trigger.send_verified / send_model_switch_true_error, BYPASSING pane_actuate/pane_policy — Event.NO_HEADROOM has a policy row and no caller. Box 2 holds literally (no fleet_inject.fire bypass) but the card's own invariant (one reader drives every keystroke) does not. EHT TRDD-8P4BNY5J routes it; this card is blocked on it (pre-block column todo). 3T9HQEQ6's commits are in v3.5.5 and are not the missing piece.
 - 2026-09-16T23:06:21+0200 — column → blocked. box 4's no-headroom half needs the model-fallback keystrokes routed through the actuator (EHT TRDD-8P4BNY5J)
+- 2026-09-16T23:09:24+0200 — framing precision: 8P4BNY5J is a gap in THIS card's own P3 call-site inventory (box 2's wording covered fleet_inject.fire senders only; terminal_trigger senders were never inventoried), not downstream fallout; the eht link is the tool's relationship, the substance is a scope miss. The blocker-probe field clears the linter and describes a check; nothing runs it — the real unblock is blocked-by going terminal, after which drift restores this card to todo.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:29:00+0200
 
