@@ -162,6 +162,15 @@ def _reports_dir_candidates(state_dir: Path) -> list[Path]:
     resolve the grandparent (2026-09-16 review of this same TRDD). The writer uses
     `candidates[0]`; the matcher globs every candidate, so either resolving or not
     resolving git still finds the same file.
+
+    De-duplicated by RESOLVED path, not the raw string (2026-09-16 follow-up): a
+    symlinked project root makes `git worktree list` print the canonical path while
+    `state_dir.parent.parent` is still the symlink spelling — two different strings for
+    one directory, so the string-equality check below let both through, and every
+    report under it was globbed and matched twice. `Path.resolve()` collapses the
+    symlink so the true directory is only ever listed once; the kept spelling is
+    whichever the caller passed in first, so `candidates[0]` is unchanged for the
+    writer.
     """
     project = state_dir.parent.parent
     grandparent = project.joinpath(*_REPORT_SUBDIR)
@@ -177,7 +186,9 @@ def _reports_dir_candidates(state_dir: Path) -> list[Path]:
     if main_root is None:
         return [grandparent]
     main_reports = main_root.joinpath(*_REPORT_SUBDIR)
-    return [main_reports] if main_reports == grandparent else [main_reports, grandparent]
+    if main_reports.resolve() == grandparent.resolve():
+        return [main_reports]
+    return [main_reports, grandparent]
 
 
 _REPORT_SUBDIR = ("reports", "janitor-memory-subconscious-agent")
@@ -196,6 +207,13 @@ def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) 
     Globs EVERY dir `_reports_dir_candidates` returns (janitor#264 review) — the
     skeleton may have landed at the main worktree root while THIS call's own
     `git worktree list` fails, so a single resolved dir is not enough to find it.
+    De-duplicated by RESOLVED path (2026-09-16 follow-up, mirrors
+    `_reports_dir_candidates`'s own fix): a symlinked project root can still slip a
+    second, differently-spelled candidate past that function's own dedup (e.g. one
+    candidate resolves cleanly and the other doesn't, or vice versa across two
+    processes), and globbing the same real directory twice would double-count every
+    file in it as two "matches" for one report — turning a single unambiguous report
+    into a spurious multi-match ambiguity.
 
     The header alone is NOT proof of completion (janitor#242 correction): a chore skill
     writes its `Claim: dispatch_id=...` header at the START of a pass, so it names an
@@ -215,11 +233,18 @@ def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) 
     or prose that merely mentions this id in passing (e.g. a "supersedes" note). The
     lookahead requires the id to end at a non-identifier character."""
     paths: list[Path] = []
+    seen_resolved: set[Path] = set()
     for reports_dir in _reports_dir_candidates(state_dir):
         try:
-            paths.extend(reports_dir.glob("*.md"))
+            candidates_here = list(reports_dir.glob("*.md"))
         except OSError:
             continue
+        for path in candidates_here:
+            resolved = path.resolve()
+            if resolved in seen_resolved:
+                continue
+            seen_resolved.add(resolved)
+            paths.append(path)
     paths = sorted(paths)
     needle_re = re.compile(re.escape(f"dispatch_id={dispatch_id}") + r"(?![\w-])")
     matches: list[tuple[str, bool]] = []
@@ -754,28 +779,42 @@ def _run_complete(argv: list[str]) -> int:
     return 2
 
 def _run_report_path(argv: list[str]) -> int:
-    """`report-path --state-dir <dir>` — prints the ONE in-flight claim's recorded
-    `report` field, so a curator READS BACK the path `claim` (or `set-report`) already
-    wrote instead of retyping it (janitor#242 follow-up, 2026-09-16): a mistyped path
-    used to abort the pass with the claim left open, since a missing/garbled header
-    match makes the claim indistinguishable from an orphaned one.
+    """`report-path --state-dir <dir> [--chore <chore>] [--scope <scope>]` — prints the
+    ONE in-flight claim's recorded `report` field, so a curator READS BACK the path
+    `claim` (or `set-report`) already wrote instead of retyping it (janitor#242
+    follow-up, 2026-09-16): a mistyped path used to abort the pass with the claim left
+    open, since a missing/garbled header match makes the claim indistinguishable from
+    an orphaned one.
 
-    Resolves the single in-flight CLAIMED record the same way `set-report`/`complete`
-    do when given no `--chore`/`--scope` (reuses `_resolve_claim`), so "which claim"
-    is answered identically everywhere. Prints ONLY the bare path on stdout, nothing
-    else — a caller does `REPORT_FILE="$(... report-path ...)"`, so a second line would
-    corrupt the captured value. Exit 1 (not `_resolve_claim`'s own 2) on zero/multiple
-    claims or an empty/missing `report` field — this verb's one job is "give me the
-    path", and any of those is simply "no path to give"."""
+    `--chore` and `--scope` are OPTIONAL and INDEPENDENT here (2026-09-16 follow-up) —
+    unlike `set-report`/`complete`, which require them paired or absent, this verb lets
+    a curator narrow by `--chore` alone: it always knows its own chore (`$PASS` in the
+    agent template) but not necessarily a `--scope` shell variable at read-back time.
+    Under two simultaneous curators on one project (e.g. repair + consolidate), naming
+    `--chore` is what stops one from reading back the other's report path; omitting
+    both falls back to `_resolve_claim`'s single-in-flight-claim resolution (exit 1 if
+    zero or multiple are in flight). An empty string for either is always an error.
+
+    Prints ONLY the bare path on stdout, nothing else — a caller does
+    `REPORT_FILE="$(... report-path ...)"`, so a second line would corrupt the captured
+    value. Exit 1 (not `_resolve_claim`'s own 2) on zero/multiple claims or an
+    empty/missing `report` field — this verb's one job is "give me the path", and any
+    of those is simply "no path to give"."""
     ap = argparse.ArgumentParser(
         prog="memory_dispatch_claim.py report-path",
         description="Print the in-flight claim's recorded report path.",
     )
     ap.add_argument("--state-dir", required=True)
+    ap.add_argument("--chore", default=None, choices=CHORES)
+    ap.add_argument("--scope", default=None)
     args = ap.parse_args(argv)
     state_dir = Path(args.state_dir)
 
-    resolved = _resolve_claim(state_dir, "report-path", None, None)
+    if args.scope is not None and args.scope == "":
+        print("memory_dispatch_claim: report-path: empty --scope", file=sys.stderr)
+        return 1
+
+    resolved = _resolve_claim(state_dir, "report-path", args.chore, args.scope)
     if isinstance(resolved, int):
         return 1
     _dispatch_id, payload = resolved

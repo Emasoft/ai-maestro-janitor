@@ -112,7 +112,7 @@ Run this block and use the path it PRINTS, verbatim. You fill in two WORDS (`PAS
 `SLUG`); you never type the timestamp:
 
 ```bash
-PASS=consolidate            # the pass you were launched for (matches your claim's "intervention") -- used only by the fallback below
+PASS=consolidate            # the pass you were launched for (matches your claim's "intervention") -- used both by the read-back below and the fallback
 SLUG=local                  # short subject for the filename — lowercase, e.g. your scope -- used only by the fallback below
 # RETYPE $STATE_DIR as your claim step's printed path -- shell vars set in an
 # earlier Bash call do not survive into this one. The path itself is READ BACK
@@ -120,7 +120,7 @@ SLUG=local                  # short subject for the filename — lowercase, e.g.
 # the pass with the claim left open, since a missing/garbled header match makes
 # the claim indistinguishable from an orphaned one -- janitor#242 follow-up).
 REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-  report-path --state-dir "$STATE_DIR")"
+  report-path --state-dir "$STATE_DIR" --chore "$PASS")"
 # Fallback (the write failed, or "report-path" found no in-flight claim to
 # read back): create the file yourself -- this skips the worktree resolution
 # the primary path relies on, it is the rare failure-of-a-failure case, not

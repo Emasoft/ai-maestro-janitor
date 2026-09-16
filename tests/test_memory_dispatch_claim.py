@@ -1466,3 +1466,77 @@ def test_report_path_stdout_is_exactly_one_line_under_uv_run(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.count("\n") == 1
     assert proc.stdout.splitlines()[0] == proc.stdout.strip()
+
+
+def test_report_path_with_chore_picks_that_claim_among_several(tmp_path):
+    """(p) 2026-09-16 follow-up: two simultaneous curators (repair + consolidate) hold
+    CLAIMED records on the SAME project at once. `report-path --chore repair` must
+    print the repair claim's own report path, never the consolidate claim's — the
+    exact ambiguity `_resolve_claim` would otherwise refuse with "multiple claims"."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _claimed(state_dir, 1_000_000, "repair", scope="LOCAL")
+    _claimed(state_dir, 2_000_000, "consolidate", scope="LOCAL")
+    (state_dir / f"{mdc.CLAIMED_PREFIX}1000000-abcd1234.json").write_text(
+        json.dumps({
+            "marker": "[janitor-memory-repair]", "intervention": "repair",
+            "scope": "LOCAL", "root": "/tmp/local/memory", "stamped_at": 1_000_000,
+            "dispatch_id": "1000000-abcd1234", "report": "/tmp/repair-report.md",
+        }), encoding="utf-8",
+    )
+    (state_dir / f"{mdc.CLAIMED_PREFIX}2000000-abcd1234.json").write_text(
+        json.dumps({
+            "marker": "[janitor-memory-consolidate]", "intervention": "consolidate",
+            "scope": "LOCAL", "root": "/tmp/local/memory", "stamped_at": 2_000_000,
+            "dispatch_id": "2000000-abcd1234", "report": "/tmp/consolidate-report.md",
+        }), encoding="utf-8",
+    )
+
+    proc = _run_cli(["report-path", "--state-dir", str(state_dir), "--chore", "repair"])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == "/tmp/repair-report.md\n"
+
+
+def test_report_path_with_chore_naming_no_claim_exits_1_empty_stdout(tmp_path):
+    """(q) 2026-09-16 follow-up: `--chore` naming a chore with no in-flight claim at all
+    must exit 1 with empty stdout — never fall back to some other chore's claim."""
+    project = tmp_path / "proj"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    _claimed(state_dir, 1_000_000, "repair", scope="LOCAL")
+
+    proc = _run_cli(["report-path", "--state-dir", str(state_dir), "--chore", "consolidate"])
+    assert proc.returncode == 1
+    assert proc.stdout == ""
+    assert proc.stderr.strip() != ""
+
+
+def test_find_completion_report_dedupes_a_symlinked_project_root(tmp_path, monkeypatch):
+    """(r) 2026-09-16 follow-up: `state_dir` lives under a SYMLINK to the real project
+    root. `git worktree list` (mocked) reports the CANONICAL path, so `main_reports`
+    (git-resolved) and `grandparent` (symlink-derived, from `state_dir.parent.parent`)
+    are two different path STRINGS for the same physical directory. Before the fix this
+    doubled every match; after it, a single skeleton report is found exactly once."""
+    real_project = tmp_path / "real"
+    real_project.mkdir()
+    symlink_project = tmp_path / "via-symlink"
+    symlink_project.symlink_to(real_project)
+
+    state_dir = symlink_project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    reports_dir = real_project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    skeleton = reports_dir / "20260916_000000+0000-repair-local.md"
+    skeleton.write_text("Claim: dispatch_id=1000000-abcd1234\n", encoding="utf-8")
+
+    def _fake_run(*a, **k):
+        return subprocess.CompletedProcess(
+            a[0], 0, stdout=f"worktree {real_project}\n", stderr="",
+        )
+
+    monkeypatch.setattr(mdc.subprocess, "run", _fake_run)
+
+    found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
+    assert found is not None
+    assert found == (str(skeleton), False)
