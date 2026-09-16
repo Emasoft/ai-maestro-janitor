@@ -1,10 +1,10 @@
 ---
 trdd-id: S2RZHXU7
 title: A one-call account rotation — the janitor-rotate-account-to skill and the rotate_to.py script it wraps, with headroom-driven target selection when no account is named
-column: todo
+column: complete
 created: 2026-09-06T05:44:34+0200
-updated: 2026-09-16T12:37:56+0200
-implementation-commits: [ae96dd12]
+updated: 2026-09-16T22:18:11+0200
+implementation-commits: [ae96dd12, 9d88e2db, 8342337b, 6a5199cd]
 current-owner: janitor-main-session
 task-type: feature
 priority: high
@@ -99,7 +99,7 @@ requests the model fallback; no candidate exits 3; already-live exit 0.
 - [x] `/janitor-rotate-account-to <email>` is one tool call from the skill to a switched
       credential
 - [x] the no-argument path selects per the spec and is pinned by tests
-- [ ] the no-Fable path types `/model opus` first (or reports not-automatable) and is pinned
+- [x] the no-Fable path types `/model opus` first (or reports not-automatable) and is pinned
 - [x] ruff, mypy, pyright, skill-frontmatter test, rotator tests green
 - [x] full-suite publish gate green (shared box)
 
@@ -119,3 +119,5 @@ file, no daemon and the chore claimed by a (fake) server.
 
 - 2026-09-16T12:50:00+0200 — boxes 1, 2, 4, 5 ticked on the evidence in reports/board-drain/20260916_123637+0200-S2RZHXU7-box-evidence.md (skill is one call into rotate_to.py; _pick_target ranking pinned by six tests; ruff/mypy/pyright/frontmatter/rotator tests green first-hand; 3.5.5 gate green with ae96dd12 included). Box 3 stays open: the no-Fable path's /model opus typing has only its dispatch pinned (the test mocks _request_model_opus); the real keystroke path via terminal_trigger has zero coverage. Column todo until that test exists — testing was claiming work nobody was doing.
 - 2026-09-16T12:37:56+0200 — column → todo. one open box with a concrete missing test; no session on it (triage 2026-09-16)
+- 2026-09-16T22:18:11+0200 — box 3 ticked: the keystroke half is pinned by three tests in tests/test_rotate_to.py that drive the REAL _request_model_opus through terminal_trigger with only the pane boundary injected (command '/model opus', esc_first, bypass_interrupt_cooldown; no-pane → not-automatable; a raising send → not-automatable with a WARNING line on stderr), mutation-checked (9d88e2db, 8342337b, 6a5199cd); the ORDERING half ('first', before the credential switch) stays pinned by the pre-existing test_no_fable_path_… test that mocks _request_model_opus. A swallowed keystroke failure is no longer silent. COMPLETE by the session under the 2026-09-03 standing permission.
+- 2026-09-16T22:18:11+0200 — COMPLETE by session. all 5 boxes ticked; keystroke path pinned and published-ready.
