@@ -3,7 +3,7 @@ trdd-id: 8P4BNY5J
 title: Route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM
 column: todo
 created: 2026-09-16T23:06:20+0200
-updated: 2026-09-16T23:06:20+0200
+updated: 2026-09-16T23:09:21+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -16,6 +16,8 @@ approval-judge: session
 approval-datetime: 2026-09-16T23:06:20+0200
 parent-trdd: N954KWUC
 derived: true
+priority: critical
+npt: []
 ---
 
 # Route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM
@@ -25,3 +27,4 @@ EHT of TRDD-N954KWUC (its title: ONE screen-state reader drives EVERY keystroke 
 ## Approval log
 
 - 2026-09-16T23:06:20+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-16T23:09:20+0200 — scope precision (review 2026-09-16): the routed path MUST preserve the flush→/model opus→confirm sequence TRDD-3T9HQEQ6 landed (fb25366f, 1533ccc9); the NO_HEADROOM policy row's plan was not read tonight — if it plans a single /model opus, use or add the row that reproduces 3T9HQEQ6's sequence rather than regress it. Acceptance items 1–2 are to be read with that constraint. Sequenced after M4HVFU2A (npt).
