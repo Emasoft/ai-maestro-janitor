@@ -1,10 +1,10 @@
 ---
 trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
-column: blocked
-pre-block-column: dev
+column: testing
+pre-block-column: 
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-16T08:56:29+0200
+updated: 2026-09-16T09:51:10+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -14,7 +14,7 @@ project-id: ai-maestro-janitor
 min-approval-requirement: user
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
-blocked-by: [user-decision-suite-failure-waiver]
+blocked-by: []
 unblock-when: [decision:user]
 npt: []
 eht: []
@@ -1029,6 +1029,8 @@ session, so Tier 2 and Tier 3 resolve to the same person regardless.
 - 2026-09-16T08:52:22+0200 — WAIVER REFUSED by the session acting as approver under the owner's standing autonomous-drain permission (2026-09-03), consistent with the owner's earlier refusal of a characterisation (c503ea52): the 10 failures are not accepted on 'contention' without a measured resource. Ruling: run the experiment the 13:25 NEXT ACTION names — full suite twice on the same host state, -n auto vs -n 4, sysctl vm.loadavg sampled every 10 s — after the 3.5.1 publish gate has finished using the host. If -n 4 is green where -n auto is red, the fix is a worker cap in the publish gate; if both are red, the failing ids go to TRDD-7NSRD8OV's fail-open timeout track.
 - 2026-09-16T08:54:23+0200 — Experiment spec tightened after adversarial review: a third outcome exists — BOTH green — and it measures nothing (soak8 already passed at loadavg 11.39). So each configuration runs at least TWICE (n>=2 per cell, never one more n=1 cell), the recorder is the worker itself (a background loop writing sysctl vm.loadavg every 10 s next to each run), results go under reports/suite-failures/ with the run's -n value and loadavg trace in the filename, and 'same host state' means: no publish gate and no other pytest running, checked from a ps snapshot before each run.
 - 2026-09-16T08:56:29+0200 — Precondition made achievable: 'quiet host' means no publish.py, no other pytest and no CPV validate in the ps snapshot; the janitor heartbeat's own 5-minute uv run fires are ALLOWED and noted in the trace, not a reason to wait. The experiment is a background script (run_in_background, reporting by file), not an agent turn, and is dispatched only after the 3.5.1 publish gate has exited.
+- 2026-09-16T09:51:10+0200 — EXPERIMENT RESULT (reports/suite-failures/20260916_094059+0200-Q8PNPRTW-n-auto-vs-n4.md + per-run pytest/loadavg files): four full-suite runs on HEAD 18dbb9dd, -n auto / -n 4 / -n auto / -n 4, ALL GREEN — 16755 passed, 2 skipped, 0 failed each; wall 108/135/102/159 s; 1-min loadavg during runs 8.4-18.5, 7.4-12.1, 9.0-26.5, 8.7-18.9 (two other agents and the heartbeat active). The both-green outcome: the 2026-09-05 failures do NOT reproduce on current HEAD even at loadavg 26.5 under -n auto, so there is nothing left to waive. Cause still unnamed; what changed since 09-05 is the landed work on TRDD-7NSRD8OV's fail-open timeout track and the 3.5.x fixes. Ruling: blocker cleared, card to testing; it completes as not-reproducible after the next two publish gates (full suite, -n auto) are also green, and reopens to dev on the first red.
+- 2026-09-16T09:51:10+0200 — column → testing by session-as-approver. waiver refused and moot: 4/4 green full-suite runs, n=2 per -n cell Cleared blocked-by (--clear-blocker override).
 
 
 ## Notes
