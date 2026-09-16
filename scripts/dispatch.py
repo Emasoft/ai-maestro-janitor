@@ -897,9 +897,14 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
     another in-flight worker and must not be touched here, so its private
     `_matching_records`/`CLAIMED_PREFIX`/`_STALE_CLAIM_FLOOR_S` are called directly
     (module-qualified) instead of adding a new public function there. A drop this way
-    prints one plain (non-bracket-token) drift line and marks the fire non-quiet via
-    `_decision_fired` directly — never `_emit_decision`, which would print a fresh
-    bare `[janitor-...]` marker this deferral is not authorized to spawn.
+    renders the age as `~Nmin` so `_dedupe_drift_text`'s elapsed-time token regex
+    (`_DRIFT_ELAPSED_TOKEN_RE`) collapses repeat fires into one deduped line instead
+    of appending a fresh seen-file entry every fire (an `(Xh Ym)` render was never
+    recognized by that regex, so dedup never triggered). It also writes a
+    `state.log_line` so the deferral survives once the printed line is deduped away.
+    This is NOT an action: `_decision_fired` is left untouched — `_emit_quiet_if_idle`
+    documents `[janitor-quiet]` as compatible with drift lines, and a deferral has
+    nothing to spawn.
     """
     if not text or "[janitor-memory-" not in text:
         return text
@@ -940,14 +945,14 @@ def _suppress_stale_memory_markers(text: str, *, force: bool = False) -> str:
                 deferred_age_s = age_s
                 break
         if deferred_age_s is not None:
-            hours, rem = divmod(deferred_age_s, 3600)
-            minutes = rem // 60
+            state.log_line(
+                "dispatch",
+                f"memory-dispatch: marker for {chore} deferred — claim in flight ({deferred_age_s}s old)",
+            )
             out.append(
                 f"deferred [janitor-memory-{chore}]: a {chore} claim is still in "
-                f"flight ({hours}h {minutes}m)"
+                f"flight (~{deferred_age_s // 60}min)"
             )
-            global _decision_fired
-            _decision_fired = True
             continue
         claimable = False
         for p in memory_dispatch_claim.candidates(state_dir):

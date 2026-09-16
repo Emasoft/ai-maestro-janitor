@@ -68,7 +68,7 @@ def _write_pending(state_dir: Path, dispatch_id: str, chore: str, *, stamped_at:
 
 def test_marker_deferred_when_unexpired_claim_exists(tmp_path, monkeypatch):
     """(1) An unexpired CLAIMED record for the chore drops the marker and prints the
-    plain deferral line, even with no PENDING record at all."""
+    plain deferral line rendered as `~Nmin`, even with no PENDING record at all."""
     import time
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
@@ -80,7 +80,7 @@ def test_marker_deferred_when_unexpired_claim_exists(tmp_path, monkeypatch):
         out = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
         assert "[janitor-memory-split]\n" not in out
         assert "deferred" in out and "split claim is still in flight" in out
-        assert dispatch._decision_fired is True
+        assert "~1min" in out
     finally:
         _clear_state_cache()
 
@@ -124,9 +124,10 @@ def test_marker_unaffected_when_no_claimed_record_exists(tmp_path, monkeypatch):
         _clear_state_cache()
 
 
-def test_deferral_alone_suppresses_the_quiet_token(tmp_path, monkeypatch, capsys):
-    """(4) A fire whose only action this cycle is the deferral must NOT also print
-    `[janitor-quiet]` — a deferral is a decision (TRDD-7ZMQSXO6 (a))."""
+def test_deferral_alone_still_prints_the_quiet_token(tmp_path, monkeypatch, capsys):
+    """(4) A fire whose only outcome this cycle is the deferral still prints
+    `[janitor-quiet]` — a deferral is not an ACTION (TRDD-7ZMQSXO6 (7z-deferral-dedupe)),
+    so `_decision_fired` stays False and `_emit_quiet_if_idle` fires normally."""
     import time
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
@@ -138,6 +139,27 @@ def test_deferral_alone_suppresses_the_quiet_token(tmp_path, monkeypatch, capsys
         dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
         capsys.readouterr()  # discard anything captured incidentally so far
         dispatch._emit_quiet_if_idle()
-        assert capsys.readouterr().out == ""
+        assert capsys.readouterr().out == "[janitor-quiet]\n"
+    finally:
+        _clear_state_cache()
+
+
+def test_repeated_deferral_line_is_deduped_across_fires(tmp_path, monkeypatch):
+    """(5) The SAME claim re-measured on a later fire renders a different `~Nmin` value,
+    but `_dedupe_drift_text` still collapses it: the first pass prints the deferral line,
+    the second (immediately re-run) pass suppresses it as a repeat of the same condition."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(dispatch, "_decision_fired", False)
+    _clear_state_cache()
+    try:
+        sd = state.state_dir()
+        _write_claimed(sd, "100-abcd1234", CHORE, stamped_at=int(time.time()) - 100)
+        raw = dispatch._suppress_stale_memory_markers("[janitor-memory-split]\n")
+        first = dispatch._dedupe_drift_text("memory-maintenance", raw)
+        assert "deferred" in first
+        second = dispatch._dedupe_drift_text("memory-maintenance", raw)
+        assert "deferred" not in second
     finally:
         _clear_state_cache()
