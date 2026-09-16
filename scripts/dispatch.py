@@ -4124,10 +4124,15 @@ def main() -> int:
         # is not: an unlogged fire is indistinguishable from a stub that never ran.
         # stderr only (never state.log_line) -- it would fail the same path-level
         # way (TRDD-V2U2ZECI).
-        sys.stderr.write(
-            f"ai-maestro-janitor: heartbeat-fires log append failed "
-            f"({type(exc).__name__}: {exc}); the fire continues\n"
-        )
+        # A caller that launched dispatch with closed/redirected-to-None fds
+        # (some test harnesses and detached daemons do) must not have this
+        # best-effort diagnostic itself raise -- that would turn the write
+        # meant to prevent a silent failure into the crash it exists to avoid.
+        if sys.stderr is not None:
+            sys.stderr.write(
+                f"ai-maestro-janitor: heartbeat-fires log append failed "
+                f"({type(exc).__name__}: {exc}); the fire continues\n"
+            )
 
     # D5 (TRDD-82JRK0CY): reset the per-fire decision sentinel. A production fire is one
     # process so this is a no-op there, but tests call main()/phases repeatedly in-process,

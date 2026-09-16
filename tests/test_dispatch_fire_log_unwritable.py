@@ -87,3 +87,48 @@ def test_unwritable_fire_log_reports_on_stderr_and_the_fire_still_completes(
     # the fire still completed and emitted its normal decision — telemetry failure
     # must never block a fire.
     assert out.strip() == "[janitor-self-disarm]", f"the fire must still complete, got {out!r}"
+
+
+def _run_fire(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, log_as_directory: bool) -> tuple[str, str]:
+    """Run one fire (kill-switch disarmed) in a fresh sandbox, optionally pre-creating
+    heartbeat-fires.log as a directory first; return (stdout, stderr)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    project = tmp_path / "project"
+    project.mkdir()
+    global_dir = tmp_path / "janitor-global-state"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(global_dir))
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "janitor-control"))
+    monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
+    for mod in ("dispatch", "global_state", "state"):
+        if mod in sys.modules:
+            del sys.modules[mod]
+
+    if log_as_directory:
+        (project / ".janitor" / "logs" / "heartbeat-fires.log").mkdir(parents=True)
+
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_kill_switch("disarmed")
+
+    return _capture(dispatch.main)
+
+
+def test_quiet_token_contract_unchanged_by_an_unwritable_fire_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Acceptance item 3 of TRDD-V2U2ZECI: the new stderr diagnostic must not alter the
+    quiet-token contract on stdout — a clean sandbox and a directory-clobbered
+    heartbeat-fires.log sandbox must emit byte-identical stdout, exactly one bare
+    `[janitor-...]` line, with the failure visible only on stderr."""
+    clean_out, clean_err = _run_fire(tmp_path / "clean", monkeypatch, log_as_directory=False)
+    dir_out, dir_err = _run_fire(tmp_path / "dir", monkeypatch, log_as_directory=True)
+
+    assert clean_out == dir_out, (clean_out, dir_out)
+    assert clean_out.strip() == "[janitor-self-disarm]", clean_out
+    assert clean_err == "", clean_err
+
+    assert "heartbeat-fires log append failed" in dir_err, dir_err
+    assert "IsADirectoryError" in dir_err, dir_err
