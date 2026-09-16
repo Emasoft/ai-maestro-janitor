@@ -3,7 +3,7 @@ trdd-id: 7ZMQSXO6
 title: Heartbeat fire must skip mid-turn and dedupe drift lines across fires
 column: todo
 created: 2026-09-16T09:44:55+0200
-updated: 2026-09-16T10:46:40+0200
+updated: 2026-09-16T10:48:28+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -35,3 +35,4 @@ Evidence: GitHub #305, GitHub #301; parent measured 284 heartbeat fires in this 
 - 2026-09-16T09:44:55+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-16T10:44:28+0200 — Criterion (a) STRUCK as satisfied by the platform (see the struck box); (b)-(e) in progress via a worker: quiet-stdout test, drift-line repeat suppression through the existing dedupe.emit_once with digit-normalised keys and ledger recording of suppressed repeats, ledger-routing test, and the protocol-rule table row fixed to 'reply exactly janitor heartbeat'.
 - 2026-09-16T10:46:39+0200 — Criterion (a) UN-STRUCK and REDEFINED (supersedes the entry above): today's heartbeats fired and spawned a memory curator while two workers were live, so 'satisfied by the platform' was true only of the main REPL, not of the agent turns the card names. The signal that exists is pending-agents.json (live vs stale, already read by dispatch.py). Implementation of (a) is a follow-up worker after (b)-(e) land, not part of the current pass. Also superseding the (c) plan wording above: keys normalise elapsed-time tokens only, and suppressed repeats are reported as one summary line, not written to the advisory ledger.
+- 2026-09-16T10:48:28+0200 — Criterion (a) NARROWED after review (supersedes the redefinition text in the box for its gate and its output): the gate is NOT 'any live pending agent' — this session's own review forks and lean-workers are live most of the time and a blunt gate would defer memory chores forever on a busy host. Defer a [janitor-memory-*] marker only when a live, non-stale pending-agents entry is a memory curator (janitor-memory-subconscious-agent) or a publish; leave the keep-going nudge exactly as TRDD-2MLFZ7DL built it (it names pending agents so the model confirms each one, which is a safeguard, not churn); and when a marker is deferred print one deferral line naming the reason, not [janitor-quiet] — a deferral is a decision. (c) note: with emit_once the window is 'until the key changes', wider than the box's 'immediately preceding fire'; accepted deliberately because a persistent condition should not re-print; the summary line prints only when the suppressed count changes. The (a) follow-up brief will be reviewed as a proposal before any worker is spawned.
