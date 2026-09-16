@@ -1,22 +1,22 @@
 ---
 trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
-column: blocked
+column: todo
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-16T12:38:17+0200
+updated: 2026-09-16T12:43:45+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
 scope: project
 severity: major
 min-approval-requirement: none
-labels: [version-update, absorbed-chores, ai-maestro, rollout, fleet-ask]
+labels: [version-update, absorbed-chores, ai-maestro, rollout]
 npt: []
 eht: []
 implementation-commits: [3903ca44, ab381b19]
 relevant-rules: []
 pre-block-column: testing
-unblock-when: [issue:ai-maestro#156]
+unblock-when: []
 ---
 
 # The two daemons update the plugin by DIFFERENT mechanisms, and only one is prompt
@@ -444,3 +444,4 @@ this, because each actor is behaving correctly by its own contract.
 
 - 2026-09-05T10:50:00+0200 — RULED option 4 by main-session on the peer's stated rule (ai-maestro hub session, 2026-09-05). Janitor work remaining: (1) the rider the card attached to option 4 — when no armed session exists to raise `version-update-requested.flag`, the lane's degradation to the 4 h floor must be SAID OUT LOUD by the janitor (a heartbeat/status line), not discovered later; (2) the asymmetry documented at the frozen `version-update.last-run.ts` (box 3); (3) a LIVE: measurement of publish→installed latency under the server (box 2). Column blocked -> dev.
 - 2026-09-16T12:35:30+0200 — column → blocked. waits on the peer's landing in ai-maestro#156 (external repo); parked as fleet-ask (triage 2026-09-16)
+- 2026-09-16T12:43:45+0200 — column → todo. ai-maestro#156 is already closed per the card's own STATE, so the peer landing it waited on has happened; the remaining step is to verify that landing, which is work, not a wait (correcting the 2026-09-16 blocked ruling)

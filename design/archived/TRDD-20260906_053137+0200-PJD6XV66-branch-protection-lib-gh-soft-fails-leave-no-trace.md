@@ -1,9 +1,9 @@
 ---
 trdd-id: PJD6XV66
 title: branch_protection_lib's direct gh calls fail soft with no trace, so a loaded suite cannot tell a timeout from a logic bug
-column: testing
+column: complete
 created: 2026-09-06T05:31:37+0200
-updated: 2026-09-08T16:05:00+0200
+updated: 2026-09-16T12:43:45+0200
 implementation-commits: [eb4bce28, 20e63eb8, 64255016]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -82,9 +82,14 @@ artifact is the decline stamp, which names the GATE but not what made gh fail.
 - [x] a real-subprocess test pins all five reasons (gh-not-on-path added on review) and the
       silent success path
 - [x] ruff, mypy, pyright, and the branch-protection test files green (eb4bce28)
-- [ ] full-suite publish gate green (shared box with every `testing` card)
+- [x] full-suite publish gate green (shared box with every `testing` card)
 
 ## Notes
 
 Not a fix for the load flake itself — that is 7NSRD8OV's card. This card makes the next
 loaded failure self-attributing, which is the precondition for fixing it causally.
+
+## Approval log
+
+- 2026-09-16T13:00:00+0200 — COMPLETE by session: last box met by the 3.5.5 release gate (fedb663a; 7130 tests, all gates passed) and green CI on the tag, with eb4bce28 included; the soft-fail trace line is present in the installed 3.5.5 cache (branch_protection_lib.py:552) and the five-reason subprocess test passes first-hand (reports/board-drain/20260916_124304+0200-post-355-card-checks.md).
+- 2026-09-16T12:43:45+0200 — COMPLETE by session. last box met by the 3.5.5 gate.
