@@ -3,7 +3,7 @@ trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
 column: blocked
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-16T22:23:19+0200
+updated: 2026-09-16T22:26:35+0200
 review-after: 2026-09-23
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
@@ -19,6 +19,9 @@ relevant-rules: []
 external-refs: [TRDD-2F3I2P18]
 pre-block-column: testing
 unblock-when: []
+blocker-probe: [trddgrep, --design-dir, /Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design, --porcelain, show, VT332PJG]
+blocker-holds-if: not-match:(complete|completed|cancelled|superseded)
+assignee: janitor-main-session
 ---
 
 # The harness now EMITS the model-change event — stop polling for it
