@@ -3,7 +3,7 @@ trdd-id: Q3WSQ9M5
 title: corpus_digest hashes a hand-picked field subset instead of the rendered body
 column: complete
 created: 2026-09-05T16:05:00+0200
-updated: 2026-09-16T12:34:43+0200
+updated: 2026-09-16T12:46:14+0200
 current-owner: main-session
 task-type: bugfix
 priority: low
@@ -85,3 +85,4 @@ the same `memdir_rel` default. 4 new regression tests added. All gates green.
 ## Approval log
 
 - 2026-09-16T12:34:43+0200 — COMPLETE by session. every acceptance box ticked, no open item, code long landed; closed on the 2026-09-16 triage (box counts verified first-hand).
+- 2026-09-16T13:15:00+0200 — implementation-commits backfill (field left empty at close; terminal card, so recorded here): 46048355 fix(claudemd-slim): corpus_digest hashes the rendered index body, not a hand-picked field pair (TRDD-Q3WSQ9M5) — found by git log -S on the acceptance tests named in the 2026-09-16 landing check.

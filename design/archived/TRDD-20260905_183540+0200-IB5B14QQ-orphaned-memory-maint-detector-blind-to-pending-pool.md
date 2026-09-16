@@ -3,7 +3,7 @@ trdd-id: IB5B14QQ
 title: orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
 column: complete
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-16T12:34:44+0200
+updated: 2026-09-16T12:46:21+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -110,3 +110,4 @@ for them.
 ## Approval log
 
 - 2026-09-16T12:34:44+0200 — COMPLETE by session. every acceptance box ticked, no open item, code long landed; closed on the 2026-09-16 triage (box counts verified first-hand).
+- 2026-09-16T13:15:00+0200 — implementation-commits backfill (field missing at close; terminal card, so recorded here): 028de468 fix(orphaned-memory-maint): the detector enumerates the per-dispatch pending pool through memory_dispatch_claim.candidates() and applies the same orphan rule to every unclaimed record, keyed pool:<dispatch_id>; legacy slot unchanged (TRDD-IB5B14QQ) — found by git log -S on the acceptance tests named in the 2026-09-16 landing check.
