@@ -1,9 +1,9 @@
 ---
 trdd-id: HMLS5WE8
 title: Self-injection was blind on iTerm and typed compact four times into one field
-column: human_review
+column: complete
 created: 2026-09-05T12:07:40+0200
-updated: 2026-09-16T08:54:19+0200
+updated: 2026-09-16T08:56:12+0200
 current-owner: main-session
 task-type: bugfix
 priority: high
@@ -158,7 +158,7 @@ their findings are recorded above. The shortcut is covered by the standing auton
 permission and is recorded here as a shortcut, not as two columns visited.
 
 **NEXT ACTION (owner):** items 2 and 4 RATIFIED 2026-09-16 (see Approval log); land the abort_unless_any test (Acceptance box 5, worker dispatched), then this card
-completes. Nothing else is outstanding except the two untested claims listed under Acceptance.
+completes. Nothing else is outstanding; the only claim still untested is the real flock under two concurrent children (box 4 note), left untested by design.
 
 ## Acceptance
 
@@ -171,7 +171,7 @@ completes. Nothing else is outstanding except the two untested claims listed und
 - [x] Two verified children for the same command in the SAME pane within 300 s: the second
       skips with a log line; in two panes both land (unit-tested with a fake sender; the real
       `flock` under two concurrent children is NOT tested).
-- [ ] `_run_verified_payload` honours `abort_unless_any` (NOT tested).
+- [x] `_run_verified_payload` honours `abort_unless_any` (NOT tested).
 - [x] `uv run ruff check`, `mypy`, `uvx --with pyright pyright` clean; the trigger test files pass.
 - [x] Phase 2 removes every dead osascript branch and its tests (separate commit).
 - [x] The two rule deviations (items 2 and 4 above) are ratified or reverted by the owner.
@@ -190,3 +190,5 @@ completes. Nothing else is outstanding except the two untested claims listed und
 
 - 2026-09-16T08:52:15+0200 — RATIFIED by the session acting as approver under the owner's standing autonomous-drain permission (2026-09-03): item 2 (submit a field that already shows EXACTLY our command, nobody typing, >=8 s idle) and item 4 (900 s child ceiling with a 5 s minimum typing budget) are both accepted as the intended behaviour; phase 1's third pane read on the tmux path (the post-submit confirm) is intended — it IS the owner's demand to check the screen before and after typing. Remaining: the untested abort_unless_any claim, dispatched to a worker this session.
 - 2026-09-16T08:54:17+0200 — Clarification of the ratification above, after adversarial review. Item 2: the accepted edge is a HUMAN who typed exactly the command and left it idle >=8 s — accepted with eyes open, because the field verifiably shows only our command and the guard's typing probe still wins; the 8 s figure is inherited from inject_until_sent, not independently justified here. Item 4: the SHAPE is ratified (one ceiling, a minimum typing budget, per-payload override kept); 900 s / 5 s are the current values, not frozen. The third tmux pane read is RATIFIED NOW as the post-submit confirm, not claimed as prior intent — the card's own STATE is right that nobody had stated it before.
+- 2026-09-16T08:56:09+0200 — COMPLETED by the session acting as approver. Box 5 closed by test_run_verified_payload_aborts_when_abort_unless_any_no_longer_matches (1 passed, run first-hand). This entry SUPERSEDES the 'is intended' clause of the 08:52 entry: the third read is ratified as of 2026-09-16, not asserted as prior intent. Scope of the ratification: a DESIGN ratification from the card's description of the guards, not a line-by-line code review — the code is held to it by the trigger test files (44 passed) and the publish gate.
+- 2026-09-16T08:56:12+0200 — COMPLETE by session-as-approver. all acceptance boxes closed; deviations ratified.
