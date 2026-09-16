@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: testing
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-16T12:44:47+0200
+updated: 2026-09-16T22:14:36+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -512,6 +512,7 @@ answer is not a better guess; it is naming the missing artifact.**
   the last of those was not optimism — it was a measurement card being asked to
   carry a design decision it had no criteria for. The split is the fix; noticing the
   scope drift six reviews in is the lesson.
+- 2026-09-16 21:57 — interim (reports/board-drain/20260916_215703+0200-QJ5LP4W2-budget-evidence.md): 12:40→21:54, 495 beats, 15 budget-exceeded beats in two clusters; oauth-rotator-tick and fleet-stop ran in all 495; max tick gap 220 s; no starvation seen. Not box 4: 9 h not 24 h, and beat gaps are not the card's per-task starting-marker stall count. The running daemon (pid 20757, started 10:04) predates the 12:40 3.5.5 install; daemon.py is byte-identical across the 3.5.1/3.5.4/3.5.5 caches (measured). Re-run the stall method after 2026-09-17 12:40.
 
 ## Approval log
 
