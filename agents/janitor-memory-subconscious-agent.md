@@ -119,8 +119,9 @@ SLUG=local                  # short subject for the filename — lowercase, e.g.
 # from the claim record, never retyped by hand (a mistyped path used to abort
 # the pass with the claim left open, since a missing/garbled header match makes
 # the claim indistinguishable from an orphaned one -- janitor#242 follow-up).
+# || true: a miss must yield an empty path, not abort the block under set -e (the retry and fallback below handle it)
 REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-  report-path --state-dir "$STATE_DIR" --chore "$PASS")"
+  report-path --state-dir "$STATE_DIR" --chore "$PASS" || true)"
 # Retry once WITHOUT --chore before falling back to create-and-paste: a
 # mistyped $PASS must not fork the report. `_resolve_claim` (memory_dispatch_claim.py)
 # fails CLOSED on ambiguity -- multiple in-flight claims for $STATE_DIR print a
@@ -134,7 +135,7 @@ REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispa
 if [ -z "$REPORT_FILE" ]; then
   echo "report-path --chore $PASS found no in-flight claim; retrying without --chore" >&2
   REPORT_FILE="$(uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-    report-path --state-dir "$STATE_DIR")"
+    report-path --state-dir "$STATE_DIR" || true)"
 fi
 # Fallback (the write failed, or "report-path" found no in-flight claim to
 # read back even without --chore): create the file yourself -- this skips the

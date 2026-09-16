@@ -1,9 +1,9 @@
 ---
 trdd-id: Q3WSQ9M5
 title: corpus_digest hashes a hand-picked field subset instead of the rendered body
-column: testing
+column: complete
 created: 2026-09-05T16:05:00+0200
-updated: 2026-09-05T17:52:00+0200
+updated: 2026-09-16T12:34:43+0200
 current-owner: main-session
 task-type: bugfix
 priority: low
@@ -81,3 +81,7 @@ working), `render_index` reuses `_render_body` once, `index_is_stale` takes
 the same `memdir_rel` default. 4 new regression tests added. All gates green.
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-09-16T12:34:43+0200 — COMPLETE by session. every acceptance box ticked, no open item, code long landed; closed on the 2026-09-16 triage (box counts verified first-hand).

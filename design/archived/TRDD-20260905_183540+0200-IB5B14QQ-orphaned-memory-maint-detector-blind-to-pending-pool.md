@@ -1,9 +1,9 @@
 ---
 trdd-id: IB5B14QQ
 title: orphaned-memory-maint detector reads only the legacy slot and never the per-dispatch pending pool
-column: testing
+column: complete
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-05T22:06:40+0200
+updated: 2026-09-16T12:34:44+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -106,3 +106,7 @@ for them.
       named above. (kept — `memory-maintenance.py::_write_pending` still writes
       it on every dispatch; existing `test_orphaned_local_pending_alarms` etc.
       exercise it.)
+
+## Approval log
+
+- 2026-09-16T12:34:44+0200 — COMPLETE by session. every acceptance box ticked, no open item, code long landed; closed on the 2026-09-16 triage (box counts verified first-hand).

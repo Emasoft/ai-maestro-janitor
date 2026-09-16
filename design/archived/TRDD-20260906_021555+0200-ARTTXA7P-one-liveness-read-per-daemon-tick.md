@@ -1,9 +1,9 @@
 ---
 trdd-id: ARTTXA7P
 title: The daemon tick must derive its chore decision and its transition-log line from ONE liveness-file read, not up to three
-column: testing
+column: complete
 created: 2026-09-06T02:15:55+0200
-updated: 2026-09-06T02:52:00+0200
+updated: 2026-09-16T12:35:28+0200
 implementation-commits: [a02c58de]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -84,7 +84,7 @@ TRDD-HXZ8B0IS: attribution at exactly the edge it was built to explain.
       mismatch TRDD-HXZ8B0IS wanted attributed is now impossible by construction).
 - [x] A real-file test proves `server_runs_chores()` / `claimed_chores()` are unchanged for
       a fresh file, a stale file, and an absent file (delegation is transparent).
-- [ ] Full suite green — at the publish gate.
+- [x] Full suite green — at the publish gate.
 
 ## Notes
 
@@ -92,3 +92,5 @@ Filed as a depth-1 EHT of TRDD-HXZ8B0IS per the parent's own construction: the p
 what the transition log SAYS; this fixes what it is SAYING IT ABOUT.
 
 ## Approval log
+- 2026-09-16T12:40:00+0200 — COMPLETE by session: the last box (full suite green at the publish gate) was met by the 3.5.5 release gate (fedb663a) with this card's code included; triage 2026-09-16.
+- 2026-09-16T12:35:28+0200 — COMPLETE by session. final box met by the 3.5.5 publish gate.

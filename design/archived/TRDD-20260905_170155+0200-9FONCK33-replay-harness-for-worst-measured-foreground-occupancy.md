@@ -1,9 +1,9 @@
 ---
 trdd-id: 9FONCK33
 title: replay harness for worst measured foreground occupancy
-column: testing
+column: complete
 created: 2026-09-05T17:01:55+0200
-updated: 2026-09-05T17:43:10+0200
+updated: 2026-09-16T12:34:44+0200
 current-owner: main-session
 task-type: feature
 scope: project
@@ -119,3 +119,7 @@ within its 60 s cadence under the real budget/survival-floor code from candidate
       `JANITOR_REPLAY_SCALE`).
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-09-16T12:34:44+0200 — COMPLETE by session. every acceptance box ticked, no open item, code long landed; closed on the 2026-09-16 triage (box counts verified first-hand).

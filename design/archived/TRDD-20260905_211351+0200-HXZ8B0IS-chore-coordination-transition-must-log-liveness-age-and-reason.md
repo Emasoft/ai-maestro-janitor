@@ -1,9 +1,9 @@
 ---
 trdd-id: HXZ8B0IS
 title: A chore-coordination transition must log the liveness file's ts, age and the None reason so an ownership flap attributes itself
-column: testing
+column: complete
 created: 2026-09-05T21:13:51+0200
-updated: 2026-09-06T05:17:11+0200
+updated: 2026-09-16T12:35:27+0200
 implementation-commits: [e9dea96a, a02c58de]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -101,7 +101,7 @@ and outside the window — the interleave, with no restart needed. One sample.
       `read-error`.
 - [x] `uv run pytest` on the daemon/harness_backend test files green; ruff/mypy/pyright
       clean on the touched files.
-- [ ] Full suite green — at the publish gate.
+- [x] Full suite green — at the publish gate.
 
 ## Notes
 
@@ -111,3 +111,5 @@ own read + one probe of the live file. The cadence/atomicity of the server's wri
 the hub's to measure; asked in the reply.
 
 ## Approval log
+- 2026-09-16T12:40:00+0200 — COMPLETE by session: the last box (full suite green at the publish gate) was met by the 3.5.5 release gate (fedb663a, 7130 tests, all gates passed) with this card's code included since a02c58de-era commits; triage 2026-09-16.
+- 2026-09-16T12:35:27+0200 — COMPLETE by session. final box met by the 3.5.5 publish gate.

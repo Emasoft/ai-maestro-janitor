@@ -1,9 +1,9 @@
 ---
 trdd-id: KI0H9C8N
 title: claudemd_slim cannot read metadata.topic so hub grouping degenerates to a flat list
-column: testing
+column: complete
 created: 2026-09-05T16:05:01+0200
-updated: 2026-09-05T18:31:00+0200
+updated: 2026-09-16T12:34:44+0200
 current-owner: main-session
 task-type: refactor
 priority: low
@@ -100,3 +100,7 @@ Tests: 20/20 pass (`tests/test_claudemd_slim.py`). ruff/mypy/pyright all clean.
 Nothing left open on this card.
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-09-16T12:34:44+0200 — COMPLETE by session. every acceptance box ticked, no open item, code long landed; closed on the 2026-09-16 triage (box counts verified first-hand).
