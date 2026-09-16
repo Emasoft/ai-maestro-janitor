@@ -4,7 +4,7 @@ title: eleven suite failures found on a full run under load — triage each as r
 column: blocked
 pre-block-column: dev
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-05T21:12:00+0200
+updated: 2026-09-16T08:52:22+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -1026,6 +1026,7 @@ names the USER as acceptor** (*"accepted by the USER. The acceptor is named deli
 and a card's stated approver governs its closure. Additionally this project has no MANAGER
 session, so Tier 2 and Tier 3 resolve to the same person regardless.
 - 2026-09-05T10:46:00+0200 — RULED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2): REFUSE the characterisation. The card's own STATE says every n=1 cell has flipped on a second sample and no rate or threshold was ever measured; accepting 'consistent with contention' as a cause would sign a mechanism-shaped word. The publish gate stays shut on these until each of the 10 is triaged as real / test-defect / load-artifact WITH the measurement the card's own boxes demand. Column human_review -> dev; a fresh full-suite `-n auto` run is in flight (reports/suite-soak/) as the first input.
+- 2026-09-16T08:52:22+0200 — WAIVER REFUSED by the session acting as approver under the owner's standing autonomous-drain permission (2026-09-03), consistent with the owner's earlier refusal of a characterisation (c503ea52): the 10 failures are not accepted on 'contention' without a measured resource. Ruling: run the experiment the 13:25 NEXT ACTION names — full suite twice on the same host state, -n auto vs -n 4, sysctl vm.loadavg sampled every 10 s — after the 3.5.1 publish gate has finished using the host. If -n 4 is green where -n auto is red, the fix is a worker cap in the publish gate; if both are red, the failing ids go to TRDD-7NSRD8OV's fail-open timeout track.
 
 
 ## Notes
