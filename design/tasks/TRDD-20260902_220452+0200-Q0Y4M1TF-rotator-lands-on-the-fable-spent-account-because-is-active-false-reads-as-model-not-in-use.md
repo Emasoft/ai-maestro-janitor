@@ -3,7 +3,7 @@ trdd-id: Q0Y4M1TF
 title: the rotator lands on the Fable-spent account because is_active false reads as model not in use, and a burn projection is allowed to do it
 column: testing
 created: 2026-09-02T22:04:52+0200
-updated: 2026-09-16T22:57:33+0200
+updated: 2026-09-16T23:01:23+0200
 review-after: 2026-09-18
 current-owner: janitor-main-session
 task-type: bugfix
@@ -79,5 +79,6 @@ box's own 24h bar is not yet met. `review-after: 2026-09-04` set (past the 22:22
 - 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 - 2026-09-16T22:57:32+0200 — box 3 is not verifiable from disk: rotator.log rotates every ~4 h (rotator.log.1 + rotator.log cover 2026-09-16 16:09→22:54 only), so 'one full day of rotator.log' is never on disk at once; 13 d 17 h of the post-install span is gone (report reports/board-drain/20260916_225614+0200-Q0Y4M1TF-rotator-audit.md). In the retained window: 0 automatic switches, 0 violations; the only recorded post-install switch (2026-09-03 10:15, target 7d=33%) was a non-violation; the fix commits are in v3.5.5. A 24.5 h capture is running (scripts_dev/q0y4m1tf_rotator_capture_24h.sh, pid 53250, output reports/board-drain/rotator-capture-20260916/rotator-24h.txt, 30-min union of both files). NEXT ACTION after 2026-09-17 23:00: audit rotator-24h.txt for auto: switched events with target 7d/Fable ≥ 99%; zero ⇒ tick box 3 and complete.
 - 2026-09-16T22:57:33+0200 — column → testing. 24h rotator-log capture in flight for box 3
+- 2026-09-16T23:01:23+0200 — guards for the 2026-09-17 23:00 audit: (1) reports/board-drain/rotator-capture-20260916/rotator-24h.txt.ticks must hold ≥ 48 lines — fewer means the capture loop died (it is a nohup child, not launchd-kept; a logout or reboot kills it) — re-run, do not tick; (2) the loop unions only rotator.log.1 + rotator.log every 30 min, so a burst rotating twice inside 30 min leaves a silent gap — compare per-tick line counts before trusting a zero; (3) sort -u orders single-line ISO-stamped entries only; count violations from the auto: switched lines and confirm the target's 7d/Fable percentages are on that line (or its neighbours) before counting; (4) the .raw file grows ~400 KB per tick (~20 MB), gitignored under reports/.
 
 ## Notes and lessons learned
