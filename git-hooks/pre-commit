@@ -11,9 +11,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-uv run pytest -q -p no:cacheprovider tests/test_detector_executable_bits.py \
-  >/tmp/precommit-execbits.txt 2>&1 || {
-    cat /tmp/precommit-execbits.txt
-    echo "pre-commit: a tracked script lost its executable bit — chmod +x <file> && git add <file>"
+uv run pytest -q -p no:cacheprovider tests/test_detector_executable_bits.py || {
+    echo "pre-commit: a tracked script lost its executable bit — chmod 755 <file> && git add <file>"
     exit 1
   }
