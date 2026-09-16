@@ -19,8 +19,8 @@ relevant-rules: []
 external-refs: [TRDD-2F3I2P18]
 pre-block-column: testing
 unblock-when: []
-blocker-probe: [trddgrep, --design-dir, /Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/design, --porcelain, show, VT332PJG]
-blocker-holds-if: not-match:(complete|completed|cancelled|superseded)
+blocker-probe: [trddgrep, --porcelain, show, VT332PJG]
+blocker-holds-if: not-match:\t(complete|completed|cancelled|superseded)\t
 assignee: janitor-main-session
 ---
 
