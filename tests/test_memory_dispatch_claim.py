@@ -514,6 +514,93 @@ def test_expire_stale_claims_local_cadence_faster_than_floor_still_waits_for_flo
     assert len(past_floor) == 1 and past_floor[0]["dispatch_id"] == dispatch_id
     assert not p.exists()
 
+def test_expire_stale_claims_closes_from_a_finished_but_unchecked_report(tmp_path, monkeypatch):
+    """A curator that finished its pass and wrote the outcome marker, but never ran
+    `complete`, must be closed instead of expired (TRDD-I8AAJ3PG, EHT of janitor#238)."""
+    _fixed_cadence(monkeypatch)
+    project = tmp_path / "project"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    epoch = 1_000_000
+    p = _claimed(state_dir, epoch, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    report = reports_dir / "20260916_120000+0000-repair-local.md"
+    report.write_text(
+        f"<!-- generated -->\nClaim: dispatch_id={dispatch_id}, scope=LOCAL,\nroot=/tmp\n"
+        "\nbody\n<!-- janitor-outcome: mutation -->\n",
+        encoding="utf-8",
+    )
+    future = epoch + 30_000
+    os.utime(report, (future, future))
+
+    acted = mdc.expire_stale_claims(state_dir, now=future, max_age_s=0)
+
+    assert len(acted) == 1
+    assert acted[0]["status"] == "closed" and acted[0]["dispatch_id"] == dispatch_id
+    assert not (state_dir / f"{mdc.EXPIRED_PREFIX}{dispatch_id}.json").exists()
+    done = state_dir / f"{mdc.DONE_PREFIX}{dispatch_id}.json"
+    assert done.is_file()
+    payload = json.loads(done.read_text(encoding="utf-8"))
+    assert payload["report"] == str(report)
+
+
+def test_expire_stale_claims_ignores_a_report_naming_a_different_dispatch(tmp_path, monkeypatch):
+    """A report's header matching a DIFFERENT dispatch_id must never close this claim —
+    proves the match is by id, not by mtime or filename alone."""
+    _fixed_cadence(monkeypatch)
+    project = tmp_path / "project"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    epoch = 1_000_000
+    p = _claimed(state_dir, epoch, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    report = reports_dir / "20260916_120000+0000-repair-local.md"
+    report.write_text(
+        "Claim: dispatch_id=999999-zzzz9999, scope=LOCAL,\nroot=/tmp\n\n"
+        "<!-- janitor-outcome: mutation -->\n",
+        encoding="utf-8",
+    )
+    future = epoch + 30_000
+    os.utime(report, (future, future))
+
+    acted = mdc.expire_stale_claims(state_dir, now=future, max_age_s=0)
+
+    assert len(acted) == 1
+    assert acted[0]["status"] == "expired" and acted[0]["dispatch_id"] == dispatch_id
+    assert (state_dir / f"{mdc.EXPIRED_PREFIX}{dispatch_id}.json").is_file()
+
+
+def test_expire_stale_claims_in_flight_report_does_not_close_early(tmp_path, monkeypatch):
+    """A report whose header names this dispatch but carries no outcome marker yet is a
+    pass still IN FLIGHT — it must not be treated as a completion signal either way, so
+    the ordinary cadence-based expiry decides (janitor#242 correction)."""
+    _fixed_cadence(monkeypatch)
+    project = tmp_path / "project"
+    state_dir = project / ".janitor" / "state"
+    state_dir.mkdir(parents=True)
+    epoch = 1_000_000
+    p = _claimed(state_dir, epoch, "repair")
+    dispatch_id = p.name[len(mdc.CLAIMED_PREFIX):-len(".json")]
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True)
+    report = reports_dir / "20260916_120000+0000-repair-local.md"
+    report.write_text(
+        f"Claim: dispatch_id={dispatch_id}, scope=LOCAL,\nroot=/tmp\n\nstill working\n",
+        encoding="utf-8",
+    )
+    future = epoch + 30_000
+    os.utime(report, (future, future))
+
+    acted = mdc.expire_stale_claims(state_dir, now=future, max_age_s=0)
+
+    assert len(acted) == 1
+    assert acted[0]["status"] == "expired" and acted[0]["dispatch_id"] == dispatch_id
+    assert (state_dir / f"{mdc.EXPIRED_PREFIX}{dispatch_id}.json").is_file()
+
 
 def test_complete_claim_renames_claimed_to_done_with_report(tmp_path):
     """The primary-key check-in: a claimed record becomes a done one, carrying the

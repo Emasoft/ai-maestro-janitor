@@ -538,6 +538,44 @@ def test_an_old_claimed_record_checked_in_done_is_not_reported_stale(tmp_path):
     assert _ledger_lines(project) == []
     assert done.is_file(), "an already-completed record must be left exactly where it was"
 
+def test_an_old_claimed_record_with_a_finished_report_is_closed_not_expired(tmp_path):
+    """TRDD-I8AAJ3PG (EHT of janitor#238): a curator that finished its pass and wrote the
+    `janitor-outcome` marker, but never ran `complete`, must be closed from its own
+    report instead of expired as presumed-dead — the detector prints the closed line,
+    not the stale-claim finding, and no MEMPASS-STALE-CLAIM lands in the ledger."""
+    home, project, gstate, settings, state_dir = _fixture(tmp_path)
+    root = str(project / "memory")
+    _write_settings(settings, repair_per_day=1000.0)
+    now = int(time.time())
+    old = now - 30_000  # past the 6h floor
+    state_dir.mkdir(parents=True, exist_ok=True)
+    dispatch_id = "3333333333-cccccccc"
+    payload = {
+        "marker": "[janitor-memory-repair]", "intervention": "repair", "scope": "LOCAL",
+        "root": root, "stamped_at": old, "dispatch_id": dispatch_id,
+    }
+    claimed = state_dir / f"{memory_dispatch_claim.CLAIMED_PREFIX}{dispatch_id}.json"
+    claimed.write_text(json.dumps(payload), encoding="utf-8")
+    _stamp_last_run(gstate, "repair", "LOCAL", root, old)
+    reports_dir = project / "reports" / "janitor-memory-subconscious-agent"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report = reports_dir / "20260916_120000+0000-repair-local.md"
+    report.write_text(
+        f"<!-- generated -->\nClaim: dispatch_id={dispatch_id}, scope=LOCAL,\nroot={root}\n"
+        "\nbody\n<!-- janitor-outcome: mutation -->\n",
+        encoding="utf-8",
+    )
+    os.utime(report, (old + 100, old + 100))
+
+    out = _run(home, project, gstate, settings)
+
+    assert "closed from its report" in out
+    assert "the curator returned without running complete" in out
+    assert _ledger_lines(project) == []
+    assert not claimed.exists()
+    assert not (state_dir / f"{memory_dispatch_claim.EXPIRED_PREFIX}{dispatch_id}.json").exists()
+    assert (state_dir / f"{memory_dispatch_claim.DONE_PREFIX}{dispatch_id}.json").is_file()
+
 
 def test_superseded_pool_record_is_not_orphaned(tmp_path):
     """A SUPERSEDED record (renamed by `_supersede_older_unclaimed`) is likewise

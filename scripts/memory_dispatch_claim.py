@@ -46,6 +46,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import re
+
 import memory_settings  # noqa: E402
 import orphaned_memory_maint as omm  # noqa: E402
 import state  # noqa: E402
@@ -143,6 +145,53 @@ def _matching_records(
             continue
         out.append((path.name[len(prefix):-len(".json")], payload))
     return out
+
+
+_REPORT_SUBDIR = ("reports", "janitor-memory-subconscious-agent")
+_HEADER_SCAN_LINES = 20
+_OUTCOME_RE = re.compile(r"<!--\s*janitor-outcome:\s*(mutation|noop[^>]*)\s*-->")
+
+
+def _find_completion_report(state_dir: Path, dispatch_id: str, stamped_at: int) -> tuple[str, bool] | None:
+    """`(report_path, has_outcome_marker)` when EXACTLY ONE report under `state_dir`'s
+    own project — `state_dir` is `<project>/.janitor/state`, so the project root is its
+    grandparent, matching every caller (the real detector's `state.state_dir()`, and this
+    module's tests, which never touch `state.project_root()` at all) — names `dispatch_id`
+    in its `Claim:` header AND was written after the claim (mtime newer than
+    `stamped_at`); `None` on zero or on MORE than one match — an ambiguous or absent
+    signal must never substitute for the cadence-based expiry this backs up.
+
+    The header alone is NOT proof of completion (janitor#242 correction): a chore skill
+    writes its `Claim: dispatch_id=...` header at the START of a pass, so it names an
+    in-flight report exactly as readily as a finished one. The caller decides what a
+    header match with no outcome marker means (it must NOT be treated as a close).
+
+    Boundary-anchored, not a bare substring (2026-09-16 adversarial review of this same
+    TRDD): a plain `needle in text` would also match a LONGER id sharing this one's
+    prefix (dispatch ids are `<epoch>-<hex>`, so a naive substring risks exactly that),
+    or prose that merely mentions this id in passing (e.g. a "supersedes" note). The
+    lookahead requires the id to end at a non-identifier character."""
+    reports_dir = state_dir.parent.parent.joinpath(*_REPORT_SUBDIR)
+    try:
+        paths = sorted(reports_dir.glob("*.md"))
+    except OSError:
+        return None
+    needle_re = re.compile(re.escape(f"dispatch_id={dispatch_id}") + r"(?![\w-])")
+    matches: list[tuple[str, bool]] = []
+    for path in paths:
+        try:
+            if path.stat().st_mtime <= stamped_at:
+                continue
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        head = "\n".join(text.splitlines()[:_HEADER_SCAN_LINES])
+        if not needle_re.search(head):
+            continue
+        matches.append((str(path), bool(_OUTCOME_RE.search(text))))
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def _resolve_claim(
@@ -384,14 +433,23 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
     # than 6h (e.g. 4h) would otherwise expire a claim before a real pass could plausibly
     # finish it; the floor overrides that, never the reverse.
 
+    Before actually expiring a record that crossed its threshold, check whether the
+    curator already finished and just never ran `complete` (janitor#238 EHT,
+    TRDD-I8AAJ3PG): `_find_completion_report` looks for exactly one report naming this
+    `dispatch_id` in its header. A header match with no `janitor-outcome` marker is a
+    pass still IN FLIGHT (the header is written at the START of a pass) — that is not
+    evidence either way, so the record falls through to the ordinary age-based expiry
+    below, unchanged. A header match WITH the marker closes the claim via `complete_claim`
+    (status `"closed"`, not `"expired"`) instead of expiring it.
+
     Malformed/unreadable claimed files are left alone — a different, already-reported
     finding (MEMPASS-MALFORMED), not this function's job to clean up. An expired record
     is still completable: `complete_claim` reads a `memory-maint-expired-<id>.json` record
     when the CLAIMED one it expected is gone (2026-09-15 review of `4a5d3434`), so a
     slow-but-alive curator that reaches `complete` after its claim was reclaimed still
     closes cleanly instead of racing a re-dispatch of the same chore. Returns one dict per
-    record expired: `{"dispatch_id", "intervention", "status": "expired", "age_s",
-    "cadence_s", "scope"}`.
+    record acted on: `{"dispatch_id", "intervention", "status": "expired"|"closed", "age_s",
+    "cadence_s", "scope"}` (a `"closed"` record also carries `"report"`).
     """
     acted: list[dict] = []
     for path in sorted(state_dir.glob(f"{CLAIMED_PREFIX}*.json")):
@@ -422,6 +480,23 @@ def expire_stale_claims(state_dir: Path, now: int, max_age_s: float) -> list[dic
         age_s = omm.pending_age_s(payload, now=now)
         if age_s < threshold:
             continue
+
+        found = _find_completion_report(state_dir, dispatch_id, payload["stamped_at"])
+        if found is not None:
+            report_path, has_outcome = found
+            if has_outcome and complete_claim(state_dir, dispatch_id, report_path, now=now):
+                print(f"MEMPASS-CLOSED-FROM-REPORT {dispatch_id} {chore} report={report_path}")
+                acted.append({
+                    "dispatch_id": dispatch_id, "intervention": chore, "status": "closed",
+                    "age_s": age_s, "cadence_s": cadence_s, "scope": scope,
+                    "report": report_path,
+                })
+                continue
+            # else: report exists but is still in flight (no outcome marker yet), or
+            # `complete_claim` failed -- lost a race, or the CLAIMED file itself vanished
+            # from under us (e.g. another sweep expired it first) -- either way, fall through to
+            # ordinary cadence-based expiry below, unchanged.
+
         target = state_dir / f"{EXPIRED_PREFIX}{dispatch_id}.json"
         try:
             path.rename(target)

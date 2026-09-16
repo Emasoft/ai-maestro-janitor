@@ -90,7 +90,10 @@ def _check_claimed_pool(state_dir: Path, seen: Path, now: int) -> None:
     the actual per-record decision (its own chore's cadence x factor, the 6h floor) and
     the rename; this just reports the ones it EXPIRED as a MEMPASS-STALE-CLAIM finding.
     A record explicitly checked in via `complete_claim` (the `complete` subcommand) is
-    renamed DONE before it ever reaches this sweep — never a finding."""
+    renamed DONE before it ever reaches this sweep — never a finding. A record the sweep
+    itself closed from a completion report it found unattended (TRDD-I8AAJ3PG, the curator
+    finished but never ran `complete`) is reported as an informational one-liner instead —
+    it needs no human attention, and the DONE rename already happened."""
     try:
         acted = memory_dispatch_claim.expire_stale_claims(state_dir, now, 0)
     except Exception as exc:  # noqa: BLE001 - a sweep failure must never break the fire
@@ -98,6 +101,18 @@ def _check_claimed_pool(state_dir: Path, seen: Path, now: int) -> None:
         return
 
     for record in acted:
+        if record["status"] == "closed":
+            dispatch_id = record["dispatch_id"]
+            intervention = record["intervention"]
+            scope = record["scope"]
+            basename = Path(record["report"]).name
+            msg = (
+                f"claim {dispatch_id} ({intervention}/{scope}) "
+                f"closed from its report {basename} — the curator returned without running complete"
+            )
+            state.log_line("orphaned-memory-maint", msg)
+            print(f"[orphaned-memory-maint] {msg}", flush=True)
+            continue
         if record["status"] != "expired":
             continue
         dispatch_id = record["dispatch_id"]
