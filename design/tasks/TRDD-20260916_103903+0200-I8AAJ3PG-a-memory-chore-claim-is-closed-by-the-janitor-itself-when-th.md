@@ -3,7 +3,7 @@ trdd-id: I8AAJ3PG
 title: A memory chore claim is closed by the janitor itself when the curator's report exists
 column: testing
 created: 2026-09-16T10:39:03+0200
-updated: 2026-09-16T12:10:47+0200
+updated: 2026-09-16T12:11:59+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -28,6 +28,7 @@ Problem: closing a claim depends on the curator agent remembering to run set-rep
 - 2026-09-16T12:05:00+0200 — landed: fd8d7d34 (close-from-report), 31860555 + b90666a5 (claim step prints the header, then creates the report skeleton itself), 28fcd137 (marked-report preference, state-dir guard), fdf2f22f (report-path verb, worktree-aware reports dir), 4c46b694 (curator appends, never creates). Fix part (2) — the spawning session running complete from the curator's return line — deliberately dropped: the sweep closes from the report and the claim step now owns the file, so a second closer would only add a place to be wrong. Live check (d) pending; column testing.
 - 2026-09-16T12:15:00+0200 — review correction: dropping part (2) moved the residual advice-dependency, it did not remove it. The sweep closes from the report only when the curator appended the janitor-outcome marker; a skipped marker reads as in-flight and the claim falls back to age expiry. The marker is now the single skippable step; a machine-side close on curator exit would be the next guard if (d) shows it skipped.
 - 2026-09-16T12:20:00+0200 — supersedes the 'machine-side close on curator exit' line above: no machine observes the curator's exit (only the spawning session does, which is fix part (2) again). The observable next guard is sweep-side: a header-matched report with no outcome marker whose mtime has been stable past the claim's cadence threshold is closed with a distinct outcome (unmarked) instead of waiting for age expiry. Two skippable curator steps remain, not one: the marker, and the header paste on the fallback path (a skipped paste hits the FATAL guard and aborts with the claim open).
+- 2026-09-16T12:25:00+0200 — correction, final for this session: the unmarked close is a CANDIDATE, not a decision. A stable mtime measures the curator's think time, not its liveness (a big consolidate can go 20+ minutes before its first append), and a false close mislabels a run that then finishes with nothing re-dispatched — worse than the duplicate run that age expiry risks. Precondition for any such design: a liveness signal the sweep can see (the curator touching the report or a sidecar per phase). Count corrected: two steps whose skip strands the claim (marker; header paste on the fallback path), two whose skip only degrades the label or path (set-report on the fallback path; complete). Mint a TRDD only if (d) shows the marker skipped.
 
 ## Acceptance
 
