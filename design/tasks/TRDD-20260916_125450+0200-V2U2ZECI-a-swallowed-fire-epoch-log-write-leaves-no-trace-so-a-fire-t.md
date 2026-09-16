@@ -3,7 +3,7 @@ trdd-id: V2U2ZECI
 title: A swallowed fire-epoch log write leaves no trace, so a fire that ran looks like a fire that never happened
 column: todo
 created: 2026-09-16T12:54:50+0200
-updated: 2026-09-16T12:54:50+0200
+updated: 2026-09-16T12:56:18+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -23,3 +23,4 @@ Observed 2026-09-16 12:47 local: the first cron fire after the local plugin roll
 ## Approval log
 
 - 2026-09-16T12:54:50+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-16T12:58:00+0200 — review correction: the cause is NOT established. Two candidates fit the three facts (quiet token printed, no fire line, no dispatch.log line): (A) the fire-log append raised inside its fail-open except and main() went on; (B) an early return upstream of the write printed the quiet token and exited. Discriminator already on disk: the detector outcome stamps in .janitor/state — under (A) at least one last-outcome-*.ts would carry a 12:47-12:49 epoch; the five read so far all carry the 12:46:28 fire's epochs, which leans (B). First step of the fix: list every last-outcome-*.ts epoch, then read main() for a non-silent early return ahead of the fire-log write. Fix shape corrected: stderr only (an already-open fd cannot share a path-level failure); a state.log_line in the same except would fail the same way or crash the fire. Test shape corrected: pre-create heartbeat-fires.log as a DIRECTORY so the append raises IsADirectoryError while dispatch.log in the same dir stays writable; assert quiet token, rc 0, one stderr line naming the error, dispatch.log still written.
