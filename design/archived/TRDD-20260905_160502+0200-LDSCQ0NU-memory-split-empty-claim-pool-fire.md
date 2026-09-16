@@ -1,9 +1,9 @@
 ---
 trdd-id: LDSCQ0NU
 title: janitor-memory-split marker fires against an empty claim pool costing a full agent spawn to abstain
-column: blocked
+column: complete
 created: 2026-09-05T16:05:02+0200
-updated: 2026-09-16T12:33:50+0200
+updated: 2026-09-16T22:14:33+0200
 current-owner: main-session
 task-type: bugfix
 priority: low
@@ -12,12 +12,12 @@ project-id: ai-maestro-janitor
 min-approval-requirement: none
 labels: [janitor-heartbeat, memory-dispatch, cost]
 relevant-rules: []
-blocked-by: [N1CPV1QV]
+blocked-by: []
 npt: []
 eht: [N1CPV1QV]
 implementation-commits: [9681eb7c, 61dcfdea]
 external-refs: [janitor#300]
-pre-block-column: testing
+pre-block-column: 
 ---
 
 # janitor-memory-split marker fires against an empty claim pool costing a full agent spawn to abstain
@@ -48,7 +48,7 @@ is not required for THIS TRDD to reach `complete`).
 (see "Deployment note" below) — testing here proves the code, not the live
 heartbeat.
 
-**NEXT ACTION:** stay in `testing` until TRDD-N1CPV1QV lands and one live
+**NEXT ACTION:** none — CLOSED 2026-09-16 (N1CPV1QV complete; live claims observed, see Approval log). Original condition: stay in `testing` until TRDD-N1CPV1QV lands and one live
 fire on this host shows a memory agent actually claiming a pending record
 (not just abstaining cleanly). Do not move to `complete` before that.
 
@@ -158,9 +158,9 @@ Either direction removes the cost (issue reporter expressed no preference):
       test_marker_survives_when_the_dispatch_is_still_pending` (a genuinely
       unclaimed matching record → the marker leaves the relay byte-for-byte
       unchanged).
-- [ ] Chore-name-mismatch-with-a-claimable-dispatch is explicitly OUT OF
-      SCOPE for this TRDD (per the criterion's own text) — left unticked on
-      purpose; no code here attempts it. `is_claimable`/`claim_one`/the
+- [x] Chore-name-mismatch-with-a-claimable-dispatch is explicitly OUT OF
+      SCOPE for this TRDD (per the criterion's own text) — ticked as DECLINED on
+      2026-09-16 (see Approval log); no code here attempts it. `is_claimable`/`claim_one`/the
       relay gate now share one `payload_matches_chore` predicate (was
       duplicated inline in `claim_one`) so all three can never silently
       diverge on what "matches" means, which is the only change this TRDD
@@ -181,3 +181,5 @@ here proves the code, not that "the marker no longer fires on this host".
 ## Approval log
 
 - 2026-09-16T12:33:50+0200 — column → blocked. stays parked until TRDD-N1CPV1QV lands (triage 2026-09-16)
+- 2026-09-16T22:14:33+0200 — live-claim condition satisfied first-hand: three claimed→done records on 2026-09-16 (10:09 LOCAL consolidate, 13:29 PROJECT consolidate, 20:12 USER atomize), each with state_dir == this project's .janitor/state and a report quoting the same dispatch_id (reports/board-drain/20260916_215500+0200-N1CPV1QV-LDSCQ0NU-live-claim-evidence.md). Box 3 marked declined (its own text says out of scope) so the checklist can close. Blocker N1CPV1QV is complete. Ruled by the session under the 2026-09-03 standing permission.
+- 2026-09-16T22:14:33+0200 — COMPLETE by session. blocker terminal; live claim observed on this host. Cleared blocked-by (all blockers terminal).

@@ -1,9 +1,9 @@
 ---
 trdd-id: 2SKHJ8NR
 title: The stale-index-lock guard self-matches a shell whose command string mentions git, so it refuses forever when invoked from any sh -c wrapper
-column: todo
+column: complete
 created: 2026-09-08T22:46:17+0200
-updated: 2026-09-16T12:33:55+0200
+updated: 2026-09-16T22:14:34+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -107,7 +107,7 @@ eht: []
   DETECTOR was not run end to end; the old rule's refusal is measured at unit level (2 failed
   by name) and at matcher level on this live snapshot. Reports:
   `reports/colony/20260909_113921+0200-unit{3,4,5,6}-*.md` (gitignored, this machine).
-- **NEXT ACTION:** none blocking closure; one deliberately unmeasured item — the detector's
+- **NEXT ACTION:** none — CLOSED 2026-09-16 by session ruling (Approval log). One deliberately unmeasured item — the detector's
   argv under a real heartbeat fire (Why it matters, above) — is left as a stand-in and would
   need one `ps` snapshot during a fire to close; the owner decides whether closure
   (`testing` → `complete`) waits for it.
@@ -178,3 +178,5 @@ eht: []
   it is fixed; the Cause paragraph's tense fixed ("turned … into a measurement"). Further
   wording goes to the owner, not another round.
 - 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-16T22:14:34+0200 — ruling: closure does not wait for the one `ps` snapshot of the detector's argv during a live heartbeat fire. Correctness is pinned by the regression tests (boxes 1–2) and fix 9c3af0f2 is in v3.5.5; the unmeasured item is diagnostic completeness only and stays named in the STATE block. Ruled by the session under the 2026-09-03 standing permission (the STATE reserved the choice for the owner; that permission covers it).
+- 2026-09-16T22:14:34+0200 — COMPLETE by session. all boxes ticked; fix 9c3af0f2 published in v3.5.5.

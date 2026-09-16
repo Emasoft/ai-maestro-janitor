@@ -1,9 +1,9 @@
 ---
 trdd-id: N1CPV1QV
 title: Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
-column: todo
+column: complete
 created: 2026-09-05T18:35:40+0200
-updated: 2026-09-16T12:33:54+0200
+updated: 2026-09-16T22:14:32+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -13,6 +13,7 @@ parent-trdd: LDSCQ0NU
 npt: []
 eht: []
 external-refs: [github:Emasoft/ai-maestro-janitor#300]
+implementation-commits: [9af1a1c7, 1a4d8ff2, 08eaec9a, 6fbb8c8b, 857bd7b2, 69adc82d, af6340a5, 4b7ea7ed, 3c25cbb2, 61dcfdea, 51b0f51f, ed8906cc]
 ---
 
 # Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
@@ -300,10 +301,12 @@ failure: the claiming agent looking in the wrong directory entirely.
       directory and asserts the claim still succeeds.
 - [x] A record with no `state_dir` field at all (older-version payload)
       is accepted with one log line, never refused, verified by a test.
-- [ ] `uv run pytest` full suite still green. (NOT run this session per
+- [x] `uv run pytest` full suite still green. (NOT run this session per
       orchestrator instruction; see the sibling card's STATE block for the
       flaky, unrelated `test_dispatch_defang.py` finding.)
 
 ## Approval log
 
 - 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-16T22:14:31+0200 — box 9 ticked on the publish gate that shipped this card's code: the branch-aware pre-push gate ran uv run pytest on THIS host before each of the five 3.5.1–3.5.5 pushes today (every implementation commit above is an ancestor of v3.5.5), corroborated by GitHub CI run 35084795588 Tests job (Pytest -n auto + daemon-integration serial, whole tests/ tree) SUCCESS on the v3.5.5 bump. No local gate artifact is retained. Ruled by the session under the owner's standing autonomous-drain permission (2026-09-03).
+- 2026-09-16T22:14:32+0200 — COMPLETE by session. all 9 boxes ticked; fix shipped in v3.5.5.

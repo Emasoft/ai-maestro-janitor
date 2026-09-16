@@ -87,10 +87,16 @@ def _request_model_opus() -> str:
         # Rotation must continue on a failed keystroke, but silently swallowing it
         # is the exact failure shape TRDD-V2U2ZECI removed elsewhere: the operator
         # needs to see WHY the model switch was not typed, not just that it wasn't.
-        if sys.stderr is not None:
+        # suppress, not a None-check: here a raised write would escape this except
+        # block and fail the rotation this function promises not to fail. Truncate
+        # to one line/200 chars -- a tmux/terminal-driver exception can carry
+        # multi-line captured screen text.
+        exc_text = str(exc)
+        exc_line = exc_text.splitlines()[0][:200] if exc_text else ""
+        with contextlib.suppress(Exception):
             sys.stderr.write(
                 f"janitor rotate_to: WARNING /model opus not typed "
-                f"({type(exc).__name__}: {exc}); continuing\n"
+                f"({type(exc).__name__}: {exc_line}); continuing\n"
             )
         return "not-automatable"
     return "typed" if sent else "not-automatable"

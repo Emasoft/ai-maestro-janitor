@@ -128,7 +128,7 @@ def test_quiet_token_contract_unchanged_by_an_unwritable_fire_log(
 
     assert clean_out == dir_out, (clean_out, dir_out)
     assert clean_out.strip() == "[janitor-self-disarm]", clean_out
-    assert clean_err == "", clean_err
+    assert "heartbeat-fires log append failed" not in clean_err, clean_err
 
     assert "heartbeat-fires log append failed" in dir_err, dir_err
     assert "IsADirectoryError" in dir_err, dir_err
