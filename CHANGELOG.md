@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.2] — 2026-09-16
+
+### Bug Fixes
+
+- **hooks:** Restore the executable bit on pre-compact-handoff.py and pre-tool-context-usage.py (CI Smoke rc=126 on 3.5.1) (18dbb9d)
+
+### Documentation
+
+- **skills:** Merge-protocol carries the two consolidate gate checks as prose again; the executable heredocs live only in SKILL.md (TRDD-V3BQT7QE) (c663728)
+- Add TRDD-PA9E2GJ1, TRDD-7ZMQSXO6, TRDD-NEVQOHGS -- the three churn child cards not yet covered, with measurable acceptance (TRDD-V3BQT7QE) (1635877)
+- **TRDD-V3BQT7QE:** STATE reflects 3.5.1 shipped, the CI exec-bit fix, and the three children as EHTs (3d45253)
+- **TRDD-Q8PNPRTW:** The ordered -n auto vs -n 4 experiment came back all green; blocker cleared, card to testing (db6d14b)
+
+### Testing
+
+- **hooks:** Every scripts/hooks/*.py must be mode 100755 in the git index, the way the CI Smoke loop execs them (0ec065c)
 ## [3.5.1] — 2026-09-16
 
 ### Bug Fixes
@@ -62,6 +78,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **memory:** LOW finding when a claim was closed against a report path that does not exist (TRDD-V3BQT7QE) (48a2922)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.5.1 (60bedab)
 
 ### Refactor
 
