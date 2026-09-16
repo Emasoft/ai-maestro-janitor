@@ -3,7 +3,7 @@ trdd-id: S2RZHXU7
 title: A one-call account rotation — the janitor-rotate-account-to skill and the rotate_to.py script it wraps, with headroom-driven target selection when no account is named
 column: complete
 created: 2026-09-06T05:44:34+0200
-updated: 2026-09-16T22:18:11+0200
+updated: 2026-09-16T22:21:40+0200
 implementation-commits: [ae96dd12, 9d88e2db, 8342337b, 6a5199cd]
 current-owner: janitor-main-session
 task-type: feature
@@ -121,3 +121,4 @@ file, no daemon and the chore claimed by a (fake) server.
 - 2026-09-16T12:37:56+0200 — column → todo. one open box with a concrete missing test; no session on it (triage 2026-09-16)
 - 2026-09-16T22:18:11+0200 — box 3 ticked: the keystroke half is pinned by three tests in tests/test_rotate_to.py that drive the REAL _request_model_opus through terminal_trigger with only the pane boundary injected (command '/model opus', esc_first, bypass_interrupt_cooldown; no-pane → not-automatable; a raising send → not-automatable with a WARNING line on stderr), mutation-checked (9d88e2db, 8342337b, 6a5199cd); the ORDERING half ('first', before the credential switch) stays pinned by the pre-existing test_no_fable_path_… test that mocks _request_model_opus. A swallowed keystroke failure is no longer silent. COMPLETE by the session under the 2026-09-03 standing permission.
 - 2026-09-16T22:18:11+0200 — COMPLETE by session. all 5 boxes ticked; keystroke path pinned and published-ready.
+- 2026-09-16T22:21:40+0200 — release status: commits 9d88e2db, 8342337b and 6a5199cd are on main and NOT in any published version yet (3.5.5 shipped only ae96dd12); they ride the next publish.py. release-via field: absent. The ORDERING half of box 3 ('first', before the credential switch) is pinned by test_no_fable_path_picks_max_headroom_and_requests_model_fallback  (which mocks _request_model_opus); the keystroke half by the three real-path tests. 6a5199cd also carries the V2U2ZECI dispatch change and three card archivals (commit-boundary slip, disclosed).
