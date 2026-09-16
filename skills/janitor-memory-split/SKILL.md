@@ -80,8 +80,9 @@ uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" --chore s
 It prints the `(intervention, scope, root)` the scheduler stamped when it emitted your
 marker, and atomically hands that dispatch to you alone. `$SCOPE_ROOT` below is the
 `root` it printed. **The path is ABSOLUTE on purpose** — your cwd as a spawned agent
-is not guaranteed to be the project root. Also capture the `CLAIM_ID=<id>` it
-prints last (closes the claim).
+is not guaranteed to be the project root. Capture the `CLAIM_ID=<id>` line (it
+follows the `(intervention, scope, root)` line; the CLOSE YOUR CLAIM block after it
+repeats the two close commands).
 
 **Any non-zero exit, an unreadable file, or a chore name other than `split`: STOP and
 report that** — do not pick a scope yourself, do not re-derive what is due, and **do
@@ -94,13 +95,11 @@ guessing here is dangerous, not just untidy:
 
 ### 1. Find the single page to split
 
+Exclusion-list rationale (why these paths are skipped):
+[split-plan-details § Finding the single page to split](references/split-plan-details.md#finding-the-single-page-to-split-the-exclusion-list).
+
 ```bash
 CAP="$(uv run "$PLUGIN/scripts/memory_settings_cli.py" get split_max_bytes | grep -oE '[0-9]+' | head -1)"
-# Every real NOTE in the scope strictly larger than the cap, biggest first. EXCLUDE
-# the non-note set (mirrors the librarian's _NON_NOTE_NAMES): the staging dir; the
-# PRIVATE user-mem store (never scan it — privacy); and the generated/index files
-# MEMORY.md / memory-index.md / memory-reorg-proposed.md. `-printf` is GNU-only and
-# breaks on BSD/macOS find, so size+sort portably via `wc -c`.
 find "$SCOPE_ROOT" -type f -name '*.md' \
   -not -path '*/.maint-staging/*' -not -path '*/user-mem/*' \
   ! -name 'MEMORY.md' ! -name 'memory-index.md' ! -name 'memory-reorg-proposed.md' \
@@ -152,14 +151,11 @@ sub-page. Full planning mechanics (seam synthesis fail-safe, overview/sub-page
 shapes, glob partitioning, size rules) are in
 [references/split-plan-details.md](references/split-plan-details.md).
 
-Key rules: (a) **Synthesize seams** when fewer than 2 natural `##` seams exist —
-partition body paragraphs verbatim under synthetic `## Part N` headings (never
-paraphrase). (b) The **overview** reuses the source slug and links DOWN to each
-sub-page; each **sub-page** carries the same `metadata.type`/tier and links UP;
-wire both ends in the same txn. (c) Carry every fact and every `[^N]` lesson
-byte-identical into exactly one output page — `verify_split` fails on any drop or
-rewording. (d) If a sub-page is still over cap after this run, the next heartbeat
-splits it — convergence requires only real progress this level.
+Key rules: synthesize seams (never abstain) when fewer than 2 natural `##` seams
+exist; the overview reuses the source slug and links DOWN, each sub-page links UP
+(wire both ends in the same txn); every fact + `[^N]` lesson survives byte-identical
+into exactly one output page; a still-over-cap sub-page is the next heartbeat's job.
+Full mechanics: [split-plan-details.md](references/split-plan-details.md).
 
 **(e) HEADROOM — never emit a sub-page within ~10% of the cap** (keep each under
 ~90% of `split_max_bytes`) — why: [split-plan-details § size rule (e)](references/split-plan-details.md#size-rule-e--headroom-and-why-it-is-a-rule-rather-than-a-preference).
@@ -170,10 +166,10 @@ When detail moves into a sub-page, any OTHER page that linked `[[source-slug]]` 
 now lives there should repoint to it. Find every inbound link:
 
 ```bash
-# Pass the SLUG: memgrep matches the note NEEDLE against the BASENAME/stem only, never a path
-# substring, so a rel-path with a "/" can NEVER match and backlinks come back silently empty.
-memgrep links --from "$(basename "$REL" .md)" "$SCOPE_ROOT"   # pages that link to the source
+memgrep links --from "$(basename "$REL" .md)" "$SCOPE_ROOT"   # pass the SLUG, never $REL
 ```
+
+Why the slug and not the rel-path: [split-plan-details § Why memgrep links --from takes the slug](references/split-plan-details.md#why-memgrep-links---from-takes-the-slug-not-the-rel-path).
 
 Rewrite `[[source-slug]]` → `[[the-right-sub-page-slug]]` in each holder that is really about a
 sub-topic. The overview KEEPS the source slug (it is NOT retired), so a backlink about the page
@@ -205,8 +201,7 @@ staging that is new or differs from its live copy becomes a write:
 - **Redirect a backlink holder** by writing its rewritten content to
   `"$STAGING/<holder-rel>"`. The commit treats it as a write that overwrites the
   live holder — no need to declare it a begin source.
-- **Do NOT touch `MEMORY.md`.** It is the harness's; the two memory systems COEXIST and
-  the wiki's index is memgrep's. A split adds NO line there and needs no index update —
+- **Do NOT touch `MEMORY.md`.** It is the harness's; a split adds no line there —
   `memgrep reindex` picks the sub-pages up after the commit.
 
 Then commit — this is the gate:
@@ -215,12 +210,9 @@ Then commit — this is the gate:
 uv run "$PLUGIN/scripts/memory_txn_cli.py" commit "$SCOPE_ROOT" "$TXN" --op split
 ```
 
-`commit --op split` reconstructs writes/deletes by diffing staging vs the recorded
-sources, runs `verify_split` (lesson preservation across sub-pages+overview; hub
-globs partition; convergence under the cap; no dangling refs to retired slugs),
-and on PASS applies atomically (stale-snapshot re-hash, per-scope flock,
-`os.replace` survivors-before-deletes). On FAIL it prints the reasons and aborts
-the txn (live tree untouched).
+`commit --op split` diffs staging vs the recorded sources, runs `verify_split`
+(the Hard invariants below), and on PASS applies atomically; on FAIL it prints the
+reasons and aborts the txn (live tree untouched).
 
 ### 6. EXIT / retry / rollback contract
 
@@ -230,11 +222,19 @@ surface FAILED. Lock contention is a normal abstain, not a failure. Exact surfac
 abort command, and the idempotency rule:
 [split-plan-details.md#exit--retry--rollback-contract-step-6](references/split-plan-details.md#exit--retry--rollback-contract-step-6).
 
-### 7. Close the claim
+### 7. Close the claim (MANDATORY — a pass that returns without this leaves an orphaned claim)
 
-Report ends `<!-- janitor-outcome: mutation|noop -->`. Read
-[close-claim.md](references/close-claim.md) and run its two commands to close the claim
-(chore=`split`).
+Report ends `<!-- janitor-outcome: mutation|noop -->`. `set-report` runs in the SAME Bash call
+that just wrote `$REPORT_FILE`; `complete` runs right after. Details:
+[close-claim.md](references/close-claim.md).
+
+```bash
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
+```
+
+If `complete` exits 2 saying more than one claim is in flight, re-run it adding `--chore split
+--scope <the scope your claim step printed>`.
 
 ## Hard invariants (every SPLIT pass enforces)
 

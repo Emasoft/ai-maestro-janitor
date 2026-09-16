@@ -64,8 +64,9 @@ changes `ocd`, never merges/splits/deletes.
    ```
 
    It prints the `(intervention, scope, root)` the scheduler stamped for you (absolute path —
-   your cwd as a spawned agent is not the project root). Also capture the `CLAIM_ID=<id>`
-   line it prints last — you need it to close the claim. Never read the legacy
+   your cwd as a spawned agent is not the project root). Capture the `CLAIM_ID=<id>`
+   line (it follows the `(intervention, scope, root)` line; the CLOSE YOUR CLAIM block after
+   it repeats the two close commands). Never read the legacy
    `memory-maint-pending.json` slot. A USER-named scope is the one exception.
 
    Three outcomes, and the middle one is easy to get wrong:
@@ -144,17 +145,18 @@ that still flags is not done — fix it or refuse it; never leave it half-widene
 
 One line + a report path under `reports/janitor-memory-enrich/`. Name the scope, pages
 touched, phrases added, duplicates removed, and any refusals. End the report with
-`<!-- janitor-outcome: mutation -->` (or `noop`). `set-report` runs in the SAME Bash call that
-just wrote `$REPORT_FILE` (its vars are still alive here); `complete` runs later with
-STATE_DIR RETYPED as the literal path from the spawn prompt, and only adds `--chore enrich
---scope <literal scope from the claim step's output>` if it exits 2 saying more than one claim
-is current:
+`<!-- janitor-outcome: mutation -->` (or `noop`).
+
+## Close the claim (MANDATORY — a pass that returns without this leaves an orphaned claim)
+
+`set-report` runs in the SAME Bash call that just wrote `$REPORT_FILE` (its vars are still
+alive here); `complete` runs right after:
 
 ```bash
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-  set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-  complete --state-dir "$STATE_DIR"
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
 ```
 
-Unclosed, it expires as MEMPASS-STALE-CLAIM after 6h and re-dispatches.
+If `complete` exits 2 saying more than one claim is in flight, re-run it adding `--chore enrich
+--scope <the scope your claim step printed>`. Unclosed, it expires as MEMPASS-STALE-CLAIM after
+6h and re-dispatches.

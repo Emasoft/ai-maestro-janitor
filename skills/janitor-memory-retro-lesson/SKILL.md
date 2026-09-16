@@ -70,8 +70,9 @@ already in lesson form; only body ATOM markers count.
    dispatch and leaving itself nothing it can perform. It prints the
    scheduler's pinned `(intervention, scope, root)` (absolute — your cwd is not the project
    root) and hands it to you alone, so a later dispatch cannot re-point work in flight
-   (janitor#242). Also capture the `CLAIM_ID=<id>` line it prints last — you need it to
-   close the claim. Exit 2 (nothing claimable), 3 (no memory-maintenance state at all —
+   (janitor#242). Capture the `CLAIM_ID=<id>` line (it follows the `(intervention, scope,
+   root)` line; the CLOSE YOUR CLAIM block after it repeats the two close commands).
+   Exit 2 (nothing claimable), 3 (no memory-maintenance state at all —
    `$STATE_DIR` is wrong), 4 (`$STATE_DIR` empty), or 5 (dispatch was recorded for a
    different state dir — claim refused) → STOP and report that; never fall back to the legacy
    `memory-maint-pending.json` slot or to "whichever is due" (#150).
@@ -103,26 +104,20 @@ already in lesson form; only body ATOM markers count.
    breaks parsing is a defect, not a completion.
 4. **Report.** Write the detailed report (converted atoms, lesson ids, WHY sources,
    FLAGGED atoms with what a human must supply) to
-   `$MAIN_ROOT/reports/memory-subconscious-agent/<YYYYMMDD_HHMMSS±HHMM>-retro-lesson-<slug>.md`.
-   `set-report` runs in the SAME Bash call that just wrote `$REPORT_FILE` (its vars are
-   still alive here):
+   `$MAIN_ROOT/reports/memory-subconscious-agent/<YYYYMMDD_HHMMSS±HHMM>-retro-lesson-<slug>.md`,
+   ending it with `<!-- janitor-outcome: mutation -->` (or `noop`).
+5. **Close the claim (MANDATORY — a pass that returns without this leaves an orphaned
+   claim).** `set-report` runs in the SAME Bash call that just wrote `$REPORT_FILE` (its
+   vars are still alive here); `complete` runs right after:
 
    ```bash
-   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-     set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
-   ```
-5. **Close the claim.** Right after the report is written and BEFORE returning your
-   result line, append `<!-- janitor-outcome: mutation -->` (or `noop`) to it, then close.
-   `complete` runs later with STATE_DIR RETYPED as the literal path from the spawn prompt, and
-   only adds `--chore retro-lesson --scope <literal scope from the claim step's output>` if it
-   exits 2 saying more than one claim is current:
-
-   ```bash
-   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" \
-     complete --state-dir "$STATE_DIR"
+   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
+   uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" complete --state-dir "$STATE_DIR"
    ```
 
-   A claim never closed expires as MEMPASS-STALE-CLAIM after 6 h and the pass is re-dispatched.
+   If `complete` exits 2 saying more than one claim is current, re-run it adding
+   `--chore retro-lesson --scope <the scope your claim step printed>`. A claim never
+   closed expires as MEMPASS-STALE-CLAIM after 6 h and the pass is re-dispatched.
    Then return ONLY: `[DONE] retro-lesson <scope>: N converted, M flagged. Report: <path>`.
 
 ## Verification (what "done" means for one atom)

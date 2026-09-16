@@ -6,6 +6,7 @@ has the runnable steps.
 
 ## Table of contents
 
+- No-third-page check (pre-merge)
 - Claim exit codes
 - The two-phase transaction contract
 - What is_legal_merge checks
@@ -106,6 +107,24 @@ for:
 Same-scope is guaranteed structurally (the txn is per-scope; you only ever pass
 two paths under the same root). Same-*subject* is YOUR judgment — neither predicate
 nor verifier can decide it; when unsure, **abstain**.
+
+**Run it** on A's and B's frontmatter, refuse on `False` (the CLI's commit gate also
+re-checks — wikimem audit M-2 — but pre-flight refuses EARLY and cheap, before
+opening a transaction):
+
+```bash
+uv run --quiet - <<PY
+import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
+import memory_edit_verify as v
+A = v.parse_frontmatter(open("$A_PATH").read())
+B = v.parse_frontmatter(open("$B_PATH").read())
+ok, why = v.is_legal_merge(A, B)
+print("legal:" if ok else "REFUSE:", why)
+sys.exit(0 if ok else 1)
+PY
+```
+
+On a refusal, abstain and surface a one-line note.
 
 ## What `verify_merge` enforces at commit (the failure catalog)
 
@@ -395,6 +414,19 @@ link your own deletion broke. It does not license editing, reordering, or
 pruning any other line in that file, which remains the harness's.
 `memory_edit_verify.redirect_memory_md_links()` performs exactly this rewrite, and
 `no_dangling_memory_md_refs()` is the matching check.
+
+## No-third-page check (pre-merge)
+
+A merge fuses exactly two sources. A THIRD live page also about this subject would
+leave a fragment behind — confirm only A and B match:
+
+```bash
+# Drop user-mem/ (private, recursive) so a private note can't masquerade as a third page.
+memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 10 | grep -v '/user-mem/'   # expect only A and B
+```
+
+If a third page appears, **abstain** and surface all three for a human. Never silently
+drop or ignore the third.
 
 ## Recording an abstain
 

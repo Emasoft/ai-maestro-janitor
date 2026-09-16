@@ -3,6 +3,15 @@
 Reference for step 3 of the SPLIT algorithm. See the main skill for the full
 algorithm context and invariants.
 
+## Finding the single page to split — the exclusion list
+
+The `find` in SKILL.md step 1 walks every real NOTE in the scope strictly larger than the
+cap, biggest first, EXCLUDING the non-note set (mirrors the librarian's
+`_NON_NOTE_NAMES`): the staging dir; the PRIVATE `user-mem/` store (never scan it —
+privacy); and the generated/index files `MEMORY.md` / `memory-index.md` /
+`memory-reorg-proposed.md`. `-printf` is GNU-only and breaks on BSD/macOS find, so
+size+sort portably via `wc -c` instead.
+
 ## 3. Plan the split (decide the seams; preserve type and every fact)
 
 Group the page's `##` content sections into **2–4 coherent sub-topics**, one per
@@ -75,6 +84,12 @@ on its own, ran USER instead, and left the stamped LOCAL scope marked
 run-without-running for a full cadence: 378k tokens, zero mutations. An abstain
 that says *"dispatched but could not read my assignment"* is cheap and
 actionable; a confident run on the wrong scope is neither.
+
+## Why `memgrep links --from` takes the slug, not the rel-path
+
+`memgrep` matches the note NEEDLE against the BASENAME/stem only, never a path
+substring, so a rel-path containing `/` can NEVER match and backlinks come back
+silently empty — always pass `$(basename "$REL" .md)`, never `$REL`.
 
 ## Backlink-redirect mechanics
 

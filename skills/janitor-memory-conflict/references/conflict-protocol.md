@@ -17,6 +17,7 @@ each stage does and how the verdict is committed.
 - THE LESSON FORM — mandatory for every `[^N]` this pass AUTHORS
 - Why a same-slug in-place edit does NOT work
 - Security and scope
+- Output format
 
 ## Preconditions — verify BEFORE doing any work
 
@@ -112,6 +113,20 @@ This is a `Workflow` script. The shape (full code + prompts in the sibling
   determine which is wrong; candidate **DEMOTE** (if the wrong one is merely
   superseded) or **DELETE** (only if the wrong one is provably FALSE *and* has
   provenance — proceed to the gates).
+
+**WRITE DOWN EVERY `skip`.** The librarian re-surfaces a pair every run, so a verdict
+you keep to yourself costs a full dispatch to re-derive next pass — the same "no", at
+~170k–260k tokens, forever. Record it:
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
+  --intervention conflict --scope "$SCOPE" --root "$SCOPE_ROOT" \
+  --page <a.md> --page <b.md> --reason "<why these two are NOT in conflict>"
+```
+
+Also write the verdict into the pages as a cross-linked See-also when a human would
+hit the same confusion. The refusal re-arms by itself when either page's bytes
+change, and after 7 days — a verdict with an expiry, not a permanent silence.
 
 ### Stage 2 — Source the WHY + resolve the repo (READ-ONLY)
 
@@ -332,3 +347,11 @@ ONLY reconciles contradictory/obsolete wikimem pages in ONE memory scope per pas
 against project repos. Does NOT create pages (`/janitor-memory-write`), merge
 same-subject pages (`/janitor-memory-consolidate`), or split oversized pages
 (`/janitor-memory-split`). PROJECT-scope editing is opt-in, never pushed standalone.
+
+### Output format
+
+Per resolved pair, ONE line: `demoted <obsolete> into <survivor> (superseded by
+<sha>/<TRDD>): <WHY>` / `deleted <false>, history folded into <survivor> (vote 3/3,
+no trace)` / `skipped <pair> (<not-a-conflict|dirty-tree|no-provenance|ambiguous-repo|
+retry-exhausted>)`. Never echo bodies; detailed report:
+`$MAIN_ROOT/reports/janitor-memory-conflict/<ts>-<slug>.md`.
