@@ -13,6 +13,7 @@ skipped when tmux isn't installed, and always tears its session down.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Mapping
 
 import pytest
 
@@ -309,6 +311,40 @@ def test_run_verified_send_stops_at_the_first_command_that_did_not_land(tmp_path
     assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 1
     assert calls == ["/a"]
     assert not (tmp_path / "self-send.%1.stamps.json").exists()
+
+
+def test_run_verified_payload_aborts_when_abort_unless_any_no_longer_matches(monkeypatch, tmp_path):
+    """`_run_verified_payload`'s own launch-time guard (TRDD-DXM75JB2) — a non-empty
+    `abort_unless_any` list whose files are ALL gone — must return 0 WITHOUT ever
+    calling `run_verified_send`; a list with a surviving file must call through."""
+    calls: list[Mapping] = []
+
+    def fake_run_verified_send(data, **_kwargs):
+        calls.append(data)
+        return 1
+
+    monkeypatch.setattr(tt, "run_verified_send", fake_run_verified_send)
+
+    missing_guard = tmp_path / "gone.flag"  # never created — guard has nothing to match
+    payload_no_guard_left = base64.b64encode(json.dumps({
+        "delay": 0.0, "terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/x"],
+        "esc_first": False, "state_dir": str(tmp_path),
+        "abort_unless_any": [str(missing_guard)],
+    }).encode("utf-8")).decode("ascii")
+
+    assert tt._run_verified_payload(payload_no_guard_left) == 0
+    assert calls == []  # aborted before ever reaching run_verified_send
+
+    surviving_guard = tmp_path / "still-here.flag"
+    surviving_guard.write_text("1", encoding="utf-8")
+    payload_guard_present = base64.b64encode(json.dumps({
+        "delay": 0.0, "terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/x"],
+        "esc_first": False, "state_dir": str(tmp_path),
+        "abort_unless_any": [str(surviving_guard)],
+    }).encode("utf-8")).decode("ascii")
+
+    assert tt._run_verified_payload(payload_guard_present) == 1
+    assert len(calls) == 1  # ran through — the guard file was still there
 
 
 def test_unknown_returns_use_iterm_path(monkeypatch):
