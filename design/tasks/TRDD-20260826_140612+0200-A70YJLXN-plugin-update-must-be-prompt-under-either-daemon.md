@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: todo
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-16T12:45:20+0200
+updated: 2026-09-16T12:48:32+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -15,7 +15,7 @@ npt: []
 eht: []
 implementation-commits: [3903ca44, ab381b19]
 relevant-rules: []
-pre-block-column: testing
+pre-block-column: 
 unblock-when: []
 ---
 
@@ -446,3 +446,4 @@ this, because each actor is behaving correctly by its own contract.
 - 2026-09-16T12:35:30+0200 — column → blocked. waits on the peer's landing in ai-maestro#156 (external repo); parked as fleet-ask (triage 2026-09-16)
 - 2026-09-16T12:43:45+0200 — column → todo. ai-maestro#156 is already closed per the card's own STATE, so the peer landing it waited on has happened; the remaining step is to verify that landing, which is work, not a wait (correcting the 2026-09-16 blocked ruling)
 - 2026-09-16T13:10:00+0200 — NEXT ACTION (so the next triage does not move this card a third time): the remaining acceptance is a live observation, not code. At the NEXT release after 3.5.5, do not run claude plugin update by hand; instead confirm the plugin reached the new version promptly under whichever daemon owns version-update (daemon.log shows chore-coordination yielding the chore to the ai-maestro server on this host), evidence = the owning daemon's log line plus claude plugin list showing the new version within one cadence. 3.5.5 itself was updated by hand at 12:45 and cannot serve as the observation. pre-block-column: testing is a leftover from the reverted blocked park and means nothing now.
+- 2026-09-16T14:25:00+0200 — correction to the NEXT ACTION above: the hand update at 12:45 contaminates evidence only AFTER 12:45. The 12:20-12:45 window of the owning daemon's log (the ai-maestro server holds version-update on this host per daemon.log's chore-coordination line) already answers whether an update was attempted within one cadence of the 3.5.5 release; read that first, it may close the box today. And never skip the upgrade-on-green rule at a future release to make this observation — read the log for the window BEFORE the hand update instead.
