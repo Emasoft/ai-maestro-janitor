@@ -1,10 +1,10 @@
 ---
 trdd-id: Q8PNPRTW
 title: eleven suite failures found on a full run under load — triage each as real, flaky, or environmental
-column: testing
+column: cancelled
 pre-block-column: 
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-16T09:58:49+0200
+updated: 2026-09-16T22:32:18+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -24,7 +24,7 @@ external-refs: [TRDD-7NSRD8OV]
 
 # Eleven suite failures, found by naming them — the prior run's file was truncated
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04
+## ⏵ STATE — CANCELLED 2026-09-16: the failures stopped reproducing (see Approval log); the entries below are the archaeology — 2026-09-04
 
 > ### ⏵ 2026-09-05 21:12 — empty-stdout cluster explained: a fail-OPEN `run_subprocess` timeout, not a stamp leak (hypothesis refuted by measurement)
 >
@@ -1032,6 +1032,8 @@ session, so Tier 2 and Tier 3 resolve to the same person regardless.
 - 2026-09-16T09:51:10+0200 — EXPERIMENT RESULT (reports/suite-failures/20260916_094059+0200-Q8PNPRTW-n-auto-vs-n4.md + per-run pytest/loadavg files): four full-suite runs on HEAD 18dbb9dd, -n auto / -n 4 / -n auto / -n 4, ALL GREEN — 16755 passed, 2 skipped, 0 failed each; wall 108/135/102/159 s; 1-min loadavg during runs 8.4-18.5, 7.4-12.1, 9.0-26.5, 8.7-18.9 (two other agents and the heartbeat active). The both-green outcome: the 2026-09-05 failures do NOT reproduce on current HEAD even at loadavg 26.5 under -n auto, so there is nothing left to waive. Cause still unnamed; what changed since 09-05 is the landed work on TRDD-7NSRD8OV's fail-open timeout track and the 3.5.x fixes. Ruling: blocker cleared, card to testing; it completes as not-reproducible after the next two publish gates (full suite, -n auto) are also green, and reopens to dev on the first red.
 - 2026-09-16T09:51:10+0200 — column → testing by session-as-approver. waiver refused and moot: 4/4 green full-suite runs, n=2 per -n cell Cleared blocked-by (--clear-blocker override).
 - 2026-09-16T09:58:49+0200 — Corrections to the experiment entry after adversarial review: (1) the script's own summary table (…-n-auto-vs-n4.md) is MALFORMED — empty pass/fail cells and unparsed loadavg cells; every number in the entry above was read from the per-run …-pytest.txt and …-loadavg.txt files, which are the evidence. (2) The loadavg ranges are min/max over all three sampled fields (1/5/15-min), not the 1-minute field alone. (3) 'not reproduced on this host today' is the exact claim; the cause is still unnamed and the attribution to 7NSRD8OV/3.5.x work is a hypothesis. (4) 'first red' means red in the CI Tests job or the publish gate's test stage — a Smoke, lint or CPV red (like the 3.5.1 exec-bit failure) does not reopen this card. unblock-when cleared to [] since the decision:user predicate is moot.
+- 2026-09-16T22:32:17+0200 — CANCELLED (work withdrawn) by the session under the owner's 2026-09-03 standing permission — this is the one closure tonight the card itself reserved for the USER as acceptor, so it is flagged for veto in the session report. Grounds: the 09:51 ruling's own condition is met — after the 4/4 green isolated full-suite runs on HEAD 18dbb9dd, two further publish gates ran green (3.5.4, CI Tests 11:09 local; 3.5.5, CI Tests 12:24 local; the local full-suite run is the pre-push gate's contract on this host, no artifact retained). The six acceptance boxes are left UNTICKED on purpose: the ten owned ids were never fixed or labelled — they stopped failing — and the cause is unnamed (the attribution to 7NSRD8OV's fail-open track and the 3.5.x fixes is a hypothesis). A terminal card does not reopen: a red in CI Tests or the publish gate's test stage is a NEW card citing this one.
+- 2026-09-16T22:32:18+0200 — CANCELLED by session. work withdrawn: not reproducible on HEAD >= 18dbb9dd and two further green publish gates; cause unnamed; boxes deliberately left open.
 
 
 ## Notes
