@@ -14,6 +14,7 @@ npt: []
 eht: []
 external-refs: [github:Emasoft/ai-maestro-janitor#300]
 implementation-commits: [9af1a1c7, 1a4d8ff2, 08eaec9a, 6fbb8c8b, 857bd7b2, 69adc82d, af6340a5, 4b7ea7ed, 3c25cbb2, 61dcfdea, 51b0f51f, ed8906cc]
+derived: true
 ---
 
 # Memory agent claim step must be handed the scheduler's absolute state dir instead of resolving it from cwd
