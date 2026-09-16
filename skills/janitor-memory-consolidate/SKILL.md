@@ -30,10 +30,15 @@ Full framing + why over-merging is worse than a missed merge:
 ```bash
 JANITOR_ROOT="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$CLAUDE_PLUGIN_ROOT")"
 CLI="$JANITOR_ROOT/scripts/memory_txn_cli.py"
+uv run --quiet - <<PY || { echo "wikimem editor disabled — abstain"; exit 0; }
+import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
+import memory_txn
+sys.exit(0 if memory_txn.editor_enabled() else 1)
+PY
 ```
 
-Run the kill-gate check BEFORE claiming (unquoted-heredoc gotcha included):
-[merge-protocol § Bounds & safety recap](references/merge-protocol.md#bounds-safety-recap).
+Run this kill-gate BEFORE claiming. Heredoc is UNQUOTED (`<<PY`) so `$JANITOR_ROOT`
+expands — a quoted `<<'PY'` false-abstains even when enabled.
 
 Process exactly **ONE scope this run**, and CLAIM it before touching anything —
 never self-select. Paste the `STATE_DIR=<path>` value from your spawn prompt into
@@ -60,8 +65,16 @@ MEMDIR="$SCOPE_ROOT"   # the root memory_dispatch_claim.py printed — never han
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # in-repo, PUSHED
 ```
 
-LOCAL and USER only by default. PROJECT opt-in, staged-not-pushed, + the gate-confirm
-snippet: [merge-protocol § Bounds & safety recap](references/merge-protocol.md#bounds-safety-recap).
+LOCAL and USER only by default. PROJECT is opt-in, staged-not-pushed. Confirm before
+touching PROJECT:
+
+```bash
+uv run --quiet - <<PY
+import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
+import memory_settings
+print("project-edit:", "ON" if memory_settings.get("edit_project_scope") else "OFF (skip PROJECT)")
+PY
+```
 
 ## The procedure
 
@@ -85,16 +98,15 @@ most-recently-modified when tied); no convincing pair, or nothing printed ⇒ ab
 (success, not failure). NEVER touch a `user-mem/` path (private, agent-invisible). Full
 picking rule + the privacy guard: [merge-protocol § Candidate selection details](references/merge-protocol.md#candidate-selection-details).
 
-Read ONLY the handful pages the printed groups name (their bodies + frontmatter). Pick at
-most ONE pair `(A, B)` that looks like the same subject.
+Read ONLY the printed groups' pages (bodies + frontmatter). Pick at most ONE pair
+`(A, B)` that looks like the same subject.
 
 ### 2. Decide subject sameness (the human judgment)
 
-Read A and B fully. They are the same subject iff a reader would say "these two
-pages are about the *same thing* and should be one page" — same element, same
-aspect, same scope. Different facets of different things ⇒ abstain. Uncertain ⇒
-abstain. **The TOPIC decides sameness, never the title string** (TRDD-87RKBYJ8
-duty 10).
+Read A and B fully. Same subject iff a reader would say "these two pages are about
+the *same thing* and should be one page" — same element, aspect, scope. Different
+facets, or uncertain ⇒ abstain. **The TOPIC decides sameness, never the title
+string.**
 
 **Description-named singletons are PRIME candidates (TRDD-NM4TPCQ9)** — a page NAMED
 like one memory's description (`implementation-of-…`) is the recurring agent naming
