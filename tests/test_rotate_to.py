@@ -304,10 +304,13 @@ def test_request_model_opus_reports_not_automatable_without_a_pane(
 
 def test_request_model_opus_survives_a_send_verified_exception(
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """`send_verified` raising (the keystroke itself failing mid-send) must be swallowed —
     not-automatable, never propagated — since a rotation that already found its target must
-    not fail over a keystroke (the function's own stated contract)."""
+    not fail over a keystroke (the function's own stated contract). TRDD-V2U2ZECI: the
+    swallow must not be SILENT — the operator needs a stderr line saying why the model
+    switch was not typed."""
     monkeypatch.setattr(rt.terminal_trigger, "self_terminal", lambda: {"kind": "tmux", "pane": "%1"})
 
     def _send_verified(*a, **k):
@@ -316,3 +319,8 @@ def test_request_model_opus_survives_a_send_verified_exception(
     monkeypatch.setattr(rt.terminal_trigger, "send_verified", _send_verified)
     result = rt._request_model_opus()
     assert result == "not-automatable"
+
+    err = capsys.readouterr().err
+    assert "/model opus not typed" in err, err
+    assert "RuntimeError" in err, err
+    assert "pane vanished mid-send" in err, err

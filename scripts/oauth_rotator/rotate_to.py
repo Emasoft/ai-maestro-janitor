@@ -83,7 +83,15 @@ def _request_model_opus() -> str:
         sent, _why = terminal_trigger.send_verified(
             terminal, "/model opus", esc_first=True, bypass_interrupt_cooldown=True,
         )
-    except Exception:  # noqa: BLE001 — keystroke failure must not block the rotation
+    except Exception as exc:  # noqa: BLE001 — keystroke failure must not block the rotation
+        # Rotation must continue on a failed keystroke, but silently swallowing it
+        # is the exact failure shape TRDD-V2U2ZECI removed elsewhere: the operator
+        # needs to see WHY the model switch was not typed, not just that it wasn't.
+        if sys.stderr is not None:
+            sys.stderr.write(
+                f"janitor rotate_to: WARNING /model opus not typed "
+                f"({type(exc).__name__}: {exc}); continuing\n"
+            )
         return "not-automatable"
     return "typed" if sent else "not-automatable"
 
