@@ -4,7 +4,7 @@ title: eleven suite failures found on a full run under load — triage each as r
 column: testing
 pre-block-column: 
 created: 2026-09-04T07:45:00+0200
-updated: 2026-09-16T09:51:10+0200
+updated: 2026-09-16T09:58:49+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -15,7 +15,7 @@ min-approval-requirement: user
 labels: [tests, flaky, suite-health, publish-blocker]
 relevant-rules: []
 blocked-by: []
-unblock-when: [decision:user]
+unblock-when: []
 npt: []
 eht: []
 implementation-commits: [5b5267a5]
@@ -1031,6 +1031,7 @@ session, so Tier 2 and Tier 3 resolve to the same person regardless.
 - 2026-09-16T08:56:29+0200 — Precondition made achievable: 'quiet host' means no publish.py, no other pytest and no CPV validate in the ps snapshot; the janitor heartbeat's own 5-minute uv run fires are ALLOWED and noted in the trace, not a reason to wait. The experiment is a background script (run_in_background, reporting by file), not an agent turn, and is dispatched only after the 3.5.1 publish gate has exited.
 - 2026-09-16T09:51:10+0200 — EXPERIMENT RESULT (reports/suite-failures/20260916_094059+0200-Q8PNPRTW-n-auto-vs-n4.md + per-run pytest/loadavg files): four full-suite runs on HEAD 18dbb9dd, -n auto / -n 4 / -n auto / -n 4, ALL GREEN — 16755 passed, 2 skipped, 0 failed each; wall 108/135/102/159 s; 1-min loadavg during runs 8.4-18.5, 7.4-12.1, 9.0-26.5, 8.7-18.9 (two other agents and the heartbeat active). The both-green outcome: the 2026-09-05 failures do NOT reproduce on current HEAD even at loadavg 26.5 under -n auto, so there is nothing left to waive. Cause still unnamed; what changed since 09-05 is the landed work on TRDD-7NSRD8OV's fail-open timeout track and the 3.5.x fixes. Ruling: blocker cleared, card to testing; it completes as not-reproducible after the next two publish gates (full suite, -n auto) are also green, and reopens to dev on the first red.
 - 2026-09-16T09:51:10+0200 — column → testing by session-as-approver. waiver refused and moot: 4/4 green full-suite runs, n=2 per -n cell Cleared blocked-by (--clear-blocker override).
+- 2026-09-16T09:58:49+0200 — Corrections to the experiment entry after adversarial review: (1) the script's own summary table (…-n-auto-vs-n4.md) is MALFORMED — empty pass/fail cells and unparsed loadavg cells; every number in the entry above was read from the per-run …-pytest.txt and …-loadavg.txt files, which are the evidence. (2) The loadavg ranges are min/max over all three sampled fields (1/5/15-min), not the 1-minute field alone. (3) 'not reproduced on this host today' is the exact claim; the cause is still unnamed and the attribution to 7NSRD8OV/3.5.x work is a hypothesis. (4) 'first red' means red in the CI Tests job or the publish gate's test stage — a Smoke, lint or CPV red (like the 3.5.1 exec-bit failure) does not reopen this card. unblock-when cleared to [] since the decision:user predicate is moot.
 
 
 ## Notes
