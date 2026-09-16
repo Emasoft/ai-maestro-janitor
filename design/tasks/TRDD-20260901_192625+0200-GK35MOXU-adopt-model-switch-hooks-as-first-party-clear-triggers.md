@@ -3,8 +3,8 @@ trdd-id: GK35MOXU
 title: Adopt the PreModelSwitch/PostModelSwitch hooks as the first-party model-change trigger for the external clear
 column: testing
 created: 2026-09-01T19:26:25+0200
-updated: 2026-09-08T23:11:17+0200
-review-after: 2026-09-05
+updated: 2026-09-16T22:14:35+0200
+review-after: 2026-09-23
 implementation-commits: [df26fa12, 73b242a8, 83e7242d]
 current-owner: janitor-main-session
 task-type: feature
@@ -102,7 +102,7 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
 
 ## Acceptance
 
-- [ ] PostModelSwitch hook ships in hooks/hooks.json and stamps the ack file (verified by a
+- [x] PostModelSwitch hook ships in hooks/hooks.json and stamps the ack file (verified by a
       real `/model` switch on this machine, not just a unit test) — hooks.json entry ADDED
       2026-09-03 (CPV upstream issue 222 closed, CPV main now knows the event); `.cpv-version`
       pin bump is STILL PENDING (orchestrator — see STATE block), and the live `/model`-switch
@@ -169,6 +169,7 @@ hook payload is first-party ground truth. Wire it: on-session-start persists the
   project, session B's switch can trigger a clear aimed at session A. Same holds for the
   reload stamps since birth; a per-session stamp keyed on session id is the upgrade if it
   ever bites.
+- 2026-09-16 — box 1 ticked: six `model switch acked (gen N)` lines in .janitor/logs/external-clear.log (gen 1 2026-09-09 15:10 … gen 6 2026-09-16 20:08) prove the hook stamps on real PostModelSwitch fires on this machine; the harness payload carried none of previous_model/new_model/model on any of them. Box 3 (/effort) needs one interactive /effort in a live session — asked of the owner 2026-09-16; parked as blocked on that decision. This session's 21:45 Opus→Fable change was a --resume, not /model; no fire expected. Report: reports/board-drain/20260916_215500+0200-GK35MOXU-model-switch-stamp.md
 
 ## Approval log
 
