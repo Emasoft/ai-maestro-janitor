@@ -1,8 +1,8 @@
 ---
 name: janitor-publish-pipeline-gate-sequence
-description: "how do I release the janitor / publish blocked / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / what is the gate sequence for scripts/publish.py / why does publish.py refuse a --skip-tests flag / CPV --strict is the sole validation step / why does the resolver twin tag exist / what does --dry-run actually do / why can publish.py push directly to the default branch / how does the admin-bypass branch ruleset model work / process-ancestry pre-push hook verification / machine-specific facts live in LOCAL scope not here / devitalize-or-remove not exempt-and-suppress"
+description: "how do I release the janitor / publish blocked / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / what is the gate sequence for scripts/publish.py / why does publish.py refuse a --skip-tests flag / CPV --strict is the sole validation step / why does the resolver twin tag exist / what does --dry-run actually do / why can publish.py push directly to the default branch / how does the admin-bypass branch ruleset model work / process-ancestry pre-push hook verification / machine-specific facts live in LOCAL scope not here / devitalize-or-remove not exempt-and-suppress / rules floor cap failed / trim a shipped rule / 6 bytes headroom / compaction lost a directive / compacting normative text"
 ocd: 2026-06-13
-lmd: 2026-09-09
+lmd: 2026-09-17
 metadata:
   node_type: memory
   type: project
@@ -85,7 +85,7 @@ ordered set of gates; **any gate failing exits non-zero and the release stops**
 
 `--dry-run` runs every validation gate fully, then stops before the bump/commit/
 push (it mutates nothing in git history; its only side effect is installing the
-push-guard hook).
+push-guard hook). [^10]
 
 ^7AY0CQO2 [desc:"CPV is the SOLE validator; a finding is cleared by devitalizing or removing the offending code, never by exempting or suppressing a rule or relaxing --strict.", keywords:"cpv_strict_is_the_sole_validation_step devitalize_or_remove_not_exempt_and_suppress no_local_copies_of_any_validator_script exempt_list_mechanism_dropped_fleet_wide execution_class_security_finding live_os_system_or_subprocess_shell_true eval_or_exec_of_a_string hardcoded_tokens_in_docs prrd_s5_1_devitalize_policy how_is_a_cpv_finding_cleared"]
 **CPV-ONLY validation policy + devitalize-or-remove (PRRD S5.1):** the pipeline
@@ -168,3 +168,4 @@ name, never literal paths or secrets).
   was MISSING from every pre-0.45.0 release; publish.py Step 12/13 now emits it
   automatically (7b47f7c) — never hand-tag it, the pipeline owns it.
 [^9]: [id:ATOM-QFXP-33LD, status:valid, desc:"required_linear_history was REMOVED from baseline-history-protect by Tier-3 ruling — do not describe or re-add it", keywords:"baseline-history-protect linear_history required_linear_history ratified_baseline branch_ruleset_payload does_history-protect_require_linear_history hand-built_ruleset_payload_reapplied_linear_history", ocd:2026-08-08, lmd:2026-08-08] DO NOT describe `required_linear_history` as part of `baseline-history-protect` or re-add it, BECAUSE the USER removed it by Tier-3 ruling 2026-08-08 (janitor#14; Emasoft/ai-maestro daec2d69) after it proved unfollowable — the code SSOT (`scripts/lib/branch_protection_lib.py`) had already dropped it, and a hand-built payload from stale rule PROSE re-applied it fleet-wide for half a day. DO build baseline payloads from `branch_protection_lib.baseline_ruleset_payloads`, never from governance prose.
+[^10]: [id: ATOM-6GZ1-LH71, status: valid, keywords: "rules_floor_cap_failed test_shipped_rules_stay_under_the_context_floor_cap 6_bytes_headroom trim_a_shipped_rule compaction_lost_a_directive always-loaded_rule_too_big move_block_to_rules/references what_belongs_in_an_always-loaded_rule rule_edit_fails_the_floor_test compacting_normative_text", ocd: 2026-09-17, lmd: 2026-09-17] DO NOT buy context-floor headroom by compacting normative rule text sentence-by-sentence, BECAUSE each sentence needs a "does an agent need this BEFORE it knows to open the reference?" judgment and the 2026-09-17 compaction of rules/markdown-memory-recall.md (fe7c88cb) cut four such clauses — the PROJECT write-gate red-flag list, "verbs SUPERSEDE, never overwrite", the write-verb names and the CAS "changed since enqueued → re-read, recompute, retry" instruction — two of which the same session had to hand-paste into worker prompts an hour later (restored in 5aaeea39). DO move ONE whole reference-heavy block (a table, a worked example) verbatim into the rule's rules/references companion, which cannot delete a directive by construction; when no exile-safe ≥2 KB block exists, REPORT that as a finding instead of changing method.
