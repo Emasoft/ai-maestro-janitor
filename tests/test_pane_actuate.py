@@ -740,6 +740,46 @@ def test_stop_flag_ignores_the_target_sessions_interrupt_cooldown(monkeypatch, t
     assert outcome.status is pa.OutcomeStatus.DONE
 
 
+def test_stop_flag_exemption_is_keyed_on_the_event_not_on_fail_open(monkeypatch, tmp_path: Path) -> None:
+    """Control for the event-keying decision: the SAME setup as
+    `test_stop_flag_ignores_the_target_sessions_interrupt_cooldown`, but with `fail_open=False`
+    -- the exemption must still hold, because it is keyed on `event is Event.STOP_FLAG`, never
+    on `fail_open` (a proxy: `fail_open` only means "type blind into an unreadable pane")."""
+    project_dir = _pane_mapping(tmp_path, 60)
+    _frames(
+        monkeypatch,
+        "real-wedged-fable-limit.txt",
+        "synthetic-idle-empty-field.txt",
+        "synthetic-working-spinner.txt",
+    )
+    fired = _seam(monkeypatch)
+    outcome = _act(
+        pa.Event.STOP_FLAG,
+        command="/janitor-disarm",
+        esc_first=True,
+        command_plan=fleet_inject.build_command_plan(_TMUX, "/janitor-disarm", esc_first=True),
+        project_dir=str(project_dir),
+        fail_open=False,
+    )
+    assert _keys(fired) == ["ESC", "/janitor-disarm"]
+    assert outcome.status is pa.OutcomeStatus.DONE
+
+
+def test_recovery_rung_with_fail_open_true_still_honours_the_cooldown(monkeypatch, tmp_path: Path) -> None:
+    """Converse control: `Event.RECOVERY_RUNG` (not STOP_FLAG) with `fail_open=True` set -- the
+    cooldown must STILL withhold the ESC. `fail_open` alone must never grant the STOP_FLAG
+    exemption; only the event identity does."""
+    project_dir = _pane_mapping(tmp_path, 60)
+    _frames(monkeypatch, "real-wedged-fable-limit.txt")
+    fired = _seam(monkeypatch)
+    outcome = _act(
+        pa.Event.RECOVERY_RUNG, command=None, esc_first=True, project_dir=str(project_dir), fail_open=True
+    )
+    assert _keys(fired) == []
+    assert outcome.status is pa.OutcomeStatus.NOOP
+    assert "interrupt-cooldown" in outcome.observed
+
+
 def test_a_missing_pane_transcript_mapping_fails_open(monkeypatch, tmp_path: Path) -> None:
     """No pane -> transcript mapping file at all -- `act` behaves exactly as it did before this
     TRDD (fails open, types normally)."""

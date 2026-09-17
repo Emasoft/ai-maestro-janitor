@@ -16,7 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
 
+import fleet_scan  # noqa: E402
+import state  # noqa: E402
 import terminal_trigger  # noqa: E402
+import token_meter  # noqa: E402
 import user_intent  # noqa: E402
 
 NOW = 1_784_000_000.0
@@ -528,3 +531,155 @@ def test_a_plain_user_prompt_after_an_interrupt_still_ends_the_cooldown(tmp_path
     _write_jsonl(t, [_interrupt_record(60), _prompt_record(30)])
 
     assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None
+
+
+def test_heartbeat_marker_matches_token_meters_own_constant() -> None:
+    """`user_intent._HEARTBEAT_MARKER` is DUPLICATED (not imported) from
+    `token_meter._HEARTBEAT_MARKER` to keep `user_intent` a leaf lib -- this pins the two
+    literals equal so a future edit to one cannot silently desync the other."""
+    assert user_intent._HEARTBEAT_MARKER == token_meter._HEARTBEAT_MARKER
+
+
+# ---------------------------------------------------------------------------------------
+# Writer/reader `state_dir` agreement (coordinator review finding, TRDD-ECHOKVZC):
+# `record_pane_transcript`'s DEFAULT `state_dir` (this session's own hooks, keyed on
+# `$CLAUDE_PROJECT_DIR` via `state.state_dir()`) and the READ side's
+# `user_intent.target_state_dir(fleet_scan.find_janitor_root(cwd))` (the daemon, discovering
+# the target pane's project from its OS cwd) must resolve to the SAME directory, or a mapping
+# written by one session's hooks is invisible to the actuator reading it back.
+# ---------------------------------------------------------------------------------------
+
+
+def _clear_state_cache() -> None:
+    """`state.project_root`/`janitor_root`/`state_dir` are `@lru_cache`d for the process
+    lifetime (by design, `state.py`) -- a test that points `$CLAUDE_PROJECT_DIR` at a tmp dir
+    MUST clear them first, or it inherits whatever an earlier test (or the real host) already
+    cached, and MUST clear them again afterward so the tmp value doesn't leak into the next
+    test. Same pattern as `tests/test_claimed_marker_deferral.py` and siblings."""
+    state.project_root.cache_clear()
+    state.janitor_root.cache_clear()
+    state.state_dir.cache_clear()
+
+
+def test_writer_and_reader_state_dir_agree_under_a_plain_project(tmp_path: Path, monkeypatch) -> None:
+    """The common case: a plain (non-symlinked, non-worktree) project directory. The writer's
+    default (`state.state_dir()`, keyed on `$CLAUDE_PROJECT_DIR`) and the reader's
+    (`target_state_dir(fleet_scan.find_janitor_root(<a subdir>))`, keyed on the daemon's
+    discovered cwd) must resolve to the IDENTICAL directory."""
+    project = tmp_path / "project"
+    (project / ".janitor" / "state").mkdir(parents=True)
+    subdir = project / "sub" / "dir"
+    subdir.mkdir(parents=True)
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    _clear_state_cache()
+    try:
+        writer_dir = state.state_dir()
+        reader_root = fleet_scan.find_janitor_root(str(subdir))
+        assert reader_root is not None
+        reader_dir = user_intent.target_state_dir(reader_root)
+        assert writer_dir == reader_dir
+    finally:
+        _clear_state_cache()
+
+
+def test_raw_state_dir_diverges_from_the_reader_through_a_symlink_by_design(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Characterizes the ACTUAL divergence the coordinator asked to test literally: the raw,
+    general-purpose `state.state_dir()` (used by dozens of unrelated callers across this
+    codebase) does NOT canonicalize `$CLAUDE_PROJECT_DIR` (`state.py::_resolve_project_root`),
+    while `fleet_scan.find_janitor_root` always does (`os.path.realpath(cwd)`,
+    `fleet_scan.py:633`) -- so under a SYMLINKED project dir the two disagree AS PATH OBJECTS.
+    This is EXPECTED and left alone: `state.state_dir()` is a shared primitive outside this
+    feature's scope, so the fix does not touch it -- instead `record_pane_transcript`'s own
+    default routes around the raw call (see the next test, and `target_state_dir`'s and
+    `record_pane_transcript`'s docstrings). This test pins the divergence so a future change to
+    either function's canonicalization behaviour is a deliberate, reviewed decision, not a
+    silent drift."""
+    real_project = tmp_path / "real_project"
+    (real_project / ".janitor" / "state").mkdir(parents=True)
+    link = tmp_path / "project_link"
+    link.symlink_to(real_project)
+    subdir_via_link = link / "sub"
+    subdir_via_link.mkdir()
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(link))
+    _clear_state_cache()
+    try:
+        raw_writer_dir = state.state_dir()  # the UNwrapped primitive -- NOT what record_pane_transcript uses
+        reader_root = fleet_scan.find_janitor_root(str(subdir_via_link))
+        assert reader_root is not None
+        reader_dir = user_intent.target_state_dir(reader_root)
+
+        assert raw_writer_dir != reader_dir  # confirms the divergence is real, not just theoretical
+        assert reader_dir == user_intent.target_state_dir(str(real_project))  # reader lands on the REAL dir
+    finally:
+        _clear_state_cache()
+
+
+def test_record_pane_transcript_default_state_dir_matches_the_reader_through_a_symlink(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """End-to-end: `record_pane_transcript` (writer, default `state_dir`) writes through a
+    SYMLINKED `$CLAUDE_PROJECT_DIR`; `pane_transcript_path` (reader) finds it via
+    `fleet_scan.find_janitor_root` on a cwd reached through the SAME symlink -- the mapping IS
+    found. Note this passes REGARDLESS of the writer-side realpath fix (verified by temporarily
+    reverting it): the OS resolves a directory symlink transparently for actual file I/O
+    (`read_text`/`is_file`/`atomic_write`'s `os.replace`), so a spelling mismatch between
+    `<link>/.janitor/state/...` and `<real>/.janitor/state/...` never manifests as a missed
+    file for a SIMPLE symlink. The realpath fix is still kept as defense-in-depth path-string
+    consistency (matching `find_janitor_root`'s own convention, cheap, harmless) -- see the
+    previous test for the divergence it actually closes (comparisons of the PATH VALUE itself,
+    not filesystem access through it)."""
+    real_project = tmp_path / "real_project"
+    (real_project / ".janitor" / "state").mkdir(parents=True)
+    link = tmp_path / "project_link"
+    link.symlink_to(real_project)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(link))
+    _clear_state_cache()
+    try:
+        written = user_intent.record_pane_transcript(str(transcript), env={"TMUX_PANE": "%5"})
+        assert written is not None
+
+        reader_root = fleet_scan.find_janitor_root(str(link))
+        assert reader_root is not None
+        found = user_intent.pane_transcript_path(reader_root, {"tmux_pane": "%5"})
+
+        assert found == transcript
+    finally:
+        _clear_state_cache()
+
+
+def test_record_pane_transcript_stores_the_realpath_so_a_symlinked_transcript_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    """`record_pane_transcript` stores `os.path.realpath(transcript_path)`, not
+    `os.path.abspath` -- so calling it once through a SYMLINKED directory and once through the
+    REAL directory (the same underlying transcript, reached two different-looking ways) writes
+    the SAME content and does not rewrite the file the second time (same mtime_ns). Had it
+    stored `abspath` instead, the two calls would disagree on the string and churn the file on
+    every call."""
+    sd = tmp_path / "state"
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    transcript = real_dir / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    link_dir = tmp_path / "link_dir"
+    link_dir.symlink_to(real_dir)
+    env = {"TMUX_PANE": "%5"}
+
+    first = user_intent.record_pane_transcript(str(link_dir / "session.jsonl"), state_dir=sd, env=env)
+    assert first is not None
+    mtime_before = first.stat().st_mtime_ns
+    content_before = first.read_text(encoding="utf-8")
+    assert content_before.strip() == str(transcript)  # realpath, not the symlinked spelling
+
+    second = user_intent.record_pane_transcript(str(transcript), state_dir=sd, env=env)
+
+    assert second is not None
+    assert second.stat().st_mtime_ns == mtime_before
+    assert second.read_text(encoding="utf-8") == content_before

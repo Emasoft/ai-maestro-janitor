@@ -744,15 +744,24 @@ def record_pane_transcript(
     Writes nothing (returns None) when this session has no pane identity in `env`, or
     `transcript_path` is empty/None -- a headless/unknown terminal has no pane key to file
     under. A write fault is caught and logged, never raised: callers are hooks, and a mapping
-    write must never break the turn it rides in on."""
+    write must never break the turn it rides in on.
+
+    The DEFAULT `state_dir` routes through `target_state_dir(os.path.realpath(...))` -- the
+    SAME helper and the SAME realpath normalisation the READ side gets for free from
+    `fleet_scan.find_janitor_root` (`os.path.realpath(cwd)` before its `.janitor` walk,
+    `fleet_scan.py:633`). `state.state_dir()` on its own does NOT canonicalize
+    (`_resolve_project_root` is a bare `Path($CLAUDE_PROJECT_DIR)`, `state.py`), so without this
+    the writer and reader could resolve to two different-looking (but same-content) directories
+    for a project reached through a symlink -- coordinator review finding, TRDD-ECHOKVZC; see
+    `tests/test_user_intent_interrupt.py`'s writer/reader parity tests."""
     pane = _pane_key(env)
     if not pane or not transcript_path:
         return None
-    sd = state.state_dir() if state_dir is None else state_dir
+    sd = target_state_dir(os.path.realpath(str(state.project_root()))) if state_dir is None else state_dir
     target = sd / f"pane-transcript.{pane}.txt"
-    content = os.path.abspath(str(transcript_path))
+    content = os.path.realpath(str(transcript_path))
     try:
-        if target.is_file() and target.read_text().strip() == content:
+        if target.is_file() and target.read_text(encoding="utf-8").strip() == content:
             return target
         state.atomic_write(target, content + "\n")
     except OSError as exc:
@@ -772,15 +781,17 @@ def target_state_dir(project_dir: str | Path) -> Path:
     self-sent-echo check and misread as "the user is back," ending the cooldown early. One
     function, used by both call sites, so they cannot drift apart again.
 
-    Deliberately does NOT `.resolve()`/canonicalize `project_dir` (second review finding): a
-    caller that ever passed a relative or symlinked path would diverge from the mapping FILE
-    ITSELF's `record_pane_transcript`, which is written from `state.state_dir()` -- and
-    `state.state_dir()`'s own `_resolve_project_root()` (`state.py`) does not canonicalize
-    either (a bare `Path($CLAUDE_PROJECT_DIR)`). Matching that exact non-canonicalizing
-    behaviour is what keeps the two sides consistent; resolving here alone would create a NEW
-    mismatch (this fn's path vs. the hook-written one), not close one. Every caller in this
-    codebase already relies on `project_dir`/`$CLAUDE_PROJECT_DIR` being a stable, absolute
-    string per session -- this function assumes exactly that, no more, no less."""
+    Does NOT itself `.resolve()`/canonicalize `project_dir` -- it trusts the CALLER to hand it
+    an already-canonical path, and both real callers do: `pane_transcript_path` (below) is fed
+    `fleet_scan.find_janitor_root`'s result, which already ran `os.path.realpath(cwd)`
+    (`fleet_scan.py:633`) before its `.janitor` walk; `record_pane_transcript`'s own default
+    (above) wraps `state.project_root()` in `os.path.realpath(...)` before calling this, for
+    the SAME reason -- `state.state_dir()` on its own does NOT canonicalize
+    (`_resolve_project_root`, `state.py`, is a bare `Path($CLAUDE_PROJECT_DIR)`), and second
+    review finding (TRDD-ECHOKVZC) confirmed that asymmetry (canonicalized reader, raw writer)
+    is a REAL divergence for a project reached through a symlink, not just a theoretical one --
+    see `tests/test_user_intent_interrupt.py`'s writer/reader parity tests, plain and
+    symlinked."""
     return Path(project_dir) / ".janitor" / "state"
 
 
@@ -808,11 +819,16 @@ def pane_transcript_path(project_dir: str | Path | None, terminal: Mapping[str, 
         return None
     mapping = target_state_dir(project_dir) / f"pane-transcript.{pane}.txt"
     try:
-        content = mapping.read_text().strip()
+        content = mapping.read_text(encoding="utf-8").strip()
     except OSError:
         state.log_line("user_intent", f"pane_transcript_path: no mapping for pane {pane!r}")
         return None
     if not content:
+        # An empty file is the ONE case worth its own trace: unlike a missing mapping (routine,
+        # never written yet) or a dangling one (routine, pane reused), an EMPTY file means
+        # `record_pane_transcript`'s write landed truncated -- `atomic_write`'s rename should
+        # make that impossible, so seeing it here is a signal something upstream is wrong.
+        state.log_line("user_intent", f"pane_transcript_path: empty mapping for pane {pane!r} ({mapping})")
         return None
     transcript = Path(content)
     if not transcript.is_file():
