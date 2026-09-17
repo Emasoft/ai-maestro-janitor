@@ -627,7 +627,7 @@ reorder the whole board around cards nobody actually touched.
    permanently valid):
 
    ```bash
-   find design ~/.claude/projects/<slug>/design ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/design \
+   find design .claude/local/design ~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/design \
      -iname 'TRDD-*-<id8>-*.md'
    ```
 

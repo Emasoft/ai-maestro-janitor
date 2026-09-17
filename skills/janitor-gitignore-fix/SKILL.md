@@ -50,7 +50,10 @@ is the remedy: it shows the proposed fix and applies it only on confirmation.
 Reads `lib/gitignore_coverage.py`'s private-class table — the same table the
 `gitignore-coverage` detector uses. Never proposes ignoring or untracking anything under
 the protected prefixes (`design/**`, `.claude/project/memory/**`) — those are deliberately
-tracked, shared PROJECT-scope content.
+tracked, shared PROJECT-scope content. The inverse also holds: `.claude/local/**` (the
+LOCAL design-corpus root, TRDD-WY198OIP) is deliberately GITIGNORED machine-private
+content — never propose tracking it or removing its coverage, even though it is not yet
+in `PROTECTED_PREFIXES` (that table guards the tracked direction only).
 
 ## Resources
 

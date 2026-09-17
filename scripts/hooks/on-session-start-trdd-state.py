@@ -75,6 +75,111 @@ def _read_input() -> tuple[Path, str]:
     return Path(cwd), source
 
 
+def _log_migration(project_dir: Path, line: str) -> None:
+    """Append one line to `.janitor/logs/dispatch.log` (best-effort; never raises)."""
+    try:
+        log_dir = project_dir / ".janitor" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        with (log_dir / "dispatch.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"{stamp} on-session-start-trdd-state: {line}\n")
+    except OSError:
+        pass
+
+
+def _has_any_trdd_md(d: Path) -> bool:
+    """True iff `d` holds at least one `TRDD-*.md` anywhere under it.
+
+    Distinguishes a genuinely migrated board from an EMPTY scaffold: `ensure_local_design()`
+    (called from the TRDD-authoring path, e.g. `ticket_proposal.propose()`) can `mkdir` the new
+    root's lifecycle folders before this hook's SessionStart ever fires in a given project —
+    e.g. a non-interactive caller (a detector's proposal path, the daemon) runs first. Treating
+    that empty scaffold as "already migrated" would refuse to move `old`'s real cards and leave
+    them permanently invisible. Only REAL content at the new root counts as migrated.
+    """
+    return d.is_dir() and any(d.rglob("TRDD-*.md"))
+
+
+def _migrate_local_design(project_dir: Path) -> None:
+    """One-time move of the OLD LOCAL design root into its new in-tree home.
+
+    TRDD-WY198OIP relocated LOCAL from `~/.claude/projects/<slug>/design` to
+    `<project_dir>/.claude/local/design` (owner directive ai-maestro#163 / issue #303),
+    to end a split-brain with ai-maestro's own pillar resolver. This runs it exactly
+    once per project, at the one point SessionStart already knows the project root:
+    - old absent → nothing to do (never had a LOCAL corpus, or already fully migrated).
+    - old present, new absent or an EMPTY scaffold → move it (shutil.move; an empty scaffold at
+      `new` is removed first so the move can land), drop a `MOVED-TO.txt` marker in the old slug
+      dir so a stray `ls` doesn't look like data loss, log one line.
+    - old present, new has REAL content (>=1 `TRDD-*.md`) → refuse and log a drift line; a human
+      resolves rather than risking a silent merge that could shadow one scope's cards with the
+      other's.
+    Never touches the sibling `memory/` dir under the same slug — that's the WIKIMEM
+    LOCAL scope, a different subsystem the directive explicitly keeps separate.
+    Best-effort: any failure is FAIL-OPEN (session start must never break for this), but it is
+    NEVER SILENT — a swallowed exception here would hide a half-moved corpus, the exact
+    split-brain this card exists to end, so the except path always logs the exception class,
+    message, and both candidate paths (whichever were resolved before the failure) via
+    `_log_migration`. KNOWN GAPS (not handled here, see TRDD-WY198OIP's STATE block): two
+    sessions of the same project starting concurrently can race this move (no lock); a
+    non-interactive consumer of `local_design_root()` that never goes through a Claude Code
+    SessionStart (a cron/daemon-only process) will not trigger this migration at all.
+    """
+    old: Path | None = None
+    new: Path | None = None
+    try:
+        import shutil
+
+        home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+        plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+        if not plugin_root:
+            return
+        scripts = Path(plugin_root) / "scripts"
+        for entry in (str(scripts), str(scripts / "lib")):
+            if entry not in sys.path:
+                sys.path.insert(0, entry)
+        from lib import memory_scopes  # noqa: E402 - local package, not PyPI
+
+        slug = memory_scopes.project_slug(str(project_dir))
+        old = home / ".claude" / "projects" / slug / "design"
+        new = project_dir / ".claude" / "local" / "design"
+        if not old.is_dir():
+            # The common case (no LOCAL corpus ever existed here, or already migrated)
+            # must stay silent on every OTHER SessionStart — this fires on nearly every
+            # session for most projects, so logging unconditionally would drown the
+            # genuinely rare DRIFT/FAILED lines in routine noise. A one-time marker file
+            # lets the FIRST observation still leave a trace (so a wrong slug or a
+            # half-cleared old dir is diagnosable) without unbounded log growth.
+            marker = project_dir / ".janitor" / "state" / "local-design-migration-checked"
+            if not marker.exists():
+                _log_migration(project_dir, f"local-design migration: nothing at {old}")
+                try:
+                    marker.parent.mkdir(parents=True, exist_ok=True)
+                    marker.touch()
+                except OSError:
+                    pass
+            return
+        if _has_any_trdd_md(new):
+            _log_migration(
+                project_dir,
+                f"DRIFT: both old ({old}) and new ({new}) LOCAL design roots have real TRDDs — "
+                "refusing to merge, human must resolve",
+            )
+            return
+        if new.is_dir():
+            shutil.rmtree(new)  # empty scaffold only (no TRDD-*.md) — safe to clear and replace
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old), str(new))
+        (old.parent / "MOVED-TO.txt").write_text(f"{new}\n", encoding="utf-8")
+        _log_migration(project_dir, f"migrated LOCAL design {old} -> {new}")
+    except Exception as exc:  # noqa: BLE001 -- fail-open, but NEVER silent (see docstring)
+        _log_migration(
+            project_dir,
+            f"local-design migration FAILED old={old} new={new}: "
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
 def _status(text_head: str) -> str | None:
     m = re.search(r"^status:\s*(\S+)\s*$", text_head, re.MULTILINE)
     return m.group(1) if m else None
@@ -213,6 +318,7 @@ def _display(p: Path, project_dir: Path) -> str:
 
 def main() -> int:
     project_dir, source = _read_input()
+    _migrate_local_design(project_dir)
 
     trdds = _in_progress(_trdd_paths(project_dir))[:MAX_TRDDS]
     if not trdds:

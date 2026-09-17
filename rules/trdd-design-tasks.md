@@ -34,12 +34,17 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
    | scope | root | git |
    |---|---|---|
    | `project` (default) | `<project-root>/design/` | tracked + pushed |
-   | `local` | `~/.claude/projects/<slug>/design/` | outside the repo, never committed |
+   | `local` | `<project-root>/.claude/local/design/` | gitignored, never committed |
    | `user` | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/design/` | host-only, never pushed |
 
-   All three share the SAME four lifecycle folders (`proposals/ tasks/ archived/ refused/`).
-   `<slug>` = the project's absolute path, non-alphanumeric → `-`. PROJECT `design/` MUST NOT
-   be gitignored; LOCAL/USER need no entry.
+   All three share the SAME four lifecycle folders (`proposals/ tasks/ archived/ refused/`),
+   plus two NON-task folders with no lifecycle of their own — `requirements/` and `specs/`
+   never get proposals/archived/refused siblings. PROJECT `design/` MUST NOT be gitignored;
+   LOCAL/USER need no entry (LOCAL's `.claude/**` coverage already ignores it in every
+   project that follows this repo's own gitignore convention). LOCAL moved inside the
+   project tree 2026-09 (owner directive ai-maestro#163) to end a split-brain with the
+   pillar tooling's own resolver, which already used this path — it was previously
+   `~/.claude/projects/<slug>/design/`, OUTSIDE the repo.
 
    **Scope routing.** Ask: *true and useful for a contributor on a DIFFERENT machine?* No →
    LOCAL (a `$HOME` path, hostname, credential, install state). One project → PROJECT.

@@ -18,31 +18,41 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
-
-try:  # hooks put scripts/ on sys.path → package import
-    from lib import memory_scopes
-except ImportError:  # detectors/tests put scripts/lib/ on sys.path → flat import
-    import memory_scopes  # type: ignore[no-redef]
 
 # ── The two design SCOPES (the SSOT every TRDD consumer must route through) ──
 #
 # A TRDD's scope IS ITS PATH — exactly like a memory note. There is no `scope:`
 # frontmatter field to keep in sync, and therefore none to get wrong:
 #
-#   PROJECT  <repo>/design/                      git-tracked + PUSHED — shared with
-#                                                every contributor.
-#   LOCAL    ~/.claude/projects/<slug>/design/   machine-private, OUTSIDE any repo —
-#                                                never pushed, and (unlike a gitignored
-#                                                in-repo dir) not destroyed by
-#                                                `git clean -fdx`.
+#   PROJECT  <repo>/design/                       git-tracked + PUSHED — shared with
+#                                                 every contributor.
+#   LOCAL    <project_root>/.claude/local/design/  machine-private — gitignored by the
+#                                                 same `.claude/**` pattern every
+#                                                 consumer project already carries for
+#                                                 `.claude/project/`.
+#
+# LOCAL used to live at `~/.claude/projects/<slug>/design/`, OUTSIDE the repo
+# entirely. TRDD-WY198OIP moved it inside the project tree (owner directive
+# ai-maestro#163 / GitHub issue #303): ai-maestro's own pillar resolver
+# (`corpusRootFor` in ai-maestro/lib/pillar/kinds.ts) already resolved LOCAL to
+# `<project_root>/.claude/local/design` — a split-brain where trddgrep and this
+# janitor disagreed on where the SAME scope's cards live. Moving here, not
+# there, because this repo can fix its own resolver; it cannot fix ai-maestro's.
+# `scripts/hooks/on-session-start-trdd-state.py` migrates any pre-existing
+# `~/.claude/projects/<slug>/design/` into the new location once, at
+# SessionStart. The wikimem LOCAL *memory* dir (`.../memory/`, a different
+# subsystem) is UNCHANGED by this move — the directive says it must stay
+# separate, and `memory_scopes.resolve_local_dir_for` still owns it.
 #
 # LOCAL mirrors the repo's `design/` EXACTLY — the same four lifecycle folders
-# (`proposals/ tasks/ archived/ refused/`). Mirroring the whole dir, rather than
-# hanging a bare `tasks/` off the slug, is what avoids a `tasks/tasks/` once the
-# lifecycle folders land (3-pillars spec, decided by its maintainer 2026-07-11).
+# (`proposals/ tasks/ archived/ refused/`), plus (as of TRDD-WY198OIP)
+# `requirements/` and `specs/`, which carry no proposals/archived/refused
+# lifecycle of their own — see `NON_TASK_FOLDERS` below.
 #
 # WHY this is an SSOT and not a constant copied into each caller: before this, all
 # eight consumers (trdd-drift, trdd-reminder, trdd-state-reconciliation,
@@ -52,17 +62,16 @@ except ImportError:  # detectors/tests put scripts/lib/ on sys.path → flat imp
 # consumer that cannot see a scope makes that scope's tasks invisible — the same
 # "two input paths ≠ SSOT" shape that let the rotator's LOG_FILE diverge from its
 # isolated ROOT and append to the production log.
-#
-# The slug comes from `memory_scopes.project_slug` — the one definition the harness
-# agrees with. It is NOT re-derived here: a separators-only translation of the same
-# idea once resolved a nonexistent dir and silently emptied the whole LOCAL memory
-# subsystem, and a second copy of that logic would put LOCAL design one typo away
-# from the same fate.
 LOCAL = "local"
 PROJECT = "project"
 
 # The four lifecycle folders, in pipeline order. Both scopes carry all four.
 DESIGN_FOLDERS = ("proposals", "tasks", "archived", "refused")
+
+# Non-task folders with NO proposals/archived/refused lifecycle of their own —
+# kept OUT of DESIGN_FOLDERS so no consumer that iterates it accidentally
+# treats them as having lifecycle siblings (owner directive ai-maestro#163).
+NON_TASK_FOLDERS = ("requirements", "specs")
 
 
 def _project_root(project_dir: str | None) -> Path:
@@ -100,16 +109,62 @@ def project_design_root(project_dir: str | None = None) -> Path | None:
     return None if tasks is None else tasks.parent
 
 
-def local_design_root(project_dir: str | None = None) -> Path:
-    """`~/.claude/projects/<slug>/design` — the LOCAL (machine-private) design root.
+@lru_cache(maxsize=None)
+def _main_checkout_root(project_dir: str) -> Path:
+    """Resolve `project_dir` to its MAIN git checkout, for the LOCAL design corpus.
+    A linked worktree (`git worktree add`) shares one `.git` with its main checkout but
+    is itself ephemeral — removed with `git worktree remove` (or a branch cleanup), at
+    which point a LOCAL corpus rooted THERE would vanish along with every card in it.
+    `git worktree list --porcelain`s FIRST `worktree <path>` line is always the main
+    checkout (git guarantees this ordering) — read that line directly, never
+    `awk {print $1}` on the plain-text `git worktree list` form, which truncates at the
+    first space in a path (routine on macOS with iCloud/Google Drive).
+    Outside a git repo the given root stands as-is — nothing to redirect to. INSIDE a
+    known git repo, a non-zero `worktree list` exit (or output missing the expected
+    line) is a real anomaly, not a reason to silently keep using the (possibly wrong)
+    worktree path, so it raises rather than failing open.
+    """
+    path = Path(project_dir)
+    try:
+        probe = subprocess.run(
+            ["git", "-C", project_dir, "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return path  # no git binary, or it hung — fall back to the given root
+    if probe.returncode != 0:
+        return path  # not a git repo at all — nothing to resolve
+    result = subprocess.run(
+        ["git", "-C", project_dir, "worktree", "list", "--porcelain"],
+        capture_output=True, text=True, timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git worktree list --porcelain failed (exit {result.returncode}) inside "
+            f"known git repo {project_dir}: {result.stderr.strip()}"
+        )
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            return Path(line[len("worktree "):])
+    raise RuntimeError(
+        f"git worktree list --porcelain produced no worktree line for {project_dir}"
+    )
 
-    NOT containment-checked against the project root: living OUTSIDE the repo is the
-    entire point of this scope, so the check that protects PROJECT would reject LOCAL
-    outright. It needs no such check — the path is derived from the project slug, never
-    from a user-supplied string, so there is nothing here for a bad option to escape with.
+
+def local_design_root(project_dir: str | None = None) -> Path:
+    """`<main_checkout_root>/.claude/local/design` — the LOCAL (machine-private) design root.
+
+    Moved INSIDE the project tree by TRDD-WY198OIP (was `~/.claude/projects/<slug>/design`)
+    to match ai-maestro's own pillar resolver and end the split-brain — see the module
+    docstring above `LOCAL`/`PROJECT`. Gitignored by the same `.claude/**` pattern every
+    consumer project already carries; NOT the wikimem LOCAL memory dir, which is a
+    different subsystem and still lives at `memory_scopes.resolve_local_dir_for(...)`.
+
+    Routed through `_main_checkout_root` so a linked git worktree never gets its own
+    LOCAL corpus that dies with the branch — see that function's docstring.
     """
     root = _project_root(project_dir)
-    return memory_scopes.resolve_local_dir_for(str(root)).parent / "design"
+    return _main_checkout_root(str(root)) / ".claude" / "local" / "design"
 
 
 def design_roots(project_dir: str | None = None) -> list[tuple[str, Path]]:
@@ -162,14 +217,16 @@ def trdd_files(
 
 
 def ensure_local_design(project_dir: str | None = None) -> Path:
-    """Create the LOCAL design root + its four lifecycle folders. Returns the root.
+    """Create the LOCAL design root + its lifecycle + non-task folders. Returns the root.
 
     Only the TRDD-AUTHORING path calls this. Detectors must NOT: a read-only observer
     that materializes the thing it observes would make every project look like it has
-    local design, and would write to `~/.claude` on every heartbeat.
+    local design, and would write to disk on every heartbeat. Creates both
+    `DESIGN_FOLDERS` (proposals/tasks/archived/refused) and `NON_TASK_FOLDERS`
+    (requirements/specs) — the full LOCAL layout, mirroring PROJECT's `design/`.
     """
     root = local_design_root(project_dir)
-    for name in DESIGN_FOLDERS:
+    for name in (*DESIGN_FOLDERS, *NON_TASK_FOLDERS):
         (root / name).mkdir(parents=True, exist_ok=True)
     return root
 

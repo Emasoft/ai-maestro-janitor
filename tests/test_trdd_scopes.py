@@ -1,17 +1,21 @@
-"""LOCAL + PROJECT design scopes — the TRDD roots SSOT (3-pillars spec, 2026-07-11).
+"""LOCAL + PROJECT design scopes — the TRDD roots SSOT (3-pillars spec, 2026-07-11;
+LOCAL relocated in-tree by TRDD-WY198OIP, owner directive ai-maestro#163).
 
 A TRDD's scope IS its path (like a memory note): PROJECT under `<repo>/design/`,
-LOCAL under `~/.claude/projects/<slug>/design/`. LOCAL mirrors the repo's design/
-exactly — the same four lifecycle folders — so the two are structurally identical
+LOCAL under `<repo>/.claude/local/design/` (gitignored, project-tree-local). LOCAL
+mirrors the repo's design/ exactly — the same four lifecycle folders, plus the two
+non-task folders `requirements/`/`specs/` — so the two are structurally identical
 and no `tasks/tasks/` appears once the lifecycle folders are in use.
 
 No mocks: every test builds a REAL on-disk tree and runs the real resolvers. The
-session-default conftest isolation points HOME at a tmp tree, so `local_design_root`
-resolves inside it and nothing here can touch the real ~/.claude.
+session-default conftest isolation points HOME at a tmp tree — no longer load-bearing
+for `local_design_root` (it derives purely from the project dir now), but still
+guards against any other resolver in this file touching the real ~/.claude.
 """
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -42,35 +46,92 @@ def test_project_design_root_is_the_repo_design_dir(tmp_path: Path) -> None:
     assert trdd_common.project_design_root(str(root)) == root / "design"
 
 
-def test_local_design_root_is_outside_the_repo(tmp_path: Path) -> None:
-    """LOCAL design lives under the harness project dir, NOT in the repo — so it can
-    never be committed by accident, and `git clean -fdx` cannot destroy it."""
+def test_local_design_root_is_inside_the_project_tree(tmp_path: Path) -> None:
+    """LOCAL design lives at `<project>/.claude/local/design` (TRDD-WY198OIP) — INSIDE
+    the project tree now, unlike the old `~/.claude/projects/<slug>/design`. It is
+    gitignored by the same `.claude/**` pattern every consumer project already carries,
+    so it is safe from `git add` without living outside the repo."""
     root = _project(tmp_path)
     local = trdd_common.local_design_root(str(root))
-    assert local.name == "design"
-    assert root not in local.parents, "LOCAL design must not sit inside the repo"
-    assert local.parent.name == memory_scopes.project_slug(str(root))
+    assert local == root / ".claude" / "local" / "design"
 
 
-def test_local_design_is_a_sibling_of_local_memory(tmp_path: Path) -> None:
-    """LOCAL design sits BESIDE LOCAL memory under the same per-project slug dir, and
-    routes through the SAME slug fn — a second slug derivation is what once resolved a
-    nonexistent dir and silently emptied the LOCAL memory subsystem."""
+def test_local_design_root_resolves_a_worktree_to_its_main_checkout(tmp_path: Path) -> None:
+    """A linked git worktree must NOT get its own LOCAL corpus — it dies with the branch when
+    the worktree is removed (review finding on TRDD-WY198OIP). Real `git init` + commit +
+    `git worktree add`; both the worktree's own path AND the main checkout must resolve to
+    the SAME `.claude/local/design`, rooted at the main checkout."""
+    main = tmp_path / "main"
+    main.mkdir()
+
+    def _git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=main, check=True, capture_output=True, text=True)
+
+    _git("init", "-q")
+    _git("config", "user.email", "test@example.com")
+    _git("config", "user.name", "Test")
+    (main / "README.md").write_text("x", encoding="utf-8")
+    _git("add", "README.md")
+    _git("commit", "-q", "-m", "init")
+    worktree = tmp_path / "wt"
+    _git("worktree", "add", "-q", "-b", "feature", str(worktree))
+
+    expected = main / ".claude" / "local" / "design"
+    assert trdd_common.local_design_root(str(worktree)) == expected
+    assert trdd_common.local_design_root(str(main)) == expected
+
+
+def test_local_design_root_raises_on_a_worktree_list_failure_inside_a_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-zero `git worktree list --porcelain` exit INSIDE a known git repo is a real
+    anomaly (corrupted `.git/worktrees` state, permission-denied on a shared checkout) — it
+    must RAISE rather than silently keep using the given root, which could be the wrong one
+    for a worktree. Real `git init` (so `rev-parse --is-inside-work-tree` genuinely succeeds);
+    only the `worktree list` subprocess call is monkeypatched to fail."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-q"], cwd=repo, check=True, capture_output=True, text=True
+    )
+    real_run = subprocess.run
+
+    def _fake_run(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if "worktree" in cmd and "list" in cmd:
+            return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: simulated")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(trdd_common.subprocess, "run", _fake_run)
+    trdd_common._main_checkout_root.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="git worktree list"):
+            trdd_common.local_design_root(str(repo))
+    finally:
+        trdd_common._main_checkout_root.cache_clear()
+
+
+def test_local_design_no_longer_shares_a_slug_dir_with_local_memory(tmp_path: Path) -> None:
+    """LOCAL design and LOCAL wikimem memory are DIFFERENT subsystems by owner directive
+    (ai-maestro#163: 'different from the wikimem architecture, and it must be so') — design
+    moved in-tree, memory still resolves under `~/.claude/projects/<slug>/memory`. They must
+    NOT collide or nest inside one another."""
     root = _project(tmp_path)
     design = trdd_common.local_design_root(str(root))
     memory = memory_scopes.resolve_local_dir_for(str(root))
-    assert design.parent == memory.parent
-    assert design.name == "design" and memory.name == "memory"
+    assert design.parent != memory.parent
+    assert design not in memory.parents and memory not in design.parents
 
 
 def test_local_mirrors_the_repo_design_folders(tmp_path: Path) -> None:
-    """LOCAL carries the SAME four lifecycle folders as the repo's design/ — mirroring
-    the whole dir (not hanging a bare tasks/ off the slug) is what avoids tasks/tasks/."""
+    """LOCAL carries the SAME four lifecycle folders as the repo's design/, plus the two
+    non-task folders (`requirements/`, `specs/`) that have no lifecycle of their own —
+    mirroring the whole dir is what avoids tasks/tasks/."""
     root = _project(tmp_path)
     created = trdd_common.ensure_local_design(str(root))
-    for folder in ("proposals", "tasks", "archived", "refused"):
+    for folder in ("proposals", "tasks", "archived", "refused", "requirements", "specs"):
         assert (created / folder).is_dir(), f"LOCAL design must carry {folder}/"
     assert trdd_common.DESIGN_FOLDERS == ("proposals", "tasks", "archived", "refused")
+    assert trdd_common.NON_TASK_FOLDERS == ("requirements", "specs")
 
 
 # ── discovery across both scopes ─────────────────────────────────────────────
@@ -182,10 +243,11 @@ def test_trdd_path_escaping_the_project_root_is_refused(
 def test_local_scope_survives_a_broken_project_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """LOCAL is derived from the project SLUG, never from the user-supplied option — so a
-    typo'd TRDD_PATH cannot take the local board down with it. LOCAL is also deliberately
-    OUTSIDE the project root, so the containment check that guards PROJECT must not be
-    applied to it (doing so would reject the entire scope)."""
+    """LOCAL is derived from the project root directly, never from the user-supplied
+    option — so a typo'd TRDD_PATH cannot take the local board down with it. LOCAL needs
+    no containment check either: unlike PROJECT (whose root can be redirected by an
+    option that might escape), LOCAL's path is a fixed join off the project root with
+    nothing here for a bad option to escape with."""
     root = _project(tmp_path)
     local = trdd_common.ensure_local_design(str(root))
     (local / "tasks" / TRDD2).write_text("column: dev\n", encoding="utf-8")
@@ -197,14 +259,17 @@ def test_local_scope_survives_a_broken_project_override(
 
 
 @pytest.mark.parametrize("dotted", ["proj.v2", "my_proj", "a-b.c_d"])
-def test_slug_survives_dotted_and_underscored_paths(tmp_path: Path, dotted: str) -> None:
-    """REGRESSION: the harness dashes EVERY non-alphanumeric char, not just separators.
-    A separators-only slug resolved a nonexistent dir and silently emptied LOCAL memory;
-    routing through memory_scopes.project_slug is what keeps LOCAL design out of that."""
+def test_local_design_root_survives_dotted_and_underscored_project_paths(
+    tmp_path: Path, dotted: str
+) -> None:
+    """REGRESSION guard for the OLD slug-based resolver, kept post-migration: a project
+    path with dots/underscores in its name must resolve LOCAL design correctly. Now that
+    LOCAL is a plain `<project>/.claude/local/design` join (no slug involved), this is
+    trivially true — but the case is worth keeping as a canary against a future
+    regression that re-introduces slug-based derivation."""
     root = tmp_path / dotted
     (root / "design" / "tasks").mkdir(parents=True)
 
     local = trdd_common.local_design_root(str(root))
 
-    assert local.parent.name == memory_scopes.project_slug(str(root))
-    assert "." not in local.parent.name and "_" not in local.parent.name
+    assert local == root / ".claude" / "local" / "design"
