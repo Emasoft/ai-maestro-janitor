@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.7] — 2026-09-17
+
+### Bug Fixes
+
+- **compact:** No forced /compact while the harness's own auto-compact is imminent; guard sits in the sender and stops below the backstop threshold (TRDD-PH8SAQKS) (9d72d6e)
+- **compact:** Guard 2 exempts the --hard emergency path and its skip is a named outcome both callers treat as no-send; OJK1MBU2 minted (TRDD-PH8SAQKS, TRDD-OJK1MBU2) (73254e3)
+- **publish:** The index.lock recovery names the guard verdict it refused on, so a fail-closed refusal under gate load is no longer invisible (TRDD-BEIG83VR) (cd38cff)
+
+### Documentation
+
+- Post-3.5.6 follow-ups — private-path lesson on the CPV publish page, YONEH3XC minted, wikimem index refreshed after the oauth split (TRDD-YONEH3XC) (898f640)
+- Private-path lesson moves to the address-lint page that owns true CPV leaks; YONEH3XC limited to role-shaped fields (TRDD-YONEH3XC) (b760249)
+- Qualify the false-positive page's pointer to the true-leak page; YONEH3XC notes the proposals/refused sweep (TRDD-YONEH3XC) (40814ce)
+- **trdd:** Assignee and current-owner carry a role name instead of the owner's username on five open cards; four frozen cards note it (TRDD-YONEH3XC) (e1b0c53)
+
+### Testing
+
+- **compact:** PreCompact stamp schema pinned against the hook's writer; still_wanted proven to gate the already-typed submit branch; read_landed_stamp made public (TRDD-YM65RCZA) (47114ac)
+- Pin CARGO_HOME and CARGO_TARGET_DIR absolute for the memgrep build so an ambient relative CARGO_HOME cannot spill a registry into the repo root (TRDD-L64C5DQ1) (841b5cc)
+- Override CARGO_HOME only when the ambient value is relative; keep the shared ~/.cargo cache and config otherwise (TRDD-L64C5DQ1) (49c7c24)
+- Cargo registry redirect leaves the repo, the git-locks guard lists git-visible files, and the guard-2 marker constant loses the TOKEN name (TRDD-L64C5DQ1, TRDD-PH8SAQKS) (04b360a)
 ## [3.5.6] — 2026-09-17
 
 ### Bug Fixes
@@ -115,6 +136,10 @@ All notable changes to this project will be documented in this file.
 
 - **token-meter:** Weekly janitor cost summary with per-fire kind attribution through a sidecar, not a schema change (TRDD-NEVQOHGS) (25e86cf)
 - **trdd:** LOCAL design corpus moves to <project-root>/.claude/local/design, migrated at SessionStart (GH #303, TRDD-WY198OIP) (5840ee6)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.5.6 (0886813)
 
 ### Refactor
 
