@@ -1,8 +1,8 @@
 ---
 name: janitor-beat-tasks-and-limitations
-description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / the heartbeat keeps telling me to resume an agent I stopped / pending agents nag after TaskStop / how do I clear a pending agent entry / dynamic heartbeat tiers fast mid slow / user-plugins-update stamp frozen / who updates user scope plugins now / where did the plugin sweep go — the janitor's two-clock schedule and its known limitations"
+description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / the heartbeat keeps telling me to resume an agent I stopped / pending agents nag after TaskStop / how do I clear a pending agent entry / dynamic heartbeat tiers fast mid slow / user-plugins-update stamp frozen / who updates user scope plugins now / where did the plugin sweep go / why is marketplace-refresh missing / is marketplace-refresh retired — the janitor's two-clock schedule and its known limitations"
 ocd: 2026-07-12
-lmd: 2026-08-21
+lmd: 2026-09-17
 metadata:
   node_type: memory
   type: project
@@ -73,7 +73,7 @@ overridable via its `CLAUDE_PLUGIN_OPTION_DAEMON_*_INTERVAL` env var. [^1]
 
 | Task | Interval | Purpose / opt-in |
 |---|---|---|
-| `marketplace-refresh` | **1200 s (20 min)** | bulk `claude plugin marketplace update` (all marketplaces) — the daemon is the sole global-refresh writer. |
+| ~~`marketplace-refresh`~~ | — | **RETIRED 2026-09-17 (TRDD-5A4SGMD6)** — ran bulk `claude plugin marketplace update` across all marketplaces; removed together with the ai-maestro server twin `RefreshAllMarketplaces` (its own churn preceded fseventsd growing to 27 GB). Kept: `marketplace-op.lock` (four callers), `plugin-updates.py`'s single-name refresh, `version-update`'s own by-name refresh. |
 | ~~`user-plugins-update`~~ | — | **RETIRED 2026-08-20 (TRDD-E39YT9G6)** — the harness self-updates user-scope plugins (autoUpdate catalogs), so the hourly sweep duplicated it; the targeted `_consume_plugin_update_requests` consumer stays. |
 | `version-update` | **21600 s (6 h)** | janitor self-update when GitHub is ahead of the cache; sets the reload flag. |
 | `oauth-rotator-supervisor` | **600 s (10 min)** | OAuth-rotator governance/alerts. **No-op unless `/janitor-auto-manage-oauth-on`.** |
@@ -167,7 +167,7 @@ uv run python -c "import sys; sys.path.insert(0,'scripts/lib'); import pending_a
   agentlensPro cross-check (informs the TTL-regime probe direction).
 
 
-^ATOM-PHXC-VE71 [desc:"The full CLAUDE.md 'Control flow' section verbatim: dispatch.py's numbered heartbeat steps 1-8+3a, the daemon loop + background bulk lane, and the release-triggered self-update fast path", keywords: control_flow_heartbeat_dispatch.py_steps_numbered daemon_loop_bulk_lane_background_tasks release_triggered_self_update_version-update-requested_flag dispatcher_stub_os.execv_auto_roll what_happens_during_a_janitor_heartbeat_fire why_does_a_plugin_update_auto-roll_without_re-arming what_is_the_dynamic_TTL-aware_cadence why_does_the_bulk_lane_run_in_one_detached_child what_is_the_1800s_task_run_cap why_is_version-update_latency_5-6_min_not_6h, type: project, ocd: 2026-08-02, lmd: 2026-08-02] [^2] [^4]
+^ATOM-PHXC-VE71 [desc:"The full CLAUDE.md 'Control flow' section verbatim: dispatch.py's numbered heartbeat steps 1-8+3a, the daemon loop + background bulk lane, and the release-triggered self-update fast path", keywords: control_flow_heartbeat_dispatch.py_steps_numbered daemon_loop_bulk_lane_background_tasks release_triggered_self_update_version-update-requested_flag dispatcher_stub_os.execv_auto_roll what_happens_during_a_janitor_heartbeat_fire why_does_a_plugin_update_auto-roll_without_re-arming what_is_the_dynamic_TTL-aware_cadence why_does_the_bulk_lane_run_in_one_detached_child what_is_the_1800s_task_run_cap why_is_version-update_latency_5-6_min_not_6h, type: project, ocd: 2026-08-02, lmd: 2026-08-02] [^2] [^4] [^6]
 
 ### Control flow
 
@@ -190,20 +190,22 @@ run each due `Task`; `_run_workload` runs subprocess with **1800s cap** +
 periodic heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts`
 **unconditionally** in `finally` (so stale last-run = task not *running*, not
 failing-silently). **Background bulk lane (TRDD-H7NVKSAX, 2026-07-17 oauth-starvation
-incident):** the BULK tasks (`marketplace-refresh`, `fleet-plugins-update`,
+incident):** the BULK tasks (`fleet-plugins-update`,
 `version-update`, `github-config-audit`; `user-plugins-update` was one until its
-2026-08-20 retirement — TRDD-E39YT9G6) carry `background=True` and run in ONE detached
+2026-08-20 retirement — TRDD-E39YT9G6, and `marketplace-refresh` was one until its
+2026-09-17 retirement — TRDD-5A4SGMD6) carry `background=True` and run in ONE detached
 child at a time (`daemon.py --run-task <name>`, parent reaps + stamps from the child rc)
 so a ~20-min bulk run can NEVER block the loop's 60s survival beats (oauth-rotator-tick
 above all — two back-to-back 1190s marketplace refreshes once blinded rotation while an
 account hit its 5h wall). One lane preserves the old bulk-chore serialization; file locks
-remain the backstop. Tasks: `marketplace-refresh` (3600s — was 1200s, which ≈ its own
-runtime and gave a 50% duty cycle; bulk), `version-update` (21600s, self-update + sets reload-flag),
+remain the backstop. Tasks: `version-update` (21600s, self-update + sets reload-flag),
 `rules-cleanup` (3600s, TRDD-H9IBY95W — when the janitor is CONFIRMED uninstalled, removes
 provenance-marked orphaned rules from `~/.claude/rules/`; the only actor that can act after a
 full uninstall since CC has no uninstall hook + the daemon outlives the plugin on its orphaned
 cache ~7d; opt-out `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED`; NEVER touches memory).
-All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
+`marketplace-op.lock` (four callers) remains for the surviving per-marketplace
+refresh paths (`plugin-updates.py`'s single-name refresh, `version-update`'s own
+by-name refresh) — skip-if-held.
 **Release-triggered self-update (TRDD-Y9KM5RCJ):** the 6h `version-update` beat is too
 slow to land a fresh janitor release (v0.41.0 sat at cache 0.39.0 for hours). The
 per-session `version-update` detector now RAISES `gs.request_version_update()`
@@ -250,3 +252,4 @@ MEASURED, not estimated (`agentlenspro heartbeat-cost`, 2026-08-04): ONE heartbe
 [^3]: [id:ATOM-3YQE-ACXU, status:valid, desc:"measure token and context numbers with agentlenspro, never state a remembered or felt figure", keywords:"I_estimated_the_context_percentage_instead_of_measuring_it how_full_is_my_context am_I_about_to_auto-compact do_not_guess_token_numbers", ocd:2026-08-04, lmd:2026-08-04] DO NOT state a context-percentage or token cost from memory, feel, or a hook warning read several turns ago, BECAUSE those numbers go stale the instant a compaction lands and a confidently wrong one gets acted on — on 2026-08-04 I claimed "~95% context" from a pre-compaction warning, when the measured figure was 406,239/700,000, and used the invented number to decline work the owner had asked for. DO run the agentlenspro CLI (owner directive 2026-08-04: always use it) — `heartbeat-cost` for a fire's real cost, `cache-expired` / `last-compact` for cache and compaction state — and quote what it prints.
 [^4]: [id: ATOM-GLM6-PIK9, status: valid, desc: "TRDD-E39YT9G6 retirement — this page's task table carried the sweep as live until 2026-08-20", keywords: "user-plugins-update_stamp_frozen where_did_the_plugin_sweep_go daemon_chore_missing_from_roster who_updates_user_scope_plugins_now sweep_retired_harness_autoupdate", ocd: 2026-08-19, lmd: 2026-08-19] DO NOT treat user-plugins-update as a live daemon chore or expect its last-run stamp to advance, BECAUSE it was RETIRED 2026-08-20 (TRDD-E39YT9G6): the harness self-updates user-scope plugins from autoUpdate catalogs, so the hourly sweep duplicated harness work and under load its serial spawns timed out until the workload cap SIGKILLed the child (2026-08-19, rc=-9 at 2184 s). DO use the targeted _consume_plugin_update_requests consumer for per-plugin updates — it is not a chore and stays daemon-owned.
 [^5]: [id: ATOM-JSLZ-XJNO, status: valid, desc: "after a TaskStop, clear the manifest yourself", keywords: "I_stopped_an_agent_and_the_heartbeat_still_lists_it do_not_resume_a_stopped_agent resuming_a_killed_agent_re-runs_what_killed_it", ocd: 2026-08-21, lmd: 2026-08-21] DO NOT walk away after `TaskStop`-ing a background agent, BECAUSE nothing clears the pending-agents manifest for you — no TaskStop hook exists — so every later heartbeat re-offers the corpse as a resume candidate, and the stub's own warning is that resuming a DIED agent re-runs the request that killed it. DO call `pending_agents.mark_stopped('<agentId>')` in the same turn as the kill; confirm with `pa.directive_lines() == []`.
+[^6]: [id: ATOM-3VKX-C7AI, status: valid, keywords: "marketplace_refresh_retired why_is_marketplace-refresh_missing daemon_throttle_gone marketplace-refresh.last-run.ts_absent is_marketplace-refresh_still_a_bulk_task fseventsd_27gb_marketplace_churn bulk_lane_task_list_changed RefreshAllMarketplaces_retired why_did_fseventsd_grow_to_27gb marketplace_update_churn_removed", ocd: 2026-09-17, lmd: 2026-09-17] DO NOT treat marketplace-refresh as a live daemon bulk task or expect its last-run stamp to advance, BECAUSE it was RETIRED 2026-09-17 (TRDD-5A4SGMD6) together with its ai-maestro server twin RefreshAllMarketplaces: the bulk 'claude plugin marketplace update' churn preceded fseventsd growing to 27 GB. DO expect marketplace-op.lock, plugin-updates.py's single-name refresh, and version-update's by-name refresh to be the only surviving marketplace-refresh paths.

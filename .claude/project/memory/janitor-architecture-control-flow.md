@@ -2,7 +2,7 @@
 name: janitor-architecture-control-flow
 description: "how does the janitor heartbeat vs daemon control flow work / what does dispatch.py do each fire / full/maintenance/stop heartbeat modes / what is the scope invariant / which ops go to the daemon vs per-session detectors / what does self-healing across respawn paths mean / does the C3 quarantine cover both the stub and the keepalive path / what is the janitor-renew marker for / does the janitor cron survive a claude restart / what is the SessionStart re-arm nudge / what is the two-tier architecture (verbatim historical)"
 ocd: 2026-06-13
-lmd: 2026-09-01
+lmd: 2026-09-17
 metadata:
   node_type: memory
   type: project
@@ -75,11 +75,13 @@ heartbeat alive woke the whole fleet; maintenance-mode avoids that).
 `Task`s; `_run_workload` runs the subprocess under a **1800s cap** with periodic
 heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts` **unconditionally in
 `finally`** — so a stale last-run stamp means the task is not *running*, not
-that it is failing silently. Every `claude plugin marketplace update` is wrapped
-in a cross-process marketplace lock (skip-if-held). The daemon's task set
-includes: `marketplace-refresh` (bulk, ~1200s), `version-update` (janitor self-update, ~21600s, sets
-the reload flag), plus the opt-in OAuth-rotator beats and the Tier-1 memory
-guard (below). For the FULL beat schedule — every daemon `Task` with its exact
+that it is failing silently. Any surviving `claude plugin marketplace update` call
+is wrapped in a cross-process marketplace lock (skip-if-held) — the bulk, argless
+form of that call was `marketplace-refresh`, RETIRED 2026-09-17 (TRDD-5A4SGMD6);
+only per-marketplace refreshes remain (`plugin-updates.py`'s single-name refresh,
+`version-update`'s own by-name refresh). The daemon's task set now includes:
+`version-update` (janitor self-update, ~21600s, sets the reload flag), plus the
+opt-in OAuth-rotator beats and the Tier-1 memory guard (below). For the FULL beat schedule — every daemon `Task` with its exact
 cadence, the dynamic per-session heartbeat tiers, and the single-writer /
 fleet-exclusion **limitations** that put a whole class of work on the slow clock
 — see [[janitor-beat-tasks-and-limitations]].
@@ -151,6 +153,11 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 - Cheap idempotent **file** writes to user-scope (rules) stay per-session but
   MUST be **atomic** (tmp + `os.replace`) — the file analogue of the daemon's
   single-writer lock for expensive commands.
+
+
+^ATOM-KUNR-K4CU [desc: "marketplace-refresh was retired 2026-09-17 (TRDD-5A4SGMD6) — it is no longer part of the daemon's task set", keywords: marketplace_refresh_retired is_marketplace-refresh_still_in_the_daemon_task_set why_is_marketplace-refresh_missing marketplace-refresh.last-run.ts_absent daemon_throttle_gone fseventsd_27gb_marketplace_churn RefreshAllMarketplaces_retired daemon_task_set_changed marketplace_update_churn_removed which_tasks_does_the_daemon_still_run, ocd: 2026-09-17, lmd: 2026-09-17]
+
+The daemon's task set no longer includes marketplace-refresh: it was RETIRED 2026-09-17 (TRDD-5A4SGMD6) along with its ai-maestro server twin RefreshAllMarketplaces, because the bulk argless 'claude plugin marketplace update' churn preceded fseventsd growing to 27 GB. Surviving marketplace-touching paths: marketplace-op.lock (four callers), plugin-updates.py's single-name refresh, version-update's own by-name refresh.
 
 ## Governed by
 

@@ -1,8 +1,8 @@
 ---
 name: janitor-core-files-reference
-description: "what does dispatch.py do / what does daemon.py do / what is in state.py under the lib folder / global_state.py responsibilities / where is publish.py / what does usage_probe.py throttle / which script is the janitor self-update / a file-by-file reference of the top-level scripts and their lib core modules / where does the dispatcher-stub live / what does doctor.py check / what does safe_delete.py do / what does branch_protection_apply.py do / what does dedupe.py do / what does version_update.py do / what does rules_installer.py do / which module owns rate-limit resume / what does gitignore_fix.py do / how do I fix a gitignore-coverage finding"
+description: "what does dispatch.py do / what does daemon.py do / what is in state.py under the lib folder / global_state.py responsibilities / where is publish.py / what does usage_probe.py throttle / which script is the janitor self-update / a file-by-file reference of the top-level scripts and their lib core modules / where does the dispatcher-stub live / what does doctor.py check / what does safe_delete.py do / what does branch_protection_apply.py do / what does dedupe.py do / what does version_update.py do / what does rules_installer.py do / which module owns rate-limit resume / what does gitignore_fix.py do / how do I fix a gitignore-coverage finding / is task_marketplace_refresh still in daemon.py / why is marketplace-refresh missing"
 ocd: 2026-08-02
-lmd: 2026-09-02
+lmd: 2026-09-17
 metadata:
   node_type: memory
   type: reference
@@ -14,14 +14,14 @@ publish-globally: false
 # janitor-core-files-reference
 
 
-^ATOM-SVVF-IY1P [desc:"Verified core-files reference: top-level scripts/ (dispatcher-stub, dispatch, daemon, doctor, publish, safe_delete, branch_protection_apply) and scripts/lib/ core modules (state, global_state, dedupe,", keywords: top_level_scripts_core_files_list dispatcher-stub_dispatch_daemon_publish_safe_delete_branch_protection_apply scripts_lib_core_state_global_state_dedupe_version_update_lib_rules_installer_usage_probe what_does_dispatch_py_do what_does_daemon_py_do where_is_publish_py what_does_doctor_py_check what_does_usage_probe_py_throttle which_file_owns_the_janitor_self-update which_module_writes_global_state, type: reference, ocd: 2026-08-02, lmd: 2026-08-02]
+^ATOM-SVVF-IY1P [desc:"Verified core-files reference: top-level scripts/ (dispatcher-stub, dispatch, daemon, doctor, publish, safe_delete, branch_protection_apply) and scripts/lib/ core modules (state, global_state, dedupe,", keywords: top_level_scripts_core_files_list dispatcher-stub_dispatch_daemon_publish_safe_delete_branch_protection_apply scripts_lib_core_state_global_state_dedupe_version_update_lib_rules_installer_usage_probe what_does_dispatch_py_do what_does_daemon_py_do where_is_publish_py what_does_doctor_py_check what_does_usage_probe_py_throttle which_file_owns_the_janitor_self-update which_module_writes_global_state, type: reference, ocd: 2026-08-02, lmd: 2026-08-02] [^1]
 
 ### Core files (verified)
 
 **Top-level `scripts/`**
 - `dispatcher-stub.py` — auto-roll stub in DATA; zero-arg, execs latest `dispatch.py`.
 - `dispatch.py` — per-session heartbeat entry; detector roster + cadences; resume/renew/reload markers.
-- `daemon.py` — global singleton daemon; `_run_workload`, `Task`/`Task.run` (finally-stamps last-run), `task_marketplace_refresh` / `task_user_plugins_update` / `task_version_update`, `_build_tasks`.
+- `daemon.py` — global singleton daemon; `_run_workload`, `Task`/`Task.run` (finally-stamps last-run), `task_version_update`, `_build_tasks`. (`task_marketplace_refresh` and `task_user_plugins_update` are both retired — the latter 2026-08-20 TRDD-E39YT9G6, the former 2026-09-17 TRDD-5A4SGMD6.)
 - `doctor_classify.py` + `commands/doctor.py` — GitHub workflow-doctor CLI (zizmor + Sentinel classifiers).
 - `publish.py` — 14-gate fail-fast release pipeline (version bump → validate → lint → tests → commit → push → tag → GH release).
 - `safe_delete.py` — moves targets to `.trashcan/` (the `/janitor-safe-delete` backend).
@@ -45,3 +45,5 @@ publish-globally: false
 - [[janitor-architecture]] — the architecture hub.
 
 ## Notes and lessons learned
+
+[^1]: [id: ATOM-1F0L-PHKW, status: valid, keywords: "task_marketplace_refresh_removed marketplace_refresh_retired daemon_throttle_gone marketplace_refresh_plan.py_missing why_is_marketplace-refresh_missing is_marketplace-refresh_still_in_daemon.py which_daemon_py_functions_still_exist daemon_task_set_changed marketplace-refresh.last-run.ts_absent fseventsd_27gb_marketplace_churn", ocd: 2026-09-17, lmd: 2026-09-17] DO NOT expect daemon.py to define task_marketplace_refresh, BECAUSE the marketplace-refresh chore was RETIRED 2026-09-17 (TRDD-5A4SGMD6) along with scripts/lib/marketplace_refresh_plan.py, scripts/detectors/marketplace-refresh.py, scripts/lib/daemon_throttle.py, and the marketplace-refresh.last-run.ts stamp. DO expect only task_version_update to still touch marketplaces (its own by-name refresh) plus marketplace_lock's surviving callers (plugin-updates.py, marketplace-op.lock).
