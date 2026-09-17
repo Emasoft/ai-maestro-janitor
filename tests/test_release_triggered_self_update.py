@@ -157,7 +157,7 @@ def test_consume_runs_only_version_update_not_other_tasks() -> None:
     """With a full task list, only 'version-update' runs — never the sibling chores."""
     ran: list[str] = []
     tasks = [
-        daemon.Task("marketplace-refresh", 1200, lambda: ran.append("marketplace-refresh")),
+        daemon.Task("github-config-audit", 1200, lambda: ran.append("github-config-audit")),
         daemon.Task("version-update", 21600, lambda: ran.append("version-update")),
         daemon.Task("fleet-plugins-update", 21600, lambda: ran.append("fleet-plugins-update")),
     ]
@@ -172,7 +172,7 @@ def test_consume_clears_flag_even_when_no_version_update_task() -> None:
     """A task list lacking 'version-update' still clears the flag + returns True — the
     request is consumed (never left to re-fire forever) even if the task is absent."""
     ran: list[str] = []
-    tasks = [daemon.Task("marketplace-refresh", 1200, lambda: ran.append("ran"))]
+    tasks = [daemon.Task("fleet-plugins-update", 1200, lambda: ran.append("ran"))]
     gs.request_version_update("x")
 
     consumed = daemon._consume_version_update_request(tasks)

@@ -11,10 +11,7 @@ $XDG_STATE_HOME/janitor -> the plugin DATA dir, per global_state_dir()) —
 when N sessions race to spawn, only one daemon acquires the lock; the rest
 exit immediately.
 
-Owns three classes of machine-global work that previously piled up across
-sessions (issue #7):
-  * marketplace-refresh — `claude plugin marketplace update` (bulk; refreshes
-    every configured marketplace globally under ~/.claude/plugins/marketplaces/).
+Owns machine-global work that previously piled up across sessions (issue #7):
   * version-update — janitor self-update. Compares the local cache's highest
     installed version against the latest GitHub release of the
     `ai-maestro-janitor` repo declared in plugin.json; when behind, runs
@@ -67,7 +64,6 @@ import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix
 import cold_cache_clear_task  # noqa: E402  # the ONE cold-cache-clear beat impl (TRDD-9ZPU69UC)
 import cross_project_issue as cpi  # noqa: E402  # file a finding on the repo it belongs to (Rule 4)
 import daemon_path  # noqa: E402  # restore a usable tool PATH under launchd (TRDD-VQ4LX7ND)
-import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
 import dedupe  # noqa: E402  # emit_once — S6 refused-runaway alert dedupe (TRDD-1T53EKTN)
 import disk_pressure as dp  # noqa: E402  # S7 dual disk metric (TRDD-1T53EKTN)
 import findings_ledger  # noqa: E402  # the ONE finding choke point (TRDD-FENWWB4E)
@@ -87,7 +83,6 @@ import github_config_audit as gca  # noqa: E402  # fleet GitHub-config audit (TR
 import global_state as gs  # noqa: E402
 import harness_backend  # noqa: E402  # server chore-ownership probe (TRDD-PZLVT2RN B2)
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
-import marketplace_refresh_plan as mrp  # noqa: E402  # installed-backing refresh set (TRDD-5EHBPH6G)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import notify  # noqa: E402  # human-notification channel — daemon-only (TRDD-4649ZLE0)
 import pane_actuate  # noqa: E402  # THE actuator: read the pane → policy table → type → verify (TRDD-N954KWUC)
@@ -181,17 +176,9 @@ _DECLINE_REMEDY = {
 
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
-_INTERVAL_MARKETPLACE_REFRESH = _env_interval(
-    "CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", 3600
-)  # 1 h — daemon is the only writer of GLOBAL marketplace refresh
-#  (refreshes every configured marketplace in one CLI call). The per-session
-#  detector handles narrower local+project marketplaces at 5 min, and the
-#  consumer of this refresh (the harness's autoUpdate pass) runs on its own
-#  cadence anyway, so a faster beat buys nothing. WHY not the old 1200: the bulk refresh takes
-#  ~1190 s at low priority, so a 1200 s cadence had the task running ~50% of
-#  wall-clock time — and (pre-background-lane) starving the 60 s survival
-#  beats for 20 min of every 40 (oauth-rotation starvation incident,
-#  2026-07-17: an account hit its 5 h wall inside such a blind window).
+# marketplace-refresh chore retired 2026-09-17: it ran `claude plugin
+# marketplace update` across every registered marketplace and generated the
+# file-churn that grew fseventsd to 27 GB.
 _INTERVAL_VERSION_UPDATE = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", 21600
 )  # 6 h — janitor self-update cadence. GitHub releases land at human-day
@@ -358,9 +345,9 @@ _FOREGROUND_FLOOR = frozenset(
 # first; this is the belt for a child wedged OUTSIDE a workload subprocess.
 _BULK_CHILD_KILL_GRACE_SEC = 120
 
-# Wall-clock cap on a single workload subprocess. Generous: a slow marketplace
-# refresh on a flaky network can legitimately take many minutes. Beyond this
-# we kill it — a stuck workload would otherwise wedge the daemon forever.
+# Wall-clock cap on a single workload subprocess. Generous: a slow bulk update
+# on a flaky network can legitimately take many minutes. Beyond this we kill
+# it — a stuck workload would otherwise wedge the daemon forever.
 _WORKLOAD_TIMEOUT_SEC = 1800  # 30 min
 
 # How often to tick the heartbeat WHILE a workload is running.
@@ -435,16 +422,16 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
     Returns the CompletedProcess on a normal exit (whatever the returncode),
     or None on timeout / spawn failure (already logged). The periodic
     heartbeat tick is what keeps the daemon visible to per-session liveness
-    checks during a long `claude plugin marketplace update` (≈10 min).
+    checks during a long bulk-update subprocess (≈10 min).
 
     This is the single-attempt primitive; `_run_workload` wraps it with the
     Pillar-1 retry-on-non-zero-exit policy.
 
     `preexec_fn` (optional, TRDD-TY2EZ8ZH): a callable run in the forked child
-    just before `exec` — used by `task_marketplace_refresh` to renice the heavy
-    refresh to low CPU priority. Defaults to None, so every other caller's
-    Popen is byte-identical to before. POSIX-only; harmless where unsupported
-    (callers pass None there).
+    just before `exec` — for a caller that needs to renice a heavy workload to
+    low CPU priority. Defaults to None, so every other caller's Popen is
+    byte-identical to before. POSIX-only; harmless where unsupported (callers
+    pass None there).
     """
     short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     try:
@@ -571,175 +558,6 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
 
 
 # ---------- Tasks --------------------------------------------------------
-
-def task_marketplace_refresh() -> None:
-    """Refresh only the marketplaces that back an INSTALLED plugin, one call each.
-
-    TRDD-5EHBPH6G: `claude plugin marketplace update` (bare, no name) loops EVERY
-    registered marketplace inside the CLI itself — 262 on the host this was
-    diagnosed on, nearly all backing zero installed plugins. That serial O(all
-    registered) sweep, throttled to background QoS, reliably missed the daemon's
-    workload cap and was SIGKILLed on every run, holding the marketplace lock for
-    the whole ~32 min attempt and starving every other marketplace op behind it.
-
-    The fix: derive the refresh set from `installed_plugins.json`
-    (`marketplace_refresh_plan.refresh_plan`, `<plugin>@<marketplace>` install-record
-    keys) plus `CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_EXTRA`, and call the CLI's
-    per-name form (`claude plugin marketplace update <name>` — the same argv shape
-    `_consume_plugin_update_requests` already uses) once per name, each bounded by
-    its OWN `CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S` timeout (default
-    60s) so one hung remote can't consume the whole budget. A timed-out or failed
-    item is logged and skipped, never retried in the same run — the run as a whole
-    only counts as FAILED (raises, so the quarantine/backoff bookkeeping and
-    consecutive-failure streak in `Task.run`/`poll_background` see it) when every
-    item failed. `last-run.ts`'s existing unconditional-stamp-even-on-failure
-    semantics are UNCHANGED here — see `Task.poll_background`'s docstring; making
-    a failed run stop refreshing that stamp is a separate, deliberately deferred
-    change (TRDD-FFXGPZEI, backburner) with wider blast radius than this task.
-
-    Follow-up (same TRDD): the per-item timeout alone has no OVERALL run budget
-    — enough items x the per-item timeout can still exceed `_WORKLOAD_TIMEOUT_SEC`
-    and get SIGKILLed by the outer watchdog again. So the loop also tracks a run
-    deadline and stops starting new items once it's exhausted; unattempted items
-    are logged as skipped and count toward neither `refreshed` nor a run failure.
-    """
-    with gs.marketplace_lock() as got:
-        if not got:
-            state.log_line("daemon", "  marketplace-refresh deferred (another marketplace op holds the lock)")
-            return
-        installed: dict = {}
-        try:
-            ip_path = _plugins_cache_root().parent / "installed_plugins.json"
-            installed = json.loads(ip_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            state.log_line("daemon", f"  marketplace-refresh: could not read installed_plugins.json ({exc})")
-        plan = mrp.refresh_plan(
-            installed, state.plugin_option("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_EXTRA")
-        )
-        # Drop what CANNOT or MUST NOT be refreshed, using the CLI's own registry
-        # (owner report 2026-09-04). Without this the plan inherits every stale
-        # `<plugin>@<marketplace>` install record, so a marketplace that was renamed
-        # is retried hourly forever — observed as a permanent `31/32` with
-        # `ai-maestro-local-marketplace exited rc=1` on every run, which converged
-        # to nothing and escalated to nobody. It also kept re-refreshing the local
-        # directory marketplaces that belong to the ai-maestro server harness.
-        # FAIL-OPEN: an unreadable registry means "do not filter", never "refresh
-        # nothing" — see `mrp.filter_refreshable`.
-        known: dict | None = None
-        try:
-            km_path = _plugins_cache_root().parent / "known_marketplaces.json"
-            known = json.loads(km_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            state.log_line(
-                "daemon",
-                f"  marketplace-refresh: could not read known_marketplaces.json ({exc}) "
-                "— refreshing the unfiltered plan",
-            )
-        plan, dropped = mrp.filter_refreshable(plan, known)
-        if dropped:
-            # ONE line per run naming what was dropped and why. The orphan record this
-            # was written for is a real thing for the USER to clean up, so it must stay
-            # visible — but as a bounded advisory, not as a recurring item FAILURE.
-            state.log_line(
-                "daemon",
-                "  marketplace-refresh: skipping "
-                + "; ".join(f"{n} ({why})" for n, why in sorted(dropped.items())),
-            )
-        if not plan:
-            # "none installed" was true when the plan came straight from
-            # installed_plugins.json. It is NOT true any more: this return is now
-            # reached whenever the plan is empty AFTER filtering, so a host whose
-            # every installed plugin came from a local or unregistered marketplace
-            # would be told nothing is installed while plugins plainly are. Say
-            # which of the two it was — the `dropped` count is the discriminator.
-            state.log_line(
-                "daemon",
-                "  marketplace-refresh: refreshed 0/0 marketplaces "
-                + (f"(all {len(dropped)} skipped)" if dropped else "(none installed)"),
-            )
-            return
-        per_item_timeout = state.coerce_int(
-            state.plugin_option("CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_PER_ITEM_S"), 60
-        )
-        # TRDD-TY2EZ8ZH (#244): run this CPU+IO-heavy refresh at LOW priority so it
-        # yields to the user's foreground work (it was timing out their Bash/agents/CI).
-        # FAIL-OPEN — ANY error building the throttle prefix or the renice preexec
-        # falls through to the CURRENT un-throttled invocation. A throttle defect must
-        # NEVER break marketplace-refresh or wedge the machine-wide singleton daemon.
-        try:
-            prefix = dt._low_priority_prefix()
-            preexec = dt.nice_preexec()
-        except Exception as exc:  # noqa: BLE001 — throttle is best-effort; never block the refresh
-            state.log_line("daemon", f"  marketplace-refresh: throttle skipped ({exc})")
-            prefix, preexec = [], None
-        if prefix or preexec:
-            state.log_line(
-                "daemon",
-                f"  marketplace-refresh: running at low priority (prefix={prefix or '[]'}, "
-                f"nice={'yes' if preexec else 'no'})",
-            )
-        t0 = time.time()
-        refreshed = 0
-        skipped = 0
-        # TRDD-5EHBPH6G follow-up: the per-item timeout alone has no overall run
-        # budget — 32 items x the 60s per-item timeout can exceed
-        # `_WORKLOAD_TIMEOUT_SEC` (1800s), re-creating the exact outer-watchdog
-        # SIGKILL + quarantine this task was written to avoid. Leave enough
-        # margin (2 items' worth) that an item already in flight when we check
-        # can finish before the outer deadline, then stop starting new ones.
-        run_deadline = t0 + _WORKLOAD_TIMEOUT_SEC - 2 * per_item_timeout
-        attempted = 0
-        for name in plan:
-            if time.time() > run_deadline:
-                skipped = len(plan) - attempted
-                state.log_line(
-                    "daemon",
-                    f"  marketplace-refresh: budget exhausted after {attempted}/{len(plan)} "
-                    f"— {skipped} skipped",
-                )
-                break
-            attempted += 1
-            proc = _run_workload_once(
-                prefix + ["claude", "plugin", "marketplace", "update", name],
-                timeout=per_item_timeout,
-                # Cap the poll tick to the item's own budget — the default 10s tick
-                # (fine for the old 1800s workload cap) would otherwise let a small
-                # per-item timeout (e.g. the 60s default itself, on a flaky remote
-                # that's still "hung" at 15s) go undetected for up to 10s past its
-                # deadline, or on a sub-10s custom timeout, never fire at all before
-                # `communicate()` returns some other way.
-                heartbeat_tick=min(per_item_timeout, _WORKLOAD_HEARTBEAT_TICK_SEC),
-                preexec_fn=preexec,
-            )
-            if proc is None:
-                state.log_line(
-                    "daemon", f"  marketplace-refresh: {name} timed out after {per_item_timeout}s — skipped"
-                )
-                continue
-            if proc.returncode != 0:
-                state.log_line("daemon", f"  marketplace-refresh: {name} exited rc={proc.returncode}")
-                continue
-            refreshed += 1
-        dt_s = int(time.time() - t0)
-        state.log_line(
-            # `(N skipped)` keeps THIS line honest. `len(plan)` is the POST-filter
-            # count, so dropping the orphan turned `refreshed 31/32` into
-            # `refreshed 31/31` — the same 31 successes now reading as a clean
-            # full house. This is the line people grep; the separate advisory is
-            # not. Never let the summary imply nothing was excluded.
-            "daemon",
-            f"  marketplace-refresh: refreshed {refreshed}/{len(plan)} marketplaces in {dt_s}s"
-            + (f" ({len(dropped)} skipped)" if dropped else "")
-        )
-        if refreshed == 0 and attempted > 0:
-            # Every ATTEMPTED item failed/timed out — a genuine run failure, not a
-            # partial success. A run that skipped everything for budget reasons
-            # before attempting any (attempted == 0) is not a failure either.
-            # Raising is what `_run_task_child` turns into rc=1, which
-            # `Task.poll_background`/`run()` read to increment the consecutive-
-            # failure streak and quarantine backoff exactly like any other task.
-            raise RuntimeError(f"marketplace-refresh: all {attempted} attempted marketplace(s) failed")
-
 
 # `task_user_plugins_update` was RETIRED here 2026-08-20 (TRDD-E39YT9G6, after
 # TRDD-TIZHEPNC removed it from the absorbed set): the Claude Code harness
@@ -2967,15 +2785,15 @@ class Task:
 
 def _build_tasks() -> list[Task]:
     # background=True marks the BULK chores (long network/CLI sweeps — a
-    # marketplace refresh alone runs ~20 min at low priority). They execute in one
+    # fleet plugin sweep alone runs ~20 min at low priority). They execute in one
     # detached child at a time (the bulk lane), so the 60 s survival beats below
     # (oauth-rotator-tick above all) are never starved behind them — the
     # oauth-rotation starvation incident, 2026-07-17. One lane (not N children)
     # preserves the old single-loop serialization between the bulk chores
     # themselves; the cross-process file locks stay as the backstop.
+    # marketplace-refresh chore retired 2026-09-17 (fseventsd 27 GB churn) — the
+    # Task() entry that ran it is deleted here, not just yielded above.
     return [
-        Task("marketplace-refresh", _INTERVAL_MARKETPLACE_REFRESH, task_marketplace_refresh,
-             background=True),
         Task("fleet-plugins-update", _INTERVAL_FLEET_PLUGINS_UPDATE, task_fleet_plugins_update,
              background=True),
         Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update,
@@ -3077,9 +2895,9 @@ def _next_bulk_task(tasks: list[Task], yielded: set[str]) -> Task | None:
     down: the lane stopped the bulk chores starving the 60 s survival beats, but
     nothing stopped a bulk chore starving its bulk siblings.
 
-    It is not only a test artifact. In production `marketplace-refresh` heads the
-    list at a 3600 s cadence and runs ~20 min, so it normally yields the lane — but
-    a refresh that stalls past its own cadence (a slow network is exactly what the
+    It is not only a test artifact. In production `fleet-plugins-update` heads the
+    list at a long cadence and runs ~20 min, so it normally yields the lane — but
+    a sweep that stalls past its own cadence (a slow network is exactly what the
     1800 s workload cap exists for) makes it perpetually due, and `version-update`
     and `github-config-audit` then never run again while it keeps stalling.
 

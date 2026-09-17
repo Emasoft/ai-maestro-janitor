@@ -253,7 +253,7 @@ def test_stamps_are_written_to_the_control_dir(dirs: tuple[Path, Path]) -> None:
     and which fails silently as "flag absent" when guessed wrong."""
     control, _gsd = dirs
     gs = _gs()
-    assert gs.last_run_path("marketplace-refresh") == control / "marketplace-refresh.last-run.ts"
+    assert gs.last_run_path("version-update") == control / "version-update.last-run.ts"
 
 
 def test_a_stamp_from_the_previous_release_still_counts(dirs: tuple[Path, Path]) -> None:
@@ -261,14 +261,13 @@ def test_a_stamp_from_the_previous_release_still_counts(dirs: tuple[Path, Path])
 
     A 0.6x daemon still stamps `global_state_dir()`. If the new code read only the control
     dir it would see 0, and 0 means "never ran" — so the chore is re-run at once. For
-    `marketplace-refresh` that is the duplicated bulk `claude plugin marketplace update`
-    that issue #7 exists to prevent, re-introduced by the very move meant to make
-    coordination visible."""
+    `version-update` that is the duplicated bulk `claude plugin update` that issue #7
+    exists to prevent, re-introduced by the very move meant to make coordination visible."""
     _control, gsd = dirs
     gs = _gs()
     gsd.mkdir(parents=True, exist_ok=True)
-    (gsd / "marketplace-refresh.last-run.ts").write_text("1700000000\n", encoding="utf-8")
-    assert gs.read_last_run("marketplace-refresh") == 1700000000
+    (gsd / "version-update.last-run.ts").write_text("1700000000\n", encoding="utf-8")
+    assert gs.read_last_run("version-update") == 1700000000
 
 
 def test_the_newest_stamp_wins_across_eras(dirs: tuple[Path, Path]) -> None:
@@ -296,16 +295,16 @@ def test_a_corrupt_stamp_cannot_mask_a_good_one(dirs: tuple[Path, Path]) -> None
     gs = _gs()
     control.mkdir(parents=True, exist_ok=True)
     gsd.mkdir(parents=True, exist_ok=True)
-    (control / "marketplace-refresh.last-run.ts").write_text("not-a-number\n", encoding="utf-8")
-    (gsd / "marketplace-refresh.last-run.ts").write_text("1700000000\n", encoding="utf-8")
-    assert gs.read_last_run("marketplace-refresh") == 1700000000
+    (control / "version-update.last-run.ts").write_text("not-a-number\n", encoding="utf-8")
+    (gsd / "version-update.last-run.ts").write_text("1700000000\n", encoding="utf-8")
+    assert gs.read_last_run("version-update") == 1700000000
 
 
 def test_an_absent_stamp_reads_zero_everywhere(dirs: tuple[Path, Path]) -> None:
     """0 must still mean "no completion yet" — `Task.run` stamps unconditionally in its
     `finally`, so a zero is genuinely never-completed, never failing-silently."""
     gs = _gs()
-    assert gs.read_last_run("marketplace-refresh") == 0
+    assert gs.read_last_run("version-update") == 0
 
 
 def test_the_failcount_deliberately_did_not_move(dirs: tuple[Path, Path]) -> None:

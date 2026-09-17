@@ -232,7 +232,7 @@ def test_evaluate_passes_declared_of_through_to_the_threshold() -> None:
     (widened) bound is OK even though it is past the roster bound."""
     now = 1_000_000
     verdicts = ccw.evaluate(
-        ["marketplace-refresh"],
+        ["version-update"],
         last_run_of=lambda c: now - 12_000,   # past roster 10800, inside declared 14400
         cadence_of=lambda c: 3600,
         now=now,

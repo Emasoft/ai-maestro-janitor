@@ -83,7 +83,7 @@ Three executors, one criterion each:
    probe file ⇒ the server is RUNNING ⇒ **ALL absorbed chores are its responsibility**
    and the janitor yields them; file absent/stale ⇒ the server is not running ⇒ the
    janitor runs them ALL. The absorbed set (`harness_backend.SERVER_ABSORBED_TASKS`):
-   `oauth-rotator-tick`, `oauth-rotator-supervisor`, `marketplace-refresh`,
+   `oauth-rotator-tick`, `oauth-rotator-supervisor`,
    `version-update`, and — since 2026-08-18 (janitor#274, settled by measurement on
    the rev-8 round) — `github-config-audit`. (`user-plugins-update` LEFT the set
    2026-08-19 — TRDD-TIZHEPNC / ai-maestro TRDD-PE54D95Q AC6 — and was then RETIRED
@@ -512,7 +512,6 @@ executor declaring its own bound — this table plus one small file.
 |---|---|---|---|---|
 | `oauth-rotator-tick` | `oauth-rotator-tick` | `~/.claude/janitor-control/oauth-rotator-tick.last-run.ts` | 60 s | 660 s |
 | `oauth-rotator-supervisor` | `oauth-rotator-supervisor` | `~/.claude/janitor-control/oauth-rotator-supervisor.last-run.ts` | 600 s | 1 800 s |
-| `marketplace-refresh` | `marketplace-refresh` | `~/.claude/janitor-control/marketplace-refresh.last-run.ts` | 3 600 s | 10 800 s |
 | `version-update` | `version-update` | `~/.claude/janitor-control/version-update.last-run.ts` | 21 600 s | 64 800 s |
 | `github-config-audit` | `github-config-audit` | `~/.claude/janitor-control/github-config-audit.last-run.ts` | 21 600 s | 64 800 s |
 

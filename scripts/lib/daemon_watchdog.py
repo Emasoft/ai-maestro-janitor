@@ -1,30 +1,16 @@
-# Shared daemon-task staleness watchdog for the per-session detector shims.
+# Shared daemon-task staleness constant.
 #
-# Daemon-owned bulk tasks (marketplace-refresh today; user-plugins-update too until
-# its 2026-08-20 retirement, TRDD-E39YT9G6) live in the global
-# daemon (issue #7). Their per-session shims must surface a drift line ONLY
-# when a daemon task is genuinely not progressing AND the daemon is not
-# responding — never when a heartbeat-fresh daemon is merely mid-run or briefly
-# behind. That false positive (issue #9) is exactly what spammed every session:
-# `<task>.last-run.ts` is stamped at COMPLETION, so it ages by the full run
-# duration while a legitimate long task is in flight; a real 27-min bulk
-# marketplace refresh aged the stamp past the old `2 * cadence` threshold while
-# the daemon was perfectly healthy, and the code then read a fresh heartbeat and
-# cried "daemon stuck — kill it".
-#
-# This is the ONE implementation every such shim calls, so they cannot drift apart —
-# the two historical shims did exactly that (marketplace-refresh was fixed, the
-# since-retired user-plugins-update shim kept crying "daemon may be stuck"), which
-# is the structural bug this module closes.
+# This module used to also hold `emit_if_daemon_stale`, the ONE staleness-watchdog
+# implementation every per-session detector shim called into — issue #9's false
+# positive (a fresh heartbeat misread as "daemon stuck" while a legitimate long
+# bulk task was still in flight). Its only caller was the marketplace-refresh
+# detector shim, retired 2026-09-17 (it ran `claude plugin marketplace update`
+# across every registered marketplace and generated the file-churn that grew
+# fseventsd to 27 GB); with that caller gone the function had zero callers and
+# was deleted here too. `MAX_TASK_RUNTIME_S` below is still consumed by
+# `detectors/global-chore-blackout.py` and `detectors/claimed-chore-stale.py`.
 
 from __future__ import annotations
-
-import os
-import time
-
-import dedupe
-import global_state as gs
-import state
 
 # A single daemon workload subprocess is capped at this many seconds
 # (daemon.py::_WORKLOAD_TIMEOUT_SEC). A task's completion stamp legitimately
@@ -34,157 +20,3 @@ import state
 MAX_TASK_RUNTIME_S = 1800
 
 
-def emit_if_daemon_stale(
-    *,
-    task_name: str,
-    last_run_filename: str,
-    cadence_env: str,
-    default_cadence_s: int,
-    subject: str,
-) -> None:
-    """Print a once/hour drift line iff `task_name`'s completion stamp is stale
-    past a generous threshold AND the daemon is not alive (dead PID / frozen
-    heartbeat).
-
-    SILENT otherwise — and crucially ALWAYS silent while the daemon heartbeat is
-    fresh, because the heartbeat (ticked every ≤60 s, and every 10 s during a
-    workload) is the real liveness oracle: a fresh heartbeat ⇒ the daemon is
-    provably looping ⇒ it is either mid-run or about to start the overdue run ⇒
-    self-healing ⇒ nothing for the user to do.
-
-    Args:
-      task_name:         drift-line tag + seen-file stem, e.g. "marketplace-refresh".
-      last_run_filename: the daemon's completion stamp in the global state dir.
-      cadence_env:       env var holding the task's cadence in seconds.
-      default_cadence_s: fallback cadence when the env var is unset/invalid.
-      subject:           human phrase for what has not happened, e.g.
-                         "global marketplaces last refreshed".
-    """
-    # The CHORE's canonical name — derived from `last_run_filename`, NOT `task_name`: the
-    # filename is the parameter that actually names the stamp, so a caller whose drift tag
-    # differs from its stamp stem still reads (and judges) its OWN chore instead of silently
-    # reading a different one. Both the absorption test and the stamp read key off this, so
-    # they can never disagree about which chore is under discussion.
-    chore = (
-        last_run_filename[: -len(".last-run.ts")]
-        if last_run_filename.endswith(".last-run.ts")
-        else last_run_filename
-    )
-
-    # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server RUNS, the daemon
-    # deliberately YIELDS the absorbed chores — so their completion stamps go stale
-    # BY DESIGN. Alarming on that would train users to ignore this watchdog. BINARY
-    # since TRDD-LU0C5KAR (owner directive 2026-07-17): the same liveness switch the
-    # daemon's own gate uses; a probe failure changes nothing about the alarm path.
-    #
-    # `chore in SERVER_ABSORBED_TASKS` is LOAD-BEARING and was missing (ai-maestro#111,
-    # 2026-08-05). Without it this returned for EVERY chore whenever a server was alive —
-    # but "yields by design" is only true of the five the server actually claims. A live
-    # server makes `ensure_daemon_running` refuse to spawn the daemon AT ALL, and the daemon
-    # owns eleven chores; the other six then run NOWHERE while this gate suppressed the only
-    # alarm that could have said so. Measured cost: eleven chores dark for 10-14 days in
-    # total silence. Never widen this back to an unconditional return.
-    try:
-        import harness_backend  # noqa: PLC0415 -- lazy sibling; keep the hot path import-light
-
-        if harness_backend.server_runs_chores() and chore in harness_backend.claimed_chores():
-            return
-    except Exception:
-        pass
-
-    # ---- FAILING-BUT-RUNNING (TRDD-3GF9PSQB) — checked BEFORE the staleness path -------
-    #
-    # A task that fails on EVERY run is invisible to everything below, for two independent
-    # reasons, and both had to be bypassed rather than one:
-    #   1. the completion stamp is written in the daemon's `finally` BEFORE the failure
-    #      branch (both `Task.run` and `Task.poll_background`), so a task failing forever
-    #      keeps a perpetually FRESH stamp and never reaches the age test; and
-    #   2. even a stale stamp is suppressed by the `daemon_is_alive()` gate below — and a
-    #      task that is running and failing has, by definition, a live daemon.
-    #
-    # So the loudest possible failure produced the quietest possible signal: a POSITIVE
-    # health indicator manufactured by the failure itself. The `last_run <= 0` comment below
-    # already knew the stamp is unconditional and reasoned correctly about ZERO; nobody
-    # followed the same fact through to non-zero.
-    #
-    # The failure streak is the signal that CAN'T be faked by failing: only a success clears
-    # it. Fire at the daemon's own quarantine threshold — the point where it stops retrying
-    # normally is exactly the point where a human should hear about it — so there is one
-    # definition of "unhealthy", not two.
-    fails = gs.read_failcount(chore)
-    if fails >= gs.QUARANTINE_AFTER_FAILS:
-        fail_msg = (
-            f"[{task_name}] the daemon is RUNNING this task but it has FAILED "
-            f"{fails} consecutive times, so {subject} is not actually happening — its "
-            f"completion stamp stays fresh because it is written on failure too, which is "
-            f"why nothing reported this until now."
-        )
-        fail_log = gs.global_state_dir() / "daemon.log"
-        if fail_log.is_file():
-            fail_msg += f" The error is in {fail_log} (grep \"task '{chore}' FAILED\")."
-        fail_seen = state.state_dir() / f"{task_name}-failing-seen.txt"
-        # Keyed on the STREAK, not the hour: a task stuck at the same failure count is one
-        # standing fact, not hourly news, so it is said once and then only when it worsens.
-        out = dedupe.emit_once(fail_seen, f"failing@{fails}", fail_msg)
-        if out is not None:
-            print(out)
-        return
-
-    # Dual-read across all three control-plane eras (TRDD-QK7M2B0X phase B step 2).
-    last_run = gs.read_last_run(chore)
-    if last_run <= 0:
-        # Never completed once — daemon just started or task has not finished
-        # yet. The stamp is written unconditionally in Task.run's finally, so a
-        # zero genuinely means "no completion yet", not "failing silently".
-        return
-
-    cadence = state.coerce_int(os.environ.get(cadence_env), default_cadence_s)
-    # Generous: a healthy completion stamp can age up to `cadence` (wait until
-    # due) + one max-length run before the next stamp lands. Add a cadence of
-    # margin so a single slow-but-successful run never trips it.
-    stale_threshold = cadence + MAX_TASK_RUNTIME_S + cadence
-    age = int(time.time()) - last_run
-    if age <= stale_threshold:
-        return
-
-    # The gate that kills the issue-#9 false positive: a heartbeat-fresh daemon
-    # is never the subject of a stuck-alarm, no matter how stale the completion
-    # stamp is.
-    if gs.daemon_is_alive():
-        return
-
-    # Daemon is genuinely dead or frozen. ensure_daemon_running() ran earlier
-    # this heartbeat (every shim calls it before us) and will have attempted a
-    # respawn, so the user usually needs to do nothing — we surface it once/hour
-    # so a *persistently* un-respawnable daemon doesn't hide silently.
-    now = int(time.time())
-    pid = gs.daemon_pid()
-    hb_ts = gs.read_heartbeat()
-    hb_age = (now - hb_ts) if hb_ts > 0 else None
-
-    msg = (
-        f"[{task_name}] {subject} ~{age // 60} min ago (cadence {cadence}s) "
-        f"and the daemon is not responding"
-    )
-    if pid is None:
-        msg += " (no daemon PID on record)"
-    elif hb_age is not None:
-        msg += f" (PID {pid}, heartbeat {hb_age}s stale)"
-    else:
-        msg += f" (PID {pid}, no heartbeat on record)"
-    msg += ". A respawn was triggered this heartbeat — it should self-heal."
-
-    # Reference the daemon log only when it actually exists. The daemon pins its
-    # log to the global-state dir (daemon.py main() sets JANITOR_LOG_DIR), so
-    # this path is real once a fixed daemon has run; an old daemon that logged
-    # into a project tree leaves no file here and the line is correctly omitted
-    # (no phantom path — issue #9).
-    log_path = gs.global_state_dir() / "daemon.log"
-    if log_path.is_file():
-        msg += f" Inspect: {log_path}."
-
-    seen = state.state_dir() / f"{task_name}-stale-seen.txt"
-    key = f"stale@{int(time.time() // 3600)}"
-    out = dedupe.emit_once(seen, key, msg)
-    if out is not None:
-        print(out)

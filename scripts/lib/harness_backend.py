@@ -58,7 +58,9 @@ BACKEND_STANDALONE = "standalone"
 # daemon.py derives its absorbed-set from THIS set; everything NOT in it keeps running
 # regardless (population-split ops + janitor-only Family-B chores).
 SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
-    "marketplace-refresh",
+    # `marketplace-refresh` RETIRED 2026-09-17: it ran `claude plugin marketplace
+    # update` across every registered marketplace and generated the file-churn
+    # that grew fseventsd to 27 GB.
     # `user-plugins-update` LEFT the absorbed set 2026-08-19 (TRDD-TIZHEPNC) and was then
     # RETIRED from GLOBAL_CHORES entirely 2026-08-20 (TRDD-E39YT9G6): the Claude Code
     # harness self-updates installed plugins from the autoUpdate:true refreshed catalogs
@@ -96,7 +98,9 @@ SERVER_ABSORBED_TASKS: frozenset[str] = frozenset({
 # name-for-name and default-for-default, so this copy cannot drift from the daemon it
 # describes.
 GLOBAL_CHORES: dict[str, tuple[str, int]] = {
-    "marketplace-refresh": ("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", 3600),
+    # "marketplace-refresh" retired 2026-09-17: it ran `claude plugin marketplace
+    # update` across every registered marketplace and generated the file-churn
+    # that grew fseventsd to 27 GB.
     # "user-plugins-update" retired 2026-08-20 (TRDD-E39YT9G6) — the harness self-updates
     # plugins; neither daemon nor server runs a bulk sweep. See SERVER_ABSORBED_TASKS note.
     "fleet-plugins-update": ("CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_PLUGINS_UPDATE_INTERVAL", 21600),

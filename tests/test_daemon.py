@@ -419,7 +419,7 @@ def test_bulk_lane_does_not_starve_a_sibling_across_rounds(
     """
     daemon = _daemon_isolated(tmp_path, monkeypatch)
     tasks = [daemon.Task(n, 1, lambda: None, background=True)
-             for n in ("marketplace-refresh", "fleet-plugins-update", "version-update")]
+             for n in ("fleet-plugins-update", "version-update", "github-config-audit")]
 
     served: list[str] = []
     clock = int(time.time())
@@ -440,17 +440,17 @@ def test_bulk_lane_skips_tasks_yielded_to_the_server(
     """A chore yielded to a live ai-maestro server never takes the lane, however old."""
     daemon = _daemon_isolated(tmp_path, monkeypatch)
     now = int(time.time())
-    yielded_task = daemon.Task("marketplace-refresh", 1, lambda: None, background=True)
+    yielded_task = daemon.Task("fleet-plugins-update", 1, lambda: None, background=True)
     other = daemon.Task("github-config-audit", 1, lambda: None, background=True)
     _stamp_last_run(yielded_task, now - 9999)  # by age alone it would win outright
     _stamp_last_run(other, now - 5)
 
     assert daemon._next_bulk_task(
-        [yielded_task, other], {"marketplace-refresh"}
+        [yielded_task, other], {"fleet-plugins-update"}
     ) is other
     # With every candidate yielded there is simply nothing to spawn.
     assert daemon._next_bulk_task(
-        [yielded_task], {"marketplace-refresh"}
+        [yielded_task], {"fleet-plugins-update"}
     ) is None
 
 

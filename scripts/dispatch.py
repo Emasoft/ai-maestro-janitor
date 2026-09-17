@@ -163,10 +163,9 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # covered at all? (TRDD-6WM4BFKF). Hourly, because the answer only changes when .gitignore
     # or the index does, and the finding is preventive rather than urgent.
     ("gitignore-coverage", 3600, "CLAUDE_PLUGIN_OPTION_GITIGNORE_COVERAGE_INTERVAL"),
-    # marketplace-refresh: per-session, scoped to local+project marketplaces.
-    # Global bulk refresh is the daemon's job (every 20 min). Runs BEFORE the
-    # plugin-* detectors so the manifest is fresh by the time they consult it.
-    ("marketplace-refresh", 300, "CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_INTERVAL"),
+    # marketplace-refresh (per-session detector) RETIRED 2026-09-17: it ran
+    # `claude plugin marketplace update` across every registered marketplace
+    # and generated the file-churn that grew fseventsd to 27 GB.
     # Track 1 (user-plugins-update) RETIRED 2026-08-20 (TRDD-E39YT9G6): the harness
     # self-updates user-scope plugins from autoUpdate:true catalogs; the daemon sweep,
     # the server loop, AND the per-session watchdog shim that lived here are all gone.
@@ -514,7 +513,7 @@ _DETECTORS: list[tuple[str, int, str]] = [
 # once that CLI ships to ~/.local/bin (follow-up, janitor#100).
 _NON_HARNESS_DETECTORS = frozenset({
     "peer-freeze-recovery",  # fleet-wide actuation — a harness agent's world is server-owned
-    "marketplace-refresh",
+    # "marketplace-refresh" retired 2026-09-17 — see _DETECTORS above.
     "local-plugins-update",
     "project-plugins-update",
     "version-update",

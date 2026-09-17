@@ -23,16 +23,19 @@ What these tests now pin:
      read and is honoured as a claim on the legacy absorbed set.
   4. The absorbed set names REAL tasks (typo guard) and never includes a population-split
      or janitor-only Family-B task.
-  5. The per-session staleness watchdog goes silent only for chores the server has actually
-     claimed.
+
+Property 5 — "the per-session staleness watchdog goes silent only for chores the server
+has actually claimed" — was pinned here via `daemon_watchdog.emit_if_daemon_stale`. That
+function's only caller was the marketplace refresh detector; once that detector retired
+2026-09-17 the function had zero callers left and was deleted with it, so the property has
+no surviving subject to test (the equivalent claim-suppression logic for the *daemon-side*
+blackout detector is still pinned in tests/test_global_chore_blackout.py).
 """
 
 from __future__ import annotations
 
-import io
 import sys
 import time
-from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -42,7 +45,6 @@ sys.path.insert(0, str(_ROOT / "scripts"))
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import daemon  # type: ignore[import-not-found]  # noqa: E402
-import daemon_watchdog  # type: ignore[import-not-found]  # noqa: E402
 import harness_backend as hb  # type: ignore[import-not-found]  # noqa: E402
 import state as janitor_state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -96,7 +98,7 @@ def test_a_chore_yields_only_when_the_server_has_CLAIMED_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The owner's ruling in one assertion: running is necessary, claimed is also required."""
-    name = "marketplace-refresh"
+    name = "version-update"
     _claim(monkeypatch, tmp_path, ["family-a"])
     claimed = hb.claimed_chores()
     assert daemon._task_yielded_to_server(name, True, claimed) is True
@@ -172,15 +174,15 @@ def test_an_EXPLICIT_operator_override_claims_the_legacy_absorbed_set(
 
 
 def test_absorbed_set_matches_the_contract() -> None:
-    """Pin the exact absorbed-chore set: the OAuth pair + the update pair
-    (marketplace-refresh + version-update) + the github-config audit (joined
-    2026-08-18, janitor#274 ratified on the rev-8/#126 thread — the server has stamped
-    it since 2026-08-05) — a drift here silently changes which chores the handoff
-    covers. `user-plugins-update` LEFT the set 2026-08-19 (TRDD-TIZHEPNC / ai-maestro
-    PE54D95Q AC6): the harness self-updates plugins, so the absorbed loop duplicated
-    it; it is daemon-owned again."""
+    """Pin the exact absorbed-chore set: the OAuth pair + `version-update` + the
+    github-config audit (joined 2026-08-18, janitor#274 ratified on the rev-8/#126
+    thread — the server has stamped it since 2026-08-05) — a drift here silently
+    changes which chores the handoff covers. `user-plugins-update` LEFT the set
+    2026-08-19 (TRDD-TIZHEPNC / ai-maestro PE54D95Q AC6): the harness self-updates
+    plugins, so the absorbed loop duplicated it; it is daemon-owned again.
+    The marketplace refresh chore RETIRED 2026-09-17 — the chore itself was deleted,
+    not just yielded, so it no longer has a place in this set at all."""
     assert hb.SERVER_ABSORBED_TASKS == frozenset({
-        "marketplace-refresh",
         "version-update",
         "oauth-rotator-supervisor",
         "oauth-rotator-tick",
@@ -297,42 +299,9 @@ def test_probe_file_drives_the_claim_yield_end_to_end(
     assert daemon._yielded_task_names(tasks, hb.server_runs_chores(), hb.claimed_chores()) == set()
 
 
-# ---------- 3. the watchdog goes silent while the server owns the chores ----------
-
-
-def _seed_stale_task_and_dead_daemon(gsd: Path, task: str) -> None:
-    """A completion stamp far past the threshold + a dead daemon: the exact state in
-    which the watchdog WOULD alarm — unless chore ownership suppresses it."""
-    gsd.mkdir(parents=True, exist_ok=True)
-    (gsd / f"{task}.last-run.ts").write_text(str(int(time.time()) - 7200), encoding="utf-8")
-    (gsd / "daemon.pid").write_text("999999", encoding="utf-8")
-    (gsd / "daemon.heartbeat.ts").write_text(str(int(time.time()) - 7200), encoding="utf-8")
-
-
-def _run_watchdog() -> str:
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        daemon_watchdog.emit_if_daemon_stale(
-            task_name="marketplace-refresh",
-            last_run_filename="marketplace-refresh.last-run.ts",
-            cadence_env="CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_INTERVAL",
-            default_cadence_s=60,
-            subject="global marketplaces last refreshed",
-        )
-    return buf.getvalue()
-
-
-def test_watchdog_silent_while_server_owns_chores(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A yielded chore's stamp goes stale BY DESIGN — the per-session watchdog must not
-    cry wolf about it while the server is running."""
-    project = tmp_path / "proj"
-    (project / ".janitor" / "state").mkdir(parents=True)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
-    _seed_stale_task_and_dead_daemon(tmp_path / "gs", "marketplace-refresh")
-    monkeypatch.setenv(hb.SERVER_CHORES_ENV, "up")
-    assert _run_watchdog() == ""
+# Section 3 (the per-session watchdog going silent while the server owns a chore) was
+# retired here with `_run_watchdog`/`_seed_stale_task_and_dead_daemon` — see the module
+# docstring's note on property 5.
 
 
 # ---------- 4. the transition log carries ts/age/reason (TRDD-HXZ8B0IS) ----------
@@ -396,16 +365,3 @@ def test_transition_message_reports_absent_with_no_ts(
     assert "ts=" not in msg
 
 
-def test_watchdog_still_alarms_when_server_not_running(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """CONTROL for the suppression test: identical stale-stamp + dead-daemon state with
-    the server forced down ⇒ the alarm fires. Proves the silent case above is silent
-    because of the ownership gate, not because the alarm path was broken."""
-    project = tmp_path / "proj"
-    (project / ".janitor" / "state").mkdir(parents=True)
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
-    _seed_stale_task_and_dead_daemon(tmp_path / "gs", "marketplace-refresh")
-    monkeypatch.setenv(hb.SERVER_CHORES_ENV, "down")
-    out = _run_watchdog()
-    assert "marketplace-refresh" in out and "not responding" in out

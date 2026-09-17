@@ -43,7 +43,7 @@ color-codes each row by health (red = broken, green = busy, grey = disarmed), wr
 file, and opens it in the default browser. Columns: pid, project, model, git branch, github repo,
 armed, active, cron, waiting-for, dispatch age, started, uptime, uncommitted, CI, gh-security,
 local-sec-scan, PRRD, wikimem proj/local, last job, last error. The summary line carries the shared
-facts: janitor version + up-to-date, daemon alive/down, last marketplace refresh, global wikimem
+facts: janitor version + up-to-date, daemon alive/down, global wikimem
 page count. Some columns are honestly `—` when not externally observable or not yet instrumented —
 the in-page legend explains each.
 

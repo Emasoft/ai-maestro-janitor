@@ -79,7 +79,7 @@ def test_migration_copies_state_stamps_marker_and_tombstones(
     legacy, data = _isolate(tmp_path, monkeypatch)
     legacy.mkdir(parents=True)
     (legacy / "kill-switch.flag").write_text("stop\n", encoding="utf-8")
-    (legacy / "marketplace-refresh.last-run.ts").write_text("123\n", encoding="utf-8")
+    (legacy / "version-update.last-run.ts").write_text("123\n", encoding="utf-8")
     (legacy / "snapshots").mkdir()
     (legacy / "snapshots" / "ps.txt").write_text("x\n", encoding="utf-8")
     (legacy / "daemon.pid").write_text("999\n", encoding="utf-8")
@@ -92,7 +92,7 @@ def test_migration_copies_state_stamps_marker_and_tombstones(
     assert fd is not None
     try:
         assert (data / "kill-switch.flag").read_text(encoding="utf-8") == "stop\n"
-        assert (data / "marketplace-refresh.last-run.ts").is_file()
+        assert (data / "version-update.last-run.ts").is_file()
         assert (data / "snapshots" / "ps.txt").is_file()
         assert not (data / "daemon.pid").exists(), "pid is re-published, never copied"
         for lock in ("daemon.flock", "settings-ensurer.lock", "ticket-dispatch.lock"):

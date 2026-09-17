@@ -1,7 +1,8 @@
 """Background bulk lane (oauth-rotation starvation incident, 2026-07-17).
 
-Root cause pinned here: two back-to-back ~1190 s low-priority marketplace-refresh
-runs blocked the single-threaded daemon loop, starving the 60 s oauth-rotator-tick
+Root cause pinned here: two back-to-back ~1190 s low-priority bulk-lane runs (then
+the daemon's now-retired marketplace refresh chore) blocked the single-threaded
+daemon loop, starving the 60 s oauth-rotator-tick
 for 20 min of every 40 — an account hit its 5 h wall inside such a blind window and
 the user had to switch accounts by hand. The fix: bulk tasks run in ONE detached
 child at a time (the bulk lane) so the loop's survival beats are never blocked.
@@ -182,7 +183,8 @@ def test_build_tasks_background_split_pins_the_survival_beats_foreground() -> No
     tasks = {t.name: t.background for t in daemon._build_tasks()}
     assert {n for n, bg in tasks.items() if bg} == {
         # user-plugins-update retired from the roster 2026-08-20 (TRDD-E39YT9G6).
-        "marketplace-refresh", "fleet-plugins-update", "version-update",
+        # marketplace refresh retired from the roster (server-absorbed chore removal).
+        "fleet-plugins-update", "version-update",
         "github-config-audit",
     }
     assert tasks["oauth-rotator-tick"] is False

@@ -19,7 +19,7 @@ Behaviour:
     The CLI is idempotent — no-ops when versions already match.
 
 Architecture: detached-worker pattern (same as
-marketplace-refresh). The detector returns in <200ms after spawning the
+project-plugins-update). The detector returns in <200ms after spawning the
 worker; the worker iterates the enabled-plugin list sequentially. PID
 tracked in `.janitor/state/local-plugins-update.pid`; successive
 heartbeats that find the prior worker still alive skip and exit.

@@ -45,7 +45,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import env_detect  # noqa: E402
-import global_state  # noqa: E402
 import state  # noqa: E402
 
 
@@ -405,16 +404,12 @@ def _gather_plugins(*, online: bool) -> dict:
             return None
 
     installed = _janitor_installed_version(home)
+    # marketplace_refresh_ts / marketplace_refresh_fails fields removed here:
+    # the marketplace-refresh chore was retired 2026-09-17 (it ran `claude
+    # plugin marketplace update` across every registered marketplace and
+    # generated the file-churn that grew fseventsd to 27 GB).
     janitor: dict = {
         "installed_version": installed or None,
-        "marketplace_refresh_ts": _ts("marketplace-refresh"),
-        # WHY read_failcount too (GH#297, TRDD-3GF9PSQB): the last-run stamp above is
-        # written unconditionally, on failure as well as success (daemon.py::Task.run /
-        # poll_background), so its age alone cannot tell a healthy chore from one
-        # failing every run. read_failcount() is the companion fact daemon_watchdog.py
-        # already consults for its own drift alarm; this display was the other reader
-        # the issue named that never picked it up.
-        "marketplace_refresh_fails": global_state.read_failcount("marketplace-refresh"),
         "version_update_ts": _ts("version-update"),
         # user_plugins_update_ts removed 2026-08-20 (TRDD-E39YT9G6): the sweep is
         # retired, so its stamp freezes forever and reporting it would read as drift.
@@ -1063,23 +1058,9 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
         if jan.get("installed_version"):
             stale = f" ({jan['staleness']})" if jan.get("staleness") else ""
             pline += f" · janitor v{jan['installed_version']}{stale}"
-        if jan.get("marketplace_refresh_ts"):
-            fails = jan.get("marketplace_refresh_fails") or 0
-            # Flag on ANY failure (fails >= 1), not only at the daemon's own
-            # quarantine threshold (coordinator-review follow-up, GH#297): gating
-            # "healthy" on QUARANTINE_AFTER_FAILS (3) left the first two killed
-            # runs showing a bare fresh age, which is the issue's exact complaint.
-            # The threshold still escalates the WORDING once the daemon has
-            # actually quarantined the task — one shared meaning, not a second
-            # health definition.
-            if fails <= 0:
-                pline += f" · marketplace refreshed {_ago(jan['marketplace_refresh_ts'])}"
-            else:
-                label = "QUARANTINED" if fails >= global_state.QUARANTINE_AFTER_FAILS else "FAILING"
-                pline += (
-                    f" · marketplace {label} ({fails}x consecutive, last attempt "
-                    f"{_ago(jan['marketplace_refresh_ts'])})"
-                )
+        # marketplace-refresh rendering block removed here: the chore was
+        # retired 2026-09-17 (fseventsd 27 GB churn), so `jan` no longer
+        # carries `marketplace_refresh_ts`/`marketplace_refresh_fails`.
         lines.append(pline)
 
     # gh CLI auth

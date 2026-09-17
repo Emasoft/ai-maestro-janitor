@@ -99,9 +99,8 @@ def test_match_agent_tmux_prefers_most_specific_workingdir() -> None:
 
 def test_daemon_interval_knob_tolerates_garbage(monkeypatch) -> None:
     """A human-shaped userConfig value must fall back, never kill the daemon at import."""
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", "20 min")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", "20 min")
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
     sys.modules.pop("daemon", None)
     daemon = importlib.import_module("daemon")
-    # 3600 since TRDD-H7NVKSAX (was 1200 ≈ the task's own runtime → 50% duty cycle).
-    assert daemon._INTERVAL_MARKETPLACE_REFRESH == 3600  # the documented default
+    assert daemon._INTERVAL_VERSION_UPDATE == 21600  # the documented default
