@@ -222,6 +222,47 @@ def test_idle_no_headroom_defers_over_unsubmitted_text() -> None:
     assert pp.plan(state, pp.Event.NO_HEADROOM) == ()
 
 
+def _idle_with_field_text(text: str) -> ps.PaneState:
+    base = _state("synthetic-idle-empty-field.txt")
+    return ps.PaneState(
+        input_field=ps.InputField(kind=ps.InputFieldKind.TEXT, text=text),
+        status=base.status,
+        agents_running=base.agents_running,
+        model=base.model,
+        context_pct=base.context_pct,
+        bypass_on=base.bypass_on,
+    )
+
+
+def test_idle_no_headroom_clears_its_own_leftover_model_text_then_switches() -> None:
+    """TRDD-FKY3NXB8: 0e8b97c9's field-empty precondition turned the janitor's OWN unverified
+    `/model ...` retry (never confirmed by 8P4BNY5J's Enter bug) into a permanent livelock --
+    nothing ever drained the field, so every later beat deferred forever. Only the janitor's
+    own `/model` vocabulary is safe to clear unasked: one ESC first, then the real switch."""
+    state = _idle_with_field_text("/model opus")
+    steps = pp.plan(state, pp.Event.NO_HEADROOM)
+    assert [s.keys for s in steps] == ["ESC", "/model opus", "Enter"]
+    assert steps[0].expect is pp.Expect.FIELD_EMPTY
+    assert steps[1].expect is pp.Expect.MENU_SHOWN
+    assert steps[2].expect is pp.Expect.IDLE_OR_WORKING
+
+
+def test_idle_no_headroom_defers_over_foreign_text_not_its_own_leftover() -> None:
+    """A human's draft that merely happens to start differently from `/model` must still
+    defer, unchanged -- clearing is scoped to the janitor's own vocabulary, never a guess at
+    whether ANY text is "probably ours"."""
+    state = _idle_with_field_text("remember to check the PR")
+    assert pp.plan(state, pp.Event.NO_HEADROOM) == ()
+
+
+def test_idle_no_headroom_does_not_clear_a_human_draft_that_merely_starts_with_model() -> None:
+    """Review finding: a bare `startswith("/model")` also matches a human typing ABOUT the
+    command, not just the janitor's own `/model <target>` -- the match must be anchored on the
+    whole command word (`/model` alone, or `/model ` with the trailing space)."""
+    state = _idle_with_field_text("/models are confusing me")
+    assert pp.plan(state, pp.Event.NO_HEADROOM) == ()
+
+
 def test_none_state_never_types_without_the_no_readback_assertion() -> None:
     """Law 1: an absent `PaneState` types NOTHING unless the caller asserts the channel has no
     read-back BY CONSTRUCTION. A readable tmux/iTerm pane that merely failed to answer this

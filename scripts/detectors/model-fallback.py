@@ -40,6 +40,7 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import findings_ledger  # noqa: E402
+import fleet_inject  # noqa: E402
 import model_fallback as mfb  # noqa: E402
 import pane_actuate  # noqa: E402
 import rotator_usage  # noqa: E402
@@ -234,11 +235,22 @@ def main() -> int:
     # call site is what `bypass_interrupt_cooldown=True` already asked for (owner finding
     # 2026-09-15, #306: this switch IS the recovery from the session's own exhausted-model
     # state, so a just-issued Esc/Ctrl-C must not defer it).
+    #
+    # `command_plan=` (TRDD-8P4BNY5J PART A, equivalence-refire report): `_model_switch_steps`'s
+    # confirming step is a bare "Enter", and `build_step_plan` can only turn a bare Enter into a
+    # real plan from a `submit_ref` or this `fallback` -- with neither, the Enter step plans to
+    # `None`, `fleet_inject.fire(None)` is False, and `act()` reports FAILED even though the
+    # `/model <target>` keystroke landed (the menu it opened is never confirmed). The plan only
+    # needs to resolve the SAME channel the actual keystrokes use, so build it from the same
+    # `_actuate_terminal(terminal)` identity this call already uses -- it is never re-typed
+    # (`build_submit_plan` sends Enter alone), so a stale/duplicate `/model` text is not a risk.
+    actuate_terminal = _actuate_terminal(terminal)
     try:
         outcome = pane_actuate.act(
-            _actuate_terminal(terminal),
+            actuate_terminal,
             pane_actuate.Event.NO_HEADROOM,
             command=f"/model {target}",
+            command_plan=fleet_inject.build_command_plan(actuate_terminal, f"/model {target}"),
             project_dir=str(state.project_root()),
             log=lambda m: state.log_line(_LOG, m),
         )

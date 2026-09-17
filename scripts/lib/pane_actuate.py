@@ -202,6 +202,17 @@ def act(
 
     steps = plan(state, event, command=command, esc_first=esc_first, unattended=unattended, blind_ok=blind_ok)
     if not steps:
+        # TRDD-FKY3NXB8: `plan()` stays PURE (module docstring) and cannot log itself, so this
+        # is the one place with both the STATE that explains a NO_HEADROOM decline and I/O
+        # already in scope. Only the population worth measuring: an idle pane holding text
+        # that is NOT the janitor's own `/model` vocabulary (that case now clears + switches,
+        # see `_at_idle`) -- a human draft deferred forever otherwise reads as a silent no-op.
+        if (
+            event is Event.NO_HEADROOM
+            and state is not None
+            and state.input_field.kind is pane_state.InputFieldKind.TEXT
+        ):
+            _log(f"deferred — idle field holds foreign text {(state.input_field.text or '')[:40]!r}")
         return Outcome(status=OutcomeStatus.NOOP, steps_done=0, observed=())
 
     accepted: list[bool] = []

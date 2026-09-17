@@ -21,6 +21,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import pane_state as ps  # type: ignore[import-not-found]  # noqa: E402
 import pytest  # noqa: E402
+import session_liveness as sl  # type: ignore[import-not-found]  # noqa: E402
 
 _FIXTURES = _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames"
 
@@ -173,3 +174,30 @@ def test_read_parses_a_successfully_captured_frame(monkeypatch: pytest.MonkeyPat
     state = ps.read({"tmux_pane": "%1"})
     assert state is not None
     assert state.status.kind == ps.StatusKind.RETRY_WEDGE
+
+def test_every_session_liveness_retry_banner_reads_as_a_wedge_here_too(monkeypatch) -> None:
+    """TRDD-8P4BNY5J equivalence check: `daemon.py` used to classify a wedge itself via
+    `session_liveness.is_retry_wedge`; that classification was deleted and `pane_state`'s
+    reader (`_classify_status`, via the shared `session_liveness._RETRY_WEDGE_RE`) is now the
+    ONLY thing that decides RETRY_WEDGE. Every banner `is_retry_wedge` was ever tested against
+    (`tests/test_session_liveness.py::test_is_retry_wedge_cause_agnostic_not_keyed_on_429`)
+    must still read as a wedge here, or the deletion silently narrowed the detection surface.
+
+    The two `is_retry_wedge` fixtures are BARE regex-match strings, not full captures — one
+    (the 429 case) omits the leading status glyph a live pane's row always carries
+    (`session_liveness._STATUS_ROW_GLYPHS`; verified against the real anonymized capture
+    `tests/fixtures/pane_frames/real-wedged-rate-limit-429.txt`, which DOES carry `· ` first).
+    `status_row_text_at_tail` requires that glyph by design — it is the guard documented at
+    length in `session_liveness.py` against misreading assistant prose that merely QUOTES the
+    wedge line — so this test restores the one piece of realistic chrome (the glyph) each
+    banner would actually carry on screen, rather than weakening `pane_state` to skip that
+    guard for an unglyphed synthetic string no live pane produces."""
+    banners = [
+        "429 Rate limited · Retrying in 0s · attempt 5/300",
+        "✻ Session limit reached · Retrying in 2m 50s (2:10pm) · attempt 1/300",
+    ]
+    for banner in banners:
+        assert sl.is_retry_wedge(banner)  # the source of truth this test is proving equivalence to
+        frame = banner if banner[:1] in "✻✽✶✢✳·" else f"· {banner}"
+        state = ps.parse(frame)
+        assert state.status.kind == ps.StatusKind.RETRY_WEDGE, f"{banner!r} -> {state.status.kind}"

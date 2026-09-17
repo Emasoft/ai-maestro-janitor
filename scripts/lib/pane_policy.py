@@ -27,8 +27,10 @@ Rows encoded here are exactly the ones the 2026-09-02 incident dictates (Proposa
 - `idle` + cron dead -> `/janitor-arm`.
 - `idle` + no headroom -> `/model opus`, confirm -- straight to the switch, no wedge to flush
   (TRDD-8P4BNY5J follow-up, 2026-09-17: the pre-8P4BNY5J code typed this on any readable
-  non-wedge pane too; restricting it to the wedge alone was a regression). Only over a
-  verified-empty input field.
+  non-wedge pane too; restricting it to the wedge alone was a regression). Over a verified-
+  empty field, or one holding the janitor's OWN leftover `/model` text (TRDD-FKY3NXB8: clear
+  it with one ESC first, then switch) -- any OTHER text defers, unchanged, since it may be a
+  human's draft.
 - `None`/`unknown` -> never type -- an unreadable or unclassifiable pane is not a green light.
 
 Phase 2 left `PLUGIN_STAGED`/`STOP_FLAG`/`STALE_PROMPT` unencoded because the command to type
@@ -329,9 +331,26 @@ def _at_idle(state: PaneState, event: Event, *, command: str | None, esc_first: 
         # straight to the switch -- but ONLY over a verified-empty field: an idle pane can
         # still hold text the human is mid-typing, and `/model ...` landing inside it would
         # corrupt that draft rather than open the model menu.
-        if state.input_field.kind != InputFieldKind.EMPTY:
-            return ()
-        return _model_switch_steps(command)
+        if state.input_field.kind == InputFieldKind.EMPTY:
+            return _model_switch_steps(command)
+        # TRDD-FKY3NXB8: the above restored a REAL bug (0e8b97c9 deferred on ANY non-empty
+        # field) but overcorrected into a livelock -- the field's leftover text is, on a spent
+        # window, most often the janitor's OWN previous unverified `/model ...` attempt (this
+        # row types it, but nothing before this fix ever confirmed it landed), which then
+        # deferred every future beat forever since nothing ever drains it. Only the janitor's
+        # OWN vocabulary is safe to clear unasked -- a human's draft (anything else) still
+        # defers, unchanged. One ESC (mirrors `_flush_wedge`'s queue-flush) clears the line
+        # before retyping the switch; `build_submit_steps`' Enter-alone contract does not apply
+        # here since this is a fresh ESC + retype, not a resend of the same text.
+        # Anchored on the WHOLE command word, not a bare prefix: a bare `startswith("/model")`
+        # also matches a human typing ABOUT the command ("/model-related bug", "/models are
+        # confusing") -- `/model` alone or `/model ` (trailing space) is the janitor's own
+        # vocabulary (`_DEFAULT_MODEL_SWITCH_COMMAND` / a configured target), never a substring
+        # a human's own draft would plausibly start with (review finding, TRDD-FKY3NXB8).
+        _text = state.input_field.text or ""
+        if state.input_field.kind == InputFieldKind.TEXT and (_text == "/model" or _text.startswith("/model ")):
+            return _flush_wedge(state, final_expect=Expect.FIELD_EMPTY, final_label="clear leftover /model text") + _model_switch_steps(command)
+        return ()
     if event is Event.STALE_PROMPT and unattended:
         # The caller's `awaiting_user` evidence is the TRANSCRIPT (an unanswered tool_use);
         # the screen may still read idle. ESC anyway -- it can only DISMISS, never answer --

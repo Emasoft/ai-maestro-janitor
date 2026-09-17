@@ -566,3 +566,89 @@ def test_no_project_dir_writes_no_ledger(monkeypatch, tmp_path) -> None:
     outcome = _act(pa.Event.ROTATION_LANDED, project_dir=None)
     assert outcome.status is pa.OutcomeStatus.DONE
     assert list(tmp_path.rglob("pane-policy.log")) == []
+
+
+def test_no_headroom_deferral_at_a_working_pane_never_latches_out_the_next_beat(monkeypatch) -> None:
+    """TRDD-8P4BNY5J follow-up (`_at_working`'s own comment, pane_policy.py): a WORKING pane
+    defers Event.NO_HEADROOM with ZERO keys sent (NOOP, `touched=False`) -- and nothing in
+    `act`/`plan`/`execute` may record that beat as "handled", or the model-fallback detector's
+    caller (which only stamps its cooldown on `outcome.touched`) would starve on a session that
+    happened to be mid-turn on the polling beat. Drives TWO beats through the real
+    `pane_state.parse` -> `pane_policy.plan` -> `execute` chain (only `fleet_inject.fire` is
+    replaced): beat 1 confirms (`ps.parse(...).status.kind is WORKING`, not just assumed of the
+    fixture's name) a genuinely WORKING pane presses nothing; beat 2, the SAME call re-run with
+    the pane now idle on an empty field, must attempt the real `/model <target>` sequence --
+    proving the deferral left no latch behind for the second call to trip over.
+
+    TRDD-8P4BNY5J PART A (was an ADJACENT DEFECT, now fixed at the root in
+    `model-fallback.py`'s call site): the sequence's second step is a bare "Enter" to confirm
+    the model-switch menu (`pane_policy._model_switch_steps`), and `build_step_plan` can only
+    build a bare-Enter plan from a `submit_ref`/`fallback` (see its own docstring) -- so this
+    beat passes `command_plan=` (the fallback) the same way the production call site now does,
+    and `outcome2.status` flips to `DONE` since every step's plan resolves and fires. `touched`
+    is deliberately NOT proof of a successful re-fire on its own here (review finding: `touched`
+    is already True from step 0 alone) -- `status is DONE` is the real proof, on top of it."""
+    fired = _seam(monkeypatch)
+
+    working_frame = (_FIXTURES / "real-calm-working.txt").read_text(encoding="utf-8")
+    assert ps.parse(working_frame).status.kind is ps.StatusKind.WORKING  # pin the fixture's own claim
+    _frames(monkeypatch, "real-calm-working.txt")
+    outcome1 = _act(pa.Event.NO_HEADROOM, command="/model opus")
+    assert outcome1.status is pa.OutcomeStatus.NOOP
+    assert outcome1.touched is False
+    assert fired == []
+
+    # beat 2: initial read (idle, empty field) -> type "/model opus" -> re-read (the model
+    # menu appeared) -> type "Enter" -> re-read (menu closed, pane idle again).
+    _frames(
+        monkeypatch,
+        "synthetic-idle-empty-field.txt",
+        "synthetic-awaiting-model-confirm.txt",
+        "synthetic-idle-empty-field.txt",
+    )
+    outcome2 = _act(
+        pa.Event.NO_HEADROOM,
+        command="/model opus",
+        command_plan=fleet_inject.build_command_plan(_TMUX, "/model opus"),
+    )
+    assert _keys(fired) == ["/model opus", "Enter"]
+    assert fired[1][1] is not None  # the Enter step now resolves a real plan via `command_plan`
+    assert outcome2.touched is True  # the deferral did NOT latch: beat 2 typed for real
+    assert outcome2.status is pa.OutcomeStatus.DONE  # both steps fired: menu confirmed
+
+
+def test_idle_no_headroom_enter_step_is_fired_through_the_fake_terminal(monkeypatch) -> None:
+    """TRDD-8P4BNY5J PART A, direct: an idle pane's NO_HEADROOM plan is `/model <target>` then
+    a bare "Enter" (`pane_policy._model_switch_steps`), and the Enter step can only be built
+    from a `submit_ref`/`fallback` -- so this pins that `fleet_inject.fire` is actually called
+    with a real (non-None) plan for BOTH steps, not just that the outcome status looks right."""
+    _frames(
+        monkeypatch,
+        "synthetic-idle-empty-field.txt",
+        "synthetic-awaiting-model-confirm.txt",
+        "synthetic-idle-empty-field.txt",
+    )
+    fired = _seam(monkeypatch)
+    outcome = _act(
+        pa.Event.NO_HEADROOM,
+        command="/model opus",
+        command_plan=fleet_inject.build_command_plan(_TMUX, "/model opus"),
+    )
+    assert _keys(fired) == ["/model opus", "Enter"]
+    assert all(plan is not None for _, plan in fired)  # every fired step resolved a real plan
+    assert fired[1][1]["channel"] == "tmux"  # the Enter step lands in the SAME pane
+    assert outcome.status is pa.OutcomeStatus.DONE
+
+
+def test_idle_no_headroom_logs_the_deferral_reason_over_foreign_text(monkeypatch) -> None:
+    """TRDD-FKY3NXB8: `plan()` stays pure and cannot log, so `act()` is the one place that has
+    both the STATE explaining a NO_HEADROOM decline and I/O already in scope -- the population
+    worth measuring is a human draft deferred forever, not the janitor's own (now-cleared)
+    `/model` leftover."""
+    _frames(monkeypatch, "synthetic-idle-text-typed-bypass-off.txt")
+    fired = _seam(monkeypatch)
+    logged: list[str] = []
+    outcome = _act(pa.Event.NO_HEADROOM, command="/model opus", log=logged.append)
+    assert fired == []
+    assert outcome.status is pa.OutcomeStatus.NOOP
+    assert any("foreign text" in m and "run the tests please" in m for m in logged)
