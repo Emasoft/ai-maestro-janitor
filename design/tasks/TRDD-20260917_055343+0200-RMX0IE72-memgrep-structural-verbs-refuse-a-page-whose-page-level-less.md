@@ -3,7 +3,7 @@ trdd-id: RMX0IE72
 title: memgrep structural verbs refuse a page whose page-level lesson is uncited although lint rates that shape INFO
 column: testing
 created: 2026-09-17T05:53:43+0200
-updated: 2026-09-17T10:35:12+0200
+updated: 2026-09-17T14:56:00+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -15,6 +15,7 @@ approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-17T05:53:43+0200
 review-after: 2026-09-24
+implementation-commits: [152e7ce3]
 ---
 
 # memgrep structural verbs refuse a page whose page-level lesson is uncited although lint rates that shape INFO
