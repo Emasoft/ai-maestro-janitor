@@ -88,8 +88,9 @@ REFERENCE).
 
 **LOCAL** `~/.claude/projects/<slug>/memory/` (never pushed, machine-private) · **PROJECT**
 `<git-root>/.claude/project/memory/` (pushed, zero private data) · **USER** the janitor's fixed
-plugin-DATA memory dir (cross-project). **UNSURE → LOCAL.** Full scope table + write-gate
-red-flag list: the FULL REFERENCE above.
+plugin-DATA memory dir (cross-project). **UNSURE → LOCAL.** Red flags → LOCAL: a home path, a
+username/hostname/email/secret, "on THIS machine", one box's install state. Full scope table +
+write-gate red-flag list: the FULL REFERENCE above.
 
 ## Read-the-notes rule — a memory's lessons ARE part of the memory
 
@@ -108,10 +109,12 @@ lesson field grammar: the FULL REFERENCE above (`## The note format`, `## THE LE
 
 ## AUTHORING — COLLABORATIVE; write through a memgrep verb, then validate
 
-**Authorship confers NO ownership** — UPDATE another agent's page, never hand-author markdown
-(use the write verbs; `update-mem-atom --lesson --supersedes` fixes a fact, SAME id). Run
+**Authorship confers NO ownership** — UPDATE another agent's page (safe: verbs SUPERSEDE, never
+overwrite), never hand-author markdown (write verbs: `new-mem-atom`, `update-mem-atom --lesson`
+adds a lesson, `update-mem-atom --lesson --supersedes` fixes a fact, SAME id). Run
 `memgrep validate <page> && memgrep lint <page>` after EVERY edit; edit ONLY via memgrep verbs
-or the Edit tool, never raw shell. Full verb list + concurrent-editing mechanics (TRDD-7YHT3FNK):
+or the Edit tool, never raw shell. On a "changed since enqueued" refusal: re-read, recompute,
+retry. Full verb list + concurrent-editing mechanics (TRDD-7YHT3FNK):
 the FULL REFERENCE above.
 
 ## The wiki layer (wikimem)
