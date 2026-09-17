@@ -595,6 +595,22 @@ mod tests {
     }
 
     #[test]
+    fn delete_allows_an_uncited_lesson_untouched_by_the_deleted_atom() {
+        // GitHub #304 regression, compute_atom_delete call site specifically: a page-level lesson
+        // nothing cites ([^9]) must not block deleting an UNRELATED atom, even though the post-build
+        // proof at the end of compute_atom_delete runs footnote_integrity_violations on the result.
+        let text = "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                    ^foo [keywords: k]\nfoo fact.[^1]\n\n\
+                    ## Notes and lessons learned\n\
+                    [^1]: foo lesson.\n\
+                    [^9]: an uncited orphan lesson.\n";
+        let r = compute_atom_delete(text, "foo", true, false).expect("delete succeeds");
+        assert!(!r.text.contains("^foo"), "atom gone: {}", r.text);
+        assert!(r.text.contains("an uncited orphan lesson."), "orphan lesson survives untouched: {}", r.text);
+        assert_eq!(footnote_integrity_violations(&r.text), Vec::<String>::new(), "result stays clean: {}", r.text);
+    }
+
+    #[test]
     fn delete_atom_with_lessons_refuses_a_lesson_still_cited_by_a_surviving_atom() {
         // The failure this guards: X and Y both cite [^1]; Z owns [^2]. Deleting X
         // --with-lessons drops the [^1]: def and leaves Y's citation, then renumbering maps Z's

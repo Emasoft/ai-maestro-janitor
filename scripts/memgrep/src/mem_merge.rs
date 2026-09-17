@@ -627,6 +627,24 @@ mod tests {
     }
 
     #[test]
+    fn merge_topic_allows_an_uncited_lesson_on_either_page() {
+        // GitHub #304 regression, merge_topic call site specifically: an uncited `[^N]:` on --from
+        // or --into (no citing `[^N]` anywhere) is a legal, lint-INFO shape and must not trip the
+        // pre-flight `footnote_integrity_violations` gate, nor survive as a violation post-build.
+        let from = "---\nname: a\ndescription: \"a\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\
+                    ^ATOM-AAAA-AAAA [keywords: foo]\n\nbody, no refs\n\n\
+                    ## Notes and lessons learned\n\n\
+                    [^1]: [id: L1 status: valid keywords: foo] DO NOT x, BECAUSE y. DO z.\n";
+        let into = "---\nname: b\ndescription: \"b\"\nocd: 2026-01-02\nlmd: 2026-01-02\n---\n\
+                    ^ATOM-BBBB-BBBB [keywords: bar]\n\nbody, no refs either\n\n\
+                    ## Notes and lessons learned\n\n\
+                    [^1]: [id: L2 status: valid keywords: bar] DO NOT p, BECAUSE q. DO r.\n";
+        let r = merge_topic_compute(from, into, "a", "b", "2026-02-01").expect("merge succeeds");
+        assert_eq!(footnote_integrity_violations(&r.dest_text), Vec::<String>::new(), "dest stays clean: {}", r.dest_text);
+        assert_eq!(footnote_integrity_violations(&r.tombstone_text), Vec::<String>::new(), "tombstone stays clean: {}", r.tombstone_text);
+    }
+
+    #[test]
     fn merge_topic_frontmatter_union_takes_earlier_ocd_and_unions_publish_globally() {
         let from = "---\nname: a\ndescription: \"symptom one\"\nocd: 2026-01-05\nlmd: 2026-01-05\n\
                     publish-globally: true\n---\n\n^ATOM-AAAA-AAAA [keywords: foo]\n\nbody a\n\n\

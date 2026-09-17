@@ -1003,6 +1003,77 @@ mod tests {
         assert!(footnote_integrity_violations(&text).is_empty(), "page must stay footnote-clean:\n{text}");
     }
 
+    #[test]
+    fn split_atom_allows_an_uncited_page_level_lesson() {
+        // GitHub #304 regression, split_atom_build call site specifically: a page carrying an uncited
+        // `[^9]:` lesson (nothing cites it) must not trip the pre-flight `footnote_integrity_violations`
+        // gate — that shape is legal (lint rates it INFO), and this same-page split never renumbers
+        // any footnote at all, so the guard was never protecting a renumbering invariant here.
+        let text = "---\nname: p\ndescription: \"d\"\n---\n\
+                    ^ATOM-1111-1111 [keywords: k]\nfirst half.\nSPLIT-HERE second half.\n\n\
+                    ## Notes and lessons learned\n[^9]: an uncited orphan lesson.\n";
+        let plan = AtomSplitPlan {
+            new_id: "ATOM-2222-2222",
+            keywords: &[],
+            atom_type: None,
+            trdd: None,
+            desc: "the second half's own triage sentence",
+            orig_keywords: None,
+            orig_desc: None,
+            lessons_to_new: &[],
+            today: "2026-09-17",
+        };
+        let (out, _) = split_atom_build(text, "ATOM-1111-1111", "SPLIT-HERE", &plan).expect("split succeeds");
+        assert!(out.contains("an uncited orphan lesson."), "orphan lesson survives untouched: {out}");
+        assert_eq!(footnote_integrity_violations(&out), Vec::<String>::new(), "result stays clean: {out}");
+    }
+
+    #[test]
+    fn split_atom_still_refuses_a_dangling_footnote_reference() {
+        // Negative counterpart to `split_atom_allows_an_uncited_page_level_lesson`: only an
+        // UNREFERENCED definition is legal now (janitor#304). A DANGLING reference — a `[^N]`
+        // citation with no matching `[^N]:` definition anywhere on the page — is real corruption and
+        // must still be refused, nothing written.
+        let text = "---\nname: p\ndescription: \"d\"\n---\n\
+                    ^ATOM-3333-3333 [keywords: k]\nfirst half.[^9]\nSPLIT-HERE second half.\n\n\
+                    ## Notes and lessons learned\n";
+        let plan = AtomSplitPlan {
+            new_id: "ATOM-4444-4444",
+            keywords: &[],
+            atom_type: None,
+            trdd: None,
+            desc: "the second half's own triage sentence",
+            orig_keywords: None,
+            orig_desc: None,
+            lessons_to_new: &[],
+            today: "2026-09-17",
+        };
+        let err = split_atom_build(text, "ATOM-3333-3333", "SPLIT-HERE", &plan).unwrap_err();
+        assert!(
+            err.to_string().contains("dangling footnote reference [^9]"),
+            "must refuse on the pre-existing dangling reference, nothing written: {err}"
+        );
+    }
+
+    #[test]
+    fn split_topic_still_refuses_a_dangling_footnote_reference() {
+        // Negative counterpart for the OTHER split path (`split-mem-topic`, cross-page — a distinct
+        // code path from `split_atom_build`, not just another call site of the same function): a
+        // moving atom citing `[^9]` with no matching `[^9]:` definition anywhere on --page must still
+        // refuse pre-flight, nothing written.
+        let src = "---\nname: misc\ndescription: \"d\"\n---\n\
+                   ^ATOM-5555-6666 [keywords: k]\nmoving body cites.[^9]\n\n\
+                   ## Notes and lessons learned\n";
+        let new_page_base = new_page_skeleton("split-off", "why it split", "2026-09-17");
+        match split_topic_compute(src, &new_page_base, &["ATOM-5555-6666".to_string()]) {
+            Ok(_) => panic!("must refuse on the pre-existing dangling reference, nothing written"),
+            Err(e) => assert!(
+                e.to_string().contains("dangling footnote reference [^9]"),
+                "wrong refusal reason: {e}"
+            ),
+        }
+    }
+
     /// A split inherits the source atom's TRDD backlink (TRDD-YMDE95LT).
     ///
     /// Both halves came out of the SAME decision, so dropping it on the new half would silently

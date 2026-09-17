@@ -4116,10 +4116,14 @@ fn atom_segment_end(lines: &[&str], marker_idx: usize) -> usize {
     end
 }
 
-/// The footnote-integrity problems of a SINGLE page text — the `lint` subset that governs migration
-/// correctness (a dangling reference or an unreferenced definition). `migrate` uses it BOTH as a
-/// pre-flight gate on the two pages and as a post-build proof that the move introduced no dangling
-/// footnote — the guard against the "migrating across a malformed page corrupts both" failure.
+/// The footnote-integrity problems of a SINGLE page text — a DANGLING reference only (a `[^N]`
+/// citation whose `[^N]:` definition does not exist on the page). `migrate`/`merge`/`split`/
+/// `delete` use it BOTH as a pre-flight gate and as a post-build proof that the operation
+/// introduced no dangling footnote. An uncited page-level definition (a `[^N]:` nothing cites) is
+/// NOT flagged here (GitHub #304): the memory model BLESSES that shape (`lint`'s `lesson-uncited`
+/// rates it INFO, "the NORMAL case" — the Notes section is mandatory even when empty), and the
+/// renumbering machinery is safe regardless — `next_footnote_label` already scans both defs and
+/// refs for the next free number, so an orphan def can never collide with a moved/renumbered one.
 pub(crate) fn footnote_integrity_violations(text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let ctx = md::build_context(text, lines.len());
@@ -4143,15 +4147,16 @@ pub(crate) fn footnote_integrity_violations(text: &str) -> Vec<String> {
             }
         }
     }
+    // Only a DANGLING reference is real corruption. An uncited definition (`[^N]:` with no citing
+    // `[^N]`) is a legal, BLESSED shape (janitor#304 / WM-LINT-06: `lint` rates it INFO, "the
+    // NORMAL case" — the Notes section is mandatory even when empty) and is never flagged here, so
+    // split/merge/migrate/delete stop refusing pages the linter itself calls healthy. Safe for the
+    // renumbering machinery too: `next_footnote_label` already scans both defs and refs for the
+    // next free number, so an orphan def can never collide with a footnote a move/renumber allocates.
     let mut out = Vec::new();
     for r in &refs {
         if !defs.contains(r) {
             out.push(format!("dangling footnote reference [^{r}]"));
-        }
-    }
-    for d in &defs {
-        if !refs.contains(d) {
-            out.push(format!("unreferenced footnote definition [^{d}]"));
         }
     }
     out
@@ -10715,6 +10720,51 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(r.dest_text.contains("[^2]: foo lesson."), "moved lesson renumbered to [^2]: {}", r.dest_text);
         assert!(r.dest_text.contains("[^1]: existing lesson."), "dest's own [^1] untouched: {}", r.dest_text);
         assert!(r.dest_text.contains("foo fact.[^2]"), "atom body ref renumbered: {}", r.dest_text);
+        assert!(footnote_integrity_violations(&r.dest_text).is_empty());
+    }
+
+    #[test]
+    fn footnote_integrity_violations_ignores_an_uncited_page_level_lesson() {
+        // GitHub #304: an uncited `[^N]:` (no `[^N]` citing it anywhere) is the memory model's
+        // BLESSED shape — `lint`'s `lesson-uncited` rates it INFO, never ERROR — so the shared
+        // integrity gate every structural verb (split/merge/migrate/delete) refuses on must not
+        // treat it as a violation either, or an oversized atom on such a page can never be split.
+        let text = "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                    body with no footnote refs at all.\n\n## Notes and lessons learned\n[^1]: orphan lesson.\n";
+        assert!(
+            footnote_integrity_violations(text).is_empty(),
+            "an uncited definition alone must not be reported"
+        );
+    }
+
+    #[test]
+    fn footnote_integrity_violations_still_reports_a_dangling_reference() {
+        // The half of the guard that IS real corruption: a `[^N]` citation whose `[^N]:` definition
+        // does not exist resolves to nothing, so this must keep refusing split/merge/migrate/delete.
+        let text = "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                    fact.[^9]\n\n## Notes and lessons learned\n";
+        let v = footnote_integrity_violations(text);
+        assert_eq!(v, vec!["dangling footnote reference [^9]".to_string()], "got: {v:?}");
+    }
+
+    #[test]
+    fn migrate_allows_an_uncited_lesson_already_on_either_page() {
+        // End-to-end regression for #304: source AND dest each carry their own uncited page-level
+        // lesson ([^2] on source, [^5] on dest); migrating an unrelated atom must not be refused by
+        // the pre-flight footnote-integrity gate, and the uncited lessons must survive untouched.
+        let from = page(
+            "from",
+            "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n\
+             [^1]: foo lesson.\n[^2]: an uncited source lesson.\n",
+        );
+        let to = page(
+            "to",
+            "body.\n\n## Notes and lessons learned\n[^5]: an uncited dest lesson.\n",
+        );
+        let r = migrate_compute(&from, &to, "foo").unwrap();
+        assert!(r.source_text.contains("[^2]: an uncited source lesson."), "source lesson untouched: {}", r.source_text);
+        assert!(r.dest_text.contains("an uncited dest lesson."), "dest lesson untouched: {}", r.dest_text);
+        assert!(footnote_integrity_violations(&r.source_text).is_empty());
         assert!(footnote_integrity_violations(&r.dest_text).is_empty());
     }
 
