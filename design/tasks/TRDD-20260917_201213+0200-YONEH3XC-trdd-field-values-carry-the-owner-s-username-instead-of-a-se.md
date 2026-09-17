@@ -3,7 +3,7 @@ trdd-id: YONEH3XC
 title: TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
 column: backburner
 created: 2026-09-17T20:12:13+0200
-updated: 2026-09-17T20:13:11+0200
+updated: 2026-09-17T20:24:53+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: docs
@@ -22,6 +22,7 @@ priority: low
 ## Approval log
 
 - 2026-09-17T20:12:13+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T20:24:52+0200 — scope note: the 9-card count grepped design/tasks and design/archived only; the fix step must also sweep design/proposals and design/refused (review finding, janitor-main-session)
 
 ## Description
 

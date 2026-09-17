@@ -157,7 +157,7 @@ Publish #5 (3.4.4, 2026-09-02) failed at the remote CPV gate with ONE MAJOR: `sk
 
 ## See also
 
-- [[janitor-publish-pipeline-address-lint]]
+- See [[janitor-publish-pipeline-address-lint]] when the flagged path is a REAL private identifier (a home path, an e-mail) rather than a scanner needle — that page owns the true-positive case.
 
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0001, status:valid, keywords:"publish_blocked_claim_superseded cpv_major_fp_era_over dont_carry_blocked_forward", ocd:2026-06-11, lmd:2026-06-12] SUPERSEDED original note: "the publish is
