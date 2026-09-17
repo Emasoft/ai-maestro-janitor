@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: testing
 created: 2026-09-15T18:47:30+0200
-updated: 2026-09-17T07:22:03+0200
+updated: 2026-09-17T14:45:21+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: audit
