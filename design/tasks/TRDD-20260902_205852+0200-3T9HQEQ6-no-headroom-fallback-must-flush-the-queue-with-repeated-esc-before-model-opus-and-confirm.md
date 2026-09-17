@@ -1,10 +1,10 @@
 ---
 trdd-id: 3T9HQEQ6
 title: when no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
-column: todo
+column: backburner
 created: 2026-09-02T20:58:52+0200
-updated: 2026-09-16T12:33:54+0200
-review-after: 2026-09-05
+updated: 2026-09-17T18:32:18+0200
+review-after: 2026-10-01
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -19,6 +19,9 @@ npt: []
 eht: []
 implementation-commits: []
 created-by: USER directive 2026-09-02 21:05, filed during TRDD-NACCL0CB
+blocker-probe: sh -c 'grep -q "queue clear after" $HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log $HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log.1 2>/dev/null'
+blocker-holds-if: exit-nonzero
+assignee: janitor-main-session
 ---
 
 # When no account has Fable headroom the fallback must ESC repeatedly until the pane queue is clean, then type /model opus and confirm with Enter
@@ -191,5 +194,7 @@ this card still flushes whatever is already queued.
 
 ## Approval log
 - 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-17T18:26:46+0200 — stays in todo; box 3 is a LIVE-event wait (no queue-flush ESC line in daemon.log/.1 as of today, fix shipped in v3.4.14 per git tag --contains fb25366f), review-after bumped to 2026-10-01 by janitor-main-session board drain
+- 2026-09-17T18:28:11+0200 — column → backburner. waits only on a live no-headroom Fable wall; todo claimed an actionable card nobody can action (review finding); review-after 2026-10-01 kept
 
 ## Notes and lessons learned

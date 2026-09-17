@@ -3,7 +3,7 @@ trdd-id: 5A4SGMD6
 title: retire the marketplace-refresh chore from the janitor daemon and the ai-maestro server
 column: testing
 created: 2026-09-17T12:12:46+0200
-updated: 2026-09-17T14:49:45+0200
+updated: 2026-09-17T18:27:55+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: refactor
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-17T12:12:46+0200
-implementation-commits: [6ddc0308, fb987e96, 58b7ae19]
+implementation-commits: [6ddc0308, fb987e96, 58b7ae19, ea4bc509]
 review-after: 2026-09-18
 ---
 
@@ -32,6 +32,7 @@ RELATED: TRDD-5EHBPH6G (the 262-marketplace serial sweep), TRDD-H7NVKSAX (bulk c
 
 - 2026-09-17T12:12:46+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T12:54:19+0200 — column → testing. code landed on both sides; live fseventsd observation pending
+- 2026-09-17T18:27:55+0200 — ea4bc509 recorded: a MIXED commit; only janitor-daemon-process-identity.md and janitor-skills-and-agents-roster.md belong to this card, the other three files are atomize/repair chore output (review finding, janitor-main-session)
 
 ## State
 
