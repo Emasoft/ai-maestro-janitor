@@ -69,6 +69,28 @@ def _fmt_ts(epoch: int | None) -> str:
     return time.strftime("%m-%d %H:%M", time.localtime(epoch))
 
 
+def _fmt_chore_stamp(epoch: int | None, fails: int, quarantine_after: int) -> str:
+    """`_fmt_ts` plus the failure streak (GH#297, TRDD-3GF9PSQB): a bare timestamp
+    can't tell a healthy chore from one failing every run, since the stamp is
+    written on failure too. Flags on ANY failure (`fails >= 1`), not just at
+    `quarantine_after` — a coordinator-review follow-up on GH#297 caught that
+    gating on the daemon's own backoff threshold (3) left kill #1 and kill #2
+    showing as a bare fresh age, which is the issue's exact complaint. "Healthy"
+    must not be coupled to when the DAEMON decides to back off; `quarantine_after`
+    (`global_state.QUARANTINE_AFTER_FAILS`) now only escalates the WORDING once the
+    daemon has actually quarantined the task, still one shared threshold for that
+    one meaning."""
+    ts = _fmt_ts(epoch)
+    if fails <= 0:
+        return ts
+    # "last attempt", not "last success" — the timestamp is the unconditional
+    # stamp (review finding on GH#297: the bare epoch alone reads as a success
+    # time, and only the failure branch says otherwise; identify_environment.py's
+    # equivalent line spells this out too).
+    label = "QUARANTINED" if fails >= quarantine_after else "FAILING"
+    return f"{ts} ({label} {fails}x, last attempt)"
+
+
 def _read_epoch(path: str) -> int | None:
     try:
         return int(Path(path).read_text().strip())
@@ -644,6 +666,12 @@ def main() -> int:
     daemon_alive = daemon_hb is not None and (now - daemon_hb) < 600
     mkt = gs.read_last_run("marketplace-refresh")
     mkt_ts = mkt if mkt > 0 else None
+    # WHY also read_failcount (GH#297, TRDD-3GF9PSQB): the stamp above is written
+    # unconditionally on failure too (daemon.py::Task.run / poll_background), so its
+    # age alone reads a task failing every run as freshly healthy. daemon_watchdog.py
+    # already consults this pair for its own drift alarm; this dashboard line was one
+    # of the readers the issue named that never did.
+    mkt_fails = gs.read_failcount("marketplace-refresh")
 
     cache_root = home / ".claude" / "plugins" / "cache" / "ai-maestro-plugins" / "ai-maestro-janitor"
     versions = sorted(
@@ -749,7 +777,8 @@ def main() -> int:
         f"{headline} · {agents_clause}"
         f"janitor v{jver} (up-to-date: {uptodate}) · daemon: "
         f"{'alive' if daemon_alive else 'DOWN'} · OS keepalive: {keepalive} · "
-        f"self-integrity: {integrity} · marketplace last refresh: {_fmt_ts(mkt_ts)} · "
+        f"self-integrity: {integrity} · marketplace last refresh: "
+        f"{_fmt_chore_stamp(mkt_ts, mkt_fails, gs.QUARANTINE_AFTER_FAILS)} · "
         f"global wikimem: {global_wikimem} · {recovery}"
     )
 
