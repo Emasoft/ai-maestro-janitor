@@ -10,6 +10,7 @@ only: HOME is monkeypatched to a tmp dir so nothing here can touch the real
 from __future__ import annotations
 
 import importlib.util as _u
+import subprocess
 import sys
 from pathlib import Path
 
@@ -166,6 +167,91 @@ def test_neither_present_logs_the_old_path_it_looked_for_once(tmp_path, _isolate
     log = (project_dir / ".janitor" / "logs" / "dispatch.log").read_text(encoding="utf-8")
     assert log.count("local-design migration: nothing at") == 1
     assert str(old) in log
+
+
+def test_leak_guard_refuses_when_git_does_not_ignore_the_new_root(tmp_path, _isolate):
+    """A project whose git does NOT ignore `.claude/local/design` must refuse the move: the
+    next `git add -A` there would commit machine-private LOCAL cards to a pushed repo — the
+    exact leak the LOCAL/PROJECT split exists to prevent."""
+    mod = _import_hook()
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+    subprocess.run(
+        ["git", "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
+    )
+    slug = memory_scopes.project_slug(str(project_dir))
+    old = _isolate / ".claude" / "projects" / slug / "design"
+    (old / "tasks").mkdir(parents=True)
+    (old / "tasks" / "TRDD-1-foo.md").write_text("column: dev\n", encoding="utf-8")
+
+    mod._migrate_local_design(project_dir)
+
+    new = project_dir / ".claude" / "local" / "design"
+    assert not new.exists(), "must not move into an unignored root"
+    assert (old / "tasks" / "TRDD-1-foo.md").exists(), "old must be untouched on refusal"
+    log = (project_dir / ".janitor" / "logs" / "dispatch.log").read_text(encoding="utf-8")
+    assert "DRIFT" in log and "does not ignore" in log
+
+
+def test_leak_guard_proceeds_when_git_ignores_the_new_root(tmp_path, _isolate):
+    """A project whose `.gitignore` already covers `.claude/**` (the standard convention every
+    consumer project carries) must migrate normally — the leak guard is not a blanket refusal
+    whenever a project happens to be a git repo."""
+    mod = _import_hook()
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+    subprocess.run(
+        ["git", "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
+    )
+    (project_dir / ".gitignore").write_text(".claude/**\n", encoding="utf-8")
+    slug = memory_scopes.project_slug(str(project_dir))
+    old = _isolate / ".claude" / "projects" / slug / "design"
+    (old / "tasks").mkdir(parents=True)
+    (old / "tasks" / "TRDD-1-foo.md").write_text("column: dev\n", encoding="utf-8")
+
+    mod._migrate_local_design(project_dir)
+
+    new = project_dir / ".claude" / "local" / "design"
+    assert (new / "tasks" / "TRDD-1-foo.md").read_text(encoding="utf-8") == "column: dev\n"
+    assert not old.exists()
+
+
+def test_leak_guard_refuses_when_the_new_root_is_explicitly_unignored(tmp_path, _isolate):
+    """Mutation-resistant version of the leak-guard test: a `.gitignore` with `.claude/**`
+    PLUS an explicit `!` re-include of the new root specifically. A guard that merely checked
+    "does a .gitignore file exist" (rather than actually asking git) would wrongly proceed
+    here; only a real `git check-ignore` call correctly reports this path as NOT ignored."""
+    mod = _import_hook()
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+    subprocess.run(
+        ["git", "init", "-q"], cwd=project_dir, check=True, capture_output=True, text=True
+    )
+    # A NAIVE guard that only checked "does a .gitignore exist mentioning .claude" would
+    # wrongly call this "ignored" (line 1 alone would match without the negations below).
+    # A full un-ignore chain (each parent dir must be re-included too — a documented
+    # gitignore gotcha) makes the path GENUINELY not-ignored; only a real `git
+    # check-ignore` call reports that correctly (verified with a real `git init` here).
+    (project_dir / ".gitignore").write_text(
+        ".claude/**\n"
+        "!.claude/\n"
+        "!.claude/local/\n"
+        "!.claude/local/design/\n"
+        "!.claude/local/design/**\n",
+        encoding="utf-8",
+    )
+    slug = memory_scopes.project_slug(str(project_dir))
+    old = _isolate / ".claude" / "projects" / slug / "design"
+    (old / "tasks").mkdir(parents=True)
+    (old / "tasks" / "TRDD-1-foo.md").write_text("column: dev\n", encoding="utf-8")
+
+    mod._migrate_local_design(project_dir)
+
+    new = project_dir / ".claude" / "local" / "design"
+    assert not new.exists(), "an explicitly un-ignored new root must still refuse"
+    assert (old / "tasks" / "TRDD-1-foo.md").exists()
+    log = (project_dir / ".janitor" / "logs" / "dispatch.log").read_text(encoding="utf-8")
+    assert "DRIFT" in log and "does not ignore" in log
 
 
 def test_local_memory_dir_is_never_touched(tmp_path, _isolate):

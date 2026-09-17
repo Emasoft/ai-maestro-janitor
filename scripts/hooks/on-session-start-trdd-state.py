@@ -100,6 +100,45 @@ def _has_any_trdd_md(d: Path) -> bool:
     return d.is_dir() and any(d.rglob("TRDD-*.md"))
 
 
+def _new_root_would_leak(project_dir: Path, new: Path) -> bool:
+    """True iff moving real cards into `new` would make a `git add -A` in this project
+    commit them: `new` sits inside a git repo whose `.gitignore` does NOT already cover
+    it. `.claude/local/design` is meant to be machine-private (LOCAL scope) — if a
+    project never adopted the shared `.claude/**` gitignore convention, the migration
+    itself would create exactly the leak RULE 0 / reports-and-memory.md exists to
+    prevent. Probes a SYNTHETIC path under `new` (`git check-ignore` needs no real file
+    to answer) rather than trusting the convention blindly. False (proceed) when there
+    is no git repo to leak into, when `git` itself is unavailable, or when the repo
+    already ignores it — the overwhelmingly common case. Once we KNOW we are inside a
+    real git repo (the first probe succeeded), a FAILED `check-ignore` call itself
+    (timeout, killed) fails CLOSED (True — assume leak risk) rather than open: this is
+    the ONE deliberate asymmetry against this best-effort hooks usual fail-open
+    default — everywhere else here "cannot tell" means "proceed," but for the single
+    check whose entire job is catching a leak, "cannot tell" defaulting to "proceed"
+    would silently defeat it.
+    """
+    import subprocess
+
+    try:
+        probe = subprocess.run(
+            ["git", "-C", str(project_dir), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False  # cannot even tell if this is a repo — nothing confirmed to leak into
+    if probe.returncode != 0:
+        return False  # not a git repo at all — nothing for a `git add -A` to leak into
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_dir), "check-ignore", "-q",
+             str(new / "tasks" / "probe.md")],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return True  # known repo, but the leak check itself failed — fail CLOSED, not open
+    return result.returncode != 0  # 0 = git ignores it (safe); nonzero = NOT ignored
+
+
 def _migrate_local_design(project_dir: Path) -> None:
     """One-time move of the OLD LOCAL design root into its new in-tree home.
 
@@ -164,6 +203,16 @@ def _migrate_local_design(project_dir: Path) -> None:
                 project_dir,
                 f"DRIFT: both old ({old}) and new ({new}) LOCAL design roots have real TRDDs — "
                 "refusing to merge, human must resolve",
+            )
+            return
+        if _new_root_would_leak(project_dir, new):
+            # Refuse rather than move: a project whose git does not ignore `new` would
+            # have the next `git add -A` commit machine-private LOCAL cards to a pushed
+            # repo — the exact leak the LOCAL/PROJECT scope split exists to prevent.
+            _log_migration(
+                project_dir,
+                f"DRIFT: refusing to migrate LOCAL design into {new} — this project's git "
+                "does not ignore it (add '.claude/**' to .gitignore, then retry)",
             )
             return
         if new.is_dir():

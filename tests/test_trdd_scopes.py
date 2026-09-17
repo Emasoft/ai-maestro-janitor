@@ -110,6 +110,84 @@ def test_local_design_root_raises_on_a_worktree_list_failure_inside_a_repo(
         trdd_common._main_checkout_root.cache_clear()
 
 
+def test_main_checkout_root_is_memoized_per_project_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`local_design_root()` fans out to ~19 call sites (dispatch.py, fleet_status.py, several
+    per-beat detectors) — a second lookup for the SAME project dir must not re-spawn `git`
+    subprocesses. `@lru_cache` on `_main_checkout_root` is what makes that true; this asserts
+    it empirically rather than trusting the decorator is still there."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-q"], cwd=repo, check=True, capture_output=True, text=True
+    )
+    real_run = subprocess.run
+    calls = []
+
+    def _counting_run(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        return real_run(cmd, *args, **kwargs)
+
+    trdd_common._main_checkout_root.cache_clear()
+    monkeypatch.setattr(trdd_common.subprocess, "run", _counting_run)
+    try:
+        trdd_common.local_design_root(str(repo))
+        first_call_count = len(calls)
+        assert first_call_count > 0, "the first lookup must actually call git"
+
+        trdd_common.local_design_root(str(repo))
+        assert len(calls) == first_call_count, (
+            "a second lookup for the same project_dir must hit the lru_cache, not git again"
+        )
+    finally:
+        trdd_common._main_checkout_root.cache_clear()
+
+
+def test_local_design_root_of_a_submodule_stays_in_the_submodule(tmp_path: Path) -> None:
+    """A git SUBMODULE checkout has `.git` as a FILE (pointing at
+    `<super>/.git/modules/<name>`), not a directory. `git worktree list --porcelain` run
+    inside the submodule operates on the submodule's OWN repo object, so its LOCAL corpus
+    must land inside the submodule itself — never hoisted up into the superproject's tree,
+    which would mix one submodule's machine-private cards into a sibling checkout's board."""
+
+    def _git(cwd: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+    sub_origin = tmp_path / "sub_origin"
+    sub_origin.mkdir()
+    _git(sub_origin, "init", "-q")
+    _git(sub_origin, "config", "user.email", "test@example.com")
+    _git(sub_origin, "config", "user.name", "Test")
+    (sub_origin / "f.txt").write_text("x", encoding="utf-8")
+    _git(sub_origin, "add", "f.txt")
+    _git(sub_origin, "commit", "-q", "-m", "init")
+
+    superproject = tmp_path / "super"
+    superproject.mkdir()
+    _git(superproject, "init", "-q")
+    _git(superproject, "config", "user.email", "test@example.com")
+    _git(superproject, "config", "user.name", "Test")
+    _git(
+        superproject, "-c", "protocol.file.allow=always",
+        "submodule", "add", "-q", str(sub_origin), "sub",
+    )
+    _git(superproject, "commit", "-q", "-m", "add submodule")
+
+    submodule_dir = superproject / "sub"
+    assert (submodule_dir / ".git").is_file(), "a submodule checkout's .git is a file"
+
+    trdd_common._main_checkout_root.cache_clear()
+    try:
+        resolved = trdd_common.local_design_root(str(submodule_dir))
+    finally:
+        trdd_common._main_checkout_root.cache_clear()
+
+    assert resolved == submodule_dir / ".claude" / "local" / "design", (
+        "a submodule's LOCAL corpus must stay in the submodule, not the superproject"
+    )
+
+
 def test_local_design_no_longer_shares_a_slug_dir_with_local_memory(tmp_path: Path) -> None:
     """LOCAL design and LOCAL wikimem memory are DIFFERENT subsystems by owner directive
     (ai-maestro#163: 'different from the wikimem architecture, and it must be so') — design

@@ -123,6 +123,18 @@ def _main_checkout_root(project_dir: str) -> Path:
     known git repo, a non-zero `worktree list` exit (or output missing the expected
     line) is a real anomaly, not a reason to silently keep using the (possibly wrong)
     worktree path, so it raises rather than failing open.
+    SUBMODULE checkouts (`.git` a FILE pointing at `<super>/.git/modules/<name>`) are a
+    MEASURED git quirk, not a free ride: `git worktree list --porcelain` run inside a
+    submodule reports that internal GITDIR as the "worktree" path
+    (`<super>/.git/modules/<name>`), never the submodules real working-tree root
+    (verified empirically — git 2.x on macOS). A path with a literal `.git` segment can
+    never be a real working tree, so that shape is detected and recovered with
+    `rev-parse --show-toplevel`, which DOES return the submodules own checkout root —
+    keeping the LOCAL corpus inside the submodule, never hoisted into the superproject.
+    See `test_local_design_root_of_a_submodule_stays_in_the_submodule`.
+    `@lru_cache` memoises this per `project_dir` string for the process lifetime — the
+    ~19 call sites of `local_design_root()` (dispatch.py, fleet_status.py, several
+    per-beat detectors) would otherwise re-spawn `git` subprocesses on every call.
     """
     path = Path(project_dir)
     try:
@@ -145,7 +157,21 @@ def _main_checkout_root(project_dir: str) -> Path:
         )
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
-            return Path(line[len("worktree "):])
+            candidate = Path(line[len("worktree "):])
+            if ".git" in candidate.parts:
+                # The submodule quirk (see docstring): recover the real checkout root.
+                toplevel = subprocess.run(
+                    ["git", "-C", project_dir, "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if toplevel.returncode == 0 and toplevel.stdout.strip():
+                    return Path(toplevel.stdout.strip())
+                raise RuntimeError(
+                    f"git worktree list --porcelain reported a gitdir ({candidate}) as "
+                    f"the worktree for {project_dir}, and rev-parse --show-toplevel "
+                    "failed to recover the real checkout root"
+                )
+            return candidate
     raise RuntimeError(
         f"git worktree list --porcelain produced no worktree line for {project_dir}"
     )
