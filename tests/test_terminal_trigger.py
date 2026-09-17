@@ -304,7 +304,8 @@ def test_run_verified_send_cancels_when_a_compaction_landed_since_the_baseline(t
     like the type-time guard above -- a compaction landing while the send is still queued (a
     busy pane, or a retry after a verification timeout) cancels the send as POSSIBLY-DELIVERED
     instead of blindly retyping /compact into a session that was just compacted by something
-    else (the harness's own auto-compact, in the incident that named this guard)."""
+    else (the harness's own auto-compact, in the incident that named this guard). Covers the
+    `last-compact.ts` ("int") signal."""
     stamp = tmp_path / "last-compact.ts"
     stamp.write_text("1000", encoding="utf-8")  # a compaction already landed at t=1000
     seen: list[tuple[bool, str]] = []
@@ -318,7 +319,7 @@ def test_run_verified_send_cancels_when_a_compaction_landed_since_the_baseline(t
         "terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/compact"],
         "esc_first": False, "state_dir": str(tmp_path),
         # baseline (999) captured BEFORE the compaction at 1000 -- the send is now stale.
-        "abort_if_landed": [str(stamp), 999],
+        "abort_if_landed": [[str(stamp), 999, "int"]],
     }
     assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 1
     assert seen == [(False, seen[0][1])]
@@ -326,10 +327,45 @@ def test_run_verified_send_cancels_when_a_compaction_landed_since_the_baseline(t
     assert not (tmp_path / "self-send.%1.stamps.json").exists()
 
 
+def test_run_verified_send_cancels_on_the_precompact_stamp_alone(tmp_path):
+    """GUARD 1 round 2 (TRDD-4JEBTT2C, issue 306): `last-compact.ts` is written by PostCompact
+    AFTER the compaction finishes -- in the incident that was ~111s after the harness's OWN
+    auto-compact started, during which `last-compact.ts` alone would have seen no change at
+    all. `precompact-last-trigger.json` (kind `json_written_at`) is written at compaction
+    START, so it must cancel the send on its OWN, even while `last-compact.ts` still reads its
+    stale baseline."""
+    last_compact = tmp_path / "last-compact.ts"
+    last_compact.write_text("500", encoding="utf-8")  # unchanged since the decision
+    precompact = tmp_path / "precompact-last-trigger.json"
+    precompact.write_text(
+        '{"trigger": "auto", "written_at": 1789475326.0, "session_id": "s"}', encoding="utf-8"
+    )
+    seen: list[tuple[bool, str]] = []
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+        seen.append(still_wanted())
+        return (False, seen[-1][1]) if not seen[-1][0] else (True, "sent")
+
+    data = {
+        "terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/compact"],
+        "esc_first": False, "state_dir": str(tmp_path),
+        "abort_if_landed": [
+            [str(last_compact), 500, "int"],  # unchanged -- must NOT be what cancels this
+            [str(precompact), 1789475260.0, "json_written_at"],  # baseline BEFORE this PreCompact
+        ],
+    }
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 1
+    assert "possibly-delivered" in seen[0][1]
+    assert "json_written_at" in seen[0][1]
+
+
 def test_run_verified_send_still_sends_when_no_compaction_landed(tmp_path):
-    """The land-time guard must not cancel a send whose baseline is still current."""
-    stamp = tmp_path / "last-compact.ts"
-    stamp.write_text("500", encoding="utf-8")
+    """The land-time guard must not cancel a send whose baseline is still current, on either
+    signal."""
+    last_compact = tmp_path / "last-compact.ts"
+    last_compact.write_text("500", encoding="utf-8")
+    precompact = tmp_path / "precompact-last-trigger.json"
+    precompact.write_text('{"trigger": "auto", "written_at": 500.0}', encoding="utf-8")
 
     def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
         ok, _why = still_wanted()
@@ -339,7 +375,10 @@ def test_run_verified_send_still_sends_when_no_compaction_landed(tmp_path):
     data = {
         "terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/compact"],
         "esc_first": False, "state_dir": str(tmp_path),
-        "abort_if_landed": [str(stamp), 500],  # baseline == current: no NEWER compaction
+        "abort_if_landed": [
+            [str(last_compact), 500, "int"],       # baseline == current: no NEWER compaction
+            [str(precompact), 500.0, "json_written_at"],
+        ],
     }
     assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 0
 

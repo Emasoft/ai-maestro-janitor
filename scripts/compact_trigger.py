@@ -183,15 +183,58 @@ def main() -> int:
     # context-enforcement hook passes it explicitly).
     commands, esc_first = plan_compact(soft=not args.hard, handoff=args.handoff)
 
-    # GUARD 1 (TRDD-4JEBTT2C, issue 306): capture the compaction high-water mark AT THE
-    # DECISION -- this script's own invocation IS the decision, made by the caller (Stop hook /
-    # heartbeat phase) the instant it saw a large idle context. The detached sender below can
-    # still defer minutes on a busy pane; passing this baseline lets it tell "a compaction
-    # already landed since we decided to send" apart from "still pending", which is the race
-    # that sent a queued /compact into a session Claude Code's own auto-compact had just
-    # compacted on its own (owner report, issue 306).
-    _last_compact_path = _project_root() / ".janitor" / "state" / state.LAST_COMPACT_STAMP
-    landed_baseline = (str(_last_compact_path), state.read_int_state(_last_compact_path, 0))
+    # GUARD 1 (TRDD-4JEBTT2C, issue 306, review round 2): capture the compaction high-water
+    # marks AT THE DECISION -- this script's own invocation IS the decision, made by the caller
+    # (Stop hook / heartbeat phase) the instant it saw a large idle context. The detached sender
+    # below can still defer minutes on a busy pane; passing these baselines lets it tell "a
+    # compaction already landed since we decided to send" apart from "still pending".
+    #
+    # TWO stamps, not one (round-2 finding). `last-compact.ts` alone is too LATE a signal: it is
+    # written by the PostCompact hook AFTER the compaction finishes, and in the incident that
+    # was ~111s after the harness's own auto-compact STARTED (14:28:46 vs. PostCompact at
+    # 14:30:37) -- for that whole window this guard would have seen `current == baseline` and
+    # let the queued send through. `precompact-last-trigger.json` is written by
+    # pre-compact-handoff.py (`_LAST_TRIGGER_FILENAME`, same literal name hardcoded below to
+    # avoid importing a hook script as a library) at compaction START, on EVERY PreCompact
+    # firing -- closing that window. `_read_landed_stamp` (terminal_trigger.py) reads it via its
+    # `written_at` float field -- `time.time()` epoch seconds (pre-compact-handoff.py:1151/1163),
+    # the same base `last-compact.ts` uses, so the two baselines are directly comparable. (A
+    # DIFFERENT `written_at` field, an ISO string, exists in this same source file at line 872 --
+    # that one belongs to `precompact-continuity.json`, a different stamp this guard does not
+    # read; do not conflate the two if this comment is ever re-derived from that file.)
+    #
+    # Two residual risks, disclosed rather than fixed here (review round 2): (i) `_read_landed_stamp`
+    # reads a corrupted/mid-write JSON stamp as 0.0 -- always BELOW a real baseline, so it can
+    # never cause a false cancel, but a stamp write that failed or raced at land-time could be
+    # misread as "nothing landed" and let a stale send through; the write itself goes through
+    # `state.atomic_write` (rename-on-write), so a torn read requires disk-level corruption, not
+    # a race -- accepted. (ii) `precompact-last-trigger.json` is ONE file per project state dir,
+    # not per-session -- two concurrent sessions in the same project would cancel each other's
+    # queued /compact on an unrelated compaction. That is an over-cancellation (a send that would
+    # have been fine gets skipped), the SAFE direction for a guard whose whole job is "don't send
+    # blind" -- accepted, not fixed.
+    #
+    # Path resolution deliberately uses `state.state_dir()`, not this script's own
+    # `_project_root()`-built path: `state` (imported for GUARD 1 above) resolves
+    # CLAUDE_PROJECT_DIR -> a process-local override -> `git rev-parse` -> cwd, while
+    # `_project_root()` here has no override step. The two can only disagree when
+    # CLAUDE_PROJECT_DIR is unset AND something upstream in THIS process set the override before
+    # `state` was imported -- not reachable in this script today -- but reusing `state.state_dir()`
+    # makes the two paths agree BY CONSTRUCTION rather than by that argument, and it is the exact
+    # path `post-compact-resume.py` (guard 4) and `pre-compact-handoff.py` write through.
+    _sd = state.state_dir()
+    _last_compact_path = _sd / state.LAST_COMPACT_STAMP
+    _last_trigger_path = _sd / "precompact-last-trigger.json"  # pre-compact-handoff.py's _LAST_TRIGGER_FILENAME
+    for _stamp_path, _stamp_kind in ((_last_compact_path, "int"), (_last_trigger_path, "json_written_at")):
+        if not _stamp_path.is_file():
+            state.log_line("compact-trigger", f"compact guard: no {_stamp_path.name} at {_stamp_path} — baseline 0")
+    landed_baseline = [
+        (str(_last_compact_path), float(state.read_int_state(_last_compact_path, 0)), "int"),
+        # Reuses terminal_trigger's own reader rather than a second JSON-parsing copy of it
+        # (both must agree on what "landed" means, or the baseline and the land-time recheck
+        # inside run_verified_send could silently disagree).
+        (str(_last_trigger_path), terminal_trigger._read_landed_stamp(_last_trigger_path, "json_written_at"), "json_written_at"),
+    ]
 
     # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a
     # channel it cannot resolve at all falls through to NO_ITERM below.

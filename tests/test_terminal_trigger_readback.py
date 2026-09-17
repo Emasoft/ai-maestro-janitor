@@ -307,6 +307,47 @@ def test_a_malformed_injection_is_CLEARED_or_the_loop_deadlocks_on_its_own_text(
     assert cleared == ["C-u"], "the malformed text must be cleared before retrying"
 
 
+def test_a_timeout_followed_by_a_landed_compaction_cancels_instead_of_retyping() -> None:
+    """GUARD 3 (TRDD-4JEBTT2C, issue 306): the incident's `send step timed out after 10s
+    (osascript) -- aborting the remaining steps` leaves the field MALFORMED (the same shape as
+    `test_a_malformed_injection_is_CLEARED...` above -- `_run_steps` returning early mid-send is
+    indistinguishable, from this loop's point of view, from any other interrupted type). The
+    retry that follows re-asks `still_wanted` at the TOP of the next pass (terminal_trigger.py's
+    `inject_until_sent`, the `if still_wanted is not None` block) BEFORE any second keystroke —
+    so a compaction that landed during the timeout is observed THERE, and the second `type_fn`
+    call never happens."""
+    still_wanted_calls = 0
+
+    def still_wanted():
+        nonlocal still_wanted_calls
+        still_wanted_calls += 1
+        if still_wanted_calls == 1:
+            return True, "no compaction landed since the decision"
+        # The SECOND pass -- i.e. the retry after the timed-out step's malformed read-back --
+        # now observes a compaction that landed while the first attempt was in flight.
+        return False, "possibly-delivered: a compaction landed at 1010 (baseline 1000) — not retried"
+
+    typed: list[str] = []
+    cleared: list[str] = []
+    sent: list[str] = []
+    reads = _seq(
+        _pane(""),          # empty -> type_fn() (the send whose osascript step will time out)
+        _pane("xx/comp"),   # MALFORMED read-back — the aborted step left partial/garbage text
+    )
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: typed.append("typed"), submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: cleared.append("C-u"),
+        reader=reads, is_typing=lambda _t: False,
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+        still_wanted=still_wanted,
+    )
+    assert ok is False
+    assert "possibly-delivered" in why
+    assert typed == ["typed"], "no SECOND type attempt after the guard cancels"
+    assert sent == [], "never submitted"
+
+
 def test_without_a_clear_fn_it_refuses_rather_than_spinning_on_its_own_garbage() -> None:
     """Fail loudly instead of burning the give-up window re-reading text we put there."""
     ok, why = tt.inject_until_sent(
