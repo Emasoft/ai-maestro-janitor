@@ -1,9 +1,9 @@
 ---
 trdd-id: ECHOKVZC
 title: Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
-column: todo
+column: testing
 created: 2026-09-17T07:08:04+0200
-updated: 2026-09-17T08:44:14+0200
+updated: 2026-09-17T18:52:11+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -34,6 +34,10 @@ Origin: TRDD-PA9E2GJ1 follow-up 2026-09-17 (reports/board-drain/20260917_impl-PA
 - 2026-09-17T07:08:04+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T07:33:12+0200 — column → todo by worker-board-drain. PA9E2GJ1's cooldown-bypass candidate — not a deferral by design, moves off backburner into the drain
 - 2026-09-17T08:44:13+0200 — Acceptance reworded to the outcome (ESC withheld inside the target's cooldown), mechanism left to the implementer. Puller: the next board drain — no session is currently assigned; the card waits in todo.
+- 2026-09-17T18:43:26+0200 — dev → testing: scripts/lib/user_intent.py (record_pane_transcript, pane_transcript_path, _pane_key, heartbeat-marker skip), scripts/lib/pane_actuate.py (act's cooldown gate, keyed on Event.STOP_FLAG not fail_open), scripts/hooks/on-prompt-submit-user-mem.py + scripts/hooks/on-stop-token-meter.py (publish sites); 8 new tests in tests/test_pane_actuate.py + 8 new tests in tests/test_user_intent_interrupt.py, all real fixtures/tmp files, no mocks of the gate; ruff/mypy/pyright all 0 findings, tldr impact act confirmed no positional-arg caller shift. Review findings applied: event-keyed (not fail_open-keyed) STOP_FLAG exemption, iTerm prefix round-trip test, heartbeat-marker root-cause fix in recently_interrupted with 2 tests, ceilings documented at the act() site. (janitor-main-session via lean-worker)
+- 2026-09-17T18:45:41+0200 — adversarial review (fork): main finding accepted and documented (not code-fixed) — a pane-id reused by a NEW session before its first-prompt hook overwrites the mapping can inherit the OLD session's still-on-disk transcript, wrongly deferring one keystroke; failure direction is an extra deferral, never an extra injection, and closing it needs a session identity in the mapping, which the TRDD's own chosen design rules out as new stamp semantics — documented as ceiling 2(b) at the pane_actuate.act gate site. Other findings (unconditional per-prompt write cost, test_a_missing_pane_transcript_mapping_fails_open's narrow scope) reviewed and accepted as already-covered/by-design, no code change. (janitor-main-session via lean-worker)
+- 2026-09-17T18:49:59+0200 — coordinator second review: fixed a real defect (act() omitted state_dir=, so recently_interrupted globbed the CALLING process's self-send stamps instead of the TARGET project's, missing a self-sent /janitor-resume echo); added user_intent.target_state_dir(project_dir) shared by pane_transcript_path and act(), a regression test proven to fail without the fix (ESC fired twice) and pass with it. Also replaced bare except/pass with state.log_line (stderr fallback) in both hook wrappers. 96 tests pass, ruff/mypy/pyright clean. (janitor-main-session via lean-worker)
+- 2026-09-17T18:51:53+0200 — fixed 3 tree-wide pyright reportOptionalMemberAccess in tests/test_user_intent_interrupt.py (None-narrowing asserts); doc-only extension to target_state_dir on canonicalization parity with state.state_dir(). Whole-tree mypy now shows 1 unrelated error in scripts/lib/terminal_trigger.py:1796 from a concurrent session's TRDD-4JEBTT2C work (not touched, flagged not fixed). All ECHOKVZC-scoped checks green. (janitor-main-session via lean-worker)
 
 ## Acceptance
 

@@ -14,8 +14,10 @@ plan each keystroke would actually fire is asserted alongside the keystroke itse
 
 from __future__ import annotations
 
+import json
 import re
 import sys
+import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -656,3 +658,140 @@ def test_idle_no_headroom_logs_the_deferral_reason_over_foreign_text(monkeypatch
     assert fired == []
     assert outcome.status is pa.OutcomeStatus.NOOP
     assert any("foreign text" in m and "run the tests please" in m for m in logged)
+
+
+# ---------------------------------------------------------------------------------------
+# TARGET-session interrupt cooldown (TRDD-ECHOKVZC): `act` must consult the TARGET session's
+# OWN transcript (published by its hooks via `user_intent.record_pane_transcript`, read back
+# by `user_intent.pane_transcript_path`) before typing into its pane -- without this, the
+# wedge-recovery ESC bypasses the 300s user-interrupt cooldown every other injector honours.
+# ---------------------------------------------------------------------------------------
+
+
+def _iso(epoch: float) -> str:
+    """Epoch seconds -> the ISO-8601 form `token_history.parse_ts` reads."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(epoch)) + ".000Z"
+
+
+def _pane_mapping(tmp_path: Path, age_s: float) -> Path:
+    """A tmp project_dir carrying `_TMUX`'s pane -> transcript mapping, where the transcript
+    holds one `[Request interrupted by user]` record `age_s` seconds old."""
+    project_dir = tmp_path / "project"
+    sd = project_dir / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    transcript = tmp_path / "session.jsonl"
+    now = time.time()
+    rec = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
+        "timestamp": _iso(now - age_s),
+    }
+    transcript.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    (sd / "pane-transcript.%5.txt").write_text(str(transcript) + "\n", encoding="utf-8")
+    return project_dir
+
+
+def test_wedge_esc_is_withheld_inside_the_target_sessions_interrupt_cooldown(monkeypatch, tmp_path: Path) -> None:
+    """A RECOVERY_RUNG ESC nudge at a wedge is withheld -- NOOP, no keys -- when the TARGET
+    session's own transcript shows an interrupt 60s ago, inside the 300s cooldown."""
+    project_dir = _pane_mapping(tmp_path, 60)
+    _frames(monkeypatch, "real-wedged-fable-limit.txt")
+    fired = _seam(monkeypatch)
+    outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, project_dir=str(project_dir))
+    assert _keys(fired) == []
+    assert outcome.status is pa.OutcomeStatus.NOOP
+    assert "interrupt-cooldown" in outcome.observed
+
+
+def test_wedge_esc_is_sent_when_the_target_sessions_interrupt_is_older_than_the_cooldown(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The same wedge, but the target session's interrupt is 400s old -- outside the 300s
+    cooldown -- so the ESC fires exactly as `test_recovery_rung_esc_only_at_a_wedge_uses_the_wedge_esc_law`."""
+    project_dir = _pane_mapping(tmp_path, 400)
+    _frames(monkeypatch, "real-wedged-fable-limit.txt", "real-calm-working.txt")
+    fired = _seam(monkeypatch)
+    outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, project_dir=str(project_dir))
+    assert _keys(fired) == ["ESC"]
+    assert outcome.status is pa.OutcomeStatus.DONE
+
+
+def test_stop_flag_ignores_the_target_sessions_interrupt_cooldown(monkeypatch, tmp_path: Path) -> None:
+    """`Event.STOP_FLAG` (the kill-switch/`/janitor-disarm` path) still flushes the wedge even
+    inside the target session's 60s-old interrupt cooldown -- a stop that silently does not
+    arrive is the failure the event-keyed exemption exists to prevent."""
+    project_dir = _pane_mapping(tmp_path, 60)
+    _frames(
+        monkeypatch,
+        "real-wedged-fable-limit.txt",
+        "synthetic-idle-empty-field.txt",
+        "synthetic-working-spinner.txt",
+    )
+    fired = _seam(monkeypatch)
+    outcome = _act(
+        pa.Event.STOP_FLAG,
+        command="/janitor-disarm",
+        esc_first=True,
+        command_plan=fleet_inject.build_command_plan(_TMUX, "/janitor-disarm", esc_first=True),
+        project_dir=str(project_dir),
+        fail_open=True,
+    )
+    assert _keys(fired) == ["ESC", "/janitor-disarm"]
+    assert outcome.status is pa.OutcomeStatus.DONE
+
+
+def test_a_missing_pane_transcript_mapping_fails_open(monkeypatch, tmp_path: Path) -> None:
+    """No pane -> transcript mapping file at all -- `act` behaves exactly as it did before this
+    TRDD (fails open, types normally)."""
+    project_dir = tmp_path / "project"
+    (project_dir / ".janitor" / "state").mkdir(parents=True)
+    _frames(monkeypatch, "real-wedged-fable-limit.txt", "real-calm-working.txt")
+    fired = _seam(monkeypatch)
+    outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, project_dir=str(project_dir))
+    assert _keys(fired) == ["ESC"]
+    assert outcome.status is pa.OutcomeStatus.DONE
+
+
+def _pane_mapping_with_resume_echo(tmp_path: Path, interrupt_age_s: float, echo_age_s: float) -> Path:
+    """Like `_pane_mapping`, but the transcript ALSO carries a `/janitor-resume` `type: user`
+    record `echo_age_s` seconds ago, stamped as a self-send in the TARGET project's own
+    `.janitor/state/self-send.%5.stamps.json` -- proves the gate passes the TARGET's own
+    state dir (not the calling process's) to `recently_interrupted`, so `_is_self_sent_echo`
+    can actually find the stamp (coordinator review finding, TRDD-ECHOKVZC)."""
+    project_dir = tmp_path / "project"
+    sd = project_dir / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    transcript = tmp_path / "session.jsonl"
+    now = time.time()
+    interrupt_rec = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
+        "timestamp": _iso(now - interrupt_age_s),
+    }
+    echo_ts = now - echo_age_s
+    echo_rec = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": "/janitor-resume"}]},
+        "timestamp": _iso(echo_ts),
+    }
+    transcript.write_text(json.dumps(interrupt_rec) + "\n" + json.dumps(echo_rec) + "\n", encoding="utf-8")
+    (sd / "pane-transcript.%5.txt").write_text(str(transcript) + "\n", encoding="utf-8")
+    (sd / "self-send.%5.stamps.json").write_text(json.dumps({"/janitor-resume": int(echo_ts)}), encoding="utf-8")
+    return project_dir
+
+
+def test_wedge_esc_stays_withheld_across_a_self_sent_resume_echo_in_the_target_pane(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The TARGET session's own self-sent `/janitor-resume` echo (30s ago) must not be misread
+    as "the user is back": the gate must consult the TARGET project's own
+    `self-send.*.stamps.json` (via `state_dir=user_intent.target_state_dir(project_dir)`), not
+    the calling process's own project -- so the real interrupt 60s ago still holds the cooldown
+    and the ESC stays withheld. Fails (ESC fires) without the `state_dir=` fix."""
+    project_dir = _pane_mapping_with_resume_echo(tmp_path, 60, 30)
+    _frames(monkeypatch, "real-wedged-fable-limit.txt")
+    fired = _seam(monkeypatch)
+    outcome = _act(pa.Event.RECOVERY_RUNG, command=None, esc_first=True, project_dir=str(project_dir))
+    assert _keys(fired) == []
+    assert outcome.status is pa.OutcomeStatus.NOOP
+    assert "interrupt-cooldown" in outcome.observed

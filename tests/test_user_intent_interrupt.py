@@ -394,3 +394,137 @@ def test_three_consecutive_old_assistant_records_stop_the_scan(tmp_path: Path) -
     t.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None
+
+
+# ---------------------------------------------------------------------------------------
+# `record_pane_transcript` / `pane_transcript_path` (TRDD-ECHOKVZC): the TARGET session's own
+# pane -> transcript mapping that lets `pane_actuate.act` find (and cool down against) a
+# session's transcript when acting on a pane it does not itself own.
+# ---------------------------------------------------------------------------------------
+
+
+def test_record_pane_transcript_writes_the_mapping_file(tmp_path: Path) -> None:
+    """A pane identity in `env` plus a transcript path writes `pane-transcript.<pane>.txt`
+    holding the absolute transcript path."""
+    sd = tmp_path / "state"
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    written = user_intent.record_pane_transcript(str(transcript), state_dir=sd, env={"TMUX_PANE": "%5"})
+
+    assert written is not None
+    assert written == sd / "pane-transcript.%5.txt"
+    assert written.read_text().strip() == str(transcript)
+
+
+def test_record_pane_transcript_is_idempotent_for_unchanged_content(tmp_path: Path) -> None:
+    """A second call with the SAME transcript path does not rewrite the file -- no mtime churn
+    on the fsevents-watched state dir."""
+    sd = tmp_path / "state"
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    env = {"TMUX_PANE": "%5"}
+
+    first = user_intent.record_pane_transcript(str(transcript), state_dir=sd, env=env)
+    assert first is not None
+    mtime_before = first.stat().st_mtime_ns
+    content_before = first.read_text()
+
+    second = user_intent.record_pane_transcript(str(transcript), state_dir=sd, env=env)
+
+    assert second is not None
+    assert second == first
+    assert second.stat().st_mtime_ns == mtime_before
+    assert second.read_text() == content_before
+
+
+def test_record_pane_transcript_writes_nothing_without_a_pane_env(tmp_path: Path) -> None:
+    """No `TMUX_PANE`/`ITERM_SESSION_ID` in `env` -- a headless/unknown terminal has no pane
+    key to file under, so nothing is written."""
+    sd = tmp_path / "state"
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    result = user_intent.record_pane_transcript(str(transcript), state_dir=sd, env={})
+
+    assert result is None
+    assert not sd.exists()
+
+
+def test_pane_transcript_path_round_trips_an_iterm_pane_across_the_prefix_mismatch(tmp_path: Path) -> None:
+    """The WRITE side gets a bare `ITERM_SESSION_ID` env value (`self_terminal`'s own shape,
+    `w0t0p0:<UUID>` -- the real env carries the window/tab/pane prefix too, per iTerm2's own
+    `$ITERM_SESSION_ID`) while the READ side gets `fleet_scan.parse_iterm_sessions`'s raw
+    AppleScript `(id of s)` dump, which this repo's OWN consumer (`fleet_scan.py:1037`) already
+    normalises with `.split(':')[-1]` before use -- so `terminal['iterm_session_id']` can carry
+    that same prefix. Both keys must resolve to the SAME mapping file for the pane to be found."""
+    project_dir = tmp_path / "project"
+    sd = project_dir / ".janitor" / "state"
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    uuid = "8AC6F1D2-EBB5-4CDD-BD8B-1234567890AB"
+
+    written = user_intent.record_pane_transcript(
+        str(transcript), state_dir=sd, env={"ITERM_SESSION_ID": f"w0t0p0:{uuid}"}
+    )
+    assert written == sd / f"pane-transcript.{uuid}.txt"
+
+    found = user_intent.pane_transcript_path(str(project_dir), {"iterm_session_id": f"w0t0p0:{uuid}"})
+
+    assert found == transcript
+
+
+def test_pane_transcript_path_round_trips_and_fails_open_for_a_dangling_path(tmp_path: Path) -> None:
+    """`pane_transcript_path` reads back exactly what `record_pane_transcript` wrote, and
+    returns None (fails open) once the mapping names a transcript file that no longer exists."""
+    project_dir = tmp_path / "project"
+    sd = project_dir / ".janitor" / "state"
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    written = user_intent.record_pane_transcript(str(transcript), state_dir=sd, env={"TMUX_PANE": "%5"})
+    assert written is not None
+
+    found = user_intent.pane_transcript_path(str(project_dir), {"tmux_pane": "%5"})
+    assert found == transcript
+
+    transcript.unlink()
+
+    assert user_intent.pane_transcript_path(str(project_dir), {"tmux_pane": "%5"}) is None
+
+
+# ---------------------------------------------------------------------------------------
+# TRDD-ECHOKVZC review finding: the cron heartbeat's OWN triggering prompt
+# (`[janitor-heartbeat] ...`) is not a human keystroke and must not be mistaken for "the user
+# is back" -- it would otherwise end the cooldown for every injector within one cron cadence
+# of a real Esc.
+# ---------------------------------------------------------------------------------------
+
+
+def _heartbeat_record(age_s: float) -> dict:
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": "[janitor-heartbeat]\nfull-fire"}]},
+        "timestamp": _iso(NOW - age_s),
+    }
+
+
+def test_a_heartbeat_prompt_after_an_interrupt_does_not_end_the_cooldown(tmp_path: Path) -> None:
+    """An interrupt 60s ago, then a `[janitor-heartbeat]` record 30s ago (newer) -- the cooldown
+    survives it (returns ~60), because the heartbeat prompt is not the user coming back."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(60), _heartbeat_record(30)])
+
+    age = user_intent.recently_interrupted("proj", now=NOW, transcript_path=t)
+
+    assert age is not None
+    assert 59.0 <= age <= 61.0
+
+
+def test_a_plain_user_prompt_after_an_interrupt_still_ends_the_cooldown(tmp_path: Path) -> None:
+    """Control: an ORDINARY user prompt (not a heartbeat) 30s after an interrupt still ends the
+    cooldown (returns None) -- the heartbeat skip must not swallow a real return-to-keyboard."""
+    t = tmp_path / "session.jsonl"
+    _write_jsonl(t, [_interrupt_record(60), _prompt_record(30)])
+
+    assert user_intent.recently_interrupted("proj", now=NOW, transcript_path=t) is None

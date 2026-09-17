@@ -98,6 +98,28 @@ def _load_user_mem_lib():
     return None
 
 
+def _load_user_intent():
+    """Import `user_intent` the same way `_load_user_mem_lib` imports `user_mem_lib` (plugin
+    root when set, else this file's own `scripts/lib` sibling). Returns the module, or None if
+    it cannot be found — a missing lib must degrade the pane-transcript publish to a no-op,
+    never crash the hook."""
+    candidates: list[Path] = []
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    if plugin_root:
+        candidates.append(Path(plugin_root) / "scripts" / "lib")
+    candidates.append(Path(__file__).resolve().parent.parent / "lib")
+    for lib_dir in candidates:
+        if (lib_dir / "user_intent.py").is_file():
+            sys.path.insert(0, str(lib_dir))
+            try:
+                import user_intent  # noqa: E402  -- local module, not PyPI
+
+                return user_intent
+            except Exception:  # pragma: no cover - defensive
+                return None
+    return None
+
+
 def _emit(obj: dict) -> None:
     """Write one JSON object to stdout (the hook's whole response)."""
     sys.stdout.write(json.dumps(obj))
@@ -215,6 +237,34 @@ def main() -> int:
         return 0
     if not isinstance(payload, dict):
         return 0
+
+    # TRDD-ECHOKVZC: publish THIS session's pane -> transcript mapping on EVERY prompt (not
+    # just user-mem commands) so `pane_actuate.act` can find it when the fleet actuator later
+    # considers typing into this pane — without it, that actuator has no route to
+    # `recently_interrupted` and bypasses the 300s user-interrupt cooldown. Best-effort: a
+    # write fault must never break this hook, so every failure is swallowed here.
+    try:
+        ui = _load_user_intent()
+        if ui is not None:
+            ui.record_pane_transcript(payload.get("transcript_path"))
+    except Exception as exc:  # pragma: no cover - defensive; never break the hook
+        # Coordinator review finding (TRDD-ECHOKVZC): a silently swallowed fault here would
+        # leave the pane -> transcript mapping never written, and `pane_actuate.act` would then
+        # fail open forever with no trace. `state` is reachable here whenever `_load_user_intent`
+        # found the lib dir at all (it inserts the same dir onto `sys.path` before returning),
+        # so this is the common case; stderr is the fallback for the dir-not-found case.
+        try:
+            import state  # noqa: E402  -- local module, not PyPI (path already inserted above)
+
+            state.log_line(
+                "user_intent",
+                f"record_pane_transcript failed in on-prompt-submit-user-mem: {type(exc).__name__}: {exc}",
+            )
+        except Exception:  # pragma: no cover - defensive
+            print(
+                f"[on-prompt-submit-user-mem] record_pane_transcript failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
 
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():

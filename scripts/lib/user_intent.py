@@ -61,6 +61,10 @@ INTERRUPT_MARKERS = (
 )
 INTERRUPT_COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_INTERRUPT_COOLDOWN_S"
 DEFAULT_INTERRUPT_COOLDOWN_S = 300
+# Mirrors `token_meter._HEARTBEAT_MARKER` (duplicated, not imported, to avoid pulling that
+# module's own imports into this leaf lib): the cron heartbeat's OWN triggering prompt starts
+# with this line and is NOT a human keystroke -- see the skip in `recently_interrupted`, below.
+_HEARTBEAT_MARKER = "[janitor-heartbeat]"
 # The initial (and doubling-step) size of `recently_interrupted`'s backward scan window. A
 # module constant, not a local literal, so a test can shrink it to force multiple doublings
 # without needing a multi-hundred-KB fixture transcript.
@@ -666,8 +670,20 @@ def recently_interrupted(
                     # Our own injected command echoed back as a `type: user` record -- not
                     # evidence the user is back, and not an interrupt. Keep scanning backward.
                     continue
-                # A newer, non-interrupt, non-self-sent user prompt found before any interrupt:
-                # the user is back -- the cooldown is over regardless of any earlier interrupt.
+                if stripped.startswith(_HEARTBEAT_MARKER):
+                    # TRDD-ECHOKVZC review finding: the cron heartbeat's own prompt
+                    # (`[janitor-heartbeat] ...`, `token_meter._HEARTBEAT_MARKER`) lands in the
+                    # transcript as an ordinary `type: user` record, but NO human typed it and
+                    # `terminal_trigger` never stamps a self-send for it (it is not sent through
+                    # that path at all). Without this skip it hit the "user is back" branch
+                    # below and ended the cooldown for EVERY injector within one cron cadence
+                    # (as little as a few minutes) of a real Esc -- blast radius: every caller
+                    # of `recently_interrupted`, not just `pane_actuate.act`. Neither an
+                    # interrupt nor proof of return: keep scanning backward.
+                    continue
+                # A newer, non-interrupt, non-self-sent, non-heartbeat user prompt found before
+                # any interrupt: the user is back -- the cooldown is over regardless of any
+                # earlier interrupt.
                 return None
             role = rec.get("type")
             if role in ("user", "assistant") and ts is not None:
@@ -682,3 +698,124 @@ def recently_interrupted(
         if window_bytes >= size:
             return None
         window_bytes = min(window_bytes * 2, size)
+
+# --- TARGET-session pane -> transcript mapping (TRDD-ECHOKVZC) -----------------------------
+#
+# `pane_actuate.act` types into OTHER sessions' panes and has no transcript of its own, so it
+# can never call `recently_interrupted` -- the wedge-recovery ESC bypasses the 300s
+# user-interrupt cooldown every other injector honours. The TARGET session is the only one
+# that knows its own `transcript_path`; it publishes the mapping here (from its own hooks) and
+# the actuator reads it back by pane, keyed the same way `terminal_trigger`'s self-send stamps
+# already are (pane, not project -- two panes must never share a file).
+
+_PANE_KEY_TMUX_RE = re.compile(r"^%[0-9]+$")
+_PANE_KEY_ITERM_RE = re.compile(r"[0-9a-fA-F-]{8,64}")
+
+
+def _pane_key(env: Mapping[str, str] | None = None) -> str | None:
+    """THIS session's own pane identity, in the filename-safe form `record_pane_transcript`
+    files under. Mirrors `terminal_trigger.self_terminal()`'s env-derivation exactly (bare
+    `TMUX_PANE`, else `ITERM_SESSION_ID`'s trailing UUID) -- duplicated rather than imported
+    because `terminal_trigger` already imports THIS module, so importing it back would be
+    circular. Validated with the same shape `terminal_trigger` enforces so a malformed env
+    value can never become a filename component."""
+    e: Mapping[str, str] = os.environ if env is None else env
+    pane = (e.get("TMUX_PANE") or "").strip()
+    if _PANE_KEY_TMUX_RE.match(pane):
+        return pane
+    sid = (e.get("ITERM_SESSION_ID") or "").strip().split(":")[-1].strip()
+    if _PANE_KEY_ITERM_RE.fullmatch(sid):
+        return sid
+    return None
+
+
+def record_pane_transcript(
+    transcript_path: str | Path | None,
+    *,
+    state_dir: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> Path | None:
+    """Publish THIS session's pane -> transcript mapping so `pane_transcript_path` (below) can
+    find it later. Writes `<state_dir>/pane-transcript.<pane>.txt` = the absolute transcript
+    path, one line -- ONLY when the file is missing or its content differs (the state dir is
+    fsevents-watched; a same-content rewrite on every prompt/turn is pure churn, see memory
+    page janitor-keepalive-test-isolation-fsevents).
+
+    Writes nothing (returns None) when this session has no pane identity in `env`, or
+    `transcript_path` is empty/None -- a headless/unknown terminal has no pane key to file
+    under. A write fault is caught and logged, never raised: callers are hooks, and a mapping
+    write must never break the turn it rides in on."""
+    pane = _pane_key(env)
+    if not pane or not transcript_path:
+        return None
+    sd = state.state_dir() if state_dir is None else state_dir
+    target = sd / f"pane-transcript.{pane}.txt"
+    content = os.path.abspath(str(transcript_path))
+    try:
+        if target.is_file() and target.read_text().strip() == content:
+            return target
+        state.atomic_write(target, content + "\n")
+    except OSError as exc:
+        state.log_line("user_intent", f"record_pane_transcript: write failed ({target}): {exc}")
+        return None
+    return target
+
+
+def target_state_dir(project_dir: str | Path) -> Path:
+    """`<project_dir>/.janitor/state` -- the TARGET project's own state dir, as opposed to
+    `state.state_dir()` (this PROCESS's own project, e.g. the daemon's). `pane_transcript_path`
+    (below) uses this to find the mapping file; `pane_actuate.act` MUST pass the same value as
+    `recently_interrupted`'s `state_dir=` (coordinator review finding, TRDD-ECHOKVZC): without
+    it, `recently_interrupted` defaults to the CALLING process's `state.state_dir()`, so
+    `_is_self_sent_echo` globs `self-send.*.stamps.json` in the daemon's own project instead of
+    the target's -- an injected `/janitor-resume` in the target pane is then invisible to the
+    self-sent-echo check and misread as "the user is back," ending the cooldown early. One
+    function, used by both call sites, so they cannot drift apart again.
+
+    Deliberately does NOT `.resolve()`/canonicalize `project_dir` (second review finding): a
+    caller that ever passed a relative or symlinked path would diverge from the mapping FILE
+    ITSELF's `record_pane_transcript`, which is written from `state.state_dir()` -- and
+    `state.state_dir()`'s own `_resolve_project_root()` (`state.py`) does not canonicalize
+    either (a bare `Path($CLAUDE_PROJECT_DIR)`). Matching that exact non-canonicalizing
+    behaviour is what keeps the two sides consistent; resolving here alone would create a NEW
+    mismatch (this fn's path vs. the hook-written one), not close one. Every caller in this
+    codebase already relies on `project_dir`/`$CLAUDE_PROJECT_DIR` being a stable, absolute
+    string per session -- this function assumes exactly that, no more, no less."""
+    return Path(project_dir) / ".janitor" / "state"
+
+
+def pane_transcript_path(project_dir: str | Path | None, terminal: Mapping[str, str]) -> Path | None:
+    """The transcript path `record_pane_transcript` filed for THIS pane, or None.
+
+    `terminal` is the dict `pane_actuate.act`/`fleet_scan.Instance.terminal` already carries
+    (`tmux_pane` / `iterm_session_id` keys -- fleet_scan.py:76-109), not the `pane`/`session_id`
+    keys `terminal_trigger.self_terminal()` returns for the CURRENT session: the two describe
+    the same identity under different key names because fleet_scan discovers OTHER sessions'
+    panes rather than reading its own env. `iterm_session_id` is normalised the same way
+    fleet_scan's OWN consumer already does (`.split(":")[-1]`, fleet_scan.py:1037) -- verified:
+    the AppleScript `(id of s)` fleet_scan reads it from carries a `w0t0p0:`-style window/tab/
+    pane prefix that `ITERM_SESSION_ID` (and so `record_pane_transcript`'s bare-UUID filename)
+    never does, so both sides must normalise or a live pane's mapping is never found.
+
+    Fails OPEN (None, logged) on no pane key, no `project_dir`, or a dangling/missing/unreadable
+    mapping file -- a caller with no known target transcript has nothing to defer for."""
+    if not project_dir:
+        return None
+    pane = (terminal.get("tmux_pane") or "").strip()
+    if not pane:
+        pane = (terminal.get("iterm_session_id") or "").strip().split(":")[-1].strip()
+    if not pane:
+        return None
+    mapping = target_state_dir(project_dir) / f"pane-transcript.{pane}.txt"
+    try:
+        content = mapping.read_text().strip()
+    except OSError:
+        state.log_line("user_intent", f"pane_transcript_path: no mapping for pane {pane!r}")
+        return None
+    if not content:
+        return None
+    transcript = Path(content)
+    if not transcript.is_file():
+        state.log_line("user_intent", f"pane_transcript_path: mapping names missing file: {transcript}")
+        return None
+    return transcript

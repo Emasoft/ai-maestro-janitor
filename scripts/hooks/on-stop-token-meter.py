@@ -203,6 +203,34 @@ def main() -> int:
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
     sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
 
+    # TRDD-ECHOKVZC: publish THIS session's pane -> transcript mapping on EVERY Stop (this hook
+    # already fires at the end of every turn) so `pane_actuate.act` can find it when the fleet
+    # actuator later considers typing into this pane -- without it, that actuator has no route
+    # to `recently_interrupted` and bypasses the 300s user-interrupt cooldown. Best-effort: a
+    # write fault must never break this hook, so every failure is swallowed here, independent
+    # of the token-meter logic below.
+    try:
+        import user_intent  # noqa: PLC0415
+
+        user_intent.record_pane_transcript(transcript_path)
+    except Exception as exc:  # noqa: BLE001 -- a mapping-write fault must never break the hook
+        # Coordinator review finding (TRDD-ECHOKVZC): a silently swallowed fault here would
+        # leave the mapping never written, and `pane_actuate.act` would then fail open forever
+        # with no trace. `scripts/lib` is already on `sys.path` (above), so `state` is reachable
+        # in the common case; stderr is the fallback.
+        try:
+            from lib import state  # noqa: E402  -- local package, not PyPI
+
+            state.log_line(
+                "user_intent",
+                f"record_pane_transcript failed in on-stop-token-meter: {type(exc).__name__}: {exc}",
+            )
+        except Exception:  # noqa: BLE001 -- defensive
+            print(
+                f"[on-stop-token-meter] record_pane_transcript failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+
     try:
         import token_meter  # noqa: E402
         from lib import state  # noqa: E402  -- local package, not PyPI

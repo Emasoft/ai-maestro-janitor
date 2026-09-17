@@ -200,6 +200,53 @@ def act(
         _log("skipped — readable channel could not be read")
         return Outcome(status=OutcomeStatus.NOOP, steps_done=0, observed=("unreadable",))
 
+    # TRDD-ECHOKVZC: the TARGET session's own hooks publish a pane -> transcript mapping
+    # (`user_intent.record_pane_transcript`); consult it before typing INTO that pane. Without
+    # this, `act` has no transcript of its own and can never call `recently_interrupted`, so
+    # the wedge-recovery ESC bypassed the 300s user-interrupt cooldown every other injector
+    # honours (two sessions sharing a cooldown is exactly the bug class the pane-keyed mapping
+    # avoids -- see `recently_interrupted`'s docstring on why there is no project-wide guess).
+    # Exempt ONLY `Event.STOP_FLAG` -- the kill-switch/`/janitor-disarm` path, which must reach
+    # the pane even inside a cooldown (a stop that silently does not arrive is the failure that
+    # path exists to prevent). Keyed on the EVENT, not on `fail_open`: `fail_open` only means
+    # "type blind into an unreadable pane" (Law 1, above) -- a future non-stop call site that
+    # sets it for an unrelated reason must not silently inherit this cooldown exemption too.
+    # A missing mapping fails OPEN (types anyway) -- a caller with no known target transcript
+    # has nothing to defer for.
+    #
+    # Ceilings, deliberately accepted (TRDD-ECHOKVZC review):
+    #   1. A session's mapping exists only from its FIRST prompt onward (SessionStart carries
+    #      no `transcript_path`) -- a wedge in the very first turn is ungated.
+    #   2. The mapping persists until the pane id is reused. Two sub-cases (review finding):
+    #      (a) the old transcript file is GONE -- `pane_transcript_path`/`recently_interrupted`
+    #      fail OPEN on the missing file, costing one stat/read, never a stuck cooldown.
+    #      (b) the pane was handed to a NEW session before that session's own first-prompt hook
+    #      overwrote the mapping (still pointing at the OLD session's real, still-on-disk
+    #      transcript) -- an interrupt the OLD session logged there can wrongly defer a
+    #      keystroke meant for the NEW one. This is a real gap, deliberately left open: the
+    #      failure direction is an EXTRA deferral, never an extra injection (the same
+    #      fail-toward-safe direction as every other gate in this module), and closing it needs
+    #      a session identity in the mapping -- new stamp semantics the TRDD's own "Design
+    #      (chosen)" section rules out.
+    #   3. The Stop-hook write (`on-stop-token-meter.py`) is belt-and-braces; the
+    #      UserPromptSubmit write (`on-prompt-submit-user-mem.py`) is the load-bearing one --
+    #      it is the hook that fires BEFORE the very turn whose ESC this gate defers.
+    if event is not Event.STOP_FLAG and project_dir:
+        tp = user_intent.pane_transcript_path(project_dir, terminal)
+        if tp is not None:
+            # MUST pass `state_dir` explicitly: `recently_interrupted` otherwise defaults it to
+            # `state.state_dir()`, this PROCESS's own project (the daemon's), not the TARGET
+            # pane's project -- see `target_state_dir`'s docstring for the bug this closes
+            # (coordinator review finding, TRDD-ECHOKVZC): without it `_is_self_sent_echo` globs
+            # the WRONG project's `self-send.*.stamps.json` and never recognises a self-sent
+            # `/janitor-resume` echoed into the TARGET pane, misreading it as "the user is back."
+            age = user_intent.recently_interrupted(
+                project_dir, transcript_path=tp, state_dir=user_intent.target_state_dir(project_dir)
+            )
+            if age is not None:
+                _log(f"deferred — target session interrupted {int(age)}s ago (user-interrupt cooldown)")
+                return Outcome(status=OutcomeStatus.NOOP, steps_done=0, observed=("interrupt-cooldown",))
+
     steps = plan(state, event, command=command, esc_first=esc_first, unattended=unattended, blind_ok=blind_ok)
     if not steps:
         # TRDD-FKY3NXB8: `plan()` stays PURE (module docstring) and cannot log itself, so this
