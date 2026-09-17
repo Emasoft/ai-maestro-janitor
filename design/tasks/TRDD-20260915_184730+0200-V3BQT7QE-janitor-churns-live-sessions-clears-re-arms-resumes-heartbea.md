@@ -4,11 +4,11 @@ title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and c
 column: testing
 created: 2026-09-15T18:47:30+0200
 updated: 2026-09-17T14:45:21+0200
-current-owner: emanuelesabetta
+current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: audit
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true

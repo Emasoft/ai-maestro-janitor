@@ -4,11 +4,11 @@ title: memgrep structural verbs refuse a page whose page-level lesson is uncited
 column: testing
 created: 2026-09-17T05:53:43+0200
 updated: 2026-09-17T14:56:00+0200
-current-owner: emanuelesabetta
+current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true

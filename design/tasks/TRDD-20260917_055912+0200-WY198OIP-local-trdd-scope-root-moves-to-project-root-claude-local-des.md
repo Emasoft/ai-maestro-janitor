@@ -4,11 +4,11 @@ title: LOCAL TRDD scope root moves to project-root .claude local design per owne
 column: testing
 created: 2026-09-17T05:59:12+0200
 updated: 2026-09-17T08:33:22+0200
-current-owner: emanuelesabetta
+current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: refactor
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true

@@ -3,7 +3,7 @@ trdd-id: FKY3NXB8
 title: No-headroom fallback livelocks on an idle pane holding abandoned unsubmitted text
 column: complete
 created: 2026-09-17T07:03:26+0200
-updated: 2026-09-17T14:57:12+0200
+updated: 2026-09-17T20:31:10+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -29,6 +29,7 @@ Symptom: pane_policy._at_idle's NO_HEADROOM row (scripts/lib/pane_policy.py:323-
 - 2026-09-17T07:31:42+0200 — column → testing by IMPLEMENTER. code+tests landed; no acceptance checklist exists to leave open (0 boxes); age-store extension explicitly out of scope, noted in STATE
 - 2026-09-17T14:56:37+0200 — COMPLETE by session. all deliverables landed, acceptance boxes ticked, gate green on d09fe94b.
 - 2026-09-17T14:59:35+0200 — disclosure by the closer: the three acceptance boxes were authored post hoc on 2026-09-17 from this card's own STATE record (the card had none); the original promise was 'the no-headroom fallback fires again on an idle pane holding only the janitor's leftover /model text, before 3.5.6' and the 3.5.6 release gate was not made a box. The card went testing → complete directly, skipping ai_review and human_review, under the standalone-project rule (the session is the approver).
+- 2026-09-17T20:31:04+0200 — YONEH3XC: assignee/current-owner still carry the owner's username; left as-is because the card is terminal (frozen) (janitor-main-session)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 

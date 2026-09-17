@@ -4,11 +4,11 @@ title: Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pan
 column: testing
 created: 2026-09-17T07:08:04+0200
 updated: 2026-09-17T19:20:35+0200
-current-owner: emanuelesabetta
+current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: feature
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true

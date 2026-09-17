@@ -3,7 +3,7 @@ trdd-id: 2MLFZ7DL
 title: Resume cues must expire -- age bound on the armed clear-resume and compact-resume paths
 column: complete
 created: 2026-09-15T20:23:13+0200
-updated: 2026-09-17T05:43:36+0200
+updated: 2026-09-17T20:31:08+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -41,6 +41,7 @@ scripts/dispatch.py, tests/test_dispatch_phases.py
 - 2026-09-15T20:23:13+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-15T20:47:59+0200 — column → testing by emanuelesabetta. phase-R landed: all 5 acceptance boxes checked, 196 tests pass, lint/type-check clean
 - 2026-09-17T05:43:36+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Resume-flag age bound landed plus same-day review fix splitting stale-agent filtering (2 rounds, 198 tests); test_dispatch_phases.py 185 passed.
+- 2026-09-17T20:31:04+0200 — YONEH3XC: assignee/current-owner still carry the owner's username; left as-is because the card is terminal (frozen) (janitor-main-session)
 
 ## ⏵ STATE
 

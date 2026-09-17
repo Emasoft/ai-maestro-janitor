@@ -1,9 +1,9 @@
 ---
 trdd-id: YONEH3XC
 title: TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
-column: backburner
+column: testing
 created: 2026-09-17T20:12:13+0200
-updated: 2026-09-17T20:24:53+0200
+updated: 2026-09-17T20:32:29+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: docs
@@ -23,6 +23,7 @@ priority: low
 
 - 2026-09-17T20:12:13+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T20:24:52+0200 — scope note: the 9-card count grepped design/tasks and design/archived only; the fix step must also sweep design/proposals and design/refused (review finding, janitor-main-session)
+- 2026-09-17T20:32:26+0200 — YONEH3XC: 5 cards rewritten (assignee/current-owner -> janitor-main-session, mechanical --no-bump), 4 terminal cards left as-is and noted (card has no acceptance box) (janitor-main-session)
 
 ## Description
 

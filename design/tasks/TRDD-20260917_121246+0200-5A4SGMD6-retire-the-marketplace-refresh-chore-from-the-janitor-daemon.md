@@ -4,11 +4,11 @@ title: retire the marketplace-refresh chore from the janitor daemon and the ai-m
 column: testing
 created: 2026-09-17T12:12:46+0200
 updated: 2026-09-17T18:27:55+0200
-current-owner: emanuelesabetta
+current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: refactor
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
