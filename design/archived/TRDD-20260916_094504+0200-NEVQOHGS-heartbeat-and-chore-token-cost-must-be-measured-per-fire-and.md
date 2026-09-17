@@ -37,6 +37,7 @@ Evidence: GitHub #290; owner complaint 2026-09-15 ("chron beats wasting tokens")
 - 2026-09-17T05:58:26+0200 — column → todo by session. self-review caught: box 1 was ticked on a substitute mechanism (different file, different format) not the card's literal claim -- un-ticked, left for a human/owner decision on whether to accept the substitute or require the literal .janitor/logs/heartbeat-cost.log path; box 3's real deliverable (ranking REAL fire kinds) does not work in production yet (always 'unknown') so testing was premature; weekly_total/top_kind_totals also had a scope bug (summed interactive turns into 'the janitor's own cost') now fixed and re-tested
 - 2026-09-17T06:10:40+0200 — column → testing by session. boxes 1+3 landed with tests, box 2 already ticked; remaining boxes are none -- all 3 acceptance criteria satisfied and tested
 - 2026-09-17T14:52:10+0200 — COMPLETE by Emasoft. all deliverables landed, gate green on d09fe94b.
+- 2026-09-17T14:59:38+0200 — updated: moved on 2026-09-17 by a format-only repair (a duplicate '## STATE' heading that trddgrep append created on close was blanked via trddgrep edit, which has no --no-bump); no fact changed after the terminal transition.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
