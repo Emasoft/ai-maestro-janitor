@@ -3,7 +3,7 @@ trdd-id: ECHOKVZC
 title: Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
 column: todo
 created: 2026-09-17T07:08:04+0200
-updated: 2026-09-17T08:32:53+0200
+updated: 2026-09-17T08:44:14+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -33,7 +33,8 @@ Origin: TRDD-PA9E2GJ1 follow-up 2026-09-17 (reports/board-drain/20260917_impl-PA
 
 - 2026-09-17T07:08:04+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T07:33:12+0200 — column → todo by worker-board-drain. PA9E2GJ1's cooldown-bypass candidate — not a deferral by design, moves off backburner into the drain
+- 2026-09-17T08:44:13+0200 — Acceptance reworded to the outcome (ESC withheld inside the target's cooldown), mechanism left to the implementer. Puller: the next board drain — no session is currently assigned; the card waits in todo.
 
 ## Acceptance
 
-- [ ] pane_actuate resolves the TARGET session's transcript identity and the fleet wedge-recovery ESC respects THAT session's user-interrupt cooldown; a test drives an ESC at a freshly-interrupted target session and asserts it is withheld.
+- [ ] the fleet wedge-recovery ESC is withheld for a target session that is inside its own user-interrupt cooldown (however pane_actuate learns which session it is acting on); a test drives an ESC at a freshly-interrupted target session and asserts it is withheld.
