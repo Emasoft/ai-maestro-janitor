@@ -1,9 +1,9 @@
 ---
 trdd-id: ECHOKVZC
 title: Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
-column: backburner
+column: todo
 created: 2026-09-17T07:08:04+0200
-updated: 2026-09-17T07:08:04+0200
+updated: 2026-09-17T07:33:12+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-17T07:08:04+0200
+priority: high
 ---
 
 # Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
@@ -31,3 +32,4 @@ Origin: TRDD-PA9E2GJ1 follow-up 2026-09-17 (reports/board-drain/20260917_impl-PA
 ## Approval log
 
 - 2026-09-17T07:08:04+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T07:33:12+0200 — column → todo by worker-board-drain. PA9E2GJ1's cooldown-bypass candidate — not a deferral by design, moves off backburner into the drain

@@ -1,6 +1,6 @@
 ---
 spec: wikimem-memgrep
-spec-version: 2.1.0
+spec-version: 2.2.0
 status: normative
 created: 2026-07-23T15:03:35+0200
 updated: 2026-09-17T06:42:51+0200
@@ -1500,7 +1500,7 @@ destination, rewriting definitions AND inline references together.
 leave a `[^N]` reference without its `[^N]:` definition; an uncited page-level lesson
 definition (`[^N]:` nothing cites) is a legal, normal shape — the Notes section is mandatory
 even when empty — and `MUST NOT` block the verb. Post-build re-proves the result
-reference-clean or writes nothing. A delete that removes the last atom citing a lesson is allowed: the definition stays as an uncited page-level lesson; a verb MUST NOT delete a lesson definition (GitHub issue 304, TRDD-RMX0IE72).
+reference-clean or writes nothing. A delete that removes the last atom citing a lesson is allowed: the definition stays as an uncited page-level lesson; a verb MUST NOT delete a lesson definition in place: an atom-level verb never removes a `[^N]:` definition from a page it leaves standing unless the caller opts in explicitly (`delete-mem-atom --with-lessons`, WM-CLI-19); removing a whole page, or merging two byte-identical lessons into one on merge, is not deleting knowledge. (GitHub issue 304, TRDD-RMX0IE72).
 
 `WM-MIG-05` **atomic-enough** — `migrate` builds BOTH new page texts in memory, proves them
 clean, then writes DEST first, SOURCE second. A crash between the two atomic writes leaves a
