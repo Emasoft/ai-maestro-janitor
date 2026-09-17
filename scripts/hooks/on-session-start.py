@@ -561,6 +561,11 @@ def _inject_post_compact_handoff(state) -> None:  # noqa: ANN001 - local module 
     marker = written_at or state.file_mtime(flag)
     if stamp.is_file() and state.coerce_int(stamp.read_text(encoding="utf-8"), 0) >= marker:
         return  # already injected for THIS compaction
+    # GUARD 4 (TRDD-4JEBTT2C, issue 306): a second compaction landing within
+    # post-compact-resume.py's own debounce window (_POST_COMPACT_DEBOUNCE_S) leaves
+    # `resume-after-compact.ts`/`.flag` UNTOUCHED for that second fire, so `marker` here stays
+    # pinned to the first compaction and the `>=` check above already suppresses this
+    # re-injection — no separate debounce needed on this side of the pair.
     # A `trigger=="auto"` compaction wrote NO prose this time — only the small
     # continuity record (owner ruling TRDD-7MGJYLY5). Which compaction just ran is
     # decided by the `_LAST_TRIGGER_FILENAME` stamp PreCompact ALWAYS writes (even when

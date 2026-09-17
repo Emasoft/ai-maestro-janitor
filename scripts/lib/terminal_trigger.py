@@ -1690,11 +1690,20 @@ _SELF_SEND_MIN_BUDGET_S = 5.0
 def _fire_detached_verified(
     delay_s: float, terminal: Mapping[str, str], commands: Sequence[str], *,
     esc_first: bool, abort_unless_any: list[str] | None = None, giveup_s: float | None = None,
+    abort_if_landed: tuple[str, int] | None = None,
 ) -> None:
     """The verified twin of `_fire_detached_steps`: a detached child that sleeps, then types
     each command through `send_verified` — read the field, type only into an empty one,
     re-read, Enter, confirm. Detached for the same reason as the blind sender: the ESC a HARD
-    send opens with would kill a parent that is a hook of the very turn being interrupted."""
+    send opens with would kill a parent that is a hook of the very turn being interrupted.
+
+    `abort_if_landed` (TRDD-4JEBTT2C, issue 306): `(stamp_path, baseline)` — cancel the send if
+    `stamp_path`'s int content later exceeds `baseline`, re-checked every retry inside
+    `run_verified_send`. `compact_trigger.py` passes `last-compact.ts` + the value it had at the
+    moment it decided to send, so a compaction that lands while this child is still deferring on
+    a busy pane cancels the queued keystroke instead of typing it into a session that was just
+    compacted by something else (Claude Code's own auto-compact, in the incident that named
+    this guard)."""
     payload: dict = {
         "delay": float(delay_s), "terminal": dict(terminal), "commands": list(commands),
         "esc_first": bool(esc_first), "state_dir": str(state.state_dir()),
@@ -1703,6 +1712,8 @@ def _fire_detached_verified(
         payload["giveup_s"] = float(giveup_s)
     if abort_unless_any:
         payload["abort_unless_any"] = [str(p) for p in abort_unless_any]
+    if abort_if_landed:
+        payload["abort_if_landed"] = [str(abort_if_landed[0]), int(abort_if_landed[1])]
     blob = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
     subprocess.Popen(  # noqa: S603 - fixed argv (this script + a base64 blob), no shell
         [sys.executable, str(Path(__file__).resolve()), "--__send-verified", blob],
@@ -1766,10 +1777,43 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
     # minutes for the lock and the field, so the guard is re-asked on every iteration of that
     # wait — a resume flag the dispatcher consumed meanwhile must cancel the send, not land it.
     guards = [str(g) for g in (data.get("abort_unless_any") or [])]
-    still_wanted = (
-        (lambda: (any(Path(g).is_file() for g in guards), "type-time guard — no guard file remains"))
-        if guards else None
-    )
+    # GUARD 1+3 (TRDD-4JEBTT2C, issue 306): `compact_trigger.py` types `/compact` into a
+    # possibly-busy pane that can defer minutes (rule 1/2 of `inject_until_sent`), and Claude
+    # Code's OWN auto-compact can fire first while the keystroke sits queued — the owner's
+    # report showed exactly that: a compaction landed, then the queued `/compact` ran AGAIN on
+    # the freshly-compacted context 20s later. `abort_if_landed` carries `[stamp_path,
+    # baseline]`, captured by the caller at the moment it decided to send; re-checking it on
+    # EVERY retry (same mechanism as the guard-file check above, folded into the same
+    # `still_wanted`) means a retry after a timed-out verification step (guard 3: "possibly
+    # delivered, don't resend blind") also observes a compaction that landed meanwhile, instead
+    # of blindly retyping into a session that no longer needs it.
+    landed = data.get("abort_if_landed")  # [path, baseline] or None
+
+    def _file_guard() -> tuple[bool, str]:
+        return any(Path(g).is_file() for g in guards), "type-time guard — no guard file remains"
+
+    def _landed_guard() -> tuple[bool, str]:
+        assert landed is not None  # only registered as a check below when landed is truthy
+        path, baseline = landed
+        current = state.read_int_state(Path(path), 0)
+        if current > int(baseline):
+            return False, (
+                f"possibly-delivered: a compaction landed at {current} (baseline {baseline}) "
+                "since this send was decided — not retried"
+            )
+        return True, "no compaction landed since the decision"
+
+    checks = [c for c in (_file_guard if guards else None, _landed_guard if landed else None) if c]
+    still_wanted = None
+    if checks:
+        def _combined_still_wanted() -> tuple[bool, str]:
+            for check in checks:
+                ok, why = check()
+                if not ok:
+                    return False, why
+            return True, "all guards passed"
+
+        still_wanted = _combined_still_wanted
     giveup_s = float(data.get("giveup_s") or _SELF_SEND_GIVEUP_S)
     deadline = clock() + giveup_s
     # Clock-independent bound on the lock wait, as `inject_until_sent` has on its own loop: a
@@ -2142,6 +2186,7 @@ def send_self_command(
     abort_unless_any: Sequence[str] | None = None,
     aimaestro_resolve_timeout_s: float = _AIMAESTRO_RESOLVE_TIMEOUT_S,
     giveup_s: float | None = None,
+    abort_if_landed: tuple[str, int] | None = None,
 ) -> str:
     """Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
     pane, choosing the mechanism by `state.terminal_kind()`.
@@ -2168,6 +2213,10 @@ def send_self_command(
         unresolvable (e.g. `$TMUX_PANE` malformed); caller degrades.
       - `USER_PRESENT` — the user is AT the terminal and did not ask for this. Nothing
         was sent; the caller must tell the user to run the command themselves.
+
+    `abort_if_landed` (TRDD-4JEBTT2C, issue 306): forwarded to `_fire_detached_verified` —
+    see its docstring. `compact_trigger.py` is the caller that needs it: a forced `/compact`
+    can defer minutes on a busy pane, and the harness's own auto-compact can land first.
 
     THE PRESENCE GATE (`respect_user_presence`, default True). Typing into a pane whose
     human is mid-sentence CLOBBERS what they were typing — this is not theoretical: a
@@ -2263,6 +2312,7 @@ def send_self_command(
         delay_s, terminal, cmds, esc_first=esc_first,
         abort_unless_any=list(abort_unless_any) if abort_unless_any else None,
         giveup_s=giveup_s,
+        abort_if_landed=abort_if_landed,
     )
     return f"FIRED:{terminal['kind']}"
 

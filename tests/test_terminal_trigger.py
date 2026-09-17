@@ -299,6 +299,51 @@ def test_run_verified_send_re_asks_the_type_time_guard_during_the_wait(tmp_path)
     assert not (tmp_path / "self-send.%1.stamps.json").exists()
 
 
+def test_run_verified_send_cancels_when_a_compaction_landed_since_the_baseline(tmp_path):
+    """GUARD 1+3 (TRDD-4JEBTT2C, issue 306): `abort_if_landed` is re-asked on every iteration
+    like the type-time guard above -- a compaction landing while the send is still queued (a
+    busy pane, or a retry after a verification timeout) cancels the send as POSSIBLY-DELIVERED
+    instead of blindly retyping /compact into a session that was just compacted by something
+    else (the harness's own auto-compact, in the incident that named this guard)."""
+    stamp = tmp_path / "last-compact.ts"
+    stamp.write_text("1000", encoding="utf-8")  # a compaction already landed at t=1000
+    seen: list[tuple[bool, str]] = []
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+        assert still_wanted is not None
+        seen.append(still_wanted())
+        return (False, seen[-1][1]) if not seen[-1][0] else (True, "sent")
+
+    data = {
+        "terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/compact"],
+        "esc_first": False, "state_dir": str(tmp_path),
+        # baseline (999) captured BEFORE the compaction at 1000 -- the send is now stale.
+        "abort_if_landed": [str(stamp), 999],
+    }
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 1
+    assert seen == [(False, seen[0][1])]
+    assert "possibly-delivered" in seen[0][1]
+    assert not (tmp_path / "self-send.%1.stamps.json").exists()
+
+
+def test_run_verified_send_still_sends_when_no_compaction_landed(tmp_path):
+    """The land-time guard must not cancel a send whose baseline is still current."""
+    stamp = tmp_path / "last-compact.ts"
+    stamp.write_text("500", encoding="utf-8")
+
+    def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+        ok, _why = still_wanted()
+        assert ok is True
+        return True, "sent"
+
+    data = {
+        "terminal": {"kind": "tmux", "pane": "%1"}, "commands": ["/compact"],
+        "esc_first": False, "state_dir": str(tmp_path),
+        "abort_if_landed": [str(stamp), 500],  # baseline == current: no NEWER compaction
+    }
+    assert tt.run_verified_send(data, send=fake_send, clock=lambda: 0.0) == 0
+
+
 def test_run_verified_send_stops_at_the_first_command_that_did_not_land(tmp_path):
     calls: list[str] = []
 

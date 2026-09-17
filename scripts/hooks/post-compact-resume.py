@@ -67,6 +67,14 @@ _UID_RE = re.compile(r"TRDD-\d{8}_\d{6}[+-]\d{4}-([0-9A-Za-z]{8})-")
 
 _MAX_DIRECTIVE_LEN = 280
 
+# GUARD 4 (TRDD-4JEBTT2C, issue 306): a second PostCompact fire landing within this many
+# seconds of the first is the race this bug tracks -- a forced /compact queued in a busy pane
+# that lands right after the harness's own auto-compact already ran, not two independent,
+# deliberate compactions -- so the resume flag is written ONCE per window rather than twice for
+# one context loss (the owner measured 20s between the two fires; 60s gives margin without
+# risking a genuinely separate compaction minutes later going undetected).
+_POST_COMPACT_DEBOUNCE_S = 60
+
 # The PreCompact hook (scripts/hooks/pre-compact-handoff.py) writes this file —
 # an authoritative, FILESYSTEM-DERIVED handoff (git HEAD + recent commits, working
 # tree, in-flight TRDD STATE blocks) — into the SAME state dir on every compaction.
@@ -600,14 +608,25 @@ def main() -> int:
     if cwd_fallback:
         state.set_project_dir_override(cwd_fallback)
 
+    # GUARD 4 (TRDD-4JEBTT2C, issue 306): read the PRIOR high-water mark BEFORE mark_compacted
+    # overwrites it below -- this is the only place that can still see "how long ago did the
+    # LAST compaction land", which is what tells a genuinely second-in-a-row fire apart from a
+    # routine one. now_ts is captured once and reused for both the debounce test and the stamp
+    # write, so the two can never straddle a clock tick and disagree.
+    now_ts = int(time.time())
+    prev_compact_ts = state.read_int_state(state.state_dir() / state.LAST_COMPACT_STAMP, 0)
+    debounced = 0 < prev_compact_ts <= now_ts and (now_ts - prev_compact_ts) < _POST_COMPACT_DEBOUNCE_S
+
     # Stamp that a compaction just happened, so the proactive-idle trigger can learn this
     # session's post-compaction FLOOR (see cold_cache_compact.refresh_floor — that floor is the
     # only thing that makes the trigger terminate). Its OWN try: this is an optimization, and a
-    # fault here must never cost us the resume flag below, which is survival-critical.
+    # fault here must never cost us the resume flag below, which is survival-critical. Stamped
+    # UNCONDITIONALLY (even when debounced) — a real compaction landed either way, and the floor
+    # learner and the debounce test above both need the high-water mark to keep advancing.
     try:
         from lib import cold_cache_compact  # noqa: PLC0415 - local package, not PyPI
 
-        cold_cache_compact.mark_compacted(state.state_dir(), now=int(time.time()))
+        cold_cache_compact.mark_compacted(state.state_dir(), now=now_ts)
     except Exception as exc:  # noqa: BLE001
         print(f"[post-compact-resume] compact stamp skipped ({exc})", file=sys.stderr)
 
@@ -621,6 +640,19 @@ def main() -> int:
         claudemd_queue.drain_if_queued(state.project_root())
     except Exception as exc:  # noqa: BLE001
         print(f"[post-compact-resume] claudemd drain skipped ({exc})", file=sys.stderr)
+
+    if debounced:
+        # Do NOT rewrite resume-after-compact.{ts,flag} -- a rewrite here is exactly what let
+        # on-session-start.py's own dedupe (`compact-handoff-injected.ts` vs. the flag's
+        # `written_at` marker) see two DIFFERENT markers and re-inject the 44KB handoff twice,
+        # 20s apart, for one context loss. Leaving the marker untouched from the first fire
+        # makes that existing dedupe suppress the second injection too, with no separate
+        # edit needed there.
+        state.log_line(
+            "post-compact-resume",
+            f"post-compact debounce: second compact within {now_ts - prev_compact_ts}s — skipped",
+        )
+        return 0
 
     try:
         wrote_flag = _record_resume_directive(state)

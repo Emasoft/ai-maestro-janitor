@@ -230,6 +230,50 @@ def test_hook_subprocess_writes_flag(tmp_path: Path) -> None:
     assert "TRDD-31095269" in flag.read_text()
 
 
+def test_hook_subprocess_debounces_a_second_compact_within_the_window(tmp_path: Path) -> None:
+    """GUARD 4 (TRDD-4JEBTT2C, issue 306): two real PostCompact fires back-to-back (well under
+    `_POST_COMPACT_DEBOUNCE_S`) must write the resume flag only ONCE -- the race the issue
+    tracks is a forced /compact landing right after the harness's own auto-compact already
+    ran, so the second fire's directive must NOT clobber the first's."""
+    project = tmp_path / "project"
+    (project / "design" / "tasks").mkdir(parents=True)
+    _write_trdd(project / "design" / "tasks", "31095269", "dev",
+                "2026-06-02T05:00:00+0200", "Context watchdog")
+
+    env = {
+        "PATH": __import__("os").environ.get("PATH", ""),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED": "false",
+    }
+    payload = json.dumps(
+        {"session_id": "sess-1", "cwd": str(project),
+         "trigger": "manual", "hook_event_name": "PostCompact"}
+    )
+    flag = project / ".janitor" / "state" / "resume-after-compact.flag"
+
+    proc1 = subprocess.run(
+        [sys.executable, str(_HOOK_PATH)], input=payload, capture_output=True, text=True,
+        env=env, timeout=30,
+    )
+    assert proc1.returncode == 0
+    first_flag = flag.read_text()
+    assert "TRDD-31095269" in first_flag
+
+    # A second, DIFFERENT in-flight TRDD lands between the two fires -- if the debounce fails,
+    # the second run's directive (naming the new TRDD) overwrites the first's.
+    _write_trdd(project / "design" / "tasks", "deadbeef", "dev",
+                "2026-06-02T05:10:00+0200", "Second task")
+    proc2 = subprocess.run(
+        [sys.executable, str(_HOOK_PATH)], input=payload, capture_output=True, text=True,
+        env=env, timeout=30,
+    )
+    assert proc2.returncode == 0
+    assert flag.read_text() == first_flag, "the second fire must not rewrite the resume flag"
+    log = (project / ".janitor" / "logs" / "post-compact-resume.log").read_text()
+    assert "post-compact debounce" in log
+
+
 # ---------- _record_resume_directive return value (the push gate) ---------
 # TRDD-HI0BGQGJ: the push must fire ONLY when a resume target was actually recorded.
 # _record_resume_directive returns that boolean; main() guards the push on it.

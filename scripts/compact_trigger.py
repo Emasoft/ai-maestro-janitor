@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import state  # noqa: E402  -- GUARD 1 (TRDD-4JEBTT2C): reads last-compact.ts
 import terminal_trigger  # noqa: E402
 
 # The slash-commands the three modes type into the pane. These are FIXED module
@@ -182,6 +183,16 @@ def main() -> int:
     # context-enforcement hook passes it explicitly).
     commands, esc_first = plan_compact(soft=not args.hard, handoff=args.handoff)
 
+    # GUARD 1 (TRDD-4JEBTT2C, issue 306): capture the compaction high-water mark AT THE
+    # DECISION -- this script's own invocation IS the decision, made by the caller (Stop hook /
+    # heartbeat phase) the instant it saw a large idle context. The detached sender below can
+    # still defer minutes on a busy pane; passing this baseline lets it tell "a compaction
+    # already landed since we decided to send" apart from "still pending", which is the race
+    # that sent a queued /compact into a session Claude Code's own auto-compact had just
+    # compacted on its own (owner report, issue 306).
+    _last_compact_path = _project_root() / ".janitor" / "state" / state.LAST_COMPACT_STAMP
+    landed_baseline = (str(_last_compact_path), state.read_int_state(_last_compact_path, 0))
+
     # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a
     # channel it cannot resolve at all falls through to NO_ITERM below.
     # NO PRESENCE CANCEL (owner directive 2026-08-02, migrated here 2026-08-13 — janitor#257).
@@ -199,6 +210,7 @@ def main() -> int:
             dry_run=args.dry_run,
             respect_user_presence=False,
             aimaestro_resolve_timeout_s=args.resolve_timeout,
+            abort_if_landed=landed_baseline,
         )
     if sent.startswith("FIRED:"):
         print("COMPACT_FIRED")
