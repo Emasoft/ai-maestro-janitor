@@ -1167,17 +1167,27 @@ def find_or_build_memgrep() -> str | None:
             return str(cand)
     cargo = shutil.which("cargo")
     if cargo:
-        # CARGO_HOME and CARGO_TARGET_DIR pinned absolute, under the (gitignored) crate
-        # target dir, unconditionally overriding whatever the ambient env holds.
-        # TRDD-L64C5DQ1: an ambient CARGO_HOME (or CARGO_TARGET_DIR) exported RELATIVE by
-        # the invoking shell/CI resolves against THIS subprocess's cwd — repo root, since
-        # pytest runs from there — spilling a thousands-of-files registry (or build output)
-        # tree into the working tree (it once orphaned .git/index.lock when a security hook
-        # tried to `git diff` those paths). Pinning both here is cwd-independent (absolute
-        # paths) and keeps the cache warm across runs, since it lives beside the crate's
-        # own target dir instead of a fresh tmp dir per run.
+        # CARGO_TARGET_DIR pinned absolute, under the (gitignored) crate dir, unconditionally
+        # overriding whatever the ambient env holds — build output is fine to redirect
+        # unconditionally, it never carries the user's own config/credentials.
+        # CARGO_HOME is different: it is the registry cache AND `~/.cargo/config.toml`
+        # (mirrors, proxies, credentials), so overriding it unconditionally would drop cache
+        # sharing on every fresh clone/`cargo clean` and hide the user's own config. Override
+        # it ONLY when the ambient value is set and RELATIVE — that is the actual hazard.
+        # TRDD-L64C5DQ1: a relative ambient CARGO_HOME (setter unknown — not found in
+        # tests/ or scripts/, and this orchestrator's own shell had it unset) resolves
+        # against THIS subprocess's cwd — repo root, since pytest runs from there —
+        # spilling a thousands-of-files registry tree into the working tree (it once
+        # orphaned .git/index.lock when a security hook tried to `git diff` those paths).
+        # Redirected under target/ (already gitignored via `/scripts/memgrep/target/`,
+        # so this needs no extra .gitignore entry) rather than a sibling of it — the cost
+        # is losing the shared ~/.cargo registry cache on `cargo clean`, but only in this
+        # pathological relative-ambient case, which is acceptable. An absolute or unset
+        # ambient CARGO_HOME is left untouched.
         cargo_env = dict(os.environ)
-        cargo_env["CARGO_HOME"] = str(_MEMGREP_CRATE_DIR / "target" / ".cargo-home")
+        ambient_cargo_home = os.environ.get("CARGO_HOME")
+        if ambient_cargo_home and not os.path.isabs(ambient_cargo_home):
+            cargo_env["CARGO_HOME"] = str(_MEMGREP_CRATE_DIR / "target" / ".cargo-home")
         cargo_env["CARGO_TARGET_DIR"] = str(_MEMGREP_CRATE_DIR / "target")
         try:
             _subprocess.run(
@@ -1191,15 +1201,10 @@ def find_or_build_memgrep() -> str | None:
         except (_subprocess.CalledProcessError, _subprocess.TimeoutExpired, OSError):
             pass
         # Build output always lands at the tree-local path now that CARGO_TARGET_DIR is
-        # pinned above; the ambient-CARGO_TARGET_DIR probe stays as a harmless fallback
-        # for a binary built by some earlier, unpinned invocation (e.g. a developer's own
-        # `cargo build` outside this suite).
-        candidates = [_MEMGREP_CRATE_DIR / "target" / "release" / "memgrep"]
-        if os.environ.get("CARGO_TARGET_DIR"):
-            candidates.append(Path(os.environ["CARGO_TARGET_DIR"]) / "release" / "memgrep")
-        for built in candidates:
-            if built.is_file() and _memgrep_runs(built):
-                return str(built)
+        # pinned above.
+        built = _MEMGREP_CRATE_DIR / "target" / "release" / "memgrep"
+        if built.is_file() and _memgrep_runs(built):
+            return str(built)
     on_path = shutil.which("memgrep")
     return on_path if on_path and _memgrep_runs(on_path) else None
 
