@@ -58,6 +58,8 @@ fixed — pass `env=` from a protected wrapper, or route through
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -84,8 +86,31 @@ _ALWAYS_PROTECTED_CALLEES = frozenset(
 
 
 def _iter_scanned_files() -> list[Path]:
-    """Every `.py` under `scripts/` this guard is responsible for."""
-    return sorted(_SCRIPTS_ROOT.rglob("*.py"))
+    """Every `.py` under `scripts/` this guard is responsible for.
+
+    Lists git-visible files (tracked + untracked-but-not-ignored) instead of
+    `rglob`, which walks the real filesystem and previously scanned vendored
+    crate sources under the gitignored `scripts/memgrep/target/` cargo
+    registry cache as if they were project code (TRDD-L64C5DQ1 — 2 false
+    failures in the 3.5.7 gate once a relative-ambient CARGO_HOME spilled a
+    registry there). `git ls-files` skips ignored paths by construction, so a
+    new untracked script is still checked but a build cache never is.
+    """
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    out = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "scripts"],
+        cwd=_PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return sorted(
+        _PROJECT_ROOT / rel
+        for rel in out.split("\0")
+        if rel.endswith(".py")
+    )
 
 
 def _callee_name(func_node: ast.expr) -> str:

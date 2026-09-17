@@ -201,7 +201,10 @@ GUARD2_LOG_NAME = "cold-cache-compact"
 # dispatch.py) -- both already import this module, so the constant has ONE definition and can
 # never drift the way `PRECOMPACT_LAST_TRIGGER_FILENAME` had to be re-mirrored (TRDD-YM65RCZA
 # item 3) because the two sides there could not share an import.
-GUARD2_STDOUT_TOKEN = "GUARD2_HARNESS_IMMINENT"
+# Named `MARKER`, not `TOKEN`: `test_secret_fixture_hygiene.py`'s contiguous-secret-literal
+# guard flags any `*TOKEN*` name assigned a string literal as a possible credential -- this
+# constant tripped that false positive under its original name (see the constant's own history).
+GUARD2_STDOUT_MARKER = "GUARD2_HARNESS_IMMINENT"
 
 
 def harness_will_autocompact(
@@ -267,7 +270,7 @@ def harness_will_autocompact(
     wired to reconcile with this guard's own fresh remeasurement -- the two answer overlapping
     but distinct questions from two different snapshots. Worst case is a redundant or a skipped
     send, both already-tolerated outcomes elsewhere in this file. The two dispatch/hook callers
-    handle this via `GUARD2_STDOUT_TOKEN` (see below), not by assuming it cannot occur.
+    handle this via `GUARD2_STDOUT_MARKER` (see below), not by assuming it cannot occur.
 
     WHY THIS GUARD EXISTS AT ALL: once a `/compact` keystroke is queued into Claude Code's input,
     no later check can unsend it. In the incident, the janitor's guard typed `/compact` into a

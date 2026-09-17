@@ -1179,15 +1179,17 @@ def find_or_build_memgrep() -> str | None:
         # against THIS subprocess's cwd — repo root, since pytest runs from there —
         # spilling a thousands-of-files registry tree into the working tree (it once
         # orphaned .git/index.lock when a security hook tried to `git diff` those paths).
-        # Redirected under target/ (already gitignored via `/scripts/memgrep/target/`,
-        # so this needs no extra .gitignore entry) rather than a sibling of it — the cost
-        # is losing the shared ~/.cargo registry cache on `cargo clean`, but only in this
-        # pathological relative-ambient case, which is acceptable. An absolute or unset
-        # ambient CARGO_HOME is left untouched.
+        # Redirected to the system temp dir, OUTSIDE the repo — a prior version pinned it
+        # under target/ (gitignored, but still inside the tree), and the registry it
+        # downloads there is real Rust source (docs/comments), which tripped this repo's
+        # own tree-walking guard tests (test_git_optional_locks_guard.py,
+        # test_secret_fixture_hygiene.py — TRDD-L64C5DQ1) into scanning vendored crate
+        # files as if they were project source. Outside the repo, no walker can see it.
+        # An absolute or unset ambient CARGO_HOME is left untouched.
         cargo_env = dict(os.environ)
         ambient_cargo_home = os.environ.get("CARGO_HOME")
         if ambient_cargo_home and not os.path.isabs(ambient_cargo_home):
-            cargo_env["CARGO_HOME"] = str(_MEMGREP_CRATE_DIR / "target" / ".cargo-home")
+            cargo_env["CARGO_HOME"] = str(Path(tempfile.gettempdir()) / "ai-maestro-janitor-memgrep-cargo-home")
         cargo_env["CARGO_TARGET_DIR"] = str(_MEMGREP_CRATE_DIR / "target")
         try:
             _subprocess.run(

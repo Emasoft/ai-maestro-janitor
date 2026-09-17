@@ -267,7 +267,7 @@ def main() -> int:
             cold_cache_compact.newest_transcript(state.project_root())
         )
         if cold_cache_compact.harness_will_autocompact(_ctx):
-            print(cold_cache_compact.GUARD2_STDOUT_TOKEN)
+            print(cold_cache_compact.GUARD2_STDOUT_MARKER)
             return 0
 
     # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a

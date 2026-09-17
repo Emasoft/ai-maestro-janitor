@@ -3,7 +3,7 @@ trdd-id: L64C5DQ1
 title: A test writes a cargo registry under the repo root and a hook diffing it orphans the git index lock
 column: testing
 created: 2026-09-17T19:21:45+0200
-updated: 2026-09-17T20:48:47+0200
+updated: 2026-09-17T21:25:28+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -25,6 +25,7 @@ priority: medium
 2026-09-17T20:37:42+0200 — Fix applied: tests/conftest.py:1168-1177 (find_or_build_memgrep) now pins CARGO_HOME to an absolute path under the gitignored scripts/memgrep/target/.cargo-home, passed explicitly via env= on the cargo build subprocess.run call. Overrides any ambient/relative CARGO_HOME the invoking shell/CI might export, which is the confirmed mechanism (reproduced: setting CARGO_HOME=.cargo-home in the ambient env before the fix landed it under scripts/memgrep/target/.cargo-home, not repo root; verified git status --short and find . -maxdepth 1 -iname '.cargo*' empty after a full rebuild). ruff and pyright clean on tests/conftest.py.
 2026-09-17T20:40:50+0200 — Adversarial review ran (fork, ROLE: REVIEW). Findings and disposition: (1) 'root cause unconfirmed, original incident shell is gone' — accepted as a stated limitation, not fixable retroactively; the fix is defensive regardless of the exact ambient mechanism. (2) 'fix also unpins CARGO_TARGET_DIR, task named it in-scope' — APPLIED: cargo_env now also pins CARGO_TARGET_DIR to the absolute scripts/memgrep/target path, so a relative ambient CARGO_TARGET_DIR (e.g. CARGO_TARGET_DIR=./target-cache) can no longer spill build output to repo root either; reverified with both vars set relative ambiently — nothing under repo root, git status clean. (3) 'cwd assumption unverified' — moot: both overrides use absolute paths, so correctness does not depend on the subprocess's actual cwd. (4) 'cache locality change: disk duplication vs shared ~/.cargo, cold on first run' — accepted tradeoff, not fixed; scoped to this one crate's target dir, already the pattern this repo uses for the 5.1GB memgrep build tree. (5) 'point fix, not a systemic guard — scripts/publish.py's cargo clippy/cargo test calls are also unpinned' — out of scope for this TRDD (owns only tests/conftest.py per the work order); noted here for a follow-up card if publish.py is ever observed to reproduce the same spillage.
 - 2026-09-17T20:48:47+0200 — review of 841b5ccf: the conftest pin is CONTAINMENT, not the culprit — no setter of a relative CARGO_HOME was found in tests/ or scripts/, the orchestrator's shell had it unset, and the paths the security hook was diffing (.cargo-home/registry/src/.../moxcms-0.7.9, napi-2.16.17) are NOT memgrep dependencies, so the producer is probably a different tool run in this repo (e.g. a native-module build), not pytest. Pin narrowed to override only a RELATIVE ambient value. Acceptance box stays open until one full pytest run shows git status clean before/after and the real producer is named (janitor-main-session)
+- 2026-09-17T21:25:26+0200 — the first (unconditional) pin left a cargo registry under scripts/memgrep/target/.cargo-home that two tree-walking guard tests then scanned (2 failures in the 3.5.7 gate); cache removed, relative-ambient redirect moved outside the repo, both walkers now list files via git ls-files --exclude-standard (janitor-main-session)
 
 ## Symptom
 

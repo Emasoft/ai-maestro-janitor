@@ -133,7 +133,7 @@ def test_backstop_still_fires_above_min_context_under_autocompact_enabled(
 def test_guard2_token_from_compact_trigger_skips_cooldown_and_logs(
     harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """compact_trigger.py's own guard 2 fired (its stdout carries GUARD2_STDOUT_TOKEN) -> no
+    """compact_trigger.py's own guard 2 fired (its stdout carries GUARD2_STDOUT_MARKER) -> no
     cooldown stamp (a later Stop must still be free to try again), and one explicit log line —
     not silently lumped into the generic no-send path (round 3)."""
     import time as _t
@@ -143,7 +143,7 @@ def test_guard2_token_from_compact_trigger_skips_cooldown_and_logs(
 
     def _guard2_run(cmd, **_kw):  # noqa: ANN001, ANN003
         harness.spawned.append(list(cmd))
-        return SimpleNamespace(returncode=0, stdout=f"{harness.ccc.GUARD2_STDOUT_TOKEN}\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout=f"{harness.ccc.GUARD2_STDOUT_MARKER}\n", stderr="")
 
     monkeypatch.setattr(harness.state, "run_subprocess", _guard2_run)
 

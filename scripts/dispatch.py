@@ -1974,7 +1974,7 @@ def _phase_proactive_idle_compact() -> bool:
         # sending is the correct BACKSTOP, not a race. Guard 2 itself lives in compact_trigger.py's
         # own main(), which RE-measures context independently before deciding (see
         # `harness_will_autocompact`'s docstring, disclosed limitation (ii)) -- so its verdict CAN
-        # rarely diverge from this site's own `ctx`; the `GUARD2_STDOUT_TOKEN` branch below is
+        # rarely diverge from this site's own `ctx`; the `GUARD2_STDOUT_MARKER` branch below is
         # what actually handles that outcome, not an assumption that it cannot occur.
 
         compact_py = _HERE / "compact_trigger.py"
@@ -1992,7 +1992,7 @@ def _phase_proactive_idle_compact() -> bool:
             detector_name="dispatch",
         )
         _stdout = proc.stdout or "" if proc else ""
-        if cold_cache_compact.GUARD2_STDOUT_TOKEN in _stdout:
+        if cold_cache_compact.GUARD2_STDOUT_MARKER in _stdout:
             # compact_trigger.py's own guard 2 fired (TRDD-PH8SAQKS round 3): the harness is
             # about to auto-compact this SAME context on its own -- one explicit log line, same
             # NO-cooldown-stamp treatment as every other no-send outcome below.
