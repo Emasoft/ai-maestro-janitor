@@ -962,6 +962,18 @@ damage is done the moment it's committed. Promoting a LOCAL TRDD to PROJECT late
 deliberate, cheap act (copy + commit); the reverse (a private TRDD already in git history) is
 not undoable by a `git rm`. That asymmetry is why the default leans LOCAL.
 
+**Why LOCAL/USER need no `.gitignore` entry:** LOCAL's `.claude/**` coverage already ignores it
+in every project that follows this repo's own gitignore convention; USER lives outside any repo.
+
+**LOCAL's root moved in-tree, 2026-09 (TRDD-WY198OIP, owner directive ai-maestro#163, janitor issue #303):** it was
+previously `~/.claude/projects/<slug>/design/`, OUTSIDE the repo, which split-brained against
+ai-maestro's own pillar resolver (`corpusRootFor` in `lib/pillar/kinds.ts`) that already
+resolved LOCAL to `<project-root>/.claude/local/design/`. The janitor now agrees with the
+resolver. A SessionStart hook (`on-session-start-trdd-state.py::_migrate_local_design`) migrates
+any pre-existing old-root corpus into the new one once, refusing the move when the target isn't
+actually gitignored (`_new_root_would_leak`) rather than silently creating the leak it exists to
+prevent.
+
 ## Why "archive AS ITSELF" (3P-ZON-05) — no rename on the way into `design/archived/`
 
 Relocated from the base rule for the corpus floor cap. 3-pillars spec 2.0.0 amended 3P-ZON-05 on

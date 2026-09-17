@@ -38,13 +38,9 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
    | `user` | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/design/` | host-only, never pushed |
 
    All three share the SAME four lifecycle folders (`proposals/ tasks/ archived/ refused/`),
-   plus two NON-task folders with no lifecycle of their own — `requirements/` and `specs/`
-   never get proposals/archived/refused siblings. PROJECT `design/` MUST NOT be gitignored;
-   LOCAL/USER need no entry (LOCAL's `.claude/**` coverage already ignores it in every
-   project that follows this repo's own gitignore convention). LOCAL moved inside the
-   project tree 2026-09 (owner directive ai-maestro#163) to end a split-brain with the
-   pillar tooling's own resolver, which already used this path — it was previously
-   `~/.claude/projects/<slug>/design/`, OUTSIDE the repo.
+   plus `requirements/`/`specs/` (no lifecycle of their own). PROJECT `design/` MUST NOT be
+   gitignored; LOCAL/USER need no entry. LOCAL moved in-tree 2026-09 (TRDD-WY198OIP,
+   ai-maestro#163) — migration history: the reference.
 
    **Scope routing.** Ask: *true and useful for a contributor on a DIFFERENT machine?* No →
    LOCAL (a `$HOME` path, hostname, credential, install state). One project → PROJECT.
@@ -105,12 +101,11 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
 12. **Terminal columns are frozen — AFTER the transition that made them terminal.** No body
     edits on `complete`/`failed`/`superseded`/`published`/`live`; new work = new TRDD. Only
     `updated:` (and, when superseding, `superseded-by:`) may change. Narrow exceptions: the
-    closing edit itself; `## Approval log` (append-only, EXEMPT); EVERY terminal column
-    archives AS ITSELF — no rename on the way in (archive-eligible =
+    closing edit itself; `## Approval log` (append-only, EXEMPT); every terminal column
+    archives AS ITSELF, no rename on the way in (archive-eligible =
     `complete|completed|cancelled|superseded|published|live`; absent `release-via:` defaults
-    to `none`; why `complete` is included: the reference); and a body line FALSELY,
-    MACHINE-VERIFIABLY contradicting the terminal `column:` MAY be removed. Worked example +
-    why so narrow: the reference.
+    to `none`); and a FALSELY, MACHINE-VERIFIABLY contradicting body line MAY be removed. Why
+    so narrow + worked example: the reference.
 13. **One atomic task per TRDD.** If you catch yourself writing "and also do X", X is an
     NPT, an EHT, or its own TRDD.
 14. **One kanban board, `scope` as a badge — not a second board.** Columns and transitions

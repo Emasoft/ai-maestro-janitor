@@ -636,6 +636,7 @@ def test_idle_no_headroom_enter_step_is_fired_through_the_fake_terminal(monkeypa
     )
     assert _keys(fired) == ["/model opus", "Enter"]
     assert all(plan is not None for _, plan in fired)  # every fired step resolved a real plan
+    assert fired[1][1] is not None  # narrow Optional[plan] for pyright before the subscript below
     assert fired[1][1]["channel"] == "tmux"  # the Enter step lands in the SAME pane
     assert outcome.status is pa.OutcomeStatus.DONE
 

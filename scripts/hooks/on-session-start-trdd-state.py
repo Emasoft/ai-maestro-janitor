@@ -116,13 +116,20 @@ def _new_root_would_leak(project_dir: Path, new: Path) -> bool:
     default — everywhere else here "cannot tell" means "proceed," but for the single
     check whose entire job is catching a leak, "cannot tell" defaulting to "proceed"
     would silently defeat it.
+
+    Both git probes are read-only, so the child gets GIT_OPTIONAL_LOCKS=0 (janitor#245):
+    `rev-parse`/`check-ignore` still WRITE .git/index.lock for an optional stat-cache
+    write-back, which can collide with a concurrent writer (e.g. a publish.py commit).
     """
     import subprocess
+
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
 
     try:
         probe = subprocess.run(
             ["git", "-C", str(project_dir), "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False  # cannot even tell if this is a repo — nothing confirmed to leak into
@@ -132,7 +139,7 @@ def _new_root_would_leak(project_dir: Path, new: Path) -> bool:
         result = subprocess.run(
             ["git", "-C", str(project_dir), "check-ignore", "-q",
              str(new / "tasks" / "probe.md")],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return True  # known repo, but the leak check itself failed — fail CLOSED, not open

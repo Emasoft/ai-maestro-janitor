@@ -135,12 +135,19 @@ def _main_checkout_root(project_dir: str) -> Path:
     `@lru_cache` memoises this per `project_dir` string for the process lifetime — the
     ~19 call sites of `local_design_root()` (dispatch.py, fleet_status.py, several
     per-beat detectors) would otherwise re-spawn `git` subprocesses on every call.
+
+    All three probes below are read-only, so each child gets GIT_OPTIONAL_LOCKS=0
+    (janitor#245): `rev-parse`/`worktree list` still WRITE .git/index.lock for an
+    optional stat-cache write-back, which can collide with a concurrent writer (e.g.
+    a publish.py commit) even though this function never touches the index itself.
     """
     path = Path(project_dir)
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         probe = subprocess.run(
             ["git", "-C", project_dir, "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return path  # no git binary, or it hung — fall back to the given root
@@ -148,7 +155,7 @@ def _main_checkout_root(project_dir: str) -> Path:
         return path  # not a git repo at all — nothing to resolve
     result = subprocess.run(
         ["git", "-C", project_dir, "worktree", "list", "--porcelain"],
-        capture_output=True, text=True, timeout=5,
+        capture_output=True, text=True, timeout=5, env=git_env,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -162,7 +169,7 @@ def _main_checkout_root(project_dir: str) -> Path:
                 # The submodule quirk (see docstring): recover the real checkout root.
                 toplevel = subprocess.run(
                     ["git", "-C", project_dir, "rev-parse", "--show-toplevel"],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True, text=True, timeout=5, env=git_env,
                 )
                 if toplevel.returncode == 0 and toplevel.stdout.strip():
                     return Path(toplevel.stdout.strip())
