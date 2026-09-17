@@ -302,3 +302,124 @@ def test_malformed_iterm_id_refuses_to_fire(tmp_path: Path) -> None:
     assert "COMPACT_FIRED" not in proc.stdout
     assert (p / ".janitor" / "state" / "resume-directive.txt").exists()
     assert not Path("/tmp/pwned").exists(), "the AppleScript injection must never execute"
+
+
+def test_precompact_last_trigger_filename_matches_the_hooks_own_constant() -> None:
+    """compact_trigger's mirrored literal must never drift from pre-compact-handoff.py's own
+    `_LAST_TRIGGER_FILENAME` -- both name the SAME stamp file, and the two modules cannot
+    import each other (a hook script is not a library)."""
+    hook_path = _PROJECT_ROOT / "scripts" / "hooks" / "pre-compact-handoff.py"
+    spec = _u.spec_from_file_location("pre_compact_handoff_for_constant_check", str(hook_path))
+    assert spec is not None and spec.loader is not None
+    hook = _u.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+
+    mod = _import()
+    assert mod.PRECOMPACT_LAST_TRIGGER_FILENAME == hook._LAST_TRIGGER_FILENAME
+
+
+# ---------- GUARD 2 (TRDD-PH8SAQKS round 2) --------------------------------
+
+def _settings(home: Path, payload: dict) -> Path:
+    import json as _json
+
+    p = home / ".claude" / "settings.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(payload), encoding="utf-8")
+    return p
+
+
+def _transcript(home: Path, project: Path, tokens: int) -> Path:
+    """A single assistant usage line reporting `tokens` of live context occupancy, at the exact
+    path `cold_cache_compact.newest_transcript` resolves for `project` under `home`."""
+    import json as _json
+    import re
+
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(project))
+    tdir = home / ".claude" / "projects" / slug
+    tdir.mkdir(parents=True, exist_ok=True)
+    line = _json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": tokens}}})
+    p = tdir / "session.jsonl"
+    p.write_text(line + "\n", encoding="utf-8")
+    return p
+
+
+def test_guard2_in_band_skips_the_send(tmp_path: Path) -> None:
+    """A measured context inside guard 2's band -> no /compact keystroke sent, no osascript."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    home = _home(tmp_path, present=False)
+    _settings(home, {"autoCompactEnabled": True})
+    # window 100_000 -> effective 66_000, margin 3_300 -> lower 62_700; no MIN_CONTEXT override
+    # -> min_context_tokens() floors at DEFAULT_MIN_CONTEXT_TOKENS (350_000) -> band [62700, 350000).
+    _transcript(home, p, 100_000)
+    proc = _run(
+        ["--dry-run"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        home=home,
+        extra_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"},
+    )
+    assert proc.returncode == 0
+    assert "GUARD2_HARNESS_IMMINENT" in proc.stdout
+    assert "DRY_RUN" not in proc.stdout
+
+
+def test_guard2_above_the_backstop_threshold_still_sends(tmp_path: Path) -> None:
+    """A measured context AT/ABOVE min_context_tokens() -> the harness already missed its turn
+    boundary; this is a BACKSTOP, not a race, so the send proceeds (dry-run reports the plan)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    home = _home(tmp_path, present=False)
+    _settings(home, {"autoCompactEnabled": True})
+    _transcript(home, p, 400_000)  # well above the 350_000 floor computed above
+    proc = _run(
+        ["--dry-run"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        home=home,
+        extra_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"},
+    )
+    assert proc.returncode == 0
+    assert "GUARD2_HARNESS_IMMINENT" not in proc.stdout
+    assert "DRY_RUN" in proc.stdout
+
+
+def test_guard2_autocompact_disabled_still_sends(tmp_path: Path) -> None:
+    """autoCompactEnabled=false -> the harness will not auto-compact, so guard 2 never applies
+    even for a context that would otherwise sit inside the band."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    home = _home(tmp_path, present=False)
+    _settings(home, {"autoCompactEnabled": False})
+    _transcript(home, p, 100_000)
+    proc = _run(
+        ["--dry-run"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        home=home,
+        extra_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"},
+    )
+    assert proc.returncode == 0
+    assert "GUARD2_HARNESS_IMMINENT" not in proc.stdout
+    assert "DRY_RUN" in proc.stdout
+
+
+def test_guard2_unmeasurable_context_still_sends(tmp_path: Path) -> None:
+    """No transcript at all -> context unmeasurable -> guard 2 fails open, send proceeds."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    home = _home(tmp_path, present=False)
+    _settings(home, {"autoCompactEnabled": True})
+    # No _transcript() call: cold_cache_compact.newest_transcript finds nothing under
+    # <home>/.claude/projects/<slug>/, so context_tokens_for returns None.
+    proc = _run(
+        ["--dry-run"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        home=home,
+        extra_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"},
+    )
+    assert proc.returncode == 0
+    assert "GUARD2_HARNESS_IMMINENT" not in proc.stdout
+    assert "DRY_RUN" in proc.stdout

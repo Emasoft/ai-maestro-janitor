@@ -40,6 +40,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Mapping
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
@@ -183,6 +184,177 @@ def min_context_tokens() -> int:
         token_meter._DEFAULT_COMPACT_SUMMARY_OVERHEAD,
     )
     return max(window - overhead + margin, DEFAULT_MIN_CONTEXT_TOKENS)
+
+# GUARD 2 (TRDD-PH8SAQKS, issue 306): the margin below the harness's own EFFECTIVE compact point
+# at which `harness_will_autocompact`'s BAND starts (see its docstring for the band's upper
+# bound, `min_context_tokens()`). 5% mirrors HARNESS_BACKSTOP_MARGIN_ENV's role above (room for
+# the measurement to be a little stale between the guard's read and the harness's own trip
+# point) without a second env knob nobody has ever needed to tune.
+GUARD2_MARGIN_FRACTION = 0.05
+# The log stream every `harness_will_autocompact` call writes to (currently only
+# compact_trigger.py, after the two dispatch/hook call sites were found to be permanently
+# unreachable, round 2 -- see the function's own docstring).
+GUARD2_LOG_NAME = "cold-cache-compact"
+
+
+def harness_will_autocompact(
+    context_tokens: int | None,
+    *,
+    settings_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """True only inside the narrow BAND where Claude Code's own auto-compact is imminent but has
+    not yet demonstrably missed it -- i.e. a caller about to type a forced `/compact` keystroke
+    must send only the existing "prepare" nudge instead (TRDD-PH8SAQKS, issue 306 guard 2).
+
+    THE BAND, and why it has BOTH a floor and a ceiling (coordinator correction, round 2 -- the
+    first draft was unbounded above and was DEAD CODE at both callers that gated on
+    `min_context_tokens()` first, see below):
+
+      lower = effective_compact_point - margin      (this function's own 5% cushion)
+      upper = min_context_tokens()                  (defined two functions above)
+
+      `context_tokens in [lower, upper)` -> True (imminent -- skip the forced `/compact`).
+      `context_tokens >= upper`          -> False (the harness ALREADY MISSED its own turn-end
+                                             compact point -- see below -- sending is now a
+                                             BACKSTOP, not a race, so it must proceed).
+      `context_tokens < lower`           -> False (genuinely not imminent yet -- proceed).
+
+    WHY THE UPPER BOUND EXISTS AT ALL: `min_context_tokens()`'s own docstring (two functions
+    above) is explicit that its threshold is `effective_compact_point + HARNESS_BACKSTOP_MARGIN`
+    -- the janitor's OWN proactive-idle/dispatch backstop is deliberately gated to fire ONLY
+    once the context has climbed ABOVE that point, i.e. only once the harness has DEMONSTRABLY
+    FAILED to compact at its own trip point (owner directive 2026-07-18). Both call sites that
+    gate on `should_compact_proactively_idle(..., min_context_tokens=cold_cache_compact.
+    min_context_tokens())` therefore only ever reach a guard-2 check with `context_tokens >=
+    min_context_tokens()` -- i.e. always AT OR ABOVE this function's own upper bound. An earlier
+    revision of this guard had NO upper bound (any context above `effective - margin` counted as
+    "imminent"), which made it return True unconditionally at both of those call sites and
+    silently disabled the backstop entirely -- caught in review, not by a test, because every
+    test was constructed algebraically consistent with the same (wrong) formula. Those two call
+    sites are consequently UNWIRED (round 2): a context that has already climbed to the backstop
+    threshold is not "the harness is about to compact" -- the incident's own PreCompact fired
+    exactly at TURN END (14:28:46, the same moment the busy turn ended), so a context still
+    sitting above that point on a later, idle turn boundary means the harness's own turn-end
+    trigger already came and went without catching it. This guard now only protects the ONE
+    caller that can observe context BEFORE `min_context_tokens()` has had a chance to gate
+    anything: `compact_trigger.py`'s own `main()`, which measures the context itself, independent
+    of any caller's floor.
+
+    TWO DISCLOSED, NOT FIXED, LIMITATIONS (round 2 review) -- in the same spirit as GUARD 1's own
+    disclosed residual risks in `compact_trigger.py`, rather than papered over:
+      (i) This guard now applies to EVERY caller of `compact_trigger.py::main()`, not just the
+          two idle-proactive callers it originally protected -- including the `--hard` emergency
+          path (the >=85% context-enforcement hook) and a manual `/janitor-compact-context`. That
+          is DELIBERATE (the coordinator's round-2 fix explicitly wires the guard inside `main()`,
+          the one place that can observe context before ANY caller-specific floor), but its
+          interaction with the emergency path's own urgency has not been separately analyzed --
+          a band that happens to sit below the 85% trip point on today's typical window sizes is
+          an observation, not a guarantee enforced by this code.
+      (ii) `compact_trigger.py::main()` RE-MEASURES `context_tokens_for(newest_transcript(...))`
+          itself rather than receiving the caller's own already-measured value, so the two can
+          disagree if the transcript changed between the caller's decision and this script's own
+          read (a fast subsequent turn, or the harness's own compaction landing in between). GUARD
+          1's `abort_if_landed` baseline protects the KEYSTROKE SEND from a landed compaction; it
+          is not wired to reconcile with this guard's own fresh remeasurement -- the two answer
+          overlapping but distinct questions from two different snapshots. Worst case is a
+          redundant or a skipped send, both already-tolerated outcomes elsewhere in this file.
+
+    WHY THIS GUARD EXISTS AT ALL: once a `/compact` keystroke is queued into Claude Code's input,
+    no later check can unsend it. In the incident, the janitor's guard typed `/compact` into a
+    busy pane at 14:28:15; the harness's own auto-compact started 31s later (14:28:46) and the
+    queued `/compact` then ran AGAINST THE ALREADY-COMPACTED CONTEXT -- a second, wasted, lossy
+    compaction stacked on the first. TRDD-4JEBTT2C (guards 1/3/4) narrows the race between
+    DECIDING to send and the keystroke actually landing; this guard instead asks, at decision
+    time, whether the harness is about to do the job itself in the next few turns -- if so, there
+    is nothing left for a forced `/compact` to do except double-compact.
+
+    `autoCompactEnabled` (USER-scope `~/.claude/settings.json`) defaults to Claude Code's own
+    default, True, when the key is absent -- only an explicit `false` disables the harness's own
+    compaction (band never applies; every send proceeds). The lower bound reuses
+    `token_meter.predict_auto_compact`'s overhead-aware `effective_compact_point` -- NOT the raw
+    `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which is where the harness starts writing its summary, not
+    where it finishes -- so this can never quietly disagree with `min_context_tokens()`, which
+    uses the SAME prediction one function above. `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is read in the
+    same fallback order `state.plugin_option` already uses elsewhere for a settings-mirrored env
+    var: a real env var first (the session's own process env), then settings.json's own `env`
+    block (some launch paths -- e.g. launchd -- never see the session's `os.environ`,
+    TRDD-XCJFCJUX). There is NO further numeric default when it is unresolvable: this codebase
+    already concluded, for the sibling `external_clear.context_high_water_tokens`, that no single
+    window constant is honest across a 200K-vs-1M model spread -- a guessed window would fire
+    this guard far too early on a small window or never on a large one. So an unresolvable window
+    FAILS OPEN (no guard, caller proceeds).
+
+    FAILS OPEN (returns False) whenever settings.json is missing/unparseable, `context_tokens` is
+    unknown, or the window is unresolvable -- a guard that cannot see its own inputs must never
+    suppress a compact that was already decided; the caller's own send proceeds unguarded, exactly
+    as it did before this guard existed. Logs one line either way via `state.log_line`.
+    """
+    path = settings_path if settings_path is not None else Path.home() / ".claude" / "settings.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state.log_line(GUARD2_LOG_NAME, f"compact guard 2: settings unreadable at {path} -- no guard, send proceeds")
+        return False
+    if not isinstance(raw, dict):
+        state.log_line(GUARD2_LOG_NAME, f"compact guard 2: settings malformed at {path} -- no guard, send proceeds")
+        return False
+
+    auto_compact_enabled = raw.get("autoCompactEnabled")
+    if auto_compact_enabled is not None and not bool(auto_compact_enabled):
+        state.log_line(GUARD2_LOG_NAME, "compact guard 2: autoCompactEnabled=false -- harness will not auto-compact, send proceeds")
+        return False
+
+    if context_tokens is None:
+        state.log_line(GUARD2_LOG_NAME, "compact guard 2: context size unknown -- no guard, send proceeds")
+        return False
+
+    e: Mapping[str, str] = os.environ if env is None else env
+    merged_env = dict(e)
+    if not merged_env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW"):
+        settings_env = raw.get("env")
+        if isinstance(settings_env, dict) and settings_env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW"):
+            merged_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(settings_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"])
+    # used_tokens=0: only the WINDOW-DERIVED geometry (effective_compact_point) is wanted here --
+    # `context_tokens` is compared against it separately below, not folded into the prediction.
+    pred = token_meter.predict_auto_compact(0, env=merged_env)
+    if pred is None:
+        state.log_line(GUARD2_LOG_NAME, "compact guard 2: CLAUDE_CODE_AUTO_COMPACT_WINDOW unresolvable -- no guard, send proceeds")
+        return False
+    effective = pred.effective_compact_point
+    margin = int(effective * GUARD2_MARGIN_FRACTION)
+    lower = effective - margin
+    upper = min_context_tokens()
+
+    # INVARIANT (round 2 review): the `>= upper` check MUST run before the `< lower` check.
+    # `upper` is normally >= `lower` (min_context_tokens() already adds its OWN, larger
+    # HARNESS_BACKSTOP_MARGIN on top of the same effective point), but an operator CAN invert
+    # it by setting CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS below
+    # `effective - margin`. With this order, any context in the resulting empty/inverted
+    # `[upper, lower)` zone still hits the `>= upper` branch FIRST and returns False -- an
+    # inverted band degrades to "guard 2 never fires" (the safe direction: it can only ever
+    # fail to suppress a send, never wrongly suppress one). Swapping the order would instead
+    # make an inverted band return True unconditionally -- the exact class of bug this guard's
+    # round-2 upper bound exists to prevent. See `test_guard2_inverted_band_fails_safe`.
+    if context_tokens >= upper:
+        state.log_line(
+            GUARD2_LOG_NAME,
+            f"compact guard 2: harness auto-compact already missed its turn boundary "
+            f"({context_tokens} >= backstop threshold {upper}) -- backstop send proceeds",
+        )
+        return False
+    if context_tokens < lower:
+        state.log_line(
+            GUARD2_LOG_NAME,
+            f"compact guard 2: harness auto-compact not imminent ({context_tokens} < {lower}) -- send proceeds",
+        )
+        return False
+    state.log_line(
+        GUARD2_LOG_NAME,
+        f"compact guard 2: harness auto-compact imminent ({lower} <= {context_tokens} < {upper}) "
+        "-- sending prepare nudge only, no /compact keystroke (TRDD-PH8SAQKS, issue 306)",
+    )
+    return True
 
 
 def cooldown_seconds() -> int:

@@ -435,3 +435,147 @@ def test_clear_cooldown_suppresses_a_repeat(tmp_path):
     assert ccc.clear_in_cooldown(
         sd, now=now + ccc.DEFAULT_CLEAR_COOLDOWN_SECONDS + 1
     ) is False
+
+
+
+# --------------------------------------------------------------------------- #
+# harness_will_autocompact — GUARD 2 (TRDD-PH8SAQKS, issue 306)               #
+#                                                                             #
+# BAND semantics (round 2, coordinator correction): imminent only inside     #
+# [effective_compact_point - margin, min_context_tokens()). Below the lower  #
+# bound the harness genuinely isn't close yet; AT OR ABOVE the upper bound   #
+# the harness has already missed its own turn-end compact point, so a send  #
+# there is a BACKSTOP, not a race, and must proceed. Every test below reads  #
+# the real `ccc.min_context_tokens()` / `token_meter.predict_auto_compact`  #
+# for its expected boundary instead of hand-computing it, so the assertions #
+# track the production formula rather than a second, possibly-wrong copy.  #
+# --------------------------------------------------------------------------- #
+
+def _write_settings(tmp_path: Path, payload: dict) -> Path:
+    import json as _json
+
+    p = tmp_path / "settings.json"
+    p.write_text(_json.dumps(payload), encoding="utf-8")
+    return p
+
+
+def _band(monkeypatch: pytest.MonkeyPatch) -> tuple[int, int]:
+    """The real (lower, upper) band edges for whatever env is currently set, computed the
+    SAME way `harness_will_autocompact` computes them -- so a test asserting against this
+    tracks the production formula instead of a second, possibly-drifted copy of it."""
+    import token_meter
+
+    pred = token_meter.predict_auto_compact(0)
+    assert pred is not None, "test setup must set CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+    lower = pred.effective_compact_point - int(pred.effective_compact_point * ccc.GUARD2_MARGIN_FRACTION)
+    upper = ccc.min_context_tokens()
+    return lower, upper
+
+
+@pytest.fixture
+def guard2_env(monkeypatch: pytest.MonkeyPatch):
+    """A small, deterministic CLAUDE_CODE_AUTO_COMPACT_WINDOW with no MIN_CONTEXT override, so
+    `min_context_tokens()` falls to its own DEFAULT_MIN_CONTEXT_TOKENS floor (350_000) --
+    comfortably above the small window's effective point, giving a real, wide band to place
+    test context sizes inside/below/above."""
+    monkeypatch.delenv(ccc.MIN_CONTEXT_ENV, raising=False)
+    monkeypatch.delenv(ccc.HARNESS_BACKSTOP_MARGIN_ENV, raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "100000")
+    return monkeypatch
+
+
+def test_guard2_inside_the_band_under_auto_compact_enabled_is_imminent(
+    tmp_path: Path, guard2_env: pytest.MonkeyPatch
+) -> None:
+    """A context between the two edges -> imminent (True), the /compact send is suppressed."""
+    settings = _write_settings(tmp_path, {"autoCompactEnabled": True})
+    lower, upper = _band(guard2_env)
+    mid = (lower + upper) // 2
+    assert ccc.harness_will_autocompact(mid, settings_path=settings) is True
+
+
+def test_guard2_below_the_band_lets_the_send_proceed(
+    tmp_path: Path, guard2_env: pytest.MonkeyPatch
+) -> None:
+    """A context below the lower edge -> not imminent yet (False), the send proceeds."""
+    settings = _write_settings(tmp_path, {"autoCompactEnabled": True})
+    lower, _upper = _band(guard2_env)
+    assert ccc.harness_will_autocompact(max(0, lower - 10_000), settings_path=settings) is False
+
+
+def test_guard2_at_or_above_the_upper_edge_is_a_backstop_not_a_race(
+    tmp_path: Path, guard2_env: pytest.MonkeyPatch
+) -> None:
+    """A context AT the upper edge (min_context_tokens()) -> the harness already missed its
+    turn-end compact point; sending is now the BACKSTOP, so it proceeds (False = not guarded)."""
+    settings = _write_settings(tmp_path, {"autoCompactEnabled": True})
+    _lower, upper = _band(guard2_env)
+    assert ccc.harness_will_autocompact(upper, settings_path=settings) is False
+    assert ccc.harness_will_autocompact(upper + 50_000, settings_path=settings) is False
+
+
+def test_guard2_inverted_band_fails_safe(tmp_path: Path, guard2_env: pytest.MonkeyPatch) -> None:
+    """An operator override can push `min_context_tokens()` (the upper edge) BELOW the lower
+    edge (`effective - margin`), inverting the band. The `>= upper` check must run before the
+    `< lower` check so this degrades to "guard 2 never fires" (the safe direction) rather than
+    to "guard 2 always fires" (which would silently re-disable the backstop, round 2's own bug,
+    for any operator who tunes the override this way). Round-2 review finding 5c."""
+    lower, upper = _band(guard2_env)
+    assert upper > lower, "test setup must start from a normal, non-inverted band"
+    # Force MIN_CONTEXT_ENV below the lower edge -> min_context_tokens() (the upper edge)
+    # drops below `lower`, inverting the band.
+    guard2_env.setenv(ccc.MIN_CONTEXT_ENV, str(lower - 10_000))
+    inverted_lower, inverted_upper = _band(guard2_env)
+    assert inverted_upper < inverted_lower, "test setup must actually invert the band"
+    settings = _write_settings(tmp_path, {"autoCompactEnabled": True})
+    # Every context in, around, and between the (now swapped) edges must fail safe (False).
+    for ctx in (inverted_upper - 1, inverted_upper, inverted_lower, inverted_lower + 1):
+        assert ccc.harness_will_autocompact(ctx, settings_path=settings) is False
+
+
+def test_guard2_auto_compact_disabled_lets_the_send_proceed(
+    tmp_path: Path, guard2_env: pytest.MonkeyPatch
+) -> None:
+    """autoCompactEnabled=false -> the harness will not compact, so the send proceeds unguarded,
+    even for a context that would otherwise sit inside the band."""
+    settings = _write_settings(tmp_path, {"autoCompactEnabled": False})
+    lower, upper = _band(guard2_env)
+    assert ccc.harness_will_autocompact((lower + upper) // 2, settings_path=settings) is False
+
+
+def test_guard2_unreadable_settings_fails_open_send_proceeds(
+    tmp_path: Path, guard2_env: pytest.MonkeyPatch
+) -> None:
+    """settings.json missing/unparseable -> fail OPEN (False), never suppress a decided send."""
+    missing = tmp_path / "does-not-exist.json"
+    lower, upper = _band(guard2_env)
+    assert ccc.harness_will_autocompact((lower + upper) // 2, settings_path=missing) is False
+
+
+def test_guard2_unresolvable_window_fails_open_send_proceeds(tmp_path: Path) -> None:
+    """No CLAUDE_CODE_AUTO_COMPACT_WINDOW anywhere (env or settings' own env block) -> fail open."""
+    settings = _write_settings(tmp_path, {"autoCompactEnabled": True})
+    assert ccc.harness_will_autocompact(999_000, settings_path=settings, env={}) is False
+
+
+def test_guard2_window_falls_back_to_settings_env_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE_CODE_AUTO_COMPACT_WINDOW absent from the real env but present in settings.json's
+    own `env` block (the launchd case, TRDD-XCJFCJUX) -> still resolves the lower bound and
+    still suppresses a context inside it (the real env's absence also leaves
+    `min_context_tokens()` at its own DEFAULT_MIN_CONTEXT_TOKENS floor, comfortably above)."""
+    monkeypatch.delenv(ccc.MIN_CONTEXT_ENV, raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    settings = _write_settings(
+        tmp_path,
+        {"autoCompactEnabled": True, "env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"}},
+    )
+    assert ccc.harness_will_autocompact(96_000, settings_path=settings, env={}) is True
+
+
+def test_guard2_default_autocompact_enabled_when_key_absent(
+    tmp_path: Path, guard2_env: pytest.MonkeyPatch
+) -> None:
+    """autoCompactEnabled key absent entirely -> defaults True (Claude Code's own default)."""
+    settings = _write_settings(tmp_path, {})
+    lower, upper = _band(guard2_env)
+    assert ccc.harness_will_autocompact((lower + upper) // 2, settings_path=settings) is True

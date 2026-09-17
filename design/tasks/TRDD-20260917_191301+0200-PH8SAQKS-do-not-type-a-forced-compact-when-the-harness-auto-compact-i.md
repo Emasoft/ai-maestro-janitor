@@ -1,9 +1,9 @@
 ---
 trdd-id: PH8SAQKS
 title: Do not type a forced compact when the harness auto-compact is about to fire under autoCompactEnabled
-column: backburner
+column: testing
 created: 2026-09-17T19:13:01+0200
-updated: 2026-09-17T19:18:27+0200
+updated: 2026-09-17T20:56:41+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -25,3 +25,6 @@ Issue 306 guard 2, the incident's ACTUAL window: the context guard typed /compac
 ## Approval log
 
 - 2026-09-17T19:13:01+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T20:42:58+0200 — dev → testing: cold_cache_compact.harness_will_autocompact + 2 call sites wired, compact_trigger.py PRECOMPACT_LAST_TRIGGER_FILENAME constant + terminal_trigger.read_landed_stamp rename; 10 new tests, pytest 67 passed, ruff/mypy/pyright clean; adversarial review round 1 fixed the margin-vs-raw-window bug (janitor-main-session via lean-worker)
+- 2026-09-17T20:52:59+0200 — correction (coordinator): round-1 guard was unbounded above and dead-by-construction at both dispatch.py/on-stop-proactive-compact.py call sites (ctx there always >= min_context_tokens(), guard 2's own would-be upper edge); added an upper bound = min_context_tokens() to harness_will_autocompact, unwired those two call sites, wired guard 2 into compact_trigger.py::main() instead (the one caller that measures ctx before any floor gate); rewrote cold_cache_compact tests to derive band edges from the production functions; 4 new compact_trigger.py subprocess tests; gate re-run 72 passed / ruff+mypy+pyright clean (janitor-main-session via lean-worker)
+- 2026-09-17T20:56:39+0200 — round-2 adversarial review: fork flagged guard 2 now covers every compact_trigger.py caller incl. --hard (accepted as directed by the round-2 fix instruction, documented in the docstring), an inverted-band edge case relying on check order (fixed: explicit invariant comment + test_guard2_inverted_band_fails_safe), re-measurement divergence vs the caller's own ctx reading (accepted/documented, same class of residual risk GUARD 1 already discloses), and a shared-oracle test tradeoff (accepted, named). Gate re-run 73 passed / ruff+mypy+pyright clean; file modes unchanged. Card stays in testing (janitor-main-session via lean-worker)

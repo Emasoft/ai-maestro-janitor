@@ -109,6 +109,27 @@ def test_fires_when_turn_ends_idle_with_a_large_context(harness, monkeypatch: py
     assert harness.ccc.in_cooldown(sd, now=int(_t.time()) + 1) is True
 
 
+def test_backstop_still_fires_above_min_context_under_autocompact_enabled(
+    harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GUARD 2 (TRDD-PH8SAQKS round 2) does NOT gate this call site. `ctx` reaching this hook has
+    already passed `should_compact_proactively_idle`'s own `min_context_tokens` floor -- the same
+    value guard 2 uses as its band's upper bound -- so it can never land inside guard 2's
+    imminent band; it is always past "the harness already missed its turn boundary", where the
+    backstop send must proceed. This pins that guard 2's existence does NOT silently disable the
+    backstop even when `autoCompactEnabled` is true and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is set
+    (the earlier, unbounded-band draft of guard 2 made this call site permanently dead)."""
+    hook = _load_hook()
+    _set(harness, monkeypatch, present=False, ctx=500_000)
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "520000")
+    settings = Path.home() / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"autoCompactEnabled": True}), encoding="utf-8")
+
+    assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
+    assert len(harness.spawned) == 1, f"expected the backstop compact_trigger spawn, got {harness.spawned}"
+
+
 def test_does_not_loop_after_a_compaction(harness, monkeypatch: pytest.MonkeyPatch) -> None:
     """THE LOOP GUARD, end-to-end through the hook, in the REAL post-compaction state.
 

@@ -123,6 +123,14 @@ def main() -> int:
         ):
             return 0
 
+        # NO GUARD 2 HERE (TRDD-PH8SAQKS round 2): `ctx` reaching this point has already passed
+        # `should_compact_proactively_idle`'s own `min_context_tokens` floor above -- the SAME
+        # value `harness_will_autocompact` uses as its band's UPPER bound -- so this call site can
+        # never land inside the guard's imminent band; it is always at or past "the harness
+        # already missed its turn boundary", where sending is the correct BACKSTOP, not a race.
+        # Guard 2 lives instead in compact_trigger.py's own main(), the one caller that measures
+        # context BEFORE any floor gate narrows it (see harness_will_autocompact's docstring).
+
         compact_py = Path(plugin_root) / "scripts" / "compact_trigger.py"
         if not compact_py.is_file():
             return 0

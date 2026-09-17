@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import cold_cache_compact  # noqa: E402  -- GUARD 2 (TRDD-PH8SAQKS): harness_will_autocompact
 import state  # noqa: E402  -- GUARD 1 (TRDD-4JEBTT2C): reads last-compact.ts
 import terminal_trigger  # noqa: E402
 
@@ -54,6 +55,11 @@ HANDOFF_CMD = "/janitor-write-handoff"
 # arg, chains to /compact itself. In SOFT --handoff no chaining is needed — both
 # commands are enqueued and the input queue serialises them (handoff turn, then compact).
 HANDOFF_THEN_COMPACT_CMD = "/janitor-write-handoff --then-compact"
+
+# pre-compact-handoff.py's own `_LAST_TRIGGER_FILENAME`, mirrored here (not imported — that hook
+# script is not a library) so the two literals can never drift apart silently; a test pins the
+# two constants equal (YM65RCZA item 3).
+PRECOMPACT_LAST_TRIGGER_FILENAME = "precompact-last-trigger.json"
 
 
 def plan_compact(*, soft: bool, handoff: bool) -> tuple[list[str], bool]:
@@ -224,7 +230,7 @@ def main() -> int:
     # path `post-compact-resume.py` (guard 4) and `pre-compact-handoff.py` write through.
     _sd = state.state_dir()
     _last_compact_path = _sd / state.LAST_COMPACT_STAMP
-    _last_trigger_path = _sd / "precompact-last-trigger.json"  # pre-compact-handoff.py's _LAST_TRIGGER_FILENAME
+    _last_trigger_path = _sd / PRECOMPACT_LAST_TRIGGER_FILENAME  # pre-compact-handoff.py's _LAST_TRIGGER_FILENAME
     for _stamp_path, _stamp_kind in ((_last_compact_path, "int"), (_last_trigger_path, "json_written_at")):
         if not _stamp_path.is_file():
             state.log_line("compact-trigger", f"compact guard: no {_stamp_path.name} at {_stamp_path} — baseline 0")
@@ -233,8 +239,22 @@ def main() -> int:
         # Reuses terminal_trigger's own reader rather than a second JSON-parsing copy of it
         # (both must agree on what "landed" means, or the baseline and the land-time recheck
         # inside run_verified_send could silently disagree).
-        (str(_last_trigger_path), terminal_trigger._read_landed_stamp(_last_trigger_path, "json_written_at"), "json_written_at"),
+        (str(_last_trigger_path), terminal_trigger.read_landed_stamp(_last_trigger_path, "json_written_at"), "json_written_at"),
     ]
+
+    # GUARD 2 (TRDD-PH8SAQKS, issue 306, round 2): this is the ONE caller that measures context
+    # itself, BEFORE any floor gate (`min_context_tokens()`) has narrowed it -- unlike the
+    # dispatch/hook callers of this script, which only ever invoke it once `ctx` has already
+    # climbed above that floor (see `cold_cache_compact.harness_will_autocompact`'s own
+    # docstring for why those two sites were found to be permanently unreachable and unwired).
+    # `--dry-run` still measures and logs but does not itself send anything either way, so the
+    # guard runs unconditionally rather than being skipped under --dry-run.
+    _ctx = cold_cache_compact.context_tokens_for(
+        cold_cache_compact.newest_transcript(state.project_root())
+    )
+    if cold_cache_compact.harness_will_autocompact(_ctx):
+        print("GUARD2_HARNESS_IMMINENT")
+        return 0
 
     # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a
     # channel it cannot resolve at all falls through to NO_ITERM below.
