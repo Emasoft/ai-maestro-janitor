@@ -1,9 +1,9 @@
 ---
 spec: wikimem-memgrep
-spec-version: 1.1.0
+spec-version: 2.0.0
 status: normative
 created: 2026-07-23T15:03:35+0200
-updated: 2026-07-23T15:21:42+0200
+updated: 2026-09-17T06:42:51+0200
 maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner request, 2026-07-23)
@@ -1495,9 +1495,12 @@ the refs used by other atoms".
 `WM-MIG-03` **renumber-on-collision** — moved references are renumbered to labels free on the
 destination, rewriting definitions AND inline references together.
 
-`WM-MIG-04` **guard-both-pages-first** — `MUST`: migrate pre-flight refuses if EITHER page has
-a dangling/unreferenced footnote (that breaks the renumber arithmetic and corrupts both);
-post-build re-proves both footnote-clean or writes nothing.
+`WM-MIG-04` **guard-both-pages-first** — `MUST`: a structural verb (`split-mem-atom`,
+`merge-mem-atom`/`-topic`, `migrate-mem-atom`, `delete-mem-atom`) refuses ONLY when it would
+leave a `[^N]` reference without its `[^N]:` definition; an uncited page-level lesson
+definition (`[^N]:` nothing cites) is a legal, normal shape — the Notes section is mandatory
+even when empty — and `MUST NOT` block the verb. Post-build re-proves the result
+reference-clean or writes nothing (GitHub issue 304, TRDD-RMX0IE72).
 
 `WM-MIG-05` **atomic-enough** — `migrate` builds BOTH new page texts in memory, proves them
 clean, then writes DEST first, SOURCE second. A crash between the two atomic writes leaves a
