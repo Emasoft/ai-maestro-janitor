@@ -31,6 +31,7 @@ EHT of TRDD-N954KWUC (its title: ONE screen-state reader drives EVERY keystroke 
 - 2026-09-16T23:06:20+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-16T23:09:20+0200 — scope precision (review 2026-09-16): the routed path MUST preserve the flush→/model opus→confirm sequence TRDD-3T9HQEQ6 landed (fb25366f, 1533ccc9); the NO_HEADROOM policy row's plan was not read tonight — if it plans a single /model opus, use or add the row that reproduces 3T9HQEQ6's sequence rather than regress it. Acceptance items 1–2 are to be read with that constraint. Sequenced after M4HVFU2A (npt).
 - 2026-09-17T05:57:29+0200 — column → testing by session. code+tests landed, ruff/mypy/pyright clean, 67/67 tests pass; box 3 (live pane-policy.log episode) is a live-observation item left open
+- 2026-09-17T19:42:20+0200 — MECHANICAL redaction (9745b4f6): absolute home paths in 1 body line(s) genericised to ~/ or repo-relative because CPV --strict refuses /Users/<name>/ in a pushed card; no fact changed, updated: not bumped (janitor-main-session)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
