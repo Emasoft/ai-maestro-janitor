@@ -3,7 +3,7 @@ trdd-id: 8P4BNY5J
 title: Route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM
 column: testing
 created: 2026-09-16T23:06:20+0200
-updated: 2026-09-17T07:41:25+0200
+updated: 2026-09-17T08:33:29+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -19,6 +19,7 @@ derived: true
 priority: critical
 npt: []
 review-after: 2026-09-24
+implementation-commits: [9c5c8fb2]
 ---
 
 # Route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM
@@ -40,3 +41,4 @@ EHT of TRDD-N954KWUC (its title: ONE screen-state reader drives EVERY keystroke 
 2026-09-17T07:05:00+0200 — hygiene correction: an idle pane holding unsubmitted text (pane_policy._at_idle, scripts/lib/pane_policy.py:323-334, NO_HEADROOM row) is NOT reliable evidence of a human mid-draft -- in practice it is usually the janitor's own unverified leftover keystrokes from a prior send. The indefinite defer this row applies is a KNOWN LIVELOCK on that population, tracked separately by TRDD-FKY3NXB8 (filed 2026-09-17, backburner). Also noted: AWAITING_USER and UNKNOWN panes get NO keystroke at all on NO_HEADROOM (scripts/lib/pane_policy.py:411-433 falls through to bare return () for both) -- an accepted silent no-op, out of this card's scope, also referenced by FKY3NXB8.
 2026-09-17T (IMPLEMENTER) — the Enter-confirm bug on the Event.NO_HEADROOM path is now closed at the root: model-fallback.py's pane_actuate.act() call passes command_plan=fleet_inject.build_command_plan(...) as the fallback build_step_plan needs to resolve the bare Enter step, so the model-switch menu is now actually confirmed (outcome DONE, not FAILED). tests/test_pane_actuate.py's pinned outcome2.status flipped FAILED->DONE plus one new direct test (test_idle_no_headroom_enter_step_is_fired_through_the_fake_terminal). Also unblocks TRDD-FKY3NXB8 (own-leftover /model text clearing) which built on the same call site.
 2026-09-17T07:41:25+0200 — VERIFY pass: pane_actuate.build_step_plan's `fallback` is dual-role (a literal fallback command plan for a command step whose rebuild is impossible, AND -- only when `submit_ref` is None -- the Enter step's channel reference). model-fallback.py's fix worked but leaned on the secondary role; now passes the same built plan as BOTH command_plan= (fallback's documented job) and submit_ref= (the API's dedicated Enter-reference parameter, matching daemon.py's OWN_COMMAND_UNSUBMITTED submit_ref=plan usage). ruff/mypy/pyright clean; 108 tests pass (test_model_fallback.py + test_pane_actuate.py + test_pane_policy.py).
+2026-09-17T08:33:29+0200 — implementation-commits += 9c5c8fb2 — BUNDLED commit (git-lock guard on the LOCAL-design probes, pane-test narrowing, rules trim); see its subject.
