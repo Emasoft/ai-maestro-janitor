@@ -12,7 +12,7 @@ effort: L
 labels: [reliability, daemon, oauth, rate-limit, watchdog, guardian]
 task-type: feature
 parent-trdd: null
-npt: [TRDD-dccb0b8a-npt-pane-record]
+npt: []
 eht: []
 blocked-by: []
 relevant-rules: [1]
