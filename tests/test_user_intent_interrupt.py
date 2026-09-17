@@ -10,6 +10,7 @@ writing these tests.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -137,8 +138,6 @@ def test_session_scoped_path_beats_newest_by_mtime_fallback(tmp_path: Path) -> N
     _write_jsonl(newer_but_clean, [_prompt_record(5)])
 
     now_ts = time.time()
-    import os
-
     os.utime(older_but_interrupted, (now_ts - 100, now_ts - 100))
     os.utime(newer_but_clean, (now_ts, now_ts))
 
@@ -579,6 +578,41 @@ def test_writer_and_reader_state_dir_agree_under_a_plain_project(tmp_path: Path,
         assert reader_root is not None
         reader_dir = user_intent.target_state_dir(reader_root)
         assert writer_dir == reader_dir
+    finally:
+        _clear_state_cache()
+
+
+def test_record_pane_transcript_default_round_trips_under_a_plain_project(tmp_path: Path, monkeypatch) -> None:
+    """End-to-end, through REAL file I/O, in the COMMON case: a plain (non-symlinked) project.
+    `record_pane_transcript` is called with NO `state_dir` -- the real default, keyed on
+    `$CLAUDE_PROJECT_DIR` (via `state.project_root()`) exactly as a real hook would call it --
+    and `pane_transcript_path` (fed `fleet_scan.find_janitor_root`'s result, as `pane_actuate.act`
+    feeds it) must find the SAME transcript, resolved to its realpath (per
+    `record_pane_transcript`'s own `os.path.realpath`, not `abspath`). Complementary to
+    `test_writer_and_reader_state_dir_agree_under_a_plain_project` (which pins ONLY the
+    state_dir formula via direct `Path` comparison) -- this one instead drives the pane-key
+    derivation, the write, `atomic_write`, and the mapping-file read-back, so it can catch a
+    regression in any of those even though, for a plain project, the state_dir formula itself
+    contributes nothing new here (`realpath(project) == project` trivially)."""
+    project = tmp_path / "project"
+    (project / ".janitor" / "state").mkdir(parents=True)
+    subdir = project / "sub" / "dir"
+    subdir.mkdir(parents=True)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    _clear_state_cache()
+    try:
+        written = user_intent.record_pane_transcript(str(transcript), env={"TMUX_PANE": "%5"})
+        assert written is not None
+
+        reader_root = fleet_scan.find_janitor_root(str(subdir))
+        assert reader_root is not None
+        found = user_intent.pane_transcript_path(reader_root, {"tmux_pane": "%5"})
+
+        assert found is not None
+        assert str(found) == os.path.realpath(str(transcript))
     finally:
         _clear_state_cache()
 

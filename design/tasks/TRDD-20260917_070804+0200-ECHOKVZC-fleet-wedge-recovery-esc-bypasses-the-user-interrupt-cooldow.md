@@ -3,7 +3,7 @@ trdd-id: ECHOKVZC
 title: Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
 column: testing
 created: 2026-09-17T07:08:04+0200
-updated: 2026-09-17T19:06:14+0200
+updated: 2026-09-17T19:20:35+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -18,6 +18,13 @@ priority: high
 ---
 
 # Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-17T19:18:13+0200
+
+- Landed: 8059663a (gate + heartbeat-marker skip), e72b70e8 (writer/reader state-dir parity, realpath), plus the plain-project default test. Acceptance box ticked (unit acceptance).
+- Column testing because the LIVE behaviour has ceilings no unit test sees: a hook process writes the mapping under state.project_root() while the daemon reads it under find_janitor_root(cwd) for a real pane.
+- NEXT ACTION (what lets it close): observe one real line 'pane-policy: ... deferred — target session interrupted Ns ago (user-interrupt cooldown)' in a target project's .janitor/logs/pane-policy.log after a human Esc; then move to complete.
+- Follow-up: TRDD-HFDM1HHP (canonical state-dir helper).
 
 Symptom: fleet_inject.py:513-588 (fleet_inject.fire, the daemon's wedge-recovery ESC sender used by pane_actuate.py:95-119 act()/build_step_plan()) never calls terminal_trigger's interrupt-cooldown gate (_interrupt_cooldown_age/recently_interrupted) at all -- it sends the iterm channel via a bare subprocess.Popen(osascript) and the tmux/wtype/xdotool channels via terminal_trigger._fire_detached_steps, the raw low-level runner with no cooldown check. The only human-safety gate on this path is pane_actuate.presence_blocked_now() (pane_actuate.py:68-77), which checks live HID idle time, not whether the user just hit Esc and stepped away -- exactly the gap TRDD-6P0KUSO9/PA9E2GJ1 targeted for other injectors. session_liveness.py has no sender of its own (detection only: is_retry_wedge, diagnose_instance, etc feed pane_actuate's decision, they never send a keystroke) -- same site as the fix.
 
@@ -40,7 +47,9 @@ Origin: TRDD-PA9E2GJ1 follow-up 2026-09-17 (reports/board-drain/20260917_impl-PA
 - 2026-09-17T18:51:53+0200 — fixed 3 tree-wide pyright reportOptionalMemberAccess in tests/test_user_intent_interrupt.py (None-narrowing asserts); doc-only extension to target_state_dir on canonicalization parity with state.state_dir(). Whole-tree mypy now shows 1 unrelated error in scripts/lib/terminal_trigger.py:1796 from a concurrent session's TRDD-4JEBTT2C work (not touched, flagged not fixed). All ECHOKVZC-scoped checks green. (janitor-main-session via lean-worker)
 - 2026-09-17T19:04:22+0200 — coordinator round 4 (post-commit 8059663a, new diff): read state.py+fleet_scan.find_janitor_root, confirmed the canonicalization asymmetry (reader realpaths via find_janitor_root, raw state.state_dir() does not); record_pane_transcript's default now routes through target_state_dir(realpath(state.project_root())), same helper as the reader. Self-caught and corrected a fabricated test-failure claim during this round (own review discipline): the symlink case does NOT actually break file I/O (OS resolves symlinks transparently), only raw Path-value equality — rewrote the test and report to say so honestly. Added STOP_FLAG event-vs-fail_open control tests (2), realpath-not-abspath fix + idempotency test for record_pane_transcript, heartbeat-marker-constant parity test, utf-8 encoding on remaining read_text calls, empty-mapping log line. 103 tests pass, ruff/mypy/pyright (incl. both test files) all clean. (janitor-main-session via lean-worker)
 - 2026-09-17T19:08:00+0200 — fifth review round (own review forks, doc-only): separated item 1 (state_dir realpath wrapping, closes NO observed functional bug, kept only because the coordinator explicitly directed it, flagged as a one-line revert if unwanted) from item 3 (transcript-path realpath, closes a REAL idempotency/churn bug, independent of item 1) — previous report text had blurred the two together. Swept for other unverified confident claims; found none beyond the one already corrected. No code changed. (janitor-main-session via lean-worker)
+- 2026-09-17T19:09:29+0200 — close-out: added test_record_pane_transcript_default_round_trips_under_a_plain_project (36/36 in file, 104/104 scoped, ruff+pyright clean); acceptance box 1 ticked; follow-up TRDD-HFDM1HHP minted (backburner, refactor, parent-trdd: ECHOKVZC, validate/lint clean). (janitor-main-session via lean-worker)
+- 2026-09-17T19:11:41+0200 — close-out review fork: docstring precision fix on the new test (complementary to, not duplicating, the plain-project state_dir-parity test); confirmed HFDM1HHP's parent-trdd carries no npt/eht claim so it cannot trip GRAPH-* validators against ECHOKVZC; noted mypy intentionally omitted this round per the narrower instruction. 36/36 tests, ruff+pyright clean after the docstring edit. (janitor-main-session via lean-worker)
 
 ## Acceptance
 
-- [ ] the fleet wedge-recovery ESC is withheld for a target session that is inside its own user-interrupt cooldown (however pane_actuate learns which session it is acting on); a test drives an ESC at a freshly-interrupted target session and asserts it is withheld.
+- [x] the fleet wedge-recovery ESC is withheld for a target session that is inside its own user-interrupt cooldown (however pane_actuate learns which session it is acting on); a test drives an ESC at a freshly-interrupted target session and asserts it is withheld.
