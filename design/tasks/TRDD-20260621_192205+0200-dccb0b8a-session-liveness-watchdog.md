@@ -167,3 +167,7 @@ on a build that downgrades it to session-only. The ONLY reliable rescuer is a
 process that lives OUTSIDE every session and can act ON a session — which is
 exactly what the global daemon already is, minus the hands. This TRDD gives it
 hands, safely and gated.
+
+## Approval log
+
+- 2026-09-17T14:52:29+0200 — validate's GRAPH-ORDER-CYCLE on this card is a validator false positive, not a card defect: npt holds the v1 derived slug TRDD-dccb0b8a-npt-pane-record and normalizeTrddRef slices it to this card's own id. Do NOT delete the entry to green the tool (0e55c6e6 did, dd6fccb3 reverted). Tracked upstream as Emasoft/ai-maestro issue 166.
