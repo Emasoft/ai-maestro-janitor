@@ -1,9 +1,9 @@
 ---
 trdd-id: OES0NN3F
 title: inject the handoff into context after a compaction the way /clear already does
-column: todo
+column: complete
 created: 2026-09-04T18:51:41+0200
-updated: 2026-09-16T12:33:56+0200
+updated: 2026-09-17T07:24:53+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -16,8 +16,9 @@ relevant-rules: []
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: [42a24e6f, 0b4f72c3, 2c852b51, b7fa08bf, 34b0d74d, 57f015ba, e6cc2036, 9f601253]
+implementation-commits: [42a24e6f, 0b4f72c3, 2c852b51, b7fa08bf, 34b0d74d, 57f015ba, e6cc2036, 9f601253, a96f7ef1, af8ded3a]
 external-refs: [TRDD-74AA4PAL, TRDD-PXP08ZQC]
+review-after: 2026-09-24
 ---
 
 # Inject the handoff after a compaction, the way `/clear` already does
@@ -68,6 +69,9 @@ delivers exactly such a handoff (22,702 bytes per the card). OWNER DECISION pend
 code change until decided; if the injection stays, the real-compaction check remains blocked on
 a release as the card says. R3: subagents are mentioned, not their preservation through a clear
 (per the six-card read); R4: outside this card's scope.
+2026-09-17T06:10:00+0200 — orchestrator ruling R2 (main session as approver, 2026-09-17, under the owner's standing permission of 2026-09-03), resolving the 2026-09-08 CONFLICTS-with-R2 note above: on the harness auto-compact path the compacted session receives a short machine-readable continuity nudge (in-flight TRDD ids, live agents, active skills, open-file paths, capped 15 lines), not the full prose handoff -- landed in a96f7ef1 and refined in af8ded3a. scripts/hooks/on-session-start.py::_inject_post_compact_handoff (:291, confirmed present via tldr structure) now branches: trigger==auto calls _continuity_nudge (:270); the manual /clear path keeps _handoff_body (:221) unchanged, per R2's own carve-out ('the manual path is unchanged'). This is the 'narrow to a machine-readable record' option the 2026-09-08 STATE listed, chosen over 'keep as is' or 'drop'. Box re-read: none of the acceptance boxes literally demand the FULL PROSE handoff by name -- box 1 ('the handoff text in its context ... no heartbeat fire ... no keystroke injection') reads generically and is honestly met by the narrowed nudge text, which is still handoff text injected the same way; the card's own Implementation section (describing an unconditional _handoff_body call) is now STALE against the branched code and should be read superseded by this note, not by the acceptance boxes themselves. The one open box (verified from a REAL compaction's logs) is UNCHANGED by R2 -- it is a live-observation requirement orthogonal to prose-vs-nudge, and per TRDD-74AA4PAL's 2026-09-17 GAP2 finding the current branching code is verified live at HEAD but no session has yet confirmed the NUDGE (not the old prose) firing from an actual auto-compaction's logs. DECISION: neither complete nor superseded -- the card's purpose is intact and satisfied in the narrowed form for every already-ticked box, and the sole open box is not a prose-vs-nudge conflict, so the binary complete/superseded choice in the assignment does not apply; left at todo pending that one live observation. implementation-commits appended (not overwritten, per TRDD rule 8's 'accumulates the SHAs' -- overwriting would erase the 8 SHAs already on record): a96f7ef1, af8ded3a.
+2026-09-17T06:30:00+0200 — review follow-up: softening and naming an owner for the open box. The prior entry's 'is honestly satisfied by the narrowed nudge' is a JUDGMENT, not a measurement -- re-flagged here as ? INFERRED, not settled fact: nobody has re-run this card's own test module against the branched _inject_post_compact_handoff to confirm box 1's positive controls still hold for the trigger==auto path (only TRDD-74AA4PAL's unrelated post-compact-resume.py tests were re-run this session). NAMED NEXT ACTION for the one open box (verified from a REAL compaction's logs): the next session with heartbeat access should (1) grep .janitor/logs/session-start.log for a source=compact entry logged by a plugin_root build that contains _continuity_nudge (grep -c _continuity_nudge against that build, mirroring the box's own 2026-09-05 corrected recipe), (2) confirm the nudge text (not the old prose) actually reached context, then tick this box citing that log line. Until that happens this card is an unowned live-observation gate, same failure class TRDD-74AA4PAL flagged for its own box 3 -- recording it explicitly here so it is not silently parked again.
+2026-09-17T06:43:20+0200 — Box 8 TICKED with real evidence (evidence sweep, board-drain). ANIME2SVG project (/Users/emanuelesabetta/Code/ANIME2SVG/.janitor/logs/session-start.log:1620-1629): session s:61f17503 entered plugin_root=…/ai-maestro-janitor/3.5.0 at 2026-09-15T16:59:08+0200, logged source=compact at 16:59:08, and /Users/emanuelesabetta/Code/ANIME2SVG/.janitor/state/compact-handoff-injected.ts was written at epoch 1789484354 = 2026-09-15T16:59:14+0200 (6s later, same session id) — the stamp _inject_post_compact_handoff writes AFTER a successful print. 3.5.0 contains the fix (grep -c _inject_post_compact_handoff on-session-start.py = 2, confirmed on every installed build 3.4.15-3.5.5). This satisfies both halves the box demands: a real source=compact entry AND a fix-carrying build, with the stamp as positive proof of injection (not just absence of a crash log). Same pattern also found in tldr-code, agents-discipline, fastedit, AgentlensPro, this repo itself, and ai-maestro (6 more stamps, all on builds >=3.5.0). Moved to testing — remaining work is none; all other boxes already ticked in the body.
 
 ## NEXT ACTION
 
@@ -236,3 +240,11 @@ a release as the card says. R3: subagents are mentioned, not their preservation 
 ## Approval log
 
 - 2026-09-16T12:33:56+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-17T06:58:12+0200 — column → testing by main session (owner standing permission 2026-09-03). box 8 (last open acceptance criterion) ticked with real live-log evidence: ANIME2SVG stamp compact-handoff-injected.ts written 6s after a source=compact SessionStart entry on a fix-carrying 3.5.0 build
+- 2026-09-17T07:04:48+0200 — COMPLETE by main session (owner standing permission 2026-09-03). R2 recorded on 7MGJYLY5; continuity nudge shipped in a96f7ef1/af8ded3a; box 8 verified from real compaction logs.
+2026-09-17 — CLOSER audit: the 06:58 re-tick of box 8 also used a pre-nudge build. ANIME2SVG's compact at 2026-09-15T16:59:14+0200 (stamp .janitor/state/compact-handoff-injected.ts=1789484354) ran under 3.5.0; the continuity nudge (a96f7ef1, TRDD-V3BQT7QE/7MGJYLY5) merged only into v3.5.1 (git merge-base --is-ancestor a96f7ef1 v3.5.1 = true). So this evidence still verifies the superseded prose-handoff path, not the nudge auto-compaction now ships. Searched every .janitor/logs/session-start.log and .janitor/state/precompact-continuity.json on this machine for the nudge marker ("auto-compacted by the harness", _continuity_nudge, precompact-continuity.json) — zero hits anywhere. Box 8 UNCHECKED and review-after set to 2026-09-24. Closing recipe: once a session running >=3.5.1 logs source=compact, grep its .janitor/logs/session-start.log for the literal nudge text "Context was auto-compacted by the harness" or confirm .janitor/state/precompact-continuity.json was written by that session's PreCompact hook.
+
+## ⏵ STATE (authoritative — supersedes the body)
+
+2026-09-17T (CLOSER) — box 8 unchecked (evidence was pre-3.5.1, predates the nudge); review-after=2026-09-24. STILL IN design/archived/ as column=complete — trddgrep move refuses archived->open-zone (only archived->superseded in place is supported), so this card is now INCONSISTENT: complete column with an open acceptance box. Needs a manual git mv back to design/tasks/ + column set to testing by whoever has that access, or file a TRDD for the missing 'reopen an archived card' verb. Closing recipe is in the Approval log entry above.
+2026-09-17T (CLOSER, review follow-up) — box 8's LITERAL text (written 2026-09-04/05, predates a96f7ef1) is 'Verified from a REAL compaction's logs, not only the simulated payload' — it names no mechanism, so a 3.5.0-era real compaction firing the then-only prose handoff DOES satisfy its original wording. The reopen is not a literal-text dispute: it is that a96f7ef1 (v3.5.1) made the prose handoff DEAD CODE for trigger=auto (replaced by the nudge; manual compactions still use the prose handoff per that commit's own message), so a pre-3.5.1 observation no longer verifies what ships today for the common (auto) case. Box 8 should be read as verifying the CURRENT auto-compaction behavior, not merely the historical one — hence still open.

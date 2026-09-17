@@ -3,7 +3,7 @@ trdd-id: 7MGJYLY5
 title: Janitor compaction prefers clear plus llm-ext at turn boundaries, preserves subagents, restores skills not files
 column: complete
 created: 2026-09-08T20:03:42+0200
-updated: 2026-09-17T06:40:06+0200
+updated: 2026-09-17T07:02:35+0200
 current-owner: janitor-session
 task-type: feature
 min-approval-requirement: none
@@ -135,6 +135,8 @@ All at `column: testing` on 2026-09-08 unless noted:
 - 2026-09-08T20:03:42+0200 — Authored at `todo` from a USER ruling relayed by the ai-maestro
   session. Owner-authorized by the ruling itself; no further approval needed to start.
 - 2026-09-17T06:40:06+0200 — COMPLETE by main session (owner standing permission 2026-09-03). ruling recorded; boxes 1-6 landed in 3.5.1; real-subagent survival test added.
+2026-09-17T07:02:23+0200 — hygiene pass: recording both owner rulings verbatim for the record. R2 verbatim (owner, ~15:52): "for automatic compaction, there is no need of summarization or handoff, the harness does this automatically! ... the janitor must only ensure continuity nudging the agent to resume his previous tasks." R3 verbatim (owner, ~16:05): "instead the janitor must preserve the subagents and restore only the skills active, not the various files opened in the previous session." Both rulings: status quo recorded; owner to confirm or reopen.
+2026-09-17T07:02:40+0200 — box-2 evidence: dde5acff introduces CLAUDE_PLUGIN_OPTION_CLEAR_AT_PCT, the turn-boundary /clear trigger, in scripts/hooks/on-stop-token-meter.py.
 
 ## ⏵ STATE
 

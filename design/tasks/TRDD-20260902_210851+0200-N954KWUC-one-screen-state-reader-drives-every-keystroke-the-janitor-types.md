@@ -3,7 +3,7 @@ trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
 column: blocked
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-16T23:09:25+0200
+updated: 2026-09-17T07:08:10+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -182,3 +182,7 @@ real capture. Phase 2 should treat these as best-effort until validated live —
 report's "Open items" section.
 
 ## Notes and lessons learned
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+2026-09-17T00:00:00+0200 — box 4, rotation half re-confirmed machine-wide: every rotation_landed line in every project's .janitor/logs/pane-policy.log ends 'observed working' or 'observed awaiting_user', never 'observed idle' — e.g. /Users/emanuelesabetta/ai-maestro/.janitor/logs/pane-policy.log:2 (observed working) and /Users/emanuelesabetta/Code/tldr-code/.janitor/logs/pane-policy.log:1 (observed awaiting_user). Box 4 asks for idle OR working with no human keystroke, so 'observed working' satisfies the rotation half. Box 4 stays UNTICKED (one box, two halves): the no-headroom half still waits on EHT TRDD-8P4BNY5J (model-fallback's NO_HEADROOM keystrokes routed through pane_actuate — a live spent-window episode after the next release, carrying commit 0e8b97c9). Column stays blocked on 8P4BNY5J.

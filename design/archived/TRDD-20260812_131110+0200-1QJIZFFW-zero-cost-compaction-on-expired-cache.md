@@ -3,7 +3,7 @@ trdd-id: 1QJIZFFW
 title: Zero-cost compaction whenever the prompt cache is expired — wire the llm-externalizer CLI into the existing external-clear scaffold
 column: complete
 created: 2026-08-12T13:11:10+0200
-updated: 2026-09-17T06:06:14+0200
+updated: 2026-09-17T07:02:36+0200
 current-owner: janitor-main-session
 task-type: feature
 scope: project
@@ -593,6 +593,7 @@ deliberately, because today it means nothing either way.
 2026-09-17 — unblocked (BDZG8Y8A complete/archived, blocked-by was stale) and closed: all 5 acceptance boxes satisfied per STATE above. Approved by main session (owner standing permission 2026-09-03).
 - 2026-09-17T05:53:20+0200 — COMPLETE by main session (owner standing permission 2026-09-03). All 5 acceptance boxes verified [x]; box 5 confirmed via code read of external_handoff_clear.py + live report 20260917_042225+0200-handoff-clear-verify.md (VERIFY_AFTER 4 PASS 0 FAIL 1 SKIP)..
 2026-09-17T06:00:00+0200 — verified AUTOMATED: idle-clear-fired.ts/clear-observed.ts @ 04:07:34/37, external_handoff_clear.py's --phase before snapshot, and the automated post-clear resume cue (dispatch.log 04:22:18 'post-clear resume cue emitted') carried --phase after, producing handoff-clear-verify.json with both before/after keys — 4 PASS/0 FAIL/1 SKIP. Box 5 satisfied on an automated cycle; closure stands. Report: reports/continuity-build/20260917_042225+0200-handoff-clear-verify.md — main session (owner standing permission 2026-09-03)
+2026-09-17 — R3 recorded on TRDD-7MGJYLY5: the active-waiting veto this card's body describes is superseded by the bounded defer in dde5acff (clear deferred while an agent is live, proceeds past CLAUDE_PLUGIN_OPTION_CLEAR_CEILING_PCT with agents named for re-attachment).
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 

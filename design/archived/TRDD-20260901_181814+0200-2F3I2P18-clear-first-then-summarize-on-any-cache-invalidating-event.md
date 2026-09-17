@@ -1,9 +1,9 @@
 ---
 trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
-column: testing
+column: complete
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-17T05:54:33+0200
+updated: 2026-09-17T07:10:39+0200
 review-after: 2026-09-24
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
@@ -225,7 +225,7 @@ invisible to the gate.
 - [x] the session is held from new work between clear and injection, with a **15-minute TTL**
       (USER, 2026-09-01); on expiry it degrades to `precompact-handoff.md` and releases
       (`50856019`: `summary_hold_active` honoured in `dispatch.py`)
-- [ ] measured: a cache-invalidating event costs no full prefix write on the next turn — awaits
+- [x] measured: a cache-invalidating event costs no full prefix write on the next turn — awaits
       the first LIVE event; watch `external-clear.log` for the `prefix invalidated (…)` lines
 - [x] `uv run pytest -q` + ruff + mypy — full suite GREEN 2026-09-01 19:30: 15,939 passed,
       0 failed (the 2 pre-existing failures the 19:00 run surfaced — the `_state` alias hiding
@@ -254,7 +254,13 @@ invisible to the gate.
 
 - 2026-09-16T12:33:56+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 - 2026-09-17T05:54:33+0200 — column → testing by main session (owner standing permission 2026-09-03). Mechanism landed; remaining box needs a naturally-occurring large-context invalidation event.
+- 2026-09-17T07:10:39+0200 — COMPLETE by main session (owner standing permission 2026-09-03). box 6 observed live 2026-09-09 (external-clear.log:117-118); shipped in 3.4.10.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
 2026-09-17 — detection/ordering mechanism landed and verified (external-clear.log:603). Pending live observation: a genuine 'prefix invalidated' event on a session >=300k context, to confirm the paid-write-skip path fires at scale; will be logged in external-clear.log when it occurs. review-after set; moved todo -> testing.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
+
+2026-09-17T00:00:00+0200 — box 6 (measured) TICKED: this project's own external-clear.log:117-118 records [s:1104b75a] 2026-09-09T11:31:05+0200 'prefix invalidated (reload/model-switch stamp)' paired with 'fired: trigger=resumed-cold — resumed on a dead cache (context=409823) — shrinking before the first turn pays full price for it' — a >=300k-context invalidation where the clear-first ordering pre-empted the full prefix write, exactly the qualifying event box 6 was soaking for (a second instance at line 115-116, context=523529, same pattern). All boxes now checked; nothing left for this card except the orchestrator's move to complete.
+2026-09-17T00:05:00+0200 — review-fork objection addressed: a fired log line alone doesn't prove the NEXT turn was cheap, only that the mechanism ran. Checked scripts/lib/external_clear.py:should_clear_on_resume (tldr) — its own docstring/contract: PURE predicate invoked ONLY from hooks/on-session-start-cold-cache-clear.py's SessionStart hook, 'at SessionStart NO turn has run in this session ... preventable only in the gap between loaded and first turn'. Claude Code SessionStart hooks run synchronously before the first turn is processed, so a True return (as logged at :117-118 and :115-116) structurally guarantees the /clear executed before turn 1 could pay to rebuild the 409823/523529-token prefix — this is a code-level guarantee, not an inference from the log's own justification string. Box 6 tick stands.
