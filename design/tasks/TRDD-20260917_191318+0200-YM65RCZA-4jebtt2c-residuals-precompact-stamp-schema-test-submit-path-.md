@@ -1,9 +1,9 @@
 ---
 trdd-id: YM65RCZA
 title: 4JEBTT2C residuals - PreCompact stamp schema test, submit-path still_wanted citation, stamp-name literal, private cross-module reader
-column: backburner
+column: testing
 created: 2026-09-17T19:13:18+0200
-updated: 2026-09-17T19:13:18+0200
+updated: 2026-09-17T20:36:03+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: refactor
@@ -23,3 +23,4 @@ approval-datetime: 2026-09-17T19:13:18+0200
 ## Approval log
 
 - 2026-09-17T19:13:18+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-09-17T20:00:00+0200 — worker (this session) implemented items 1, 2, 4 (item 3 owned by TRDD-PH8SAQKS worker, scripts/compact_trigger.py). Files: scripts/lib/terminal_trigger.py (rename _read_landed_stamp -> read_landed_stamp + a why-commented backward-compat alias `_read_landed_stamp = read_landed_stamp`), tests/test_precompact_last_trigger_stamp_schema.py (new — runs the real pre-compact-handoff.py writer end-to-end and asserts read_landed_stamp parses its written_at exactly), tests/test_terminal_trigger_readback.py (new test test_already_typed_branch_is_ALSO_cancelled_by_still_wanted — item 2: cited scripts/lib/terminal_trigger.py:935-940 (still_wanted checked unconditionally at loop top, before the pane read at :955 that decides already_typed at :984) as ALREADY covering the already-typed submit branch, no code fix needed, only a test). Gate: 121 passed 1 skipped (pytest tests/test_terminal_trigger.py tests/test_terminal_trigger_readback.py tests/test_precompact_last_trigger_stamp_schema.py -q); ruff check scripts tests -> All checks passed; mypy scripts/ --ignore-missing-imports -> Success: no issues found in 504 source files; pyright scripts/lib/terminal_trigger.py + the 3 test files -> 0 errors, 0 warnings, 0 informations. Reconciliation note for the TRDD-PH8SAQKS worker: scripts/compact_trigger.py:236 calls terminal_trigger._read_landed_stamp(...) -- still works via the alias; update to read_landed_stamp when that worker's own edit lands, then the alias may be deleted.

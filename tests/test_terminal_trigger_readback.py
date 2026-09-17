@@ -1352,3 +1352,49 @@ def test_the_confirm_is_bounded_and_never_presses_enter_on_other_text() -> None:
         is_typing=lambda _t: False, sleeper=lambda _s: None, clock=lambda: 0.0,
     )
     assert ok and sent == ["Enter"] * (1 + tt._SUBMIT_CONFIRM_ATTEMPTS)
+
+
+# --- TRDD-YM65RCZA item 2: `still_wanted` also gates the "already sitting in the field"
+# submit branch, not just the type path -------------------------------------------------
+
+
+def test_already_typed_branch_is_ALSO_cancelled_by_still_wanted() -> None:
+    """The card's guard-3 test (`test_a_timeout_followed_by_a_landed_compaction_cancels...`
+    above) only exercises the branch where THIS call types the command itself. This pins the
+    OTHER branch: the field already shows our command on entry (an earlier run's Enter never
+    took), so `already_typed=True` and `type_fn()` is skipped entirely
+    (terminal_trigger.py:984-992) — the field could otherwise go straight to Enter
+    (terminal_trigger.py:1032-1043) without this call ever having re-checked the condition
+    itself.
+
+    It does NOT need a separate check bolted onto that branch: `still_wanted` is asked
+    UNCONDITIONALLY at the top of every loop iteration (terminal_trigger.py:935-940), strictly
+    BEFORE the pane is even read (terminal_trigger.py:955) — so the already-typed path can only
+    be reached in an iteration where `still_wanted` already said yes. Proven here by making
+    `still_wanted` say NO on the very first call, with a reader that would otherwise submit
+    immediately (the field already shows exactly our command): `type_fn` never runs (not even
+    reached) and Enter is never sent."""
+    typed: list[str] = []
+    sent: list[str] = []
+    reads: list[str] = []
+
+    def _reader(_t=None):
+        reads.append("read")
+        return _pane("/compact")  # our command already sitting in the field on entry
+
+    def _still_wanted():
+        return False, "possibly-delivered: a compaction landed before this call even started"
+
+    ok, why = tt.inject_until_sent(
+        {"kind": "tmux", "pane": "%1"}, "/compact",
+        type_fn=lambda: typed.append("typed"), submit_fn=lambda: sent.append("Enter"),
+        clear_fn=lambda: None,
+        reader=_reader, is_typing=lambda _t: False,
+        sleeper=lambda _s: None, clock=lambda: 0.0,
+        still_wanted=_still_wanted,
+    )
+    assert ok is False
+    assert "possibly-delivered" in why
+    assert typed == [], "type_fn must not run — the cancel fires before the already-typed check"
+    assert sent == [], "the pre-existing field text must never be submitted once cancelled"
+    assert reads == [], "the pane is never even read once still_wanted says no"

@@ -1750,7 +1750,7 @@ def _stamp_self_sent(stamps: Path, command: str, now: float) -> None:
     os.replace(tmp, stamps)
 
 
-def _read_landed_stamp(path: Path, kind: str) -> float:
+def read_landed_stamp(path: Path, kind: str) -> float:
     """Read ONE `abort_if_landed` stamp as an epoch float, per `kind`. Never raises — an
     unreadable/absent/malformed stamp reads as 0.0 (never NEWER than a real baseline), the same
     fail-direction `state.read_int_state` already uses for `last-compact.ts` elsewhere in this
@@ -1772,6 +1772,12 @@ def _read_landed_stamp(path: Path, kind: str) -> float:
         value = data.get("written_at")
         return float(value) if isinstance(value, (int, float)) else 0.0
     return float(state.read_int_state(path, 0))
+
+
+# TRDD-YM65RCZA item 4: kept as a private alias — compact_trigger.py still imports the
+# underscore name (its own rename is owned by a parallel worker on TRDD-PH8SAQKS); remove
+# once that caller lands on the public name.
+_read_landed_stamp = read_landed_stamp
 
 
 def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time.sleep) -> int:
@@ -1838,7 +1844,7 @@ def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time
 
     def _landed_guard() -> tuple[bool, str]:
         for path, baseline, kind in landed_specs:
-            current = _read_landed_stamp(Path(path), kind)
+            current = read_landed_stamp(Path(path), kind)
             if current > baseline:
                 return False, (
                     f"possibly-delivered: {kind} stamp {path} landed at {current} "
