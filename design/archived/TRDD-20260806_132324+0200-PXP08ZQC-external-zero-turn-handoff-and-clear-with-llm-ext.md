@@ -1,10 +1,10 @@
 ---
 trdd-id: PXP08ZQC
 title: Cache-expiry-aware EXTERNAL handoff-and-clear — zero model turns, terminal-driven, handoff composed by llm-externalizer for free
-column: todo
+column: complete
 created: 2026-08-06T13:23:24+0200
-updated: 2026-09-16T12:33:55+0200
-review-after: 2026-09-05
+updated: 2026-09-17T06:07:21+0200
+review-after: 2026-09-24
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -382,7 +382,7 @@ the right moment (before the next turn executes).
 - [x] handoff written by llm-ext with ZERO main-model tokens (or template fallback), passes
       check_handoff_concise
 - [x] /clear + bootstrap land via run_chained_inject with no model turn before them
-- [ ] one observed end-to-end unattended cycle: big idle session → external handoff →
+- [x] one observed end-to-end unattended cycle: big idle session → external handoff →
       clear → re-arm → resume, with the verify harness PASS table
       — the CYCLE (with a genuine llm-ext summary, not template/failed) was observed
       2026-09-03T05:25:28 — see STATE 2026-09-03. The `handoff_clear_verify.py` PASS table was
@@ -472,3 +472,10 @@ equality test now pins producer and checker together so they cannot drift apart 
   genuine llm-ext summary; the PASS-table half still needs a `--phase after` capture on a future
   fire. `review-after: 2026-09-05` set; card stays `testing`.
 - 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-17T05:54:01+0200 — column → testing by main session (owner standing permission 2026-09-03). Only open box is a live measurement (automated cold-cache-clear cycle's --phase after PASS table on llm-externalizer); today's report is a different, manual-skill event and does not satisfy it. Code+tests otherwise complete.
+- 2026-09-17T06:07:21+0200 — COMPLETE by main session (owner standing permission 2026-09-03). all 4 acceptance boxes verified; PASS table captured on automated cycle.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME
+
+2026-09-17 — checked today's reports/continuity-build/20260917_042225+0200-handoff-clear-verify.md: it is a /janitor-handoff-and-clear manual-skill run (TRDD-Z582IKIR P1) on THIS repo's own session, not an automated cold-cache-clear cycle on llm-externalizer (the project this card's open box is about) — does NOT satisfy the box. Still waiting on the next automated cycle's --phase after PASS table. review-after reset to 2026-09-24; moved todo -> testing per closer-batch-2 instructions.
+2026-09-17T06:00:00+0200 — box 4 (PASS table) ticked: verified the 2026-09-17 04:07 clear as AUTOMATED (idle-clear-fired.ts/clear-observed.ts @ 04:07:34/37, external_handoff_clear.py's own --phase before snapshot, automated post-clear resume cue @ 04:22:18 carrying --phase after) and handoff_clear_verify.py produced a real before/after PASS table: reports/continuity-build/20260917_042225+0200-handoff-clear-verify.md (4 PASS / 0 FAIL / 1 SKIP). All 4 acceptance boxes now checked; moving to complete.

@@ -3,7 +3,7 @@ trdd-id: HK7IZ21Z
 title: Failure-class detector — warn on fseventsd/mds/any process RAM-CPU runaway + disk pressure
 column: complete
 created: 2026-07-03T06:46:53+0200
-updated: 2026-08-14T20:07:00+0200
+updated: 2026-09-17T05:52:03+0200
 implementation-commits: [fe2c68e1]
 current-owner: janitor-session
 assignee: null
@@ -19,7 +19,7 @@ delivery: direct-push
 target-branch: main
 test-requirements: [unit, lint]
 review-requirements: []
-implementation-commits: []
+derived: true
 ---
 
 # TRDD-HK7IZ21Z — system-daemon runaway detector (the fseventsd-class safety net)
@@ -108,3 +108,7 @@ box-counting audit. These record what was actually built and verified in
       remaining grouped-list reconciliation is split out as **TRDD-IEW2K659** rather
       than absorbed here — documenting 33 detectors is a curator pass, not part of
       shipping one detector.
+
+## Approval log
+
+- 2026-09-17T05:52:03+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Already column: complete in frontmatter, never archived (board-invisibility bug: legacy STATE picker). Detector-roster acceptance box satisfied by TRDD-IEW2K659 complete + roster page documenting 73 detectors. Archival git-mv only..

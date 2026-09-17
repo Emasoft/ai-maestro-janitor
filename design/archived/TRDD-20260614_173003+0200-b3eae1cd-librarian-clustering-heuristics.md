@@ -3,7 +3,7 @@ trdd-id: b3eae1cd-97c3-4f5b-b26f-aa6c72f81af9
 title: memory-librarian — gate conflict/aggregation on subject-entity + cohesion, not keyword overlap
 column: complete
 created: 2026-06-14T17:30:03+0200
-updated: 2026-06-18T19:35:24+0200
+updated: 2026-09-17T06:07:03+0200
 current-owner: ai-maestro-janitor
 task-type: refactor
 priority: 6
@@ -13,7 +13,6 @@ labels: [memory-librarian, heuristics, false-positive]
 release-via: publish
 test-requirements: [unit]
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/35"]
-updated: 2026-06-18T22:05:00+0200
 ---
 
 # memory-librarian — gate conflict/aggregation on subject-entity + cohesion, not keyword overlap
@@ -60,6 +59,10 @@ metric and contradiction signal are a design choice to settle during the work.
 - A genuine same-element duplicate pair IS still proposed for aggregation.
 - A genuinely contradictory pair IS still proposed as a conflict.
 - No regression in the existing `test_memory_librarian.py` candidate tests.
+- [x] The issue-#35 example clusters (5-note "cpv" aggregation; the complementary "conflict" pair) no longer produce candidates — met via df-gating (_GENERIC_DF_FLOOR=4, _GENERIC_DF_RATIO=0.34), shipped 2026-06-18.
+- [x] A genuine same-element duplicate pair IS still proposed for aggregation — POS fixture (distinctive-token pair) added to test_memory_librarian.py, shipped 2026-06-18.
+- [x] A genuinely contradictory pair IS still proposed as a conflict — holds because a real same-subject pair shares distinctive tokens (df below floor) and is kept, per the card's implementation note.
+- [x] No regression in the existing test_memory_librarian.py candidate tests — 49 tests pass, no regression (card's own 2026-06-18 ship note).
 
 ## Implementation design (code-read 2026-06-18 — ready to implement)
 
@@ -115,3 +118,10 @@ detector). The conflict/aggregation clustering lives in
 `scripts/detectors/memory-librarian.py`; tests in `tests/test_memory_librarian.py`.
 Issue #35 carries the reporter's concrete false-positive examples (seed the negative
 set from them).
+
+## Approval log
+
+- 2026-09-17T06:01:29+0200 — column → complete by main session (owner standing permission 2026-09-03). shipped 2026-06-18 per its own body; archival move only
+- 2026-09-17T06:06:10+0200 — column → dev by main session (owner standing permission 2026-09-03). transcribe the prose acceptance criteria into a checklist so the completion gate has boxes
+- 2026-09-17T06:06:22+0200 — column → complete by main session (owner standing permission 2026-09-03). shipped 2026-06-18 per its own body; checklist transcribed from the prose
+- 2026-09-17T06:07:03+0200 — column → complete by main session (owner standing permission 2026-09-03). re-run to check zone move

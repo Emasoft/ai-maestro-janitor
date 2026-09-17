@@ -1,9 +1,9 @@
 ---
 trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
-column: todo
+column: testing
 created: 2026-09-04T18:48:19+0200
-updated: 2026-09-16T12:33:56+0200
+updated: 2026-09-17T06:07:31+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -17,6 +17,7 @@ npt: []
 eht: []
 implementation-commits: []
 external-refs: [TRDD-PXP08ZQC, TRDD-1QJIZFFW, TRDD-2F3I2P18]
+review-after: 2026-09-24
 ---
 
 # Compacted sessions are neither woken nor told a handoff exists
@@ -214,7 +215,7 @@ trading that away.
 
 ## Acceptance criteria
 
-- [ ] A session that AUTO-compacts has the handoff in its context without any nudge firing.
+- [ ] ~~A session that AUTO-compacts has the handoff in its context without any nudge firing.~~ OUT OF SCOPE for this card — split to `TRDD-OES0NN3F` (2026-09-08 STATE entry directed this strike, done 2026-09-17 by board-drain worker).
 - [x] An attended pane still receives no keystroke during the grace window, but does receive
       the push once the pane goes quiet.
 - [ ] Both verified from the logs on a real compaction, not only by unit test.
@@ -233,3 +234,15 @@ trading that away.
 
 - 2026-09-05T10:38:00+0200 — APPROVED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal): the deferred-push change (defer ~60 s instead of cancelling when the pane is attended). It preserves the no-typing-under-live-fingers floor that the rejected alternative (shrinking `_PROMPT_WINDOW_S`) would have weakened, and it answers the one hard number on the card — 63 of 115 push decisions SUPPRESSED, measured directly. The trigger-attributed split (auto 66% / manual 38%) stays INDICATIVE, as the card itself labels it, and does not bear on the approval. Column restored to `todo`; this is now startable code work.
 - 2026-09-16T12:33:56+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-17T05:51:26+0200 — column → testing by board-drain-worker. GAP 1 fix (deferred push, TRDD-74AA4PAL) already landed in ff6a7810 and is unchanged by every later compaction commit (a96f7ef1, f07f7ed0, c1bcf97a, 5efa8d82) verified via git log; tests/test_post_compact_resume_hook.py 34/34 pass this session; remaining work is an observation (live confirmation the deferred push actually wakes a session) plus GAP 2 tracked separately under OES0NN3F
+- 2026-09-17T05:53:44+0200 — column → todo by board-drain-worker. revert my own testing move (adversarial review + full-text re-read via git show found what trddgrep show truncates): acceptance box 3 requires 'verified from the logs on a real compaction, not only unit test' — a live observation, not something this bounded session did or can claim. The board's own 2026-09-16 triage already reverted an identical premature testing->todo for the same reason (7-13 days idle in testing); reclaiming testing now without anyone positioned to watch a real compaction would repeat that exact mistake.
+- 2026-09-17T06:07:31+0200 — column → testing by main session (owner standing permission 2026-09-03). GAP 1 fix (ff6a7810) shipped in 3.4.15; boxes 2/4 ticked, box 1 struck; box 3 parked pending a live auto-compaction observation
+
+## STATE
+
+2026-09-17T05:51:06+0200 — worker: verified GAP 1 fix (TRDD-74AA4PAL, commit ff6a7810) is landed and CURRENT — post-compact-resume.py::_maybe_push_resume (:374-407) defers the push via _defer_push/_run_deferred_recheck instead of dropping it when the pane is attended; unchanged by a96f7ef1/5efa8d82/c1bcf97a/f07f7ed0 (none touch post-compact-resume.py, confirmed via git log). tests/test_post_compact_resume_hook.py: 34/34 pass (uv run pytest, this session), including test_deferred_recheck_pushes_once_pane_goes_idle/_gives_up_past_bound/_moot_when_flag_already_consumed. No code change made — none needed. GAP 2 (OES0NN3F) question answered in report, OES0NN3F itself not touched. trddgrep show <id> truncates this card's STATE+body to 37 of 235 lines (both with and without --design-body) — could not read the acceptance-criteria checklist to tick specific boxes; flagging as adjacent tooling defect, not fixed (out of scope).
+2026-09-17T05:54:33+0200 — CORRECTION to my own prior entry above: I initially moved this card to testing on the strength of code+tests alone, without having read the acceptance criteria (trddgrep show truncates them). Adversarial review flagged that as a guess dressed as a classification. I then read the full card via 'git show HEAD:<path>' (git is tool-only-exempt) and confirmed: box 2 (defer on attendance) and box 4 (gates clean) were ALREADY CHECKED by a prior session; box 1 (inject handoff without a nudge) is OES0NN3F's scope per the 2026-09-08 entry above, and I struck it accordingly; the ONLY remaining box is box 3, 'verified from the logs on a real compaction, not only by unit test' — a live observation nobody in this bounded session performed. Reverted the column back to todo: the 2026-09-16 entry above already reverted an identical premature testing column for the exact same reason (idle 7-13 days with nobody watching a real compaction), and re-claiming testing now without such an observation in hand would repeat that mistake. Next session: watch post-compact-resume.log across a real auto-compaction on an attended-then-idle pane, confirm a fired (not just deferred) push line, then check box 3 and move to testing.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME
+
+2026-09-17T06:00:00+0200 — code shipped in 3.4.15; box 3 is a live observation of post-compact-resume.log on a real auto-compaction; parked.
