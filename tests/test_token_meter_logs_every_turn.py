@@ -146,6 +146,20 @@ def _run_hook(project: Path, transcript: Path) -> list[dict]:
     return [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
+def _read_kind_log(project: Path) -> list[dict]:
+    """The TRDD-NEVQOHGS box-3 sidecar `.janitor/state/token-meter-kind.jsonl`
+    the hook writes ONLY for a heartbeat turn whose stub printed a bare
+    `[janitor-<kind>]` token line."""
+    log = project / ".janitor" / "state" / "token-meter-kind.jsonl"
+    if not log.is_file():
+        return []
+    return [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+def _tool_result_with(text: str) -> str:
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": text}]}})
+
+
 class TestEveryTurnIsLogged(unittest.TestCase):
     def test_a_user_turn_is_logged_and_tagged_interactive(self) -> None:
         """A user-typed turn (e.g. /janitor-arm) IS metered, tagged heartbeat=False.
@@ -177,6 +191,74 @@ class TestEveryTurnIsLogged(unittest.TestCase):
 
             self.assertEqual(len(records), 1)
             self.assertIs(records[0]["heartbeat"], True)
+
+
+class TestFireKindSidecar(unittest.TestCase):
+    """TRDD-NEVQOHGS box 3: the hook writes `token-meter-kind.jsonl` for a heartbeat
+    fire, joined to its token-meter.jsonl record by the SAME `ts` (never a key on the
+    pinned record itself, TRDD-ZCODD6YS)."""
+
+    def test_janitor_quiet_heartbeat_writes_sidecar_kind(self) -> None:
+        with TemporaryDirectory() as d:
+            project = Path(d)
+            t = project / "transcript.jsonl"
+            t.write_text(
+                "\n".join(
+                    [
+                        _user(_HB),
+                        _assistant(_USAGE, tool=True),
+                        _tool_result_with("[janitor-quiet]\n"),
+                        _assistant(_USAGE),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            records = _run_hook(project, t)
+            kind_records = _read_kind_log(project)
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(len(kind_records), 1)
+            self.assertEqual(kind_records[0]["kind"], "quiet")
+            self.assertEqual(kind_records[0]["id"], records[0]["ts"], "sidecar must join on the SAME ts")
+
+    def test_janitor_memory_consolidate_heartbeat_writes_sidecar_kind(self) -> None:
+        with TemporaryDirectory() as d:
+            project = Path(d)
+            t = project / "transcript.jsonl"
+            t.write_text(
+                "\n".join(
+                    [
+                        _user(_HB),
+                        _assistant(_USAGE, tool=True),
+                        _tool_result_with("[janitor-memory-consolidate]\nSTATE_DIR=/x\n"),
+                        _assistant(_USAGE),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            records = _run_hook(project, t)
+            kind_records = _read_kind_log(project)
+
+            self.assertEqual(len(kind_records), 1)
+            self.assertEqual(kind_records[0]["kind"], "memory-consolidate")
+            self.assertEqual(kind_records[0]["id"], records[0]["ts"])
+
+    def test_interactive_turn_writes_no_sidecar(self) -> None:
+        """An interactive (non-heartbeat) turn is metered but never kind-tagged."""
+        with TemporaryDirectory() as d:
+            project = Path(d)
+            t = project / "transcript.jsonl"
+            t.write_text("\n".join([_user(_USER), _assistant(_USAGE, tool=True)]) + "\n", encoding="utf-8")
+
+            records = _run_hook(project, t)
+            kind_records = _read_kind_log(project)
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(kind_records, [], "an interactive turn must never write a fire-kind sidecar line")
 
 
 class TestRecordShape(unittest.TestCase):

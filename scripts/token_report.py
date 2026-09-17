@@ -129,6 +129,30 @@ def _heartbeat_week_line(beat_7d_weighted: int, price_per_mtok: float | None) ->
     return f"  janitor heartbeat: {_fmt_k(beat_7d_weighted)} weighted tokens this week on quiet fires (set CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK for a $ estimate)"
 
 
+def _render_weekly_summary(records: list[dict], now: int, as_json: bool) -> int:
+    """NEVQOHGS box 2+3: a plain (non-weighted) 7d HEARTBEAT-only token total, plus the
+    top-3 fire KINDS by summed cost, joined from the `token-meter-kind.jsonl` sidecar
+    (on-stop-token-meter.py's own kind detector; a fire predating that sidecar, or one
+    with no sidecar file at all, buckets as "unknown" -- see `token_meter.top_kind_totals`
+    docstring). Heartbeat-only, not "all turns" (review fix 2026-09-17): this is a report
+    on the JANITOR's own cost, so a user's own interactive coding turns must not inflate
+    it -- same rule `heartbeat_cost_7d` already enforces for the self-cost alarm."""
+    total = token_meter.weekly_total(records, now=now)
+    kind_map = token_meter.load_kind_map(_state_dir() / "token-meter-kind.jsonl")
+    top_kinds = token_meter.top_kind_totals(records, now=now, kind_map=kind_map)
+    if as_json:
+        print(json.dumps({"weekly_total_tokens": total, "top_kinds": top_kinds}, separators=(",", ":")))
+        return 0
+    print(f"[janitor-token-report] 7d total: {total} tokens (raw input+output, heartbeat/chore fires only)")
+    if top_kinds:
+        print("  top fire kinds by summed cost:")
+        for kind, cost in top_kinds:
+            print(f"    {kind:<20} {cost}")
+    else:
+        print("  (no per-record `kind` tag in the log yet -- nothing to rank)")
+    return 0
+
+
 def _project_dir() -> str:
     return os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
 
@@ -507,6 +531,7 @@ def main() -> int:
     ap.add_argument("--window", choices=("5h", "7d"), default=None, help="report exactly ONE subscription window (bounds from the live probe): the CURRENT window by default, the previous one with --last")
     ap.add_argument("--last", action="store_true", help="with --window: the LAST completed window instead of the current one")
     ap.add_argument("--graph", action="store_true", help="append cumulative + per-bucket-rate sparklines (this project's events) to the window/interval view")
+    ap.add_argument("--weekly-summary", action="store_true", help="TRDD-NEVQOHGS: print the plain (non-weighted) 7d token total + top fire kinds, instead of the full historical report")
     args = ap.parse_args()
 
     if args.window is not None:
@@ -526,6 +551,10 @@ def main() -> int:
 
     log_path = _state_dir() / "token-meter.jsonl"
     records = token_meter.load_log(log_path)
+
+    if args.weekly_summary:
+        return _render_weekly_summary(records, int(time.time()), args.json)
+
 
     if not records:
         if args.json:

@@ -210,9 +210,18 @@ def main() -> int:
         usage = token_meter.tail_turn_usage(transcript_path)
         if usage is not None:
             state.init_state()
+            # Same epoch reused for the sidecar write below -- it is the join key
+            # `top_kind_totals` matches a fire-kind tag back to its token-meter.jsonl
+            # record by (TRDD-NEVQOHGS box 3: the pinned schema forbids a `kind` field
+            # on the record itself, see token_meter.append_kind_log's docstring).
+            now_epoch = int(time.time())
             log_path = state.state_dir() / "token-meter.jsonl"
-            token_meter.append_log(log_path, usage, int(time.time()))
+            token_meter.append_log(log_path, usage, now_epoch)
             token_meter.trim_log(log_path)
+            if usage.is_heartbeat:
+                kind = token_meter.detect_fire_kind(transcript_path)
+                if kind is not None:
+                    token_meter.append_kind_log(state.state_dir() / "token-meter-kind.jsonl", now_epoch, kind)
     except Exception as exc:  # never let the meter break a turn's completion
         sys.stderr.write(f"[on-stop-token-meter] skipped ({exc})\n")
 

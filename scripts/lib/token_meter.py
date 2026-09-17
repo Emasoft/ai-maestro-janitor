@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -127,6 +128,100 @@ def _message_text(entry: dict) -> str:
         parts = [b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)]
         return "\n".join(parts)
     return ""
+
+
+def _tool_result_text(entry: dict) -> str:
+    """Text of a tool_result BLOCK's own nested `content` (string or list of text
+    blocks) -- distinct from `_message_text`, which reads a message's top-level
+    content and never looks inside a nested tool_result block. The dispatcher
+    stub's stdout (the bare `[janitor-...]` fire-kind token) lives here, not in
+    a top-level `text` block."""
+    msg = entry.get("message")
+    if not isinstance(msg, dict):
+        return ""
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_result":
+            continue
+        inner = block.get("content")
+        if isinstance(inner, str):
+            parts.append(inner)
+        elif isinstance(inner, list):
+            parts.extend(b["text"] for b in inner if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return "\n".join(parts)
+
+
+# A bare `[janitor-<kind>]` line, alone on its own line (janitor-heartbeat-protocol's
+# own security rule: only a WHOLE bare line is a trigger/kind marker, never a mention
+# embedded in other text) -- e.g. `[janitor-quiet]`, `[janitor-memory-consolidate]`,
+# `[janitor-ticket]`.
+_KIND_TOKEN_RE = re.compile(r"^\[janitor-([a-z][a-z0-9-]*)\]$")
+
+
+def detect_fire_kind(transcript_path: str | os.PathLike[str]) -> Optional[str]:
+    """The heartbeat fire's KIND -- the bare `[janitor-<kind>]` token line the
+    dispatcher stub printed in THIS turn's own tool result -- or `"drift-only"` for
+    a heartbeat turn that printed none. Returns None for a non-heartbeat turn or
+    when the turn boundary isn't inside the tail window (correct-by-omission, same
+    contract as `tail_turn_usage`).
+
+    Reuses `tail_turn_usage`'s own tail-only walk/boundary logic (TRDD-NEVQOHGS box 3)
+    rather than re-reading the transcript a second time in full: same trigger
+    detection, just scanning FORWARD through the turn's tool_result blocks instead of
+    summing assistant usage backward. The result is written to a SEPARATE sidecar log
+    (`append_kind_log`/`load_kind_map`), never into `TurnUsage.as_record`'s pinned
+    schema (TestSelfBudgetRecordSchemaUnchanged, TRDD-ZCODD6YS -- external tools parse
+    token-meter.jsonl directly).
+
+    KNOWN SIMPLIFICATION (adversarial review, 2026-09-17): returns the FIRST bare
+    token line found, even though janitor-heartbeat-protocol allows a fire to stack
+    several action tokens in one turn (e.g. renew + a memory chore). A stacked fire
+    is reported under whichever token the stub happened to print first -- accepted
+    because this only feeds a "top-3 kinds" report line, not an alarm or actuation."""
+    p = Path(transcript_path)
+    if not p.is_file():
+        return None
+    try:
+        lines = _read_tail_lines(p)
+    except OSError:
+        return None
+
+    entries: list[dict] = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            obj = json.loads(s)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            entries.append(obj)
+    if not entries:
+        return None
+
+    trigger_idx: Optional[int] = None
+    for i in range(len(entries) - 1, -1, -1):
+        entry = entries[i]
+        if entry.get("type") == "user" and not _is_tool_result(entry):
+            trigger_idx = i
+            break
+    if trigger_idx is None:
+        return None  # turn boundary not in the tail window -- omit rather than guess
+    if not _message_text(entries[trigger_idx]).lstrip().startswith(_HEARTBEAT_MARKER):
+        return None  # interactive turn -- no kind to tag
+
+    for entry in entries[trigger_idx + 1 :]:
+        if entry.get("type") != "user" or not _is_tool_result(entry):
+            continue
+        for raw_line in _tool_result_text(entry).splitlines():
+            m = _KIND_TOKEN_RE.match(raw_line.strip())
+            if m:
+                return m.group(1)
+    return "drift-only"
 
 
 def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsage]:
@@ -495,6 +590,56 @@ def append_log(log_path: str | os.PathLike[str], turn_usage: TurnUsage, now_epoc
         f.write(line)
 
 
+def append_kind_log(path: str | os.PathLike[str], ts: int, kind: str) -> None:
+    """Append one `{"id": ts, "kind": kind}` sidecar line for a heartbeat fire's KIND.
+
+    A SEPARATE file from token-meter.jsonl, never a new key on `TurnUsage.as_record`:
+    `TestSelfBudgetRecordSchemaUnchanged` pins that schema byte-identical because
+    external tooling (AgentLens) parses it directly (TRDD-ZCODD6YS). ``ts`` MUST be
+    the exact same epoch second the caller passed to `append_log` for this same
+    fire -- that shared `ts` is the join key `load_kind_map`/`top_kind_totals` use,
+    since neither log carries a message/turn id of its own.
+
+    KNOWN LIMITATION (adversarial review, 2026-09-17): ``ts`` is epoch-SECOND
+    resolution, not a guaranteed-unique id -- two Stop-hook fires in the SAME
+    project within the same wall-clock second (a rapid retry, or two janitor-armed
+    sessions sharing one project) collide, and `load_kind_map`'s plain `{ts: kind}`
+    dict silently last-write-wins, misattributing one fire's tokens to the other's
+    kind in the ranking. Accepted as a report-only risk (this feeds a "top-3 kinds"
+    display line, never an alarm or an actuation, and never corrupts `weekly_total`,
+    which sums independently of kind) rather than adding a real per-turn id the
+    pinned schema has no room for -- see `test_ts_collision_last_write_wins`."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": int(ts), "kind": str(kind)}, separators=(",", ":")) + "\n")
+
+
+def load_kind_map(path: str | os.PathLike[str]) -> dict[int, str]:
+    """`{ts: kind}` from the sidecar log, or `{}` when it's absent/unreadable/garbage --
+    a missing sidecar must never crash the report, only leave every fire "unknown"
+    (same fail-open contract as `load_log`)."""
+    p = Path(path)
+    if not p.is_file():
+        return {}
+    out: dict[int, str] = {}
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            obj = json.loads(s)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("id"), (int, float)) and isinstance(obj.get("kind"), str):
+            out[int(obj["id"])] = obj["kind"]
+    return out
+
+
 def trim_log(log_path: str | os.PathLike[str], *, keep_lines: int = 5000, max_bytes: int = 1_000_000) -> None:
     """Cap the append-only log: when it exceeds `max_bytes`, atomically rewrite
     it keeping only the last `keep_lines` records. Amortised-cheap — only rewrites
@@ -720,3 +865,63 @@ def summarize(records: list[dict], *, field: str = "output") -> Optional[dict]:
         "p95": _percentile(vals, 95),
         "max": vals[-1],
     }
+
+
+WEEKLY_WINDOW_S = 7 * 86400
+
+
+def weekly_total(records: list[dict], *, now: int, window_s: int = WEEKLY_WINDOW_S) -> int:
+    """Sum of raw input+output tokens across the janitor's OWN fires (heartbeat + chore)
+    whose ``ts`` falls in the trailing ``window_s`` (default 7d).
+
+    HEARTBEAT-ONLY -- same rule as ``heartbeat_cost_7d``: a record missing the
+    ``heartbeat`` key predates the D4 change that started logging interactive turns
+    too, so it defaults to True. Fixed in review (2026-09-17): the first cut of this
+    function summed EVERY record, so a user's own interactive coding turns inflated
+    "the janitor's own weekly cost" -- exactly the backwards-blame mistake
+    ``heartbeat_cost_7d``'s docstring already warns against for this file. RAW, not
+    weighted (TRDD-NEVQOHGS box 2): the owner asked how many tokens, not a relative
+    load index -- ``heartbeat_cost_7d`` already answers the weighted-cost question for
+    the self-cost alarm, this answers the plain-count question."""
+    lo = now - window_s
+    total = 0
+    for r in records:
+        if not isinstance(r, dict) or not r.get("heartbeat", True):
+            continue
+        ts = r.get("ts")
+        if not isinstance(ts, (int, float)) or not (lo <= int(ts) <= now):
+            continue
+        total += int(r.get("input", 0) or 0) + int(r.get("output", 0) or 0)
+    return total
+
+
+def top_kind_totals(
+    records: list[dict],
+    *,
+    now: int,
+    window_s: int = WEEKLY_WINDOW_S,
+    n: int = 3,
+    kind_map: Mapping[int, str] | None = None,
+) -> list[tuple[str, int]]:
+    """The top ``n`` HEARTBEAT/chore fire KINDS by summed raw input+output tokens in the
+    trailing window (same heartbeat-only filter as ``weekly_total`` -- see its docstring).
+
+    ``kind_map`` (from `load_kind_map`) joins each record to its fire kind BY ``ts`` --
+    the sidecar log, never a key on the record itself, because token-meter.jsonl's schema
+    is pinned byte-identical (TestSelfBudgetRecordSchemaUnchanged, TRDD-ZCODD6YS -- external
+    tools parse it directly) so ``kind`` cannot live there. A record whose ``ts`` has no
+    sidecar entry (missing sidecar file, or a fire that predates this feature) buckets as
+    "unknown" rather than being dropped, so ranking degrades gracefully instead of
+    crashing when the sidecar is absent (``kind_map=None``)."""
+    lo = now - window_s
+    km = kind_map or {}
+    totals: dict[str, int] = {}
+    for r in records:
+        if not isinstance(r, dict) or not r.get("heartbeat", True):
+            continue
+        ts = r.get("ts")
+        if not isinstance(ts, (int, float)) or not (lo <= int(ts) <= now):
+            continue
+        kind = km.get(int(ts), "unknown")
+        totals[kind] = totals.get(kind, 0) + int(r.get("input", 0) or 0) + int(r.get("output", 0) or 0)
+    return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:n]

@@ -42,6 +42,13 @@ def _tool_result() -> str:
     return json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
 
 
+def _tool_result_with(text: str) -> str:
+    """A tool-result entry whose own `content` is `text` -- the shape the
+    dispatcher stub's stdout arrives in (nested inside the tool_result block,
+    not a top-level `text` block)."""
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": text}]}})
+
+
 _HB = "[janitor-heartbeat]\n/path/to/dispatcher-stub.py\nSurface stdout verbatim..."
 
 
@@ -524,6 +531,177 @@ class TestExhaustionLog(unittest.TestCase):
     def test_bad_path_never_raises(self):
         with TemporaryDirectory() as d:
             token_meter.append_exhaustion_event(d, {"ts": 1})  # d is a DIR → open() fails, swallowed
+
+
+
+
+class TestDetectFireKind(unittest.TestCase):
+    """TRDD-NEVQOHGS box 3: `detect_fire_kind` reads the bare `[janitor-<kind>]` token
+    line the dispatcher stub printed in a heartbeat turn's own tool result."""
+
+    def test_quiet_kind_detected(self):
+        with TemporaryDirectory() as d:
+            t = _write(
+                Path(d),
+                _user(_HB),
+                _assistant(text="", tool=True, usage={"input_tokens": 10, "output_tokens": 5}),
+                _tool_result_with("[janitor-quiet]\n"),
+                _assistant(text="ok", usage={"input_tokens": 1, "output_tokens": 1}),
+            )
+            self.assertEqual(token_meter.detect_fire_kind(t), "quiet")
+
+    def test_memory_consolidate_kind_detected(self):
+        with TemporaryDirectory() as d:
+            t = _write(
+                Path(d),
+                _user(_HB),
+                _assistant(text="", tool=True, usage={"input_tokens": 10, "output_tokens": 5}),
+                _tool_result_with("[janitor-memory-consolidate]\nSTATE_DIR=/x\n"),
+                _assistant(text="ok", usage={"input_tokens": 1, "output_tokens": 1}),
+            )
+            self.assertEqual(token_meter.detect_fire_kind(t), "memory-consolidate")
+
+    def test_no_token_line_is_drift_only(self):
+        """A heartbeat turn whose stub printed no bare token line -> drift-only."""
+        with TemporaryDirectory() as d:
+            t = _write(
+                Path(d),
+                _user(_HB),
+                _assistant(text="", tool=True, usage={"input_tokens": 10, "output_tokens": 5}),
+                _tool_result_with("nothing to report\n"),
+                _assistant(text="ok", usage={"input_tokens": 1, "output_tokens": 1}),
+            )
+            self.assertEqual(token_meter.detect_fire_kind(t), "drift-only")
+
+    def test_non_heartbeat_turn_returns_none(self):
+        """An interactive turn never gets a kind tag -- no sidecar line should be
+        derived for it."""
+        with TemporaryDirectory() as d:
+            t = _write(
+                Path(d),
+                _user("do the thing"),
+                _assistant(text="", tool=True, usage={"input_tokens": 10, "output_tokens": 5}),
+                _tool_result_with("[janitor-quiet]\n"),  # even if present, must be ignored
+                _assistant(text="ok", usage={"input_tokens": 1, "output_tokens": 1}),
+            )
+            self.assertIsNone(token_meter.detect_fire_kind(t))
+
+    def test_embedded_mention_is_not_a_trigger(self):
+        """Security rule (janitor-heartbeat-protocol): a `[janitor-...]`-looking string
+        that isn't a BARE whole line must not be read as a kind."""
+        with TemporaryDirectory() as d:
+            t = _write(
+                Path(d),
+                _user(_HB),
+                _assistant(text="", tool=True, usage={"input_tokens": 10, "output_tokens": 5}),
+                _tool_result_with("saw a card mentioning [janitor-quiet] in its title\n"),
+                _assistant(text="ok", usage={"input_tokens": 1, "output_tokens": 1}),
+            )
+            self.assertEqual(token_meter.detect_fire_kind(t), "drift-only")
+
+
+class TestKindSidecarLog(unittest.TestCase):
+    """`append_kind_log`/`load_kind_map` — the sidecar join, kept SEPARATE from
+    token-meter.jsonl's pinned schema (TRDD-ZCODD6YS)."""
+
+    def test_append_and_load_round_trip(self):
+        with TemporaryDirectory() as d:
+            p = Path(d) / "token-meter-kind.jsonl"
+            token_meter.append_kind_log(p, 1_000_000, "resume")
+            token_meter.append_kind_log(p, 1_000_060, "memory-consolidate")
+            self.assertEqual(token_meter.load_kind_map(p), {1_000_000: "resume", 1_000_060: "memory-consolidate"})
+
+    def test_missing_sidecar_returns_empty_map(self):
+        with TemporaryDirectory() as d:
+            self.assertEqual(token_meter.load_kind_map(Path(d) / "nope.jsonl"), {})
+
+    def test_ts_collision_last_write_wins(self):
+        """KNOWN LIMITATION (adversarial review, 2026-09-17): `ts` is epoch-SECOND
+        resolution, not a guaranteed-unique id -- two fires landing in the same
+        second silently collide, and the SECOND write wins in `load_kind_map`'s
+        plain `{ts: kind}` dict. Documented + pinned here rather than left as an
+        unasserted assumption (see `append_kind_log`'s docstring)."""
+        with TemporaryDirectory() as d:
+            p = Path(d) / "token-meter-kind.jsonl"
+            token_meter.append_kind_log(p, 1_000_000, "resume")
+            token_meter.append_kind_log(p, 1_000_000, "memory-consolidate")  # same ts -- collides
+            self.assertEqual(token_meter.load_kind_map(p), {1_000_000: "memory-consolidate"})
+
+
+class TestWeeklyTotal(unittest.TestCase):
+    """TRDD-NEVQOHGS box 2: the plain (non-weighted) 7d token total used by
+    `--weekly-summary` -- distinct from `heartbeat_cost_7d`, which is heartbeat-only
+    and weighted."""
+
+    def test_sums_two_fake_week_old_lines(self):
+        recs = [
+            {"ts": 1_000_000, "input": 100, "output": 50},
+            {"ts": 999_000, "input": 30, "output": 20},
+        ]
+        self.assertEqual(token_meter.weekly_total(recs, now=1_000_000), 200)
+
+    def test_outside_window_excluded(self):
+        recs = [
+            {"ts": 1_000_000, "input": 100, "output": 50},
+            {"ts": 1_000_000 - 8 * 86400, "input": 999, "output": 999},  # 8d old — outside 7d
+        ]
+        self.assertEqual(token_meter.weekly_total(recs, now=1_000_000), 150)
+
+    def test_empty_log_is_zero(self):
+        self.assertEqual(token_meter.weekly_total([], now=1_000_000), 0)
+
+    def test_garbage_records_skipped(self):
+        recs = [None, {"ts": "not-a-number", "input": 5, "output": 5}, {"ts": 1_000_000, "input": 10, "output": 10}]
+        self.assertEqual(token_meter.weekly_total(recs, now=1_000_000), 20)  # type: ignore[list-item]
+
+    def test_interactive_turns_excluded(self):
+        """Review fix (2026-09-17): the card is 'the janitor's own' cost, same rule as
+        `heartbeat_cost_7d` -- a user's own interactive coding turn must never inflate it."""
+        recs = [
+            {"ts": 1_000_000, "input": 10, "output": 10, "heartbeat": True},
+            {"ts": 1_000_000, "input": 10_000, "output": 10_000, "heartbeat": False},  # must NOT count
+        ]
+        self.assertEqual(token_meter.weekly_total(recs, now=1_000_000), 20)
+
+
+class TestTopKindTotals(unittest.TestCase):
+    """TRDD-NEVQOHGS box 3: ranks HEARTBEAT-only records (same filter as
+    `weekly_total`) by a fire kind joined from a SEPARATE `kind_map` (``{ts: kind}``,
+    what `load_kind_map` returns) -- never from a `kind` key on the record itself,
+    since the token-meter.jsonl schema is pinned byte-identical
+    (TestSelfBudgetRecordSchemaUnchanged, TRDD-ZCODD6YS) and cannot carry one. Each
+    fire gets its own `ts` here (real fires never share a second) so the join can
+    tell them apart."""
+
+    def test_ranks_three_distinct_kinds_by_summed_cost(self):
+        recs = [
+            {"ts": 1_000_000, "input": 10, "output": 10},  # resume: 20
+            {"ts": 999_999, "input": 5, "output": 5},  # resume: +10 = 30
+            {"ts": 999_998, "input": 100, "output": 100},  # memory-consolidate: 200
+            {"ts": 999_997, "input": 1, "output": 1},  # plain-quiet: 2
+        ]
+        kind_map = {1_000_000: "resume", 999_999: "resume", 999_998: "memory-consolidate", 999_997: "plain-quiet"}
+        top = token_meter.top_kind_totals(recs, now=1_000_000, kind_map=kind_map)
+        self.assertEqual(top, [("memory-consolidate", 200), ("resume", 30), ("plain-quiet", 2)])
+
+    def test_caps_to_n(self):
+        recs = [{"ts": 1_000_000 - i, "input": i, "output": 0} for i in range(5)]
+        kind_map = {1_000_000 - i: f"k{i}" for i in range(5)}
+        self.assertEqual(len(token_meter.top_kind_totals(recs, now=1_000_000, n=3, kind_map=kind_map)), 3)
+
+    def test_untagged_records_bucket_as_unknown(self):
+        """No `kind_map` at all (sidecar absent) -- every fire buckets as unknown
+        rather than crashing or being dropped."""
+        recs = [{"ts": 1_000_000, "input": 5, "output": 5}]
+        self.assertEqual(token_meter.top_kind_totals(recs, now=1_000_000), [("unknown", 10)])
+
+    def test_interactive_turns_excluded(self):
+        recs = [
+            {"ts": 1_000_000, "input": 5, "output": 5, "heartbeat": True},
+            {"ts": 1_000_000, "input": 999, "output": 999, "heartbeat": False},
+        ]
+        kind_map = {1_000_000: "resume"}
+        self.assertEqual(token_meter.top_kind_totals(recs, now=1_000_000, kind_map=kind_map), [("resume", 10)])
 
 
 if __name__ == "__main__":
