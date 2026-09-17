@@ -3,7 +3,7 @@ trdd-id: 4JEBTT2C
 title: context guard forced compact raced the harness auto-compact so two compactions ran 20 s apart
 column: testing
 created: 2026-09-17T18:26:26+0200
-updated: 2026-09-17T19:08:17+0200
+updated: 2026-09-17T19:19:04+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -49,3 +49,10 @@ priority: high
 - 2026-09-17T18:56:04+0200 — review fork on the dev->testing diff: (1) still_wanted is checked before typing, not atomic through Enter/submit, so possibly-delivered mitigates but does not fully eliminate the keystroke-race window inside inject_until_sent -- disclosed, not fixed (an atomic guard at the Enter step is out of scope for this card). (2) the 60s post-compact-resume.py debounce fails CLOSED (skips a legitimate second resume flag if two real compactions land within 60s), inverted from clear_trigger.py's fail-open asymmetry elsewhere in this codebase -- this is the literal behavior the dispatching card specified (skip the rewrite within 60s), so implemented as specified and disclosed as an accepted trade-off, not changed unilaterally. (3) reviewer asked whether the debounce could break the deferred-push re-arm chain (_defer_push / _run_deferred_recheck) -- verified NOT an issue: that path re-enters main() via the _DEFER_ARG argv branch (line 541), which returns before any debounce code runs (~line 611), so the two are independent. No code changes made as a result of this review; findings 1-2 are disclosed limitations, finding 3 is resolved as a non-issue by tracing the code. (janitor-main-session via lean-worker)
 - 2026-09-17T19:05:02+0200 — review round 2: guard now keys on the PreCompact stamp (compaction START) as well as last-compact.ts; guard 2 (never type /compact under autoCompactEnabled near the harness threshold) is NOT implemented — the race is narrowed, not removed; needs a threshold-aware design, own TRDD (janitor-main-session)
 - 2026-09-17T19:08:12+0200 — round 2 review fork on the abort_if_landed diff: verified written_at epoch format matches last-compact.ts (pre-compact-handoff.py:1151/1163, not the unrelated ISO written_at at line 872); disclosed two accepted residual risks (a corrupted/mid-write stamp reads as 0.0 -- safe direction, guarded by atomic_write; one precompact-last-trigger.json per project not per-session -- over-cancellation across sessions, safe direction); fixed a documentation-precision overstatement (still_wanted is re-asked once per inject_until_sent outer pass, not on the settle-poll's own bounded sub-iterations). No logic changes from this round of review. Gate re-run clean: 207 passed/1 skipped, ruff/mypy/pyright clean. (janitor-main-session via lean-worker)
+
+## Acceptance
+
+- [x] guard 1: terminal_trigger.py abort_if_landed threaded from compact_trigger.py's last-compact.ts baseline (tests/test_terminal_trigger.py, 2 new tests) — landed 5da508b8
+- [x] guard 3: compact_trigger.py's last-compact.ts baseline feeds abort_if_landed (tests/test_terminal_trigger.py) — landed 5da508b8
+- [x] guard 4: the queued /compact guard also keys on the PreCompact start stamp, both stamp paths come from state.state_dir() (post-compact-resume.py debounce, on-session-start.py marker dedupe; tests/test_terminal_trigger.py, tests/test_user_intent_interrupt.py) — landed 642e55fc
+- [ ] issue 306 does not reproduce live: needs guard 2 (TRDD-PH8SAQKS) and a compaction observed with no queued /compact re-run

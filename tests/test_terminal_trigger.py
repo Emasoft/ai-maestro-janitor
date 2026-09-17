@@ -343,6 +343,7 @@ def test_run_verified_send_cancels_on_the_precompact_stamp_alone(tmp_path):
     seen: list[tuple[bool, str]] = []
 
     def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+        assert still_wanted is not None
         seen.append(still_wanted())
         return (False, seen[-1][1]) if not seen[-1][0] else (True, "sent")
 
@@ -368,6 +369,7 @@ def test_run_verified_send_still_sends_when_no_compaction_landed(tmp_path):
     precompact.write_text('{"trigger": "auto", "written_at": 500.0}', encoding="utf-8")
 
     def fake_send(_terminal, command, *, esc_first, giveup_s, still_wanted=None):
+        assert still_wanted is not None
         ok, _why = still_wanted()
         assert ok is True
         return True, "sent"
