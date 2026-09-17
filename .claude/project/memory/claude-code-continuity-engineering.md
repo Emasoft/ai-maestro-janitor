@@ -26,7 +26,7 @@ CC docs verified 2026-07-18. The owner's standing directive: *"they must never s
 2. **Account rotation (PREVENTION — the load-bearing layer)** — a 429 only stalls a session
    for hours when every retry re-hits the same exhausted account. Window-ASYMMETRIC rotation
    thresholds (7d rejected only at 99, 5h at 97) guarantee a live rotation target:
-   [[oauth-rotation-renew-reauth]]; record: TRDD-P7WU40G9 §BUG 1.
+   [[oauth-rotation-renew-reauth-cascade]]; record: TRDD-P7WU40G9 §BUG 1.
 3. **Freeze recovery (UNSTICK)** — a session in the retry-watchdog "Retrying in Xm" wait is
    freed with ESC-ONLY injection (2 raw ESCs, zero text, zero Enter — anything typed BUFFERS
    and floods). Semantics: [[claude-code-esc-input-semantics]]; record: TRDD-P7WU40G9 §BUG 3.
