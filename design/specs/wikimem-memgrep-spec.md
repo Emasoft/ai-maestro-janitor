@@ -1500,7 +1500,7 @@ destination, rewriting definitions AND inline references together.
 leave a `[^N]` reference without its `[^N]:` definition; an uncited page-level lesson
 definition (`[^N]:` nothing cites) is a legal, normal shape — the Notes section is mandatory
 even when empty — and `MUST NOT` block the verb. Post-build re-proves the result
-reference-clean or writes nothing. A delete that removes the last atom citing a lesson is allowed: the definition stays as an uncited page-level lesson, and an atom-level verb MUST NOT remove a `[^N]:` definition from a page it leaves standing. Removing a whole page (`delete-mem-topic`) and merging two byte-identical lesson definitions into one on merge are not deleting knowledge. The one explicit opt-in is `delete-mem-atom --with-lessons` (WM-CLI-19): it deletes every `[^N]:` definition the removed atom references, refusing to write anything if any of those definitions is still cited by another atom left on the page. (GitHub issue 304, TRDD-RMX0IE72).
+reference-clean or writes nothing. A delete that removes the last atom citing a lesson is allowed: the definition stays as an uncited page-level lesson, and an atom-level verb MUST NOT remove a `[^N]:` definition from a page it leaves standing, except under the explicit `--with-lessons` opt-in below. Removing a whole page (`delete-mem-topic`) and merging two byte-identical lesson definitions into one on merge are not deleting knowledge. The one explicit opt-in is `delete-mem-atom --with-lessons`; its semantics are WM-CLI-19's. (GitHub issue 304, TRDD-RMX0IE72).
 
 `WM-MIG-05` **atomic-enough** — `migrate` builds BOTH new page texts in memory, proves them
 clean, then writes DEST first, SOURCE second. A crash between the two atomic writes leaves a
