@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=392b112ff010 generated=2026-09-09T12:23:45+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=96cce327b40a generated=2026-09-17T20:10:30+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -133,6 +133,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 **claude-code-continuity-engineering** — claude stalled overnight
 - [claude-code-continuity-engineering](.claude/project/memory/claude-code-continuity-engineering.md) — claude stalled overnight
   - [claude-code-continuity-settings](.claude/project/memory/claude-code-continuity-settings.md) — claude stopped on an api error instead of retrying
+  - [oauth-rotation-renew-reauth-cascade](.claude/project/memory/oauth-rotation-renew-reauth-cascade.md) — How the ROTATE
   - [claude-code-esc-input-semantics](.claude/project/memory/claude-code-esc-input-semantics.md) — how many ESC to unstick claude
   - [claude-code-plugin-rollout-staleness](.claude/project/memory/claude-code-plugin-rollout-staleness.md) — the fix is published but the bug keeps happening
 
@@ -167,8 +168,8 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [janitor-detector-and-hook-roster](.claude/project/memory/janitor-detector-and-hook-roster.md) — the janitor detector and hook roster split into parts
   - [janitor-detector-and-hook-roster-findings](.claude/project/memory/janitor-detector-and-hook-roster-findings.md) — how good are the scan_text rules
 
-**janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (73 registered)
-- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (73 registered)
+**janitor-detector-and-hook-roster-list** — full list of the janitor detectors by group (71 registered, marketplace-refresh retired 2026-09-17)
+- [janitor-detector-and-hook-roster-list](.claude/project/memory/janitor-detector-and-hook-roster-list.md) — full list of the janitor detectors by group (71 registered, marketplace-refresh retired 2026-09-17)
 
 **janitor-publish-pipeline** — publish blocked
 - [janitor-publish-pipeline](.claude/project/memory/janitor-publish-pipeline.md) — publish blocked
@@ -193,16 +194,15 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 
 **oauth-rotation-renew-reauth** — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
 - [oauth-rotation-renew-reauth](.claude/project/memory/oauth-rotation-renew-reauth.md) — How the janitor OAuth account rotator keeps a Claude Code session alive across N paid subscriptions — the ROT…
-  - [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
-  - [janitor-beat-tasks-and-limitations](.claude/project/memory/janitor-beat-tasks-and-limitations.md) — what is the heartbeat rate
-  - [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
-  - [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
+  - [oauth-rotation-renew-reauth-keychain](.claude/project/memory/oauth-rotation-renew-reauth-keychain.md) — Where the rotator's OAuth tokens and cookies actually live — the cross-platform safe-storage backends (macOS…
+  - [oauth-rotation-renew-reauth-operations](.claude/project/memory/oauth-rotation-renew-reauth-operations.md) — The rotator's exact CLI commands (rotator.py auto/tick/oauth-health/usage/list/switch, slot_capture_browser.p…
 
 **Other topics**
 - [agentlens-diagnostics-integration](.claude/project/memory/agentlens-diagnostics-integration.md) — should I switch a janitor detector to agentlensPro's window budget
 - [closing-a-card-changes-what-its-dependents-may-do](.claude/project/memory/closing-a-card-changes-what-its-dependents-may-do.md) — closing a TRDD broke another card's task
 - [feedback_peer_agent_consensus](.claude/project/memory/feedback_peer_agent_consensus.md) — Coordinating with the peer Claude agents (maintainer/manager plugins) on GitHub — seek consensus, never give…
 - [identify-environment-prober](.claude/project/memory/identify-environment-prober.md) — how does /janitor-identify-environment detect the environment
+- [janitor-beat-tasks-and-limitations](.claude/project/memory/janitor-beat-tasks-and-limitations.md) — what is the heartbeat rate
 - [janitor-daemon-bulk-lane](.claude/project/memory/janitor-daemon-bulk-lane.md) — oauth rotation missed
 - [janitor-has-no-off-switch-but-disarm](.claude/project/memory/janitor-has-no-off-switch-but-disarm.md) — can I add a pause
 - [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
@@ -213,6 +213,9 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [oauth-rotator-keychain-latch-false-positive-under-load](.claude/project/memory/oauth-rotator-keychain-latch-false-positive-under-load.md) — the janitor failed again to rotate
 - [plugin-cache-install-integrity](.claude/project/memory/plugin-cache-install-integrity.md) — the installed plugin is missing agents commands or hooks
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
+- [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
+- [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
+- [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
 - [review-fork-gate-when-to-spawn-and-when-not](.claude/project/memory/review-fork-gate-when-to-spawn-and-when-not.md) — the review-fork gate fires on every turn
 - [status-lines-to-autonomous-readers-cause-escalation](.claude/project/memory/status-lines-to-autonomous-readers-cause-escalation.md) — agents keep turning global maintenance back on by themselves
 <+-+-JANITOR-WIKIMEM-INDEX-END-(do-not-modify)-+-+>
