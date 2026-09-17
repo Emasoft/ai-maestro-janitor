@@ -2,7 +2,7 @@
 name: janitor-daemon-process-identity
 description: "the daemon keeps restarting every heartbeat / the iTerm Automation (TCC) grant will not stick / a healthy version got quarantined as crash-looping / which python interpreter runs the daemon and why it matters / which TREE the daemon runs from — a staged import closure, not the plugin cache / a daemon chore silently does nothing and logs done in 0s / tests pass but the feature is dead on the daemon / never subprocess an unstaged path, log deduped chore failures / 6 daemon kills in 7 minutes with zero exceptions logged / why does uv run mint a new interpreter every spawn / grep found zero lines in daemon.log — is the daemon really silent / where does the global daemon write its log file / what does the s: tag mean on a janitor log line / is this log line the daemon or a per-session shim / a healthy cached version was quarantined as crash-looping / how to tell daemon lines from session-shim lines in the log / quarantine.json says crash-loop but there is no traceback / uv python find returns the wrong interpreter path / the daemon restarts ping-pong between two cached versions / installed is not the same as running / is the fix live or just installed / restart to apply changes / I shipped the fix so the behaviour is fixed"
 ocd: 2026-08-06
-lmd: 2026-09-03
+lmd: 2026-09-17
 metadata:
   node_type: memory
   type: reference
@@ -82,7 +82,8 @@ The practical consequence: a daemon chore that reaches a repo path by FILENAME �
 (`state.py:166`) returns that override when set, so the daemon's log is
 `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/daemon.log`.
 A project's `<repo>/.janitor/logs/daemon.log` is written by the **per-session detector shims**
-(`detectors/version-update.py`, `detectors/marketplace-refresh.py`, …), never by the daemon.
+(`detectors/version-update.py`, `detectors/plugin-updates.py`, …; `detectors/marketplace-refresh.py`
+existed until its 2026-09-17 retirement, TRDD-5A4SGMD6), never by the daemon.
 
 So `grep -c chore-coordination <repo>/.janitor/logs/daemon.log` → 0 is **not** evidence the
 daemon never yielded. Measured 2026-08-06: that grep returned 0 while the real log held 9 such

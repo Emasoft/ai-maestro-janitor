@@ -2,7 +2,7 @@
 name: memory-system
 description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence / memgrep binary is stale on this host / another host reports lint errors I cannot reproduce / cargo install does not roll forward with the plugin update / memgrep refused my write because the atom is too big / can I raise the atom budget knob / add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached / does memgrep ever refuse a write outright / publish-globally-missing never drains / should I add publish-globally to repair_defect / widen a precheck predicate signature / scope=None suppresses a finding in a fail-open module / an argument whose failure mode has zero live instances / code implements a variant nothing exercises"
 ocd: 2026-06-13
-lmd: 2026-09-03
+lmd: 2026-09-17
 metadata:
   node_type: memory
   type: project
@@ -17,12 +17,14 @@ split-lineage: c89f02722a424b5385204031e5db35ce
 
 # The wiki-memory system (janitor functionality)
 
+^3H03LQKJ [desc:"the janitor owns the reference implementation of wikimem — the memgrep engine, the authoring/recall/update skills, two policing detectors, and the recall-discipline rule; this is the component page", keywords:what_is_the_wikimem_system who_owns_memgrep janitor_reference_implementation_of_memory does_this_plugin_own_the_memory_engine which_skills_police_the_wiki, ocd:2026-06-13, lmd:2026-06-13]
 The janitor **owns the reference implementation** of the markdown wiki-memory
 system — the engine (`memgrep`), the three authoring/recall/update skills, the
 two heartbeat detectors that police it, and the recall-discipline rule. Other
 plugins/projects adopt it; this page is the component page for that functionality
 as the janitor ships it.
 
+^FXYC463M [desc:"why the memory system exists: sessions are stateless across context windows, so a symptom-indexed markdown corpus + recall engine lets a session find prior answers; index by the QUESTION not answer", keywords:why_does_the_memory_system_exist why_index_by_symptom_not_answer sessions_are_stateless_across_context_windows what_problem_does_wikimem_solve index_by_the_question_not_the_answer, ocd:2026-06-13, lmd:2026-06-13]
 **Why:** sessions are stateless across context windows; a durable, symptom-indexed
 markdown corpus + a recall engine lets a future session find "have we hit this
 before?" instead of re-deriving (badly) what was already learned. The whole
@@ -30,6 +32,7 @@ discipline is "index by the QUESTION, not the answer" — a memory is found from
 the SYMPTOM (the user's words / the error text), and the note's body holds the
 fix.
 
+^5SDNO8W5 [desc:"how to apply the memory system: recall first before debugging/design/editing/memorizing, then memorize only non-obvious reusable facts and update non-destructively when a fact changes", keywords:how_do_i_use_the_memory_system_correctly when_should_i_recall_before_acting when_should_i_memorize_a_fact recall_before_debugging_or_design_decision update_non_destructively_when_fact_changes, ocd:2026-06-13, lmd:2026-06-13]
 **How to apply:** run RECALL before debugging a recurring problem, before a design
 decision, before editing a file in an unloaded area, and before MEMORIZE (so you
 update the right page instead of duplicating). Then MEMORIZE only what is

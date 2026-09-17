@@ -2,7 +2,7 @@
 name: janitor-skills-and-agents-roster
 description: "why did janitor-pause disappear / arm disarm is the only switch / what skills does the janitor ship / janitor-compact-context soft vs hard / janitor-reload-skills vs janitor-reload-plugins / what are the two janitor agents / janitor-memory-subconscious-agent vs janitor-security-agent / where do janitor tests and TRDDs live / why was maintenance mode removed / can I pause the janitor temporarily / a host had keep-going-off set for 14 days silently / why does a global stop delete the cron instead of silencing it / what does janitor-write-handoff do / how do I reload just non-plugin skills / why were the issues-watch on off skills deleted / how many janitor agents are there and what model do they use / what happened to janitor-maintenance-mode"
 ocd: 2026-08-02
-lmd: 2026-08-27
+lmd: 2026-09-17
 metadata:
   node_type: memory
   type: project
@@ -27,7 +27,8 @@ security fixes have real blast radius; opt out `CLAUDE_PLUGIN_OPTION_SECURITY_AG
 Memory agent `model: sonnet` (USER cost decision 2026-06-30), security agent `model: opus`; both `effort: high`.
 
 **Tests (`tests/`)** — pytest; one `test_*_patterns.py` per pattern lib + core tests
-(`test_marketplace_lock`, `test_rules_installer`, `test_marketplace_refresh_daemon_stale`, …).
+(`test_marketplace_lock`, `test_rules_installer`, …). (`test_marketplace_refresh_daemon_stale`
+was removed with the marketplace-refresh chore, 2026-09-17, TRDD-5A4SGMD6.)
 Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`CLAUDE_PROJECT_DIR`.
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
