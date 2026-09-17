@@ -401,9 +401,12 @@ def test_the_closed_loop_spends_exactly_one_capture_when_it_converges(monkeypatc
     reads: list[int] = []
     wedged = (_FIXTURES / "real-wedged-fable-limit.txt").read_text(encoding="utf-8")
     cleared = (_FIXTURES / "synthetic-idle-empty-field.txt").read_text(encoding="utf-8")
-    monkeypatch.setattr(
-        fleet_scan, "capture_pane_text", lambda _t: (reads.append(1), cleared)[1]
-    )
+
+    def _count_and_read(_t: str) -> str:
+        reads.append(1)
+        return cleared
+
+    monkeypatch.setattr(fleet_scan, "capture_pane_text", _count_and_read)
     _seam(monkeypatch)
     pre = ps.parse(wedged)  # the caller's OWN read, handed in — costs this loop nothing
     outcome = _act(pa.Event.ROTATION_LANDED, state=pre)
