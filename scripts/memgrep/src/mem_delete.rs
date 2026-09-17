@@ -610,6 +610,23 @@ mod tests {
         assert_eq!(footnote_integrity_violations(&r.text), Vec::<String>::new(), "result stays clean: {}", r.text);
     }
 
+
+    #[test]
+    fn delete_of_the_sole_citing_atom_keeps_the_lesson_as_uncited() {
+        // WM-MIG-04 (spec 2.1.0, TRDD-RMX0IE72): a delete that removes the ONLY atom citing a
+        // lesson is ALLOWED with --keep-lessons — the `[^N]:` definition survives as an uncited
+        // page-level lesson (the Notes section is mandatory even when empty), never deleted. No
+        // knowledge is lost, only its citation.
+        let text = "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                    ^foo [keywords: k]\nfoo fact.[^1]\n\n\
+                    ## Notes and lessons learned\n\
+                    [^1]: foo lesson.\n";
+        let r = compute_atom_delete(text, "foo", false, true).expect("--keep-lessons must succeed");
+        assert!(!r.text.contains("^foo"), "atom gone: {}", r.text);
+        assert!(r.text.contains("[^1]: foo lesson."), "lesson definition survives, uncited: {}", r.text);
+        assert_eq!(footnote_integrity_violations(&r.text), Vec::<String>::new(), "uncited lesson is legal, not a violation: {}", r.text);
+    }
+
     #[test]
     fn delete_atom_with_lessons_refuses_a_lesson_still_cited_by_a_surviving_atom() {
         // The failure this guards: X and Y both cite [^1]; Z owns [^2]. Deleting X
