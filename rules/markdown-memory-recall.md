@@ -86,17 +86,10 @@ REFERENCE).
 
 ## Memory scopes — pick by what the note CONTAINS
 
-| Scope | Root | Git | Put here |
-|---|---|---|---|
-| **LOCAL** | `~/.claude/projects/<slug>/memory/` | outside any repo — never pushed | machine-private: local paths, usernames, hostnames, an account/plan, install state, "on THIS machine…", secret-adjacent hints |
-| **PROJECT** | `<git-root>/.claude/project/memory/` | **tracked + PUSHED** to every cloner | machine-AGNOSTIC project knowledge: architecture, code gotchas, project lessons — **zero** private data |
-| **USER** | the janitor's fixed plugin-DATA memory dir (above) | never in a repo | knowledge true across ALL projects |
-
-**THE WRITE GATE — ask before writing to PROJECT:** *"Would this be TRUE and USEFUL for a
-stranger who clones this repo on a DIFFERENT machine?"* If no → **LOCAL** (red flags: a home
-path, username/hostname/email/secret, "on THIS machine", one box's install state — PROJECT is
-**pushed**, so private config written there leaks to every cloner). Split a note if needed,
-cross-linked. **UNSURE → LOCAL.** Full red-flag list + rationale: the FULL REFERENCE above.
+**LOCAL** `~/.claude/projects/<slug>/memory/` (never pushed, machine-private) · **PROJECT**
+`<git-root>/.claude/project/memory/` (pushed, zero private data) · **USER** the janitor's fixed
+plugin-DATA memory dir (cross-project). **UNSURE → LOCAL.** Full scope table + write-gate
+red-flag list: the FULL REFERENCE above.
 
 ## Read-the-notes rule — a memory's lessons ARE part of the memory
 
@@ -105,47 +98,21 @@ with the SECOND HOP — take the hop on the note you chose.
 
 ## The note format
 
-Frontmatter (the write verbs emit it — you rarely type it): `name` == filename stem ·
-`description:` **QUOTED** (the load-bearing recall field) · `ocd`/`lmd` dates ·
-`publish-globally:` **on every PROJECT page** (see below) ·
-`metadata: {node_type: memory, type, tier}`. Body = the one fact (feedback/project add
-`**Why:**` / `**How to apply:**`). `## Notes and lessons learned` is **MANDATORY on every page,
-even when empty** — the standing landing zone for a correction lesson. Full frontmatter grammar +
-a worked atom/lesson example: the FULL REFERENCE above.
-
-### `publish-globally:` — how ONE project's knowledge becomes visible to ALL of them
-
-**Every PROJECT-scope page carries `publish-globally: true|false`** (default `false` —
-opt-in). `true` means the page is ALSO reachable from every other project via a **symlink**
-in the USER memory root — no copy, no drift. memgrep NORMALIZES the field + symlink ALWAYS,
-before AND after every write. **Maintain the page at its PROJECT home, never through the
-symlink alias.** Full mechanics + the reconciliation table: the FULL REFERENCE above.
-
-### THE LESSON FORM — a lesson is an ATOM, and a GUARDRAIL, not a story
-
-A `[^N]:` footnote whose bracketed block is the lesson's ADDRESS
-(`id`/`status`/`keywords`/`ocd`/`lmd` REQUIRED), then `DO NOT <X>, BECAUSE <why>. DO <Y>
-instead.` ONE lesson = ONE mistake, ≤3 lines, all three parts.
-
-**`keywords:` is the RECALL SURFACE** — the SYMPTOM phrases a future session will search with,
-not the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not exist.** The
-VERB's `--keywords` is comma-separated; the STORED props block is space-separated (another
-reason not to hand-author). Full field grammar + supersession: the FULL REFERENCE above.
+Frontmatter (write verbs emit it): `name` == filename stem · `description:` **QUOTED** (load-bearing
+recall field) · `publish-globally:` **on every PROJECT page** (auto-normalized on every write;
+edit only the PROJECT home, never through the USER-side symlink). `## Notes and lessons learned`
+is **MANDATORY, even empty**. A lesson is a `[^N]:` footnote (`id`/`status`/`keywords`/`ocd`/`lmd`
+REQUIRED): `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` **`keywords:` is the RECALL SURFACE — no
+keywords ⇒ no recall.** Full frontmatter grammar, `publish-globally:` symlink mechanics, and the
+lesson field grammar: the FULL REFERENCE above (`## The note format`, `## THE LESSON FORM`).
 
 ## AUTHORING — COLLABORATIVE; write through a memgrep verb, then validate
 
-**Authorship confers NO ownership.** UPDATE another agent's USER/PROJECT page rather than fork a
-near-synonym or hedge beside a wrong fact — safe: verbs SUPERSEDE, never overwrite. The real
-failure is a known-false fact nobody corrected.
-
-Never hand-author wikimem markdown — use the write verbs (`new-mem-{topic,atom}
-update-mem-{topic,atom[--lesson]} migrate-mem-atom {delete,merge,split,reference}-mem-{topic,atom}`);
-fix a fact with `update-mem-atom --lesson --supersedes`, SAME id. Run `memgrep validate <page> &&
-memgrep lint <page>` after EVERY edit. Detail: the reference above.
-
-**CONCURRENT EDITING.** Write verbs are scope-LOCKED + CAS-guarded; edit pages ONLY via memgrep
-verbs or the Edit tool, never raw shell. On a "changed since enqueued" refusal: re-read,
-recompute, retry. Full mechanics (TRDD-7YHT3FNK): the FULL REFERENCE above.
+**Authorship confers NO ownership** — UPDATE another agent's page, never hand-author markdown
+(use the write verbs; `update-mem-atom --lesson --supersedes` fixes a fact, SAME id). Run
+`memgrep validate <page> && memgrep lint <page>` after EVERY edit; edit ONLY via memgrep verbs
+or the Edit tool, never raw shell. Full verb list + concurrent-editing mechanics (TRDD-7YHT3FNK):
+the FULL REFERENCE above.
 
 ## The wiki layer (wikimem)
 
