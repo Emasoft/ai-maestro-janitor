@@ -2,6 +2,134 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.6] — 2026-09-17
+
+### Bug Fixes
+
+- **agent:** The no-chore retry of the report read-back fires only on an empty path and leaves a stderr trace naming the chore token that found nothing (TRDD-I8AAJ3PG) (89d3bc2)
+- **dispatch:** TRDD-V2U2ZECI — a swallowed heartbeat-fires log append now says so on stderr (3775ac7)
+- **dispatch:** TRDD-V2U2ZECI — guard the stderr diagnostic and prove the quiet-token contract (ab0a62c)
+- **rotate_to:** TRDD-S2RZHXU7 — a swallowed /model opus keystroke failure is no longer silent (8342337)
+- TRDD-V2U2ZECI TRDD-S2RZHXU7 — the stderr diagnostics can never out-fail what they report on (6a5199c)
+- **status:** A failed or killed background chore reads FAILING Nx, not a fresh last-run age (GH #297 half 2) (74ed979)
+- **memgrep:** Structural verbs no longer refuse a page whose page-level lesson is uncited (GH #304, TRDD-RMX0IE72) (152e7ce)
+- **injectors:** Every ESC the janitor types honours the 300 s user-interrupt cooldown (TRDD-PA9E2GJ1) (a3ae1b0)
+- **model-fallback:** The no-headroom keystrokes go through pane_actuate with Event.NO_HEADROOM, never terminal_trigger directly (TRDD-8P4BNY5J) (0e8b97c)
+- **trdd:** LOCAL migration refuses an unignored .claude/local, resolves a submodule's own root, memoises the worktree lookup (TRDD-WY198OIP follow-up) (9b2ae80)
+- **model-fallback:** The routed switch now confirms the model menu, and an idle pane holding the janitor's own leftover /model text is cleared and switched (TRDD-8P4BNY5J, TRDD-FKY3NXB8) (9803ee1)
+- **model-fallback:** Name the target pane as the Enter step's submit reference, not only as the typing fallback (TRDD-8P4BNY5J) (06e5dc2)
+- **trdd:** Read-only git probes set GIT_OPTIONAL_LOCKS=0; shipped rules trimmed under the context-floor cap; pane test narrows the fired plan (TRDD-WY198OIP follow-up, TRDD-8P4BNY5J) (9c5c8fb)
+- **skill:** Janitor-memory-record-recent runs its git diff commands with GIT_OPTIONAL_LOCKS=0 (9a73649)
+- **actuator:** Fleet wedge-recovery ESC honours the target session's user-interrupt cooldown (TRDD-ECHOKVZC) (8059663)
+- **compact:** A queued forced /compact cancels when a compaction lands first, and a second PostCompact within 60 s is debounced (TRDD-4JEBTT2C) (5da508b)
+- **actuator:** Pane-transcript writer and reader resolve the state dir the same way; STOP_FLAG exemption proven by the event (TRDD-ECHOKVZC) (e72b70e)
+- **compact:** The queued /compact guard also keys on the PreCompact start stamp, and both stamp paths come from state.state_dir() (TRDD-4JEBTT2C) (642e55f)
+
+### Documentation
+
+- **board:** Work-column triage — 6 cards closed, 4 parked blocked, 17 re-columned to todo (5a2d8d0)
+- **board:** S2RZHXU7 boxes 1,2,4,5 ticked on evidence, box 3 open (typing path untested), moved to todo; A70YJLXN gains unblock-when issue:ai-maestro#156; HXZ8B0IS/ARTTXA7P logs cite 3.5.1 as the first gate that satisfied their last box (ffb27d9)
+- **board:** PJD6XV66 closed on the 3.5.5 gate and installed-cache evidence; A70YJLXN corrected from blocked to todo (ai-maestro#156 already closed, verifying the landing is work) (09405c7)
+- **board:** KE88RIKX and QJ5LP4W2 stay in testing behind review-after dates; their last boxes are multi-day daemon.log observations under 3.5.5 (d7f9b62)
+- **board:** A70YJLXN carries its live-observation NEXT ACTION (do not hand-update at the next release; watch the owning daemon); 7NSRD8OV notes the gh soft-fail trace is now observable under 3.5.5 (4c902ac)
+- **board:** Landing SHAs backfilled into the Approval logs of Q3WSQ9M5 (46048355), KI0H9C8N (f948226e), IB5B14QQ (028de468); 9FONCK33 already carried f2f7656d (60c3984)
+- **TRDD-A70YJLXN:** NEXT ACTION corrected to the 12:20-12:45 daemon-log window that predates the hand update; stale pre-block-column cleared (dc7388a)
+- Add TRDD-V2U2ZECI -- a swallowed fire-epoch log write leaves no trace (one fire after the 3.5.5 cache swap printed quiet and logged nothing) (e4335e1)
+- **TRDD-V2U2ZECI:** Cause marked unestablished with two candidates and the on-disk discriminator; fix narrowed to stderr only; test reshaped to a directory in place of the log file (02a08c0)
+- **TRDD-V2U2ZECI:** Cause retracted to unestablished in the body itself; the keep-going line, not the outcome stamps, is the discriminator; the stub's own fallback added as a third candidate (31097cf)
+- **TRDD-V2U2ZECI:** STATE block added so the discriminate-first NEXT ACTION outranks the body's candidate-(A) fix and test (0b9919c)
+- **TRDD-V2U2ZECI:** The body's first line points at the trailing STATE block and drops the inferred 12:47 fire time for the bracketing timestamps; last edit to this card this session (fadf64c)
+- **TRDD-GK35MOXU:** Box 1 ticked on six real PostModelSwitch stamp advances in external-clear.log; box 3 (/effort) needs one interactive keystroke from the owner; review-after 2026-09-23 (1eec8ff)
+- **TRDD-KE88RIKX:** Interim — 0 esc_nudge lines in the post-rotation daemon.log; box 6 has had no occasion yet; stays parked to 2026-09-23 (0906bed)
+- **TRDD-QJ5LP4W2:** Interim — 9 h of budget evidence (15/495 beats over budget, floor tasks never skipped, max tick gap 220 s); box 4 waits for the 24 h window and the card's own stall method after 2026-09-17 12:40 (6e71125)
+- **TRDD-S2RZHXU7:** Complete — box 3 (the no-Fable /model opus keystroke path) pinned by three real-path tests (9d88e2db, 8342337b, 6a5199cd); implementation-commits recorded; card archived (4053012)
+- **TRDD-GK35MOXU:** Parked as blocked on the owner's one interactive /effort (unblock-when decision predicate); the blocker card and the box-1 text follow in the next commit (0c39f84)
+- **TRDD-V2U2ZECI:** Implementation-commits recorded (3775ac7a, ab0a62c0, 6a5199cd); closure follows once the STATE line is re-addressed (the set shifted the line the guarded edit expected) (c0d2a2c)
+- Add TRDD-VT332PJG — owner runs /effort once in a live session and records whether the model-switch stamp advanced (the human keystroke GK35MOXU box 3 waits on; human_review) (8d6e0b2)
+- **TRDD-GK35MOXU:** Blocked-by VT332PJG (the decision record); box-1 text now states its evidence instead of 'still outstanding'; unblock-when cleared because a decision predicate never auto-clears (9db9fe4)
+- **TRDD-V2U2ZECI:** STATE closed with the cause recorded as unestablished and the next-time discriminator; closure line appended; archive refused until an acceptance checklist exists (next commit) (8c36492)
+- **TRDD-N1CPV1QV:** Precision on the box-9 evidence (the gate is configured to run the suite; no artifact retained) and the 6a5199cd commit-boundary disclosure (fe8f802)
+- **TRDD-S2RZHXU7:** Release status (9d88e2db, 8342337b, 6a5199cd ride the next publish.py); ordering half of box 3 pinned by test_no_fable_path_picks_max_headroom_and_requests_model_fallback (faaa264)
+- **TRDD-V2U2ZECI:** Complete — acceptance checklist written at close from the body's three acceptance sentences, each box carrying its commit/test evidence; cause recorded as unestablished; card archived (bf4d97d)
+- **TRDD-GK35MOXU:** Runnable blocker probe on VT332PJG's column (BLOCKED-WITHOUT-PROBE cleared) and an assignee; probe anchoring and path hygiene follow in the next commit (210226e)
+- **TRDD-N1CPV1QV:** Derived true — the missing half of the EHT link LDSCQ0NU declares (validator DERIVED-FLAG-MISSING) (34819e1)
+- **TRDD-Q8PNPRTW:** Cancelled — the 09:51 ruling's condition is met (4/4 green isolated runs on 18dbb9dd, then the 3.5.4 and 3.5.5 gates green); the ten owned ids stopped failing, nothing was fixed or labelled, so the six boxes stay open by design; cause unnamed; flagged for the owner's veto (6136459)
+- **TRDD-GK35MOXU:** Blocker probe without the machine path and anchored to porcelain's column field (a pushed card must not carry a local absolute path; an unanchored needle would flip on a title word) (10fc399)
+- **TRDD-V2U2ZECI:** Checklist provenance (the body's own 12:54 sentences) and the fact that the fix is on main only until the next publish.py (0817f2a)
+- **TRDD-S2RZHXU7:** The 'first' half of box 3 was over-claimed on faaa2648; pinned by 29c38ffd as CALL order on the auto-select path — pane-level completion and the explicit-email path are named as not pinned (e42ddaf)
+- **TRDD-Q8PNPRTW:** The still-owned test ids listed verbatim for the next reader, with the rule that a future red or an owner veto is a NEW card citing this one (db87db3)
+- **TRDD-9EAQS97B:** Complete — gh_reply_watch tests 14/14 at loadavg 2.8 (no failing captures, so no run_subprocess lines to paste); publish-gate box on the 3.5.5 gate that shipped 8bcd2975; card archived (5cdc387)
+- **TRDD-Q0Y4M1TF:** Testing — box 3 cannot be read from disk (rotator.log rotates every ~4 h); a 24.5 h capture is running under scripts_dev/ for the audit after 2026-09-17 23:00; review-after 2026-09-18 (dc9ddf0)
+- **TRDD-9EAQS97B:** Box-4 evidence restated — the stderr trace is proven by the fail-open test's real-timeout capture; gh_reply_watch had no failing capture to paste (8297d4e)
+- **TRDD-Q0Y4M1TF:** Audit guards for the capture — ticks liveness (nohup child, not launchd), double-rotation gap ceiling, percentages-on-line check, raw-file growth (ca0b542)
+- **TRDD-N954KWUC:** Box 4 rotation half observed live (another project's pane, same daemon/actuator); no-headroom half cannot occur — Event.NO_HEADROOM has no production caller and 3T9HQEQ6 does not name it; owner of that caller still to be determined (0319cb7)
+- Add TRDD-8P4BNY5J — route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM (EHT of N954KWUC: the fallback bypasses the pane reader/policy via terminal_trigger; NO_HEADROOM has a row and no caller) (ce9aa7a)
+- **TRDD-N954KWUC:** Blocked on EHT 8P4BNY5J with a runnable blocker probe; the 'cannot occur' line corrected — the no-headroom fallback types through terminal_trigger, bypassing the reader/policy; rotation half of box 4 observed live (7692938)
+- **TRDD-8P4BNY5J:** Priority critical (inherits the parent); routed path must preserve 3T9HQEQ6's flush→/model opus→confirm sequence; sequenced after M4HVFU2A in prose (a derived card keeps npt empty — depth-1 rule) (1c7c5ad)
+- **TRDD-N954KWUC:** 8P4BNY5J framed as a gap in this card's own P3 call-site inventory, not fallout; the probe clears the linter, the real unblock is blocked-by going terminal (82504f3)
+- **board:** Close 7 testing cards whose code landed and shipped — 7ZMQSXO6 I8AAJ3PG M4HVFU2A TWF7DXXR 2MLFZ7DL 11GAS4LC 6P0KUSO9 (6fdbe75)
+- **board:** Batch 2 — close JDIJ76SW Q7X4M2KP KS41G6AL TASA9ACJ; park 5 observe-after-publish cards in testing; DB1P25S4 box 7; BMITQ2MN blocker named (6352f9e)
+- **board:** Batch 3 — 1QJIZFFW and PXP08ZQC close on this morning's automated clear; 74AA4PAL parked; HK7IZ21Z and B3EAE1CD repaired and archived (f325e80)
+- **board:** Close TRDD-7MGJYLY5 — the compaction ruling is recorded, its six boxes landed in 3.5.1, and a real subagent survives the forced clear (fa1c856)
+- **spec:** WM-MIG-04 forbids stranding a reference, not an uncited lesson definition — spec 2.0.0 (GH #304, TRDD-RMX0IE72) (546a112)
+- **TRDD-PA9E2GJ1:** Boxes 2 and 3 landed in a3ae1b04 (candidates 1 and 2 were real FAILs, 3 passes by construction); parked in testing for the live Esc reproduction (ae504b7)
+- **board:** Batch 4 — close 2F3I2P18, UA4FAX67, 7NSRD8OV; reopen OES0NN3F to testing; PA9E2GJ1 candidates 4–5 filed as ECHOKVZC; N954KWUC and V3BQT7QE STATE; review lines on two frozen cards (57893b1)
+- **spec:** WM-MIG-04 states the delete-of-the-sole-citer case; spec 2.1.0; test pins it (TRDD-RMX0IE72) (96c353a)
+- **spec:** WM-MIG-04 states the in-place lesson guard as opt-in-overridable via --with-lessons; spec 2.2.0; ECHOKVZC to todo/high (TRDD-RMX0IE72, TRDD-ECHOKVZC) (0a7a851)
+- **memory:** Git-index-lock page gains lesson [^5] — read-only session-start git probes need GIT_OPTIONAL_LOCKS=0 too (TRDD-WY198OIP follow-up) (d5498ce)
+- **rules:** Compact three sections of markdown-memory-recall.md that its companion reference already carries in full — 2,287 B of context-floor headroom (fe7c88c)
+- **spec:** WM-MIG-04 split into rule / non-cases / --with-lessons opt-in worded to the code; spec 2.3.0 (TRDD-RMX0IE72) (79f7770)
+- **rules:** Restore the four action-time clauses fe7c88cb's compaction cut from markdown-memory-recall.md (5aaeea3)
+- **memory:** Supersede lesson [^5] on the git-index-lock page with [^6], the narrower verified claim; body no longer says the drift guard covers "every" call site (c9dd820)
+- **trdd:** WY198OIP and 8P4BNY5J cite the bundled commit 9c5c8fb2; ECHOKVZC gains an acceptance line (TRDD-WY198OIP, TRDD-8P4BNY5J, TRDD-ECHOKVZC) (5c0df8c)
+- **memory:** Git-index-lock atom body cites the valid lesson [^6], not the superseded [^5], and names what the drift guard actually walks (9dfdbde)
+- **memory:** Publish-gate page gains lesson [^10] — never buy context-floor headroom by compacting normative rule text; move one whole reference block or report that none exists (3b2b57b)
+- **spec:** WM-MIG-04's MUST NOT carries its own --with-lessons exception; the opt-in sentence points at WM-CLI-19 instead of copying its mechanics (TRDD-RMX0IE72) (534b3fc)
+- **memory:** Git-index-lock atom body states the guard's coverage plainly — every .py under scripts/ and nothing else — dropping the false coverage-gap implication and the rot-prone identifier (974dd37)
+- **trdd:** 8P4BNY5J STATE corrects the 'pane-test narrowing' wording; ECHOKVZC acceptance states the outcome, not the mechanism (TRDD-8P4BNY5J, TRDD-ECHOKVZC) (30420b7)
+- **spec:** Wikimem-memgrep 2.4.0 — WM-MIG-04's MUST NOT names its own opt-in inline (TRDD-RMX0IE72) (346f5cb)
+- **memory:** Publish-gate page drops the false [^10] citation from the --dry-run paragraph (65f86e4)
+- **memory:** Git-index-lock atom names the guard's one real blind spot, tests/, instead of two that do not exist (2ae35f2)
+- **trdd:** RMX0IE72 corrects its mis-stamped 09:00 line and records the version-policy resolution (TRDD-RMX0IE72) (6ed7293)
+- **memory:** Git-index-lock atom also names the memgrep crate's Rust git calls as outside the guard's walk (36d9f9f)
+- **memory:** Git-index-lock atom marks the memgrep crate's git calls as rev-parse, which takes no lock (4e43819)
+- Add TRDD-911PCSFZ — the idle-clear gate reads a stalled turn as idle and clears a session with live subagents using a stale handoff (0e11fb3)
+- **trdd:** 911PCSFZ states observables only, names the missing subagent re-attachment as defect (b), and is a spike until the gate is read (TRDD-911PCSFZ) (172e7c5)
+- **trdd:** 911PCSFZ gets its single spike deliverable; the bugfix boxes are marked as the follow-up's, and box 2 becomes re-attachment (TRDD-911PCSFZ) (f702c6f)
+- **trdd:** 5A4SGMD6 to testing with its two janitor commits recorded (TRDD-5A4SGMD6) (d09fe94)
+- **memory:** Six project pages supersede marketplace-refresh as a live daemon chore (TRDD-5A4SGMD6) (58b7ae1)
+- **trdd:** 5A4SGMD6 records the memory-page supersession commit 58b7ae19; gate on HEAD pending (TRDD-5A4SGMD6) (1877a27)
+- **trdd:** Mechanical graph repairs — DCCB0B8A drops a dangling npt entry the validator read as a self-ring; V3BQT7QE claims its derived child 0KOIJ3SK in eht (0e55c6e)
+- **trdd:** Restore DCCB0B8A's recorded npt prerequisite (0e55c6e6 revert, half); V3BQT7QE bumps updated: for its eht change (dd6fccb)
+- **trdd:** 5A4SGMD6 records the green gate on d09fe94b and parks until 2026-09-18 for the fseventsd observation (TRDD-5A4SGMD6) (a44c0bb)
+- **trdd:** DCCB0B8A approval log explains its validate false positive locally and points at ai-maestro issue 166 (8885870)
+- **trdd:** FKY3NXB8 closes to complete with its acceptance boxes; RMX0IE72 records 152e7ce3; NEVQOHGS loses the duplicate STATE heading (TRDD-FKY3NXB8, TRDD-RMX0IE72, TRDD-NEVQOHGS) (658607d)
+- **trdd:** FKY3NXB8 and NEVQOHGS approval logs disclose the post-hoc checklist, the skipped review columns, and the format-only updated: bump (TRDD-FKY3NXB8, TRDD-NEVQOHGS) (aed3c7a)
+- **memory:** Janitor memory chores land on five project pages (TRDD-5A4SGMD6) (ea4bc50)
+- **trdd:** 4JEBTT2C minted for issue 306; 3T9HQEQ6 parked on a probe; 5A4SGMD6 records ea4bc509 (TRDD-4JEBTT2C, TRDD-3T9HQEQ6, TRDD-5A4SGMD6) (b62fb11)
+- **trdd:** Redact absolute home paths leaked into four cards so CPV --strict passes (TRDD-UA4FAX67, TRDD-N954KWUC, TRDD-OES0NN3F, TRDD-8P4BNY5J) (9745b4f)
+- **trdd:** Approval-log lines record the 9745b4f6 path redaction on the four cards it touched (TRDD-UA4FAX67, TRDD-N954KWUC, TRDD-OES0NN3F, TRDD-8P4BNY5J) (ac6fd4b)
+- **memory:** Split oauth-rotation-renew-reauth into an overview plus cascade, keychain and operations sub-pages (janitor split chore) (f958db2)
+
+### Features
+
+- **token-meter:** Weekly janitor cost summary with per-fire kind attribution through a sidecar, not a schema change (TRDD-NEVQOHGS) (25e86cf)
+- **trdd:** LOCAL design corpus moves to <project-root>/.claude/local/design, migrated at SessionStart (GH #303, TRDD-WY198OIP) (5840ee6)
+
+### Refactor
+
+- **daemon:** Retire the marketplace-refresh chore (TRDD-5A4SGMD6) (6ddc030)
+- **daemon:** The marketplace-refresh removal edits — code, tests, manifest, docs (TRDD-5A4SGMD6) (fb987e9)
+
+### Testing
+
+- **agent:** The curator's report bash block runs under a stub claim CLI in four read-back outcomes; the block is now errexit-safe (TRDD-I8AAJ3PG) (be5a298)
+- **rotate_to:** TRDD-S2RZHXU7 — pin the real /model opus keystroke path (9d88e2d)
+- **rotate_to:** TRDD-S2RZHXU7 — pin that /model opus is requested BEFORE the credential switch is written (29c38ff)
+- **compaction:** The subagent-survival test now drives the real clear path to the shrink chain (TRDD-7MGJYLY5 box 4) (7c8c4bf)
+- **pane-actuate:** Replace the tuple-comma read counter with a named function so mypy stops flagging func-returns-value (TRDD-8P4BNY5J) (e7ab932)
+- **actuator:** Pin the pane-transcript default under a plain project; ECHOKVZC gains its STATE block and ticked box; HFDM1HHP minted (TRDD-ECHOKVZC, TRDD-HFDM1HHP) (892a8c1)
+- **compact:** Narrow two Optional still_wanted calls for tree-wide pyright; 4JEBTT2C boxes for guards 1/3/4 ticked; PH8SAQKS, YM65RCZA, L64C5DQ1 minted (TRDD-4JEBTT2C, TRDD-PH8SAQKS, TRDD-YM65RCZA, TRDD-L64C5DQ1) (8f84024)
 ## [3.5.5] — 2026-09-16
 
 ### Bug Fixes
@@ -30,6 +158,10 @@ All notable changes to this project will be documented in this file.
 - **git-hooks:** Pre-commit runs the executable-bit tests so a dropped bit is refused at commit time (TRDD-3JBPW12E) (0092aa0)
 - **memory:** The claim step creates the curator's report file with its header already written (TRDD-I8AAJ3PG) (b90666a)
 - **memory:** Report-path verb reads the curator's report path back from the claim; reports dir resolved to the main checkout for writer and matcher alike (TRDD-I8AAJ3PG) (fdf2f22)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.5.5 (fedb663)
 ## [3.5.4] — 2026-09-16
 
 ### Bug Fixes
