@@ -25,6 +25,10 @@ Rows encoded here are exactly the ones the 2026-09-02 incident dictates (Proposa
   caller-driven soft enqueue; anything starting with ESC -- hard-plus-command AND the ESC-only
   nudge -- is refused, because ESC cancels the live turn.)
 - `idle` + cron dead -> `/janitor-arm`.
+- `idle` + no headroom -> `/model opus`, confirm -- straight to the switch, no wedge to flush
+  (TRDD-8P4BNY5J follow-up, 2026-09-17: the pre-8P4BNY5J code typed this on any readable
+  non-wedge pane too; restricting it to the wedge alone was a regression). Only over a
+  verified-empty input field.
 - `None`/`unknown` -> never type -- an unreadable or unclassifiable pane is not a green light.
 
 Phase 2 left `PLUGIN_STAGED`/`STOP_FLAG`/`STALE_PROMPT` unencoded because the command to type
@@ -277,6 +281,24 @@ def _blind(event: Event, *, command: str | None, esc_first: bool, unattended: bo
     return ()
 
 
+_DEFAULT_MODEL_SWITCH_COMMAND = "/model opus"
+
+
+def _model_switch_steps(command: str | None) -> tuple[Step, ...]:
+    """The `/model <target>` + confirm pair TRDD-3T9HQEQ6 ratified for the wedge row, shared
+    with `_at_idle`'s NO_HEADROOM row (TRDD-8P4BNY5J follow-up) -- one place the sequence is
+    built, so the two rows cannot drift when a caller resolves a non-default target.
+
+    `is None`, not `or`: a caller passing `command=""` gets exactly that typed rather than a
+    silent fallback to the default -- `command`'s only defined "no override" value is `None`
+    (see `plan()`'s own default), so coalescing every other falsy value would hide a caller bug."""
+    keys = _DEFAULT_MODEL_SWITCH_COMMAND if command is None else command
+    return (
+        Step(keys=keys, expect=Expect.MENU_SHOWN, label="switch model", presence_deferrable=True),
+        Step(keys="Enter", expect=Expect.IDLE_OR_WORKING, label="confirm model switch", presence_deferrable=True),
+    )
+
+
 def _at_wedge(state: PaneState, event: Event, *, command: str | None, esc_first: bool) -> tuple[Step, ...]:
     if event is Event.ROTATION_LANDED:
         # `rotation unwedge` is a CONTRACT, not a label: TRDD-UA4FAX67's `unblock-when`
@@ -285,10 +307,11 @@ def _at_wedge(state: PaneState, event: Event, *, command: str | None, esc_first:
         return _flush_wedge(state, final_expect=Expect.WEDGE_GONE, final_label="rotation unwedge")
     if event is Event.NO_HEADROOM:
         flush = _flush_wedge(state, final_expect=Expect.FIELD_EMPTY, final_label="queue-flush for model switch")
-        return flush + (
-            Step(keys="/model opus", expect=Expect.MENU_SHOWN, label="switch model", presence_deferrable=True),
-            Step(keys="Enter", expect=Expect.IDLE_OR_WORKING, label="confirm model switch", presence_deferrable=True),
-        )
+        # `command` is the caller's resolved target (TRDD-8P4BNY5J follow-up:
+        # model-fallback.py's configurable CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_TARGET,
+        # threaded through pane_actuate.act's existing `command` channel) -- defaulting
+        # preserves the literal every pre-follow-up caller relied on.
+        return flush + _model_switch_steps(command)
     if event in _CALLER_DRIVEN:
         return _rung(state, command=command, esc_first=esc_first, label=event.value)
     return ()  # RELAUNCH / STALE_PROMPT / PLUGIN_STAGED: a wedge is a LIVE claude, hands off
@@ -297,9 +320,21 @@ def _at_wedge(state: PaneState, event: Event, *, command: str | None, esc_first:
 def _at_idle(state: PaneState, event: Event, *, command: str | None, esc_first: bool, unattended: bool) -> tuple[Step, ...]:
     if event is Event.CRON_DEAD:
         return (Step(keys="/janitor-arm", expect=Expect.IDLE_OR_WORKING, label="re-arm cron", presence_deferrable=True),)
+    if event is Event.NO_HEADROOM:
+        # TRDD-8P4BNY5J follow-up: the pre-8P4BNY5J code typed this switch on ANY readable,
+        # non-wedge pane still on the exhausted model, not just a `retry_wedge` -- restricting
+        # the row to the wedge alone turned a spent-model-but-otherwise-idle pane into a
+        # silent no-op (`token_burn.model_fallback_verdict` fires on usage percentage, not on
+        # a wedge banner, so this case is plausible and common). No wedge to flush here, so go
+        # straight to the switch -- but ONLY over a verified-empty field: an idle pane can
+        # still hold text the human is mid-typing, and `/model ...` landing inside it would
+        # corrupt that draft rather than open the model menu.
+        if state.input_field.kind != InputFieldKind.EMPTY:
+            return ()
+        return _model_switch_steps(command)
     if event is Event.STALE_PROMPT and unattended:
         # The caller's `awaiting_user` evidence is the TRANSCRIPT (an unanswered tool_use);
-        # the screen may still read idle. ESC anyway — it can only DISMISS, never answer —
+        # the screen may still read idle. ESC anyway -- it can only DISMISS, never answer --
         # but with nothing to verify: an ESC at an already-idle pane changes no pixel.
         return (Step(keys="ESC", expect=Expect.ANY, label="stale-prompt ESC dismiss", presence_deferrable=False),)
     if event is Event.OWN_COMMAND_UNSUBMITTED:
@@ -339,6 +374,13 @@ def _at_working(state: PaneState, event: Event, *, command: str | None, esc_firs
     """
     if event is Event.OWN_COMMAND_UNSUBMITTED:
         return _submit(state)
+    if event is Event.NO_HEADROOM:
+        # TRDD-8P4BNY5J follow-up: already refused by the trailing `return ()` below (NO_HEADROOM
+        # is screen-driven, not caller-driven -- the module docstring's law 2 names it
+        # explicitly), spelled out here so a reader does not have to prove it by elimination.
+        # NOOP, not a keystroke: the detector stamps no cooldown on an untouched pane, so this
+        # fires again next beat once the turn ends and the pane reads idle/wedged.
+        return ()
     if event in _CALLER_DRIVEN and command and not esc_first:
         return _rung(state, command=command, esc_first=esc_first, label=event.value)
     return ()

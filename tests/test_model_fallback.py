@@ -192,12 +192,22 @@ def _load_detector():
 
 
 def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
-    """Fake every gate up to the injection so main() reaches the sequence choice with
-    `pane_text` on the pane, and spy on BOTH injection entry points."""
-    called: dict[str, list] = {"true_error": [], "verified": []}
+    """Fake every gate up to the injection so main() reaches the actuation call with
+    `pane_text` on the pane, and spy on the ONE remaining injection entry point.
+
+    TRDD-8P4BNY5J: the detector no longer calls `terminal_trigger.send_verified` /
+    `send_model_switch_true_error` directly — both are replaced by ONE call to
+    `pane_actuate.act(..., Event.NO_HEADROOM)`, which is what these tests spy on now. Which
+    keystroke sequence that produces (wedge vs. idle) is `pane_policy`'s own concern, pinned
+    for real (unmocked) in `tests/test_pane_policy.py::
+    test_retry_wedge_no_headroom_flushes_then_switches_model_and_confirms` — not re-tested
+    here against a mock.
+    """
+    called: dict[str, list] = {"act": [], "command": []}
     monkeypatch.setattr(det.state, "init_state", lambda: None)
     monkeypatch.setattr(det.state, "log_line", lambda *a, **k: None)
     monkeypatch.setattr(det.state, "rotate_log_if_big", lambda *a, **k: None)
+    monkeypatch.setattr(det.state, "project_root", lambda: Path("/tmp/model-fallback-test"))
     monkeypatch.setattr(det.mfb, "enabled", lambda: True)
     monkeypatch.setattr(det, "_live_account", lambda: {"usage": {}, "sample_age_s": 0, "is_live": True})
     monkeypatch.setattr(
@@ -212,14 +222,15 @@ def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
         det.mfb, "plan_model_fallback",
         lambda **k: {"act": True, "command": "/model opus", "reason": "test"},
     )
-    monkeypatch.setattr(
-        det.terminal_trigger, "send_model_switch_true_error",
-        lambda t, c, **k: (called["true_error"].append(c), (True, "sent; ask-user menu confirmed"))[1],
-    )
-    monkeypatch.setattr(
-        det.terminal_trigger, "send_verified",
-        lambda t, c, **k: (called["verified"].append(c), (True, "sent"))[1],
-    )
+
+    def _act(terminal, event, **kw):
+        called["act"].append((terminal, event))
+        called["command"].append(kw.get("command"))
+        return det.pane_actuate.Outcome(
+            status=det.pane_actuate.OutcomeStatus.DONE, steps_done=3, observed=(), touched=True,
+        )
+
+    monkeypatch.setattr(det.pane_actuate, "act", _act)
     monkeypatch.setattr(det.terminal_trigger, "confirm_model_switch", lambda *a: True)
     monkeypatch.setattr(det, "_stamp_switch", lambda _n: None)
     monkeypatch.setattr(det, "_last_switch_ts", lambda: 0)
@@ -232,27 +243,35 @@ def _wire_acting_detector(det, monkeypatch, pane_text: str) -> dict[str, list]:
     return called
 
 
-def test_a_true_error_pane_routes_to_the_owner_ratified_sequence(monkeypatch, capsys) -> None:
-    """Owner spec 2026-08-15: a pane showing CC's live retry signature must get the
-    command+Enter → ESC → wait-for-menu → Enter sequence, NOT the idle ESC-first one."""
+def test_no_headroom_routes_through_pane_actuate_not_terminal_trigger_directly(monkeypatch, capsys) -> None:
+    """TRDD-8P4BNY5J acceptance (1): the detector must have no direct
+    `send_verified`/`send_model_switch_true_error` call — asserted here by making BOTH raise,
+    proving `main()` never reaches them, while the ONE routed call
+    (`pane_actuate.act(actuate_terminal, Event.NO_HEADROOM)`) is what actually fires, with the
+    terminal converted to the `pane_state`/`fleet_scan` `{tmux_pane: ...}` shape (NOT
+    `_this_terminal()`'s own `{kind, pane}` shape)."""
     det = _load_detector()
-    called = _wire_acting_detector(
-        det, monkeypatch, "⏳ Rate limited · Retrying in 3s · attempt 12/300\n"
-    )
-    assert det.main() == 0
-    assert called["true_error"] == ["/model opus"], "the true-error sequence must be chosen"
-    assert called["verified"] == [], "the idle ESC-first path must NOT fire on an erroring pane"
 
+    def _raise(*_a, **_k):
+        raise AssertionError("model-fallback must not call terminal_trigger typing directly")
 
-def test_an_idle_pane_keeps_the_esc_first_sequence(monkeypatch, capsys) -> None:
-    """CONTROL for the routing: no retry signature on the pane ⇒ the original ESC-first
-    verified injection stands — proving the router keys on the pane state, not on the
-    verdict alone."""
-    det = _load_detector()
+    monkeypatch.setattr(det.terminal_trigger, "send_verified", _raise)
+    monkeypatch.setattr(det.terminal_trigger, "send_model_switch_true_error", _raise)
     called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
     assert det.main() == 0
-    assert called["verified"] == ["/model opus"], "idle pane must keep the ESC-first path"
-    assert called["true_error"] == [], "the true-error sequence must not fire on an idle pane"
+    assert called["act"] == [({"tmux_pane": "%1"}, det.pane_actuate.Event.NO_HEADROOM)]
+
+
+def test_no_headroom_passes_the_configured_target_as_command(monkeypatch, capsys) -> None:
+    """TRDD-8P4BNY5J follow-up: `pane_policy._at_wedge`/`_at_idle`'s NO_HEADROOM row hardcoded
+    `/model opus`, ignoring `CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_TARGET`. The detector must
+    thread `mfb.fallback_target()` through `pane_actuate.act`'s existing `command=` channel so
+    a non-default target reaches the typed keystroke."""
+    det = _load_detector()
+    called = _wire_acting_detector(det, monkeypatch, "just an idle prompt, nothing retrying\n")
+    monkeypatch.setattr(det.mfb, "fallback_target", lambda: "sonnet")
+    assert det.main() == 0
+    assert called["command"] == ["/model sonnet"]
 
 
 def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkeypatch, capsys) -> None:
@@ -267,8 +286,7 @@ def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkey
     def _raise(*_a, **_k):
         raise AssertionError("must not inject when a sibling has headroom")
 
-    monkeypatch.setattr(det.terminal_trigger, "send_verified", _raise)
-    monkeypatch.setattr(det.terminal_trigger, "send_model_switch_true_error", _raise)
+    monkeypatch.setattr(det.pane_actuate, "act", _raise)
     monkeypatch.setattr(
         det.rotator_usage, "accounts_usage",
         lambda: [{"label": "sibling", "is_live": False,
@@ -284,7 +302,7 @@ def test_a_sibling_with_headroom_routes_to_rotate_first_and_types_nothing(monkey
     out = capsys.readouterr().out
     assert "sibling still has Fable headroom (40% used)" in out
     assert out.rstrip().endswith("rotate first: /janitor-rotate-account-to"), out
-    assert called["verified"] == [] and called["true_error"] == []
+    assert called["act"] == []
 
 
 def _sibling(*, fable_pct: float, seven_day_pct: float = 20.0) -> list[dict]:
@@ -308,7 +326,7 @@ def test_a_sibling_over_the_rotation_bar_does_not_divert(monkeypatch, capsys) ->
     monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: _sibling(fable_pct=95.0))
     assert det.main() == 0
     assert "rotate first" not in capsys.readouterr().out
-    assert called["verified"] == ["/model opus"]
+    assert called["act"] == [({"tmux_pane": "%1"}, det.pane_actuate.Event.NO_HEADROOM)]
 
 
 def test_a_sibling_with_a_spent_account_window_does_not_divert(monkeypatch, capsys) -> None:
@@ -319,7 +337,7 @@ def test_a_sibling_with_a_spent_account_window_does_not_divert(monkeypatch, caps
     monkeypatch.setattr(det.rotator_usage, "accounts_usage", lambda: _sibling(fable_pct=40.0, seven_day_pct=95.0))
     assert det.main() == 0
     assert "rotate first" not in capsys.readouterr().out
-    assert called["verified"] == ["/model opus"]
+    assert called["act"] == [({"tmux_pane": "%1"}, det.pane_actuate.Event.NO_HEADROOM)]
 
 
 def test_the_detectors_bars_equal_the_rotation_verbs_bars() -> None:
@@ -345,11 +363,10 @@ def test_a_declined_switch_backs_off_and_retypes_nothing(monkeypatch, capsys) ->
     def _raise(*_a, **_k):
         raise AssertionError("must not inject while backing off a declined switch")
 
-    monkeypatch.setattr(det.terminal_trigger, "send_verified", _raise)
-    monkeypatch.setattr(det.terminal_trigger, "send_model_switch_true_error", _raise)
+    monkeypatch.setattr(det.pane_actuate, "act", _raise)
 
     assert det.main() == 0
-    assert called["verified"] == [] and called["true_error"] == []
+    assert called["act"] == []
 
 
 def test_a_stale_decline_no_longer_backs_off(monkeypatch, capsys) -> None:
@@ -360,5 +377,4 @@ def test_a_stale_decline_no_longer_backs_off(monkeypatch, capsys) -> None:
     monkeypatch.setattr(det, "_declined_age_s", lambda _now: det._DECLINED_BACKOFF_S + 1.0)
 
     assert det.main() == 0
-    assert called["verified"] == ["/model opus"]
-    assert called["true_error"] == [], "the true-error sequence must not fire on an idle pane"
+    assert called["act"] == [({"tmux_pane": "%1"}, det.pane_actuate.Event.NO_HEADROOM)]

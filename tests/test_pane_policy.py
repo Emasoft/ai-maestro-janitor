@@ -86,6 +86,14 @@ def test_retry_wedge_no_headroom_flushes_then_switches_model_and_confirms() -> N
     assert steps[2].presence_deferrable is True
 
 
+def test_retry_wedge_no_headroom_honors_a_configured_target() -> None:
+    """TRDD-8P4BNY5J follow-up: the row must not hardcode `/model opus` -- a caller-resolved
+    `command` (the detector's configured fallback target) is typed instead."""
+    state = _state("real-wedged-rate-limit-429.txt")
+    steps = pp.plan(state, pp.Event.NO_HEADROOM, command="/model sonnet")
+    assert [s.keys for s in steps] == ["ESC", "/model sonnet", "Enter"]
+
+
 @pytest.mark.parametrize(
     "event",
     [
@@ -144,6 +152,14 @@ def test_working_still_accepts_a_soft_enqueue_that_types_a_command() -> None:
         assert [s.keys for s in steps] == ["/janitor-arm"], f"{event} must still enqueue"
 
 
+def test_working_no_headroom_types_nothing() -> None:
+    """TRDD-8P4BNY5J follow-up, law 2: a live turn refuses the model switch too, exactly like
+    every other screen-driven sequence -- typing over a running turn is the same interruption
+    hazard regardless of which event triggered it. NOOP, zero keystrokes, retried next beat."""
+    state = _state("synthetic-working-spinner.txt")
+    assert pp.plan(state, pp.Event.NO_HEADROOM) == ()
+
+
 def test_working_refuses_hard_plus_command_unchanged() -> None:
     """Unchanged by the ESC-only fix, and pinned so a later edit cannot quietly re-admit it."""
     state = _state("synthetic-working-spinner.txt")
@@ -170,8 +186,40 @@ def test_idle_cron_dead_re_arms() -> None:
 
 def test_idle_non_cron_dead_events_do_nothing() -> None:
     state = _state("synthetic-idle-empty-field.txt")
-    for event in (pp.Event.ROTATION_LANDED, pp.Event.NO_HEADROOM, pp.Event.PLUGIN_STAGED, pp.Event.STOP_FLAG):
+    for event in (pp.Event.ROTATION_LANDED, pp.Event.PLUGIN_STAGED, pp.Event.STOP_FLAG):
         assert pp.plan(state, event) == ()
+
+
+def test_idle_no_headroom_switches_model_when_field_is_empty() -> None:
+    """TRDD-8P4BNY5J follow-up: the pre-8P4BNY5J code typed the switch on any readable
+    non-wedge pane, not just a `retry_wedge` -- restricting the row to the wedge alone made a
+    spent-model-but-otherwise-idle pane a silent no-op. No wedge to flush at idle, so the
+    sequence starts straight at the command, honoring a caller-resolved `command`."""
+    state = _state("synthetic-idle-empty-field.txt")
+    steps = pp.plan(state, pp.Event.NO_HEADROOM)
+    assert [s.keys for s in steps] == ["/model opus", "Enter"]
+    assert steps[0].expect is pp.Expect.MENU_SHOWN
+    assert steps[1].expect is pp.Expect.IDLE_OR_WORKING
+    assert steps[0].presence_deferrable is True
+    assert steps[1].presence_deferrable is True
+
+
+def test_idle_no_headroom_honors_a_configured_target() -> None:
+    """The row must not hardcode `/model opus` — a caller-resolved `command` (e.g. from
+    `CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_TARGET`) is typed instead, exactly like the wedge
+    row (`test_retry_wedge_no_headroom_flushes_then_switches_model_and_confirms`'s sibling)."""
+    state = _state("synthetic-idle-empty-field.txt")
+    steps = pp.plan(state, pp.Event.NO_HEADROOM, command="/model sonnet")
+    assert [s.keys for s in steps] == ["/model sonnet", "Enter"]
+
+
+def test_idle_no_headroom_defers_over_unsubmitted_text() -> None:
+    """An idle pane can still hold text the human is mid-typing (the verified-field
+    precondition) -- `/model ...` must not land inside that draft, so the row types nothing
+    and waits for the next beat."""
+    state = _state("synthetic-idle-text-typed-bypass-off.txt")
+    assert state.input_field.kind is ps.InputFieldKind.TEXT
+    assert pp.plan(state, pp.Event.NO_HEADROOM) == ()
 
 
 def test_none_state_never_types_without_the_no_readback_assertion() -> None:

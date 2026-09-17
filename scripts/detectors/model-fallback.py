@@ -14,8 +14,9 @@ is that missing consumer.
 
 It owns NO decisions: the gate is `token_burn.model_fallback_verdict` (scoped-high AND
 account-headroom AND both PROVEN), the plan is `model_fallback.plan_model_fallback` (target,
-already-switched, cooldown), the typing is `terminal_trigger.send_verified` (the owner's
-ratified empty-field / 8s-retry / verify-before-Enter rules), and the confirmation is
+already-switched, cooldown), the typing is `pane_actuate.act` with `Event.NO_HEADROOM`
+(TRDD-8P4BNY5J: the one screen-state reader + policy table decide and run the keystrokes —
+this file no longer types directly), and the confirmation is
 `terminal_trigger.confirm_model_switch` (three-state). This file is the glue that gathers
 the inputs and records the outcome.
 
@@ -40,8 +41,8 @@ sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import findings_ledger  # noqa: E402
 import model_fallback as mfb  # noqa: E402
+import pane_actuate  # noqa: E402
 import rotator_usage  # noqa: E402
-import session_liveness  # noqa: E402
 import state  # noqa: E402
 import terminal_trigger  # noqa: E402
 import token_burn  # noqa: E402
@@ -85,6 +86,24 @@ def _this_terminal() -> dict[str, str]:
     if iterm:
         return {"kind": "iterm", "session_id": iterm.split(":")[-1].strip()}
     return {"kind": "unknown"}
+
+
+def _actuate_terminal(terminal: dict[str, str]) -> dict[str, str]:
+    """Convert `_this_terminal()`'s `{kind, pane|session_id}` shape (terminal_trigger's own
+    reader convention) to the `{tmux_pane|iterm_session_id}` shape `pane_state`/`pane_actuate`/
+    `fleet_inject` expect (`fleet_scan.capture_pane_text`'s convention). TWO conventions
+    genuinely coexist in this codebase; this file still needs the first for
+    `terminal_trigger.read_pane_text`/`parse_pane_model`/`confirm_model_switch` (pure text
+    parsing, untouched by TRDD-8P4BNY5J), and now needs the second so the actual keystrokes go
+    through `pane_actuate.act` instead of typing directly. An unrecognized/unknown kind maps to
+    `{}`, which `pane_actuate.act` reads as "no channel" and no-ops on — the same fail-open
+    the old code got from `terminal_trigger.read_pane_text` returning None for an unknown kind.
+    """
+    if terminal.get("kind") == "tmux" and terminal.get("pane"):
+        return {"tmux_pane": terminal["pane"]}
+    if terminal.get("kind") == "iterm" and terminal.get("session_id"):
+        return {"iterm_session_id": terminal["session_id"]}
+    return {}
 
 
 def _declined_age_s(now: int) -> float | None:
@@ -197,30 +216,39 @@ def main() -> int:
                              f"{verdict['scoped_util']:.0f}%, account {verdict['account_max_util']:.0f}%)")
         return 0
 
-    command = str(plan["command"])
-    # SEQUENCE IS STATE-DEPENDENT (owner spec 2026-08-15, from watching the real wall):
-    # a pane in the TRUE error state (CC's retry signature on screen) gets
-    # command+Enter → ESC → wait-for-Ask-user-menu → Enter; an idle pane keeps the
-    # original ESC-first type-and-submit. ESC-first on an erroring pane ends the turn
-    # before the command exists and the menu then swallows the slash command.
-    true_error = bool(pane) and session_liveness.is_retry_wedge(pane or "")
-    # `bypass_interrupt_cooldown=True`: this switch IS the recovery from the session's own
-    # exhausted-model/retry state, so a just-issued Esc/Ctrl-C in the transcript must not defer
-    # it (owner finding 2026-09-15, #306 -- `esc_first` alone no longer implies this bypass).
+    # TRDD-8P4BNY5J: route the keystrokes through pane_actuate/pane_policy's Event.NO_HEADROOM
+    # row instead of calling terminal_trigger.send_verified/send_model_switch_true_error
+    # directly. This file used to classify the wedge itself (`true_error`, above) and hand-pick
+    # which hand-rolled sequence to type — exactly the bypass TRDD-N954KWUC's "ONE screen-state
+    # reader drives EVERY keystroke" invariant forbids. `pane_actuate.act` re-reads the pane
+    # fresh and `pane_policy.plan()` picks the sequence from THAT read: at a retry_wedge OR an
+    # idle pane still on the exhausted model it is the ESC-flush(-if-wedged) -> `/model <target>`
+    # -> confirm chain TRDD-3T9HQEQ6 ratified (`pane_policy._at_wedge`/`_at_idle`'s NO_HEADROOM
+    # rows, extended by the 8P4BNY5J follow-up so a spent window on an otherwise-idle pane is no
+    # longer a silent no-op); a live turn (`_at_working`) still refuses, by design (law 2).
+    # `command=` carries the CONFIGURED target (CLAUDE_PLUGIN_OPTION_MODEL_FALLBACK_TARGET)
+    # through `pane_actuate.act`'s existing pass-through to `pane_policy.plan()`, so a non-
+    # default target is honored instead of the policy table's hardcoded "/model opus" fallback.
+    # No `bypass_interrupt_cooldown` equivalent exists in `pane_actuate`/`fleet_inject` at
+    # all -- daemon-driven actuation never enforced that guard for any event, which for THIS
+    # call site is what `bypass_interrupt_cooldown=True` already asked for (owner finding
+    # 2026-09-15, #306: this switch IS the recovery from the session's own exhausted-model
+    # state, so a just-issued Esc/Ctrl-C must not defer it).
     try:
-        if true_error:
-            sent, why = terminal_trigger.send_model_switch_true_error(
-                terminal, command, bypass_interrupt_cooldown=True,
-            )
-        else:
-            sent, why = terminal_trigger.send_verified(
-                terminal, command, esc_first=True, bypass_interrupt_cooldown=True,
-            )
+        outcome = pane_actuate.act(
+            _actuate_terminal(terminal),
+            pane_actuate.Event.NO_HEADROOM,
+            command=f"/model {target}",
+            project_dir=str(state.project_root()),
+            log=lambda m: state.log_line(_LOG, m),
+        )
     except Exception as exc:  # noqa: BLE001 — an injection fault must not break the heartbeat
         state.log_line(_LOG, f"inject raised: {exc!r}")
         return 0
-    if not sent:
-        state.log_line(_LOG, f"not sent: {why} — NOT stamping the cooldown, will retry")
+    if not outcome.touched:
+        state.log_line(
+            _LOG, f"not sent: {outcome.status.value} — NOT stamping the cooldown, will retry",
+        )
         return 0
 
     # CONFIRM before stamping. Three-state: only True is success — None means the badge was
