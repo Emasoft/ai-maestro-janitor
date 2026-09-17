@@ -423,3 +423,24 @@ def test_guard2_unmeasurable_context_still_sends(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert "GUARD2_HARNESS_IMMINENT" not in proc.stdout
     assert "DRY_RUN" in proc.stdout
+
+
+def test_guard2_hard_emergency_path_is_exempt(tmp_path: Path) -> None:
+    """`--hard` skips guard 2 entirely (round 3): the SAME in-band context that suppresses a
+    soft send must NOT suppress `--hard`, the one path built to be urgent."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    home = _home(tmp_path, present=False)
+    _settings(home, {"autoCompactEnabled": True})
+    # Same band-triggering setup as test_guard2_in_band_skips_the_send above.
+    _transcript(home, p, 100_000)
+    proc = _run(
+        ["--dry-run", "--hard"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        home=home,
+        extra_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"},
+    )
+    assert proc.returncode == 0
+    assert "GUARD2_HARNESS_IMMINENT" not in proc.stdout
+    assert "DRY_RUN" in proc.stdout

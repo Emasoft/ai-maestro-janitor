@@ -130,6 +130,32 @@ def test_backstop_still_fires_above_min_context_under_autocompact_enabled(
     assert len(harness.spawned) == 1, f"expected the backstop compact_trigger spawn, got {harness.spawned}"
 
 
+def test_guard2_token_from_compact_trigger_skips_cooldown_and_logs(
+    harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """compact_trigger.py's own guard 2 fired (its stdout carries GUARD2_STDOUT_TOKEN) -> no
+    cooldown stamp (a later Stop must still be free to try again), and one explicit log line —
+    not silently lumped into the generic no-send path (round 3)."""
+    import time as _t
+
+    hook = _load_hook()
+    _set(harness, monkeypatch, present=False, ctx=600_000)
+
+    def _guard2_run(cmd, **_kw):  # noqa: ANN001, ANN003
+        harness.spawned.append(list(cmd))
+        return SimpleNamespace(returncode=0, stdout=f"{harness.ccc.GUARD2_STDOUT_TOKEN}\n", stderr="")
+
+    monkeypatch.setattr(harness.state, "run_subprocess", _guard2_run)
+
+    assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
+    assert len(harness.spawned) == 1, "compact_trigger.py must still be invoked"
+    sd = harness.state.state_dir()
+    assert harness.ccc.in_cooldown(sd, now=int(_t.time())) is False, "guard 2 must not stamp a cooldown"
+    log_path = harness.state.log_dir() / "on-stop-proactive-compact.log"
+    assert log_path.is_file() and "compact guard 2" in log_path.read_text(encoding="utf-8")
+
+
+
 def test_does_not_loop_after_a_compaction(harness, monkeypatch: pytest.MonkeyPatch) -> None:
     """THE LOOP GUARD, end-to-end through the hook, in the REAL post-compaction state.
 

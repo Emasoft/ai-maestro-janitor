@@ -195,6 +195,13 @@ GUARD2_MARGIN_FRACTION = 0.05
 # compact_trigger.py, after the two dispatch/hook call sites were found to be permanently
 # unreachable, round 2 -- see the function's own docstring).
 GUARD2_LOG_NAME = "cold-cache-compact"
+# compact_trigger.py's own stdout token for a guard-2 skip, in the SAME bare-token vocabulary
+# its other NO-SEND outcomes already use (NO_ITERM, USER_PRESENT, ...). Defined HERE, not in
+# compact_trigger.py, and imported by both it and its callers (on-stop-proactive-compact.py,
+# dispatch.py) -- both already import this module, so the constant has ONE definition and can
+# never drift the way `PRECOMPACT_LAST_TRIGGER_FILENAME` had to be re-mirrored (TRDD-YM65RCZA
+# item 3) because the two sides there could not share an import.
+GUARD2_STDOUT_TOKEN = "GUARD2_HARNESS_IMMINENT"
 
 
 def harness_will_autocompact(
@@ -241,24 +248,26 @@ def harness_will_autocompact(
     anything: `compact_trigger.py`'s own `main()`, which measures the context itself, independent
     of any caller's floor.
 
-    TWO DISCLOSED, NOT FIXED, LIMITATIONS (round 2 review) -- in the same spirit as GUARD 1's own
+    `compact_trigger.py::main()` EXEMPTS `--hard` from this guard entirely (round 3 review): on a
+    small `CLAUDE_CODE_AUTO_COMPACT_WINDOW` the band can sit BELOW the >=85% emergency trip point
+    (e.g. a 200K window gives an effective point of ~166K, a band of roughly
+    [158K, 166K + HARNESS_BACKSTOP_MARGIN), and 85% trips at 170K -- squarely inside it), which
+    would suppress the one path built to be urgent (ESC-interrupt NOW). A caller reaching for
+    `--hard` has already decided the send cannot wait, and this guard exists to avoid a
+    REDUNDANT compact, not to override an explicit urgency signal -- see that call site's own
+    comment.
+
+    ONE DISCLOSED, NOT FIXED, LIMITATION (round 2 review) -- in the same spirit as GUARD 1's own
     disclosed residual risks in `compact_trigger.py`, rather than papered over:
-      (i) This guard now applies to EVERY caller of `compact_trigger.py::main()`, not just the
-          two idle-proactive callers it originally protected -- including the `--hard` emergency
-          path (the >=85% context-enforcement hook) and a manual `/janitor-compact-context`. That
-          is DELIBERATE (the coordinator's round-2 fix explicitly wires the guard inside `main()`,
-          the one place that can observe context before ANY caller-specific floor), but its
-          interaction with the emergency path's own urgency has not been separately analyzed --
-          a band that happens to sit below the 85% trip point on today's typical window sizes is
-          an observation, not a guarantee enforced by this code.
-      (ii) `compact_trigger.py::main()` RE-MEASURES `context_tokens_for(newest_transcript(...))`
-          itself rather than receiving the caller's own already-measured value, so the two can
-          disagree if the transcript changed between the caller's decision and this script's own
-          read (a fast subsequent turn, or the harness's own compaction landing in between). GUARD
-          1's `abort_if_landed` baseline protects the KEYSTROKE SEND from a landed compaction; it
-          is not wired to reconcile with this guard's own fresh remeasurement -- the two answer
-          overlapping but distinct questions from two different snapshots. Worst case is a
-          redundant or a skipped send, both already-tolerated outcomes elsewhere in this file.
+    `compact_trigger.py::main()` RE-MEASURES `context_tokens_for(newest_transcript(...))` itself
+    rather than receiving the caller's own already-measured value, so the two can disagree if the
+    transcript changed between the caller's decision and this script's own read (a fast
+    subsequent turn, or the harness's own compaction landing in between). GUARD 1's
+    `abort_if_landed` baseline protects the KEYSTROKE SEND from a landed compaction; it is not
+    wired to reconcile with this guard's own fresh remeasurement -- the two answer overlapping
+    but distinct questions from two different snapshots. Worst case is a redundant or a skipped
+    send, both already-tolerated outcomes elsewhere in this file. The two dispatch/hook callers
+    handle this via `GUARD2_STDOUT_TOKEN` (see below), not by assuming it cannot occur.
 
     WHY THIS GUARD EXISTS AT ALL: once a `/compact` keystroke is queued into Claude Code's input,
     no later check can unsend it. In the incident, the janitor's guard typed `/compact` into a

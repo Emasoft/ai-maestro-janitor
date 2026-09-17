@@ -249,12 +249,26 @@ def main() -> int:
     # docstring for why those two sites were found to be permanently unreachable and unwired).
     # `--dry-run` still measures and logs but does not itself send anything either way, so the
     # guard runs unconditionally rather than being skipped under --dry-run.
-    _ctx = cold_cache_compact.context_tokens_for(
-        cold_cache_compact.newest_transcript(state.project_root())
-    )
-    if cold_cache_compact.harness_will_autocompact(_ctx):
-        print("GUARD2_HARNESS_IMMINENT")
-        return 0
+    #
+    # EXEMPT `--hard` (review round 3): the guard's own band can sit BELOW the >=85% emergency
+    # trip point on a small window -- e.g. a 200k CLAUDE_CODE_AUTO_COMPACT_WINDOW gives an
+    # effective point of ~166k, a band of roughly [158k, 166k + HARNESS_BACKSTOP_MARGIN), and
+    # the 85% trip fires at 170k, squarely inside it -- which would suppress the one path this
+    # script exposes specifically to be urgent (ESC-interrupt NOW, never enqueue-and-wait). A
+    # caller reaching for `--hard` has already decided the send cannot wait for the harness;
+    # guard 2 exists to avoid a REDUNDANT compact, not to override an explicit urgency signal.
+    # `--hard` currently has no automated caller (the >=85% PreToolUse hook that used to pass it
+    # was removed, TRDD-11GAS4LC/7MGJYLY5 -- see this file's own commented history above) but the
+    # flag remains a manual/skill-invocable escape hatch, so the exemption still matters.
+    if args.hard:
+        state.log_line("compact-trigger", "compact guard 2: --hard emergency path, guard skipped")
+    else:
+        _ctx = cold_cache_compact.context_tokens_for(
+            cold_cache_compact.newest_transcript(state.project_root())
+        )
+        if cold_cache_compact.harness_will_autocompact(_ctx):
+            print(cold_cache_compact.GUARD2_STDOUT_TOKEN)
+            return 0
 
     # send_self_command drives both tmux and iTerm directly (TRDD-db169d9e R3); only a
     # channel it cannot resolve at all falls through to NO_ITERM below.

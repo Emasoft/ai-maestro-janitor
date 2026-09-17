@@ -166,6 +166,25 @@ def test_backstop_still_fires_above_min_context_under_autocompact_enabled(
     assert ret is True and len(calls) == 1
 
 
+def test_guard2_token_from_compact_trigger_skips_cooldown_and_logs(
+    iso, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """compact_trigger.py's own guard 2 fired (its stdout carries GUARD2_STDOUT_TOKEN) -> no
+    cooldown stamp (a later heartbeat must still be free to try again), and one explicit log
+    line — not silently lumped into the generic no-send path (round 3)."""
+    d, state, ccc = iso.dispatch, iso.state, iso.ccc
+    sd = state.state_dir()
+    _patch_idle(monkeypatch, iso, present=False, active=False)
+    _set_ctx(monkeypatch, iso, 500_000)
+    calls = _patch_run(monkeypatch, iso, f"{ccc.GUARD2_STDOUT_TOKEN}\n")
+    _, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is False
+    assert len(calls) == 1, "compact_trigger.py must still be invoked"
+    assert ccc.in_cooldown(sd, now=int(time.time())) is False, "guard 2 must not stamp a cooldown"
+    log_path = state.log_dir() / "dispatch.log"
+    assert log_path.is_file() and "guard 2" in log_path.read_text(encoding="utf-8")
+
+
 def test_proactive_idle_never_fires_when_user_present(iso, monkeypatch: pytest.MonkeyPatch) -> None:
     """A present user vetoes — compaction must never fire out from under active work."""
     d = iso.dispatch

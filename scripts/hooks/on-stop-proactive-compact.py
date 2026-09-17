@@ -123,13 +123,15 @@ def main() -> int:
         ):
             return 0
 
-        # NO GUARD 2 HERE (TRDD-PH8SAQKS round 2): `ctx` reaching this point has already passed
-        # `should_compact_proactively_idle`'s own `min_context_tokens` floor above -- the SAME
-        # value `harness_will_autocompact` uses as its band's UPPER bound -- so this call site can
-        # never land inside the guard's imminent band; it is always at or past "the harness
-        # already missed its turn boundary", where sending is the correct BACKSTOP, not a race.
-        # Guard 2 lives instead in compact_trigger.py's own main(), the one caller that measures
-        # context BEFORE any floor gate narrows it (see harness_will_autocompact's docstring).
+        # NO GUARD 2 CHECK HERE (TRDD-PH8SAQKS round 2): `ctx` reaching this point has already
+        # passed `should_compact_proactively_idle`'s own `min_context_tokens` floor above -- the
+        # SAME value `harness_will_autocompact` uses as its band's UPPER bound -- so THIS site's
+        # own `ctx` is always at or past "the harness already missed its turn boundary", where
+        # sending is the correct BACKSTOP, not a race. Guard 2 itself lives in compact_trigger.py's
+        # own main(), which RE-measures context independently before deciding (see
+        # `harness_will_autocompact`'s docstring, disclosed limitation (ii)) -- so its verdict CAN
+        # rarely diverge from this site's own `ctx`; the `GUARD2_STDOUT_TOKEN` branch below is
+        # what actually handles that outcome, not an assumption that it cannot occur.
 
         compact_py = Path(plugin_root) / "scripts" / "compact_trigger.py"
         if not compact_py.is_file():
@@ -152,7 +154,14 @@ def main() -> int:
             capture=True,
             detector_name="on-stop-proactive-compact",
         )
-        if not (proc and proc.returncode == 0 and "COMPACT_FIRED" in (proc.stdout or "")):
+        _stdout = proc.stdout or "" if proc else ""
+        if cold_cache_compact.GUARD2_STDOUT_TOKEN in _stdout:
+            # compact_trigger.py's own guard 2 fired (TRDD-PH8SAQKS round 3): the harness is
+            # about to auto-compact this SAME context on its own -- one explicit log line, same
+            # NO-cooldown-stamp treatment as every other no-send outcome below.
+            state.log_line("on-stop-proactive-compact", f"compact guard 2 skipped the send (context={ctx})")
+            return 0
+        if not (proc and proc.returncode == 0 and "COMPACT_FIRED" in _stdout):
             # NO_ITERM / headless / trigger failed → no compaction happened, so do NOT stamp
             # the cooldown: a stamp with no compact would also suppress the SessionStart and
             # heartbeat trigger points. All three must agree on what "fired" means.
