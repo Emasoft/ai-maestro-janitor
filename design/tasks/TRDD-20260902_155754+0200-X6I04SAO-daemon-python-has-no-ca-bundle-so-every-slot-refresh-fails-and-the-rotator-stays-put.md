@@ -1,10 +1,10 @@
 ---
 trdd-id: X6I04SAO
 title: the daemon's Python has no CA bundle, so every slot refresh fails TLS and the rotator stays put while the user rotates by hand
-column: todo
+column: testing
 created: 2026-09-02T15:57:54+0200
-updated: 2026-09-16T12:33:53+0200
-review-after: 2026-09-05
+updated: 2026-09-17T05:54:33+0200
+review-after: 2026-09-24
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -131,5 +131,10 @@ scoped switch (util still healthy, no pane was actually wedged/blocked at the ti
 
 ## Approval log
 - 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-17T05:54:33+0200 — column → testing by main session (owner standing permission 2026-09-03). CA-bundle fix landed and stable; remaining box 4 needs a genuinely wedged pane + paired ESC event.
 
 ## Notes and lessons learned
+
+## ⏵ STATE — READ THIS FIRST ON RESUME
+
+2026-09-17 — CA-bundle fix (5d3c82d2) landed and stable, boxes 1-3 done. Pending live observation: box 4, a genuinely wedged pane paired with an ESC (today's rotator.log entry was only a proactive scoped switch, not a wedged-pane case) — will be logged in rotator.log when it occurs. review-after set; moved todo -> testing.

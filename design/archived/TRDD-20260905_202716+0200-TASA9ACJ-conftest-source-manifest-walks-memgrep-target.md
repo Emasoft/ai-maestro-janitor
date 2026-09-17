@@ -1,9 +1,9 @@
 ---
 trdd-id: TASA9ACJ
 title: conftest source manifest walks and sorts the 100k-file memgrep target tree before filtering it out
-column: todo
+column: complete
 created: 2026-09-05T20:27:16+0200
-updated: 2026-09-16T12:33:54+0200
+updated: 2026-09-17T05:51:26+0200
 current-owner: janitor-main-session
 assignee: janitor-main-session
 task-type: bugfix
@@ -101,7 +101,7 @@ before that, a revert to `rglob` left the list empty and the prune assertions va
 - [x] Targeted run green: the test file that covers `_source_manifest`, plus
       `uv run ruff check tests/conftest.py`, `uv run mypy scripts/ --ignore-missing-imports`,
       `uvx --with pyright pyright tests/conftest.py`.
-- [ ] Full suite green — deferred to the publish gate (host loadavg was 87–144 while this
+- [x] Full suite green — deferred to the publish gate (host loadavg was 87–144 while this
       card was filed; do not start a full run to prove this box).
 
 ## Notes
@@ -115,3 +115,5 @@ subprocesses that card tracks, though it is not shown to be the cause of any spe
 
 ## Approval log
 - 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+2026-09-17 full unscoped suite on HEAD: 16804 passed, 2 skipped (reports/board-drain/20260917_baseline-gates.txt); ruff/mypy/pyright clean. — closer batch 2, approved by main session (owner standing permission 2026-09-03).
+- 2026-09-17T05:51:26+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Full unscoped suite on HEAD today 16804 passed/2 skipped, ruff/mypy/pyright clean (20260917_baseline-gates.txt); publish-gate criterion satisfied..

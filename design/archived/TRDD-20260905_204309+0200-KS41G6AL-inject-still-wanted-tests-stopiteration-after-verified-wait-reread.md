@@ -1,9 +1,9 @@
 ---
 trdd-id: KS41G6AL
 title: test_inject_still_wanted raises StopIteration since the verified wait re-reads the pane through _still_shows_ours
-column: todo
+column: complete
 created: 2026-09-05T20:43:09+0200
-updated: 2026-09-16T12:33:54+0200
+updated: 2026-09-17T05:51:25+0200
 current-owner: janitor-main-session
 assignee: janitor-main-session
 task-type: bugfix
@@ -94,7 +94,7 @@ Either way the three currently-passing tests in the file and every test in
       after phase 2 quoted from the source.
 - [x] `uv run ruff check`, `uv run mypy scripts/ --ignore-missing-imports`,
       `uvx --with pyright pyright` on the touched files — clean.
-- [ ] Full suite green — at the publish gate (do not start a full run for this card).
+- [x] Full suite green — at the publish gate (do not start a full run for this card).
 
 ## Notes
 
@@ -132,3 +132,5 @@ Full trace + verification commands/output: `reports/board-drain/20260905_210043+
 
 ## Approval log
 - 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+2026-09-17 full unscoped suite on HEAD: 16804 passed, 2 skipped (reports/board-drain/20260917_baseline-gates.txt); ruff/mypy/pyright clean. — closer batch 2, approved by main session (owner standing permission 2026-09-03).
+- 2026-09-17T05:51:25+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Full unscoped suite on HEAD today 16804 passed/2 skipped, ruff/mypy/pyright clean (20260917_baseline-gates.txt); publish-gate criterion satisfied..

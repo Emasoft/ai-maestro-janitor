@@ -1,9 +1,9 @@
 ---
 trdd-id: 7NSRD8OV
 title: Tests that shell out with a 5s timeout flake under full-suite load and can block a publish
-column: todo
+column: testing
 created: 2026-08-21T06:37:16+0200
-updated: 2026-09-16T12:45:21+0200
+updated: 2026-09-17T05:55:28+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -12,6 +12,7 @@ implementation-commits: [de08aa15, 935daa7e, 1ea8b734, 2b88f67d, 8bdc8baa, 912f5
 npt: []
 eht: [TASA9ACJ, 9EAQS97B]
 min-approval-requirement: none
+review-after: 2026-09-24
 ---
 
 # Subprocess-timeout tests flake under full-suite load
@@ -1203,4 +1204,9 @@ advisor verdict, and is recorded that way deliberately.
 - 2026-09-05T10:38:00+0200 — RULING APPLIED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal): the card's own written ruling of 2026-09-03 stands verbatim — the soak-evidence bar is ONE green full-suite run under xdist after 2026-09-03 with zero category-D `TimeoutExpired`, no host-load floor required. That run is in flight now (reports/suite-soak/); the card returns to `testing` and closes on its result, or stays with the failures named.
 - 2026-09-16T12:34:44+0200 — column → todo. boxes ticked but the STATE block carries an ordered residual next-action list nobody is working; re-columned honest (triage 2026-09-16)
 - 2026-09-16T13:10:00+0200 — observation now possible: PJD6XV66 (the gh soft-fail trace line) shipped in 3.5.5 and is present in the installed cache; the first real gh soft-fail under 3.5.5 prints a ⟦branch_protection_lib⟧ line to stderr/daemon.log and attributes the guard-family flake this card left unattributed. Check for it on the next full-suite run under load.
+- 2026-09-17T05:55:28+0200 — column → testing by main session (owner standing permission 2026-09-03). Prerequisite tracing (PJD6XV66) landed; family did not flake in today's full-suite run, but the acceptance box demands attributing the original incident's root swallow-site, which cannot be reproduced retroactively.
 
+
+## ⏵ STATE — READ THIS FIRST ON RESUME
+
+2026-09-17 — TRDD-PJD6XV66 (stderr trace for branch_protection_lib gh-reader soft-fails) landed (eb4bce28) and shipped; today's full unscoped suite (16804 passed, 0 failed, 560s, reports/board-drain/20260917_baseline-gates.txt) ran with that tracing live and the 5s-timeout/branch-protection-guard family did not flake. This is evidence the family is currently stable, NOT an attribution of the original 7-failure incident's root cause among the 5 swallow-to-None call sites (detect_default_branch/viewer_is_admin/list_existing_rulesets/gh_available), which remains unattributed and unfixed (the acceptance box asks for attributing all flake categories, not merely 'no longer flakes'). Nothing here changes this card's gates. review-after set; moved todo -> testing pending a reproduction under load with the new trace to actually attribute a cause.

@@ -1,10 +1,10 @@
 ---
 trdd-id: 2F3I2P18
 title: clear FIRST on any cache-invalidating event, then summarize — the summary source survives the clear
-column: todo
+column: testing
 created: 2026-09-01T18:18:14+0200
-updated: 2026-09-16T12:33:56+0200
-review-after: 2026-09-05
+updated: 2026-09-17T05:54:33+0200
+review-after: 2026-09-24
 implementation-commits: [59e31dcb, 50856019, 3be4a950, 109cc3b9, 4181d6c5, e3299d8d]
 current-owner: janitor-main-session
 task-type: feature
@@ -253,3 +253,8 @@ invisible to the gate.
 ## Approval log
 
 - 2026-09-16T12:33:56+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-17T05:54:33+0200 — column → testing by main session (owner standing permission 2026-09-03). Mechanism landed; remaining box needs a naturally-occurring large-context invalidation event.
+
+## ⏵ STATE — READ THIS FIRST ON RESUME
+
+2026-09-17 — detection/ordering mechanism landed and verified (external-clear.log:603). Pending live observation: a genuine 'prefix invalidated' event on a session >=300k context, to confirm the paid-write-skip path fires at scale; will be logged in external-clear.log when it occurs. review-after set; moved todo -> testing.

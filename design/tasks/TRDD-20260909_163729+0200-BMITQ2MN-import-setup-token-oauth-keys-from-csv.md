@@ -3,7 +3,7 @@ trdd-id: BMITQ2MN
 title: Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault
 column: blocked
 created: 2026-09-09T16:37:29+0200
-updated: 2026-09-16T12:35:31+0200
+updated: 2026-09-17T05:54:48+0200
 current-owner: ai-maestro-janitor session
 task-type: feature
 scope: project
@@ -13,6 +13,7 @@ implementation-commits: [f4457513, 780c811d, 1c797cfe, 9ef139d0]
 relevant-rules: []
 labels: [fleet-ask]
 pre-block-column: testing
+blocked-by: [ai-maestro:TRDD-UIDK2SDL]
 ---
 
 # Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault

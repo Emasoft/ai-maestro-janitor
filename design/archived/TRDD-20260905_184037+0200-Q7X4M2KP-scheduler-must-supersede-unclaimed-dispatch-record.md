@@ -1,9 +1,9 @@
 ---
 trdd-id: Q7X4M2KP
 title: Scheduler must supersede its own unclaimed dispatch record for the same scope root and intervention instead of stacking a new one
-column: todo
+column: complete
 created: 2026-09-05T18:40:37+0200
-updated: 2026-09-16T12:33:54+0200
+updated: 2026-09-17T05:51:25+0200
 current-owner: main-session
 task-type: bugfix
 scope: project
@@ -135,7 +135,7 @@ _CLAIMED_PREFIX)`, so a third, un-pruned prefix would accumulate one file per la
 - [x] A new test pins the `claim_one` `except OSError: continue` behavior against a record
       concurrently renamed out from under it by a supersede (the peer-claim race stays benign).
 - [x] `uv run pytest tests/test_memory_maintenance.py -k supersede` passes.
-- [ ] Full suite still green: `uv run pytest`. (NOT run this session per orchestrator
+- [x] Full suite still green: `uv run pytest`. (NOT run this session per orchestrator
       instruction — see STATE block for the flaky, unrelated `test_dispatch_defang.py`
       finding.)
 - [x] A new test seeds `_PENDING_KEEP + N` superseded lapses for distinct keys and asserts the
@@ -150,3 +150,5 @@ keeps growing unless the scheduler stops stacking duplicate unclaimed records.
 
 ## Approval log
 - 2026-09-16T12:33:54+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+2026-09-17 full unscoped suite on HEAD: 16804 passed, 2 skipped (reports/board-drain/20260917_baseline-gates.txt); ruff/mypy/pyright clean. — closer batch 2, approved by main session (owner standing permission 2026-09-03).
+- 2026-09-17T05:51:25+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Full unscoped suite on HEAD today 16804 passed/2 skipped, ruff/mypy/pyright clean (20260917_baseline-gates.txt); publish-gate criterion satisfied..

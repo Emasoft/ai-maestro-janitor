@@ -1,9 +1,9 @@
 ---
 trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
-column: todo
+column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-16T12:33:53+0200
+updated: 2026-09-17T05:54:34+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -15,6 +15,7 @@ related-trdds: [UA4FAX67, WKTD5JTC, P7WU40G9, O7UCNNN2, G043V3V0, 9ZPU69UC]
 npt: []
 eht: []
 implementation-commits: [9cc22049]
+review-after: 2026-09-24
 ---
 
 # session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
@@ -290,5 +291,10 @@ Mechanism, verified in code + transcript:
   owner's standing delegation of the review columns. F0–F6 verified against the code and
   the green full suite; F5 (live observation) explicitly left open and stated on the card.
 - 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+- 2026-09-17T05:54:34+0200 — column → testing by main session (owner standing permission 2026-09-03). F0-F6 code-complete and shipped in v3.4.14; F5 needs one real stalled-fire observation post-publish, cannot be manufactured.
 
 ## Notes and lessons learned
+
+## ⏵ STATE — READ THIS FIRST ON RESUME
+
+2026-09-17 — F0-F6 code-complete (commit 9cc22049), full suite green (16351 passed), ruff+mypy clean. Pending live observation: F5, one real stalled heartbeat fire recovering with a SINGLE nudge on this host post-publish (cannot be manufactured). TRDD-56d24c02's separate kill/force-restart-rung policy question is explicitly out of scope here. 9cc22049 confirmed shipped in tag ai-maestro-janitor--v3.4.14. review-after set; moved todo -> testing (HELD at testing, not complete, until F5 is observed).

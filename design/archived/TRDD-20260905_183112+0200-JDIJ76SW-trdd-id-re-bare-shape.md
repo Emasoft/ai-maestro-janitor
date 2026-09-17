@@ -1,9 +1,9 @@
 ---
 trdd-id: JDIJ76SW
 title: TRDD filename matcher drops v1-migrated bare TRDD-<8hex>-<slug> cards from detectors and the board count
-column: todo
+column: complete
 created: 2026-09-05T18:31:12+0200
-updated: 2026-09-16T12:33:55+0200
+updated: 2026-09-17T05:51:24+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -105,7 +105,7 @@ uppercase base36 id) and `TRDD-<uuid>-<slug>.md`, but no case for the bare
       short-id negative test) exists in `tests/test_trdd_common.py` asserting the bare-shape
       id is extracted, and passes via `uv run pytest tests/test_trdd_common.py -k
       test_extract_uid_bare`.
-- [ ] Full suite still green: `uv run pytest` — the UNSCOPED run is not claimed here; the
+- [x] Full suite still green: `uv run pytest` — the UNSCOPED run is not claimed here; the
       pre-publish gate performs it. Evidence so far (coordinator, 2026-09-05 18:53–19:00):
       every test file naming the matcher or one of its six caller modules (`extract_uid|
       trdd_common|_all_folders_columns|trdd-reminder|trdd-drift|cross-card-blindspot|
@@ -159,3 +159,5 @@ real false-negative one. The regex stays as committed.
 
 ## Approval log
 - 2026-09-16T12:33:55+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
+2026-09-17 full unscoped suite on HEAD: 16804 passed, 2 skipped (reports/board-drain/20260917_baseline-gates.txt); ruff/mypy/pyright clean. — closer batch 2, approved by main session (owner standing permission 2026-09-03).
+- 2026-09-17T05:51:24+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Full unscoped suite on HEAD today 16804 passed/2 skipped, ruff/mypy/pyright clean (20260917_baseline-gates.txt); publish-gate criterion satisfied..
