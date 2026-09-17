@@ -365,11 +365,26 @@ def _git_write_or_recover_lock(cmd: list[str], root: Path) -> None:
         sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
         import git_utils  # noqa: PLC0415 -- local import; publish.py has no lib deps at top
         # min_age_s=0.0 disables ONLY the age guard (see above); every other guard holds.
-        if git_utils.clear_stale_index_lock(root, min_age_s=0.0) == "removed":
+        verdict = git_utils.clear_stale_index_lock(root, min_age_s=0.0)
+        if verdict == "removed":
             cprint(f"  {YELLOW}Removed an orphaned .git/index.lock that blocked "
                    f"{' '.join(cmd)} (no holder, no live git) — retrying once.{NC}")
             run(cmd, cwd=root)
             return
+        # 2026-09-17 3.5.7 gate (TRDD-L64C5DQ1/PH8SAQKS): under the 16-way xdist
+        # run test_orphaned_index_lock_is_removed_and_the_write_retried failed
+        # with a bare "Command failed (exit 128)" and no clue which fail-closed
+        # guard in clear_stale_index_lock refused — see the memory page
+        # git-index-lock-orphan-recovery: a fail-closed refusal under load is
+        # invisible unless it is named. Name it.
+        try:
+            st = lock.stat()
+            age_s = time.time() - st.st_mtime
+            detail = f"{st.st_size} bytes, age {age_s:.1f}s"
+        except OSError as exc:
+            detail = f"stat failed: {exc}"
+        cprint(f"  {RED}index.lock recovery refused: verdict={verdict} "
+               f"(lock {detail}) — see git_utils.clear_stale_index_lock{NC}")
     cprint(f"  {RED}Command failed (exit {result.returncode}){NC}")
     sys.exit(result.returncode)
 

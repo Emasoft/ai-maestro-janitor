@@ -420,3 +420,22 @@ def test_a_failure_that_is_not_a_lock_collision_is_not_retried(repo: Path) -> No
         publish._git_write_or_recover_lock(["git", "add", "--", "no-such-file.md"], repo)
     assert exc.value.code != 0
     assert not (repo / ".git" / "index.lock").exists()
+
+
+@_needs_binaries
+def test_refusal_prints_which_guard_named_the_verdict(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A non-"removed" verdict is named on stdout, not swallowed into a bare exit-128."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
+    import git_utils  # noqa: PLC0415 -- same local-import path publish.py itself uses
+
+    monkeypatch.setattr(git_utils, "clear_stale_index_lock", lambda *a, **kw: "live-git")
+    (repo / "notes.md").write_text("changed\n", encoding="utf-8")
+    lock = repo / ".git" / "index.lock"
+    lock.touch()  # real git refuses with exit 128 while this file exists
+
+    with pytest.raises(SystemExit) as exc:
+        publish._git_write_or_recover_lock(["git", "add", "--", "notes.md"], repo)
+    assert exc.value.code == 128
+    assert "verdict=live-git" in capsys.readouterr().out
