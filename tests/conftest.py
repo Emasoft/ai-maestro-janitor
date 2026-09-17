@@ -1167,6 +1167,18 @@ def find_or_build_memgrep() -> str | None:
             return str(cand)
     cargo = shutil.which("cargo")
     if cargo:
+        # CARGO_HOME and CARGO_TARGET_DIR pinned absolute, under the (gitignored) crate
+        # target dir, unconditionally overriding whatever the ambient env holds.
+        # TRDD-L64C5DQ1: an ambient CARGO_HOME (or CARGO_TARGET_DIR) exported RELATIVE by
+        # the invoking shell/CI resolves against THIS subprocess's cwd — repo root, since
+        # pytest runs from there — spilling a thousands-of-files registry (or build output)
+        # tree into the working tree (it once orphaned .git/index.lock when a security hook
+        # tried to `git diff` those paths). Pinning both here is cwd-independent (absolute
+        # paths) and keeps the cache warm across runs, since it lives beside the crate's
+        # own target dir instead of a fresh tmp dir per run.
+        cargo_env = dict(os.environ)
+        cargo_env["CARGO_HOME"] = str(_MEMGREP_CRATE_DIR / "target" / ".cargo-home")
+        cargo_env["CARGO_TARGET_DIR"] = str(_MEMGREP_CRATE_DIR / "target")
         try:
             _subprocess.run(
                 [cargo, "build", "--release", "--manifest-path", str(_MEMGREP_CRATE_DIR / "Cargo.toml")],
@@ -1174,11 +1186,14 @@ def find_or_build_memgrep() -> str | None:
                 capture_output=True,
                 text=True,
                 timeout=600,
+                env=cargo_env,
             )
         except (_subprocess.CalledProcessError, _subprocess.TimeoutExpired, OSError):
             pass
-        # Cargo honors CARGO_TARGET_DIR; the tree-local path is only where output lands
-        # when that var is unset. Probe both, tree-local first.
+        # Build output always lands at the tree-local path now that CARGO_TARGET_DIR is
+        # pinned above; the ambient-CARGO_TARGET_DIR probe stays as a harmless fallback
+        # for a binary built by some earlier, unpinned invocation (e.g. a developer's own
+        # `cargo build` outside this suite).
         candidates = [_MEMGREP_CRATE_DIR / "target" / "release" / "memgrep"]
         if os.environ.get("CARGO_TARGET_DIR"):
             candidates.append(Path(os.environ["CARGO_TARGET_DIR"]) / "release" / "memgrep")
