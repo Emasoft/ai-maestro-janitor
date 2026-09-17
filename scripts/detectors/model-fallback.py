@@ -245,12 +245,21 @@ def main() -> int:
     # `_actuate_terminal(terminal)` identity this call already uses -- it is never re-typed
     # (`build_submit_plan` sends Enter alone), so a stale/duplicate `/model` text is not a risk.
     actuate_terminal = _actuate_terminal(terminal)
+    # Built once, passed as BOTH `command_plan` and `submit_ref`: `submit_ref=` is the API's
+    # dedicated parameter for "resolve the bare Enter step's channel" (see daemon.py's
+    # OWN_COMMAND_UNSUBMITTED, `submit_ref=plan`) -- `fallback` only picks it up as a
+    # SECOND-priority default when `submit_ref` is absent (`build_step_plan`'s
+    # `ref = submit_ref if submit_ref is not None else fallback`). Passing both keeps
+    # `command_plan` doing its documented job (the command step's own rebuild-failure fallback)
+    # instead of silently also carrying the Enter reference through an undocumented side door.
+    model_plan = fleet_inject.build_command_plan(actuate_terminal, f"/model {target}")
     try:
         outcome = pane_actuate.act(
             actuate_terminal,
             pane_actuate.Event.NO_HEADROOM,
             command=f"/model {target}",
-            command_plan=fleet_inject.build_command_plan(actuate_terminal, f"/model {target}"),
+            command_plan=model_plan,
+            submit_ref=model_plan,
             project_dir=str(state.project_root()),
             log=lambda m: state.log_line(_LOG, m),
         )

@@ -151,9 +151,11 @@ def satisfied(expect: Expect, state: PaneState | None) -> bool:
         return state.input_field.kind == InputFieldKind.EMPTY
     if expect is Expect.MENU_SHOWN:
         return state.status.kind == StatusKind.AWAITING_USER and state.status.awaiting_kind == "model-confirm"
-    if expect is Expect.IDLE_OR_WORKING:
-        return state.status.kind in (StatusKind.IDLE, StatusKind.WORKING)
-    return False  # pragma: no cover -- Expect is a closed enum; no other member exists
+    # `expect is Expect.IDLE_OR_WORKING` here always, since `Expect` is a 5-member closed enum
+    # and every other member has its own branch above -- no trailing `return False`: pyright
+    # narrows `expect` to `Never` past this point, and flags a further `return` as unreachable
+    # dead code (TRDD-8P4BNY5J follow-up).
+    return state.status.kind in (StatusKind.IDLE, StatusKind.WORKING)
 
 
 # The cap on a queue flush, mirroring `terminal_trigger._QUEUE_FLUSH_MAX_ESC`: a queue deeper
