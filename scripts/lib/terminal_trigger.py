@@ -697,6 +697,50 @@ def scoped_transcript_path_env(path: str | None) -> Iterator[None]:
         else:
             os.environ[_TRANSCRIPT_PATH_ENV] = prior
 
+def _interrupt_cooldown_age(
+    bypass_interrupt_cooldown: bool, transcript_path: str | None = None,
+) -> float | None:
+    """`recently_interrupted(...)` age, or None — an Esc/Ctrl-C interrupt is NOT a keystroke
+    the typing probe can see (owner complaint 2026-09-15: "esc key unable to stop the
+    current agent from running" — the queued command typed itself the moment the pane went
+    idle right after the user hit Esc). Never raises: a broken probe degrades to
+    "not interrupted", never to a crash.
+
+    Skipped entirely when `bypass_interrupt_cooldown` is True: that flag marks a HARD send
+    (fleet-recovery unwedge of a frozen/retry_wedged session, the model-fallback switch) —
+    exactly the case where a just-issued Esc/Ctrl-C is expected and must NOT defer the very
+    send meant to recover from it. Deliberately SEPARATE from `esc_first` (TRDD, owner
+    finding 2026-09-15, the #306 injector): `esc_first` ALSO fires from `compact_trigger.py
+    --hard`, a caller that never sent that Esc as a recovery — keying the bypass on
+    `esc_first` let a routine hard `/compact` skip the cooldown it exists to enforce. Only a
+    caller that explicitly asserts "I am recovering from my own interrupt" may bypass.
+
+    THE SHARED GATE (TRDD-PA9E2GJ1): `inject_until_sent` (the typed-command retry loop) AND
+    `send_verified`'s own up-front raw ESC (candidate 1 of that card) both call this SAME
+    function rather than each keeping its own copy — the bug this card closes is exactly that
+    `send_verified` used to fire its ESC unconditionally, honouring the cooldown only for the
+    text typed AFTER it, so a routine `esc_first=True` send during a user's own 300s
+    interrupt window still put a second keystroke into their pane.
+
+    `transcript_path` (the explicit kwarg) wins; else `JANITOR_TRANSCRIPT_PATH` — set by a
+    hook-aware caller (resume/clear/compact trigger's `--transcript-path`) into its own
+    `os.environ` before calling `send_self_command`, which spawns its detached child WITHOUT
+    an explicit `env=` override, so the child inherits it (`_fire_detached_verified`/
+    `_fire_detached_steps`). Neither given -> `recently_interrupted` skips the cooldown
+    (session unknown) rather than guessing at one.
+    """
+    if bypass_interrupt_cooldown:
+        state.log_line("terminal_trigger", "interrupt cooldown bypassed: hard recovery send")
+        return None
+    try:
+        import user_intent  # noqa: PLC0415 — lazy; only the inject path needs it
+
+        project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+        tp = transcript_path or os.environ.get(_TRANSCRIPT_PATH_ENV) or None
+        return user_intent.recently_interrupted(project_dir, transcript_path=tp)
+    except Exception:  # noqa: BLE001 - a broken probe must never block the inject path
+        return None
+
 
 def inject_until_sent(
     terminal: Mapping[str, str],
@@ -1233,13 +1277,22 @@ def send_verified(
     retries are governed by rules 1-3, and re-ESCing on each pass would be an extra keystroke
     into a pane the user may have just started typing in.
 
+    THE ESC ITSELF IS NOW COOLDOWN-GATED TOO (TRDD-PA9E2GJ1, candidate 1 FAIL): before
+    2026-09-17 this fired the up-front ESC unconditionally and relied on `inject_until_sent`
+    to defer only the COMMAND typed after it -- so a routine `esc_first=True` send (a pane
+    mid-render, a stuck menu) still put a second raw ESC into the user's pane during their
+    own 300s post-interrupt cooldown window. It now asks the SAME shared gate
+    (`_interrupt_cooldown_age`, also used by `inject_until_sent`) before firing that ESC, and
+    skips it (never blocks the whole send -- `inject_until_sent` below still runs and will
+    itself keep deferring the command for as long as the cooldown holds).
+
     `bypass_interrupt_cooldown` is forwarded to `inject_until_sent` as ITS SEPARATE
     hard-send-recovery flag (owner finding 2026-09-15, #306): `esc_first` alone no longer
     bypasses the interrupt-cooldown check there, because `esc_first` is also set by callers
     (e.g. `compact_trigger.py --hard`) that never sent that Esc as a recovery from a real
     interrupt. Pass `bypass_interrupt_cooldown=True` only when the caller is itself the
     recovery from a just-issued Esc/Ctrl-C (a fleet-recovery unwedge, the model-fallback
-    switch) -- everyone else leaves it False.
+    switch) -- everyone else leaves it False. The same flag now also governs the up-front ESC.
 
     `reader`/`is_typing` are the same injectable seams `inject_until_sent` exposes, forwarded
     only when given: they are bound as DEFAULT ARGUMENTS there, so a caller (or a test) that
@@ -1249,9 +1302,15 @@ def send_verified(
     if build_type_only_steps(terminal, command) is None or build_submit_steps(terminal) is None:
         return False, f"channel {terminal.get('kind', '?')!r} cannot type-then-verify"
     if esc_first:
-        plan = build_esc_only_steps(terminal)
-        if plan:
-            _run_steps(plan)
+        if _interrupt_cooldown_age(bypass_interrupt_cooldown) is not None:
+            state.log_line(
+                "terminal_trigger",
+                "send_verified: esc_first skipped -- within interrupt cooldown",
+            )
+        else:
+            plan = build_esc_only_steps(terminal)
+            if plan:
+                _run_steps(plan)
     _runner, _submit, _clear = _step_runners(terminal)
     extra = {}
     if reader is not None:

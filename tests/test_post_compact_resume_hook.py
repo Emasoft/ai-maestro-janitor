@@ -449,6 +449,31 @@ def test_push_fires_when_unattended(
     assert calls[0][-1].endswith("resume_trigger.py")
 
 
+def test_push_forwards_transcript_path_to_resume_trigger(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-PA9E2GJ1 candidate 2 (FAIL before this fix, verified by this test): without a
+    `--transcript-path`, `terminal_trigger.recently_interrupted` has no session identity and
+    SILENTLY SKIPS the interrupt cooldown (its own documented fail-open) — so a post-compact
+    resume push could re-type over a user who had just hit Esc. `_maybe_push_resume` must
+    thread its `transcript_path` argument all the way to the `resume_trigger.py` argv."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))  # no presence file → unattended
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED", raising=False)
+    calls = _patch_popen(monkeypatch, hook)
+    hook._maybe_push_resume(state, "/tmp/fake-session.jsonl")
+    assert len(calls) == 1
+    assert calls[0][-3:] == [
+        str(_PROJECT_ROOT / "scripts" / "resume_trigger.py"),
+        "--transcript-path",
+        "/tmp/fake-session.jsonl",
+    ]
+
+
 def test_push_skips_when_attended(
     state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -371,7 +371,7 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
     return (now - last) < prompt_window_s
 
 
-def _maybe_push_resume(state) -> None:  # noqa: ANN001
+def _maybe_push_resume(state, transcript_path: str | None = None) -> None:  # noqa: ANN001
     """Fire the detached /janitor-resume push — gated + best-effort.
 
     Called ONLY after a resume flag was written (so there IS a target). Skips
@@ -380,6 +380,11 @@ def _maybe_push_resume(state) -> None:  # noqa: ANN001
     (see `_defer_push`) rather than dropped — TRDD-74AA4PAL. Spawns fully
     detached so the hook returns immediately; the caller wraps this so a fault
     never affects the compaction.
+
+    `transcript_path` (this session's own, from the PostCompact hook payload) is
+    threaded to `_fire_push`/`_defer_push` so the interrupt-cooldown check inside
+    `terminal_trigger.inject_until_sent` can actually find this session's
+    transcript instead of skipping the cooldown for want of one (TRDD-PA9E2GJ1).
     """
     if not state.is_truthy_env(_PUSH_ENABLED_ENV, default=True):
         return
@@ -401,19 +406,28 @@ def _maybe_push_resume(state) -> None:  # noqa: ANN001
         # live fingers — the HID grace + prompt-window checks above) is
         # UNCHANGED: we still never fire `resume_trigger.py` while attended.
         # We only stop treating "attended right now" as "attended forever".
-        _defer_push(state, plugin_root)
+        _defer_push(state, plugin_root, transcript_path)
         return
-    _fire_push(plugin_root)
+    _fire_push(plugin_root, transcript_path)
     state.log_line("post-compact-resume", "resume push fired (/janitor-resume)")
 
 
-def _fire_push(plugin_root: str) -> None:
-    """Spawn the detached `resume_trigger.py` — the actual keystroke injector."""
+def _fire_push(plugin_root: str, transcript_path: str | None = None) -> None:
+    """Spawn the detached `resume_trigger.py` — the actual keystroke injector.
+    `transcript_path` is forwarded as `--transcript-path` so `terminal_trigger`'s
+    interrupt-cooldown check (E-1, TRDD-6P0KUSO9) can resolve THIS session's own
+    transcript. Without it `recently_interrupted` has no session identity and SKIPS
+    the cooldown entirely (its own documented fail-open) -- which is what silently
+    let a post-compact resume push re-type over a user who had just hit Esc
+    (TRDD-PA9E2GJ1 candidate 2, box 2 FAIL)."""
     trigger = Path(plugin_root) / "scripts" / "resume_trigger.py"
     if not trigger.is_file():
         return
+    argv = [sys.executable, str(trigger)]
+    if transcript_path:
+        argv += ["--transcript-path", transcript_path]
     subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, str(trigger)],
+        argv,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -436,7 +450,7 @@ _PUSH_DEFER_MAX_S = 15 * 60
 _DEFER_ARG = "--deferred-push-recheck"
 
 
-def _defer_push(state, plugin_root: str) -> None:  # noqa: ANN001
+def _defer_push(state, plugin_root: str, transcript_path: str | None = None) -> None:  # noqa: ANN001
     """Re-arm the push ~60s out instead of dropping it (TRDD-74AA4PAL).
 
     Spawns a detached child of THIS SAME script (re-entered via `_DEFER_ARG`,
@@ -445,9 +459,14 @@ def _defer_push(state, plugin_root: str) -> None:  # noqa: ANN001
     (`_run_deferred_recheck`). This is the same fire-and-forget async spawn
     `_fire_push` already uses for the push itself — the hook's own synchronous
     handler never sleeps or blocks; only the detached child does.
+
+    `transcript_path` rides along as a 4th argv element (empty string when
+    unknown) so a re-armed push still carries this session's identity through
+    to `_fire_push` — dropping it here would silently reopen the no-cooldown
+    gap for every deferred (attended-at-compaction-time) resume.
     """
     subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, "0"],
+        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, "0", transcript_path or ""],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -463,15 +482,19 @@ def _run_deferred_recheck(
     state,  # noqa: ANN001
     plugin_root: str,
     elapsed_s: int,
+    transcript_path: str | None = None,
     sleep_fn=time.sleep,
 ) -> None:
     """CHILD role (detached): wait, re-check attendance, push / re-defer / give up.
 
     `elapsed_s` is the total deferral time accumulated across self-chained
     re-arms, so the `_PUSH_DEFER_MAX_S` bound holds regardless of how many
-    hops it took. Testable directly: pass `sleep_fn=lambda _: None` and drive
-    `_user_recently_active`'s inputs (presence files) the same way the other
-    `_maybe_push_resume` tests already do — no real subprocess needed.
+    hops it took. `transcript_path` is carried through unchanged from
+    `_defer_push`'s argv so a re-armed push still resolves the interrupt
+    cooldown against THIS session (TRDD-PA9E2GJ1). Testable directly: pass
+    `sleep_fn=lambda _: None` and drive `_user_recently_active`'s inputs
+    (presence files) the same way the other `_maybe_push_resume` tests
+    already do — no real subprocess needed.
     """
     sleep_fn(_PUSH_DEFER_RECHECK_S)
     # The resume flag is the only thing the push is FOR. If a heartbeat fire
@@ -485,7 +508,7 @@ def _run_deferred_recheck(
     total = elapsed_s + _PUSH_DEFER_RECHECK_S
     now = int(time.time())
     if not _user_recently_active(state, now, _push_grace_s(), _push_prompt_window_s()):
-        _fire_push(plugin_root)
+        _fire_push(plugin_root, transcript_path)
         state.log_line("post-compact-resume", f"resume push fired after {total}s deferral")
         return
     if total >= _PUSH_DEFER_MAX_S:
@@ -494,7 +517,7 @@ def _run_deferred_recheck(
         )
         return
     subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, str(total)],
+        [sys.executable, str(Path(__file__).resolve()), _DEFER_ARG, plugin_root, str(total), transcript_path or ""],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -513,29 +536,45 @@ def main() -> int:
             elapsed_arg = int(sys.argv[3])
         except ValueError:
             elapsed_arg = 0
+        # 5th argv slot (TRDD-PA9E2GJ1): the transcript path `_defer_push`/
+        # `_run_deferred_recheck` carried into this re-entry, or empty when
+        # the original compaction payload had none.
+        transcript_arg = sys.argv[4] if len(sys.argv) >= 5 and sys.argv[4] else None
         sys.path.insert(0, str(Path(plugin_root_arg) / "scripts"))
         try:
             from lib import state as state_mod  # noqa: E402 - local package, not PyPI
         except Exception:  # noqa: BLE001 - a broken re-entry must never crash noisily
             return 0
-        _run_deferred_recheck(state_mod, plugin_root_arg, elapsed_arg)
+        _run_deferred_recheck(state_mod, plugin_root_arg, elapsed_arg, transcript_arg)
         return 0
 
     # Drain stdin (PostCompact delivers a JSON payload there). We mainly rely on
     # CLAUDE_PROJECT_DIR for project resolution, but fall back to the payload's
     # `cwd` if the env var is somehow absent in this hook's environment.
+    #
+    # `transcript_path` is read UNCONDITIONALLY (unlike `cwd`, which only matters
+    # when CLAUDE_PROJECT_DIR is missing): it is this hook's ONLY source for it,
+    # and every PostCompact payload carries its own session's transcript path.
+    # Threading it to `_maybe_push_resume` is what lets `terminal_trigger`'s
+    # interrupt-cooldown check resolve a session at all — without it,
+    # `recently_interrupted` had no identity to check and silently skipped the
+    # cooldown (TRDD-PA9E2GJ1 candidate 2, box 2 FAIL).
     raw = ""
     try:
         raw = sys.stdin.read()
     except (OSError, ValueError):
         raw = ""
     cwd_fallback = ""
-    if raw.strip() and not os.environ.get("CLAUDE_PROJECT_DIR", "").strip():
+    transcript_path = ""
+    if raw.strip():
         try:
             payload = json.loads(raw)
-            cwd_fallback = str(payload.get("cwd", "") or "") if isinstance(payload, dict) else ""
         except (ValueError, TypeError):
-            cwd_fallback = ""
+            payload = None
+        if isinstance(payload, dict):
+            transcript_path = str(payload.get("transcript_path", "") or "")
+            if not os.environ.get("CLAUDE_PROJECT_DIR", "").strip():
+                cwd_fallback = str(payload.get("cwd", "") or "")
 
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
     if not plugin_root:
@@ -599,7 +638,7 @@ def main() -> int:
     # no automatable pane) — the cron path still resumes if the push is skipped.
     if wrote_flag:
         try:
-            _maybe_push_resume(state)
+            _maybe_push_resume(state, transcript_path or None)
         except Exception as exc:  # noqa: BLE001 - never let the push break compaction
             try:
                 state.log_line("post-compact-resume", f"resume push failed: {exc}")

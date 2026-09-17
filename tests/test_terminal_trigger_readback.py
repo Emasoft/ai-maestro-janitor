@@ -949,6 +949,27 @@ def test_send_verified_without_esc_types_no_escape(monkeypatch) -> None:
     assert not any("Escape" in c for c in calls)
 
 
+def test_send_verified_esc_suppressed_during_interrupt_cooldown(monkeypatch) -> None:
+    """TRDD-PA9E2GJ1 candidate 1 (FAIL before this fix, verified by this test): a user
+    interrupt at t0 must suppress BOTH the up-front raw ESC `send_verified(esc_first=True)`
+    used to fire unconditionally, AND the command typing `inject_until_sent` already gated —
+    no injection of any kind for 300s (the E-1 floor, TRDD-6P0KUSO9), never only the typing
+    half. `user_intent.recently_interrupted` is monkeypatched to report an interrupt 10s ago
+    (well inside the 300s floor) for the whole call, simulating "still within cooldown"."""
+    import user_intent
+
+    calls: list[str] = []
+    monkeypatch.setattr(tt, "_run_steps", lambda steps: calls.extend(" ".join(map(str, s)) for s in steps))
+    monkeypatch.setattr(user_intent, "recently_interrupted", lambda *a, **k: 10.0)
+    ok, why = tt.send_verified(
+        {"kind": "tmux", "pane": "%1"}, "/model opus", esc_first=True,
+        sleeper=lambda _s: None, giveup_s=0.2,
+        reader=lambda _t: _pane(""), is_typing=lambda _t: False,
+    )
+    assert ok is False, why  # never settles: the interrupt cooldown never lifts in this test
+    assert not any("Escape" in c for c in calls), f"ESC must be suppressed during cooldown: {calls!r}"
+
+
 def test_send_verified_escs_types_and_submits_on_ITERM_too(monkeypatch) -> None:
     """The same contract on the OTHER readable channel (TRDD-QE390SJA acceptance).
 
