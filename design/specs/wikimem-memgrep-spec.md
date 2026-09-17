@@ -1,9 +1,9 @@
 ---
 spec: wikimem-memgrep
-spec-version: 2.3.0
+spec-version: 2.4.0
 status: normative
 created: 2026-07-23T15:03:35+0200
-updated: 2026-09-17T08:23:47+0200
+updated: 2026-09-17T08:53:11+0200
 maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner request, 2026-07-23)
@@ -1500,7 +1500,7 @@ destination, rewriting definitions AND inline references together.
 leave a `[^N]` reference without its `[^N]:` definition; an uncited page-level lesson
 definition (`[^N]:` nothing cites) is a legal, normal shape — the Notes section is mandatory
 even when empty — and `MUST NOT` block the verb. Post-build re-proves the result
-reference-clean or writes nothing. A delete that removes the last atom citing a lesson is allowed: the definition stays as an uncited page-level lesson, and an atom-level verb MUST NOT remove a `[^N]:` definition from a page it leaves standing, except under the explicit `--with-lessons` opt-in below. Removing a whole page (`delete-mem-topic`) and merging two byte-identical lesson definitions into one on merge are not deleting knowledge. The one explicit opt-in is `delete-mem-atom --with-lessons`; its semantics are WM-CLI-19's. (GitHub issue 304, TRDD-RMX0IE72).
+reference-clean or writes nothing. A delete that removes the last atom citing a lesson is allowed: the definition stays as an uncited page-level lesson, and an atom-level verb MUST NOT remove a `[^N]:` definition from a page it leaves standing, except under the explicit `delete-mem-atom --with-lessons` opt-in (WM-CLI-19). Removing a whole page (`delete-mem-topic`) and merging two byte-identical lesson definitions into one on merge are not deleting knowledge. (GitHub issue 304, TRDD-RMX0IE72).
 
 `WM-MIG-05` **atomic-enough** — `migrate` builds BOTH new page texts in memory, proves them
 clean, then writes DEST first, SOURCE second. A crash between the two atomic writes leaves a
