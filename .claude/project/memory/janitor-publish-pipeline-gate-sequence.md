@@ -15,7 +15,7 @@ split-lineage: 08b34684a6214833bc3d78b80244d2cd
 
 # janitor-publish-pipeline — gate sequence, CPV-only policy & admin-bypass model
 
-^5VNCUPK1 [desc:"publish.py's ordered 16-step fail-fast gate sequence, from self-integrity check through tests/lint/CPV validate to version bump, changelog, tag, push, release; --dry-run stops before mutation.", keywords:"how_do_i_release_the_janitor publish_blocked what_is_the_gate_sequence_for_scripts_publish_py can_i_skip_a_gate self_integrity_env_bypass_rejection auto_detect_project_language version_consistency_check git_cliff_changelog_release_notes resolver_twin_tag_step push_and_github_release_step what_does_dry_run_actually_do no_changelog"]
+^5VNCUPK1 [desc: "publish.py's ordered 16-step fail-fast gate sequence, from self-integrity check through tests/lint/CPV validate to version bump, changelog, tag, push, release; --dry-run stops before mutation.", keywords: how_do_i_release_the_janitor publish_blocked what_is_the_gate_sequence_for_scripts_publish_py can_i_skip_a_gate self_integrity_env_bypass_rejection auto_detect_project_language version_consistency_check git_cliff_changelog_release_notes resolver_twin_tag_step push_and_github_release_step what_does_dry_run_actually_do no_changelog, lmd: 2026-09-17]
 The janitor ships via `scripts/publish.py` — a strict, **fail-fast** release
 pipeline. **It is a CPV plugin**, so its pipeline includes the CPV plugin-schema +
 security gate. Not every fleet project is a plugin: **non-plugin agents (e.g.
@@ -85,7 +85,7 @@ ordered set of gates; **any gate failing exits non-zero and the release stops**
 
 `--dry-run` runs every validation gate fully, then stops before the bump/commit/
 push (it mutates nothing in git history; its only side effect is installing the
-push-guard hook). [^10]
+push-guard hook).
 
 ^7AY0CQO2 [desc:"CPV is the SOLE validator; a finding is cleared by devitalizing or removing the offending code, never by exempting or suppressing a rule or relaxing --strict.", keywords:"cpv_strict_is_the_sole_validation_step devitalize_or_remove_not_exempt_and_suppress no_local_copies_of_any_validator_script exempt_list_mechanism_dropped_fleet_wide execution_class_security_finding live_os_system_or_subprocess_shell_true eval_or_exec_of_a_string hardcoded_tokens_in_docs prrd_s5_1_devitalize_policy how_is_a_cpv_finding_cleared"]
 **CPV-ONLY validation policy + devitalize-or-remove (PRRD S5.1):** the pipeline
