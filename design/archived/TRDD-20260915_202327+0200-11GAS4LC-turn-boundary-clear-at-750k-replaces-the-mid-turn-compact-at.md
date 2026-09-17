@@ -1,9 +1,9 @@
 ---
 trdd-id: 11GAS4LC
 title: Turn-boundary clear at ~750k replaces the mid-turn compact at 85 percent of the window
-column: testing
+column: complete
 created: 2026-09-15T20:23:27+0200
-updated: 2026-09-15T21:15:44+0200
+updated: 2026-09-17T05:43:36+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -39,6 +39,7 @@ scripts/hooks/pre-tool-context-usage.py, scripts/hooks/on-stop-token-meter.py, a
 ## Approval log
 
 - 2026-09-15T20:23:27+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T05:43:36+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Turn-boundary clear at CLEAR_AT_PCT/CLEAR_CEILING_PCT landed (dde5acff) plus review addendum on _still_wanted gate; test_dispatch_phases.py 185 passed.
 
 ## STATE
 

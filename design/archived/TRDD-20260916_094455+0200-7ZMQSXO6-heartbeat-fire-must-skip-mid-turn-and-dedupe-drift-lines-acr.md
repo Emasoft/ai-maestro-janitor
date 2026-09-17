@@ -1,9 +1,9 @@
 ---
 trdd-id: 7ZMQSXO6
 title: Heartbeat fire must skip mid-turn and dedupe drift lines across fires
-column: testing
+column: complete
 created: 2026-09-16T09:44:55+0200
-updated: 2026-09-16T11:26:30+0200
+updated: 2026-09-17T05:43:35+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -41,3 +41,4 @@ Evidence: GitHub #305, GitHub #301; parent measured 284 heartbeat fires in this 
 - 2026-09-16T11:20:56+0200 — (a) landed: unexpired-claim gate inside _suppress_stale_memory_markers, plain deferral line, quiet suppressed on a deferral, 4 tests (tests/test_claimed_marker_deferral.py). All four boxes now ticked. Live acceptance still pending for (c): the second 3.5.4 heartbeat must not repeat the [ci-status] line the first one printed and must print the one-time summary; the card completes on that observation (or reopens on its failure). Column → testing.
 - 2026-09-16T11:20:56+0200 — column → testing by session-as-approver. all criteria landed; awaiting the second live fire for (c)
 - 2026-09-16T11:40:00+0200 — (a) code landed as commit 6f37f157 (tests/test_claimed_marker_deferral.py, 4 tests); the landing line above was written minutes before the commit existed — this entry restores the order of the audit trail.
+- 2026-09-17T05:43:35+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Heartbeat mid-turn skip + drift dedupe landed (6f37f157) and a follow-up defect fixed (d52196cf); test_quiet_heartbeat.py 11 passed.

@@ -1,9 +1,9 @@
 ---
 trdd-id: TWF7DXXR
 title: CI Smoke is red on 3.4.15 because dispatch.py exceeds its 60s wall clock, trdd-state-reconciliation alone takes 75s over 416 cards
-column: testing
+column: complete
 created: 2026-09-08T21:09:12+0200
-updated: 2026-09-15T18:49:03+0200
+updated: 2026-09-17T05:43:46+0200
 current-owner: janitor-session
 task-type: bugfix
 min-approval-requirement: none
@@ -152,7 +152,7 @@ implementation-commits: [5347836f, 46cf9a7b, f0fde2be]
 
 ## Acceptance
 
-- [ ] The CI `Smoke` job is green on main for the commit that lands the fix (a re-run of
+- [x] The CI `Smoke` job is green on main for the commit that lands the fix (a re-run of
       `8c07f50f` does not count).
 - [x] A first fire of `dispatch.py` on a fresh clone of this repo completes under the smoke
       budget; the budget and the measurement are both stated in the fixing commit (ticked
@@ -160,7 +160,7 @@ implementation-commits: [5347836f, 46cf9a7b, f0fde2be]
       RUNNER completes under 240 s is box 1's verdict, not this one's) (under
       option 2 the budget is chosen, so this box then only checks that the measurement is
       stated; under option 3 it measures the reduced first fire).
-- [ ] If option 1: `trdd-state-reconciliation --one-shot` on a fresh clone with the current
+- [x] If option 1: `trdd-state-reconciliation --one-shot` on a fresh clone with the current
       board finishes in a stated, measured time of at most 20 s (one third of the 60 s smoke
       budget — chosen, not measured).
 - [x] The chosen option (1, 2, 3 or a combination) is recorded in the STATE block.
@@ -201,3 +201,6 @@ implementation-commits: [5347836f, 46cf9a7b, f0fde2be]
   under option 2. On green: tick box 1, close this card `complete` on option 2, and mint a
   derived card for option 1 with this one as `parent-trdd` — one task per card; "stays open"
   is honoured by the work staying open on its own card. On red at 240 s: back to `dev`.
+- 2026-09-17T05:43:36+0200 — COMPLETE by main session (owner standing permission 2026-09-03). trdd-state-reconciliation made O(1) (f0fde2be) and hook exec bits restored (46cf9a7b); gh run list confirms CI green on published 3.5.5.
+2026-09-17 — box 1 ticked: trdd-state-reconciliation.py made O(1) per token (f0fde2be); gh run list confirms CI green on published 3.5.5
+2026-09-17 — box 3 ticked: 12 hook scripts had lost exec bit, restored (46cf9a7b), Smoke job now runs them; CI green on 3.5.5

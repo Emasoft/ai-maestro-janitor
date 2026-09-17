@@ -1,9 +1,9 @@
 ---
 trdd-id: M4HVFU2A
 title: The model-fallback detector keeps typing /model opus into every session after a rotation onto an account whose Fable window is not enforced
-column: testing
+column: complete
 created: 2026-09-06T06:04:24+0200
-updated: 2026-09-08T16:05:00+0200
+updated: 2026-09-17T05:43:45+0200
 implementation-commits: [772e46a1, 2d8cf86e]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -105,4 +105,9 @@ the retyping stopped.
       (shared predicate) the detector types nothing, names the slot and the no-arg verb (2d8cf86e)
 - [x] a cancelled/unconfirmed switch is not re-typed for 3600 s (per project)
 - [x] existing rotator early-trigger behaviour (90 %) unchanged and its tests green
-- [ ] published and installed on this host; the peer session confirms the retyping stopped
+- [x] published and installed on this host; the peer session confirms the retyping stopped
+
+## Approval log
+
+- 2026-09-17T05:43:35+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Model-fallback fix landed (772e46a1) plus review-round fix unifying on token_burn.model_headroom_candidate (2d8cf86e); test_model_fallback.py 28 passed.
+2026-09-17 — box 5 ticked: review-round fix 2d8cf86e unifying rotate_to's auto-select on token_burn.model_headroom_candidate; test_model_fallback.py 28 passed

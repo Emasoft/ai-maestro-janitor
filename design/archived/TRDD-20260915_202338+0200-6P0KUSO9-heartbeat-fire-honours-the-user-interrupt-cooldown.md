@@ -1,9 +1,9 @@
 ---
 trdd-id: 6P0KUSO9
 title: Heartbeat fire honours the user-interrupt cooldown
-column: testing
+column: complete
 created: 2026-09-15T20:23:38+0200
-updated: 2026-09-15T21:07:10+0200
+updated: 2026-09-17T05:43:36+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -36,6 +36,7 @@ scripts/dispatch.py, tests/test_dispatch_phases.py
 ## Approval log
 
 - 2026-09-15T20:23:38+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T05:43:36+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Interrupt-cooldown phase landed (7ac1e38a); review-fork challenge on CLAUDE_CODE_SESSION_ID refuted with production dispatch.log evidence; test_dispatch_phases.py 185 passed.
 
 ## STATE
 
