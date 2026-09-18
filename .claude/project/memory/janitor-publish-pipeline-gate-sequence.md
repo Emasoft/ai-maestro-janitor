@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline-gate-sequence
 description: "how do I release the janitor / publish blocked / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / what is the gate sequence for scripts/publish.py / why does publish.py refuse a --skip-tests flag / CPV --strict is the sole validation step / why does the resolver twin tag exist / what does --dry-run actually do / why can publish.py push directly to the default branch / how does the admin-bypass branch ruleset model work / process-ancestry pre-push hook verification / machine-specific facts live in LOCAL scope not here / devitalize-or-remove not exempt-and-suppress / rules floor cap failed / trim a shipped rule / 6 bytes headroom / compaction lost a directive / compacting normative text"
 ocd: 2026-06-13
-lmd: 2026-09-17
+lmd: 2026-09-18
 metadata:
   node_type: memory
   type: project
@@ -15,7 +15,145 @@ split-lineage: 08b34684a6214833bc3d78b80244d2cd
 
 # janitor-publish-pipeline — gate sequence, CPV-only policy & admin-bypass model
 
-^5VNCUPK1 [desc: "publish.py's ordered 16-step fail-fast gate sequence, from self-integrity check through tests/lint/CPV validate to version bump, changelog, tag, push, release; --dry-run stops before mutation.", keywords: how_do_i_release_the_janitor publish_blocked what_is_the_gate_sequence_for_scripts_publish_py can_i_skip_a_gate self_integrity_env_bypass_rejection auto_detect_project_language version_consistency_check git_cliff_changelog_release_notes resolver_twin_tag_step push_and_github_release_step what_does_dry_run_actually_do no_changelog, lmd: 2026-09-17]
+^7AY0CQO2 [desc:"CPV is the SOLE validator; a finding is cleared by devitalizing or removing the offending code, never by exempting or suppressing a rule or relaxing --strict.", keywords:"cpv_strict_is_the_sole_validation_step devitalize_or_remove_not_exempt_and_suppress no_local_copies_of_any_validator_script exempt_list_mechanism_dropped_fleet_wide execution_class_security_finding live_os_system_or_subprocess_shell_true eval_or_exec_of_a_string hardcoded_tokens_in_docs prrd_s5_1_devitalize_policy how_is_a_cpv_finding_cleared"]
+**CPV-ONLY validation policy + devitalize-or-remove (PRRD S5.1):** the pipeline
+invokes ONLY the CPV plugin for validation — there are NO local copies of any
+validator script. A CPV finding is cleared by **devitalizing or removing** the
+offending code, **NEVER** by exempting/suppressing a rule or relaxing `--strict`.
+The exempt-list mechanism was dropped fleet-wide as trivially exploitable.
+Concretely: an execution-class security finding (live `os.system` /
+`subprocess(shell=True)`, pipe-to-shell install docs, `eval`/`exec` of a string,
+backtick command substitution, hardcoded tokens in docs, raw detection-pattern
+signatures) is rewritten into provably-inert data the scanner recognizes
+(see the CPV `devitalize-threats` catalog) — you make the code's executable
+shape inert, you do not silence the rule.
+
+^7CRKBQJI [desc:"Why publish.py can push the release commit/tag to default branch: GitHub ruleset admin-bypass + local pre-push hook verifying caller by process ancestry; run forms --patch/--minor/--major, --dry-run.", keywords:"admin_bypass_for_publish_py how_does_the_admin_bypass_branch_ruleset_model_work process_ancestry_pre_push_hook_verification why_can_publish_py_push_directly_to_the_default_branch baseline_history_protect_no_bypass_actor pr_and_checks_admin_direct_push_bypass no_env_var_process_trees_cannot_be_spoofed run_forms_scripts_publish_py_patch_minor_major push_rejected_by_pre_push_hook"]
+**Admin-bypass-for-publish.py branch-ruleset model:** the default branch carries
+the ratified baseline ruleset pair (history-protect: no force-push / no deletion
+with NO bypass actor;[^9] pr-and-checks: PR ≥ 1 approval + required
+status checks, with an admin direct-push bypass). The admin bypass exists
+precisely so `publish.py` can push the release commit + tag directly to the
+default branch while ordinary contributions still go through PRs. Two layers
+guard this: (a) the GitHub ruleset's admin bypass, and (b) a local **pre-push
+hook** that verifies its caller by **process ancestry** — it walks the PID tree
+looking for a `python … scripts/publish.py` ancestor and only then allows the
+push. No env var is involved (process trees can't be spoofed), so a stray
+`git push` from outside the pipeline is refused locally even before GitHub.
+
+Run forms: `scripts/publish.py --patch` (or `--minor` / `--major`), add
+`--dry-run` to exercise every gate without releasing.
+
+^BQWUFPQ3 [desc:"Machine-specific facts (repo path, gh auth identity, account emails, OAuth tokens) live in LOCAL scope, not on this git-tracked page; this page carries only generic procedure.", keywords:"machine_specific_facts_live_in_local_scope_not_here where_do_local_paths_and_secrets_go this_page_is_git_tracked_and_host_global never_literal_paths_or_secrets_in_project_scope repo_root_path_owner_gh_auth_account_emails_oauth_tokens use_repo_root_home_email_placeholders"]
+**Machine-specific facts live in LOCAL scope** (named here, not stored): the
+absolute repo-root path, the owner GitHub identity / `gh` auth, account emails,
+and any OAuth tokens. This page is git-tracked and host-global, so it carries
+only generic procedure (use `<repo-root>`, `$HOME`, `<email>`, the CPV repo by
+name, never literal paths or secrets).
+
+
+
+
+^ATOM-8M7Q-PCE4 [desc: "publish.py is a strict fail-fast, language-agnostic release pipeline (CPV plugin) that self-checks for bypass patterns/env vars before running; no skip/force/bypass exists.", keywords: how_do_i_release_the_janitor publish_blocked can_i_skip_a_gate self_integrity_env_bypass_rejection no_skip_no_force_no_bypass publish.py_is_fail-fast CPV_plugin_pipeline non-plugin_agents_have_their_own_pipeline language-agnostic_auto-detect skip-tests_skip-lint_skip-validate_rejected, ocd: 2026-09-18, lmd: 2026-09-18]
+
+The janitor ships via `scripts/publish.py` — a strict, **fail-fast** release
+pipeline. **It is a CPV plugin**, so its pipeline includes the CPV plugin-schema +
+security gate. Not every fleet project is a plugin: **non-plugin agents (e.g.
+service-style or library projects) have their OWN pipelines** — this page
+documents the janitor's specifically; do not assume another project releases the
+same way. The pipeline auto-detects the project (it is language-agnostic:
+claude-plugin / python / rust / go / node / bash can coexist) and runs an
+ordered set of gates; **any gate failing exits non-zero and the release stops**
+— there is no skip, no force, no bypass.
+
+**Gate sequence (in order; each is mandatory; failure = stop):**
+
+1. **Self-integrity + env-bypass rejection** — before anything runs, `main()`
+   greps its OWN source for forbidden bypass patterns (`--skip-tests`,
+   `--skip-lint`, `--skip-validate`, `--no-validate`, `--force-publish`,
+   `--bypass`, `skip_*` variables) and refuses to run if any appear outside the
+   two authorized allowlists. It then rejects a set of bypass env vars
+   (`SKIP_TESTS`, `SKIP_VALIDATE`, `CPV_SKIP`, `CPV_NO_STRICT`, `FORCE_PUBLISH`,
+   `BYPASS_VALIDATION`, …). This makes the no-skip policy self-enforcing against
+   future edits.
+
+
+^ATOM-1F05-Y4KV [desc: "Steps 0-3: auto-detect project+plugin root, (re)install the pre-push hook, require a clean tree (uv.lock auto-committed), run language-native tests then lint.", keywords: step_0_auto-detect_git_root_plugin_root step_0.5_install_refresh_pre-push_hook dry-run_installs_the_push-guard_hook step_1_clean_working_tree_git_status_porcelain uv.lock-only_dirty_tree_auto-committed step_2_language-native_tests_mandatory step_3_language-native_lint_zero_errors ruff_clippy_go_vet_npm_lint_shellcheck pymarkdown_yamllint_json_toml_linters gate_sequence_steps_0_through_3, ocd: 2026-09-18, lmd: 2026-09-18]
+
+2. **Step 0 — auto-detect** git root, plugin root (walks up to
+   `.claude-plugin/plugin.json`), plugin info, marketplace (from git remote),
+   default branch, and whether the plugin lives in a subfolder.
+3. **Step 0.5 — install/refresh the pre-push hook** (the strict gate; see the
+   push-guard model below). Regenerated from an inline template on every run so
+   a locally-edited hook can't survive as a bypass. This is the ONE intentional
+   side effect of `--dry-run`.
+4. **Step 1 — clean working tree** (`git status --porcelain`); a `uv.lock`-only
+   dirty tree is auto-committed (skipped under `--dry-run`), anything else
+   aborts.
+5. **Step 2 — language-native TESTS** (mandatory, per detected language; any
+   failure exits). A no-op only if no test infra exists for any detected
+   ecosystem.
+6. **Step 3 — language-native LINT** (mandatory, zero errors): ruff (Python),
+   clippy (Rust), go vet, the `lint` npm script (Node), shellcheck (bash), plus
+   the by-extension linters (pymarkdown, yamllint, json, toml).
+
+
+^ATOM-TNA9-WX6V [desc: "Steps 4,6-11: CPV --strict is the sole validate step; version-consistency + git-cliff precheck; compute/bump the semver; write CHANGELOG via git-cliff; commit only known files.", keywords: step_4_CPV_strict_validate_sole_validation_step CPV_strict_is_the_sole_validation_step step_6_version_consistency_plugin.json_pyproject_cargo version_mismatch_on_publish step_7_git-cliff_availability_pre-check no_changelog_fails_before_mutation step_8_compute_bumped_semver_major_minor_patch step_9_bump_version_files_re-uv-lock step_10_git-cliff_changelog_release_notes step_11_commit_bump_changelog_never_git_add_-a, ocd: 2026-09-18, lmd: 2026-09-18]
+
+7. **Step 4 — CPV `--strict` VALIDATE** (only when the project is a claude
+   plugin): `uvx --from git+<CPV repo> cpv-remote-validate plugin <plugin-root>
+   --strict`. This is the SOLE validation invocation — it covers the full plugin
+   schema check + the strict rule set.[^2] (Historical: a separate `cpv … lint` step
+   existed; CPV ≥ v2.71.0 retired it after fixing its gitignore-walk bug, so the
+   single `plugin --strict` pass now covers everything.)
+8. **Step 6 — version consistency** across plugin.json / pyproject.toml /
+   package.json / Cargo.toml / Python `__version__`; a mismatch aborts. [^1]
+9. **Step 7 — git-cliff availability pre-check** (fail BEFORE any file mutation —
+   every release MUST produce a CHANGELOG entry + release notes).
+10. **Step 8 — compute the bumped semver** from `--major | --minor | --patch`
+    (exactly one is required).
+11. **Step 9 — bump the version** in every applicable config file (and re-`uv
+    lock` so the lockfile tracks the new version).
+12. **Step 10 — git-cliff CHANGELOG + release notes**: `git cliff --bump
+    --unreleased --tag vX.Y.Z -o CHANGELOG.md`, extracting the notes for the
+    GitHub release into a gitignored `.git-cliff-release-notes.md`.
+13. **Step 11 — commit** the bump + CHANGELOG (stages only known-modified files
+    by name — NEVER `git add -A`, which could pick up secrets or scratch).
+
+
+^ATOM-UWKO-S756 [desc: "Steps 12-14: annotated release tag + resolver twin tag (Claude Code >=2.1.110 dependency resolution), push both tags, create the GitHub release; --dry-run stops before this.", keywords: step_12_annotated_tag_resolver_twin_tag why_does_the_resolver_twin_tag_exist claude_code_2.1.110_dependency_version_constraint_resolution step_13_push_commit_and_both_tags_to_origin step_14_create_the_github_release_gh_release_create push_and_github_release_step what_does_dry-run_actually_do dry-run_stops_before_mutation missing_unauthenticated_gh_fails_the_pipeline resolver_twin_tag_plugin-name--vX.Y.Z, ocd: 2026-09-18, lmd: 2026-09-18]
+
+14. **Step 12 — annotated tag** `vX.Y.Z` whose body is the extracted release
+    notes, PLUS the bare **resolver twin tag** `<plugin-name>--vX.Y.Z` — Claude
+    Code ≥ 2.1.110 dependents resolve `dependencies` version constraints ONLY
+    against `{name}--v{version}` tags, so a release without the twin tag breaks
+    every dependent's constrained install (#85/#90; shipped v0.45.0). The
+    resolution mechanics live on the USER-scope `claude-plugin-dependencies`
+    page.[^3]
+15. **Step 13 — push** commit + BOTH tags to `origin/<default-branch>`.
+16. **Step 14 — create the GitHub release** (mandatory; `gh release create` with
+    `--notes-file`) so Claude Code's plugin-update detector sees the new version.
+    Missing/unauthenticated `gh` fails the pipeline (no silent skip).
+
+`--dry-run` runs every validation gate fully, then stops before the bump/commit/
+push (it mutates nothing in git history; its only side effect is installing the
+push-guard hook).
+
+## Governed by
+
+- [[janitor-publish-pipeline]] — the publish-pipeline overview hub this page details.
+
+## See also
+
+- [[janitor-self-update-bootstrap-gap]] — the OTHER half of a release: after publish.py
+  succeeds, why the local cache can stay on the old version (the fast-updater can't
+  accelerate its own first release; reload ≠ update).
+
+
+## Superseded
+
+
+^5VNCUPK1 [desc: "publish.py's ordered 16-step fail-fast gate sequence, from self-integrity check through tests/lint/CPV validate to version bump, changelog, tag, push, release; --dry-run stops before mutation.", keywords: how_do_i_release_the_janitor publish_blocked what_is_the_gate_sequence_for_scripts_publish_py can_i_skip_a_gate self_integrity_env_bypass_rejection auto_detect_project_language version_consistency_check git_cliff_changelog_release_notes resolver_twin_tag_step push_and_github_release_step what_does_dry_run_actually_do no_changelog, lmd: 2026-09-17, status: superseded, superseded-by: ATOM-8M7Q-PCE4]
 The janitor ships via `scripts/publish.py` — a strict, **fail-fast** release
 pipeline. **It is a CPV plugin**, so its pipeline includes the CPV plugin-schema +
 security gate. Not every fleet project is a plugin: **non-plugin agents (e.g.
@@ -86,55 +224,6 @@ ordered set of gates; **any gate failing exits non-zero and the release stops**
 `--dry-run` runs every validation gate fully, then stops before the bump/commit/
 push (it mutates nothing in git history; its only side effect is installing the
 push-guard hook).
-
-^7AY0CQO2 [desc:"CPV is the SOLE validator; a finding is cleared by devitalizing or removing the offending code, never by exempting or suppressing a rule or relaxing --strict.", keywords:"cpv_strict_is_the_sole_validation_step devitalize_or_remove_not_exempt_and_suppress no_local_copies_of_any_validator_script exempt_list_mechanism_dropped_fleet_wide execution_class_security_finding live_os_system_or_subprocess_shell_true eval_or_exec_of_a_string hardcoded_tokens_in_docs prrd_s5_1_devitalize_policy how_is_a_cpv_finding_cleared"]
-**CPV-ONLY validation policy + devitalize-or-remove (PRRD S5.1):** the pipeline
-invokes ONLY the CPV plugin for validation — there are NO local copies of any
-validator script. A CPV finding is cleared by **devitalizing or removing** the
-offending code, **NEVER** by exempting/suppressing a rule or relaxing `--strict`.
-The exempt-list mechanism was dropped fleet-wide as trivially exploitable.
-Concretely: an execution-class security finding (live `os.system` /
-`subprocess(shell=True)`, pipe-to-shell install docs, `eval`/`exec` of a string,
-backtick command substitution, hardcoded tokens in docs, raw detection-pattern
-signatures) is rewritten into provably-inert data the scanner recognizes
-(see the CPV `devitalize-threats` catalog) — you make the code's executable
-shape inert, you do not silence the rule.
-
-^7CRKBQJI [desc:"Why publish.py can push the release commit/tag to default branch: GitHub ruleset admin-bypass + local pre-push hook verifying caller by process ancestry; run forms --patch/--minor/--major, --dry-run.", keywords:"admin_bypass_for_publish_py how_does_the_admin_bypass_branch_ruleset_model_work process_ancestry_pre_push_hook_verification why_can_publish_py_push_directly_to_the_default_branch baseline_history_protect_no_bypass_actor pr_and_checks_admin_direct_push_bypass no_env_var_process_trees_cannot_be_spoofed run_forms_scripts_publish_py_patch_minor_major push_rejected_by_pre_push_hook"]
-**Admin-bypass-for-publish.py branch-ruleset model:** the default branch carries
-the ratified baseline ruleset pair (history-protect: no force-push / no deletion
-with NO bypass actor;[^9] pr-and-checks: PR ≥ 1 approval + required
-status checks, with an admin direct-push bypass). The admin bypass exists
-precisely so `publish.py` can push the release commit + tag directly to the
-default branch while ordinary contributions still go through PRs. Two layers
-guard this: (a) the GitHub ruleset's admin bypass, and (b) a local **pre-push
-hook** that verifies its caller by **process ancestry** — it walks the PID tree
-looking for a `python … scripts/publish.py` ancestor and only then allows the
-push. No env var is involved (process trees can't be spoofed), so a stray
-`git push` from outside the pipeline is refused locally even before GitHub.
-
-Run forms: `scripts/publish.py --patch` (or `--minor` / `--major`), add
-`--dry-run` to exercise every gate without releasing.
-
-^BQWUFPQ3 [desc:"Machine-specific facts (repo path, gh auth identity, account emails, OAuth tokens) live in LOCAL scope, not on this git-tracked page; this page carries only generic procedure.", keywords:"machine_specific_facts_live_in_local_scope_not_here where_do_local_paths_and_secrets_go this_page_is_git_tracked_and_host_global never_literal_paths_or_secrets_in_project_scope repo_root_path_owner_gh_auth_account_emails_oauth_tokens use_repo_root_home_email_placeholders"]
-**Machine-specific facts live in LOCAL scope** (named here, not stored): the
-absolute repo-root path, the owner GitHub identity / `gh` auth, account emails,
-and any OAuth tokens. This page is git-tracked and host-global, so it carries
-only generic procedure (use `<repo-root>`, `$HOME`, `<email>`, the CPV repo by
-name, never literal paths or secrets).
-
-
-
-## Governed by
-
-- [[janitor-publish-pipeline]] — the publish-pipeline overview hub this page details.
-
-## See also
-
-- [[janitor-self-update-bootstrap-gap]] — the OTHER half of a release: after publish.py
-  succeeds, why the local cache can stay on the old version (the fast-updater can't
-  accelerate its own first release; reload ≠ update).
-
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0011, status:valid, keywords:"pipeline_step_numbers_skip_preserve renumbering_breaks_log_greps removed_stage_keep_downstream_numbers", ocd:2026-06-13, lmd:2026-06-13] The step numbers intentionally skip 5 —
   the old "Step 5: CPV lint" was folded into the single Step 4 `plugin --strict`
