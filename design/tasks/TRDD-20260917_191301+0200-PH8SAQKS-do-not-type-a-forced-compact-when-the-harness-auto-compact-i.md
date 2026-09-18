@@ -3,7 +3,7 @@ trdd-id: PH8SAQKS
 title: Do not type a forced compact when the harness auto-compact is about to fire under autoCompactEnabled
 column: testing
 created: 2026-09-17T19:13:01+0200
-updated: 2026-09-18T06:25:23+0200
+updated: 2026-09-18T06:36:11+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -16,7 +16,7 @@ approval-judge: janitor-main-session
 approval-datetime: 2026-09-17T19:13:01+0200
 priority: high
 severity: major
-eht: [ZXKJZLZK, OJK1MBU2, K0BIY8K2]
+eht: [ZXKJZLZK, OJK1MBU2, K0BIY8K2, PPQG9JVP]
 implementation-commits: [9d72d6e7, 73254e33, 763b28e3]
 ---
 

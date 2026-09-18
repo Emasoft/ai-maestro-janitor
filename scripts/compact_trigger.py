@@ -252,7 +252,8 @@ def main() -> int:
     #
     # EXEMPT `--hard` (review round 3): the guard's own band can sit BELOW the >=85% emergency
     # trip point on a small window -- e.g. a 200k CLAUDE_CODE_AUTO_COMPACT_WINDOW gives an
-    # effective point of ~166k, a band of roughly [158k, 166k + HARNESS_BACKSTOP_MARGIN), and
+    # effective point of ~166k, a band of roughly [158k, 350k) (the upper edge is floored at
+    # DEFAULT_MIN_CONTEXT_TOKENS, TRDD-PPQG9JVP), and
     # the 85% trip fires at 170k, squarely inside it -- which would suppress the one path this
     # script exposes specifically to be urgent (ESC-interrupt NOW, never enqueue-and-wait). A
     # caller reaching for `--hard` has already decided the send cannot wait for the harness;

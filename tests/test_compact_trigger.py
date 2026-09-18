@@ -447,7 +447,6 @@ def test_guard2_hard_emergency_path_is_exempt(tmp_path: Path) -> None:
     assert "DRY_RUN" in proc.stdout
 
 
-
 def test_guard2_measures_the_given_transcript_path_not_the_newest(tmp_path: Path) -> None:
     """Guard 2 must measure `--transcript-path` (this session's own transcript) when given, not
     the project's newest `*.jsonl` -- a different, concurrently-live session's transcript could

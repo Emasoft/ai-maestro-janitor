@@ -1,18 +1,18 @@
 ---
 trdd-id: ZXKJZLZK
 title: The hard handoff path loses its urgency because the chained compact trigger runs without hard so guard 2 can skip it
-column: design
+column: backburner
 created: 2026-09-18T06:22:32+0200
-updated: 2026-09-18T06:25:04+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+updated: 2026-09-18T06:36:23+0200
+current-owner: janitor-main-session
+created-by: janitor-main-session
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: janitor-main-session
 approval-datetime: 2026-09-18T06:22:32+0200
 ---
 
@@ -23,3 +23,5 @@ Symptom — /janitor-compact-context --handoff --hard is the emergency path, and
 ## Approval log
 
 - 2026-09-18T06:22:32+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-18T06:36:15+0200 — column → backburner. design column means the design is being written in place; this card awaits a user decision, like its sibling K0BIY8K2
+- 2026-09-18T06:36:21+0200 — correction: minted by a janitor-main-session worker under the user's general go-ahead, not a mandate for this specific card; the 06:22:32 MANDATE line was the tool's default attribution.

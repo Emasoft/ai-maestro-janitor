@@ -572,7 +572,6 @@ def test_guard2_window_falls_back_to_settings_env_block(tmp_path: Path, monkeypa
     assert ccc.harness_will_autocompact(96_000, settings_path=settings, env={}) is True
 
 
-
 def test_guard2_upper_edge_uses_the_settings_merged_window_not_the_bare_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
