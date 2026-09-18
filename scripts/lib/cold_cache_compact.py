@@ -368,7 +368,7 @@ def harness_will_autocompact(
     state.log_line(
         GUARD2_LOG_NAME,
         f"compact guard 2: harness auto-compact imminent ({lower} <= {context_tokens} < {upper}) "
-        "-- no /compact keystroke sent, the harness compacts on its own (TRDD-PH8SAQKS, issue 306)",
+        "-- no /compact keystroke sent; left to the harness's own auto-compact, which may not run right away (TRDD-PH8SAQKS, issue 306)",
     )
     return True
 

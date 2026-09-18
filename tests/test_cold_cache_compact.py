@@ -572,6 +572,48 @@ def test_guard2_window_falls_back_to_settings_env_block(tmp_path: Path, monkeypa
     assert ccc.harness_will_autocompact(96_000, settings_path=settings, env={}) is True
 
 
+
+def test_guard2_upper_edge_uses_the_settings_merged_window_not_the_bare_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launchd case (TRDD-XCJFCJUX): with no CLAUDE_CODE_AUTO_COMPACT_WINDOW in the process
+    env, guard 2's upper edge must come from min_context_tokens(env=<settings env block>), not
+    the env-less min_context_tokens() -- reverting to the latter would leave a context strictly
+    between the two edges wrongly classified as still-in-band (True) instead of past-the-real-
+    upper-edge (False)."""
+    monkeypatch.delenv(ccc.MIN_CONTEXT_ENV, raising=False)
+    monkeypatch.delenv(ccc.HARNESS_BACKSTOP_MARGIN_ENV, raising=False)
+    monkeypatch.delenv(ccc.CONTEXT_WINDOW_ENV, raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.setattr(ccc.state, "_SETTINGS_OPTIONS", {}, raising=False)
+    settings = _write_settings(
+        tmp_path,
+        {"autoCompactEnabled": True, "env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "700000"}},
+    )
+    env_with_window = {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "700000"}
+    upper_with_window = ccc.min_context_tokens(env=env_with_window)
+    upper_env_less = ccc.min_context_tokens()
+    context_tokens = upper_with_window + (upper_env_less - upper_with_window) // 2
+    assert upper_with_window <= context_tokens < upper_env_less, (
+        "test setup must place context strictly between the settings-merged upper edge and the "
+        "env-less one -- that gap is what this test discriminates"
+    )
+    # Pin the expected False to the `>= upper` branch specifically (not the `< lower` branch,
+    # which would also return False for the wrong reason and mask a regression in the upper-edge
+    # check this test targets -- round-2 review finding).
+    import token_meter
+
+    pred = token_meter.predict_auto_compact(0, env=env_with_window)
+    assert pred is not None
+    lower = pred.effective_compact_point - int(pred.effective_compact_point * ccc.GUARD2_MARGIN_FRACTION)
+    assert context_tokens >= lower, (
+        "test setup must keep context_tokens at/above the band's lower edge too, so a False "
+        "result can only come from the `>= upper` branch this test is about"
+    )
+    assert ccc.harness_will_autocompact(context_tokens, settings_path=settings, env={}) is False
+
+
 def test_guard2_default_autocompact_enabled_when_key_absent(
     tmp_path: Path, guard2_env: pytest.MonkeyPatch
 ) -> None:

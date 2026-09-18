@@ -329,9 +329,10 @@ def _settings(home: Path, payload: dict) -> Path:
     return p
 
 
-def _transcript(home: Path, project: Path, tokens: int) -> Path:
+def _transcript(home: Path, project: Path, tokens: int, *, name: str = "session.jsonl") -> Path:
     """A single assistant usage line reporting `tokens` of live context occupancy, at the exact
-    path `cold_cache_compact.newest_transcript` resolves for `project` under `home`."""
+    path `cold_cache_compact.newest_transcript` resolves for `project` under `home`. `name` lets a
+    test write MULTIPLE transcripts for the same project (e.g. the session's own vs. the newest)."""
     import json as _json
     import re
 
@@ -339,7 +340,7 @@ def _transcript(home: Path, project: Path, tokens: int) -> Path:
     tdir = home / ".claude" / "projects" / slug
     tdir.mkdir(parents=True, exist_ok=True)
     line = _json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": tokens}}})
-    p = tdir / "session.jsonl"
+    p = tdir / name
     p.write_text(line + "\n", encoding="utf-8")
     return p
 
@@ -444,3 +445,52 @@ def test_guard2_hard_emergency_path_is_exempt(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert "GUARD2_HARNESS_IMMINENT" not in proc.stdout
     assert "DRY_RUN" in proc.stdout
+
+
+
+def test_guard2_measures_the_given_transcript_path_not_the_newest(tmp_path: Path) -> None:
+    """Guard 2 must measure `--transcript-path` (this session's own transcript) when given, not
+    the project's newest `*.jsonl` -- a different, concurrently-live session's transcript could
+    otherwise decide THIS session's guard. Two transcripts for the same project: `own.jsonl`
+    (below the band -- the send must proceed) written first, then `session.jsonl` (in the band --
+    the send must be suppressed) written second so it sorts NEWEST by mtime. Passing
+    `--transcript-path <own>` must measure `own.jsonl` and let the send proceed (the control: the
+    same setup WITHOUT the flag measures the newest instead and IS suppressed)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    home = _home(tmp_path, present=False)
+    _settings(home, {"autoCompactEnabled": True})
+    # window 100_000 -> effective 66_000, margin 3_300 -> lower 62_700; no MIN_CONTEXT override
+    # -> min_context_tokens() floors at DEFAULT_MIN_CONTEXT_TOKENS (350_000) -> band [62700, 350000).
+    import os as _os
+    import time as _time
+
+    own_path = _transcript(home, p, 30_000, name="own.jsonl")  # below the band
+    newest_path = _transcript(home, p, 100_000, name="session.jsonl")  # inside the band
+    # Pin mtimes explicitly (own OLDER, newest NEWER) rather than relying on write-order
+    # timing, which a fast filesystem could collapse to the same mtime tick.
+    now = _time.time()
+    _os.utime(own_path, (now - 10, now - 10))
+    _os.utime(newest_path, (now, now))
+
+    proc_with_flag = _run(
+        ["--dry-run", "--transcript-path", str(own_path)],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        home=home,
+        extra_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"},
+    )
+    assert proc_with_flag.returncode == 0
+    assert "GUARD2_HARNESS_IMMINENT" not in proc_with_flag.stdout
+    assert "DRY_RUN" in proc_with_flag.stdout
+
+    proc_without_flag = _run(
+        ["--dry-run"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        home=home,
+        extra_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"},
+    )
+    assert proc_without_flag.returncode == 0
+    assert "GUARD2_HARNESS_IMMINENT" in proc_without_flag.stdout
+    assert "DRY_RUN" not in proc_without_flag.stdout
