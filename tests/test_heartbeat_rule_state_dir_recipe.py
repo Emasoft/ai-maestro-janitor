@@ -11,7 +11,12 @@ the two stay in lock-step; a future edit to either side (e.g. a new project-anch
 rung planned ahead of git) can silently re-diverge and reproduce the exact same
 bug. This test extracts the recipe verbatim from the rule file (never re-typed,
 so wording drift breaks extraction loudly) and runs it as a real bash subprocess
-against a real state.py subprocess, in both a no-git and a git-repo cwd.
+against a real state.py subprocess, in both a no-git and a git-repo cwd. POSIX
+shell only (the rule's recipe is `bash`, skipped on win32). A future
+project-anchor rung added to state.py ahead of the git rung (see the module
+docstring above) is invisible to this test until it is extended with a fixture
+that actually seeds that anchor — the recipe and state.py can only diverge on
+a rung neither side's current inputs ever trigger.
 """
 
 from __future__ import annotations
@@ -24,12 +29,19 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the rule's recipe is POSIX shell")
+
 _TESTS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _TESTS_DIR.parent
 _LIB_DIR = _PROJECT_ROOT / "scripts" / "lib"
 # The repo's own shipped source, not whatever happens to be installed under
 # ~/.claude/rules/ on this machine (that copy may lag a plugin update/reinstall).
 _RULE_FILE = _PROJECT_ROOT / "rules" / "janitor-heartbeat-protocol.md"
+# The pre-fix recipe (before commit ac39cf13 added the `2>/dev/null || pwd -P`
+# fallback) — proves the recipe/state.py comparison can actually fail: in a
+# no-git folder this diverges from state.state_dir(), which is exactly the bug
+# ac39cf13 fixed.
+_OLD_RECIPE = '"$(git -C "$PWD" rev-parse --show-toplevel)/.janitor/state"'
 
 
 def _extract_recipe() -> str:
@@ -56,13 +68,20 @@ def _extract_recipe() -> str:
     return recipe
 
 
-def _clean_env(home: Path) -> dict[str, str]:
-    # Strip CLAUDE_PROJECT_DIR (real sessions may have it set) and point HOME at
-    # a scratch dir so neither side of the comparison can touch the real ~/.claude.
-    env = dict(os.environ)
-    env.pop("CLAUDE_PROJECT_DIR", None)
-    env["HOME"] = str(home)
-    return env
+def _clean_env(home: Path, ceiling: Path) -> dict[str, str]:
+    # Allowlist, not os.environ copy + pop: this suite's own pre-push git hook runs
+    # pytest with GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE already set for the janitor
+    # repo, and inheriting them makes `git -C <tmp>` answer for the janitor repo
+    # instead of the temp one — silently invalidating the no-git/subfolder cases
+    # this test exists to check. Only PATH (to find `git`/`bash`) and a fresh HOME
+    # survive; no GIT_* or CLAUDE_* variable is ever passed through.
+    # GIT_CEILING_DIRECTORIES stops git from walking above the temp area even if
+    # some other real repo happens to be an ancestor of tmp_path on this machine.
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(home),
+        "GIT_CEILING_DIRECTORIES": str(ceiling),
+    }
 
 
 def _run_recipe(recipe: str, cwd: Path, env: dict[str, str]) -> str:
@@ -80,9 +99,11 @@ def _run_recipe(recipe: str, cwd: Path, env: dict[str, str]) -> str:
         env=env,
         capture_output=True,
         text=True,
-        check=True,
     )
-    return result.stdout.strip()
+    assert result.returncode == 0, f"recipe subprocess failed: {result.stderr}"
+    output = result.stdout.strip()
+    assert output, f"recipe subprocess printed nothing: {result.stderr}"
+    return output
 
 
 def _run_state_dir(cwd: Path, env: dict[str, str]) -> str:
@@ -96,26 +117,30 @@ def _run_state_dir(cwd: Path, env: dict[str, str]) -> str:
         env=env,
         capture_output=True,
         text=True,
-        check=True,
     )
-    return result.stdout.strip()
+    assert result.returncode == 0, f"state.state_dir() subprocess failed: {result.stderr}"
+    output = result.stdout.strip()
+    assert output, f"state.state_dir() subprocess printed nothing: {result.stderr}"
+    return output
 
 
 def test_no_git_folder_matches_state_dir(tmp_path: Path) -> None:
     """No CLAUDE_PROJECT_DIR, no .git: the rule's recipe and state.state_dir() must agree."""
-    probe = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
-    if probe.returncode == 0:
-        pytest.skip(f"{tmp_path} is unexpectedly inside a git repo: {probe.stdout.strip()}")
-
     home = tmp_path / "home"
     home.mkdir()
-    env = _clean_env(home)
-    recipe = _extract_recipe()
+    env = _clean_env(home, ceiling=tmp_path.resolve().parent)
 
+    # With GIT_CEILING_DIRECTORIES set, tmp_path can no longer resolve into a git
+    # repo above it — assert that directly instead of silently skipping when it
+    # does, which would hide a broken ceiling.
+    probe = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=tmp_path, env=env, capture_output=True, text=True
+    )
+    assert probe.returncode != 0, (
+        f"{tmp_path} is unexpectedly inside a git repo despite the ceiling: {probe.stdout.strip()}"
+    )
+
+    recipe = _extract_recipe()
     recipe_result = _run_recipe(recipe, cwd=tmp_path, env=env)
     state_result = _run_state_dir(cwd=tmp_path, env=env)
 
@@ -123,19 +148,35 @@ def test_no_git_folder_matches_state_dir(tmp_path: Path) -> None:
     assert Path(recipe_result).resolve() == (tmp_path / ".janitor" / "state").resolve()
 
 
+def test_old_recipe_diverges_from_state_dir_in_no_git_folder(tmp_path: Path) -> None:
+    """Proves the comparison can fail: the pre-ac39cf13 recipe disagrees with state.state_dir()."""
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _clean_env(home, ceiling=tmp_path.resolve().parent)
+
+    old_result = _run_recipe(_OLD_RECIPE, cwd=tmp_path, env=env)
+    state_result = _run_state_dir(cwd=tmp_path, env=env)
+
+    assert Path(old_result).resolve() != Path(state_result).resolve()
+
+
 def test_git_repo_subfolder_matches_state_dir(tmp_path: Path) -> None:
     """Inside a git repo (run from a subfolder), both resolve to <repo-toplevel>/.janitor/state."""
     repo = tmp_path / "repo"
     repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _clean_env(home, ceiling=tmp_path.resolve().parent)
     # `cwd=repo`, not a `-C <path>` argument — the suite's sandbox_guard classifies a git
-    # verb by where the PROCESS runs, and only trusts `init` on a path already under tmp_path.
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    # verb by where the PROCESS runs, and only trusts `init` on a path already under
+    # tmp_path. Same allowlisted `env` as everything else in this test: a bare os.environ
+    # (the default when `env=` is omitted) would let a leaked GIT_DIR make `init` write
+    # into the *janitor* repo's own .git instead of `repo/.git`, which then makes the
+    # git-repo case silently behave like the no-git case below.
+    subprocess.run(["git", "init", "-q"], cwd=repo, env=env, check=True)
     subfolder = repo / "sub" / "dir"
     subfolder.mkdir(parents=True)
 
-    home = tmp_path / "home"
-    home.mkdir()
-    env = _clean_env(home)
     recipe = _extract_recipe()
 
     recipe_result = _run_recipe(recipe, cwd=subfolder, env=env)
