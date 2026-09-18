@@ -124,6 +124,11 @@ the plan / the trap to avoid" layer on top, for the rare junctures that warrant 
      run `/compact` now (auto-trigger works in iTerm and tmux)."* Then stop. The
      resume directive was still recorded, so the auto-resume will work once the
      user compacts.
+   - `GUARD2_HARNESS_IMMINENT` → nothing was sent (not even the `--handoff`
+     step): context sits just below Claude Code's own auto-compact point, so a
+     forced `/compact` would double-compact. The directive was recorded and the
+     harness's own compaction will pick it up. Say so in one line and stop; re-run
+     with `--hard` only if the compact truly cannot wait.
 
 3. **END YOUR TURN IMMEDIATELY.** This is critical: the script fired a *detached*
    keystroke sender that, after ~2 s, sends the command(s) to your pane. In the

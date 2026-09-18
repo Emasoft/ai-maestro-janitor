@@ -202,14 +202,14 @@ def main() -> int:
     # let the queued send through. `precompact-last-trigger.json` is written by
     # pre-compact-handoff.py (`_LAST_TRIGGER_FILENAME`, same literal name hardcoded below to
     # avoid importing a hook script as a library) at compaction START, on EVERY PreCompact
-    # firing -- closing that window. `_read_landed_stamp` (terminal_trigger.py) reads it via its
+    # firing -- closing that window. `read_landed_stamp` (terminal_trigger.py) reads it via its
     # `written_at` float field -- `time.time()` epoch seconds (pre-compact-handoff.py:1151/1163),
     # the same base `last-compact.ts` uses, so the two baselines are directly comparable. (A
     # DIFFERENT `written_at` field, an ISO string, exists in this same source file at line 872 --
     # that one belongs to `precompact-continuity.json`, a different stamp this guard does not
     # read; do not conflate the two if this comment is ever re-derived from that file.)
     #
-    # Two residual risks, disclosed rather than fixed here (review round 2): (i) `_read_landed_stamp`
+    # Two residual risks, disclosed rather than fixed here (review round 2): (i) `read_landed_stamp`
     # reads a corrupted/mid-write JSON stamp as 0.0 -- always BELOW a real baseline, so it can
     # never cause a false cancel, but a stamp write that failed or raced at land-time could be
     # misread as "nothing landed" and let a stale send through; the write itself goes through
@@ -263,8 +263,11 @@ def main() -> int:
     if args.hard:
         state.log_line("compact-trigger", "compact guard 2: --hard emergency path, guard skipped")
     else:
+        # Prefer the caller's own session transcript when given: the project's NEWEST transcript
+        # can belong to a different live session of the same project, so measuring it would
+        # judge this session's compact by another session's context size.
         _ctx = cold_cache_compact.context_tokens_for(
-            cold_cache_compact.newest_transcript(state.project_root())
+            args.transcript_path or cold_cache_compact.newest_transcript(state.project_root())
         )
         if cold_cache_compact.harness_will_autocompact(_ctx):
             print(cold_cache_compact.GUARD2_STDOUT_MARKER)

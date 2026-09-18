@@ -148,7 +148,7 @@ def enabled() -> bool:
     return state.is_truthy_env(ENABLED_ENV, True)
 
 
-def min_context_tokens() -> int:
+def min_context_tokens(env: Mapping[str, str] | None = None) -> int:
     """The context size at/above which the janitor may compact — HARNESS-RELATIVE so it never
     competes with Claude Code's own auto-compaction (owner directive 2026-07-18).
 
@@ -175,7 +175,11 @@ def min_context_tokens() -> int:
     )
     # predict_auto_compact(0) returns the used-independent geometry when the env var is set (the
     # effective point is `auto_window - overhead`), and None when it is unset.
-    pred = token_meter.predict_auto_compact(0)
+    # `env` lets harness_will_autocompact pass the SAME settings-merged env it used for its band's
+    # lower bound; resolving the upper bound from os.environ alone would, in the launchd case
+    # (window only in settings.json's env block), fall to the full-window default and stretch the
+    # band over the backstop region, suppressing the very sends guard 2 must let through.
+    pred = token_meter.predict_auto_compact(0, env=env)
     if pred is not None:
         return max(pred.effective_compact_point + margin, DEFAULT_MIN_CONTEXT_TOKENS)
     window = state.coerce_int(state.plugin_option(CONTEXT_WINDOW_ENV), DEFAULT_CONTEXT_WINDOW_TOKENS)
@@ -215,7 +219,7 @@ def harness_will_autocompact(
 ) -> bool:
     """True only inside the narrow BAND where Claude Code's own auto-compact is imminent but has
     not yet demonstrably missed it -- i.e. a caller about to type a forced `/compact` keystroke
-    must send only the existing "prepare" nudge instead (TRDD-PH8SAQKS, issue 306 guard 2).
+    must not send it and leave the compaction to the harness (TRDD-PH8SAQKS, issue 306 guard 2).
 
     THE BAND, and why it has BOTH a floor and a ceiling (coordinator correction, round 2 -- the
     first draft was unbounded above and was DEAD CODE at both callers that gated on
@@ -336,7 +340,7 @@ def harness_will_autocompact(
     effective = pred.effective_compact_point
     margin = int(effective * GUARD2_MARGIN_FRACTION)
     lower = effective - margin
-    upper = min_context_tokens()
+    upper = min_context_tokens(env=merged_env)
 
     # INVARIANT (round 2 review): the `>= upper` check MUST run before the `< lower` check.
     # `upper` is normally >= `lower` (min_context_tokens() already adds its OWN, larger
@@ -364,7 +368,7 @@ def harness_will_autocompact(
     state.log_line(
         GUARD2_LOG_NAME,
         f"compact guard 2: harness auto-compact imminent ({lower} <= {context_tokens} < {upper}) "
-        "-- sending prepare nudge only, no /compact keystroke (TRDD-PH8SAQKS, issue 306)",
+        "-- no /compact keystroke sent, the harness compacts on its own (TRDD-PH8SAQKS, issue 306)",
     )
     return True
 

@@ -103,6 +103,8 @@ pointer). With `--then-compact` it also launches the detached `/compact` enqueue
   located and stop.
 - If the `compact_trigger.py` chain prints `NO_ITERM` (not an automatable terminal),
   the handoff + directive are still written — ask the user to run `/compact` manually.
+- If it prints `GUARD2_HARNESS_IMMINENT`, no `/compact` was sent because Claude Code's own
+  auto-compact is about to run; the handoff + directive are written and it will use them.
 
 ## Scope
 

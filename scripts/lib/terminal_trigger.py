@@ -1698,7 +1698,7 @@ def _fire_detached_verified(
     send opens with would kill a parent that is a hook of the very turn being interrupted.
 
     `abort_if_landed` (TRDD-4JEBTT2C, issue 306): a list of `(stamp_path, baseline, kind)` —
-    cancel the send if ANY stamp's value (read per `kind`, see `_read_landed_stamp`) later
+    cancel the send if ANY stamp's value (read per `kind`, see `read_landed_stamp`) later
     exceeds its baseline, re-checked at the top of every `inject_until_sent` pass inside
     `run_verified_send` (see that function's own comment for the exact granularity). `compact_trigger.py`
     passes BOTH `last-compact.ts` (kind `"int"`) and `precompact-last-trigger.json` (kind
@@ -1772,12 +1772,6 @@ def read_landed_stamp(path: Path, kind: str) -> float:
         value = data.get("written_at")
         return float(value) if isinstance(value, (int, float)) else 0.0
     return float(state.read_int_state(path, 0))
-
-
-# TRDD-YM65RCZA item 4: kept as a private alias — compact_trigger.py still imports the
-# underscore name (its own rename is owned by a parallel worker on TRDD-PH8SAQKS); remove
-# once that caller lands on the public name.
-_read_landed_stamp = read_landed_stamp
 
 
 def run_verified_send(data: Mapping, *, send=None, clock=time.time, sleeper=time.sleep) -> int:
