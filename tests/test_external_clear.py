@@ -722,3 +722,80 @@ def test_should_clear_externally_recovery_pending_defaults_false():
     """Every existing caller/test that never learned about the new parameter keeps firing."""
     v = verdict()
     assert v.fire is True
+
+
+# --- TRDD-RAEGS1D5 card 3 part C1: compose_handoff carries the compacted context, and the
+# trailing "pointers expand with:" line survives the budget cut no matter what ------------------
+
+
+def _compacted_doc(body_lines: int, *, transcript: str = "/tmp/fake-transcript.jsonl") -> str:
+    """A `jev_compact.py compact` document shape (scripts/lib/jev_compaction.py::compose):
+    a header, kept items, then the fixed trailing pointer-expand line -- built directly rather
+    than importing jev_compaction (this test file must not import jevctx/httpx transitively;
+    see tests/test_jev_boundary.py)."""
+    body = "\n".join(f"line {i} of the compacted context, padded to a realistic width" for i in range(body_lines))
+    return (
+        "# Compacted context (Jev compaction)\n"
+        f"transcript: {transcript}\n"
+        "\n## Kept items\n"
+        f"{body}\n"
+        "\n## Elided\n"
+        '[[elided id=abc:0 tokens=40 "an elided item"]]\n'
+        "\n"
+        f'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
+        f"expand --transcript {transcript} <id>"
+    )
+
+
+def test_compose_handoff_survives_a_missing_compacted_context():
+    """`summary=None` (jev_compact never produced a file) must still yield facts + tail --
+    unchanged from the llm-ext-era contract this composer already had."""
+    text = ec.compose_handoff(
+        _inputs(), now_iso=NOW_ISO, summary=None, tail=["USER: do the thing", "ASSISTANT: done"],
+    )
+    assert "PXP08ZQC" in text
+    assert "do the thing" in text
+
+
+def test_compose_handoff_pointer_expand_line_survives_truncation():
+    """THE POINT of the rewrite: a compacted context long enough to be cut by the budget must
+    still end with its `pointers expand with:` line intact -- it is the model's only way back
+    to every elided item. A naive byte-slice (the old behaviour) could and did drop it."""
+    doc = _compacted_doc(400)  # long enough that max_bytes=2500 forces a cut well before EOF
+    text = ec.compose_handoff(_inputs(), now_iso=NOW_ISO, summary=doc, tail=[], max_bytes=2500)
+    assert len(text.encode("utf-8")) <= 2500
+    assert "pointers expand with:" in text
+    assert text.rstrip().splitlines()[-1].startswith("pointers expand with:")
+
+
+def test_compose_handoff_pointer_line_survives_even_under_extreme_pressure():
+    """No room at all for the body (facts alone eat the whole budget) must still keep the
+    pointer line rather than silently drop the whole compacted-context section."""
+    big_inputs = _inputs(
+        findings=[f"HIGH finding number {i} with a reasonably long descriptive message" for i in range(40)],
+    )
+    doc = _compacted_doc(50)
+    text = ec.compose_handoff(big_inputs, now_iso=NOW_ISO, summary=doc, max_bytes=1400)
+    assert len(text.encode("utf-8")) <= 1400
+    if "## Compacted context" in text:
+        assert "pointers expand with:" in text
+
+
+def test_compose_handoff_leaves_a_plain_summary_untouched_when_short():
+    """A short, old-style (no trailing pointer line) summary is unaffected by the pointer-
+    preservation logic -- `_split_trailing_pointer_line` degrades to a no-op for it."""
+    text = ec.compose_handoff(_inputs(), now_iso=NOW_ISO, summary="a short plain summary", tail=[])
+    assert "a short plain summary" in text
+    assert "pointers expand with:" not in text
+
+
+def test_split_trailing_pointer_line_no_trailer():
+    assert ec._split_trailing_pointer_line("just text\nmore text") == ("just text\nmore text", "")
+
+
+def test_split_trailing_pointer_line_extracts_the_fixed_line():
+    body, trailer = ec._split_trailing_pointer_line(
+        "body line one\nbody line two\npointers expand with: uv run --script x expand y z"
+    )
+    assert body == "body line one\nbody line two"
+    assert trailer == "pointers expand with: uv run --script x expand y z"
