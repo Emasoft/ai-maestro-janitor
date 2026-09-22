@@ -1,0 +1,18 @@
+{"type": "user", "uuid": "u1", "parentUuid": null, "isMeta": false, "timestamp": "2026-09-22T10:00:00+0200", "message": {"role": "user", "content": "Please fix the login bug"}}
+{"type": "assistant", "uuid": "a1", "parentUuid": "u1", "timestamp": "2026-09-22T10:00:05+0200", "message": {"role": "assistant", "content": [{"type": "text", "text": "Looking into the login bug now."}]}}
+{"type": "assistant", "uuid": "a2", "parentUuid": "a1", "timestamp": "2026-09-22T10:00:06+0200", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "let me trace the auth flow first..."}]}}
+{"type": "assistant", "uuid": "a3", "parentUuid": "a2", "timestamp": "2026-09-22T10:00:07+0200", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "tu1", "name": "Bash", "input": {"command": "grep -rn login src/"}}]}}
+{"type": "user", "uuid": "u2", "parentUuid": "a3", "isMeta": false, "timestamp": "2026-09-22T10:00:08+0200", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu1", "content": "src/auth.py:42: def login(...):"}]}}
+{"type": "user", "uuid": "u3", "parentUuid": "u2", "isMeta": true, "timestamp": "2026-09-22T10:00:09+0200", "message": {"role": "user", "content": "hidden hook context"}}
+{"type": "user", "uuid": "u4", "parentUuid": "u3", "isMeta": false, "timestamp": "2026-09-22T10:00:10+0200", "message": {"role": "user", "content": "[janitor-heartbeat] fire"}}
+{"type": "system", "uuid": "s1", "parentUuid": "u4", "timestamp": "2026-09-22T10:00:11+0200", "subtype": "turn_duration", "content": "12ms"}
+{"type": "mode", "mode": "default"}
+{"type": "file-history-snapshot", "snapshot": {}}
+{"type": "user", "uuid": "u5", "parentUuid": "s1", "isMeta": false, "timestamp": "2026-09-22T10:00:12+0200", "message": {"role": "user", "content": [{"type": "text", "text": "Also check the signup flow"}]}}
+{"type": "assistant", "uuid": "a4", "parentUuid": "u5", "timestamp": "2026-09-22T10:00:13+0200", "message": {"role": "assistant", "content": [{"type": "text", "text": "Sure, checking signup too."}]}}
+{"type": "assistant", "uuid": "a5", "parentUuid": "a4", "timestamp": "2026-09-22T10:00:14+0200", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "tu2", "name": "Read", "input": {"file_path": "src/signup.py"}}]}}
+{"type": "user", "uuid": "u6", "parentUuid": "a5", "isMeta": false, "timestamp": "2026-09-22T10:00:15+0200", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu2", "content": [{"type": "text", "text": "def signup(): ..."}]}]}}
+{"type": "user", "uuid": "u7", "parentUuid": "u6", "isMeta": false, "timestamp": "2026-09-22T10:00:16+0200", "message": {"role": "user", "content": "One more thing: always validate emails."}}
+{"type": "last-prompt", "prompt": "One more thing: always validate emails."}
+{"type": "queue-operation", "op": "dequeue"}
+{"type": "attachment", "uuid": "att1", "parentUuid": "u7", "kind": "image"}
