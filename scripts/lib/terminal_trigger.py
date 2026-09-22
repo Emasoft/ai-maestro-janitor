@@ -483,6 +483,80 @@ def build_submit_steps(terminal: Mapping[str, str]) -> list[list[str]] | None:
     return None
 
 
+# Timeout for an iTerm read (`osascript -e <enumerating script>`) and for its single retry.
+# Matches the value the owner measured against: 92 osascript timeouts/week, all at 15s,
+# during system load (report reports/compaction-replacement/…-janitor-compaction-inventory.md
+# §4). Shared by `read_pane_text` and `_read_iterm_pane_text` so the retry uses the same
+# budget rather than a second, undocumented number.
+_ITERM_READ_TIMEOUT_S = 15.0
+
+
+def _run_osascript(script: str, *, timeout: float) -> subprocess.CompletedProcess[str]:
+    """Run `osascript -e <script>` and return the CompletedProcess, or raise
+    `subprocess.TimeoutExpired`. A thin seam (tests monkeypatch this, not `subprocess.run`
+    itself) so `_read_iterm_pane_text` can tell a TIMEOUT apart from every other failure —
+    `state.run_subprocess` collapses both to `None`, which is fine for its many fire-and-log
+    callers but loses exactly the distinction this function needs to decide "retry once"."""
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell; script content is caller-built
+        ["osascript", "-e", script],
+        capture_output=True, text=True, check=False, timeout=timeout,
+    )
+
+
+def _iterm_direct_session_script(sid: str, inner: list[str]) -> str:
+    """AppleScript that runs `inner` against iTerm session `sid`, addressed through ONE
+    `whose id is` filter over every session of every tab of every window — no
+    `repeat with w in windows` walk of our own (contrast `_iterm_session_script`).
+
+    Retry-only counterpart used after an enumerating-script osascript TIMEOUT: a `whose`
+    filter is EXPECTED to cost one Apple Event instead of one round trip per window — not
+    verified against a live iTerm2 (review finding, 2026-09-22: this codebase has a prior
+    scar, `_iterm_session_script`'s own docstring, from exactly this kind of untested
+    AppleScript guess), which is why the retry is bounded to ONE attempt and fails closed
+    (a bad idiom degrades to a logged `None`, never a mistyped keystroke) rather than being
+    trusted as a proven fix. `sid` reaches here only after `valid_iterm_session_id`, same
+    guard as `_iterm_session_script`.
+    """
+    lines = ['tell application "iTerm2"', f'  tell (item 1 of (every session of every tab of every window whose id is "{sid}"))']
+    lines += inner
+    lines += ["  end tell", "end tell"]
+    return "\n".join(lines) + "\n"
+
+
+def _read_iterm_pane_text(sid: str) -> str | None:
+    """`read_pane_text`'s iTerm branch, split out so the timeout-retry logic is testable on
+    its own. On a TIMEOUT of the enumerating script: log the 1-minute load average (system
+    load is what the owner's 92/week timeouts correlated with) and the timeout used, then
+    retry ONCE against `_iterm_direct_session_script` — never a second retry, so a genuinely
+    wedged iTerm fails in ~2x the budget instead of doubling every caller's worst case
+    forever."""
+    script = (
+        'tell application "iTerm2" to repeat with w in windows\n'
+        '  repeat with t in tabs of w\n    repeat with s in sessions of t\n'
+        f'      if id of s is "{sid}" then return contents of s\n'
+        '    end repeat\n  end repeat\nend repeat'
+    )
+    try:
+        proc = _run_osascript(script, timeout=_ITERM_READ_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        state.log_line(
+            "terminal_trigger",
+            f"iterm read timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
+            f"load1={os.getloadavg()[0]:.2f} sid={sid} — retrying direct session target",
+        )
+        direct_script = _iterm_direct_session_script(sid, ["            return contents"])
+        try:
+            proc = _run_osascript(direct_script, timeout=_ITERM_READ_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            state.log_line(
+                "terminal_trigger",
+                f"iterm read retry also timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
+                f"load1={os.getloadavg()[0]:.2f} sid={sid} — giving up",
+            )
+            return None
+    return proc.stdout if proc and proc.returncode == 0 else None
+
+
 def read_pane_text(terminal: Mapping[str, str]) -> str | None:
     """Read a pane's visible text, or None when this channel cannot be read back.
 
@@ -501,17 +575,7 @@ def read_pane_text(terminal: Mapping[str, str]) -> str | None:
         # Bare-UUID guard, mirroring fleet_inject.valid_session_id — the id is interpolated
         # into an AppleScript string literal, so anything else could break out of it.
         if kind == "iterm" and valid_iterm_session_id(terminal.get("session_id", "")):
-            script = (
-                'tell application "iTerm2" to repeat with w in windows\n'
-                '  repeat with t in tabs of w\n    repeat with s in sessions of t\n'
-                f'      if id of s is "{terminal["session_id"]}" then return contents of s\n'
-                '    end repeat\n  end repeat\nend repeat'
-            )
-            proc = state.run_subprocess(
-                ["osascript", "-e", script], timeout=15, capture=True,
-                detector_name="terminal_trigger",
-            )
-            return proc.stdout if proc and proc.returncode == 0 else None
+            return _read_iterm_pane_text(terminal["session_id"])
     except Exception:  # noqa: BLE001 — unreadable is a real answer, not a crash
         return None
     return None
