@@ -1,9 +1,9 @@
 ---
 trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
-column: testing
+column: dev
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-22T21:33:32+0200
+updated: 2026-09-22T21:44:04+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -16,12 +16,15 @@ npt: []
 eht: []
 implementation-commits: [9cc22049]
 review-after: 2026-09-24
+assignee: ai-maestro-janitor main session
+created-by: ai-maestro-janitor main session
 ---
 
 # session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-04 00:13
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-22
 
+- 2026-09-22 — card 1 of docs_dev/jev-compaction-spec.md is being implemented under this card (trigger + loop guards, recovery guard, iTerm timeout targeting).
 - **HELD AT `testing` — NOT `complete`.** The implementation is done; the card is not, because
   F5 and the six live acceptance criteria below need a real stalled fire on this host, which
   cannot be manufactured. **Unblock condition:** publish, then observe one stalled fire recover
@@ -292,13 +295,14 @@ Mechanism, verified in code + transcript:
   the green full suite; F5 (live observation) explicitly left open and stated on the card.
 - 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 - 2026-09-17T05:54:34+0200 — column → testing by main session (owner standing permission 2026-09-03). F0-F6 code-complete and shipped in v3.4.14; F5 needs one real stalled-fire observation post-publish, cannot be manufactured.
+- 2026-09-22T21:44:04+0200 — column → dev. card 1 (trigger and loop guards) in progress 2026-09-22
 
 ## Notes and lessons learned
 
-## ⏵ STATE — READ THIS FIRST ON RESUME
 
-2026-09-17 — F0-F6 code-complete (commit 9cc22049), full suite green (16351 passed), ruff+mypy clean. Pending live observation: F5, one real stalled heartbeat fire recovering with a SINGLE nudge on this host post-publish (cannot be manufactured). TRDD-56d24c02's separate kill/force-restart-rung policy question is explicitly out of scope here. 9cc22049 confirmed shipped in tag ai-maestro-janitor--v3.4.14. review-after set; moved todo -> testing (HELD at testing, not complete, until F5 is observed).
 
-## STATE
 
-2026-09-22 -- card 1 of docs_dev/jev-compaction-spec.md is being implemented under this card (trigger + loop guards, recovery guard, iTerm timeout targeting).
+
+
+
+

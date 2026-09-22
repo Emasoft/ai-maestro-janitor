@@ -1,9 +1,9 @@
 ---
 trdd-id: 541CBN36
 title: Vendor jevctx and add the OpenRouter Jev provider and scorer CLI
-column: todo
+column: dev
 created: 2026-09-22T21:33:15+0200
-updated: 2026-09-22T21:34:41+0200
+updated: 2026-09-22T21:44:04+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -65,3 +65,4 @@ before card 3 implements the compacted-context builder.
 ## Approval log
 
 - 2026-09-22T21:33:15+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-22T21:44:04+0200 — column → dev. card 2 worker running 2026-09-22

@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: todo
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-22T21:33:20+0200
+updated: 2026-09-22T21:44:00+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -86,3 +86,9 @@ commits per card with the WHY in the message.
 ## Approval log
 
 - 2026-09-22T21:32:55+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Design
+
+- Card 1 loop/recovery guards (binding on this program, tracked under TRDD-L32WC0H7): **Recovery guard** — no Jev compaction fires while a rate-limit / API-error / compact resume is pending or was consumed less than N seconds ago (gate on the `dispatch._phase_compact_resume`, `_phase_clear_resume` and rate-limit-cleared state files); owner: "beware of ... truncating other operations, like resuming after api error or model expired time limit window".
+- **Loop guard:** SessionStart with `source` in {`clear`, `compact`} never evaluates cache staleness (RESUME_SOURCES, pinned by a test); a failed compaction attempt records `evaluated` not `fired` (no cooldown burn, no hot retry); a hard cap of one automatic Jev compaction per session per `CLEAR_COOLDOWN` window, whatever the trigger.
+No PRRD rule applies here (relevant-rules field left empty): checked prrdgrep's full board plus targeted searches for compact/clear/handoff on 2026-09-22, nothing constrains Jev compaction.
