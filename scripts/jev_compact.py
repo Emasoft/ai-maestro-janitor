@@ -71,8 +71,10 @@ non-``None`` for ``kind="rate_limited"`` (the server's own ``Retry-After`` heade
 seconds). Two TTLs, read by different callers: ``PROBE_OK_TTL_S`` (6h) documents how long an
 ``ok=true`` stamp should be considered current by an external reader; ``PROBE_FAIL_TTL_S``
 (30min) is the one this file itself enforces for a ``kind="unavailable"`` stamp —
-``kind="rate_limited"`` instead uses ``min(retry_after_s or _RATE_LIMIT_FALLBACK_TTL_S,
-_RATE_LIMIT_MAX_TTL_S)`` (see `cmd_compact`).
+``kind="rate_limited"`` instead uses ``min(retry_after_s or _RATE_LIMIT_FALLBACK_TTL_S, 1800
+if retry_after_s else _RATE_LIMIT_MAX_TTL_S)`` — a server-STATED ``Retry-After`` is honoured
+up to 1800s, the 300s ``_RATE_LIMIT_MAX_TTL_S`` ceiling applies only to the no-header fallback
+guess (see `cmd_compact`).
 """
 
 from __future__ import annotations
@@ -111,9 +113,11 @@ PROBE_FAIL_TTL_S = 30 * 60
 
 # `kind="rate_limited"` decline window (see `cmd_compact`): a 429 is a per-key limit, not
 # a whole-endpoint outage, so it earns a much shorter fast-decline TTL than
-# `PROBE_FAIL_TTL_S` -- the server's own `Retry-After` value wins when the response sent
-# one, `_RATE_LIMIT_FALLBACK_TTL_S` is the guess when it didn't, and `_RATE_LIMIT_MAX_TTL_S`
-# caps either so a server-supplied value can't itself black out compaction too long.
+# `PROBE_FAIL_TTL_S` -- the server's own `Retry-After` value wins when the response sent one,
+# `_RATE_LIMIT_FALLBACK_TTL_S` is the guess when it didn't. `_RATE_LIMIT_MAX_TTL_S` caps ONLY
+# the fallback guess (300s, unchanged): a server-STATED `Retry-After` is honoured up to 1800s
+# instead (TRDD-RAEGS1D5 card 3 C2) -- the server said how long it needs, and a 300s cap on
+# that would make us retry into the SAME window it just asked us to wait out.
 _RATE_LIMIT_FALLBACK_TTL_S = 60
 _RATE_LIMIT_MAX_TTL_S = 300
 
@@ -388,7 +392,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         elif kind == "rate_limited":
             retry_after_s = stamp.get("retry_after_s")
             base = retry_after_s if isinstance(retry_after_s, (int, float)) else _RATE_LIMIT_FALLBACK_TTL_S
-            ttl = min(base, _RATE_LIMIT_MAX_TTL_S)
+            ttl = min(base, 1800 if isinstance(retry_after_s, (int, float)) else _RATE_LIMIT_MAX_TTL_S)
         if ttl is not None and age_s < ttl:
             reason = stamp.get("reason") or "unknown"
             print(f"declined: recent probe failure: {reason}", file=sys.stderr)

@@ -15,6 +15,7 @@ import json
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ sys.path.insert(0, str(_SCRIPTS / "lib"))
 import findings_ledger  # noqa: E402
 import global_state  # noqa: E402
 import handoff_files  # noqa: E402
+import jev_compaction_lane as jcl  # noqa: E402
 import state  # noqa: E402
 import summarize_previous_session as sps  # noqa: E402
 
@@ -124,7 +126,7 @@ def test_compact_invocation_form_and_timeout(tmp_path, monkeypatch, _isolated_en
     monkeypatch.setenv("PATH", str(Path(sys.executable).parent))
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     plugin_root = tmp_path / "plugin"
     argv_log = tmp_path / "argv.json"
     _stub_jev_compact(plugin_root, argv_log, exit_code=0, out_text=_COMPACTED_DOC)
@@ -137,7 +139,11 @@ def test_compact_invocation_form_and_timeout(tmp_path, monkeypatch, _isolated_en
         captured_kwargs.update(kwargs)
         return real_run(cmd, **kwargs)
 
-    monkeypatch.setattr(sps.subprocess, "run", _spy_run)
+    # `subprocess.run` is called inside `jev_compaction_lane.run_compact` now, not in `sps`
+    # itself (card 3 C2 thinned the entry script) — but `subprocess` is ONE module object
+    # shared by every importer, so patching it here via this file's own import still
+    # intercepts the call made from inside the lib module.
+    monkeypatch.setattr(subprocess, "run", _spy_run)
 
     rc = sps.main()
     assert rc == 0
@@ -161,11 +167,11 @@ def test_exit_0_writes_a_composed_handoff_and_releases_the_hold(tmp_path, monkey
                                                                   _isolated_env):
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(sps, "_state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
 
     rc = sps.main()
     assert rc == 0
@@ -176,9 +182,14 @@ def test_exit_0_writes_a_composed_handoff_and_releases_the_hold(tmp_path, monkey
     text = group[0].read_text(encoding="utf-8")
     assert "pointers expand with:" in text
     assert "Jev compaction" in text
-    assert not (sd / "summary-pending.json").is_file() or True  # hold released; see below
-    from external_handoff_clear import _PENDING_FILE  # noqa: PLC0415
+    # The hold must release on ARTIFACT PRESENCE, not merely at some later TTL expiry
+    # (TRDD-RAEGS1D5 card 3 C2): the ten-minute-to-seconds win is exactly this — the moment
+    # the compacted context is written, `summary_hold_active` must already read False.
+    from external_handoff_clear import _PENDING_FILE, summary_hold_active  # noqa: PLC0415
     assert not (sd / _PENDING_FILE).is_file(), "the hold must be released on success"
+    assert not summary_hold_active(sd, int(time.time())), (
+        "summary_hold_active must be False the same second the artifact lands"
+    )
 
 
 # --- exit 5/6/7 -> the findings ledger, and the hold is LEFT to expire ---------------------
@@ -208,11 +219,11 @@ def test_nonzero_exit_maps_to_the_right_finding(
 ):
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=exit_code)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(sps, "_state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     if stamp is not None:
         _write_probe_stamp(**stamp)
 
@@ -236,11 +247,11 @@ def test_kind_rate_limited_with_retry_after_is_medium(tmp_path, monkeypatch, _is
     MEDIUM finding, distinct from the generic `unavailable` text."""
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(sps, "_state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     _write_probe_stamp(kind="rate_limited", reason="429", retry_after_s=42)
 
     assert sps.main() == 0
@@ -258,11 +269,11 @@ def test_kind_rate_limited_without_retry_after_falls_back_to_unavailable(
     number or crashing."""
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(sps, "_state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     _write_probe_stamp(kind="rate_limited", reason="429 no window given")
 
     assert sps.main() == 0
@@ -276,11 +287,11 @@ def test_auth_finding_deduped_on_the_same_reason(tmp_path, monkeypatch, _isolate
     problem re-surfaced every SessionStart would be noise, not new information."""
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(sps, "_state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     _write_probe_stamp(kind="auth", reason="401 invalid key")
 
     from external_handoff_clear import _release_summary_hold  # noqa: PLC0415
@@ -300,13 +311,13 @@ def test_auth_finding_deduped_on_the_same_reason(tmp_path, monkeypatch, _isolate
 def test_timeout_expired_is_a_high_bug_finding(tmp_path, monkeypatch, _isolated_env):
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
-    monkeypatch.setattr(sps, "_state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
 
     def _raise_timeout(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 120))
 
-    monkeypatch.setattr(sps.subprocess, "run", _raise_timeout)
+    monkeypatch.setattr(subprocess, "run", _raise_timeout)
 
     assert sps.main() == 0
     entries = _ledger_entries()
@@ -353,7 +364,7 @@ def test_state_heads_written_for_in_flight_columns_only(tmp_path, monkeypatch, _
     _install_stub_trddgrep(tmp_path / "bin", monkeypatch)
 
     sd = state.state_dir()
-    paths, unavailable, cards = sps._state_head_paths(project_dir, sd)
+    paths, unavailable, cards = jcl.state_head_paths(project_dir, sd)
 
     assert unavailable is False
     assert len(paths) == 1  # only the DEV card, never the BACKBURNER one
@@ -371,7 +382,7 @@ def test_state_heads_written_for_in_flight_columns_only(tmp_path, monkeypatch, _
 def test_state_heads_unavailable_when_trddgrep_absent(tmp_path, monkeypatch, _isolated_env):
     monkeypatch.setenv("PATH", "/nonexistent-bin-only")
     sd = state.state_dir()
-    paths, unavailable, cards = sps._state_head_paths(_isolated_env, sd)
+    paths, unavailable, cards = jcl.state_head_paths(_isolated_env, sd)
     assert paths == []
     assert unavailable is True
     assert cards == []
@@ -384,7 +395,7 @@ def test_heads_unavailable_note_lands_in_the_written_handoff(tmp_path, monkeypat
     in-flight work" — a materially different claim)."""
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     # trddgrep absent, but the stub's own `/usr/bin/env python3` shebang still needs to resolve.
     monkeypatch.setenv("PATH", str(Path(sys.executable).parent))
     plugin_root = tmp_path / "plugin"
@@ -405,7 +416,7 @@ def test_in_flight_cards_land_in_the_written_handoff(tmp_path, monkeypatch, _iso
     project_dir = _isolated_env
     (project_dir / "design" / "tasks").mkdir(parents=True)
     prev = _make_prev_transcript(project_dir)
-    monkeypatch.setattr(sps, "previous_transcript", lambda root, sid: prev)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     _install_stub_trddgrep(tmp_path / "bin", monkeypatch)
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)

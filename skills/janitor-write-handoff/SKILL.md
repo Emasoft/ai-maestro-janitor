@@ -18,6 +18,12 @@ This skill adds the **semantic** layer on top, and it is **also zero model cost*
 `llm-ext` CLI, out of process, and writes
 `.janitor/state/agent-handoff-<session>-<ts>-<pid>.md`.
 
+**MANUAL-ONLY** (TRDD-RAEGS1D5 card 3 C2): this is the sole remaining place in this plugin
+that still calls `llm-ext` — the automatic SessionStart summarizer
+(`scripts/summarize_previous_session.py`) was rewired onto the janitor's own `jev_compact.py`
+scorer and no longer touches `llm-ext` at all. Invoking THIS skill is what still spends an
+`llm-ext` call; nothing automatic does.
+
 **It used to make the MODEL author that prose, and that was the whole cost** — tokens
 spent inside the very window about to be shrunk, which is the worst possible place to
 spend them. Owner directive 2026-09-03 retired that: handoff, compaction and clear work

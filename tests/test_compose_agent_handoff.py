@@ -6,13 +6,15 @@ check_handoff_concise` stops recognizing the file as composer-authored and resum
 `too-large` on every oversized composer handoff — silently, because no test would redden.
 
 WHAT IS AND IS NOT COVERED. `main()`'s only external dependency is `llm-ext` via
-`ec.summarize_with_retry`, which can shell out for minutes — never invoked here (see
-test_external_clear_llm_ext.py's own rationale for not calling the real CLI). This test
-monkeypatches `summarize_with_retry` and `cold_cache_compact.newest_transcript` to return a
-canned oversized summary, then runs the REAL `main()` body: the real marker prepend, the real
+`llm_ext_summary.summarize_with_retry` (TRDD-RAEGS1D5 card 3 C2 moved that function, and the
+rest of the manual lane's llm-ext machinery, out of `external_clear.py` and into
+`scripts/lib/llm_ext_summary.py` — the automatic SessionStart lane no longer touches llm-ext at
+all), which can shell out for minutes — never invoked here. This test monkeypatches
+`summarize_with_retry` and `cold_cache_compact.newest_transcript` to return a canned oversized
+summary, then runs the REAL `main()` body: the real marker prepend, the real
 `handoff_files.write`, and the real `clear_trigger.check_handoff_concise` on the resulting file.
-Not covered: the llm-ext subprocess invocation itself (that is `external_clear.py`'s own test
-file's job), and the retry/deadline machinery inside `summarize_with_retry`.
+Not covered: the llm-ext subprocess invocation itself, and the retry/deadline machinery inside
+`summarize_with_retry` (both are `llm_ext_summary.py`'s own test file's job).
 """
 
 from __future__ import annotations
@@ -57,7 +59,7 @@ def test_a_composed_handoff_is_stamped_and_passes_the_size_exemption(
         detail = ""
 
     monkeypatch.setattr(
-        compose_agent_handoff.ec, "summarize_with_retry", lambda *a, **k: _FakeAttempt()
+        compose_agent_handoff.les, "summarize_with_retry", lambda *a, **k: _FakeAttempt()
     )
 
     argv = ["compose_agent_handoff.py", "--project-root", str(root)]

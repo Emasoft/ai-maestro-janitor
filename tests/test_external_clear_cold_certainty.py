@@ -21,7 +21,10 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "scripts" / "lib"))
 
+# D2 (below): TRDD-RAEGS1D5 card 3 C2 moved resolve_llm_ext/attempt_llm_ext_summary/OUTCOME_*
+# out of external_clear.py and into llm_ext_summary.py.
 import external_clear as ec  # noqa: E402
+import llm_ext_summary as les  # noqa: E402
 
 _HOUR = 3600
 
@@ -120,7 +123,7 @@ def test_the_cli_is_found_with_an_empty_path(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "")
     binary = _install(tmp_path, "13.5.1")
-    assert ec.resolve_llm_ext() == str(binary)
+    assert les.resolve_llm_ext() == str(binary)
 
 
 def test_the_newest_version_wins_numerically_not_lexicographically(tmp_path, monkeypatch) -> None:
@@ -129,14 +132,14 @@ def test_the_newest_version_wins_numerically_not_lexicographically(tmp_path, mon
     monkeypatch.setenv("PATH", "")
     _install(tmp_path, "9.0.0")
     newest = _install(tmp_path, "13.5.1")
-    assert ec.resolve_llm_ext() == str(newest)
+    assert les.resolve_llm_ext() == str(newest)
 
 
 def test_a_genuinely_absent_cli_resolves_to_empty(tmp_path, monkeypatch) -> None:
     """No install anywhere must degrade to the template, not raise or invent a path."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "")
-    assert ec.resolve_llm_ext() == ""
+    assert les.resolve_llm_ext() == ""
 
 
 def test_a_real_path_entry_still_wins(tmp_path, monkeypatch) -> None:
@@ -149,13 +152,13 @@ def test_a_real_path_entry_still_wins(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", str(onpath))
     _install(tmp_path, "13.5.1")
-    assert ec.resolve_llm_ext() == str(shim)
+    assert les.resolve_llm_ext() == str(shim)
 
 
 def test_an_absent_cli_reports_the_exact_permanent_detail(tmp_path, monkeypatch) -> None:
     """The guardrail for the CI break this file's own rename caused (TRDD-CEWVQ8DG).
 
-    `test_external_clear_retry.py` asserts this detail against a SET of three, because WHICH
+    `tests/test_llm_ext_summary.py` asserts this detail against a SET of three, because WHICH
     precondition fires depends on the host — so on a machine where llm-ext IS installed it reaches
     the transcript branch and a renamed string sails through review. CI, with no llm-ext, caught it.
 
@@ -167,8 +170,8 @@ def test_an_absent_cli_reports_the_exact_permanent_detail(tmp_path, monkeypatch)
     transcript = tmp_path / "session.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
 
-    got = ec.attempt_llm_ext_summary(str(transcript))
-    assert got.outcome == ec.OUTCOME_PERMANENT
+    got = les.attempt_llm_ext_summary(str(transcript))
+    assert got.outcome == les.OUTCOME_PERMANENT
     assert got.detail == "llm-ext is not installed"
 
 
@@ -184,8 +187,8 @@ def test_the_summary_attempt_no_longer_reports_not_on_path(tmp_path, monkeypatch
     transcript = tmp_path / "session.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
 
-    attempt = ec.attempt_llm_ext_summary(
+    attempt = les.attempt_llm_ext_summary(
         str(transcript), runner=lambda *a, **k: _Proc(0, "a real summary")
     )
-    assert attempt.outcome == ec.OUTCOME_OK
+    assert attempt.outcome == les.OUTCOME_OK
     assert attempt.text == "a real summary"

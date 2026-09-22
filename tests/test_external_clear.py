@@ -9,11 +9,20 @@ regression guard for the whole reason this module deviates from the card's liter
 """
 
 import dataclasses
+import json
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
+_REPO = Path(__file__).resolve().parent.parent
+# BOTH roots, not just lib/: test_the_composer_targets_the_budget_the_checker_enforces and
+# test_a_REALISTIC_handoff_passes_the_contract_with_defaults import `clear_trigger`, which lives
+# in scripts/ — without this insert they pass only when another collected test file's
+# module-level insert (which runs at pytest COLLECTION time) happens to have put scripts/ on
+# sys.path first, i.e. this file would be order-dependent and fail when run solo (the same
+# mechanism verified in tests/test_external_clear_llm_ext.py before it moved here, 2026-08-18).
+sys.path.insert(0, str(_REPO / "scripts"))
+sys.path.insert(0, str(_REPO / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
 
@@ -799,3 +808,223 @@ def test_split_trailing_pointer_line_extracts_the_fixed_line():
     )
     assert body == "body line one\nbody line two"
     assert trailer == "pointers expand with: uv run --script x expand y z"
+
+
+# ---------- compose_handoff / recent_messages — general coverage (moved from ----------------
+# tests/test_external_clear_llm_ext.py, TRDD-RAEGS1D5 card 3 C2: that file was deleted because
+# its llm-ext-specific tests moved to tests/test_llm_ext_summary.py, but these exercise
+# `compose_handoff`/`recent_messages`, which STAYED in this module.)
+
+
+def test_handoff_survives_a_failed_summary():
+    """summary=None must still yield the scriptable facts + tail, never an empty handoff."""
+    text = ec.compose_handoff(
+        _inputs(), now_iso=NOW_ISO, summary=None,
+        tail=["USER: do the thing", "ASSISTANT: done"],
+    )
+    assert "PXP08ZQC" in text
+    assert "do the thing" in text
+
+
+def test_the_composer_targets_the_budget_the_checker_enforces():
+    """The producer and its checker must agree, or the contract is decorative.
+
+    MEASURED DRIFT (TRDD-PXP08ZQC): `compose_handoff` defaulted to 8192 while
+    `clear_trigger.check_handoff_concise` enforced 4096, and the caller passed neither.
+    Asserted as a CONSTANT EQUALITY rather than only behaviourally, because two independently
+    tuned numbers drift silently the moment someone changes one side.
+    """
+    import inspect
+
+    import clear_trigger  # noqa: PLC0415 -- a script, imported only by this assertion
+
+    default = inspect.signature(ec.compose_handoff).parameters["max_bytes"].default
+    assert default == clear_trigger._HANDOFF_MAX_BYTES == ec.HANDOFF_MAX_BYTES, (
+        f"composer default ({default}) and enforced contract "
+        f"({clear_trigger._HANDOFF_MAX_BYTES}) disagree — a handoff composed with defaults would "
+        "violate the check that gates it."
+    )
+
+
+def test_a_REALISTIC_handoff_passes_the_contract_with_defaults():
+    """The regression a toy fixture could not catch: a handoff the size a real project produces
+    (many cards, commits, findings, a long tail and an oversized summary) must keep the SHIPPED
+    defaults inside `clear_trigger.check_handoff_concise`'s contract."""
+    import clear_trigger  # noqa: PLC0415
+
+    inputs = ec.HandoffInputs(
+        cards=[(f"CARD{i:04d}", "dev", f"A card with a reasonably long descriptive title {i}")
+               for i in range(12)],
+        commits=[(f"abc{i:04d}", f"feat(area): a commit subject of realistic length {i}")
+                 for i in range(10)],
+        findings=[f"HIGH something notable happened in subsystem {i}" for i in range(8)],
+        memory_dir=".claude/project/memory",
+        trigger=ec.TRIGGER_RESUMED_COLD,
+    )
+    text = ec.compose_handoff(
+        inputs,
+        now_iso="2026-08-16T00:50:00+0200",
+        summary="S" * 40_000,
+        tail=[f"USER: a message of some length, number {i}" for i in range(300)],
+    )
+
+    ok, reasons = clear_trigger.check_handoff_concise(text)
+    assert ok, f"a realistic handoff violates the contract it is gated by: {reasons}"
+
+
+def test_whole_payload_respects_one_budget():
+    """Three 'small' parts add up — the budget is over the WHOLE injection, not per part."""
+    text = ec.compose_handoff(
+        _inputs(), now_iso=NOW_ISO,
+        summary="S" * 40_000,
+        tail=[f"USER: message number {i}" for i in range(400)],
+        max_bytes=6000,
+    )
+    assert len(text.encode("utf-8")) <= 6000, f"payload overran its budget: {len(text)}"
+
+
+def test_tail_is_trimmed_from_the_OLDEST_end_and_says_so():
+    """A resuming session needs the most recent exchanges; a silent clip reads as complete."""
+    tail = [f"USER: m{i}" for i in range(200)]
+    text = ec.compose_handoff(
+        _inputs(), now_iso=NOW_ISO, summary=None, tail=tail, max_bytes=3000,
+    )
+    # EXACT-LINE membership, not substring: "m0" occurs inside "m100".."m199", so a substring
+    # check can never fail and would assert nothing.
+    lines = set(text.splitlines())
+    assert "USER: m199" in lines, "the NEWEST turn must survive"
+    assert "USER: m0" not in lines, "the OLDEST turn should be dropped first"
+    assert "earlier message(s) dropped" in text, "truncation must be STATED, not silent"
+
+
+def test_recent_messages_skips_tool_noise(tmp_path):
+    """Tool payloads are the bulk of a transcript and the least useful thing to restore."""
+    t = tmp_path / "s.jsonl"
+    t.write_text(
+        json.dumps({"message": {"role": "user", "content": [{"type": "text", "text": "hello"}]}})
+        + "\n"
+        + json.dumps({"message": {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "Bash"},
+            {"type": "text", "text": "hi back"},
+        ]}})
+        + "\n",
+        encoding="utf-8",
+    )
+    got = ec.recent_messages(str(t))
+    assert got == ["USER: hello", "ASSISTANT: hi back"]
+
+
+# ---------- the fleet lane (moved from tests/test_external_clear_retry.py, ------------------
+# TRDD-RAEGS1D5 card 3 C2: `acquire_fleet_lease` & co. STAYED in external_clear.py — card 3 C3
+# renames them — while the retry-loop tests that also lived in that file moved to
+# tests/test_llm_ext_summary.py alongside the code they exercise.)
+
+
+def test_the_lane_caps_concurrency_at_three(tmp_path: Path):
+    """THE point of the lane (owner: '20 compacting requests will surely result in a rate limit
+    ban'), bounded the way the owner's timing requires: capping CONCURRENCY bounds the load
+    without bounding throughput."""
+    got = [
+        ec.acquire_fleet_lease(now=1_000_000.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path)
+        for _ in range(20)
+    ]
+
+    assert sum(1 for g in got if g) == 3, "exactly three may run at once"
+    assert all(g is None for g in got[3:]), "the rest must be told to wait, not admitted"
+    assert len({g for g in got if g}) == 3, "each holder must get a DISTINCT lease id"
+
+
+def test_a_released_lease_lets_the_next_session_start_at_once(tmp_path: Path):
+    """The fourth session starts the moment one of the three finishes, not after a fixed
+    spacing interval."""
+    held = [
+        ec.acquire_fleet_lease(now=1_000.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path)
+        for _ in range(3)
+    ]
+    assert ec.acquire_fleet_lease(
+        now=1_000.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path
+    ) is None
+
+    ec.release_fleet_lease(held[0], lane_dir=tmp_path)
+
+    assert ec.acquire_fleet_lease(
+        now=1_000.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path
+    ) is not None
+
+
+def test_a_lease_expires_so_a_killed_holder_cannot_wedge_the_lane(tmp_path: Path):
+    """The holder is a process that can be killed. If expiry depended on a clean release, one
+    crash would shrink the fleet's capacity permanently."""
+    for _ in range(3):
+        ec.acquire_fleet_lease(now=1_000.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path)
+
+    assert ec.acquire_fleet_lease(
+        now=1_100.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path
+    ) is None, "still inside the TTL — the cap must hold"
+    assert ec.acquire_fleet_lease(
+        now=1_400.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path
+    ) is not None, "past the TTL the dead holders' leases must be reclaimed"
+
+
+def test_a_corrupt_or_absurd_lease_store_cannot_park_the_fleet(tmp_path: Path):
+    """One bad write (or a clock jump) must not hold the lane shut."""
+    store = tmp_path / ec.FLEET_LEASE_FILE
+    store.write_text('{"a": 99999999999, "b": 99999999999, "c": 99999999999}', encoding="utf-8")
+    assert ec.acquire_fleet_lease(
+        now=1_000.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path
+    ) is not None
+
+    store.write_text("not json at all", encoding="utf-8")
+    assert ec.acquire_fleet_lease(
+        now=1_000.0, max_concurrent=3, ttl_s=300, lane_dir=tmp_path
+    ) is not None
+
+
+def test_the_lane_is_off_at_zero_concurrency(tmp_path: Path):
+    """Single-session hosts pay nothing: no store, no lock, no wait."""
+    assert ec.acquire_fleet_lease(
+        now=1_000.0, max_concurrent=0, ttl_s=300, lane_dir=tmp_path
+    ) == "lane-disabled"
+    assert not (tmp_path / ec.FLEET_LEASE_FILE).exists()
+
+
+def test_an_unwritable_lane_fails_open(tmp_path: Path):
+    """The lane must never be able to block the clear."""
+    blocked = tmp_path / "nope"
+    blocked.write_text("i am a file, not a directory", encoding="utf-8")
+
+    assert ec.acquire_fleet_lease(
+        now=1_000.0, max_concurrent=3, ttl_s=300, lane_dir=blocked
+    ) is not None
+
+
+def test_awaiting_a_full_lane_past_the_deadline_gives_up():
+    """A lane that stays full through the whole budget must return None so the caller degrades
+    to a fallback — waiting forever would strand the caller unshrunk."""
+    full = Path("/nonexistent-so-we-inject-instead")
+    calls: list[float] = []
+
+    def _always_full(**kw) -> None:
+        calls.append(kw["now"])
+        return None
+
+    original = ec.acquire_fleet_lease
+    try:
+        ec.acquire_fleet_lease = _always_full  # type: ignore[assignment]
+        t = {"n": 1_000_000.0}
+
+        def _now() -> float:
+            return t["n"]
+
+        def _sleep(seconds: float) -> None:
+            t["n"] += seconds
+
+        got = ec.await_fleet_lease(
+            deadline=_now() + 12.0, max_concurrent=3, ttl_s=300, lane_dir=full,
+            now_fn=_now, sleeper=_sleep, poll_s=5.0,
+        )
+    finally:
+        ec.acquire_fleet_lease = original  # type: ignore[assignment]
+
+    assert got is None
+    assert len(calls) >= 2, "it must actually poll, not refuse on the first look"

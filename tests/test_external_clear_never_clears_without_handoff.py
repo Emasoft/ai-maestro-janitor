@@ -60,17 +60,14 @@ def _firing_project(tmp_path, monkeypatch) -> tuple[Path, Path]:
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
     monkeypatch.setenv(ec.ENABLED_ENV, "true")
     monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no third-party probe
-    # The summariser is STUBBED so it can never really spawn here. The original leak is worth
-    # keeping in view: these tests once spawned the machine's REAL llm-ext against a pytest tmp
-    # transcript, which the suite's allow-list correctly refused (SandboxViolation), after which
-    # the retry loop slept through its backoff — slow AND impure. Since TRDD-QZVAEWQH the lane
-    # under test never calls it at all (it delegates), so the stub is a tripwire, not a fixture;
-    # the subject stays the ORDER of the payload write versus the chain spawn.
-    monkeypatch.setattr(
-        ec,
-        "summarize_with_retry",
-        lambda *a, **k: ec.SummaryAttempt(text="stubbed llm-ext session summary", outcome="ok"),
-    )
+    # No llm-ext stub needed here (TRDD-RAEGS1D5 card 3 C2): `external_clear.summarize_with_
+    # retry` — the tripwire this fixture used to patch, kept only as a defensive no-op since
+    # TRDD-QZVAEWQH stopped the lane under test calling it at all — moved to
+    # `scripts/lib/llm_ext_summary.py` along with the rest of the manual-lane's llm-ext
+    # machinery, and no longer exists on `ec`. The subject here stays the ORDER of the payload
+    # write versus the chain spawn; the original leak this comment used to guard against (a real
+    # llm-ext subprocess spawned against a pytest tmp transcript) cannot recur because this lane
+    # never reaches llm-ext code at all anymore.
     monkeypatch.setenv(ec.MIN_CONTEXT_ENV, "0")  # size must not veto
 
     import cold_cache_compact  # noqa: PLC0415

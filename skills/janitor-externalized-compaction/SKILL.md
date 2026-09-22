@@ -1,6 +1,6 @@
 ---
 name: janitor-externalized-compaction
-description: Shrink this session by running the EXTERNAL (zero-model-turn) handoff-and-clear — a template handoff composed from on-disk facts, optionally upgraded by the llm-externalizer CLI, then /clear plus the verified bootstrap chain. The skill surface over scripts/external_handoff_clear.py. Cheaper and more detailed than /janitor-handoff-and-clear because the handoff is COMPOSED OUTSIDE the model (no tokens spent authoring it) and the summary comes from llm-ext rather than from this session's own window. Use when context is high and the work is durably on disk, or when asked to compact, shrink, or externally clear.
+description: Shrink this session by running the EXTERNAL (zero-model-turn) handoff-and-clear — a template handoff composed from on-disk facts, then /clear plus the verified bootstrap chain. The skill surface over scripts/external_handoff_clear.py. Cheaper and more detailed than /janitor-handoff-and-clear because the handoff is COMPOSED OUTSIDE the model (no tokens spent authoring it): the fresh (cleared) session's own SessionStart hook automatically upgrades the template into a richer Jev-compacted handoff a few minutes later (TRDD-RAEGS1D5 card 3 — `jev_compact.py`, not the model and not llm-ext). Use when context is high and the work is durably on disk, or when asked to compact, shrink, or externally clear.
 ---
 
 # Janitor externalized compaction
@@ -9,10 +9,13 @@ description: Shrink this session by running the EXTERNAL (zero-model-turn) hando
 
 The three legs of a shrink are DECIDE, COMPOSE, TYPE. `/janitor-handoff-and-clear` spends
 model tokens on COMPOSE — this skill does not. `scripts/external_handoff_clear.py`
-(TRDD-PXP08ZQC) composes the handoff from on-disk facts (TRDD `## STATE` blocks, git log,
-the findings ledger) and, when the `llm-ext` CLI is available, upgrades the prose through
-it. **Neither path costs this session a turn of authoring**, which is the whole point: the
-summary is produced outside the window it is meant to shrink.
+(TRDD-PXP08ZQC) composes a TEMPLATE handoff from on-disk facts (TRDD `## STATE` blocks, git
+log, the findings ledger) at fire time — it does not itself call any summarizer. The FRESH
+(cleared) session's own SessionStart hook then runs `scripts/summarize_previous_session.py`,
+which compacts the just-cleared transcript through the janitor's own Jev scorer
+(`jev_compact.py`, TRDD-RAEGS1D5 card 3) and upgrades the template into a richer handoff, all
+within the same short hold window. **Neither path costs this session a turn of authoring**,
+which is the whole point: the summary is produced outside the window it is meant to shrink.
 
 It then reuses `clear_trigger`'s already-ratified verified injection chain to type `/clear`
 and bootstrap the fresh session.
@@ -91,8 +94,10 @@ bootstrap chain at this session's own pane.
 - The script never blocks; the keystrokes fire detached.
 - Not in an automatable terminal (iTerm/tmux) → it reports it; ask the user to `/clear`
   manually. The handoff is still on disk, so the resume still works.
-- `llm-ext` absent → NOT an error. The on-disk template is what ships; the CLI only upgrades
-  the prose. Never treat a missing `llm-ext` as a reason to skip the shrink.
+- The Jev scorer unavailable/declining → NOT an error. The on-disk template is what ships at
+  fire time regardless; the fresh session's SessionStart summarizer only UPGRADES it, and its
+  own fallback is that same template (unchanged if the upgrade never lands). Never treat a
+  scorer outage as a reason to skip the shrink.
 
 ## Scope
 
@@ -103,8 +108,9 @@ config, does not disarm the heartbeat, does not compact other sessions.
 ## Resources
 
 - `scripts/external_handoff_clear.py` — the entry point (flags: `--project-root`,
-  `--dry-run`, `--force`, `--on-resume`). Its module docstring mentions a `--llm-ext`
-  flag that argparse does NOT define; the llm-ext upgrade is internal, so do not pass it.
+  `--dry-run`, `--force`, `--on-resume`). It composes the fire-time TEMPLATE only; the
+  Jev-compacted upgrade happens later, at the fresh session's own SessionStart
+  (`scripts/summarize_previous_session.py` + `scripts/lib/jev_compaction_lane.py`), not here.
 - `scripts/lib/external_clear.py` — the PURE decision half (`should_clear_externally`).
 - `/janitor-handoff-and-clear` — the in-session sibling (model-authored handoff).
 - `/janitor-compact-context` — the `/compact` path; last resort, see "When to use".

@@ -12,6 +12,7 @@ it via `subprocess.run`, never `import jevctx`.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -22,6 +23,7 @@ _SHEBANG_DIRS = (_REPO_ROOT / "scripts", _REPO_ROOT / "scripts" / "detectors", _
 _FORBIDDEN_MODULE_FILES = (
     "scripts/lib/external_clear.py",
     "scripts/lib/cold_cache_compact.py",
+    "scripts/lib/jev_compaction_lane.py",
     "scripts/summarize_previous_session.py",
     "scripts/external_handoff_clear.py",
     "scripts/dispatch.py",
@@ -34,14 +36,20 @@ _ALLOWED_EXCEPTION = "scripts/jev_compact.py"
 
 
 def _imports(module_text: str, name: str) -> bool:
-    """A real top-level import of `name`, not a mention in a comment/string.
+    """A real top-level import of `name`, not a mention in a comment/string, and not a
+    DIFFERENT module that merely starts with `name` (TRDD-RAEGS1D5 card 3 C2: adding the
+    legitimate `jev_compaction_lane` module made a bare substring check on `"jev_compaction"`
+    false-positive on it -- `name in stripped` matches inside `jev_compaction_lane` too).
 
     Only lines that START with `import`/`from` count -- a match inside a comment
-    (e.g. "# do NOT import jevctx here") or a docstring must not false-positive.
+    (e.g. "# do NOT import jevctx here") or a docstring must not false-positive. `name` must
+    then be followed by a non-identifier character (`.`, whitespace, or end of string) so a
+    same-prefixed sibling module never counts as importing `name` itself.
     """
+    boundary = re.compile(rf"\b{re.escape(name)}(?![A-Za-z0-9_])")
     for line in module_text.splitlines():
         stripped = line.strip()
-        if stripped.startswith(("import ", "from ")) and name in stripped:
+        if stripped.startswith(("import ", "from ")) and boundary.search(stripped):
             return True
     return False
 

@@ -6,9 +6,15 @@
 
 WHY THIS EXISTS. `janitor-write-handoff` today asks the MODEL to author the semantic handoff
 prose — real tokens, spent inside the very turn that is about to be compacted/cleared. This
-script replaces that authorship with the same out-of-process `llm-ext` summarizer the daemon
-already uses for the PREVIOUS session (`summarize_previous_session.py`), pointed at THIS
-session's own transcript instead.
+script replaces that authorship with the out-of-process `llm-ext` summarizer, pointed at THIS
+session's own transcript.
+
+MANUAL-ONLY (TRDD-RAEGS1D5 card 3 C2): the AUTOMATIC SessionStart lane
+(`summarize_previous_session.py`) was rewired onto `jev_compact.py compact` in card 3 C1 and no
+longer touches llm-ext at all — this script is now the ONLY place in the AUTOMATIC-vs-MANUAL
+split that still calls it, via `scripts/lib/llm_ext_summary.py` (the owner's manual
+`/janitor-write-handoff` tool is explicitly allowed to keep using llm-ext; see that skill's own
+SKILL.md).
 
 WHY IT IS A SEPARATE SCRIPT, NOT A FLAG ON THE SIBLING. `summarize_previous_session.py` exists
 specifically to EXCLUDE the live session's transcript (`previous_transcript` filters it out by
@@ -34,8 +40,8 @@ _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
-import external_clear as ec  # noqa: E402
 import handoff_files  # noqa: E402
+import llm_ext_summary as les  # noqa: E402
 import state  # noqa: E402
 
 _LOG = "agent-handoff-compose"
@@ -70,7 +76,7 @@ def main() -> int:
         state.log_line(_LOG, "no transcript found for this session — nothing to summarize")
         return 0
 
-    got = ec.summarize_with_retry(str(transcript), deadline=time.time() + _SUMMARY_BUDGET_S)
+    got = les.summarize_with_retry(str(transcript), deadline=time.time() + _SUMMARY_BUDGET_S)
     text = (got.text or "").strip()
     if not text:
         reason = f"{got.outcome}: {got.detail}"

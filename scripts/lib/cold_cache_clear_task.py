@@ -137,8 +137,12 @@ def run_once() -> int:
             skip_recent += 1
             continue
         # KEEP THE WATCHER'S STDOUT (TRDD-UQW5IOAE). It prints exactly the audit line this
-        # feature is judged on — `VERDICT FIRE/HOLD … why=…`, plus NO_SUMMARY /
-        # HANDOFF_NOT_CONCISE / CLEAR_CHAIN_SPAWNED — and DEVNULL threw every one of them away.
+        # feature is judged on — `VERDICT FIRE/HOLD … why=…`, plus HANDOFF_NOT_CONCISE /
+        # CLEAR_CHAIN_SPAWNED / SUMMARY_DELEGATED — and DEVNULL threw every one of them away.
+        # (`NO_SUMMARY` was corrected here TRDD-RAEGS1D5 card 3 C2: `external_handoff_clear.py`
+        # never emits that token — its own `_run` prints only the tokens named above plus
+        # `NO_RECORDED_PANE`/`DRY_RUN…`/`NO_TRANSCRIPT`; the fire-time compose is a mechanical
+        # template, never a summary attempt that could itself fail and print `NO_SUMMARY`.)
         # A silent lane looks identical to an idle one, so nothing would ever be recorded. The
         # SessionStart lane never had this hole (it is blocking and logs its own verdict via
         # state.log_line), so this was the one call site.

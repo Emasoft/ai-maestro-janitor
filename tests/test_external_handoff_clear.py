@@ -19,6 +19,7 @@ sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
 import external_handoff_clear as ehc  # noqa: E402
+import llm_ext_summary as les  # noqa: E402
 
 SCRIPT = _ROOT / "scripts" / "external_handoff_clear.py"
 
@@ -109,7 +110,11 @@ def _delegation_case(tmp_path, monkeypatch, *, on_resume: bool, trigger: str, ga
     def must_not_compose(*_a, **_k):
         raise AssertionError("must not compose — every caller delegates (TRDD-QZVAEWQH)")
 
-    monkeypatch.setattr(ec, "summarize_with_retry", must_not_compose)
+    # `summarize_with_retry` moved to `scripts/lib/llm_ext_summary.py` (TRDD-RAEGS1D5 card 3
+    # C2) -- `external_handoff_clear.py` never imports it (confirmed by this very tripwire
+    # never firing), so patching `les` here only guards against a future regression that adds
+    # an inline llm-ext compose back into `_run`/`_compose`.
+    monkeypatch.setattr(les, "summarize_with_retry", must_not_compose)
     return _armed_run(root, on_resume=on_resume), root
 
 
