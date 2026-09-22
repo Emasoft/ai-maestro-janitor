@@ -15,7 +15,6 @@ related-trdds: [UA4FAX67, WKTD5JTC, P7WU40G9, O7UCNNN2, G043V3V0, 9ZPU69UC]
 npt: []
 eht: []
 implementation-commits: [9cc22049]
-review-after: 
 assignee: ai-maestro-janitor main session
 created-by: ai-maestro-janitor main session
 ---
@@ -299,15 +298,3 @@ Mechanism, verified in code + transcript:
 - 2026-09-22T21:44:04+0200 — column → dev. card 1 (trigger and loop guards) in progress 2026-09-22
 
 ## Notes and lessons learned
-
-
-
-
-
-
-
-
-
-
-
-
