@@ -20,6 +20,7 @@ to — see `tests/test_jev_boundary.py` and the module docstring of
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -34,14 +35,24 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _REPO_ROOT / "scripts" / "summarize_previous_session.py"
 
+_ARGV_RECORD_NAME = "jev_compact_argv.txt"
+
 _STUB_JEV_COMPACT = """#!/usr/bin/env python3
 import sys
 from pathlib import Path
 argv = sys.argv
 if "--out" in argv:
-    Path(argv[argv.index("--out") + 1]).write_text(
+    out = Path(argv[argv.index("--out") + 1])
+    out.write_text(
         "# Compacted context (Jev compaction)\\ntranscript: stub\\n\\n## Kept items\\nstub\\n",
         encoding="utf-8",
+    )
+    # Discriminates which jev_compact.py actually ran: the lane must exec the tmp plugin
+    # root's copy (resolved from CLAUDE_PLUGIN_ROOT), never this repo's own real
+    # scripts/jev_compact.py via __file__ -- record OUR argv and OUR resolved path so the
+    # test can prove that from outside this subprocess.
+    out.with_name("jev_compact_argv.txt").write_text(
+        repr(argv) + "\\n" + str(Path(__file__).resolve()) + "\\n", encoding="utf-8",
     )
 sys.exit(0)
 """
@@ -84,7 +95,10 @@ def _non_venv_path_dirs() -> list[str] | None:
 def test_summarize_previous_session_runs_stdlib_only_under_uv_run(tmp_path: Path) -> None:
     """Real `uv run --script` subprocess, real (stubbed-jev_compact) end to end: exit 0, the
     compacted artifact lands under the tmp project's `.janitor/state/`, and stderr carries no
-    `ModuleNotFoundError`/`ImportError` — the one failure mode a venv-hosted test cannot see."""
+    `ModuleNotFoundError`/`ImportError` — the one failure mode a venv-hosted test cannot see.
+    The property proven is that the lane's imports resolve under the PEP-723 runtime without
+    the project venv or user site-packages, and that the lane execs the stub `jev_compact.py`
+    resolved from `CLAUDE_PLUGIN_ROOT`, never the real one via its own `__file__`."""
     path_dirs = _non_venv_path_dirs()
     if path_dirs is None:
         pytest.skip("uv (and a non-.venv python3/python) not found on PATH")
@@ -121,6 +135,10 @@ def test_summarize_previous_session_runs_stdlib_only_under_uv_run(tmp_path: Path
         "CLAUDE_PROJECT_DIR": str(project_dir),
         "CLAUDE_PLUGIN_ROOT": str(plugin_root),
         "CLAUDE_CODE_SESSION_ID": "new-session",
+        # A user-site package (e.g. a stray PyYAML install) must not be able to mask a
+        # missing PEP-723 dependency declaration — the real production PATH has no user
+        # site-packages either, and this test exists to catch exactly this gap.
+        "PYTHONNOUSERSITE": "1",
     }
     if os.environ.get("TMPDIR"):
         env["TMPDIR"] = os.environ["TMPDIR"]
@@ -138,6 +156,22 @@ def test_summarize_previous_session_runs_stdlib_only_under_uv_run(tmp_path: Path
     artifacts = list((project_dir / ".janitor" / "state").glob("jev-compacted-*.md"))
     assert artifacts, "expected a jev-compacted-*.md artifact under .janitor/state"
     assert artifacts[0].read_text(encoding="utf-8").strip()
+
+    # Discriminate which jev_compact.py actually ran: the lane must resolve the plugin root
+    # from CLAUDE_PLUGIN_ROOT (the tmp copy), never from its own `__file__` (this repo's real
+    # scripts/jev_compact.py, and its real control-dir stamp, must never be touched).
+    record_path = artifacts[0].with_name(_ARGV_RECORD_NAME)
+    assert record_path.is_file(), f"stub jev_compact.py never ran (no {record_path})"
+    argv_line, resolved_line = record_path.read_text(encoding="utf-8").splitlines()
+    # Parse the recorded argv structurally (not a substring match) so a coincidental
+    # "compact" appearing elsewhere in argv (e.g. inside a tmp_path directory name) can't
+    # produce a false pass.
+    recorded_argv = ast.literal_eval(argv_line)
+    assert "compact" in recorded_argv, recorded_argv
+    recorded_path = Path(resolved_line)
+    assert recorded_path.is_relative_to(plugin_root.resolve()), (
+        f"jev_compact.py ran from outside the tmp plugin root: {recorded_path}"
+    )
 
 
 if __name__ == "__main__":

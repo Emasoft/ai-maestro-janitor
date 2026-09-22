@@ -46,6 +46,18 @@ _LLM_EXT_SUMMARY_ALLOWED = (
     "scripts/lib/llm_ext_summary.py",
 )
 
+# The test-file scan below (test_no_test_file_imports_llm_ext_summary_except_allowed) is
+# broader than _LLM_EXT_SUMMARY_ALLOWED above -- it also allows the two EXISTING manual-lane
+# tests that legitimately import `llm_ext_summary` directly (external_handoff_clear's and
+# external_clear's own tests, exercising the function that moved there in TRDD-RAEGS1D5 card 3
+# C2). Only `tests/test_llm_ext_summary.py` is that module's own dedicated test; these two are
+# additional real importers this scan must not flag, or it would fail on the day it is added.
+_LLM_EXT_SUMMARY_TEST_ALLOWED = (
+    "tests/test_llm_ext_summary.py",
+    "tests/test_external_handoff_clear.py",
+    "tests/test_external_clear_cold_certainty.py",
+)
+
 
 def _imports(module_text: str, name: str) -> bool:
     """A real top-level import of `name`, not a mention in a comment/string, and not a
@@ -108,3 +120,21 @@ def test_no_hook_or_named_lib_script_imports_jevctx_or_httpx() -> None:
     assert offenders == [], (
         f"scripts importing jevctx/httpx/jev_compaction/llm_ext_summary in-process: {offenders}"
     )
+
+
+def test_no_test_file_imports_llm_ext_summary_except_allowed() -> None:
+    """Guards the test suite itself (TRDD-RAEGS1D5 card 3 C2 follow-up): a future test for the
+    AUTOMATIC Jev lane must never quietly import `llm_ext_summary`, the MANUAL summarizer's own
+    module -- only `tests/test_llm_ext_summary.py` and the two existing manual-lane tests in
+    `_LLM_EXT_SUMMARY_TEST_ALLOWED` may."""
+    tests_dir = _REPO_ROOT / "tests"
+    candidates = sorted(tests_dir.rglob("*.py"))
+    assert candidates, f"expected test files under {tests_dir}"
+
+    offenders = [
+        str(p.relative_to(_REPO_ROOT))
+        for p in candidates
+        if p.relative_to(_REPO_ROOT).as_posix() not in _LLM_EXT_SUMMARY_TEST_ALLOWED
+        and _imports(p.read_text(), "llm_ext_summary")
+    ]
+    assert offenders == [], f"test files importing llm_ext_summary: {offenders}"
