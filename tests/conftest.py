@@ -76,6 +76,17 @@ import pytest
 # see sandbox_guard's docstring. pytest puts this dir on sys.path, so a plain import works.
 import sandbox_guard
 
+# `tests/jevctx/*.py` (the vendored jevctx suite) imports `jevctx.budget` etc. bare, the
+# same way `scripts/*.py` imports `lib.*` bare — put `scripts/lib` on sys.path here, once,
+# instead of a per-directory `conftest.py`: a SECOND `conftest.py` with no `__init__.py`
+# anywhere under `tests/` collides on the bare module name "conftest" (pytest's default
+# rootless import mode), so `tests/jevctx/conftest.py` silently overwrote
+# `sys.modules["conftest"]` and broke every `from conftest import MEMGREP_BIN_PATH` at the
+# top of the suite (test_wikimem_spec_drift.py and friends) with an ImportError.
+_SCRIPTS_LIB = Path(__file__).resolve().parent.parent / "scripts" / "lib"
+if str(_SCRIPTS_LIB) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_LIB))
+
 # ─── S1a/S1b module state (filled by pytest_configure) ──────────────────────────────────
 
 _ISOLATION_ENVS = (

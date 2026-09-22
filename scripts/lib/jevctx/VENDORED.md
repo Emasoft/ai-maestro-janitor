@@ -54,3 +54,36 @@ scripts are PEP-723 stdlib-only single files that vendor their own
 dependencies rather than pull them from a registry — vendoring `jevctx`
 (source-only, MIT) matches that existing convention instead of introducing a
 new one.
+
+## Trimmed to card 3's needs (2026-09-22, TRDD-541CBN36 card 2 follow-ups)
+
+Removed `check.py`, `context.py`, `ledger.py`, `pipeline.py`, `segments.py`,
+`shadow.py`, `store.py` — the agent-loop / context-buffer half of upstream
+(`ContextBuffer`, `CacheLedger`, `admit`/`retrieve`/`expand` gate pipeline,
+segment detection, shadow-mode logging, the in-memory/JSONL stores). Card 3
+(the compacted-context scorer + CLI) only needs the scoring half: `budget.py`,
+`jev.py`, `scorer.py`, `tokens.py`, `types.py`, `testing.py`, plus this
+project's own `openrouter.py`/`provider.py`. Removed for scope, not for a
+defect in the removed code — `git log` recovers commit `4b8ba762` (the one
+that added all of it) if a later card needs the agent-loop half after all;
+re-vendor from the same upstream commit `6d33376a759b95dc53b2169eed2cad32842036ca`
+rather than resurrecting the deleted copy, in case upstream has moved since.
+
+Matching test files removed from `tests/jevctx/`: `test_check.py` (already
+absent, see above), `test_context.py`, `test_ledger.py`, `test_pipeline.py`,
+`test_segments.py`, `test_shadow.py`, `test_store.py`, and `test_end_to_end.py`
+(exercised the removed modules together). Kept: `test_budget.py`, `test_jev.py`,
+`test_scorer.py`.
+
+`RETRIEVE_QUESTION` (a `Noul` constant card 3's spec names directly) lived only
+in the now-removed `pipeline.py` — it is NOT available from this trimmed
+package. Whoever implements card 3 either re-vendors `pipeline.py` or defines
+an equivalent `Noul` locally; this is a known gap, not an oversight.
+
+`__init__.py`'s import list and `__all__` were trimmed to match (kept:
+`Batch`, `BudgetPlanner`, `HttpJevClient`, `RateLimiter`, `RetryPolicy`,
+`build_state`, `score_items`, `score_map`, `FakeJevClient`, `estimate_tokens`,
+and the `types.py` re-exports still referenced by the kept modules); the two
+mypy/pyright fix notes above for `check.py`/`shadow.py` are now moot (the
+files are gone) but left in place as history rather than deleted, per this
+project's commit-discipline convention of superseding rather than erasing.

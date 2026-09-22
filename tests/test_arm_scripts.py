@@ -414,3 +414,96 @@ def test_restricted_mode_predicate_has_ONE_home_and_errs_toward_refusing() -> No
         assert state.restricted_mode() is False, f"{negative!r} must not read as restricted"
     os.environ.pop("CLAUDE_CODE_RESTRICTED", None)
     assert state.restricted_mode() is False, "unset means a normal session"
+
+
+def _load_arm_prepare():
+    """Import arm_prepare.py as a module (it's a script, not a package member)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("arm_prepare_under_test", PREPARE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_jev_probe_skips_the_subprocess_on_a_fresh_ok_stamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stamp younger than 6h with ok=true must short-circuit — zero subprocess calls.
+
+    arm_prepare.py runs on every SessionStart of every project; a live network probe there is
+    a session-start stall, so the whole point of the cache is that a fresh ok stamp never
+    reaches `state.run_subprocess` at all (asserted here by making that call raise).
+    """
+    arm_prepare = _load_arm_prepare()
+    stamp = tmp_path / "jev-probe.json"
+    stamp.write_text(
+        '{"ok": true, "reason": null, "ts": %f, "cost": 0.00002, "model": null, "provider": ""}'
+        % __import__("time").time()
+    )
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise AssertionError("cached ok stamp must not fall through to a subprocess")
+
+    monkeypatch.setattr(arm_prepare.state, "run_subprocess", _boom)
+    result = arm_prepare.jev_probe(ROOT, state_dir=tmp_path)
+    assert result.startswith("jev=ok (cached ")
+
+
+def test_jev_probe_ignores_a_fresh_ok_stamp_from_a_different_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fresh ok=true stamp measured under a DIFFERENT provider must not be trusted.
+
+    Flagged by adversarial review (TRDD-541CBN36 card 2 follow-ups): a cache keyed only on
+    age would keep reporting a stale `jev=ok` for up to 6h after the user switched
+    CLAUDE_PLUGIN_OPTION_JEV_PROVIDER, silently reporting the health of the WRONG provider.
+    """
+    arm_prepare = _load_arm_prepare()
+    stamp = tmp_path / "jev-probe.json"
+    stamp.write_text(
+        '{"ok": true, "reason": null, "ts": %f, "cost": 0.00002, "model": null, "provider": "openrouter"}'
+        % __import__("time").time()
+    )
+
+    def _fake_run(cmd, *, timeout, detector_name):  # noqa: ANN001
+        return subprocess.CompletedProcess(cmd, 0, stdout="probe ok noul=0.9 cost=0.00001 ms=200\n", stderr="")
+
+    monkeypatch.setattr(arm_prepare.state, "run_subprocess", _fake_run)
+    result = arm_prepare.jev_probe(ROOT, state_dir=tmp_path, env={"CLAUDE_PLUGIN_OPTION_JEV_PROVIDER": "typesafe"})
+    assert result == "jev=ok"
+    assert '"provider": "typesafe"' in stamp.read_text(), "the re-probe must re-stamp under the NEW provider"
+
+
+def test_jev_probe_runs_and_stamps_on_a_stale_stamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stamp older than 6h falls through to a (mocked) probe, then writes a fresh stamp."""
+    arm_prepare = _load_arm_prepare()
+    stamp = tmp_path / "jev-probe.json"
+    stale_ts = __import__("time").time() - arm_prepare._JEV_PROBE_CACHE_SECONDS - 1
+    stamp.write_text(
+        '{"ok": true, "reason": null, "ts": %f, "cost": 0.00002, "model": null, "provider": ""}' % stale_ts
+    )
+
+    calls = []
+
+    def _fake_run(cmd, *, timeout, detector_name):  # noqa: ANN001
+        calls.append(timeout)
+        return subprocess.CompletedProcess(cmd, 0, stdout="probe ok noul=0.9 cost=0.00003 ms=410\n", stderr="")
+
+    monkeypatch.setattr(arm_prepare.state, "run_subprocess", _fake_run)
+    result = arm_prepare.jev_probe(ROOT, state_dir=tmp_path)
+    assert result == "jev=ok"
+    assert calls == [arm_prepare._JEV_PROBE_TIMEOUT_SECONDS], "the bound must be 3s, not the old 20s"
+    written = stamp.read_text()
+    assert '"ok": true' in written
+    assert '"cost": 3e-05' in written
+
+
+def test_jev_probe_never_calls_the_subprocess_when_provider_is_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    arm_prepare = _load_arm_prepare()
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise AssertionError("provider=off must never reach a subprocess")
+
+    monkeypatch.setattr(arm_prepare.state, "run_subprocess", _boom)
+    result = arm_prepare.jev_probe(ROOT, state_dir=tmp_path, env={"CLAUDE_PLUGIN_OPTION_JEV_PROVIDER": "off"})
+    assert result == "jev=off"

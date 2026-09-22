@@ -34,9 +34,11 @@ never toward "leak a heartbeat". This mirrors the ordering rationale the skill a
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -134,31 +136,103 @@ def restricted_mode_active() -> bool:
     return state.restricted_mode()
 
 
-def jev_probe(plugin_root: Path, env: Mapping[str, str] | None = None) -> str:
-    """Run `jev_compact.py probe` once at arm time (TRDD-541CBN36 card 2, spec step 5).
+_JEV_PROBE_CACHE_SECONDS = 6 * 60 * 60  # 6h — see jev_probe()'s docstring
+_JEV_PROBE_TIMEOUT_SECONDS = 3  # was 20s; only a stamp miss/stale/failure ever pays this now
+
+
+def _parse_probe_cost(stdout: str) -> float | None:
+    """Pull `cost=<f>` out of jev_compact.py probe's one stdout line (`probe ok noul=.. cost=.. ms=..`).
+
+    Best-effort: the stamp is a caching optimization, not the probe's own correctness --
+    a line that doesn't parse just leaves `cost` as None rather than failing the probe.
+    """
+    for token in stdout.split():
+        if token.startswith("cost="):
+            try:
+                return float(token[len("cost=") :])
+            except ValueError:
+                return None
+    return None
+
+
+def _write_jev_probe_stamp(stamp_path: Path, *, ok: bool, reason: str | None, cost: float | None, provider: str) -> None:
+    """Best-effort: a stamp write failure must not turn a successful probe into an arm failure.
+    `provider` is stamped alongside the verdict so a later read can tell a genuinely fresh
+    "ok" apart from one measured under a DIFFERENT provider — see jev_probe()'s cache-key note.
+    """
+    body = {"ok": ok, "reason": reason, "ts": time.time(), "cost": cost, "model": None, "provider": provider}
+    try:
+        state.atomic_write(stamp_path, json.dumps(body))
+    except OSError:
+        pass
+
+
+def jev_probe(plugin_root: Path, state_dir: Path | None = None, env: Mapping[str, str] | None = None) -> str:
+    """Run `jev_compact.py probe` at arm time, off the hot path (TRDD-541CBN36 card 2 follow-ups).
+
+    `arm_prepare.py` runs on every SessionStart of every project on this machine — a network
+    round trip there is a session-start stall the WHOLE janitor rests on, not a one-off cost.
+    So the probe is CACHED: a `jev-probe.json` stamp under the janitor state dir
+    (`{"ok": bool, "reason": str|None, "ts": epoch, "cost": float|None, "model": str|None,
+    "provider": str}`) younger than 6h, with `ok: true` AND a `provider` matching the CURRENT
+    `CLAUDE_PLUGIN_OPTION_JEV_PROVIDER`, short-circuits the subprocess entirely — zero network,
+    zero wait. Only a missing/stale/failed/provider-mismatched stamp pays the (now 3s-bounded,
+    was 20s) subprocess cost. 3s, not 20s: a probe that hasn't answered in 3s on a live host is
+    not going to save this arm anything over just trying again next arm — 20s was sized for the
+    one-shot case, not a check now hit on every arm until it succeeds once and caches.
+
+    The `provider` key (an adversarial review flagged this, TRDD-541CBN36 card 2 follow-ups)
+    exists because the cache is otherwise config-oblivious: a stamp keyed only on age would
+    keep reporting a stale `jev=ok` for up to 6h after the user switched
+    `CLAUDE_PLUGIN_OPTION_JEV_PROVIDER` (openrouter <-> typesafe), silently probing the WRONG
+    provider's health. It does NOT cover an API-key rotation under the same provider name --
+    that would need hashing the key into the stamp, which is out of scope here; a rotated key
+    is caught the same way any other probe failure is, on the next natural cache miss.
 
     A dedicated `off` value on `CLAUDE_PLUGIN_OPTION_JEV_PROVIDER` (on top of the two the
     provider module itself knows, `openrouter`/`typesafe`) skips this entirely — arming
     must work on a host that never wants Jev compaction, with no network call and no error
     line. A probe FAILURE changes nothing else here (arming proceeds either way); it only
     changes what gets printed, so the skill/human sees `jev=<reason>` instead of `jev=ok`.
-    This is a 20s-bounded subprocess, not an in-process call, because `jev_compact.py` is
-    its own PEP-723 script declaring `httpx` — this file stays stdlib-only (see its own
-    docstring) and shells out the same way the scope-check detector call above does.
+    This never changes the arm's own exit code.
     """
     environ: Mapping[str, str] = os.environ if env is None else env
     provider = (environ.get("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER") or "").strip().lower()
     if provider == "off":
         return "jev=off"
+
+    sd = state.state_dir() if state_dir is None else state_dir
+    stamp_path = sd / "jev-probe.json"
+    now = time.time()
+    try:
+        stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+        age = now - float(stamp["ts"])
+        fresh = stamp.get("ok") is True and 0 <= age < _JEV_PROBE_CACHE_SECONDS
+        same_provider = stamp.get("provider") == provider
+        if fresh and same_provider:
+            return f"jev=ok (cached {int(age)}s)"
+    except (OSError, ValueError, KeyError, TypeError):
+        pass  # no stamp, unreadable, or malformed -- fall through to a live probe
+
     script = plugin_root / "scripts" / "jev_compact.py"
     if not script.is_file():
         return "jev=script missing"
-    proc = state.run_subprocess(["uv", "run", "--script", "--quiet", str(script), "probe"], timeout=20, detector_name="arm_prepare")
+    proc = state.run_subprocess(
+        ["uv", "run", "--script", "--quiet", str(script), "probe"],
+        timeout=_JEV_PROBE_TIMEOUT_SECONDS,
+        detector_name="arm_prepare",
+    )
     if proc is None:
-        return "jev=probe did not run (timeout or uv not on PATH)"
+        result = "jev=probe did not run (timeout or uv not on PATH)"
+        _write_jev_probe_stamp(stamp_path, ok=False, reason=result, cost=None, provider=provider)
+        return result
     if proc.returncode != 0:
         reason = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+        _write_jev_probe_stamp(stamp_path, ok=False, reason=reason, cost=None, provider=provider)
         return f"jev={reason}"
+
+    cost = _parse_probe_cost(proc.stdout)
+    _write_jev_probe_stamp(stamp_path, ok=True, reason=None, cost=cost, provider=provider)
     return "jev=ok"
 
 
@@ -242,7 +316,7 @@ def main() -> int:
     print(f"cron={cron}")
     print(f"prior-cron-id={prior}")
     print(f"sweep={'no' if prior else 'yes'}")
-    print(jev_probe(plugin_root))
+    print(jev_probe(plugin_root, state_dir=sd))
     # No `maintenance=` line any more — there is no maintenance mode to report. The line
     # existed to make a suppressed host visible, and even in that narrow form it was
     # dangerous: agents read a status line about maintenance, collided it with the
