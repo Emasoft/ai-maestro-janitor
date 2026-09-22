@@ -15,15 +15,22 @@ from __future__ import annotations
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_HOOKS_DIR = _REPO_ROOT / "scripts" / "hooks"
+_SHEBANG_DIRS = (_REPO_ROOT / "scripts", _REPO_ROOT / "scripts" / "detectors", _REPO_ROOT / "scripts" / "hooks")
 
+# Explicit non-shebang modules that are imported in-process by other scripts/tests and must
+# therefore stay import-light too (they don't live under a _SHEBANG_DIRS top level).
 _FORBIDDEN_MODULE_FILES = (
     "scripts/lib/external_clear.py",
+    "scripts/lib/cold_cache_compact.py",
     "scripts/summarize_previous_session.py",
     "scripts/external_handoff_clear.py",
     "scripts/dispatch.py",
     "scripts/daemon.py",
 )
+
+# The ONE allowed exception: jev_compact.py is deliberately its own separate PEP-723 process
+# (see module docstring) and is the only thing that imports jevctx/jev_compaction in-process.
+_ALLOWED_EXCEPTION = "scripts/jev_compact.py"
 
 
 def _imports(module_text: str, name: str) -> bool:
@@ -39,10 +46,22 @@ def _imports(module_text: str, name: str) -> bool:
     return False
 
 
+def _has_shebang(path: Path) -> bool:
+    with path.open(encoding="utf-8") as fh:
+        return fh.readline().startswith("#!")
+
+
 def test_no_hook_or_named_lib_script_imports_jevctx_or_httpx() -> None:
-    hook_files = sorted(_HOOKS_DIR.glob("*.py"))
-    assert hook_files, f"expected hook scripts under {_HOOKS_DIR}"
-    candidates = list(hook_files)
+    """Hook/detector/daemon/dispatch scripts run stdlib-only under `uv run --script` (or
+    in-process, for the explicit lib modules) -- an in-process `import jevctx`/`import httpx`
+    would kill them at import time since neither is declared in their own PEP-723 header.
+    `jev_compact.py` is the sole, deliberate exception (its own separate process boundary)."""
+    candidates: list[Path] = []
+    for d in _SHEBANG_DIRS:
+        for p in sorted(d.glob("*.py")):
+            if _has_shebang(p) and p.relative_to(_REPO_ROOT).as_posix() != _ALLOWED_EXCEPTION:
+                candidates.append(p)
+    assert candidates, f"expected shebang scripts under {_SHEBANG_DIRS}"
     for rel in _FORBIDDEN_MODULE_FILES:
         path = _REPO_ROOT / rel
         assert path.is_file(), f"expected {path} to exist"
