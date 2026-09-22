@@ -746,22 +746,51 @@ def _sym_in_history():
 _HANG_ONLY_TIMEOUT_S = 300
 
 
-@pytest.mark.xdist_group("real-git-history-probes")
-def test_ordinary_words_are_not_symbols(tmp_path):
+def test_ordinary_words_are_not_symbols(repo: Path):
     """The reported failure: `queue` (another system's AMP verb) and `modified` (a memory
     frontmatter field) were both flagged as deleted symbols, because `git log -S` matches a
     substring anywhere in any changed line. Governance TRDDs quote other systems' vocabulary
-    constantly, so the check fired hardest on the cards it understands least."""
+    constantly, so the check fired hardest on the cards it understands least.
+
+    Hermetic (janitor#292): this used to probe THIS repo's OWN `scripts/` history, so it broke
+    the moment a legitimate commit anywhere added a line starting with one of these words (e.g.
+    a docstring line left-flush at column 0 reading "context: with the default ..."). A negative
+    test asserting a property of live, ever-growing history is not a test of the property — it's
+    a test that nobody has ever used these six words as a line-starter, which is not the claim.
+    Build a throwaway repo instead: one commit defines two REAL symbols — a `def` and an
+    annotated module-level assignment (`retries: int = 3`) — so this test exercises the new
+    third regex branch's own positive case, not just the sibling `_HERE`/`frobnicate` tests'
+    unrelated branches; a regression that re-tightened the annotated-assignment charset too far
+    would otherwise slip past every test in this file. A second commit plants each ordinary word
+    at column 0 as prose (mimicking the exact false-positive shape: a bare word followed by a
+    colon, mid-sentence, inside a `scripts/` file).
+    """
     mod = _sym_in_history()
-    root = Path(__file__).resolve().parent.parent
-    for word in ("queue", "modified", "context", "result", "data", "value"):
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "real.py").write_text(
+        "def frobnicate():\n    pass\n\n\nretries: int = 3\n", encoding="utf-8"
+    )
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", "feat: add frobnicate"], repo)
+
+    words = ("queue", "modified", "context", "result", "data", "value")
+    prose_lines = "\n".join(f'{w}: this is prose, not a symbol definition.' for w in words)
+    (repo / "scripts" / "prose.py").write_text(
+        f'"""Module docstring.\n\n{prose_lines}\n"""\n', encoding="utf-8"
+    )
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", "docs: add prose using ordinary words"], repo)
+
+    for word in words:
         # `is False`, NOT `assert not` — the distinction is the whole point. `None` means the
         # lookup could not RUN (timeout, git missing), and `assert not None` passes, so the
         # loose form is satisfied by a check that never executed. A negative test that a dead
         # check can satisfy proves nothing about the code it names.
-        assert mod._symbol_in_history(word, root, timeout_s=_HANG_ONLY_TIMEOUT_S) is False, (
+        assert mod._symbol_in_history(word, repo, timeout_s=_HANG_ONLY_TIMEOUT_S) is False, (
             f"{word!r} is prose, not a symbol"
         )
+    assert mod._symbol_in_history("frobnicate", repo, timeout_s=_HANG_ONLY_TIMEOUT_S) is True
+    assert mod._symbol_in_history("retries", repo, timeout_s=_HANG_ONLY_TIMEOUT_S) is True
 
 
 @pytest.mark.xdist_group("real-git-history-probes")

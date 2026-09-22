@@ -301,7 +301,8 @@ def _tokens_absent_at_head(tokens: set[str], root: Path) -> set[str] | None:
 
 
 # A token was a SYMBOL here only if it was once DEFINED in `scripts/`: a `def`/`class` at any
-# indent (so methods count), or an assignment at COLUMN 0 (module level).
+# indent (so methods count), a plain assignment at COLUMN 0 (`name = value`), or an annotated
+# assignment at COLUMN 0 with a value (`name: Type = value`).
 #
 # The asymmetry is deliberate and measured. An INDENTED assignment (`^\s*foo:`) is
 # indistinguishable from a YAML/frontmatter line quoted inside a docstring — which is exactly
@@ -311,13 +312,27 @@ def _tokens_absent_at_head(tokens: set[str], root: Path) -> set[str] | None:
 # citation occasionally, versus a false finding that costs trust in every other finding the
 # detector makes. That trade runs the same direction as the fail-silent rule below.
 #
+# A bare `name:` (colon, no required `=`) was ALSO accepted here until janitor found `context`
+# flagged as a symbol: a module docstring line, left-flush at column 0, read "context: with the
+# default ``on_error=...``, anything that goes wrong scores the affected..." — ordinary English
+# sentences routinely start `word: rest of sentence`, and that shape is indistinguishable from a
+# bare annotation (`name: Type`) by indentation alone, the same collision the comment above
+# already solved for the indented case. The fix: require the COLON form to look like a real
+# annotated assignment (`name: <type-expression> = value`), never a bare annotation — the
+# type-expression charset excludes anything prose would contain (spaces beyond single word
+# separators are fine, but backticks, quotes-as-markdown, and multi-clause punctuation are not).
+# Every real module-level annotated constant in this repo already carries a `= value` (checked:
+# 656 hits for the tightened shape, 0 for the old bare-colon shape that weren't prose/CSS), so
+# nothing legitimate is lost.
+#
 # Python `re`, not git's POSIX ERE (`-G`) — janitor#255's `\b`/`\s` bug class (git's ERE
 # silently matches NOTHING on those escapes, so a per-token `-G` regex went permanently
 # dead) cannot recur here: this now runs as ONE Python-side scan of the history text, so
 # `\s` and `\b` behave exactly as documented.
 _HISTORY_DEFINITION_RE = re.compile(
     r"^[ \t]*(?:def|class|async def)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[^A-Za-z0-9_]"
-    r"|^([A-Za-z_][A-Za-z0-9_]*)[ \t]*[:=]"
+    r"|^([A-Za-z_][A-Za-z0-9_]*)[ \t]*="
+    r"|^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*[A-Za-z_][A-Za-z0-9_.\[\], |]*[ \t]*="
 )
 
 # Memoized per project root: the expensive part (walking the FULL `scripts/` history once) runs
@@ -363,7 +378,7 @@ def _load_ever_defined_symbols(root: Path, *, timeout_s: float) -> set[str] | No
             continue
         m = _HISTORY_DEFINITION_RE.match(line[1:])
         if m:
-            names.add(m.group(1) or m.group(2))
+            names.add(m.group(1) or m.group(2) or m.group(3))
     return names
 
 
