@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-17T05:54:34+0200
+updated: 2026-09-22T21:33:32+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -298,3 +298,7 @@ Mechanism, verified in code + transcript:
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
 2026-09-17 — F0-F6 code-complete (commit 9cc22049), full suite green (16351 passed), ruff+mypy clean. Pending live observation: F5, one real stalled heartbeat fire recovering with a SINGLE nudge on this host post-publish (cannot be manufactured). TRDD-56d24c02's separate kill/force-restart-rung policy question is explicitly out of scope here. 9cc22049 confirmed shipped in tag ai-maestro-janitor--v3.4.14. review-after set; moved todo -> testing (HELD at testing, not complete, until F5 is observed).
+
+## STATE
+
+2026-09-22 -- card 1 of docs_dev/jev-compaction-spec.md is being implemented under this card (trigger + loop guards, recovery guard, iTerm timeout targeting).
