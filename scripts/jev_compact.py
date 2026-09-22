@@ -40,7 +40,13 @@ Sub-commands:
                                             scorer failure) during THIS attempt; the probe
                                             stamp is written ok=false with the reason and a
                                             `kind` (below) so the NEXT attempt can decide
-                                            whether to decline fast via exit 5.
+                                            whether to decline fast via exit 5. `kind=
+                                            "unreachable"` (a transport failure -- no
+                                            response ever came back, may be local to this
+                                            machine/lane) never declines a later attempt
+                                            either, same as `auth`/`budget` -- only a real
+                                            `kind="unavailable"` (a 429/5xx response, Jev
+                                            itself degraded) does.
                                       (2..4 are `probe`/`expand`'s own codes, listed above —
                                       one flat exit-code space across all three sub-commands
                                       so a caller never confuses e.g. `expand`'s 3 with
@@ -53,7 +59,8 @@ where ``armed.flag`` and the daemon's other control-plane files already live), s
 ``{"ok": bool, "reason": str|None, "ts": epoch_seconds, "cost": float|None,
 "model": None, "provider": str, "kind": str}``. ``model`` is always ``None`` — nothing in
 this CLI's probe response carries a model name to put there. ``kind`` is one of
-``"unavailable"``, ``"auth"``, ``"budget"``, ``"ok"`` (see ``write_probe_stamp``) — it is
+``"unavailable"``, ``"unreachable"``, ``"auth"``, ``"budget"``, ``"ok"`` (see
+``write_probe_stamp``) — it is
 what `compact`'s decline gate keys on, not ``ok`` alone. Two TTLs, read by different
 callers: ``PROBE_OK_TTL_S`` (6h) documents how long an ``ok=true`` stamp should be
 considered current by an external reader; ``PROBE_FAIL_TTL_S`` (30min) is the one this file
@@ -95,6 +102,12 @@ PROBE_STAMP_NAME = "jev-probe.json"
 PROBE_OK_TTL_S = 6 * 3600
 PROBE_FAIL_TTL_S = 30 * 60
 
+# Sentinel for `_stamp_kind_for_error`: tells "no `.status` attribute at all" (an
+# unrecognized exception shape) apart from "`.status` is explicitly `None`" (a real
+# transport failure) -- `getattr(exc, "status", None)` alone could not make that
+# distinction, since both cases would return `None`.
+_MISSING = object()
+
 # `compact`'s own tunables — CLAUDE_PLUGIN_OPTION_* env vars, read like every sibling script
 # reads a plugin option (state.plugin_option, real env var wins over the settings.json
 # mirror). Defaults match docs_dev/jev-compaction-spec.md card 3 / jev_compaction.py.
@@ -109,21 +122,30 @@ def _probe_stamp_path() -> Path:
 
 
 def read_probe_stamp() -> dict[str, Any] | None:
-    """The current probe stamp, or `None` if it doesn't exist / isn't valid JSON.
+    """The current probe stamp, or `None` if it doesn't exist / isn't valid JSON / isn't
+    a JSON object.
 
     A missing or corrupt stamp is not an error here — it just means "no prior probe result
     to decide anything from", so every caller of this function already treats `None` as
-    "proceed as if nothing is known."
+    "proceed as if nothing is known" (`compact` proceeds instead of fast-declining). A
+    torn write (a crash mid-write, or a reader racing `write_probe_stamp`'s
+    tmp+`os.replace`) must never crash the CLI -- it is reported on stderr and treated
+    the same as "no stamp".
     """
+    path = _probe_stamp_path()
     try:
-        raw = _probe_stamp_path().read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8")
     except OSError:
         return None
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        print(f"probe stamp unreadable: {exc}", file=sys.stderr)
         return None
-    return parsed if isinstance(parsed, dict) else None
+    if not isinstance(parsed, dict):
+        print(f"probe stamp unreadable: not a JSON object ({path})", file=sys.stderr)
+        return None
+    return parsed
 
 
 def write_probe_stamp(
@@ -132,11 +154,15 @@ def write_probe_stamp(
 ) -> None:
     """Atomically write the probe stamp — see module docstring for the shape/TTLs.
 
-    ``kind`` classifies WHY (one of ``"unavailable"``, ``"auth"``, ``"budget"``, ``"ok"``) —
-    `compact`'s fast-decline gate keys on it, not on ``ok`` alone: an ``auth``/``budget``
-    failure is a config/planner bug specific to THIS caller's key or request shape, not
-    evidence the Jev endpoint itself is down, so it must not black out compaction for every
-    other shell on the machine the way an ``unavailable`` stamp correctly does.
+    ``kind`` classifies WHY (one of ``"unavailable"``, ``"unreachable"``, ``"auth"``,
+    ``"budget"``, ``"ok"``) — `compact`'s fast-decline gate keys on it, not on ``ok``
+    alone: an ``auth``/``budget`` failure is a config/planner bug specific to THIS
+    caller's key or request shape, not evidence the Jev endpoint itself is down, so it
+    must not black out compaction for every other shell on the machine the way an
+    ``unavailable`` stamp correctly does. ``unreachable`` is the same non-decline
+    treatment for a different reason: a transport failure means no response ever came
+    back at all, which can be local to THIS machine/lane (e.g. the daemon's Python
+    missing a CA bundle, TRDD-X6I04SAO) rather than Jev being down machine-wide.
     """
     stamp = {"ok": ok, "reason": reason, "ts": time.time(), "cost": cost,
               "model": model, "provider": provider, "kind": kind}
@@ -146,17 +172,26 @@ def write_probe_stamp(
 def _stamp_kind_for_error(exc: JevError) -> str:
     """Classify a `JevError` into the probe-stamp `kind` — see `write_probe_stamp`.
 
-    `JevUnavailableError` and any OTHER `JevError` subclass (e.g. a malformed-response
-    condition this CLI raises itself, not from jevctx) both map to "unavailable" -- an
-    unrecognized failure shape is safer treated as "assume outage" than silently falling
-    through the decline gate on an error `compact` doesn't know how to name.
+    `JevUnavailableError` splits into two `kind`s by its (optional) `.status` attribute
+    -- jevctx sets it on every `JevUnavailableError` it raises (`status=<code>` for a
+    429/5xx response, `status=None` for a transport failure with no response at all).
+    `getattr(..., "status", _MISSING)` distinguishes a real `status=None` ("unreachable")
+    from the attribute being absent entirely ("unavailable" -- the conservative default
+    for a shape this CLI doesn't recognize, e.g. a bare `JevUnavailableError` raised by a
+    test double or a future jevctx version that hasn't picked up the attribute; treating
+    an unrecognized shape as "assume outage" is safer than silently falling through the
+    decline gate). Any OTHER `JevError` subclass this CLI itself might raise maps to
+    "unavailable" for the same reason.
     """
     if isinstance(exc, JevAuthError):
         return "auth"
     if isinstance(exc, JevBudgetError):
         return "budget"
     if isinstance(exc, JevUnavailableError):
-        return "unavailable"
+        status = getattr(exc, "status", _MISSING)
+        if status is _MISSING:
+            return "unavailable"
+        return "unavailable" if status is not None else "unreachable"
     return "unavailable"
 
 

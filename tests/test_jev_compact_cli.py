@@ -374,6 +374,150 @@ def test_compact_budget_error_exits_7_with_budget_stamp(
     assert stamp["kind"] == "budget"
 
 
+def test_probe_ask_raises_unreachable_when_status_is_none(
+    _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `JevUnavailableError` whose `.status` is explicitly `None` (jevctx's shape for a
+    transport failure -- no response ever came back, e.g. TRDD-X6I04SAO's CA-bundle gap)
+    must classify as `kind="unreachable"`, distinct from a real `kind="unavailable"`
+    outage -- see `_stamp_kind_for_error`'s docstring."""
+    from jevctx.types import JevUnavailableError
+
+    class _FailingClient(_FakeClient):
+        def ask(self, state: Any, questions: Any) -> dict[str, _FakeAnswer]:
+            exc = JevUnavailableError("connection refused")
+            exc.status = None  # type: ignore[attr-defined]
+            exc.cause = "ConnectError: connection refused"  # type: ignore[attr-defined]
+            raise exc
+
+    client = _FailingClient()
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    code, _out = _run(["probe"])
+    assert code == 2
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["kind"] == "unreachable"
+
+
+def test_compact_does_not_decline_on_unreachable_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `kind="unreachable"` stamp is a LOCAL transport problem (this machine/lane), not
+    evidence the Jev endpoint itself is down -- the fast-decline gate (exit 5) must key on
+    `kind == "unavailable"` alone, same as the existing auth/budget non-decline test."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated local networking failure", "ts": time.time(),
+              "cost": None, "model": None, "provider": "openrouter", "kind": "unreachable"}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert out.exists()
+
+
+def test_read_probe_stamp_torn_json_treated_as_no_stamp(
+    _isolated_control_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A torn/garbage stamp (e.g. a crash mid-write, or a reader racing the atomic
+    tmp+os.replace) must not crash `compact` -- `read_probe_stamp` returns `None` (proceed
+    as if nothing is known) and reports the reason on stderr, never raises."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    (_isolated_control_dir / "jev-probe.json").write_text("{not valid json,,,")
+
+    assert jev_compact.read_probe_stamp() is None
+    assert "probe stamp unreadable" in capsys.readouterr().err
+
+
+def test_read_probe_stamp_wrong_shape_treated_as_no_stamp(
+    _isolated_control_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Valid JSON that isn't an object (e.g. a JSON array or a bare number) is also "no
+    stamp", not a crash -- the shape contract is `dict`, and `compact` must proceed."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    (_isolated_control_dir / "jev-probe.json").write_text("[1, 2, 3]")
+
+    assert jev_compact.read_probe_stamp() is None
+    assert "probe stamp unreadable" in capsys.readouterr().err
+
+
+def test_write_probe_stamp_uses_atomic_replace(
+    _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`write_probe_stamp` must go through `state.atomic_write` (tmp file + `os.replace`),
+    not a direct write -- a concurrent reader must never see a half-written stamp. Proven
+    two ways: (1) `os.replace` is spied on directly, showing the rename actually happens
+    (not just a `.write_text` that a reader could catch mid-write); (2) a simulated
+    `os.replace` failure (the crash-mid-write case) leaves the ORIGINAL target file
+    untouched -- a reader never sees a torn stamp, only the old content or none at all."""
+    replace_calls: list[tuple[Path, Path]] = []
+    real_replace = jev_compact.state.os.replace
+
+    def _spy_replace(src: Any, dst: Any) -> None:
+        replace_calls.append((Path(src), Path(dst)))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(jev_compact.state.os, "replace", _spy_replace)
+    jev_compact.write_probe_stamp(
+        ok=True, reason=None, cost=0.01, model=None, provider="openrouter", kind="ok"
+    )
+
+    target = _isolated_control_dir / "jev-probe.json"
+    assert len(replace_calls) == 1
+    src, dst = replace_calls[0]
+    assert dst == target
+    assert src.name.startswith("jev-probe.json.tmp.")
+    assert target.exists()
+    leftover_tmp = list(_isolated_control_dir.glob("*.tmp.*"))
+    assert leftover_tmp == [], f"atomic write left a partial file: {leftover_tmp}"
+
+    # Simulated crash: os.replace raises AFTER the tmp file is fully written. The
+    # original target must be left exactly as it was -- never a torn/partial stamp.
+    before = target.read_text(encoding="utf-8")
+
+    def _failing_replace(src: Any, dst: Any) -> None:
+        raise OSError("simulated crash during os.replace")
+
+    monkeypatch.setattr(jev_compact.state.os, "replace", _failing_replace)
+    with pytest.raises(OSError, match="simulated crash"):
+        jev_compact.write_probe_stamp(
+            ok=False, reason="should not land", cost=None, model=None,
+            provider="openrouter", kind="unavailable",
+        )
+    assert target.read_text(encoding="utf-8") == before
+
+
+def test_compact_budget_error_from_planner_site_exits_7_with_budget_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`JevBudgetError` from `BudgetPlanner.plan` (inside `jc.score_items`, BEFORE any
+    request is sent) must be caught by the same `except JevBudgetError` in `cmd_compact`
+    as the client's own `check_request_budget` inside `ask()` -- proven here by making the
+    planner itself raise, not the client."""
+
+    from jevctx.types import JevBudgetError
+
+    def _raising_plan(self: Any, items: Any, question_tokens: int, envelope_tokens: int = 0) -> Any:
+        raise JevBudgetError("item too large for even one batch")
+
+    monkeypatch.setattr(jc.BudgetPlanner, "plan", _raising_plan)
+    monkeypatch.setattr(jev_compact, "make_client", lambda: FakeJevClient(_keep_only("bug")))
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 7
+    assert "budget: item too large for even one batch" in output
+    assert not out.exists()
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["kind"] == "budget"
+
+
 def test_expand_round_trips_a_composed_pointer_id() -> None:
     """`compose()`'s pointer ids are `<entry uuid>:<block index>` positions in the RAW
     content list (jev_compaction.Item's own contract) -- prove that claim against `expand`'s

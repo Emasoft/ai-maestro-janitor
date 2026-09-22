@@ -275,6 +275,35 @@ def _error_detail(response: httpx.Response) -> str:
     return str(payload)
 
 
+class _JevUnavailableDetail(JevUnavailableError):
+    """``JevUnavailableError`` with WHY attached (TRDD-RAEGS1D5 card 3 follow-up).
+
+    ``status`` is the HTTP status code when a response actually came back (429/5xx --
+    Jev itself is degraded, true machine-wide outage, safe to black out every caller
+    on this stamp). ``status is None`` means a transport-level failure (connect/DNS/TLS/
+    read timeout -- no response ever arrived), which can be local to THIS machine or
+    lane (e.g. the daemon Python missing a CA bundle, TRDD-X6I04SAO) rather than Jev
+    being down -- the caller must NOT blackout every other shell over it. ``cause`` is
+    the underlying exception class + message (bounded), for whoever reads the stamp."""
+
+    def __init__(self, message: str, *, status: int | None, cause: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.cause = cause
+
+
+def _detail_from_last_error(last_error: Exception | None) -> tuple[int | None, str]:
+    """(status, cause) for the "retries exhausted" raise -- carries forward a
+    `_JevUnavailableDetail` own status/cause from an inner 429/5xx iteration unchanged,
+    or derives them fresh from a transport failure (status=None: no response ever
+    arrived -- see `_JevUnavailableDetail`'s docstring for why that split matters)."""
+    if isinstance(last_error, _JevUnavailableDetail):
+        return last_error.status, last_error.cause
+    if last_error is not None:
+        return None, f"{type(last_error).__name__}: {str(last_error)[:200]}"
+    return None, "retries exhausted with no recorded error"
+
+
 # --------------------------------------------------------------------------- #
 # The client
 # --------------------------------------------------------------------------- #
@@ -375,21 +404,24 @@ class HttpJevClient:
                 if response.status_code == 422:
                     raise JevValidationError(_error_detail(response))
                 if response.status_code == 429 or response.status_code >= 500:
-                    last_error = JevUnavailableError(
-                        f"Jev returned {response.status_code}: {_error_detail(response)}"
+                    last_error = _JevUnavailableDetail(
+                        f"Jev returned {response.status_code}: {_error_detail(response)}",
+                        status=response.status_code, cause=f"HTTP {response.status_code}",
                     )
                     if is_last_attempt:
                         break
                     retry_after = self._retry_after_seconds(response)
                     self._sleep(self._retry_policy.delay(attempt, retry_after=retry_after))
                     continue
-                # Any other 4xx: the request is bad in some way we don't special-case.
+                # Any other 4xx: the request is bad in some way we do not special-case.
                 raise JevValidationError(
                     f"Jev returned {response.status_code}: {_error_detail(response)}"
                 )
 
-        raise JevUnavailableError(
-            f"Jev request failed after {self._retry_policy.max_retries + 1} attempt(s)"
+        status, cause = _detail_from_last_error(last_error)
+        raise _JevUnavailableDetail(
+            f"Jev request failed after {self._retry_policy.max_retries + 1} attempt(s)",
+            status=status, cause=cause,
         ) from last_error
 
     def _retry_after_seconds(self, response: httpx.Response) -> float | None:

@@ -87,3 +87,32 @@ and the `types.py` re-exports still referenced by the kept modules); the two
 mypy/pyright fix notes above for `check.py`/`shadow.py` are now moot (the
 files are gone) but left in place as history rather than deleted, per this
 project's commit-discipline convention of superseding rather than erasing.
+
+## `jev.py`/`openrouter.py`: unavailable-vs-unreachable attribute (2026-09-22, commit 1e36e9bc follow-up)
+
+`jevctx.types.JevUnavailableError` (upstream, unmodified) collapses two
+different failure shapes into one exception: a 429/5xx *response* (Jev itself
+is degraded — a true, machine-wide outage) and a *transport* failure — no
+response at all (`httpx.TransportError`: connect/DNS/TLS/read timeout — can be
+local to this one machine or lane, e.g. the daemon's Python missing a CA
+bundle, TRDD-X6I04SAO). `jev_compact.py`'s probe-stamp decline gate needs to
+tell these apart (declining every other shell's compaction over a purely
+local networking problem is wrong), but `types.py` says of itself "if
+something here is wrong or missing, report it rather than editing it" — so
+rather than editing the shared `JevUnavailableError` base in `types.py`, both
+`jev.py` and (separately) `openrouter.py` now raise a **local, additive**
+subclass, `_JevUnavailableDetail(JevUnavailableError)`, carrying `status: int
+| None` (the HTTP status when a response existed, `None` for a transport
+error) and `cause: str` (the exception class + message). `except
+JevUnavailableError` callers are unaffected (subclass instances still match);
+`jev_compact.py` reads the two new fields defensively via `getattr(...,
+"status", _MISSING)`, so a bare `JevUnavailableError` raised by test code or a
+future jevctx version without the attribute still falls back to the old,
+conservative "assume outage" classification. `_detail_from_last_error()`
+carries the inner status/cause forward to the final "retries exhausted"
+raise instead of losing it, in both `jev.py::HttpJevClient.ask` and
+`openrouter.py::OpenRouterJevClient.ask` (which has its own, separate retry
+loop — not shared with `jev.py`, so it needed the same treatment twice). Not
+reported upstream — this is a local-only addition, not a divergence from
+upstream's `JevUnavailableError` semantics, and does not change any upstream
+byte.

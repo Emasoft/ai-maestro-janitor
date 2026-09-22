@@ -20,7 +20,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 from jevctx.openrouter import API_KEY_ENV, DEFAULT_MODEL, OpenRouterJevClient  # noqa: E402
-from jevctx.types import JevAuthError, Noul  # noqa: E402
+from jevctx.types import JevAuthError, JevUnavailableError, Noul  # noqa: E402
 
 # Byte-identical to the §M1 live-probe response.
 M1_RESPONSE_BODY = {
@@ -94,3 +94,43 @@ def test_missing_key_raises_jev_auth_error_naming_the_env_var(monkeypatch: pytes
     monkeypatch.delenv(API_KEY_ENV, raising=False)
     with pytest.raises(JevAuthError, match=API_KEY_ENV):
         OpenRouterJevClient(api_key=None, transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+
+
+def test_retries_exhausted_on_5xx_carries_http_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 429/5xx response IS a response -- `.status` must be the HTTP code, which
+    `jev_compact.py::_stamp_kind_for_error` reads to classify the probe stamp
+    `kind="unavailable"` (a real, machine-wide Jev outage -- see VENDORED.md's
+    `_JevUnavailableDetail` note, commit 1e36e9bc follow-up)."""
+    monkeypatch.setenv(API_KEY_ENV, "or-key")
+    client = OpenRouterJevClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(503)),
+        max_retries=1,
+        sleep=lambda s: None,
+    )
+    with pytest.raises(JevUnavailableError) as excinfo:
+        client.ask(STATE, QUESTIONS)
+    client.close()
+    assert getattr(excinfo.value, "status") == 503
+    assert "503" in getattr(excinfo.value, "cause")
+
+
+def test_retries_exhausted_on_transport_error_carries_no_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No response ever came back -- `.status` must be `None` so `jev_compact.py`
+    classifies this `kind="unreachable"` instead of `"unavailable"`: a transport error
+    (connect/DNS/TLS/timeout) can be local to this one machine or lane (e.g. the
+    daemon's Python missing a CA bundle, TRDD-X6I04SAO), not evidence Jev itself is
+    down, so it must not black out every other shell's compaction."""
+    monkeypatch.setenv(API_KEY_ENV, "or-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = OpenRouterJevClient(
+        transport=httpx.MockTransport(handler), max_retries=1, sleep=lambda s: None
+    )
+    with pytest.raises(JevUnavailableError) as excinfo:
+        client.ask(STATE, QUESTIONS)
+    client.close()
+    assert getattr(excinfo.value, "status") is None
+    assert "ConnectError" in getattr(excinfo.value, "cause")
+    assert isinstance(excinfo.value.__cause__, httpx.ConnectError)
