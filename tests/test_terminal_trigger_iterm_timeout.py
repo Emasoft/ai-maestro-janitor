@@ -105,3 +105,66 @@ def test_the_direct_script_never_enumerates_windows() -> None:
     assert "repeat with w in windows" not in script
     assert "repeat" not in script
     assert _SID in script
+
+def test_retry_result_is_trusted_when_shape_valid_even_if_empty(monkeypatch) -> None:
+    """A genuinely empty pane (a fresh session with nothing printed yet) is a real, distinct
+    signal `wait_for_empty_prompt` depends on (contrast `None` = unreadable) — the retry path
+    must NOT collapse a returncode-0 empty string into "unreadable". Live check (2026-09-22)
+    disproved the hypothesis that `_iterm_direct_session_script` silently returns `""`/`{}`
+    for a MISMATCHED id (it raises a real AppleScript error instead, nonzero exit), so only
+    exit-code/type shape is validated here, not content."""
+    logged: list[str] = []
+
+    def fake_run(script: str, *, timeout: float) -> subprocess.CompletedProcess[str]:
+        if "repeat with w in windows" in script:
+            raise subprocess.TimeoutExpired(cmd="osascript", timeout=timeout)
+        return _proc("")
+
+    monkeypatch.setattr(tt, "_run_osascript", fake_run)
+    monkeypatch.setattr(tt.state, "log_line", lambda _name, msg: logged.append(msg))
+    monkeypatch.setattr(tt.os, "getloadavg", lambda: (1.0, 1.0, 1.0))
+
+    assert tt._read_iterm_pane_text(_SID) == ""
+    assert logged == [
+        m for m in logged if "timed out" in m
+    ], "no spurious 'unreadable' log for a shape-valid empty read"
+
+
+def test_retry_result_with_nonzero_exit_is_treated_as_unreadable(monkeypatch) -> None:
+    """A retry that fails (nonzero exit, e.g. a mismatched sid raising an AppleScript error)
+    is a real FAILURE and must return None, never a bogus string."""
+    logged: list[str] = []
+
+    def fake_run(script: str, *, timeout: float) -> subprocess.CompletedProcess[str]:
+        if "repeat with w in windows" in script:
+            raise subprocess.TimeoutExpired(cmd="osascript", timeout=timeout)
+        return _proc("", returncode=1)
+
+    monkeypatch.setattr(tt, "_run_osascript", fake_run)
+    monkeypatch.setattr(tt.state, "log_line", lambda _name, msg: logged.append(msg))
+    monkeypatch.setattr(tt.os, "getloadavg", lambda: (1.0, 1.0, 1.0))
+
+    assert tt._read_iterm_pane_text(_SID) is None
+    assert any("no usable text" in m for m in logged)
+
+def test_read_pane_text_end_to_end_via_a_stub_osascript_on_path(monkeypatch, tmp_path) -> None:
+    """Exercises the REAL `subprocess.run` kwargs `_run_osascript` passes (argv shape, timeout)
+    end to end through the public `read_pane_text` entry point — everything else in this file
+    stubs `_run_osascript` itself, which would miss a broken argv or a missing timeout kwarg."""
+    stub = tmp_path / "osascript"
+    stub.write_text('#!/bin/sh\necho "got: $1 $2"\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{tt.os.pathsep}{tt.os.environ['PATH']}")
+
+    terminal = {"kind": "iterm", "session_id": _SID}
+    result = tt.read_pane_text(terminal)
+    assert result is not None
+    assert result.startswith("got: -e ")  # proves argv was ["osascript", "-e", <script>]
+    assert _SID in result  # the enumerating script embeds sid — proves the script itself reached the stub
+
+    # Timeout path: a stub that outlives the (patched-down) budget must surface as None, not hang.
+    monkeypatch.setattr(tt, "_ITERM_READ_TIMEOUT_S", 0.2)
+    stub.write_text("#!/bin/sh\nsleep 2\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(tt.state, "log_line", lambda *a, **k: None)
+    assert tt.read_pane_text(terminal) is None

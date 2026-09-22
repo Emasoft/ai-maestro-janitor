@@ -539,21 +539,52 @@ def _read_iterm_pane_text(sid: str) -> str | None:
     try:
         proc = _run_osascript(script, timeout=_ITERM_READ_TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        state.log_line(
-            "terminal_trigger",
-            f"iterm read timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
-            f"load1={os.getloadavg()[0]:.2f} sid={sid} — retrying direct session target",
-        )
+        # `state.log_line` does not itself catch OSError (a disk-full box would raise straight
+        # out of `f.write`) — best-effort here means a fallback to stderr, not a bare `pass`:
+        # the timeout is still correctly surfaced to the caller via the `return None` below
+        # regardless of whether this line lands, but silently discarding a disk-full signal
+        # with nowhere else it is ever recorded is its own failure worth seeing (review finding).
+        try:
+            state.log_line(
+                "terminal_trigger",
+                f"iterm read timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
+                f"load1={os.getloadavg()[0]:.2f} sid={sid} — retrying direct session target",
+            )
+        except OSError as exc:
+            print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
         direct_script = _iterm_direct_session_script(sid, ["            return contents"])
         try:
             proc = _run_osascript(direct_script, timeout=_ITERM_READ_TIMEOUT_S)
         except subprocess.TimeoutExpired:
-            state.log_line(
-                "terminal_trigger",
-                f"iterm read retry also timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
-                f"load1={os.getloadavg()[0]:.2f} sid={sid} — giving up",
-            )
+            try:
+                state.log_line(
+                    "terminal_trigger",
+                    f"iterm read retry also timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
+                    f"load1={os.getloadavg()[0]:.2f} sid={sid} — giving up",
+                )
+            except OSError as exc:
+                print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
             return None
+        # Only shape/exit-code validated here, NOT emptiness: a live check against a real
+        # session proved `_iterm_direct_session_script` returns byte-identical text to the
+        # enumerating script for a valid sid, and raises a real AppleScript error (nonzero
+        # exit) rather than an empty/`{}` result for an invalid one (review, 2026-09-22) — so
+        # the predicted silent-empty failure does not occur for this script shape. An EARLIER
+        # version of this function also rejected `proc.stdout in ("", "{}")` as unreadable, but
+        # that misclassifies a genuinely empty pane (a fresh session with nothing printed yet)
+        # as unreadable instead of the real, distinct "empty" signal `wait_for_empty_prompt`
+        # depends on — removed after adversarial review caught the regression.
+        if not proc or proc.returncode != 0 or not isinstance(proc.stdout, str):
+            try:
+                state.log_line(
+                    "terminal_trigger",
+                    f"iterm direct-session retry returned no usable text sid={sid} "
+                    f"rc={proc.returncode if proc else None} — treating as unreadable",
+                )
+            except OSError as exc:
+                print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+            return None
+        return proc.stdout
     return proc.stdout if proc and proc.returncode == 0 else None
 
 
