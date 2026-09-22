@@ -1633,7 +1633,7 @@ def _phase_compact_resume() -> bool:
 
 
 def _fresh_summary_note(sd: Path) -> str:
-    """A one-line pointer at the freshest post-clear llm-ext summary, when one exists on disk.
+    """A one-line pointer at the freshest post-clear compacted context, when one exists on disk.
 
     TRDD-QZVAEWQH: SessionStart injects the NEWEST handoff group at hook time, but the
     session-side summarizer (`summarize_previous_session.py`, spawned detached from that same
@@ -1657,7 +1657,7 @@ def _fresh_summary_note(sd: Path) -> str:
         return ""
     latest = max(candidates, key=state.file_mtime)
     return (
-        f"Read {latest.resolve()} FIRST — the llm-ext summary of the cleared session (it "
+        f"Read {latest.resolve()} FIRST — the compacted context of the cleared session (it "
         "landed after SessionStart injected the older handoff)."
     )
 
@@ -4232,19 +4232,22 @@ def main() -> int:
     _phase_log_retention()
 
     # Phase 0.5: THE SUMMARY HOLD (TRDD-2F3I2P18; reordered AHEAD of the clear-resume phase by
-    # TRDD-QZVAEWQH). A session that was just cleared is waiting for llm-ext to finish
-    # summarizing the transcript it had BEFORE the clear. Until that lands it knows nothing, so
-    # resuming it now would hand a blank session its old task list and every chore at once — the
-    # owner's ruling was explicit that the resume comes AFTER the injection ("at that point only
-    # we can resume all the other tasks. chron, etc.").
+    # TRDD-QZVAEWQH). A session that was just cleared is waiting for the cleared session's own
+    # SessionStart summarizer (`summarize_previous_session.py`, Jev compaction — seconds, not
+    # llm-ext's minutes) to finish compacting the transcript it had BEFORE the clear. Until that
+    # lands it knows nothing, so resuming it now would hand a blank session its old task list and
+    # every chore at once — the owner's ruling was explicit that the resume comes AFTER the
+    # injection ("at that point only we can resume all the other tasks. chron, etc.").
     #
     # MUST run before `_phase_clear_resume` (was after it — the QZVAEWQH bug): the resume phase
-    # fires on `clear-observed.ts` alone, which lands ~1 minute after the clear, while the
-    # session-side llm-ext summary can take ~10 minutes. With the old order the resume cue fired
-    # first, telling the fresh turn to "read the injected SessionStart handoff summary" — but
-    # SessionStart had only the OLD handoff group on disk at that point, so the directive pointed
-    # at stale text and the fresh summary was never read at all (measured: AgentlensPro
-    # 2026-09-02, cue at 04:25:03, summary landed ~04:34). Checking the hold FIRST defers the
+    # fires on `clear-observed.ts` alone, which lands ~1 minute after the clear. In the llm-ext
+    # era the session-side summary could take ~10 minutes; with the old order the resume cue
+    # fired first, telling the fresh turn to "read the injected SessionStart handoff summary" —
+    # but SessionStart had only the OLD handoff group on disk at that point, so the directive
+    # pointed at stale text and the fresh summary was never read at all (measured: AgentlensPro
+    # 2026-09-02, cue at 04:25:03, summary landed ~04:34). Jev compaction now lands in seconds,
+    # but the hold-before-resume ordering this fixed still matters — a fast summarizer racing a
+    # resume cue is the same bug, just with less room to hit it. Checking the hold FIRST defers the
     # resume itself until the summary lands (or the TTL expires onto the mechanical fallback),
     # so `_phase_clear_resume`'s composed note can then name the fresh file directly.
     #

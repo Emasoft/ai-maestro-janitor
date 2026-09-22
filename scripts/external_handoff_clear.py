@@ -14,9 +14,10 @@ today the model does all three. Here:
 
   1. DECIDE  — `external_clear.should_clear_externally`, from files the session already writes
      (transcript mtime, `armed-cadence.cron`, the presence breadcrumb).
-  2. DELEGATE — the `llm-ext session-summary` is composed by the CLEARED session's own
-     SessionStart summarizer, out of process and on llm-ext's own free models. Zero tokens from
-     THIS session, which is what "zero turn" means — not that no model is involved.
+  2. DELEGATE — the compacted-context handoff is composed by the CLEARED session's own
+     SessionStart summarizer (`summarize_previous_session.py`, Jev compaction against its own
+     provider — not llm-ext), out of process. Zero tokens from THIS session, which is what
+     "zero turn" means — not that no model is involved.
      TRDD-QZVAEWQH — THIS SCRIPT NEVER COMPOSES, IN EITHER MODE. It used to: the `--on-resume`
      caller (a SessionStart hook, which has the summarizer's API key) composed inline while the
      keyless daemon lane delegated. That split kept a race alive — an on-resume fire types
@@ -63,9 +64,9 @@ _LOG = "external-clear"
 
 
 # The hold's lifetime. 15 minutes (USER, 2026-09-01). It is a CEILING, not a schedule: the hold
-# normally ends when the summary lands, seconds-to-minutes later. The TTL exists only so that an
-# llm-ext that never returns — a dead network, a wedged free-tier model — degrades the session to
-# the mechanical `precompact-handoff.md` instead of holding it forever. An unbounded hold would
+# normally ends when the compacted context lands, seconds later. The TTL exists only so that a
+# `jev_compact.py compact` that never returns — a dead network, a wedged provider — degrades the
+# session to the mechanical `precompact-handoff.md` instead of holding it forever. An unbounded hold would
 # convert one expensive session into a permanently stuck one, which is a worse failure than the
 # cost this whole card exists to avoid.
 _HOLD_TTL_S = 15 * 60
@@ -668,7 +669,7 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     # The hold is left ARMED, not released: `summarize_previous_session.py`, spawned detached from
     # the CLEARED session's own SessionStart (which always has the key — it inherits the new
     # session's environment), re-captures the same transcript under its own hold and writes the
-    # keyed handoff once llm-ext returns. That is the ONE summarizer for this transcript now —
+    # keyed handoff once jev compaction returns. That is the ONE summarizer for this transcript now —
     # there is no second writer left to race it.
     print(
         f"SUMMARY_DELEGATED key={pending['key'] or handoff_files.UNKEYED_KEY} — the "

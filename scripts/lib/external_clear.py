@@ -1286,9 +1286,12 @@ def read_ttl_minutes(state_dir: Path) -> int:  # noqa: ARG001 -- kept for caller
 class HandoffInputs:
     """Everything the template composer needs, already gathered from disk.
 
-    A dataclass rather than a pile of keyword args because the llm-ext composer consumes the
-    same inputs — it is handed these PATHS (never their contents; `use-llm-externalizer.md`),
-    and this template is what runs when llm-ext is absent or fails.
+    A dataclass rather than a pile of keyword args because the automatic lane's compacted-context
+    composer consumes the same inputs (`summarize_previous_session.py` builds one of these and
+    passes it straight through to `compose_handoff` below — it used to be filled from an llm-ext
+    summary, now from Jev compaction) — it is handed these PATHS (never their contents;
+    `use-llm-externalizer.md`), and this template is what runs when that composition is absent
+    or fails.
     """
 
     cards: Sequence[tuple[str, str, str]] = field(default_factory=list)  # (id, column, title)

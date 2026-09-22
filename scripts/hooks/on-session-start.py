@@ -787,8 +787,9 @@ def main() -> int:
     # `.jsonl` on disk and a blank session starting beside it. This is the only place that fact is
     # observable, so it is where the summary is kicked off.
     #
-    # DETACHED, always. llm-ext takes minutes; blocking here would stall the start of every
-    # session behind a network call, and a SessionStart hook that hangs is worse than one that
+    # DETACHED, always. Jev compaction is a network call against its own provider — seconds, not
+    # llm-ext's minutes, but still a call this hook cannot afford to wait on; blocking here would
+    # stall the start of every session behind it, and a SessionStart hook that hangs is worse than one that
     # does nothing. The child takes the hold itself (writing `summary-pending.json` before it
     # begins), so the heartbeat honours it even though this parent has already returned.
     try:

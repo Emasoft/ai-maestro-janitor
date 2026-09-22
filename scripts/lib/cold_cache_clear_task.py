@@ -16,14 +16,15 @@ therefore reading a bill that has already been paid. Only an out-of-turn actor (
 or the server's lane) can shrink a cold-cache session BEFORE one begins.
 
 It delegates rather than reimplements — one ``external_handoff_clear.py --project-root <p>``
-per candidate. That script owns the gate, the handoff composition (retry loop, fleet lane)
-and the injection chain; duplicating any of that here would be a second implementation of an
-unrecoverable ``/clear``.
+per candidate. That script owns the gate and the injection chain, and delegates the handoff
+composition to the cleared session's own SessionStart summarizer (Jev compaction); duplicating
+any of that here would be a second implementation of an unrecoverable ``/clear``.
 
-ONE CANDIDATE PER CALL, deliberately. Even with the fleet lane spacing the llm-ext calls,
-firing N clears from one beat means N concurrent children each holding a lane ticket, and the
-last one's ticket is minutes out — so they would pile up faster than they drain. Draining one
-per beat lets a 20-session fleet settle over ~20 beats with at most one child alive at a time.
+ONE CANDIDATE PER CALL, deliberately. Firing N clears from one beat means N concurrent
+detached compose children (each spawning its own ``jev_compact.py compact`` subprocess against
+the same provider) waking at once instead of staggered — so they would pile up faster than they
+drain. Draining one per beat lets a 20-session fleet settle over ~20 beats with at most one
+child alive at a time.
 
 SAFETY: default-OFF via the same opt-in as the SessionStart half (``external_clear.enabled()``),
 never a session the caller cannot identify a pane for, never one whose transcript is ADVANCING
