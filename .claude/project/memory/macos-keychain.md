@@ -48,7 +48,7 @@ the ACL re-set prompts. Unattended, that prompt hangs → the 5s timeout trips t
 rotation dark. [^6]
 
 
-^ATOM-UE0X-XYJF [desc: "The proven fix: set the ACL only at CREATE, write data-only (no -A/-T) on an existing item; probe existence first with a silent find-generic-password. The earlier fa46a49 fix (pinning -A) hit the iden", keywords: proven_fix_set_acl_only_at_create data_only_update_no_acl_flag probe_existence_first_find_generic_password set_acl_equals_not_exists throwaway_keychain_timing_proof fa46a49_wrong_fix dash_A_on_existing_item_same_prompt dash_T_on_update_not_harmless superseded_wrong_fix only_no_acl_flag_on_update_is_silent, ocd: 2026-09-22, lmd: 2026-09-22]
+^ATOM-UE0X-XYJF [desc: "Proven fix: set the ACL only at CREATE; write data-only (no -A/-T) on an existing item, probing existence first. Superseded fix (fa46a49, pinning -A) hit the identical SetAccess prompt.", keywords: proven_fix_set_acl_only_at_create data_only_update_no_acl_flag probe_existence_first_find_generic_password set_acl_equals_not_exists throwaway_keychain_timing_proof fa46a49_wrong_fix dash_A_on_existing_item_same_prompt dash_T_on_update_not_harmless superseded_wrong_fix only_no_acl_flag_on_update_is_silent, ocd: 2026-09-22, lmd: 2026-09-22]
 
 **The proven fix:** set the ACL **only at CREATE**; on an EXISTING item write **data-only — NO
 `-A`/`-T`**. The write path probes existence first with a silent attribute-only
@@ -84,7 +84,7 @@ anywhere else. The choke-point enforces, in order:
 2. **Hard timeout** on the subprocess (`_CLI_TIMEOUT_S`). A `security` call blocked on a
    prompt must time out, never hang.
 
-^ATOM-HVTS-0SPZ [desc: "safe_storage.py protocol items 3-7: headless fail-fast (never -w read on a routine path), set-latch-and-stop on denial, temp-keychain test scope, prefer -T-accessible mirrors, never poll in a tight lo", keywords: headless_fail_fast_never_prompt janitor_rotator_headless_env_var livebak_mirror_fallback acl_denied_set_latch_and_log_once do_not_retry_on_denial temp_keychain_test_isolation janitor_rotator_keychain_env_var prefer_T_accessible_mirrors never_poll_keychain_in_tight_loop read_once_cache_backoff, ocd: 2026-09-22, lmd: 2026-09-22]
+^ATOM-HVTS-0SPZ [desc: "safe_storage.py protocol items 3-7: headless fail-fast, set-latch-and-stop on denial, temp-keychain test scope, prefer -T-accessible mirrors, never poll the keychain in a tight loop.", keywords: headless_fail_fast_never_prompt janitor_rotator_headless_env_var livebak_mirror_fallback acl_denied_set_latch_and_log_once do_not_retry_on_denial temp_keychain_test_isolation janitor_rotator_keychain_env_var prefer_T_accessible_mirrors never_poll_keychain_in_tight_loop read_once_cache_backoff, ocd: 2026-09-22, lmd: 2026-09-22]
 
 3. **Headless / fail-fast — NEVER prompt on a routine path.** A liveness/presence check must
    not `-w`-read an ACL-restricted item. Use the headless primitive
@@ -104,7 +104,7 @@ anywhere else. The choke-point enforces, in order:
 
 ## Gotcha 4 — the DEAD SECURITY SESSION (severity: fleet-down; 2026-07-12 incident)
 
-^45YMC3RE [desc: "Symptom: EVERY Claude agent reports Not logged in fleet-wide, /login changes nothing. Root cause: the per-security-session search list dies when securityd recycles a long-lived terminal's session; dotenclave unlock replaces the list leaving a dangling entry.", keywords: not_logged_in_fleet_wide dead_security_session parameters_not_valid_error securityd_session_dies_and_is_inherited per_security_session_search_list dotenclave_unlock_replaces_search_list dangling_keychain_entry_empty_string login_does_not_fix_this_class_of_failure credential_was_never_the_problem seckeychaincopysearchlist_error, lmd: 2026-09-22]
+^45YMC3RE [desc: "Symptom: EVERY Claude agent reports Not logged in, /login fixes nothing. Cause: the per-session search list dies when securityd recycles a session; dotenclave unlock leaves a dangling entry.", keywords: not_logged_in_fleet_wide dead_security_session parameters_not_valid_error securityd_session_dies_and_is_inherited per_security_session_search_list dotenclave_unlock_replaces_search_list dangling_keychain_entry_empty_string login_does_not_fix_this_class_of_failure credential_was_never_the_problem seckeychaincopysearchlist_error, lmd: 2026-09-22]
 **Symptom:** EVERY Claude agent on the machine reports `Not logged in`, all at once. New
 `claude` processes fail; ones started earlier keep working (they hold a token in memory).
 `/login` succeeds and **changes nothing**. The keychain item is present, unmodified, and
@@ -129,7 +129,7 @@ the problem — REACHABILITY was.** The trigger here: an unguarded `dotenclave u
 lookup in that session. [^5]
 
 
-^ATOM-MW3U-I6J7 [desc: "Fix: recreate the terminal/tmux server, verify with security list-keychains in a new pane. THE FRUIT: the keychain-health detector now runs every heartbeat, uniquely able to see the dead session from ", keywords: recreate_terminal_tmux_server verify_with_security_list_keychains guard_shell_rc_hook keychain_health_detector_every_heartbeat per_session_heartbeat_sees_what_agent_sees dangling_entry_high_severity unfindable_credential_critical dead_session_critical_login_wont_help the_fruit_janitor_guardian_of_fleet panes_inherit_dead_session_cannot_repair, ocd: 2026-09-22, lmd: 2026-09-22]
+^ATOM-MW3U-I6J7 [desc: "Fix: recreate the terminal/tmux server, verify with security list-keychains in a new pane. THE FRUIT: keychain-health now runs every heartbeat, uniquely able to see the dead session live.", keywords: recreate_terminal_tmux_server verify_with_security_list_keychains guard_shell_rc_hook keychain_health_detector_every_heartbeat per_session_heartbeat_sees_what_agent_sees dangling_entry_high_severity unfindable_credential_critical dead_session_critical_login_wont_help the_fruit_janitor_guardian_of_fleet panes_inherit_dead_session_cannot_repair, ocd: 2026-09-22, lmd: 2026-09-22]
 
 **Fix:** recreate the terminal/tmux server (its panes inherit the dead session; nothing inside
 it can be repaired). Verify by running `security list-keychains` inside a NEW pane. Guard the
@@ -177,7 +177,7 @@ user rotates / re-logs a Claude account**.
    every heartbeat × N sessions = a flood.
 
 
-^ATOM-SWCN-6GGC [desc: "A crash-looping daemon falls back to a stale cached flooder; the L0 OS-keepalive stages its own old closure into DATA/scripts, independent of the cache — why the flood recurred for days after the fix was published.", keywords: crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon staged_closure_revives_old_flooder l0_launchd_keepalive_stages_closure byte_verify_staged_closure_against_new_version cleared_kill_switch_revives_staged_closure daemon_crashloop_stale_cached_version fix_not_deployed_until_restaged pre_fix_0310_flooder_staged data_scripts_directory, ocd: 2026-09-22, lmd: 2026-09-22]
+^ATOM-SWCN-6GGC [desc: "A crash-looping daemon falls back to a stale cached flooder; the L0 OS-keepalive stages its own old closure into DATA/scripts, independent of the cache — why the flood recurred for days.", keywords: crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon staged_closure_revives_old_flooder l0_launchd_keepalive_stages_closure byte_verify_staged_closure_against_new_version cleared_kill_switch_revives_staged_closure daemon_crashloop_stale_cached_version fix_not_deployed_until_restaged pre_fix_0310_flooder_staged data_scripts_directory, ocd: 2026-09-22, lmd: 2026-09-22]
 
 4. Compounded by the **crash-loop → quarantine → old-version fallback**: when the current
    version crash-loops (see the daemon-crashloop TRDD) the heartbeat runs a **stale cached**
@@ -204,7 +204,7 @@ user rotates / re-logs a Claude account**.
    exempt).
 
 
-^ATOM-HG7R-GOOU [desc: "Stopping the 2026-07-09 flood: kill hung readers by PID, set the kill-switch in both state dirs, boot the launchd keepalive, killall SecurityAgent — a second independent flooder (AgentLens) existed th", keywords: kill_hung_reader_by_pid killall_securityagent kill_switch_both_canonical_and_legacy_dirs sigstop_does_not_stop_flood dismiss_queued_dialog_backlog two_independent_flooders_same_night boot_out_launchd_keepalive trace_security_parent_process diagnose_actual_reader second_flooder_agentlens_tool, ocd: 2026-09-22, lmd: 2026-09-22]
+^ATOM-HG7R-GOOU [desc: "Stopping the 2026-07-09 flood: kill hung readers by PID, set the kill-switch in both state dirs, boot the launchd keepalive, killall SecurityAgent — a second flooder (AgentLens) also existed.", keywords: kill_hung_reader_by_pid killall_securityagent kill_switch_both_canonical_and_legacy_dirs sigstop_does_not_stop_flood dismiss_queued_dialog_backlog two_independent_flooders_same_night boot_out_launchd_keepalive trace_security_parent_process diagnose_actual_reader second_flooder_agentlens_tool, ocd: 2026-09-22, lmd: 2026-09-22]
 
 **How it was stopped (2026-07-09):** kill the hung reader daemons **by PID** (they never
 honor the kill-switch mid-hang), set the machine-wide **kill-switch** (both canonical +
