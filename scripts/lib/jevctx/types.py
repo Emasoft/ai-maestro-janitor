@@ -411,7 +411,27 @@ class JevBudgetError(JevError):
 
 
 class JevUnavailableError(JevError):
-    """429/529/timeout, retries exhausted. Callers should fail open."""
+    """429/529/timeout, retries exhausted. Callers should fail open.
+
+    ``status`` is the HTTP status code when a response actually came back (429/5xx --
+    Jev itself is degraded, true machine-wide outage, safe to decline every other
+    caller on this stamp). ``status is None`` means a transport-level failure
+    (connect/DNS/TLS/read timeout -- no response ever arrived), which can be local to
+    THIS machine or lane rather than Jev being down -- the caller must NOT black out
+    every other shell over it (TRDD-RAEGS1D5 card 3 follow-up, commit 1e36e9bc).
+    ``cause`` is the underlying exception class + message (bounded), for whoever reads
+    the stamp. ``retry_after`` is the last seen ``Retry-After`` value in seconds, from
+    a 429 response that carried one -- ``None`` when no response did.
+    """
+
+    def __init__(
+        self, message: str = "", *, status: int | None = None, cause: str = "",
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.cause = cause
+        self.retry_after = retry_after
 
 
 class FrozenPrefixError(RuntimeError):

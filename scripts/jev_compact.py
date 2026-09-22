@@ -44,9 +44,14 @@ Sub-commands:
                                             "unreachable"` (a transport failure -- no
                                             response ever came back, may be local to this
                                             machine/lane) never declines a later attempt
-                                            either, same as `auth`/`budget` -- only a real
-                                            `kind="unavailable"` (a 429/5xx response, Jev
-                                            itself degraded) does.
+                                            either, same as `auth`/`budget` -- a real
+                                            `kind="unavailable"` (a 5xx response, Jev
+                                            itself degraded) declines for the full
+                                            `PROBE_FAIL_TTL_S`; `kind="rate_limited"` (a
+                                            429, a per-key limit rather than an outage)
+                                            declines too, but only for the much shorter
+                                            window `cmd_compact` derives from the
+                                            server's own `Retry-After` value.
                                       (2..4 are `probe`/`expand`'s own codes, listed above —
                                       one flat exit-code space across all three sub-commands
                                       so a caller never confuses e.g. `expand`'s 3 with
@@ -57,15 +62,17 @@ never duplicated in arm_prepare.py or anywhere else): JSON at
 ``<global_state.control_dir()>/jev-probe.json`` (machine-wide, not per-project — matching
 where ``armed.flag`` and the daemon's other control-plane files already live), shape
 ``{"ok": bool, "reason": str|None, "ts": epoch_seconds, "cost": float|None,
-"model": None, "provider": str, "kind": str}``. ``model`` is always ``None`` — nothing in
-this CLI's probe response carries a model name to put there. ``kind`` is one of
-``"unavailable"``, ``"unreachable"``, ``"auth"``, ``"budget"``, ``"ok"`` (see
-``write_probe_stamp``) — it is
-what `compact`'s decline gate keys on, not ``ok`` alone. Two TTLs, read by different
-callers: ``PROBE_OK_TTL_S`` (6h) documents how long an ``ok=true`` stamp should be
-considered current by an external reader; ``PROBE_FAIL_TTL_S`` (30min) is the one this file
-itself enforces — `compact` declines fast on a fresher-than-this ``ok=false, kind=
-"unavailable"`` stamp only.
+"model": None, "provider": str, "kind": str, "retry_after_s": float|None}``. ``model`` is
+always ``None`` — nothing in this CLI's probe response carries a model name to put there.
+``kind`` is one of ``"unavailable"``, ``"unreachable"``, ``"rate_limited"``, ``"auth"``,
+``"budget"``, ``"ok"`` (see ``write_probe_stamp``) — it is
+what `compact`'s decline gate keys on, not ``ok`` alone. ``retry_after_s`` is only ever
+non-``None`` for ``kind="rate_limited"`` (the server's own ``Retry-After`` header value, in
+seconds). Two TTLs, read by different callers: ``PROBE_OK_TTL_S`` (6h) documents how long an
+``ok=true`` stamp should be considered current by an external reader; ``PROBE_FAIL_TTL_S``
+(30min) is the one this file itself enforces for a ``kind="unavailable"`` stamp —
+``kind="rate_limited"`` instead uses ``min(retry_after_s or _RATE_LIMIT_FALLBACK_TTL_S,
+_RATE_LIMIT_MAX_TTL_S)`` (see `cmd_compact`).
 """
 
 from __future__ import annotations
@@ -102,11 +109,13 @@ PROBE_STAMP_NAME = "jev-probe.json"
 PROBE_OK_TTL_S = 6 * 3600
 PROBE_FAIL_TTL_S = 30 * 60
 
-# Sentinel for `_stamp_kind_for_error`: tells "no `.status` attribute at all" (an
-# unrecognized exception shape) apart from "`.status` is explicitly `None`" (a real
-# transport failure) -- `getattr(exc, "status", None)` alone could not make that
-# distinction, since both cases would return `None`.
-_MISSING = object()
+# `kind="rate_limited"` decline window (see `cmd_compact`): a 429 is a per-key limit, not
+# a whole-endpoint outage, so it earns a much shorter fast-decline TTL than
+# `PROBE_FAIL_TTL_S` -- the server's own `Retry-After` value wins when the response sent
+# one, `_RATE_LIMIT_FALLBACK_TTL_S` is the guess when it didn't, and `_RATE_LIMIT_MAX_TTL_S`
+# caps either so a server-supplied value can't itself black out compaction too long.
+_RATE_LIMIT_FALLBACK_TTL_S = 60
+_RATE_LIMIT_MAX_TTL_S = 300
 
 # `compact`'s own tunables — CLAUDE_PLUGIN_OPTION_* env vars, read like every sibling script
 # reads a plugin option (state.plugin_option, real env var wins over the settings.json
@@ -150,49 +159,58 @@ def read_probe_stamp() -> dict[str, Any] | None:
 
 def write_probe_stamp(
     *, ok: bool, reason: str | None, cost: float | None, model: str | None, provider: str,
-    kind: str,
+    kind: str, retry_after_s: float | None = None,
 ) -> None:
     """Atomically write the probe stamp — see module docstring for the shape/TTLs.
 
-    ``kind`` classifies WHY (one of ``"unavailable"``, ``"unreachable"``, ``"auth"``,
-    ``"budget"``, ``"ok"``) — `compact`'s fast-decline gate keys on it, not on ``ok``
-    alone: an ``auth``/``budget`` failure is a config/planner bug specific to THIS
-    caller's key or request shape, not evidence the Jev endpoint itself is down, so it
-    must not black out compaction for every other shell on the machine the way an
-    ``unavailable`` stamp correctly does. ``unreachable`` is the same non-decline
-    treatment for a different reason: a transport failure means no response ever came
-    back at all, which can be local to THIS machine/lane (e.g. the daemon's Python
-    missing a CA bundle, TRDD-X6I04SAO) rather than Jev being down machine-wide.
+    ``kind`` classifies WHY (one of ``"unavailable"``, ``"unreachable"``,
+    ``"rate_limited"``, ``"auth"``, ``"budget"``, ``"ok"``) — `compact`'s fast-decline
+    gate keys on it, not on ``ok`` alone: an ``auth``/``budget`` failure is a
+    config/planner bug specific to THIS caller's key or request shape, not evidence the
+    Jev endpoint itself is down, so it must not black out compaction for every other
+    shell on the machine the way an ``unavailable`` stamp correctly does. ``unreachable``
+    is the same non-decline treatment for a different reason: a transport failure means
+    no response ever came back at all, which can be local to THIS machine/lane (e.g. the
+    daemon's Python missing a CA bundle, TRDD-X6I04SAO) rather than Jev being down
+    machine-wide. ``rate_limited`` (a 429, retries exhausted) DOES decline a later
+    attempt, but only briefly (see `cmd_compact`) — a per-key rate limit, not an outage.
+    ``retry_after_s`` carries the server's own ``Retry-After`` value in seconds for a
+    ``rate_limited`` stamp; ``None`` for every other ``kind``.
     """
     stamp = {"ok": ok, "reason": reason, "ts": time.time(), "cost": cost,
-              "model": model, "provider": provider, "kind": kind}
+              "model": model, "provider": provider, "kind": kind,
+              "retry_after_s": retry_after_s}
     state.atomic_write(_probe_stamp_path(), json.dumps(stamp))
 
 
 def _stamp_kind_for_error(exc: JevError) -> str:
     """Classify a `JevError` into the probe-stamp `kind` — see `write_probe_stamp`.
 
-    `JevUnavailableError` splits into two `kind`s by its (optional) `.status` attribute
-    -- jevctx sets it on every `JevUnavailableError` it raises (`status=<code>` for a
-    429/5xx response, `status=None` for a transport failure with no response at all).
-    `getattr(..., "status", _MISSING)` distinguishes a real `status=None` ("unreachable")
-    from the attribute being absent entirely ("unavailable" -- the conservative default
-    for a shape this CLI doesn't recognize, e.g. a bare `JevUnavailableError` raised by a
-    test double or a future jevctx version that hasn't picked up the attribute; treating
-    an unrecognized shape as "assume outage" is safer than silently falling through the
-    decline gate). Any OTHER `JevError` subclass this CLI itself might raise maps to
-    "unavailable" for the same reason.
+    `JevUnavailableError` always carries `.status`/`.cause` (public attributes on the
+    base class itself, set at every raise site in jev.py/openrouter.py -- see the
+    class's own docstring in types.py), so this reads them directly, no `getattr`
+    fallback and no private-subclass check needed. `status == 429` is its own `kind`
+    (`"rate_limited"`) rather than folded into `"unavailable"`: it is a per-key rate
+    limit, not evidence the whole endpoint is down (see `cmd_compact`'s decline gate).
+    Any OTHER `JevError` subclass this CLI itself might raise maps to `"unavailable"`,
+    the conservative default.
     """
     if isinstance(exc, JevAuthError):
         return "auth"
     if isinstance(exc, JevBudgetError):
         return "budget"
     if isinstance(exc, JevUnavailableError):
-        status = getattr(exc, "status", _MISSING)
-        if status is _MISSING:
-            return "unavailable"
-        return "unavailable" if status is not None else "unreachable"
+        if exc.status == 429:
+            return "rate_limited"
+        return "unavailable" if exc.status is not None else "unreachable"
     return "unavailable"
+
+
+def _retry_after_for_stamp(exc: JevError) -> float | None:
+    """`exc.retry_after` when `exc` is a `JevUnavailableError` (the only `JevError` shape
+    that ever carries one); `None` for every other kind (`write_probe_stamp`'s own
+    default for a non-`rate_limited` stamp)."""
+    return exc.retry_after if isinstance(exc, JevUnavailableError) else None
 
 
 def _current_provider() -> str:
@@ -227,7 +245,7 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
         write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider,
-                           kind=_stamp_kind_for_error(exc))
+                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc))
         return 2
 
     start = time.monotonic()
@@ -239,7 +257,7 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
         write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider,
-                           kind=_stamp_kind_for_error(exc))
+                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc))
         return 2
     finally:
         close = getattr(client, "close", None)
@@ -353,14 +371,25 @@ def cmd_compact(args: argparse.Namespace) -> int:
     provider = _current_provider()
 
     stamp = read_probe_stamp()
-    # Decline ONLY on kind="unavailable" -- an auth or budget failure is scoped to this
-    # caller's key/request, not evidence the Jev endpoint itself is down, so it must not
-    # black out compaction machine-wide the way a real outage stamp correctly does (see
-    # write_probe_stamp's docstring). Those stamps still exist for a caller to surface as
-    # a finding; they just don't gate the NEXT attempt.
-    if stamp is not None and stamp.get("ok") is False and stamp.get("kind") == "unavailable":
+    # Decline on kind="unavailable" (a real, machine-wide outage -- the full
+    # PROBE_FAIL_TTL_S) or kind="rate_limited" (a per-key 429 -- a much shorter window
+    # derived from the server's own Retry-After, since it is not evidence the endpoint
+    # itself is down). An auth or budget failure is scoped to this caller's key/request,
+    # not evidence the Jev endpoint itself is down, so it must not black out compaction
+    # machine-wide the way these two do (see write_probe_stamp's docstring). Those
+    # stamps still exist for a caller to surface as a finding; they just don't gate the
+    # NEXT attempt.
+    if stamp is not None and stamp.get("ok") is False:
+        kind = stamp.get("kind")
         age_s = time.time() - float(stamp.get("ts", 0))
-        if age_s < PROBE_FAIL_TTL_S:
+        ttl: float | None = None
+        if kind == "unavailable":
+            ttl = PROBE_FAIL_TTL_S
+        elif kind == "rate_limited":
+            retry_after_s = stamp.get("retry_after_s")
+            base = retry_after_s if isinstance(retry_after_s, (int, float)) else _RATE_LIMIT_FALLBACK_TTL_S
+            ttl = min(base, _RATE_LIMIT_MAX_TTL_S)
+        if ttl is not None and age_s < ttl:
             reason = stamp.get("reason") or "unknown"
             print(f"declined: recent probe failure: {reason}", file=sys.stderr)
             return 5
@@ -405,7 +434,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         reason = str(exc)
         print(f"compact failed: {reason}", file=sys.stderr)
         write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider,
-                           kind=_stamp_kind_for_error(exc))
+                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc))
         return 7
     finally:
         if client is not None:

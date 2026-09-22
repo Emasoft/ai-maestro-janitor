@@ -12,7 +12,11 @@
   vendored: `test_demo.py`, `test_showcase_data.py`, `test_check.py`.
 - Modified: `jev.py` — one blank line removed between two import groups
   (`ruff check --fix`, rule I001, import-sort) to pass this project's lint
-  gate. No other byte differs. The eight upstream test files kept under
+  gate; and (2026-09-22, commit 40cc06d1 follow-up) `types.py`'s
+  `JevUnavailableError` gained three public `__init__` kwargs/attributes —
+  `status: int | None`, `cause: str`, `retry_after: float | None` — see the
+  "unavailable-vs-unreachable-vs-rate-limited" section below for why. The
+  eight upstream test files kept under
   `tests/jevctx/` (see below) got the same one-line fix for the same reason
   (`test_context.py`, `test_jev.py`, `test_ledger.py`, `test_pipeline.py`,
   `test_scorer.py`, `test_segments.py`, `test_shadow.py`, `test_store.py`).
@@ -88,7 +92,44 @@ mypy/pyright fix notes above for `check.py`/`shadow.py` are now moot (the
 files are gone) but left in place as history rather than deleted, per this
 project's commit-discipline convention of superseding rather than erasing.
 
-## `jev.py`/`openrouter.py`: unavailable-vs-unreachable attribute (2026-09-22, commit 1e36e9bc follow-up)
+## `jev.py`/`openrouter.py`: unavailable-vs-unreachable-vs-rate-limited (2026-09-22, commit 40cc06d1 follow-up, supersedes the private-subclass approach below)
+
+**Superseded 2026-09-22.** The original fix (commit 1e36e9bc, kept verbatim
+further down for history) avoided touching `types.py`'s "report rather than
+edit" convention by raising a local, additive subclass,
+`_JevUnavailableDetail(JevUnavailableError)`, from `jev.py`/`openrouter.py`.
+That subclass turned out to be the wrong tradeoff: a private class defined in
+one vendored module and imported by a sibling vendored module crosses the
+same "written against `types.py` in parallel" boundary the convention exists
+to protect, just one file over instead of in `types.py` itself, and
+`jev_compact.py` had to read the two fields defensively
+(`getattr(exc, "status", _MISSING)`) because nothing guaranteed every
+`JevUnavailableError` carried them. The owner's follow-up instruction was to
+put the fields on the base class instead: `JevUnavailableError` itself (in
+`types.py`) now takes `status: int | None = None`, `cause: str = ""`, and
+`retry_after: float | None = None` as `__init__` kwargs, all stored as
+public attributes with safe defaults — so *every* `JevUnavailableError`
+instance carries them, no subclass, no `getattr`, no `_MISSING` sentinel.
+`jev.py` and `openrouter.py` raise `JevUnavailableError` directly at every
+site that used to raise `_JevUnavailableDetail`; `_detail_from_last_error()`
+(defined once in `jev.py`, imported by `openrouter.py`) now returns a
+3-tuple (`status, cause, retry_after`) instead of 2, reading them straight
+off `isinstance(last_error, JevUnavailableError)` — the legitimate public-API
+check that check remains, since `jev_compact.py`'s classifier still has to
+tell a `JevUnavailableError` apart from `JevAuthError`/`JevBudgetError`/a
+bare transport exception. `retry_after` is new: it carries the server's own
+`Retry-After` header value (seconds) for a 429/5xx response so
+`jev_compact.py` can give a `kind="rate_limited"` (429, a per-key limit, not
+a whole-endpoint outage) probe stamp a much shorter fast-decline TTL than a
+real `kind="unavailable"` (5xx) outage earns — see `jev_compact.py`'s own
+module docstring for the exit-code/kind table. Not reported upstream — this
+diverges from upstream's `JevUnavailableError` (which takes no kwargs at
+all), but the defaults mean every upstream call site
+(`JevUnavailableError("message")`) still works unchanged; re-vendoring a
+future upstream commit needs to re-apply this `__init__` addition to
+`types.py` the same way the import-sort fix above is re-applied.
+
+### Superseded text, kept for history (commit 1e36e9bc, no longer accurate)
 
 `jevctx.types.JevUnavailableError` (upstream, unmodified) collapses two
 different failure shapes into one exception: a 429/5xx *response* (Jev itself

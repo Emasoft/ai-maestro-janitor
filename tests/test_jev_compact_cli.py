@@ -199,7 +199,11 @@ def test_probe_ask_raises(
 
     class _FailingClient(_FakeClient):
         def ask(self, state: Any, questions: Any) -> dict[str, _FakeAnswer]:
-            raise JevUnavailableError("503")
+            # `status=503` mirrors what jev.py's real 5xx raise site sets -- a bare
+            # `JevUnavailableError()` with no status now means "no response arrived"
+            # (kind="unreachable", see the dedicated test below), since `status`
+            # defaults to `None` on the base class itself (commit 40cc06d1 follow-up).
+            raise JevUnavailableError("503", status=503, cause="HTTP 503")
 
     client = _FailingClient()
     monkeypatch.setattr(jev_compact, "make_client", lambda: client)
@@ -209,6 +213,30 @@ def test_probe_ask_raises(
     assert client.closed
     stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
     assert stamp["kind"] == "unavailable"
+
+
+def test_probe_ask_raises_429_writes_rate_limited_stamp(
+    _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 429 is a per-key rate limit, not a whole-endpoint outage -- `_stamp_kind_for_error`
+    must classify it as its own `kind="rate_limited"`, distinct from a real 5xx
+    `kind="unavailable"`, and carry the server's `Retry-After` value forward as
+    `retry_after_s` so `cmd_compact`'s decline gate can use it (commit 40cc06d1
+    follow-up)."""
+    from jevctx.types import JevUnavailableError
+
+    class _FailingClient(_FakeClient):
+        def ask(self, state: Any, questions: Any) -> dict[str, _FakeAnswer]:
+            raise JevUnavailableError("429", status=429, cause="HTTP 429", retry_after=12.5)
+
+    client = _FailingClient()
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    code, out = _run(["probe"])
+    assert code == 2
+    assert "429" in out
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["kind"] == "rate_limited"
+    assert stamp["retry_after_s"] == 12.5
 
 
 def _keep_only(*keywords: str):
@@ -329,7 +357,7 @@ def test_compact_scorer_error_writes_failure_stamp(
 
     class _FailingScoreClient:
         def ask(self, state: Any, questions: Any) -> dict[str, Any]:
-            raise JevUnavailableError("simulated 503")
+            raise JevUnavailableError("simulated 503", status=503, cause="HTTP 503")
 
     monkeypatch.setattr(jev_compact, "make_client", lambda: _FailingScoreClient())
     transcript = _write_transcript(tmp_path)
@@ -345,6 +373,35 @@ def test_compact_scorer_error_writes_failure_stamp(
     assert stamp["ok"] is False
     assert "simulated 503" in stamp["reason"]
     assert stamp["kind"] == "unavailable"
+
+
+def test_compact_scorer_429_writes_rate_limited_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same scorer-error path as the 503 test above, but a 429 must land
+    `kind="rate_limited"` with the server's `retry_after_s` -- not `"unavailable"`."""
+    from jevctx.types import JevUnavailableError
+
+    class _FailingScoreClient:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            raise JevUnavailableError(
+                "simulated 429", status=429, cause="HTTP 429", retry_after=7.0
+            )
+
+    monkeypatch.setattr(jev_compact, "make_client", lambda: _FailingScoreClient())
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 7
+    assert "simulated 429" in output
+    assert not out.exists()
+
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["ok"] is False
+    assert stamp["kind"] == "rate_limited"
+    assert stamp["retry_after_s"] == 7.0
 
 
 def test_compact_budget_error_exits_7_with_budget_stamp(
@@ -402,11 +459,82 @@ def test_compact_does_not_decline_on_unreachable_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A `kind="unreachable"` stamp is a LOCAL transport problem (this machine/lane), not
-    evidence the Jev endpoint itself is down -- the fast-decline gate (exit 5) must key on
-    `kind == "unavailable"` alone, same as the existing auth/budget non-decline test."""
+    evidence the Jev endpoint itself is down -- the fast-decline gate (exit 5) never
+    declines on it, same as the existing auth/budget non-decline test (only
+    `kind == "unavailable"` and `kind == "rate_limited"` ever decline)."""
     _isolated_control_dir.mkdir(parents=True, exist_ok=True)
     stamp = {"ok": False, "reason": "simulated local networking failure", "ts": time.time(),
               "cost": None, "model": None, "provider": "openrouter", "kind": "unreachable"}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert out.exists()
+
+
+def test_compact_declines_on_recent_rate_limited_probe_failure(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fresh `kind="rate_limited"` stamp declines like `"unavailable"` does, but the TTL
+    it honours is the server's own `retry_after_s`, not `PROBE_FAIL_TTL_S`."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated 429", "ts": time.time(),
+              "cost": None, "model": None, "provider": "openrouter", "kind": "rate_limited",
+              "retry_after_s": 20.0}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    def _must_not_be_called() -> Any:
+        raise AssertionError("make_client must not be called on a fast decline")
+
+    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 5
+    assert "declined: recent probe failure: simulated 429" in output
+    assert not out.exists()
+
+
+def test_compact_does_not_decline_once_rate_limited_ttl_has_passed(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `kind="rate_limited"` stamp older than its own short `retry_after_s` TTL must NOT
+    decline -- unlike `"unavailable"`'s much longer `PROBE_FAIL_TTL_S` (30min), this stamp
+    is stale after just a few seconds."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated 429", "ts": time.time() - 30,
+              "cost": None, "model": None, "provider": "openrouter", "kind": "rate_limited",
+              "retry_after_s": 5.0}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert out.exists()
+
+
+def test_compact_rate_limited_ttl_falls_back_and_caps_without_retry_after(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No `retry_after_s` on the stamp (the 429 carried no `Retry-After` header) falls back
+    to `_RATE_LIMIT_FALLBACK_TTL_S` (60s) -- a stamp 90s old must therefore NOT decline."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated 429", "ts": time.time() - 90,
+              "cost": None, "model": None, "provider": "openrouter", "kind": "rate_limited",
+              "retry_after_s": None}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
     client = FakeJevClient(_keep_only("bug"))

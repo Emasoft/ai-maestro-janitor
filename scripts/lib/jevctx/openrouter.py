@@ -39,7 +39,6 @@ from jevctx.jev import (
     Usage,
     _detail_from_last_error,
     _error_detail,
-    _JevUnavailableDetail,
     _parse_retry_after,
     _to_jsonable,
     check_request_budget,
@@ -48,6 +47,7 @@ from jevctx.types import (
     RATE_LIMIT_RPM,
     Answer,
     JevAuthError,
+    JevUnavailableError,
     JevValidationError,
     Question,
     State,
@@ -177,22 +177,23 @@ class OpenRouterJevClient:
                 if response.status_code == 422:
                     raise JevValidationError(_error_detail(response))
                 if response.status_code == 429 or response.status_code >= 500:
-                    last_error = _JevUnavailableDetail(
+                    retry_after = self._retry_after_seconds(response)
+                    last_error = JevUnavailableError(
                         f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}",
                         status=response.status_code, cause=f"HTTP {response.status_code}",
+                        retry_after=retry_after,
                     )
                     if is_last_attempt:
                         break
-                    retry_after = self._retry_after_seconds(response)
                     self._sleep(self._retry_policy.delay(attempt, retry_after=retry_after))
                     continue
                 # Any other 4xx: the request is bad in some way we do not special-case.
                 raise JevValidationError(f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}")
 
-        status, cause = _detail_from_last_error(last_error)
-        raise _JevUnavailableDetail(
+        status, cause, retry_after = _detail_from_last_error(last_error)
+        raise JevUnavailableError(
             f"Jev (OpenRouter) request failed after {self._retry_policy.max_retries + 1} attempt(s)",
-            status=status, cause=cause,
+            status=status, cause=cause, retry_after=retry_after,
         ) from last_error
 
     def _retry_after_seconds(self, response: httpx.Response) -> float | None:
