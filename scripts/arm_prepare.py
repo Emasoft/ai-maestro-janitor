@@ -134,6 +134,34 @@ def restricted_mode_active() -> bool:
     return state.restricted_mode()
 
 
+def jev_probe(plugin_root: Path, env: Mapping[str, str] | None = None) -> str:
+    """Run `jev_compact.py probe` once at arm time (TRDD-541CBN36 card 2, spec step 5).
+
+    A dedicated `off` value on `CLAUDE_PLUGIN_OPTION_JEV_PROVIDER` (on top of the two the
+    provider module itself knows, `openrouter`/`typesafe`) skips this entirely — arming
+    must work on a host that never wants Jev compaction, with no network call and no error
+    line. A probe FAILURE changes nothing else here (arming proceeds either way); it only
+    changes what gets printed, so the skill/human sees `jev=<reason>` instead of `jev=ok`.
+    This is a 20s-bounded subprocess, not an in-process call, because `jev_compact.py` is
+    its own PEP-723 script declaring `httpx` — this file stays stdlib-only (see its own
+    docstring) and shells out the same way the scope-check detector call above does.
+    """
+    environ: Mapping[str, str] = os.environ if env is None else env
+    provider = (environ.get("CLAUDE_PLUGIN_OPTION_JEV_PROVIDER") or "").strip().lower()
+    if provider == "off":
+        return "jev=off"
+    script = plugin_root / "scripts" / "jev_compact.py"
+    if not script.is_file():
+        return "jev=script missing"
+    proc = state.run_subprocess(["uv", "run", "--script", "--quiet", str(script), "probe"], timeout=20, detector_name="arm_prepare")
+    if proc is None:
+        return "jev=probe did not run (timeout or uv not on PATH)"
+    if proc.returncode != 0:
+        reason = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+        return f"jev={reason}"
+    return "jev=ok"
+
+
 def scope_is_user(plugin_root: Path) -> tuple[bool, str]:
     """The janitor MUST be a user-scope install: it guards OAuth, the machine-global daemon, and
     drift for the WHOLE machine. Arming a project-scope janitor would bind a machine-global
@@ -214,6 +242,7 @@ def main() -> int:
     print(f"cron={cron}")
     print(f"prior-cron-id={prior}")
     print(f"sweep={'no' if prior else 'yes'}")
+    print(jev_probe(plugin_root))
     # No `maintenance=` line any more — there is no maintenance mode to report. The line
     # existed to make a suppressed host visible, and even in that narrow form it was
     # dangerous: agents read a status line about maintenance, collided it with the

@@ -72,6 +72,12 @@ dev = [
     # own test step died on collection (ModuleNotFoundError: yaml) and the pipeline could only
     # run on a machine where pyyaml happened to be installed already.
     "pyyaml",
+    # scripts/lib/jevctx/jev.py and openrouter.py (TRDD-541CBN36) import httpx. At RUNTIME
+    # `scripts/jev_compact.py` carries it via its own PEP-723 header (`dependencies =
+    # ["httpx>=0.27"]`, matching the pyyaml case above one line up), but pytest collects
+    # tests/jevctx/ and the OpenRouter tests in the PROJECT venv, where that header does not
+    # apply either.
+    "httpx>=0.27",
     # tests/test_rules_installer.py's per-skill token-budget gate reproduces CPV's own
     # SKILL.md measure exactly (o200k_base encode * 1.3) rather than a char-count proxy —
     # a gate that only approximates the authority it stands in for is worse than none
