@@ -302,28 +302,37 @@ def _tokens_absent_at_head(tokens: set[str], root: Path) -> set[str] | None:
 
 # A token was a SYMBOL here only if it was once DEFINED in `scripts/`: a `def`/`class` at any
 # indent (so methods count), a plain assignment at COLUMN 0 (`name = value`), or an annotated
-# assignment at COLUMN 0 with a value (`name: Type = value`).
+# declaration at ANY indent — `name: Type` or `name: Type = value` — so a dataclass field
+# (`flag: bool`) or a class-level constant (`LIMIT: int`) is seen too, not only a module-level
+# one with a value.
 #
-# The asymmetry is deliberate and measured. An INDENTED assignment (`^\s*foo:`) is
-# indistinguishable from a YAML/frontmatter line quoted inside a docstring — which is exactly
-# what produced the reported `modified` false positive. `def`/`class` carry their own keyword,
-# so they cannot collide with prose and are safe to accept at any indent. The cost is an
-# indented dataclass FIELD (`last_rearm_ts: int = 0`), which this no longer sees: one stale
-# citation occasionally, versus a false finding that costs trust in every other finding the
-# detector makes. That trade runs the same direction as the fail-silent rule below.
+# The def/class vs plain-assignment asymmetry is deliberate and measured. An INDENTED plain
+# assignment (`^\s*foo =`) is indistinguishable from a YAML/frontmatter line quoted inside a
+# docstring — which is exactly what produced the reported `modified` false positive. `def`/
+# `class` carry their own keyword, so they cannot collide with prose and are safe to accept at
+# any indent.
 #
-# A bare `name:` (colon, no required `=`) was ALSO accepted here until janitor found `context`
-# flagged as a symbol: a module docstring line, left-flush at column 0, read "context: with the
-# default ``on_error=...``, anything that goes wrong scores the affected..." — ordinary English
-# sentences routinely start `word: rest of sentence`, and that shape is indistinguishable from a
-# bare annotation (`name: Type`) by indentation alone, the same collision the comment above
-# already solved for the indented case. The fix: require the COLON form to look like a real
-# annotated assignment (`name: <type-expression> = value`), never a bare annotation — the
-# type-expression charset excludes anything prose would contain (spaces beyond single word
-# separators are fine, but backticks, quotes-as-markdown, and multi-clause punctuation are not).
-# Every real module-level annotated constant in this repo already carries a `= value` (checked:
-# 656 hits for the tightened shape, 0 for the old bare-colon shape that weren't prose/CSS), so
-# nothing legitimate is lost.
+# The annotated form's OWN colon-then-type-expression shape is its guard, so it needs no
+# indentation restriction as a second one — but a bare colon alone is not enough: janitor found
+# `context` flagged as a symbol, a module docstring line left-flush at column 0 reading "context:
+# with the default ``on_error=...``, anything that goes wrong scores the affected..." — ordinary
+# English sentences routinely start `word: rest of sentence`, and a naive `name: <anything>`
+# collides with that. A follow-up tightening (48098ead) closed the collision by requiring
+# `= value`, which incidentally dropped the commonest shape in this repo — a BARE annotation with
+# no value. The real guard was never "does it have `=`", it is "does the right-hand side look
+# like a TYPE": one or more dotted/bracketed/union identifiers (`str`, `list[Item]`,
+# `dict[str, int] | None`), never a run of plain space-separated words. A type expression's only
+# legal whitespace is INSIDE brackets (after a comma) or around a `|`; prose has neither, so
+# "with the default retries the caller sets" fails at its first un-bracketed, un-piped space —
+# the type atom can advance no further, and the pattern can never reach the required trailing
+# `=` or end-of-line from there. Verified against the exact sentence that caused both janitor#255
+# and this file's 48098ead regression; `= value` is now optional again.
+#
+# Residual, ACCEPTED gap (review, 2026-09-22): a single-word RHS is still ambiguous — a config-
+# style prose line like `status: pending` is lexically identical to a bare annotation and WILL be
+# read as a definition. Closing it needs a type-keyword allowlist this detector doesn't have; the
+# same fail-silent trade as the plain-assignment asymmetry above (a stale citation costs less than
+# a false finding) is accepted here too, not fixed.
 #
 # Python `re`, not git's POSIX ERE (`-G`) — janitor#255's `\b`/`\s` bug class (git's ERE
 # silently matches NOTHING on those escapes, so a per-token `-G` regex went permanently
@@ -332,7 +341,9 @@ def _tokens_absent_at_head(tokens: set[str], root: Path) -> set[str] | None:
 _HISTORY_DEFINITION_RE = re.compile(
     r"^[ \t]*(?:def|class|async def)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[^A-Za-z0-9_]"
     r"|^([A-Za-z_][A-Za-z0-9_]*)[ \t]*="
-    r"|^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*[A-Za-z_][A-Za-z0-9_.\[\], |]*[ \t]*="
+    r"|^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*"
+    r"[A-Za-z_][\w.]*(?:\[[^\]\n]*\])?(?:[ \t]*\|[ \t]*[A-Za-z_][\w.]*(?:\[[^\]\n]*\])?)*"
+    r"[ \t]*(?:=|$)"
 )
 
 # Memoized per project root: the expensive part (walking the FULL `scripts/` history once) runs

@@ -793,6 +793,80 @@ def test_ordinary_words_are_not_symbols(repo: Path):
     assert mod._symbol_in_history("retries", repo, timeout_s=_HANG_ONLY_TIMEOUT_S) is True
 
 
+def _git_hermetic(args: list[str], cwd: Path) -> None:
+    """`git` with an inline identity and signing disabled — every call here is `-c`-scoped, so
+    this fixture's commits never read (or need) the machine's global git config. Unlike `_git`'s
+    env-var identity above, `-c commit.gpgsign=false` also covers a machine where
+    `commit.gpgsign=true` is set globally: without it, `git commit` would try to invoke a real
+    signing key and hang or fail outside this test's control."""
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "-c", "commit.gpgsign=false", *args],
+        cwd=str(cwd), check=True, capture_output=True, text=True,
+    )
+
+
+def test_symbol_regex_bare_annotations_and_class_level_shapes(tmp_path: Path):
+    """Follow-up to 48098ead: that fix's tightened annotated alternative (`name: Type = value`)
+    accidentally dropped BARE annotations — `id: str` in a dataclass, `LIMIT: int` at class
+    level — the commonest definition shape in this repo (e.g. `jev_compaction.py`'s `Item`/
+    `Scores`). Pins all five real-definition shapes the regex must now accept, and proves the
+    prose guard survives restoring the bare form: the exact docstring sentence that caused
+    48098ead must still read as prose, not as a symbol.
+
+    `LIMIT = 3` is placed at column 0 (not indented inside `Widget`) deliberately: the plain
+    `name = value` alternative is unchanged by this follow-up and still requires column 0 (see
+    the block comment above `_HISTORY_DEFINITION_RE`) — an indented class constant of that exact
+    shape is the documented, accepted miss.
+    """
+    mod = _sym_in_history()
+    (tmp_path / "scripts").mkdir()
+    _git_hermetic(["init", "-q", "-b", "main"], tmp_path)
+    (tmp_path / "scripts" / "real.py").write_text(
+        "def frobnicate():\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class Widget:\n"
+        "    flag: bool\n"
+        "\n"
+        "\n"
+        "LIMIT = 3\n"
+        "\n"
+        "ratio: float = 0.5\n",
+        encoding="utf-8",
+    )
+    _git_hermetic(["add", "-A"], tmp_path)
+    _git_hermetic(["commit", "-q", "-m", "feat: add real symbols"], tmp_path)
+
+    words = ("queue", "modified", "context", "result", "data", "value")
+    (tmp_path / "PROSE.md").write_text(
+        "\n".join(f"{w}: this is prose, not a symbol definition." for w in words) + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "scripts" / "prose.py").write_text(
+        '"""Module docstring.\n\ncontext: with the default retries the caller sets\n"""\n',
+        encoding="utf-8",
+    )
+    _git_hermetic(["add", "-A"], tmp_path)
+    _git_hermetic(["commit", "-q", "-m", "docs: add prose using ordinary words"], tmp_path)
+
+    for name in ("frobnicate", "Widget", "flag", "LIMIT", "ratio"):
+        assert mod._symbol_in_history(name, tmp_path, timeout_s=_HANG_ONLY_TIMEOUT_S) is True, (
+            f"{name!r} is a real definition"
+        )
+    for word in words:
+        assert mod._symbol_in_history(word, tmp_path, timeout_s=_HANG_ONLY_TIMEOUT_S) is False, (
+            f"{word!r} is prose, not a symbol"
+        )
+
+    # `None` means the lookup could not RUN — a nonexistent root makes `git log` fail (exit
+    # 128), which must stay a tested distinction from a confirmed "no" (see
+    # `test_an_undetermined_lookup_is_none_not_false` for the monkeypatched variant of the
+    # same property).
+    assert mod._symbol_in_history("frobnicate", tmp_path / "does-not-exist") is None
+
+
 @pytest.mark.xdist_group("real-git-history-probes")
 def test_real_deleted_symbols_are_still_found(tmp_path):
     """The fix must not buy a zero FP rate by making the check never fire — the failure mode
