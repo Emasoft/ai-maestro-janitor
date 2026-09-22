@@ -899,10 +899,15 @@ def test_history_walk_is_pathspec_restricted_to_code_files(tmp_path: Path):
 @pytest.mark.xdist_group("real-git-history-probes")
 def test_real_deleted_symbols_are_still_found(tmp_path):
     """The fix must not buy a zero FP rate by making the check never fire — the failure mode
-    this repo keeps hitting. These are real definitions in this repo's own history."""
+    this repo keeps hitting. These are real definitions in this repo's own history.
+    `recovery_pending` (added in bc9f62b8, TRDD-L32WC0H7) is the regression guard for the
+    35d22842 pathspec bug: a single brace pathspec (`scripts/**/*.{py,rs,sh}`) has no
+    wildmatch brace expansion and matches nothing, so a broken pathspec makes every symbol
+    look never-defined — this fails loud on that regression instead of silently finding
+    nothing."""
     mod = _sym_in_history()
     root = Path(__file__).resolve().parent.parent
-    for sym in ("_phase_self_budget", "_symbol_in_history", "emit_once"):
+    for sym in ("_phase_self_budget", "_symbol_in_history", "emit_once", "recovery_pending"):
         assert mod._symbol_in_history(sym, root, timeout_s=_HANG_ONLY_TIMEOUT_S) is True, (
             f"{sym!r} was defined here, must be found"
         )
