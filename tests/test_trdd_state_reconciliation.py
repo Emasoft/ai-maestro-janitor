@@ -867,6 +867,35 @@ def test_symbol_regex_bare_annotations_and_class_level_shapes(tmp_path: Path):
     assert mod._symbol_in_history("frobnicate", tmp_path / "does-not-exist") is None
 
 
+def test_history_walk_is_pathspec_restricted_to_code_files(tmp_path: Path):
+    """A TRDD card or any other markdown file under `scripts/` (docs live there, see this
+    repo's own `scripts/**/*.md`) is prose, not code — `column: dev` / `title: Some words
+    here` are YAML-frontmatter lines that are LEXICALLY IDENTICAL to a bare annotation
+    (`flag: bool`), so the regex alone cannot tell them apart; only the file's own type can.
+    `_load_ever_defined_symbols` must pathspec-restrict its `git log` walk to code extensions
+    (`.py .rs .sh`) so a `.md` file's frontmatter never reaches `_HISTORY_DEFINITION_RE` at
+    all. A trailing `# comment` after a bare annotation (`flag: bool  # why`) is still a real
+    definition and must stay True.
+    """
+    mod = _sym_in_history()
+    (tmp_path / "scripts").mkdir()
+    _git_hermetic(["init", "-q", "-b", "main"], tmp_path)
+    (tmp_path / "scripts" / "CARD.md").write_text(
+        "---\ncolumn: dev\ntitle: Some words here\n---\n", encoding="utf-8"
+    )
+    (tmp_path / "scripts" / "real.py").write_text(
+        "def frobnicate():\n    pass\n\n\nflag: bool  # set at create\n", encoding="utf-8"
+    )
+    _git_hermetic(["add", "-A"], tmp_path)
+    _git_hermetic(["commit", "-q", "-m", "feat: add card and real symbol"], tmp_path)
+
+    for word in ("column", "title"):
+        assert mod._symbol_in_history(word, tmp_path, timeout_s=_HANG_ONLY_TIMEOUT_S) is False, (
+            f"{word!r} only ever appeared in a .md file's frontmatter, not code"
+        )
+    assert mod._symbol_in_history("flag", tmp_path, timeout_s=_HANG_ONLY_TIMEOUT_S) is True
+
+
 @pytest.mark.xdist_group("real-git-history-probes")
 def test_real_deleted_symbols_are_still_found(tmp_path):
     """The fix must not buy a zero FP rate by making the check never fire — the failure mode

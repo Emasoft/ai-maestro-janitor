@@ -343,7 +343,10 @@ _HISTORY_DEFINITION_RE = re.compile(
     r"|^([A-Za-z_][A-Za-z0-9_]*)[ \t]*="
     r"|^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*"
     r"[A-Za-z_][\w.]*(?:\[[^\]\n]*\])?(?:[ \t]*\|[ \t]*[A-Za-z_][\w.]*(?:\[[^\]\n]*\])?)*"
-    r"[ \t]*(?:=|$)"
+    # `#` alongside `=`/end-of-line: a bare annotation followed by a trailing
+    # comment (`flag: bool  # why`) is still a definition — the comment is not
+    # part of the type, so the type must not be required to end the line.
+    r"[ \t]*(?:=|#|$)"
 )
 
 # Memoized per project root: the expensive part (walking the FULL `scripts/` history once) runs
@@ -358,7 +361,7 @@ _ever_defined_cache: dict[Path, set[str]] = {}
 
 
 def _load_ever_defined_symbols(root: Path, *, timeout_s: float) -> set[str] | None:
-    """Every identifier ever DEFINED in `scripts/` history, in ONE pass over ONE `git log -p`.
+    """Every identifier ever DEFINED in `scripts/` code files, in ONE pass over ONE `git log -p`.
 
     A symbol's DEFINING commit always ADDS the line that introduces it, so scanning only
     `+`-prefixed lines (never the `+++` file-header line) across the whole history is a
@@ -372,12 +375,24 @@ def _load_ever_defined_symbols(root: Path, *, timeout_s: float) -> set[str] | No
     means — was this ever a `def`/`class`/module-level assignment — not "did this text ever
     change anywhere".
 
+    The `git log` call is pathspec-restricted to CODE file extensions (`.py .rs .sh` — the
+    only source languages under `scripts/`, per this repo's own tree). Without it, the same
+    line shape (`word:` + one bare token) is ALSO how YAML frontmatter and markdown prose
+    read (`column: dev`, `flag: bool` as a doc example) — the regex cannot tell a TRDD card's
+    `column: dev` from a real `flag: bool` annotation by shape alone, only the file it lives
+    in tells them apart. Restricting the walk to code files removes that class of prose file
+    entirely, rather than trying to out-regex it.
+
     Returns `None` (undetermined) on any git failure. The caller does not cache `None` —
     conflating "the read failed" with "never defined anywhere" would suppress every future
     finding for the rest of the run over one transient error.
     """
     proc = state.run_subprocess(
-        ["git", "-C", str(root), "log", "-p", "--", "scripts"],
+        # ponytail: this extension list is a known ceiling, not exhaustive — a source
+        # language added under scripts/ later (e.g. .go, .ts) stays invisible to this
+        # walk until added here too. Update alongside any new scripts/ language.
+        ["git", "-C", str(root), "log", "-p", "--",
+         ":(glob)scripts/**/*.py", ":(glob)scripts/**/*.rs", ":(glob)scripts/**/*.sh"],
         timeout=timeout_s,
         detector_name="trdd-state-reconciliation",
     )
