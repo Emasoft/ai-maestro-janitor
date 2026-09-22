@@ -84,8 +84,7 @@ anywhere else. The choke-point enforces, in order:
 2. **Hard timeout** on the subprocess (`_CLI_TIMEOUT_S`). A `security` call blocked on a
    prompt must time out, never hang.
 
-^ATOM-HVTS-0SPZ [desc: "safe_storage.py protocol items 3-7: headless fail-fast, set-latch-and-stop on denial, temp-keychain test scope, prefer -T-accessible mirrors, never poll the keychain in a tight loop.", keywords: headless_fail_fast_never_prompt janitor_rotator_headless_env_var livebak_mirror_fallback acl_denied_set_latch_and_log_once do_not_retry_on_denial temp_keychain_test_isolation janitor_rotator_keychain_env_var prefer_T_accessible_mirrors never_poll_keychain_in_tight_loop read_once_cache_backoff, ocd: 2026-09-22, lmd: 2026-09-22]
-
+^ATOM-HVTS-0SPZ [desc: "safe_storage.py protocol items 3-7: headless fail-fast, set-latch-and-stop on denial, temp-keychain test scope, prefer -T-accessible mirrors, never poll the keychain in a tight loop.", keywords: headless_fail_fast_never_prompt janitor_rotator_headless_env_var livebak_mirror_fallback acl_denied_set_latch_and_log_once do_not_retry_on_denial temp_keychain_test_isolation janitor_rotator_keychain_env_var prefer_T_accessible_mirrors never_poll_keychain_in_tight_loop read_once_cache_backoff security_dash_w_read_on_routine_path never_w_read_liveness_check, ocd: 2026-09-22, lmd: 2026-09-22]
 3. **Headless / fail-fast — NEVER prompt on a routine path.** A liveness/presence check must
    not `-w`-read an ACL-restricted item. Use the headless primitive
    (`JANITOR_ROTATOR_HEADLESS` → `_primary_secret_read_permitted` / `_read_primary_macos_keychain`):
@@ -129,8 +128,7 @@ the problem — REACHABILITY was.** The trigger here: an unguarded `dotenclave u
 lookup in that session. [^5]
 
 
-^ATOM-MW3U-I6J7 [desc: "Fix: recreate the terminal/tmux server, verify with security list-keychains in a new pane. THE FRUIT: keychain-health now runs every heartbeat, uniquely able to see the dead session live.", keywords: recreate_terminal_tmux_server verify_with_security_list_keychains guard_shell_rc_hook keychain_health_detector_every_heartbeat per_session_heartbeat_sees_what_agent_sees dangling_entry_high_severity unfindable_credential_critical dead_session_critical_login_wont_help the_fruit_janitor_guardian_of_fleet panes_inherit_dead_session_cannot_repair, ocd: 2026-09-22, lmd: 2026-09-22]
-
+^ATOM-MW3U-I6J7 [desc: "Fix: recreate the terminal/tmux server, verify with security list-keychains in a new pane. keychain-health runs every heartbeat INSIDE the agent's security session, so it sees the dead session.", keywords: recreate_terminal_tmux_server verify_with_security_list_keychains guard_shell_rc_hook keychain_health_detector_every_heartbeat per_session_heartbeat_sees_what_agent_sees dangling_entry_high_severity unfindable_credential_critical dead_session_critical_login_wont_help the_fruit_janitor_guardian_of_fleet panes_inherit_dead_session_cannot_repair, ocd: 2026-09-22, lmd: 2026-09-22]
 **Fix:** recreate the terminal/tmux server (its panes inherit the dead session; nothing inside
 it can be repaired). Verify by running `security list-keychains` inside a NEW pane. Guard the
 shell-rc hook so it cannot leave a dangling entry.
@@ -177,8 +175,7 @@ user rotates / re-logs a Claude account**.
    every heartbeat × N sessions = a flood.
 
 
-^ATOM-SWCN-6GGC [desc: "A crash-looping daemon falls back to a stale cached flooder; the L0 OS-keepalive stages its own old closure into DATA/scripts, independent of the cache — why the flood recurred for days.", keywords: crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon staged_closure_revives_old_flooder l0_launchd_keepalive_stages_closure byte_verify_staged_closure_against_new_version cleared_kill_switch_revives_staged_closure daemon_crashloop_stale_cached_version fix_not_deployed_until_restaged pre_fix_0310_flooder_staged data_scripts_directory, ocd: 2026-09-22, lmd: 2026-09-22]
-
+^ATOM-SWCN-6GGC [desc: "A crash-looping daemon falls back to a stale cached flooder; the L0 OS-keepalive stages its own old closure into DATA/scripts, independent of the cache — why the flood recurred for days.", keywords: crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon staged_closure_revives_old_flooder l0_launchd_keepalive_stages_closure byte_verify_staged_closure_against_new_version cleared_kill_switch_revives_staged_closure daemon_crashloop_stale_cached_version fix_not_deployed_until_restaged pre_fix_0310_flooder_staged data_scripts_directory flood_recurred_after_fix_published fix_published_but_bug_persists, ocd: 2026-09-22, lmd: 2026-09-22]
 4. Compounded by the **crash-loop → quarantine → old-version fallback**: when the current
    version crash-loops (see the daemon-crashloop TRDD) the heartbeat runs a **stale cached**
    **version** that lacks the timeout/headless fixes, so even a "fixed" tree keeps flooding from
