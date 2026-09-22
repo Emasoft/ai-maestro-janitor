@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["httpx>=0.27"]
 # ///
-"""Jev compaction CLI (TRDD-541CBN36 card 2).
+"""Jev compaction CLI (TRDD-541CBN36 card 2, TRDD-RAEGS1D5 card 3 part B).
 
 This is its OWN PEP-723 script, separate from the stdlib-only hook scripts, because it is
 the one place in this project that needs ``httpx`` — jevctx's ``HttpJevClient`` /
@@ -15,11 +15,42 @@ also gives it a CA bundle via ``httpx`` → ``certifi`` in the daemon lane, cf. 
 Sub-commands:
   probe                            — one Noul question through the configured provider;
                                       prints ``probe ok noul=<f> cost=<usd> ms=<n>`` and
-                                      exits 0, or prints the reason and exits 2.
+                                      exits 0, or prints the reason and exits 2. Also writes
+                                      the probe stamp (below) — a manual check, so it always
+                                      actually probes, never short-circuits on a cached stamp.
   expand --transcript P ID         — prints the ORIGINAL bytes of one item (``ID`` =
                                       ``<uuid>:<n>``) from a transcript JSONL; exits 3 if
                                       the entry or the block index isn't found.
-  compact ...                      — STUB. Card 3 fills this in; here it only exits 4.
+  compact --transcript P --out F   — compose the compacted context (card 3) and write it to
+                                      F atomically. Exit code contract (a part C caller
+                                      branches on these, so each is deliberate and stable):
+                                        0 — wrote F; one summary line on stdout.
+                                        5 — declined: a probe-stamp failure younger than
+                                            PROBE_FAIL_TTL_S says Jev is down right now — no
+                                            network fan-out into a known outage.
+                                        6 — declined: `jev_compaction.NoDigest` — neither a
+                                            human message nor a TRDD STATE head exists, so
+                                            there is nothing to judge relevance against.
+                                        7 — a Jev error (missing/bad key, scorer failure)
+                                            during THIS attempt; the probe stamp is written
+                                            ok=false with the reason so the NEXT attempt
+                                            declines fast via exit 5 instead of repeating the
+                                            same failing network round-trip.
+                                      (2..4 are `probe`/`expand`'s own codes, listed above —
+                                      one flat exit-code space across all three sub-commands
+                                      so a caller never confuses e.g. `expand`'s 3 with
+                                      `compact`'s 5..7.)
+
+Probe stamp contract (single source of truth — every reader/writer of this file lives HERE,
+never duplicated in arm_prepare.py or anywhere else): JSON at
+``<global_state.control_dir()>/jev-probe.json`` (machine-wide, not per-project — matching
+where ``armed.flag`` and the daemon's other control-plane files already live), shape
+``{"ok": bool, "reason": str|None, "ts": epoch_seconds, "cost": float|None,
+"model": None, "provider": str}``. ``model`` is always ``None`` — nothing in this CLI's
+probe response carries a model name to put there. Two TTLs, read by different callers:
+``PROBE_OK_TTL_S`` (6h) documents how long an ``ok=true`` stamp should be considered current
+by an external reader; ``PROBE_FAIL_TTL_S`` (30min) is the one this file itself enforces —
+`compact` declines fast on a fresher-than-this ``ok=false`` stamp.
 """
 
 from __future__ import annotations
@@ -35,19 +66,93 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
 
-from jevctx.provider import make_client  # noqa: E402  -- needs the sys.path line above
-from jevctx.types import JevError, Noul  # noqa: E402  -- needs the sys.path line above
+import global_state  # noqa: E402  -- needs the sys.path line above
+import jev_compaction as jc  # noqa: E402
+import state  # noqa: E402
+from jevctx.provider import DEFAULT_PROVIDER, PROVIDER_ENV, make_client  # noqa: E402
+from jevctx.tokens import estimate_tokens  # noqa: E402
+from jevctx.types import JevError, Noul  # noqa: E402
+
+# --------------------------------------------------------------------------- #
+# Probe stamp — see module docstring for the full contract.
+# --------------------------------------------------------------------------- #
+
+PROBE_STAMP_NAME = "jev-probe.json"
+PROBE_OK_TTL_S = 6 * 3600
+PROBE_FAIL_TTL_S = 30 * 60
+
+# `compact`'s own tunables — CLAUDE_PLUGIN_OPTION_* env vars, read like every sibling script
+# reads a plugin option (state.plugin_option, real env var wins over the settings.json
+# mirror). Defaults match docs_dev/jev-compaction-spec.md card 3 / jev_compaction.py.
+_BUDGET_ENV = "CLAUDE_PLUGIN_OPTION_JEV_COMPACT_BUDGET_TOKENS"
+_RELEVANCE_ENV = "CLAUDE_PLUGIN_OPTION_JEV_RELEVANCE_THRESHOLD"
+_DECISION_ENV = "CLAUDE_PLUGIN_OPTION_JEV_DECISION_THRESHOLD"
+_DEFAULT_BUDGET_TOKENS = 8000
+
+
+def _probe_stamp_path() -> Path:
+    return global_state.control_dir() / PROBE_STAMP_NAME
+
+
+def read_probe_stamp() -> dict[str, Any] | None:
+    """The current probe stamp, or `None` if it doesn't exist / isn't valid JSON.
+
+    A missing or corrupt stamp is not an error here — it just means "no prior probe result
+    to decide anything from", so every caller of this function already treats `None` as
+    "proceed as if nothing is known."
+    """
+    try:
+        raw = _probe_stamp_path().read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def write_probe_stamp(
+    *, ok: bool, reason: str | None, cost: float | None, model: str | None, provider: str
+) -> None:
+    """Atomically write the probe stamp — see module docstring for the shape/TTLs."""
+    stamp = {"ok": ok, "reason": reason, "ts": time.time(), "cost": cost,
+              "model": model, "provider": provider}
+    state.atomic_write(_probe_stamp_path(), json.dumps(stamp))
+
+
+def _current_provider() -> str:
+    return (os.environ.get(PROVIDER_ENV) or DEFAULT_PROVIDER).strip() or DEFAULT_PROVIDER
+
+
+def _coerce_float(value: str | None, default: float) -> float:
+    """Like `state.coerce_int` but for a `[0, 1]`-ish threshold — no such helper exists in
+    state.py (it only coerces non-negative ints), so this is the small local equivalent: an
+    empty/unset/unparseable value silently falls back to `default` rather than crashing the
+    CLI on a config typo."""
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 
 def cmd_probe(_args: argparse.Namespace) -> int:
     """One Noul question through whichever provider `CLAUDE_PLUGIN_OPTION_JEV_PROVIDER`
     names. A probe failure must never look like a compaction failure to the caller, so it
     is always ONE line on stdout/stderr and a small, distinguishable exit code (2) —
-    `arm_prepare.py` greps this line, it does not parse a traceback."""
+    `arm_prepare.py` greps this line, it does not parse a traceback.
+
+    A MANUAL check: unlike `compact`, this never reads or short-circuits on a cached probe
+    stamp — it always actually probes. It DOES write the stamp on every outcome, so a human
+    running `probe` by hand also refreshes what `compact`'s fast-decline path reads next."""
+    provider = _current_provider()
     try:
         client = make_client()
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
+        write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider)
         return 2
 
     start = time.monotonic()
@@ -58,6 +163,7 @@ def cmd_probe(_args: argparse.Namespace) -> int:
         )
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
+        write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider)
         return 2
     finally:
         close = getattr(client, "close", None)
@@ -68,9 +174,12 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     answer = answers.get("a")
     noul = getattr(answer, "noul", None)
     if noul is None:
-        print("probe failed: response carried no 'a.noul' answer", file=sys.stderr)
+        reason = "response carried no 'a.noul' answer"
+        print(f"probe failed: {reason}", file=sys.stderr)
+        write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider)
         return 2
     cost = getattr(getattr(client, "usage", None), "cost", 0.0)
+    write_probe_stamp(ok=True, reason=None, cost=cost, model=None, provider=provider)
     print(f"probe ok noul={noul} cost={cost} ms={elapsed_ms}")
     return 0
 
@@ -156,9 +265,83 @@ def cmd_expand(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_compact(_args: argparse.Namespace) -> int:
-    print("compact: not implemented yet — card 3", file=sys.stderr)
-    return 4
+def cmd_compact(args: argparse.Namespace) -> int:
+    """Compose the compacted context and write it to `args.out` atomically.
+
+    Order matters and is deliberate (see the module docstring's exit-code table): the probe
+    stamp is checked BEFORE reading the transcript or building anything, so a known-down Jev
+    declines in microseconds rather than after paying the cost of walking a
+    (possibly 24-258 MB, per the spec) transcript file first.
+    """
+    provider = _current_provider()
+
+    stamp = read_probe_stamp()
+    if stamp is not None and stamp.get("ok") is False:
+        age_s = time.time() - float(stamp.get("ts", 0))
+        if age_s < PROBE_FAIL_TTL_S:
+            reason = stamp.get("reason") or "unknown"
+            print(f"declined: recent probe failure: {reason}", file=sys.stderr)
+            return 5
+
+    start = time.monotonic()
+    items = jc.extract_items(args.transcript)
+
+    state_heads: list[str] = []
+    for head_path in args.state_heads or []:
+        try:
+            state_heads.append(Path(head_path).read_text(encoding="utf-8"))
+        except OSError as exc:
+            # A missing/unreadable STATE head file degrades the digest, it does not abort
+            # the whole compaction -- the remaining heads and human messages may still be
+            # enough to build one.
+            print(f"compact: skipping unreadable state head {head_path!r}: {exc}", file=sys.stderr)
+
+    try:
+        digest = jc.build_digest(items, state_heads, cap_tokens=args.digest_tokens)
+    except jc.NoDigest as exc:
+        print(f"declined: no digest material: {exc}", file=sys.stderr)
+        return 6
+
+    client = None
+    try:
+        client = make_client()
+        scores = jc.score_items(
+            items, digest, client,
+            relevance_threshold=args.relevance_threshold,
+            decision_threshold=args.decision_threshold,
+        )
+    except JevError as exc:
+        reason = str(exc)
+        print(f"compact failed: {reason}", file=sys.stderr)
+        write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider)
+        return 7
+    finally:
+        if client is not None:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+
+    usage = getattr(client, "usage", None)
+    usage_tokens = getattr(usage, "input_tokens", 0) + getattr(usage, "output_tokens", 0)
+    usage_cost = getattr(usage, "cost", 0.0)
+
+    doc = jc.compose(
+        items, scores, budget_tokens=args.budget_tokens,
+        header={
+            "transcript_path": str(args.transcript),
+            "session_key": args.session_key or "",
+            "digest": digest,
+            "usage": {"tokens": usage_tokens, "cost": usage_cost},
+        },
+    )
+    state.atomic_write(Path(args.out), doc)
+    write_probe_stamp(ok=True, reason=None, cost=usage_cost, model=None, provider=provider)
+
+    kept = sum(1 for s in scores.values() if s.kept and not s.oversized)
+    elapsed_ms = int((time.monotonic() - start) * 1000)
+    out_tokens = estimate_tokens(doc)
+    print(f"compacted items={kept}/{len(items)} tokens={out_tokens} cost={usage_cost} ms={elapsed_ms}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -171,11 +354,24 @@ def main(argv: list[str] | None = None) -> int:
     p_expand.add_argument("--transcript", required=True)
     p_expand.add_argument("id")
 
-    p_compact = sub.add_parser("compact", help="(card 3) compose the compacted context")
-    p_compact.add_argument("--transcript")
-    p_compact.add_argument("--out")
+    p_compact = sub.add_parser("compact", help="compose the compacted context (card 3)")
+    p_compact.add_argument("--transcript", required=True)
+    p_compact.add_argument("--out", required=True)
+    p_compact.add_argument("--session-key", default="")
+    p_compact.add_argument("--state-heads", nargs="*", default=[])
     p_compact.add_argument("--digest-tokens", type=int, default=4000)
-    p_compact.add_argument("--budget-tokens", type=int, default=8000)
+    p_compact.add_argument(
+        "--budget-tokens", type=int,
+        default=state.coerce_int(state.plugin_option(_BUDGET_ENV), _DEFAULT_BUDGET_TOKENS),
+    )
+    p_compact.add_argument(
+        "--relevance-threshold", type=float,
+        default=_coerce_float(state.plugin_option(_RELEVANCE_ENV), jc.DEFAULT_RELEVANCE_THRESHOLD),
+    )
+    p_compact.add_argument(
+        "--decision-threshold", type=float,
+        default=_coerce_float(state.plugin_option(_DECISION_ENV), jc.DEFAULT_DECISION_THRESHOLD),
+    )
 
     args = parser.parse_args(argv)
     if args.command == "probe":

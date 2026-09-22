@@ -28,8 +28,17 @@ if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
 from jevctx import scorer as _scorer  # noqa: E402  -- needs the sys.path line above
+from jevctx.budget import BudgetPlanner  # noqa: E402
 from jevctx.tokens import estimate_tokens  # noqa: E402
-from jevctx.types import JevClient, Noul, ScoreItem  # noqa: E402
+from jevctx.types import (  # noqa: E402
+    MAX_QUESTIONS_PER_REQUEST,
+    JevClient,
+    JevValidationError,
+    Noul,
+    NoulAnswer,
+    Question,
+    ScoreItem,
+)
 
 __all__ = [
     "Item",
@@ -95,6 +104,11 @@ class Scores:
     decision: float
     oversized: bool
     kept: bool
+    # Baked in here for the same reason `kept`/`oversized` are: `score_items` is the one
+    # place that knows `decision_threshold`. `compose`'s budget eviction reads this to
+    # protect a user-stated decision/constraint/correction from being dropped for space
+    # before a merely-relevant item is (see `compose`'s eviction-order comment).
+    decision_passed: bool
 
 
 class NoDigest(Exception):
@@ -176,6 +190,11 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
             entry_type = entry.get("type")
             if entry_type not in _WALKED_ENTRY_TYPES:
                 continue
+            # A subagent's turns live in the SAME main transcript file (isSidechain: true)
+            # but are not the main conversation -- scoring/inlining them into the parent
+            # session's compacted context would mix two different tasks' history.
+            if entry.get("isSidechain"):
+                continue
 
             uuid = entry.get("uuid")
             ts = entry.get("timestamp")
@@ -247,18 +266,22 @@ def build_digest(
     """The small task description scored items are judged against.
 
     Order: STATE heads first (the durable, machine-produced facts), then the last three
-    human messages last (freshest signal of what's being worked on right now) -- so that
+    human messages and the last two assistant `text` blocks, chronological -- so that
     if the cap forces dropping whole parts, the least essential piece (an OLDER state head)
-    goes first and the freshest human words survive longest.
+    goes first and the freshest words survive longest. The last two assistant messages are
+    included alongside the human ones (not just the human ones alone) because on an
+    unattended session the last HUMAN message can be old -- what the agent last said it was
+    doing anchors relevance-scoring better than a stale human prompt alone would.
     """
     user_items = [it for it in items if it.kind == "user"]
-    last_three = user_items[-3:]
+    assistant_items = [it for it in items if it.kind == "assistant"]
+    recent = sorted(user_items[-3:] + assistant_items[-2:], key=lambda it: it.turn)
 
     parts: list[str] = [
         "\n".join(head.splitlines()[:30]) for head in trdd_state_heads
-    ] + [it.text for it in last_three]
+    ] + [it.text for it in recent]
 
-    if not last_three and not trdd_state_heads:
+    if not recent and not trdd_state_heads:
         raise NoDigest("no human message and no TRDD STATE head -- nothing to digest")
 
     # Drop whole parts from the front (the lowest-priority end, per the ordering above)
@@ -277,6 +300,21 @@ def build_digest(
     return "\n\n".join(parts)
 
 
+def _ref_question(question: Noul, ref: str) -> Noul:
+    """A copy of `question` whose instructions name `ref`.
+
+    Mirrors `jevctx.scorer._ref_question` (private, so duplicated here rather than reached
+    into across module boundaries): every item in a batch shares one `state`, so the
+    question text is the only thing that tells the model which ref+question pair an answer
+    is about.
+    """
+    return Noul(
+        instructions=f"Considering item {ref} only: {question.instructions}",
+        true=question.true,
+        false=question.false,
+    )
+
+
 def score_items(
     items: list[Item],
     digest: str,
@@ -285,41 +323,80 @@ def score_items(
     relevance_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
     decision_threshold: float = DEFAULT_DECISION_THRESHOLD,
 ) -> dict[str, Scores]:
-    """Score every item against both Noul questions and fold the result into `Scores`.
+    """Score every item against both Noul questions in ONE fan-out, not two.
 
-    Two library calls (`jevctx.scorer.score_items`), one per question -- not a hand-rolled
-    batching loop -- so batching/budget/oversized handling stays exactly what the vendored
-    library does. `on_error="raise"` is the one deliberate deviation from the library's own
-    default (`"keep"`, fail-open): the spec requires a scorer failure to propagate here so
-    the CALLER can fall back to the fact-only template, never silently keep everything.
+    A review of the first draft (two sequential `jevctx.scorer.score_items` calls, one per
+    question) found that sends every item's TEXT twice -- once per question's own batch
+    `state` -- doubling exactly the cost `jevctx.budget` exists to avoid (Jev bills for
+    `state`, not for questions). `jevctx.scorer.score_items` has no "two questions per item"
+    mode, so this drives `BudgetPlanner` + `client.ask()` directly instead: each batch's
+    `state.items` carries ONE entry per item (never duplicated), while the `questions` dict
+    carries TWO keys per item (`<ref>:rel`, `<ref>:dec`). `max_questions` is therefore HALVED
+    (`MAX_QUESTIONS_PER_REQUEST // 2`) when planning batches: the planner counts
+    `len(batch.items)` against `max_questions`, but each item now costs 2 real questions in
+    the request, so halving the item cap keeps the actual question count at or under Jev's
+    hard `MAX_QUESTIONS_PER_REQUEST` limit.
+
+    Always raises on a scorer failure -- never fails open like the library's own default.
+    The one caller (`scripts/jev_compact.py compact`) must fall back to the fact-only
+    template on any Jev error, never silently keep everything.
     """
     if not items:
         return {}
 
     lib_items = [ScoreItem(id=it.id, text=it.text, tokens=it.tokens) for it in items]
-    relevance_results = _scorer.score_items(
-        client, digest, lib_items, RELEVANCE_QUESTION, on_error="raise"
-    )
-    decision_results = _scorer.score_items(
-        client, digest, lib_items, DECISION_QUESTION, on_error="raise"
-    )
-    relevance_by_id = {r.item_id: r for r in relevance_results}
-    decision_by_id = {r.item_id: r for r in decision_results}
+    items_by_id = {it.id: it for it in items}
+
+    rel_tokens = estimate_tokens(_ref_question(RELEVANCE_QUESTION, "i0").to_payload())
+    dec_tokens = estimate_tokens(_ref_question(DECISION_QUESTION, "i0").to_payload())
+    # `BudgetPlanner._fits` uses `question_tokens` two ways: (a) `state + question_tokens *
+    # count` against the "all questions" cap -- correct here, since `count` items really do
+    # cost `question_tokens` (both questions) each; and (b) `state + question_tokens` against
+    # the "longest single question" cap -- an intentional OVER-estimate here (a real batch's
+    # longest single question is only ~half of `question_tokens`), which is conservative in
+    # the safe direction (packs batches a bit smaller / more round trips, never overflows a
+    # real Jev limit) rather than under-estimating and risking a 422.
+    question_tokens = rel_tokens + dec_tokens
+    envelope_tokens = estimate_tokens(_scorer.build_state(digest, [], []))
+
+    planner = BudgetPlanner(max_questions=MAX_QUESTIONS_PER_REQUEST // 2)
+    batches = planner.plan(lib_items, question_tokens, envelope_tokens)
 
     scores: dict[str, Scores] = {}
-    for it in items:
-        rel = relevance_by_id[it.id]
-        dec = decision_by_id[it.id]
-        # An oversized item is fail-open at the library level (never sent, always score
-        # 1.0) regardless of on_error -- it is a budget decision, not a scorer failure.
-        # Mark it here so `compose` can still refuse to inline it (spec: "never inlined").
-        oversized = rel.error == "oversized" or dec.error == "oversized"
-        kept = (not oversized) and (
-            rel.score >= relevance_threshold or dec.score >= decision_threshold
-        )
-        scores[it.id] = Scores(
-            relevance=rel.score, decision=dec.score, oversized=oversized, kept=kept
-        )
+    for batch in batches:
+        if batch.meta.get("oversized"):
+            # Never sent -- fail-open at the library level regardless of caller intent,
+            # exactly like jevctx.scorer's own oversized handling. `compose` still refuses
+            # to inline it because `oversized=True` here (spec: "never inlined").
+            it = items_by_id[batch.items[0].id]
+            scores[it.id] = Scores(relevance=1.0, decision=1.0, oversized=True,
+                                    kept=False, decision_passed=False)
+            continue
+
+        refs = batch.question_keys
+        state = _scorer.build_state(digest, batch.items, refs)
+        questions: dict[str, Question] = {}
+        for ref in refs:
+            questions[f"{ref}:rel"] = _ref_question(RELEVANCE_QUESTION, ref)
+            questions[f"{ref}:dec"] = _ref_question(DECISION_QUESTION, ref)
+
+        answers = client.ask(state, questions)  # a JevError here propagates -- see docstring
+
+        for ref, lib_item in zip(refs, batch.items, strict=True):
+            rel_answer = answers.get(f"{ref}:rel")
+            dec_answer = answers.get(f"{ref}:dec")
+            if not isinstance(rel_answer, NoulAnswer) or not isinstance(dec_answer, NoulAnswer):
+                raise JevValidationError(
+                    f"expected NoulAnswers for ref {ref!r}, got "
+                    f"{type(rel_answer).__name__}/{type(dec_answer).__name__}"
+                )
+            it = items_by_id[lib_item.id]
+            rel = rel_answer.value
+            dec = dec_answer.value
+            decision_passed = dec >= decision_threshold
+            kept = rel >= relevance_threshold or decision_passed
+            scores[it.id] = Scores(relevance=rel, decision=dec, oversized=False,
+                                    kept=kept, decision_passed=decision_passed)
     return scores
 
 
@@ -330,6 +407,19 @@ def _format_pointer(item: Item) -> str:
     # the transcript is 24-258 MB (docs_dev/jev-compaction-spec.md card 3) -- so the path
     # lives once, in the header, never per pointer.
     return f'[[elided id={item.id} tokens={item.tokens} "{preview}"]]'
+
+
+# Spec: "Oversized single item (jev marks oversized) -> never inlined; pointer + first 20
+# lines" -- a DIFFERENT, richer pointer than a plain budget-dropped item gets (that one is
+# just the single-line `_format_pointer` above). An oversized item never even reached Jev
+# (jevctx's own budget planner refuses to send it -- see `score_items`), so it has no
+# relevance/decision signal at all; the extra 20 lines give the model enough to decide
+# whether `expand` is worth it, which the 80-char preview alone cannot.
+_OVERSIZED_PREVIEW_LINES = 20
+
+
+def _oversized_preview(item: Item) -> str:
+    return "\n".join(item.text.splitlines()[:_OVERSIZED_PREVIEW_LINES])
 
 
 def compose(
@@ -358,12 +448,19 @@ def compose(
         s = scores[it.id]
         return max(s.relevance, s.decision)
 
+    def evict_key(it: Item) -> tuple[bool, float, int]:
+        # (decision_passed, max_score, turn) ascending: a relevance-only item (`False`)
+        # sorts, and is dropped, BEFORE any item that passed the decision question -- "never
+        # let the budget undo the decision question" (a user-stated decision, constraint,
+        # correction or instruction the user gave later work must obey is worse to lose than
+        # merely-relevant background). Within each group, lowest score first, oldest
+        # (smallest `turn`) among equal scores -- unchanged from before.
+        return (scores[it.id].decision_passed, max_score(it), it.turn)
+
     total_tokens = sum(it.tokens for it in kept_items)
     kept_ids = {it.id for it in kept_items}
     if total_tokens > budget_tokens:
-        # Ascending (max_score, turn): lowest score dropped first; among equal scores the
-        # smaller `turn` (older) sorts first and is dropped first ("oldest among equals").
-        for it in sorted(kept_items, key=lambda it: (max_score(it), it.turn)):
+        for it in sorted(kept_items, key=evict_key):
             if total_tokens <= budget_tokens:
                 break
             kept_ids.discard(it.id)
@@ -395,6 +492,8 @@ def compose(
     for it in items:
         if it.id not in kept_ids:
             lines.append(_format_pointer(it))
+            if scores[it.id].oversized:
+                lines.append(_oversized_preview(it))
 
     lines.append("")
     lines.append(

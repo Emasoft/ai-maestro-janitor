@@ -70,6 +70,8 @@ def test_no_hook_or_named_lib_script_imports_jevctx_or_httpx() -> None:
     offenders = [
         str(p.relative_to(_REPO_ROOT))
         for p in candidates
-        if _imports(p.read_text(), "jevctx") or _imports(p.read_text(), "httpx")
+        if _imports(p.read_text(), "jevctx")
+        or _imports(p.read_text(), "httpx")
+        or _imports(p.read_text(), "jev_compaction")
     ]
-    assert offenders == [], f"scripts importing jevctx/httpx in-process: {offenders}"
+    assert offenders == [], f"scripts importing jevctx/httpx/jev_compaction in-process: {offenders}"

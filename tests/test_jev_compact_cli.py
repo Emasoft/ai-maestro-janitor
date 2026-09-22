@@ -1,12 +1,13 @@
-"""Tests for scripts/jev_compact.py (TRDD-541CBN36 card 2): `expand` and `probe`.
+"""Tests for scripts/jev_compact.py (TRDD-541CBN36 card 2, TRDD-RAEGS1D5 card 3 part B).
 
 `expand` is tested against a tiny synthetic transcript carrying the three block kinds the
 spec names (user text, assistant text block, tool_result block) — not a real transcript,
-which can be 24-258 MB per the study's facts. `probe` is tested by monkeypatching
+which can be 24-258 MB per the study's facts. `probe`/`compact` are tested by monkeypatching
 `jev_compact.make_client` (the name bound in jev_compact's own module namespace), so no
 network call happens and every exit code the CLI contract promises is exercised directly.
-`compact` is a card-3 stub here; this file only pins its exit code so nothing external
-starts depending on a richer stub shape by accident.
+Every test runs under an isolated `JANITOR_CONTROL_DIR` (see `_isolated_control_dir` below)
+so the probe stamp `compact`/`probe` write never touches this machine's real
+`~/.claude/janitor-control/`.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import importlib.util as _u
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,11 @@ import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _PROJECT_ROOT / "scripts" / "jev_compact.py"
+_FIXTURE = _PROJECT_ROOT / "tests" / "fixtures" / "jev_transcript_small.jsonl"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+
+import jev_compaction as jc  # noqa: E402
+from jevctx.testing import FakeJevClient  # noqa: E402  -- needs the sys.path line above
 
 
 def _import():
@@ -33,6 +39,18 @@ def _import():
 
 
 jev_compact = _import()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_control_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test in this file gets its OWN, empty control dir -- `probe`/`compact` write
+    the probe stamp unconditionally, and without this every test run would write to (and a
+    stale stamp from one test could leak into) this machine's real
+    `~/.claude/janitor-control/jev-probe.json` (`global_state.control_dir()`'s
+    `JANITOR_CONTROL_DIR` env override -- see `scripts/lib/global_state.py::control_dir`)."""
+    control = tmp_path / "control"
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(control))
+    return control
 
 
 def _write_transcript(tmp_path: Path) -> Path:
@@ -183,7 +201,146 @@ def test_probe_ask_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.closed
 
 
-def test_compact_is_still_a_card3_stub() -> None:
-    code, out = _run(["compact"])
-    assert code == 4
-    assert "card 3" in out
+def _keep_only(*keywords: str):
+    """A `FakeJevClient` answer function: keep an item iff its text contains one of
+    `keywords`, on BOTH the relevance and decision question. Keys arrive as `<ref>:rel` /
+    `<ref>:dec` (score_items sends both questions for an item in one request); the ref is
+    the part before the ':'."""
+
+    def answer(state: Any, questions: Any, key: str) -> float:
+        ref = key.split(":", 1)[0]
+        text = ""
+        if isinstance(state, dict):
+            for entry in state.get("items", []):
+                if entry.get("ref") == ref:
+                    text = entry.get("text", "")
+        return 0.9 if any(kw in text for kw in keywords) else 0.05
+
+    return answer
+
+
+def test_compact_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    # "bug" keeps the user message and the assistant's text; the dangling tool_result item
+    # ("file written: 12 lines") has no such keyword, so it must be elided -- giving this
+    # test both a kept item AND a pointer, per the task's own "pointers present" requirement.
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert "compacted items=" in output
+    assert out.exists()
+    doc = out.read_text(encoding="utf-8")
+    pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided")]
+    assert pointer_lines, "expected at least one elided pointer"
+    for line in pointer_lines:
+        assert str(transcript) not in line  # spec: a pointer never carries a path
+    assert doc.count(str(transcript)) == 2  # header line + the one fixed trailing line
+
+
+def test_compact_declines_on_recent_probe_failure(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated outage", "ts": time.time(),
+              "cost": None, "model": None, "provider": "openrouter"}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    def _must_not_be_called() -> Any:
+        raise AssertionError("make_client must not be called on a fast decline")
+
+    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 5
+    assert "declined: recent probe failure: simulated outage" in output
+    assert not out.exists()
+
+
+def test_compact_no_digest_material(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A single dangling tool_result: extract_items yields one `kind="tool"` item and ZERO
+    # user/assistant items, and no --state-heads is passed -- build_digest has nothing to
+    # judge relevance against.
+    entries = [{
+        "type": "user", "uuid": "u1", "parentUuid": None,
+        "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "missing", "content": "orphaned result"}
+        ]},
+    }]
+    transcript = tmp_path / "no_digest.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    out = tmp_path / "compacted.md"
+
+    def _must_not_be_called() -> Any:
+        raise AssertionError("make_client must not be called when there is no digest")
+
+    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 6
+    assert "declined: no digest material" in output
+    assert not out.exists()
+
+
+def test_compact_scorer_error_writes_failure_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jevctx.types import JevUnavailableError
+
+    class _FailingScoreClient:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            raise JevUnavailableError("simulated 503")
+
+    monkeypatch.setattr(jev_compact, "make_client", lambda: _FailingScoreClient())
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 7
+    assert "simulated 503" in output
+    assert not out.exists()
+
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["ok"] is False
+    assert "simulated 503" in stamp["reason"]
+
+
+def test_expand_round_trips_a_composed_pointer_id() -> None:
+    """`compose()`'s pointer ids are `<entry uuid>:<block index>` positions in the RAW
+    content list (jev_compaction.Item's own contract) -- prove that claim against `expand`'s
+    OWN indexing, on the real fixture transcript, not just by construction. A `kind="tool"`
+    item is deliberately skipped for the round-trip: its `Item.text` is a SYNTHESIZED
+    "name(input)\\nresult" pairing (see jev_compaction.extract_items), not the raw
+    tool_result block's own content -- `expand` correctly returns the latter, so comparing
+    against a tool item would be a false mismatch, not evidence of an indexing bug."""
+    items = jc.extract_items(_FIXTURE)
+    scores = {
+        it.id: jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                          decision_passed=False)
+        for it in items
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": str(_FIXTURE), "session_key": "s"})
+
+    by_id = {it.id: it for it in items}
+    target_id = None
+    for line in doc.splitlines():
+        if not line.startswith("[[elided"):
+            continue
+        candidate = line.split("id=", 1)[1].split(" ", 1)[0]
+        if by_id[candidate].kind != "tool":
+            target_id = candidate
+            break
+    assert target_id is not None, "expected at least one non-tool elided item"
+
+    code, out = _run(["expand", "--transcript", str(_FIXTURE), target_id])
+    assert code == 0
+    assert out.rstrip("\n") == by_id[target_id].text
