@@ -201,28 +201,76 @@ def test_context_tokens_for_resume_stays_none_when_neither_source_has_anything(
     got = ccc.context_tokens_for_resume(missing, project_dir=tmp_path, session_id="no-such-session", now=1_000_000)
     assert got is None
 
-
-
-def test_context_tokens_for_resume_discards_a_stale_snapshot(tmp_path: Path) -> None:
-    """Adversarial-review finding (TRDD-L32WC0H7 card 1 follow-up): a snapshot older than
-    token_meter's own staleness window must NOT authorize a clear — it is a cached number a
-    different process wrote, and trusting it blindly would regress the exact failure mode item 1
-    was written to close (a wrong-but-present reading silently authorizing a destructive /clear).
+def test_context_tokens_for_resume_discards_a_snapshot_the_transcript_has_outgrown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Post-review fix (TRDD-L32WC0H7 card 1 follow-up item 1 v2): staleness is an ORDERING
+    check against the transcript, never wall-clock age against `now` -- a snapshot is only
+    wrong once the transcript grew AFTER it was written. `snap_ts` here is recent by wall-clock
+    terms (unlike the old, now-removed age-based test this replaces) to prove age plays no part:
+    only the transcript's mtime landing after it matters.
     """
     import json
+    import os
 
-    import token_meter
+    t = tmp_path / "s.jsonl"
+    t.write_text("some later activity\n", encoding="utf-8")
 
-    missing = tmp_path / "does-not-exist.jsonl"
     snap_dir = tmp_path / ".claude" / "janitor"
     snap_dir.mkdir(parents=True)
-    stale_ts = 1_000_000 - token_meter._CONTEXT_SNAPSHOT_STALE_AGE_S - 1
+    snap_ts = 1_000_000 - 5  # 5s old -- well inside token_meter's own 120s window
     (snap_dir / "context-usage.s1.json").write_text(
-        json.dumps({"pct": 40, "tokens": 400_000, "window": 1_000_000, "ts": stale_ts}),
+        json.dumps({"pct": 40, "tokens": 400_000, "window": 1_000_000, "ts": snap_ts}),
         encoding="utf-8",
     )
-    got = ccc.context_tokens_for_resume(missing, project_dir=tmp_path, session_id="s1", now=1_000_000)
+    os.utime(t, (snap_ts + 100, snap_ts + 100))  # transcript written AFTER the snapshot
+    monkeypatch.setattr(ccc, "context_tokens_for", lambda _p: None)  # force the fallback branch
+
+    got = ccc.context_tokens_for_resume(t, project_dir=tmp_path, session_id="s1", now=1_000_000)
     assert got is None
+
+
+def test_context_tokens_for_resume_keeps_an_old_snapshot_the_transcript_has_not_outgrown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The resume-lane bug this fix closes: a session idle for 26h has a snapshot that is, by
+    wall-clock age, always "stale" -- but nothing ran on the transcript while it was idle, so
+    the number is still exactly right and must NOT be discarded."""
+    import json
+    import os
+
+    t = tmp_path / "s.jsonl"
+    t.write_text("some earlier activity\n", encoding="utf-8")
+
+    snap_dir = tmp_path / ".claude" / "janitor"
+    snap_dir.mkdir(parents=True)
+    now = 1_000_000
+    snap_ts = now - 26 * 3600  # written 26h before the restart -- ordinary resume, not corruption
+    (snap_dir / "context-usage.s1.json").write_text(
+        json.dumps({"pct": 40, "tokens": 400_000, "window": 1_000_000, "ts": snap_ts}),
+        encoding="utf-8",
+    )
+    os.utime(t, (snap_ts, snap_ts))  # transcript untouched since the snapshot was written
+    monkeypatch.setattr(ccc, "context_tokens_for", lambda _p: None)  # force the fallback branch
+
+    got = ccc.context_tokens_for_resume(t, project_dir=tmp_path, session_id="s1", now=now)
+    assert got == 400_000
+
+
+def test_context_tokens_for_resume_transcript_with_no_assistant_usage_is_none(tmp_path: Path) -> None:
+    """No snapshot and a transcript big enough to force the tail-window branch, but with no
+    usage-bearing assistant entry anywhere in it: genuinely unmeasurable, never guessed."""
+    import json
+
+    t = tmp_path / "s.jsonl"
+    filler = json.dumps({"type": "user", "message": {"content": "x" * 200}}) + "\n"
+    with t.open("w", encoding="utf-8") as fh:
+        while fh.tell() < 600_000:  # exceed token_meter._TAIL_BYTES (512 KiB)
+            fh.write(filler)
+
+    got = ccc.context_tokens_for_resume(t, project_dir=tmp_path, session_id="no-such-session", now=1_000_000)
+    assert got is None
+
 
 
 def test_newest_transcript_picks_latest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

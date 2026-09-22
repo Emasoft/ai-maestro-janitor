@@ -582,16 +582,21 @@ def context_tokens_for_resume(
     only calls its existing public API a second time, with the extra facts (`project_dir`,
     `session_id`, `now`) only the resume lane has on hand.
 
-    NOT "VERBATIM", ON PURPOSE (adversarial review, TRDD-L32WC0H7 card 1 follow-up): a snapshot
-    is a CACHED number a DIFFERENT process wrote, not a transcript read, and `resolve_context`'s
-    own `stale` bool exists exactly so a caller can refuse a snapshot that predates something —
-    a crash mid-turn, a kill -9 -- that left it uncorrected. This function is authorizing a
-    destructive `/clear`, so a STALE snapshot is discarded and treated the same as no signal at
-    all (falls through to the transcript-only branch `resolve_context` also tries internally,
-    then to `None`) rather than trusted at face value. The prior draft of this function silently
-    dropped `_stale` entirely, which would have let a stale-but-present number authorize a clear
-    that the old (pre-this-function) code correctly refused as unmeasurable -- a REGRESSION in
-    the exact failure mode TRDD-L32WC0H7 card 1 item 1 was written to close.
+    STALENESS IS NOT WALL-CLOCK AGE (post-review fix, TRDD-L32WC0H7 card 1 follow-up item 1 v2).
+    `resolve_context`'s own `stale` bool is `(now - snapshot_ts) > 120s` -- correct for its
+    original caller (a LIVE hook, where a >120s gap between statusline writes means the CLI
+    stopped updating mid-session and the number is suspect). On the RESUME lane `now` is the
+    RESTART time, and the snapshot is by definition the last thing the PRIOR run wrote before
+    the session went idle for hours or days -- `now - snapshot_ts` is large on every single
+    resume, not just the corrupted ones, so trusting that bool here would make this function
+    refuse on the ordinary case and only work by accident (resuming inside 2 minutes). Nothing
+    ran on this transcript while the session was idle, so the snapshot is still exactly right
+    UNLESS the transcript itself grew after the snapshot was written (a crash mid-turn, a
+    `kill -9`, an editor appending JSONL directly). So staleness here is checked the same way
+    `token_meter.reading_predates_compaction` checks it elsewhere in this codebase: by ORDERING
+    against the transcript, not by AGE against the wall clock -- the transcript's own mtime is
+    compared to the snapshot's `ts`, and only a transcript written AFTER the snapshot discards
+    it.
 
     Falls back to the live tail reading first (the common, cheap case); only calls
     `resolve_context` when that reading is None. Best-effort, never raises -- a bad transcript
@@ -601,14 +606,37 @@ def context_tokens_for_resume(
     if live is not None:
         return live
     try:
-        _pct, tokens, _window, stale = token_meter.resolve_context(
+        snap = token_meter.read_context_snapshot(str(project_dir), session_id)
+        _pct, tokens, _window, _stale = token_meter.resolve_context(
             str(project_dir),
             session_id,
             str(transcript_path) if transcript_path else "",
             token_meter.default_window(),
             now=now,
         )
-        return None if stale else tokens
+        if tokens is None:
+            return None
+        # Ordering check, not age: a snapshot from a statusline write is only wrong once the
+        # transcript has grown SINCE it was taken -- an idle session's old snapshot is still
+        # the true number (see docstring). `_stale` above is deliberately ignored: it is
+        # wall-clock-vs-now and would discard every ordinary resume.
+        # ponytail: whole-second mtime vs an int `ts` can tie within the same second (the
+        # snapshot writer reads the transcript, then one more line lands in that same wall-
+        # clock second before `ts` is persisted) -- `mtime > snap_ts` reads as "not stale" on
+        # that tie, a sub-second-scale miss in the OPPOSITE direction from the bug this fix
+        # closes (hours-to-days-scale false positives). Adversarial review flagged it
+        # (TRDD-L32WC0H7 card 1 follow-up item 1 v2); accepted as a known, tolerable ceiling --
+        # upgrade path: compare against the transcript's own last-entry timestamp instead of
+        # mtime if a real race is ever observed.
+        snap_ts = snap.get("ts") if snap else None
+        if isinstance(snap_ts, int) and transcript_path:
+            try:
+                mtime = int(Path(transcript_path).stat().st_mtime)
+            except OSError:
+                mtime = None
+            if mtime is not None and mtime > snap_ts:
+                return None
+        return tokens
     except Exception:  # noqa: BLE001 -- a bad snapshot/transcript must never break a resume
         return None
 
