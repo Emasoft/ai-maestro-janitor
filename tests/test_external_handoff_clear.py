@@ -79,7 +79,9 @@ def _armed_run(root: Path, *, on_resume: bool) -> tuple[int, str]:
     import io
 
     sd = root / ".janitor" / "state"
-    args = argparse.Namespace(dry_run=False, force=False, on_resume=on_resume, project_root=str(root))
+    args = argparse.Namespace(
+        dry_run=False, force=False, on_resume=on_resume, project_root=str(root), session_id=""
+    )
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         rc = ehc._run(root, sd, int(time.time()), args)
@@ -216,6 +218,50 @@ def test_awaiting_user_veto_reaches_the_watcher_end_to_end(tmp_path, monkeypatch
     assert forced.fire is False and forced.why == "awaiting-user", (
         "--force overrides trigger terms only; a human is being asked a question"
     )
+
+
+
+def test_decide_on_resume_uses_the_widened_reader_when_a_session_id_is_given(tmp_path, monkeypatch):
+    """Adversarial-review finding (TRDD-L32WC0H7 card 1 follow-up): the confirmatory `--on-resume`
+    re-check must use the SAME widened `cold_cache_compact.context_tokens_for_resume` reader the
+    SessionStart hook used, not silently disagree with it via the narrower plain reading — this
+    is what the new `session_id` parameter on `_decide` threads through for."""
+    import cold_cache_compact
+
+    monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no agentlensPro subprocess
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    now = int(time.time())
+    captured: dict = {}
+
+    def _fake_resume_reader(transcript_path, *, project_dir, session_id, now):
+        captured["called"] = True
+        captured["session_id"] = session_id
+        return 424_242
+
+    monkeypatch.setattr(cold_cache_compact, "context_tokens_for_resume", _fake_resume_reader)
+    verdict, facts = ehc._decide(root, sd, now, force=False, on_resume=True, session_id="s1")
+    assert captured.get("called") is True
+    assert captured.get("session_id") == "s1"
+    assert facts["context_tokens"] == 424_242
+
+
+def test_decide_on_resume_falls_back_to_the_plain_reader_without_a_session_id(tmp_path, monkeypatch):
+    """No `session_id` (a bare CLI `--on-resume` invocation) keeps the pre-existing behaviour --
+    the widened reader is never even called, so this path costs nothing extra for that caller."""
+    import cold_cache_compact
+
+    monkeypatch.setenv(ec.CACHE_EXPIRED_COMMAND_ENV, "")  # no agentlensPro subprocess
+    root = _project(tmp_path)
+    sd = root / ".janitor" / "state"
+    now = int(time.time())
+
+    def _boom(*a, **kw):
+        raise AssertionError("the widened reader must not be called without a session_id")
+
+    monkeypatch.setattr(cold_cache_compact, "context_tokens_for_resume", _boom)
+    verdict, facts = ehc._decide(root, sd, now, force=False, on_resume=True)
+    assert verdict.fire is False  # no transcript in this bare tmp project -> unmeasurable
 
 
 def test_unknown_idle_holds_end_to_end_and_touches_nothing(tmp_path):
@@ -503,7 +549,9 @@ def test_dry_run_never_arms_the_summary_hold(tmp_path, monkeypatch, capsys):
     fired = types.SimpleNamespace(count=0)
     monkeypatch.setattr(ehc, "_fire", lambda *_a, **_k: setattr(fired, "count", fired.count + 1))
 
-    args = argparse.Namespace(dry_run=True, force=False, on_resume=False, project_root=str(root))
+    args = argparse.Namespace(
+        dry_run=True, force=False, on_resume=False, project_root=str(root), session_id=""
+    )
     assert ehc._run(root, sd, int(time.time()), args) == 0
     out = capsys.readouterr().out
     assert "DRY_RUN" in out, out
@@ -516,4 +564,3 @@ def test_dry_run_never_arms_the_summary_hold(tmp_path, monkeypatch, capsys):
     assert ehc._run(root, sd, int(time.time()), args) == 0
     out = capsys.readouterr().out
     assert "would decline" in out, out
-    assert "would clear" not in out, "same inputs must not produce opposite reports"

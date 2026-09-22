@@ -194,7 +194,7 @@ def _last_turn_age(root: Path, now: int) -> int | None:
 
 
 def _decide(
-    root: Path, sd: Path, now: int, *, force: bool, on_resume: bool = False
+    root: Path, sd: Path, now: int, *, force: bool, on_resume: bool = False, session_id: str = ""
 ) -> tuple[ec.ClearVerdict, dict]:
     """Gather every runtime fact and run the pure gate. Returns (verdict, facts-for-logging)."""
     import cold_cache_compact  # noqa: PLC0415
@@ -203,7 +203,7 @@ def _decide(
 
     # `user_intent` is deliberately NOT imported: this path knows nothing about whether the
     # user is "present". The only keystroke fact anywhere in the system is the LAST KEYSTROKE
-    # TIMESTAMP, and it lives where it is used — inside the injector, which defers 8 s from it
+    # TIMESTAMP, and it lives where it is used -- inside the injector, which defers 8 s from it
     # and retries. A presence predicate here is what kept this watcher dead for weeks.
 
     cron = ""
@@ -216,21 +216,28 @@ def _decide(
     # TRDD-O7UCNNN2: the gate's idle term must ignore heartbeat-only turns, or an ARMED session
     # (this watcher's whole audience) can never exceed the ~5-min beat cadence and the 1-hour
     # floor below is unreachable by construction. `idle_s` (the substantive age) is kept for
-    # logging/comparison only — `human_idle_s` is what feeds the gate.
+    # logging/comparison only -- `human_idle_s` is what feeds the gate.
     human_idle_s = fleet_scan.human_activity_age(str(root), now)
-    # `trailing_enqueues` is deliberately NOT wired into `should_clear_externally` — it is a
+    # `trailing_enqueues` is deliberately NOT wired into `should_clear_externally` -- it is a
     # DIFFERENT signal (the daemon's wedged-session evidence, TRDD-8DR0X08A F2: how many typed
     # commands sat queued and never executed), not a veto for THIS gate. It cannot substitute for
     # `awaiting_user` either: per `fleet_scan.awaiting_user_decision`'s own docstring it only goes
     # non-zero AFTER something has already been typed, so it would miss the FIRST unanswered
-    # `tool_use` — the one that actually reaches a human. `awaiting_user`, below, is the fix for
+    # `tool_use` -- the one that actually reaches a human. `awaiting_user`, below, is the fix for
     # TRDD-OO301H7D: it used to be bound to `_await` and discarded on this same line.
     # Resolved ONCE and carried in `facts`, because `_capture_summary_source` needs the same
-    # transcript the verdict was computed from — it is what names the summary source on disk
+    # transcript the verdict was computed from -- it is what names the summary source on disk
     # for the delegated summarizer to pick up (TRDD-QZVAEWQH).
     newest = cold_cache_compact.newest_transcript(root)
     active_waiting = dispatch._cadence_active_waiting(sd, now)
     in_cooldown = cold_cache_compact.clear_in_cooldown(sd, now=now)
+    # RECOVERY GUARD (card 1 follow-up item 2, TRDD-L32WC0H7): this daemon-lane decider used to
+    # reach BOTH `should_clear_externally` and `should_clear_on_resume` with no recovery guard
+    # at all -- `recovery_pending` defaulted False on both, silently, which is the actual bug
+    # this closes. `external_clear.recovery_pending` is the SAME shared helper the SessionStart
+    # hook and `dispatch._cadence_active_waiting` use, so the allow-list of pending-recovery
+    # flags can never drift between the three callers again.
+    recovery_pending = ec.recovery_pending(sd)
     # The user's presence is deliberately NOT gathered (owner, 2026-08-13). It used to be read
     # here and fed to the gate as a hard veto; since the injector handles presence by DELAYING
     # 8 s per keystroke and never cancelling, reading it here could only re-introduce the
@@ -240,20 +247,20 @@ def _decide(
     # Both vetoes hold regardless of what the probe would say, so probing first would spend a
     # bounded-but-real 5 s per fire to compute an input the gate is about to ignore.
     cache_expired = None if (active_waiting or in_cooldown) else ec.cache_certainly_expired(root)
-    # TRDD-2F3I2P18 — a model/effort switch or a plugin/skill reload kills the prefix OUTRIGHT,
+    # TRDD-2F3I2P18 -- a model/effort switch or a plugin/skill reload kills the prefix OUTRIGHT,
     # so from this gate's point of view it is an expired cache arriving by a different route.
     # OR'd into the existing term rather than given a branch of its own: it wants the same veto
     # set, the same cooldown and the same tests, and a parallel trigger would drift from them.
-    # Logged separately below so the ATTRIBUTION stays honest — "cache expired", "you switched
+    # Logged separately below so the ATTRIBUTION stays honest -- "cache expired", "you switched
     # model" and "you reloaded plugins" are the same verdict for very different reasons, and a
     # log line that cannot tell them apart is one nobody can act on.
     prefix_dead = None if (active_waiting or in_cooldown) else ec.prefix_invalidated()
     if prefix_dead:
-        state.log_line(_LOG, "prefix invalidated (model/effort switch) — treating as cache-expired")
+        state.log_line(_LOG, "prefix invalidated (model/effort switch) -- treating as cache-expired")
         cache_expired = True
     # Probed AFTER the same vetoes, and NOT short-circuited by `prefix_dead`: the probe consumes
     # its cursor, so skipping it when the model switch already fired would leave a pending reload
-    # event to trigger a SECOND clear on the next beat — one dead prefix, two clears.
+    # event to trigger a SECOND clear on the next beat -- one dead prefix, two clears.
     # `last_turn_age` doubles as the reload probe's paid-detector: a transcript turn newer
     # than an ack stamp means the re-cache already happened and the event must not fire.
     last_turn_age = _last_turn_age(root, now)
@@ -269,12 +276,12 @@ def _decide(
     if reload_dead:
         state.log_line(
             _LOG,
-            "prefix invalidated (reload/model-switch stamp) — treating as cache-expired",
+            "prefix invalidated (reload/model-switch stamp) -- treating as cache-expired",
         )
         cache_expired = True
     # SPLIT DELIBERATELY: `gate` is exactly the pure decision's parameters, `facts` is the log
     # record that also carries composer-only fields. They were one dict until `transcript` was
-    # added to it, which made every run raise `unexpected keyword argument 'transcript'` — the
+    # added to it, which made every run raise `unexpected keyword argument 'transcript'` -- the
     # whole watcher was dead on arrival and the `# type: ignore[arg-type]` that used to sit on
     # the call is what hid it from mypy. Keep them separate: a composer field can never again
     # reach the gate by being added to the wrong dict.
@@ -291,7 +298,8 @@ def _decide(
         "in_cooldown": in_cooldown,
         "awaiting_user": awaiting_user,
         "cache_expired": cache_expired,
-        # TRDD-79LXF6PJ — the ONLY trigger that can fire on a busy session, and it is OWNED
+        "recovery_pending": recovery_pending,
+        # TRDD-79LXF6PJ -- the ONLY trigger that can fire on a busy session, and it is OWNED
         # CONDITIONALLY: while Claude Code still auto-compacts, the janitor must stay out of the
         # way or the session is compacted twice. 0 disables the trigger, so resolving ownership
         # here keeps the pure gate free of the question.
@@ -299,14 +307,14 @@ def _decide(
             0 if ec.harness_auto_compacts() else ec.context_high_water_tokens()
         ),
     }
-    # `trailing_enqueues` is log-only (see the comment where it is unpacked above) — carried in
+    # `trailing_enqueues` is log-only (see the comment where it is unpacked above) -- carried in
     # `facts`, never in `gate`, so it stays visible for diagnosis without becoming an undeclared
     # extra keyword `should_clear_externally` would reject.
     facts = {
         **gate,
         "transcript": str(newest) if newest else "",
         "trailing_enqueues": trailing_enqueues,
-        # Both ages kept side by side for diagnosis — TRDD-O7UCNNN2 replaced the substantive
+        # Both ages kept side by side for diagnosis -- TRDD-O7UCNNN2 replaced the substantive
         # age with the human one as the GATE's input, but seeing them diverge is exactly the
         # evidence that the fix is doing something on an armed session.
         "transcript_idle_s": idle_s,
@@ -314,27 +322,48 @@ def _decide(
     }
     if on_resume:
         # The RESUME gate, not the abandoned-session one. A session loaded seconds ago can never
-        # satisfy the long-idle term, so `should_clear_externally` would refuse every resume —
+        # satisfy the long-idle term, so `should_clear_externally` would refuse every resume --
         # which is precisely the shrink that matters most, because the first turn after a cold
         # load re-reads the whole context at full price. The hook has already established the
         # `source`; re-asserting it here keeps the pure gate the single place that enforces it.
+        #
+        # ADVERSARIAL-REVIEW FINDING, TRDD-L32WC0H7 card 1 follow-up: this confirmatory re-check
+        # used to always reuse `gate["context_tokens"]` (the plain tail-only reading), while the
+        # SessionStart hook that decided to SPAWN this watcher already measured with the widened
+        # `context_tokens_for_resume`. On the exact case item 1 exists for (a tail-window miss) the
+        # two readings could disagree: the hook fires (its widened reading found a real number),
+        # this confirmatory check re-measures with the narrower reader, gets None again, and
+        # silently declines -- so nothing is ever cleared and the hook's own fire decision becomes
+        # a no-op, with no signal that it happened. `session_id` (passed by the hook via
+        # `--session-id` when it spawns this watcher) lets this re-check use the SAME widened
+        # reader on the SAME facts. Absent (a bare CLI `--on-resume` invocation with no
+        # `--session-id`) this falls back to the pre-existing plain reading -- unchanged for that
+        # caller.
+        resume_context_tokens = (
+            cold_cache_compact.context_tokens_for_resume(
+                newest, project_dir=root, session_id=session_id, now=now
+            )
+            if session_id
+            else gate["context_tokens"]
+        )
         verdict = ec.should_clear_on_resume(
             source="resume",
             cache_expired=cache_expired,
-            context_tokens=gate["context_tokens"],
+            context_tokens=resume_context_tokens,
             min_context=gate["min_context"],
             in_cooldown=in_cooldown,
             already_fired_this_session=False,
+            recovery_pending=recovery_pending,
         )
-        return verdict, {**facts, "gate": "resume"}
+        return verdict, {**facts, "gate": "resume", "context_tokens": resume_context_tokens}
     verdict = ec.should_clear_externally(**gate)
     if force and not verdict.fire and verdict.why.startswith(("idle ", "no-headroom")):
         # --force overrides the two TRIGGER terms ONLY (is it idle enough / would the next fire
-        # miss). Every SAFETY veto — cooldown, active waiting, awaiting-user (a human is being
-        # asked a question — TRDD-OO301H7D), unknown idle, tiny context — still holds, because
+        # miss). Every SAFETY veto -- cooldown, active waiting, awaiting-user (a human is being
+        # asked a question -- TRDD-OO301H7D), unknown idle, tiny context -- still holds, because
         # those are the ones that protect work, and an operator asking to observe the mechanism
         # has not thereby authorized clearing a session someone is typing into or waiting on.
-        # (There is no separate "user present" veto — that one was removed 2026-08-13; see
+        # (There is no separate "user present" veto -- that one was removed 2026-08-13; see
         # `ec.should_clear_externally`'s docstring for why re-adding it would silently re-break
         # the whole lever.)
         verdict = ec.ClearVerdict(True, "forced", f"--force (gate said: {verdict.why})")
@@ -489,6 +518,13 @@ def main() -> int:
                     help="use the RESUME gate (ec.should_clear_on_resume) instead of the "
                          "abandoned-session one: a just-loaded session can never satisfy the "
                          "long-idle term, so the default gate would always refuse it")
+    ap.add_argument("--session-id", default="", help="TRDD-L32WC0H7 card 1 follow-up, "
+                    "adversarial-review finding: the SessionStart hook that spawns this watcher "
+                    "with --on-resume passes its OWN session_id here so the confirmatory "
+                    "_decide re-check can use the SAME widened context_tokens_for_resume reader "
+                    "the hook already used, instead of silently re-measuring with the narrower "
+                    "plain reader and disagreeing with the hook's own fire decision. Absent, "
+                    "_decide falls back to the pre-existing plain reading unchanged.")
     args = ap.parse_args()
 
     root = Path(args.project_root or os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd()).resolve()
@@ -539,7 +575,9 @@ def main() -> int:
 def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     """The body of `main` past the singleflight lock — split so the lock's try/finally stays
     two lines instead of indenting the whole flow."""
-    verdict, facts = _decide(root, sd, now, force=args.force, on_resume=args.on_resume)
+    verdict, facts = _decide(
+        root, sd, now, force=args.force, on_resume=args.on_resume, session_id=args.session_id
+    )
     print(f"VERDICT {'FIRE' if verdict.fire else 'HOLD'} "
           f"trigger={verdict.trigger or '-'} why={verdict.why} "
           f"transcript_idle_s={facts.get('transcript_idle_s')} "

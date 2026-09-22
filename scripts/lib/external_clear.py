@@ -1492,6 +1492,38 @@ def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | Non
     return alp.probe_cache_expired(command, project=str(project_dir) if project_dir else None)
 
 
+def recovery_pending(state_dir: Path) -> bool:
+    """True iff a rate-limit / API-error / compact / clear resume cue is still armed,
+    unconsumed, on disk for this state dir (card 1 item 5 follow-up, TRDD-L32WC0H7).
+
+    SHARED HELPER (TRDD-L32WC0H7 card 1 follow-up item 2): this used to be three separate
+    inline copies of the same three-flag check -- the SessionStart hook
+    (on-session-start-cold-cache-clear.py), dispatch.py's own _cadence_active_waiting, and
+    (missing entirely, the actual bug this closes) external_handoff_clear.py's own _decide.
+    One shared helper means the allow-list of pending-recovery flags can never drift between
+    callers, and a caller that forgets it (as _decide did) is no longer possible by omission.
+
+    WHY these three flags name the "recovery is in flight" window: state.RATE_LIMITED_FLAG
+    covers both a rate-limit and a generic API error (StopFailure writes one flag for both);
+    resume-after-compact.flag / resume-after-clear.flag are the post-shrink resume directives
+    dispatch.py's own _phase_compact_resume / _phase_clear_resume consume. Each is unlinked by
+    its own phase, so a caller that finds one here knows the interrupted task has NOT yet been
+    replayed to the model, and a /clear right now would destroy the context that replay is
+    about to need before it is ever read.
+
+    Best-effort, fail-open (a read error reads as "nothing pending") -- the SAME asymmetry
+    _fire_recorded already documents: a missed veto costs one wrongly-cleared session, a false
+    one costs the whole lever, silently, on every resume.
+    """
+    try:
+        return any(
+            (state_dir / flag).is_file()
+            for flag in (state.RATE_LIMITED_FLAG, "resume-after-compact.flag", "resume-after-clear.flag")
+        )
+    except OSError:
+        return False
+
+
 def cache_expired_from_harness_payload(payload: Mapping[str, object]) -> bool | None:
     """PURE. The FIRST-PARTY answer to `cache_certainly_expired`'s question (TRDD-GK35MOXU).
 
@@ -1582,55 +1614,67 @@ def _should_clear_externally_decide(
     awaiting_user: bool,
     cache_expired: bool | None = None,
     context_high_water: int = 0,
+    recovery_pending: bool = False,
 ) -> ClearVerdict:
     """PURE. The whole external-clear decision, with the deciding rule named.
 
     THE USER'S PRESENCE IS NOT AN INPUT HERE, AND MUST NOT BE RE-ADDED (owner, 2026-08-13:
-    *"my presence must not even be mentioned"*). It used to be the first veto — `user_present`
-    → refuse — which is what left this whole lever dead: the injection layer migrated to the
+    *"my presence must not even be mentioned"*). It used to be the first veto -- `user_present`
+    -> refuse -- which is what left this whole lever dead: the injection layer migrated to the
     three ratified rules on 2026-08-02 (`terminal_trigger.inject_until_sent`: inject only into
     an empty field, STOP the moment a key is typed, retry 8 s later, never cancel), but the
     DECISION layer never followed. So the gate kept answering "user-present" and the injector
     that would have politely deferred was never even asked. Presence is now handled in exactly
-    one place — the injector — where it DELAYS by 8 s per keystroke and never refuses. A veto
+    one place -- the injector -- where it DELAYS by 8 s per keystroke and never refuses. A veto
     here would silently re-break that, because a refusal at this layer never reaches the
     injector at all.
 
     Vetoes, in the order they are cheapest to establish:
 
-      * `in_cooldown`    — a clear already fired recently. Shared with the in-model lever via
+      * `recovery_pending` (TRDD-L32WC0H7 card 1 follow-up item 2; owner: "beware of ...
+        truncating other operations, like resuming after api error or model expired time
+        limit window") -- a rate-limit / API-error / compact / clear resume cue is still
+        armed, unconsumed, on disk (`external_clear.recovery_pending`). This is the DAEMON
+        lane's own copy of the guard `should_clear_on_resume` already had: the abandoned-
+        session watcher runs from a SEPARATE process with no relationship to this session's
+        own heartbeat phase order, so it can fire WHILE dispatch.py has not yet replayed an
+        interrupted task to the model. Clearing into that window destroys the context the
+        pending cue is about to need before it is ever read.
+      * `in_cooldown`    -- a clear already fired recently. Shared with the in-model lever via
         `cold_cache_compact`'s `idle-clear-fired.ts`, so whichever path fires first stands the
         other down. That sharing IS the coexistence contract while both exist.
-      * `active_waiting` — a resume or a background agent is in flight. NOT about the user:
+      * `active_waiting` -- a resume or a background agent is in flight. NOT about the user:
         this is machine state, and firing into it would type over a chain already running.
-      * `awaiting_user`   — the transcript tail ends on an unanswered HUMAN-FACING `tool_use`
-        (`ExitPlanMode` / `AskUserQuestion` — see `fleet_scan.awaiting_user_decision`). This is
+      * `awaiting_user`   -- the transcript tail ends on an unanswered HUMAN-FACING `tool_use`
+        (`ExitPlanMode` / `AskUserQuestion` -- see `fleet_scan.awaiting_user_decision`). This is
         NOT the removed `user_present` veto: that one refused on the user's mere presence and
         broke the whole lever (2026-08-13). This one refuses only when the session is parked on
-        a QUESTION addressed to a person — idle by construction, satisfies the long-idle trigger,
+        a QUESTION addressed to a person -- idle by construction, satisfies the long-idle trigger,
         and would otherwise be `/clear`ed with the pending decision lost (TRDD-OO301H7D). `--force`
         must NOT be able to override this: it is a SAFETY veto, not a trigger term.
-      * `idle_seconds is None` — an UNKNOWN idle age must never authorize a destructive action.
+      * `idle_seconds is None` -- an UNKNOWN idle age must never authorize a destructive action.
         Note the deliberate asymmetry with `context_tokens`, below.
-      * headroom — a fire is imminent, so the chain would be typing into a session mid-turn.
+      * headroom -- a fire is imminent, so the chain would be typing into a session mid-turn.
         Wait for the next gap; nothing is lost, the gap recurs every cadence period. An UNKNOWN
-        headroom (a cron shape we cannot read) does NOT veto — that would make an unreadable
+        headroom (a cron shape we cannot read) does NOT veto -- that would make an unreadable
         cron silently disable the lever.
 
     Then the three triggers, OR'd (see the module docstring for why none subsumes the others).
     `cache_expired` is the agentlensPro MEASUREMENT and is checked first, ahead of the
-    prediction that models the same cost — when both agree, attributing the fire to the
+    prediction that models the same cost -- when both agree, attributing the fire to the
     measurement is what makes the log line worth reading. Its `None` is "no signal", never
     `False`: an absent CLI must leave the other two triggers exactly as they were.
 
     SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 1): `context_tokens is None` USED TO skip
     the size clause and let the idle/miss terms decide alone (owner directive 2026-08-04, dated
-    correction — that directive was about the SEPARATE `should_clear_when_long_idle` idle-time
+    correction -- that directive was about the SEPARATE `should_clear_when_long_idle` idle-time
     lever, not this size floor, and reusing its reasoning here was the bug). An unmeasurable
     context now VETOES on the floor exactly like a too-small one: "we don't know if there is
     anything worth reclaiming" and "there is nothing worth reclaiming" both mean the same thing
     to a gate that must justify a destructive `/clear`.
     """
+    if recovery_pending:
+        return ClearVerdict(False, why="recovery cue pending -- not truncating the resume")
     if in_cooldown:
         return ClearVerdict(False, why="cooldown")
     if active_waiting:
@@ -1643,22 +1687,22 @@ def _should_clear_externally_decide(
         return ClearVerdict(
             False, why=f"no-headroom ({seconds_to_next_fire}s < {headroom_s}s to next fire)"
         )
-    # CONTEXT PRESSURE FIRST — its alternative is not a wasted cache write, it is a session that
+    # CONTEXT PRESSURE FIRST -- its alternative is not a wasted cache write, it is a session that
     # STOPS. With `autoCompactEnabled: false` the harness no longer rescues a full window; it
     # errors. Every other trigger here is an economy (avoid paying for a cold cache); this one is
     # survival, so it outranks them. It is also the only trigger that can fire on a BUSY session,
     # which is precisely the case the other four structurally cannot reach.
     # `context_high_water == 0` now means BOTH "not configured" and "the harness still owns
-    # compaction" — the caller resolves ownership (`harness_auto_compacts`) and passes 0 when the
+    # compaction" -- the caller resolves ownership (`harness_auto_compacts`) and passes 0 when the
     # janitor must stay out of the way. Keeping that decision in the CALLER leaves this function
     # pure and keeps the two questions separate: this one asks "is the context too big", never
     # "whose job is it".
     #
     # IT MUST SIT ABOVE THE `min_context` FLOOR, and "FIRST" in the paragraph above was not
-    # rhetoric — it used to be checked BELOW it and was therefore unreachable on every 200 K
+    # rhetoric -- it used to be checked BELOW it and was therefore unreachable on every 200 K
     # model. The floor is 300 K (`DEFAULT_MIN_CONTEXT_TOKENS`) while `context_high_water`
     # resolves from `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which is under 200 K there: a session at
-    # 170 K with auto-compact off — exactly the case this trigger exists for — was refused with
+    # 170 K with auto-compact off -- exactly the case this trigger exists for -- was refused with
     # "nothing worth reclaiming" and rode on into the hard context-limit error. The floor asks
     # "is this big enough to be worth a clear"; a context at or above the high-water mark has
     # already answered that, and the two can only disagree when the floor is the higher number.
@@ -1671,22 +1715,29 @@ def _should_clear_externally_decide(
             True,
             TRIGGER_CONTEXT_PRESSURE,
             f"context {context_tokens} >= high-water {context_high_water} and the harness no "
-            "longer auto-compacts — without a clear this session stops at the context limit",
+            "longer auto-compacts -- without a clear this session stops at the context limit",
         )
     # INVERTED, card 1 item 1 (owner, 2026-09-22 spec, superseding the 2026-08-04 directive this
     # branch used to cite in its own name): an UNMEASURABLE context must NOT skip the min-context
-    # floor, it must FAIL it. The old `context_tokens is not None and …` shape let a transcript
-    # that could not be measured slide past the floor and decide on `cache_expired`/idle alone —
+    # floor, it must FAIL it. The old `context_tokens is not None and ...` shape let a transcript
+    # that could not be measured slide past the floor and decide on `cache_expired`/idle alone --
     # exactly backwards for a gate whose whole job is "is there enough here to be worth a
     # destructive `/clear`": not knowing the size is the ONE case where the honest answer is
-    # "assume no". `context_tokens is None` now reads as "unmeasurable ⇒ below the floor".
+    # "assume no". `context_tokens is None` now reads as "unmeasurable => below the floor".
+    #
+    # CARD 1 FOLLOW-UP item 1 (TRDD-L32WC0H7): the "unmeasurable" a caller passes here is never
+    # a raw None straight off `token_meter` any more -- every production caller now derives it
+    # from the transcript first (`cold_cache_compact.context_tokens_for` / the resume-lane
+    # widened reader in the SessionStart hook) before conceding "genuinely unmeasurable". This
+    # gate stays pure and keeps refusing on a TRUE None; it is the callers' job to have already
+    # tried the transcript.
     if context_tokens is None or context_tokens < min_context:
         return ClearVerdict(
             False,
             why=(
-                "context unmeasurable — treated as below floor"
+                "context unmeasurable -- treated as below floor"
                 if context_tokens is None
-                else f"context {context_tokens} < {min_context} — nothing worth reclaiming"
+                else f"context {context_tokens} < {min_context} -- nothing worth reclaiming"
             ),
         )
 
@@ -1694,7 +1745,7 @@ def _should_clear_externally_decide(
         return ClearVerdict(
             True,
             TRIGGER_CACHE_CERTAIN_EXPIRED,
-            "agentlensPro reports this session's prompt cache is ALREADY expired — the next "
+            "agentlensPro reports this session's prompt cache is ALREADY expired -- the next "
             "turn pays a full cache-creation write on the whole context",
         )
     if next_fire_misses_cache(
@@ -1706,7 +1757,7 @@ def _should_clear_externally_decide(
             True,
             TRIGGER_NEXT_FIRE_MISSES,
             f"next fire lands {last_turn_age_s}+{seconds_to_next_fire}s after the last turn, "
-            f"past the {ttl_minutes}min cache TTL — it would pay a full miss",
+            f"past the {ttl_minutes}min cache TTL -- it would pay a full miss",
         )
     if idle_seconds >= min_idle_s:
         return ClearVerdict(
@@ -1734,13 +1785,20 @@ def should_clear_externally(
     awaiting_user: bool,
     cache_expired: bool | None = None,
     context_high_water: int = 0,
+    recovery_pending: bool = False,
 ) -> ClearVerdict:
-    """PUBLIC entry point. Decides via `_should_clear_externally_decide` (kept PURE — see its
+    """PUBLIC entry point. Decides via `_should_clear_externally_decide` (kept PURE -- see its
     own docstring for the whole policy) then logs the decision (card 1 items 2+7). Review note:
     THIS wrapper is NOT the pure function the "tests call directly with injected facts" claim is
-    about — `_should_clear_externally_decide` is, and it stays free of the log write. This
+    about -- `_should_clear_externally_decide` is, and it stays free of the log write. This
     wrapper is the ONE place the real watcher caller routes through, so it is also the one place
     that needs to know how to log.
+
+    `recovery_pending` DEFAULTS FALSE (card 1 follow-up item 2, TRDD-L32WC0H7) -- mirrors
+    `should_clear_on_resume`'s own default, and for the same reason: any test or caller that
+    constructs this call without the argument keeps the pre-existing behaviour. The ONE
+    production caller, `external_handoff_clear.py::_decide`, now always passes the real reading
+    from the shared `external_clear.recovery_pending` helper.
     """
     verdict = _should_clear_externally_decide(
         idle_seconds=idle_seconds,
@@ -1756,6 +1814,7 @@ def should_clear_externally(
         awaiting_user=awaiting_user,
         cache_expired=cache_expired,
         context_high_water=context_high_water,
+        recovery_pending=recovery_pending,
     )
     _log_clear_decision("external-clear", verdict, context_tokens=context_tokens)
     return verdict

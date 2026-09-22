@@ -27,15 +27,20 @@ Sub-commands:
                                         0 — wrote F; one summary line on stdout.
                                         5 — declined: a probe-stamp failure younger than
                                             PROBE_FAIL_TTL_S says Jev is down right now — no
-                                            network fan-out into a known outage.
+                                            network fan-out into a known outage. Gated on
+                                            stamp `kind == "unavailable"` ONLY: an `auth` or
+                                            `budget` stamp never declines a later attempt —
+                                            those are scoped to one key/request, not the
+                                            endpoint, so the caller surfaces them as a
+                                            finding instead of the whole machine going dark.
                                         6 — declined: `jev_compaction.NoDigest` — neither a
                                             human message nor a TRDD STATE head exists, so
                                             there is nothing to judge relevance against.
-                                        7 — a Jev error (missing/bad key, scorer failure)
-                                            during THIS attempt; the probe stamp is written
-                                            ok=false with the reason so the NEXT attempt
-                                            declines fast via exit 5 instead of repeating the
-                                            same failing network round-trip.
+                                        7 — a Jev error (missing/bad key, budget violation,
+                                            scorer failure) during THIS attempt; the probe
+                                            stamp is written ok=false with the reason and a
+                                            `kind` (below) so the NEXT attempt can decide
+                                            whether to decline fast via exit 5.
                                       (2..4 are `probe`/`expand`'s own codes, listed above —
                                       one flat exit-code space across all three sub-commands
                                       so a caller never confuses e.g. `expand`'s 3 with
@@ -46,11 +51,14 @@ never duplicated in arm_prepare.py or anywhere else): JSON at
 ``<global_state.control_dir()>/jev-probe.json`` (machine-wide, not per-project — matching
 where ``armed.flag`` and the daemon's other control-plane files already live), shape
 ``{"ok": bool, "reason": str|None, "ts": epoch_seconds, "cost": float|None,
-"model": None, "provider": str}``. ``model`` is always ``None`` — nothing in this CLI's
-probe response carries a model name to put there. Two TTLs, read by different callers:
-``PROBE_OK_TTL_S`` (6h) documents how long an ``ok=true`` stamp should be considered current
-by an external reader; ``PROBE_FAIL_TTL_S`` (30min) is the one this file itself enforces —
-`compact` declines fast on a fresher-than-this ``ok=false`` stamp.
+"model": None, "provider": str, "kind": str}``. ``model`` is always ``None`` — nothing in
+this CLI's probe response carries a model name to put there. ``kind`` is one of
+``"unavailable"``, ``"auth"``, ``"budget"``, ``"ok"`` (see ``write_probe_stamp``) — it is
+what `compact`'s decline gate keys on, not ``ok`` alone. Two TTLs, read by different
+callers: ``PROBE_OK_TTL_S`` (6h) documents how long an ``ok=true`` stamp should be
+considered current by an external reader; ``PROBE_FAIL_TTL_S`` (30min) is the one this file
+itself enforces — `compact` declines fast on a fresher-than-this ``ok=false, kind=
+"unavailable"`` stamp only.
 """
 
 from __future__ import annotations
@@ -71,7 +79,13 @@ import jev_compaction as jc  # noqa: E402
 import state  # noqa: E402
 from jevctx.provider import DEFAULT_PROVIDER, PROVIDER_ENV, make_client  # noqa: E402
 from jevctx.tokens import estimate_tokens  # noqa: E402
-from jevctx.types import JevError, Noul  # noqa: E402
+from jevctx.types import (  # noqa: E402
+    JevAuthError,
+    JevBudgetError,
+    JevError,
+    JevUnavailableError,
+    Noul,
+)
 
 # --------------------------------------------------------------------------- #
 # Probe stamp — see module docstring for the full contract.
@@ -113,12 +127,29 @@ def read_probe_stamp() -> dict[str, Any] | None:
 
 
 def write_probe_stamp(
-    *, ok: bool, reason: str | None, cost: float | None, model: str | None, provider: str
+    *, ok: bool, reason: str | None, cost: float | None, model: str | None, provider: str,
+    kind: str,
 ) -> None:
-    """Atomically write the probe stamp — see module docstring for the shape/TTLs."""
+    """Atomically write the probe stamp — see module docstring for the shape/TTLs.
+
+    ``kind`` classifies WHY (one of ``"unavailable"``, ``"auth"``, ``"budget"``, ``"ok"``) —
+    `compact`'s fast-decline gate keys on it, not on ``ok`` alone: an ``auth``/``budget``
+    failure is a config/planner bug specific to THIS caller's key or request shape, not
+    evidence the Jev endpoint itself is down, so it must not black out compaction for every
+    other shell on the machine the way an ``unavailable`` stamp correctly does.
+    """
     stamp = {"ok": ok, "reason": reason, "ts": time.time(), "cost": cost,
-              "model": model, "provider": provider}
+              "model": model, "provider": provider, "kind": kind}
     state.atomic_write(_probe_stamp_path(), json.dumps(stamp))
+
+
+def _stamp_kind_for_error(exc: JevError) -> str:
+    """Classify a `JevError` into the probe-stamp `kind` — see `write_probe_stamp`."""
+    if isinstance(exc, JevAuthError):
+        return "auth"
+    if isinstance(exc, JevBudgetError):
+        return "budget"
+    return "unavailable"  # JevUnavailableError, or any other JevError -- treat as an outage
 
 
 def _current_provider() -> str:
@@ -152,7 +183,8 @@ def cmd_probe(_args: argparse.Namespace) -> int:
         client = make_client()
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
-        write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider)
+        write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider,
+                           kind=_stamp_kind_for_error(exc))
         return 2
 
     start = time.monotonic()
@@ -163,7 +195,8 @@ def cmd_probe(_args: argparse.Namespace) -> int:
         )
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
-        write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider)
+        write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider,
+                           kind=_stamp_kind_for_error(exc))
         return 2
     finally:
         close = getattr(client, "close", None)
@@ -176,10 +209,11 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     if noul is None:
         reason = "response carried no 'a.noul' answer"
         print(f"probe failed: {reason}", file=sys.stderr)
-        write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider)
+        write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider,
+                           kind="unavailable")
         return 2
     cost = getattr(getattr(client, "usage", None), "cost", 0.0)
-    write_probe_stamp(ok=True, reason=None, cost=cost, model=None, provider=provider)
+    write_probe_stamp(ok=True, reason=None, cost=cost, model=None, provider=provider, kind="ok")
     print(f"probe ok noul={noul} cost={cost} ms={elapsed_ms}")
     return 0
 
@@ -276,7 +310,12 @@ def cmd_compact(args: argparse.Namespace) -> int:
     provider = _current_provider()
 
     stamp = read_probe_stamp()
-    if stamp is not None and stamp.get("ok") is False:
+    # Decline ONLY on kind="unavailable" -- an auth or budget failure is scoped to this
+    # caller's key/request, not evidence the Jev endpoint itself is down, so it must not
+    # black out compaction machine-wide the way a real outage stamp correctly does (see
+    # write_probe_stamp's docstring). Those stamps still exist for a caller to surface as
+    # a finding; they just don't gate the NEXT attempt.
+    if stamp is not None and stamp.get("ok") is False and stamp.get("kind") == "unavailable":
         age_s = time.time() - float(stamp.get("ts", 0))
         if age_s < PROBE_FAIL_TTL_S:
             reason = stamp.get("reason") or "unknown"
@@ -310,10 +349,20 @@ def cmd_compact(args: argparse.Namespace) -> int:
             relevance_threshold=args.relevance_threshold,
             decision_threshold=args.decision_threshold,
         )
+    except JevBudgetError as exc:
+        # A budget violation is the planner's own bug (a request shape it should never have
+        # built), not an outage -- kept as its own branch so the message and stamp kind say
+        # so, instead of being folded into the generic "compact failed" outage wording below.
+        reason = str(exc)
+        print(f"budget: {reason}", file=sys.stderr)
+        write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider,
+                           kind="budget")
+        return 7
     except JevError as exc:
         reason = str(exc)
         print(f"compact failed: {reason}", file=sys.stderr)
-        write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider)
+        write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider,
+                           kind=_stamp_kind_for_error(exc))
         return 7
     finally:
         if client is not None:
@@ -335,7 +384,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
         },
     )
     state.atomic_write(Path(args.out), doc)
-    write_probe_stamp(ok=True, reason=None, cost=usage_cost, model=None, provider=provider)
+    write_probe_stamp(ok=True, reason=None, cost=usage_cost, model=None, provider=provider,
+                       kind="ok")
 
     kept = sum(1 for s in scores.values() if s.kept and not s.oversized)
     elapsed_ms = int((time.monotonic() - start) * 1000)

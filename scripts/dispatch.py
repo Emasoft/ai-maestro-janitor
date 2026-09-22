@@ -4019,13 +4019,13 @@ def _daemon_wake_covered_fresh(sd: Path, now: int) -> bool:
 def _cadence_active_waiting(sd: Path, now: int) -> bool:
     """True iff this session is waiting on something time-sensitive: a RECENT resume cue
     (rate-limit or post-compact), a pending directive resume, or in-flight background agents.
-    Fail-open (any read error → the pending agents probe, itself fail-open).
+    Fail-open (any read error -> the pending agents probe, itself fail-open).
 
-    `now` governs the stamp comparisons only — the directive's age is read from the real clock,
+    `now` governs the stamp comparisons only -- the directive's age is read from the real clock,
     so this is not evaluable as-of an arbitrary time.
 
     Formerly the FAST-tier signal for a since-removed dynamic-cadence controller
-    (TRDD-0QQX9H0G, retired by TRDD-BRHJHWW0 — mid-session tier flips were re-arming the cron
+    (TRDD-0QQX9H0G, retired by TRDD-BRHJHWW0 -- mid-session tier flips were re-arming the cron
     on every flip, several times an hour). What survives is the boolean itself: the idle-compact
     and idle-clear phases below still need "is this session waiting on something" to avoid
     shrinking/clearing a context a resume is about to need. The three signals below are all
@@ -4038,7 +4038,7 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     still reads as actively-waiting.
 
     MF4 handshake (TRDD-X07E7HTN, D1 v1): a fresh `daemon-wake-covered.ts` is the SOLE
-    condition that lets a rate-limit resume stop counting as active-waiting — the daemon owns
+    condition that lets a rate-limit resume stop counting as active-waiting -- the daemon owns
     the wake for free, so there is nothing left to poll for. It suppresses ONLY the resume-stamp
     reason: the coverage stamp (not `active_waiting` itself) is what authorizes that, and the
     directive / pending-agents reasons below still hold True on their own. Absent the feature
@@ -4053,7 +4053,7 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
         # their flag in the SAME fire, so by the time this function runs here the flag is
         # already gone. That ordering guarantee does NOT hold for the external-clear watcher
         # (`external_handoff_clear.py`, spawned detached by
-        # `scripts/hooks/on-session-start-cold-cache-clear.py` at SessionStart — see the
+        # `scripts/hooks/on-session-start-cold-cache-clear.py` at SessionStart -- see the
         # comment above this function): it is a SEPARATE process with no relationship to this
         # session's own heartbeat phase order, so a SessionStart can spawn it WHILE a
         # rate-limit / API-error / compact / clear resume is still pending, unconsumed, on
@@ -4061,29 +4061,34 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
         # the owner named. So the three flags are checked directly here too, best-effort and
         # fail-open like every other branch in this function.
         #
-        # DISCLOSED SCOPE NOTE (adversarial review of this card): this function is SHARED — its
-        # only other caller is `_phase_proactive_idle_compact`, the PREVENTIVE /compact nudge —
+        # DISCLOSED SCOPE NOTE (adversarial review of this card): this function is SHARED -- its
+        # only other caller is `_phase_proactive_idle_compact`, the PREVENTIVE /compact nudge --
         # so this fix extends the recovery guard to that lossy-compact path too, not just the
         # clear paths item 5's text names. That is a DELIBERATE keep, not an accident: a
         # compaction racing an unconsumed resume cue would truncate the same recovery the owner
         # was describing, just via a different destructive action. Splitting it out would mean
         # deliberately leaving that sibling path unguarded, which nobody asked for.
-        for _pending_flag in (
-            state.RATE_LIMITED_FLAG,  # rate-limit / API-error (StopFailure writes one flag for both)
-            "resume-after-compact.flag",
-            "resume-after-clear.flag",
-        ):
-            if (sd / _pending_flag).is_file():
-                return True
+        #
+        # SHARED HELPER (card 1 follow-up item 2, TRDD-L32WC0H7): the three-flag check used to
+        # be inlined here, in the SessionStart hook, and (missing entirely) in
+        # `external_handoff_clear.py::_decide`. `external_clear.recovery_pending` is now the
+        # ONE place the allow-list of pending-recovery flags lives, so the three callers can
+        # never drift apart on which flags count. Local import to avoid a module-level cycle
+        # (`external_clear` is imported the same way elsewhere in this module, e.g. the
+        # `terminal_from_record` call site).
+        import external_clear  # noqa: PLC0415 - shared recovery_pending helper
+
+        if external_clear.recovery_pending(sd):
+            return True
         last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
         resume_recent = last_resume > 0 and 0 <= now - last_resume < _RESUME_RECENCY_WINDOW_S
         if resume_recent and not _daemon_wake_covered_fresh(sd, now):
             return True
-        # AGE-BOUNDED, like the resume stamp above — and for the same reason, which this
+        # AGE-BOUNDED, like the resume stamp above -- and for the same reason, which this
         # signal did not originally have. `resume-directive.txt` is unlinked by exactly ONE
         # consumer, `post-compact-resume.py` ("one-shot per compact"). If that compaction
-        # never lands — the soft `/compact` is only ENQUEUED, so a session that never ends
-        # its turn, or is restarted first, never runs it — the pointer is never consumed and
+        # never lands -- the soft `/compact` is only ENQUEUED, so a session that never ends
+        # its turn, or is restarted first, never runs it -- the pointer is never consumed and
         # this branch pins the session to the FAST `*/5` tier FOREVER.
         #
         # Measured 2026-08-02: an idle session held FAST for 2.9 h on a directive written
@@ -4093,14 +4098,14 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
         #
         # Bounding the CADENCE signal does NOT delete or ignore the file: the directive is
         # still read as CONTENT by the resume phases and the nudge (dispatch.py:1712). Only
-        # its claim to mean "actively waiting RIGHT NOW" expires — which is precisely the
+        # its claim to mean "actively waiting RIGHT NOW" expires -- which is precisely the
         # distinction the stamp already made and this branch conflated.
         directive = sd / "resume-directive.txt"
         if directive.is_file() and directive.stat().st_size > 0:
             # Against `time.time()`, NOT the passed `now`: the branch above compares a RECORDED
             # STAMP (caller's frame, correct), this compares a FILESYSTEM MTIME (not the caller's
             # frame). A directive written after `now` was sampled is fresher than `now` knows, so
-            # `now - mtime` went negative and `0 <=` rejected the freshest possible signal —
+            # `now - mtime` went negative and `0 <=` rejected the freshest possible signal --
             # measured: reddened the 12-min suite, passed standalone in 2 s. A future-dated
             # mtime (skew) still fails `0 <=`, which is deliberate; see TRDD-2640RYR5.
             age = time.time() - directive.stat().st_mtime
@@ -4109,29 +4114,29 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     except OSError:
         pass
     # EXTERNAL agents only (TRDD-CI6ZTNB9): a janitor-spawned memory/security agent
-    # is housekeeping the janitor queued, not a time-sensitive wait — counting it
+    # is housekeeping the janitor queued, not a time-sensitive wait -- counting it
     # here would make this controller react to its own output and re-arm twice per
     # memory chore. The resume/directive signals above are legitimate and unchanged;
     # only this pending-agent term was self-perturbing.
     #
     # AGE-BOUNDED for exactly the reason the directive branch above is, which this
-    # branch was missing. A manifest entry CANNOT be cleared by SubagentStop — the
+    # branch was missing. A manifest entry CANNOT be cleared by SubagentStop -- the
     # documented payload carries no `agent_id` (pinned by
-    # test_stop_hook_without_id_is_a_noop) — so the only cleanup is the 7-day
+    # test_stop_hook_without_id_is_a_noop) -- so the only cleanup is the 7-day
     # MAX_AGE_S sweep. An agent that died mid-run therefore keeps asserting "in
     # flight" for a WEEK, and this branch turned that stale assertion into a FAST
     # `*/5` pin for the same week.
     #
     # Measured 2026-08-04: 12 workflow-subagents spawned 2026-08-02 (none of whose
-    # SubagentStop fired) held this session at FAST for 111 consecutive fires — ~12
-    # no-op wake-ups per hour re-reading a 180k context — until the window-burn-rate
+    # SubagentStop fired) held this session at FAST for 111 consecutive fires -- ~12
+    # no-op wake-ups per hour re-reading a 180k context -- until the window-burn-rate
     # alarm surfaced this host as the fleet's top consumer at 2.6x linear pace on the
     # 7d window, projecting exhaustion 104h before reset.
     #
     # A genuinely in-flight agent still pins FAST: the bound is the SAME window the
     # resume and directive branches use, and no polling cadence helps an agent that
     # stopped reporting half a day ago. Like those branches this bounds only the
-    # CADENCE claim — the entries are still listed by the nudge and still resumable.
+    # CADENCE claim -- the entries are still listed by the nudge and still resumable.
     # `sd` MUST flow through here: this predicate is borrowed by the external-clear
     # watcher for OTHER projects, and an ambient manifest read leaks the calling
     # session's agents into their verdicts (see _fresh_external_agent_count).

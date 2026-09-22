@@ -553,6 +553,66 @@ def context_tokens_for(transcript_path: str | os.PathLike[str] | None) -> int | 
         return None
 
 
+def context_tokens_for_resume(
+    transcript_path: str | os.PathLike[str] | None,
+    *,
+    project_dir: str | os.PathLike[str],
+    session_id: str,
+    now: int,
+) -> int | None:
+    """`context_tokens_for`, widened for the RESTART lane (TRDD-L32WC0H7 card 1 follow-up
+    item 1; owner: "when restarting, if the cache is stale/expired, it must clear and inject
+    the jev compacted summary of the session").
+
+    WHY THIS EXISTS. `context_tokens_for` reads only the TAIL window of the transcript
+    (`token_meter.latest_context_size` -> `latest_context_entry`, capped at `token_meter`'s own
+    `_TAIL_BYTES`, by design -- transcripts run tens of MB and the tail-only read is what keeps
+    every OTHER caller of `context_tokens_for` cheap). A resumed session whose LAST assistant
+    usage entry does not happen to sit inside that tail window (a large tool_result pushing it
+    off, or the continuing session's most recent activity sitting further back) reads as
+    unmeasurable there -- exactly the moment `should_clear_on_resume` must decide whether a
+    stale cache should be cleared. Since card 1 item 1 made an unmeasurable context REFUSE
+    every clear gate (correctly, for the genuinely-unmeasurable case), a tail-window miss on
+    restart silently disables the very lever the owner asked for.
+
+    THE FIX REUSES `token_meter.resolve_context` (no second summation): it already prefers the
+    statusline's `context-usage.<session_id>.json` snapshot -- written by the PRIOR run of this
+    SAME session_id -- and falls back to the SAME `latest_context_entry` transcript read
+    `context_tokens_for` uses. `token_meter.py` is intentionally left unmodified: this function
+    only calls its existing public API a second time, with the extra facts (`project_dir`,
+    `session_id`, `now`) only the resume lane has on hand.
+
+    NOT "VERBATIM", ON PURPOSE (adversarial review, TRDD-L32WC0H7 card 1 follow-up): a snapshot
+    is a CACHED number a DIFFERENT process wrote, not a transcript read, and `resolve_context`'s
+    own `stale` bool exists exactly so a caller can refuse a snapshot that predates something —
+    a crash mid-turn, a kill -9 -- that left it uncorrected. This function is authorizing a
+    destructive `/clear`, so a STALE snapshot is discarded and treated the same as no signal at
+    all (falls through to the transcript-only branch `resolve_context` also tries internally,
+    then to `None`) rather than trusted at face value. The prior draft of this function silently
+    dropped `_stale` entirely, which would have let a stale-but-present number authorize a clear
+    that the old (pre-this-function) code correctly refused as unmeasurable -- a REGRESSION in
+    the exact failure mode TRDD-L32WC0H7 card 1 item 1 was written to close.
+
+    Falls back to the live tail reading first (the common, cheap case); only calls
+    `resolve_context` when that reading is None. Best-effort, never raises -- a bad transcript
+    or a missing snapshot must never break a resume.
+    """
+    live = context_tokens_for(transcript_path)
+    if live is not None:
+        return live
+    try:
+        _pct, tokens, _window, stale = token_meter.resolve_context(
+            str(project_dir),
+            session_id,
+            str(transcript_path) if transcript_path else "",
+            token_meter.default_window(),
+            now=now,
+        )
+        return None if stale else tokens
+    except Exception:  # noqa: BLE001 -- a bad snapshot/transcript must never break a resume
+        return None
+
+
 def transcript_age_s(transcript: Path | None, *, now: int) -> int | None:
     """Seconds since a transcript last changed — the PROMPT-CACHE clock — or None when unknown.
 

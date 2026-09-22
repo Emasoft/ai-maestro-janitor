@@ -116,7 +116,7 @@ def main() -> int:
 
         # A disabled refusal MUST leave a trace (incident 2026-08-15: the feature shipped with
         # DEFAULT_ENABLED=False, the owner restarted a whole fleet expecting it, and every
-        # session refused here SILENTLY — 7M tokens of cold re-reads with nothing anywhere
+        # session refused here SILENTLY -- 7M tokens of cold re-reads with nothing anywhere
         # saying "the switch is off". One log line per resume is what makes a dark feature
         # distinguishable from a broken one.)
         if not ec.enabled():
@@ -127,20 +127,20 @@ def main() -> int:
             )
             return 0
 
-        # Guard 2 — one fire per session id, whatever SessionStart does.
+        # Guard 2 -- one fire per session id, whatever SessionStart does.
         #
         # READ-ONLY here; the key is RECORDED only after `verdict.fire` is true (below). It used
         # to be written by an `emit_once` at THIS point, which consumed the session's single
         # allowance on the FIRST SessionStart regardless of outcome. Measured 2026-08-18: this
-        # session recorded its key on a run whose verdict was `cache warm` — nothing was cleared
-        # — and because a RESUMED session keeps its id indefinitely, every later reload logged
+        # session recorded its key on a run whose verdict was `cache warm` -- nothing was cleared
+        # -- and because a RESUMED session keeps its id indefinitely, every later reload logged
         # `already fired for this session` and the lever stayed dead for two days. The user
         # restarted after a 24 h gap, when the cache was certainly cold, and still got nothing:
         # this guard is checked BEFORE the cache check, so a stale key short-circuits a verdict
         # that would otherwise have fired.
         #
-        # The guard's real job is narrow — make a DOUBLE-DELIVERED SessionStart a no-op — and a
-        # marker named `…-fired` must therefore record FIRES, not ATTEMPTS.
+        # The guard's real job is narrow -- make a DOUBLE-DELIVERED SessionStart a no-op -- and a
+        # marker named `...-fired` must therefore record FIRES, not ATTEMPTS.
         key = f"cold-cache-clear@{session_id or 'no-session-id'}"
         already = _fire_recorded(sd / _FIRED_STAMP, key)
 
@@ -148,17 +148,17 @@ def main() -> int:
         now = int(time.time())
         # TRDD-GK35MOXU: the SAME SessionStart `data` payload this hook already parsed may
         # carry the harness's own `prompt_cache_likely_expired` verdict (CC >= 2.1.251). Read
-        # from `data` directly, never `session-staleness.json` — that file is written by the
+        # from `data` directly, never `session-staleness.json` -- that file is written by the
         # SIBLING `on-session-start.py` hook, which fires in PARALLEL with this one per the
         # docs, so reading it here would race its writer. The stdin payload has no such race:
         # both hooks receive the identical JSON for this one SessionStart.
         harness_signal = None if already else ec.cache_expired_from_harness_payload(data)
         # The probe answers when it can and WINS when it does; elapsed time is the fallback that
         # makes this lever reachable at all on a host without agentlensPro (TRDD-CEWVQ8DG). Before
-        # this, an abstaining probe logged `why=cache state unknown — not clearing` and a whole
+        # this, an abstaining probe logged `why=cache state unknown -- not clearing` and a whole
         # fleet of cold resumes each paid a full cache-creation write on its first turn.
         # The harness signal, when present, OUTRANKS the probe and SKIPS its subprocess
-        # entirely (TRDD-GK35MOXU) — cheaper and it is the harness's own answer, not a
+        # entirely (TRDD-GK35MOXU) -- cheaper and it is the harness's own answer, not a
         # heuristic re-derivation of it from the outside.
         cache_expired = (
             None
@@ -179,27 +179,29 @@ def main() -> int:
         # operations, like resuming after api error or model expired time limit window"). This
         # hook is the ONE production caller of `should_clear_on_resume` that can fire a
         # SessionStart WHILE a rate-limit / API-error / compact / clear resume cue is still
-        # armed on disk — dispatch.py's own heartbeat has not necessarily run yet to replay
+        # armed on disk -- dispatch.py's own heartbeat has not necessarily run yet to replay
         # that interrupted task to the model. Clearing here would destroy the context the
-        # pending cue is about to need before it is ever read. Best-effort, fail-open (a read
-        # error is treated as "no cue pending" — the SAME asymmetry `_fire_recorded` already
-        # documents: a missed veto costs one wrongly-cleared session, a false one costs the
-        # whole lever, silently, on every resume).
-        try:
-            recovery_pending = any(
-                (sd / f).is_file()
-                for f in (
-                    state.RATE_LIMITED_FLAG,  # same flag for rate-limit AND generic API error
-                    "resume-after-compact.flag",
-                    "resume-after-clear.flag",
-                )
-            )
-        except OSError:
-            recovery_pending = False
+        # pending cue is about to need before it is ever read.
+        #
+        # SHARED HELPER (card 1 follow-up item 2, TRDD-L32WC0H7): this used to be an inline copy
+        # of the same three-flag check; `dispatch._cadence_active_waiting` and
+        # `external_handoff_clear.py::_decide` each had (or, for `_decide`, was missing) their
+        # own copy. `external_clear.recovery_pending` is now the ONE place the allow-list of
+        # pending-recovery flags lives, fail-open like every caller of it.
+        recovery_pending = ec.recovery_pending(sd)
+        # CARD 1 FOLLOW-UP item 1 (TRDD-L32WC0H7): `context_tokens_for_resume`, not the plain
+        # `context_tokens_for` -- the RESTART lane is exactly the case where the transcript's
+        # last assistant usage entry may sit outside the tail window `context_tokens_for` reads
+        # (see that function's own docstring). Widening to the statusline snapshot / a fuller
+        # transcript read here means a genuinely large resumed context is MEASURED, not refused
+        # as unmeasurable -- the owner's "when restarting ... it must clear" directive depends
+        # on this measurement actually succeeding on the restart path.
         verdict = ec.should_clear_on_resume(
             source=source,
             cache_expired=cache_expired,
-            context_tokens=cold_cache_compact.context_tokens_for(newest),
+            context_tokens=cold_cache_compact.context_tokens_for_resume(
+                newest, project_dir=root, session_id=session_id, now=now,
+            ),
             min_context=ec.min_context_tokens(),
             # `now`, not a second `time.time()`: one decision reads one clock, so the age and the
             # cooldown can never be judged against instants that straddle a second boundary.
@@ -214,36 +216,36 @@ def main() -> int:
         if not verdict.fire:
             return 0
 
-        # RECORD THE ONE-SHOT HERE — past the fire decision, so a refused verdict leaves the
+        # RECORD THE ONE-SHOT HERE -- past the fire decision, so a refused verdict leaves the
         # allowance intact for the next SessionStart of this same (possibly long-lived) session.
         dedupe.emit_once(sd / _FIRED_STAMP, key, "x")
 
         watcher = _PLUGIN_ROOT / "scripts" / "external_handoff_clear.py"
         if not watcher.is_file():
-            state.log_line("cold-cache-clear", f"watcher missing at {watcher} — nothing fired")
+            state.log_line("cold-cache-clear", f"watcher missing at {watcher} -- nothing fired")
             return 0
         # BLOCKING, NOT DETACHED (owner directive 2026-08-13: *"of course this means to have a
         # huge timeout on all hooks, and making them blocking"*). Detaching here defeats the
         # entire feature: the hook would return 0, Claude Code would accept the first prompt, and
-        # that turn re-reads the whole cold-cache conversation at full price — the exact ~700k
-        # burn this exists to prevent — while the detached child was still composing the handoff
+        # that turn re-reads the whole cold-cache conversation at full price -- the exact ~700k
+        # burn this exists to prevent -- while the detached child was still composing the handoff
         # it would then use to clear a session that had ALREADY paid. The cost is only incurred
         # by a TURN, so the summarize must finish before one can start, which means waiting.
         #
         # The wait is bounded and the bound is chosen against the harness, not against hope:
         # `hooks.json` states this hook's OWN `timeout:` explicitly (2800 s), and it MUST stay
-        # STRICTLY GREATER than `ec.DEFAULT_SUMMARY_DEADLINE_S` (2600 s) — NOT equal (USER
+        # STRICTLY GREATER than `ec.DEFAULT_SUMMARY_DEADLINE_S` (2600 s) -- NOT equal (USER
         # directive, TRDD-YOZ9TS3W). Past the deadline the watcher's fallback path composes the
-        # network-free TEMPLATE handoff and fires the clear chain — and that compose-and-clear
+        # network-free TEMPLATE handoff and fires the clear chain -- and that compose-and-clear
         # work happens AFTER the deadline expires, so it needs its OWN headroom on top of the
         # deadline. 2800 = 2600 (the deadline) + ~200 s to run that fallback path to completion.
         # If the hook's timeout equalled the deadline exactly, Claude Code would kill the hook at
-        # the very moment the fallback path begins — producing NO handoff and NO clear, which is
+        # the very moment the fallback path begins -- producing NO handoff and NO clear, which is
         # the one failure mode this whole feature must never have. Do NOT "tidy" this to match
         # the deadline exactly; the gap is load-bearing, not slack.
         #
         # (TRDD-YOZ9TS3W: this comment previously claimed the deadline "sits under Claude Code's
-        # 600 s default `command`-hook timeout", which was false — `hooks.json` declared 120 s
+        # 600 s default `command`-hook timeout", which was false -- `hooks.json` declared 120 s
         # here, far too short to let even one `LLM_EXT_TIMEOUT_S` attempt finish, and nobody had
         # checked the actual config against the claim.)
         #
@@ -258,7 +260,7 @@ def main() -> int:
         # LAUNCHED UNDER A STABLY SIGNED INTERPRETER, NEVER `uv` (TRDD-DB1P25S4 / GH#92, and
         # the 2026-08-16 correction in `global_state.automation_python_path`). This child's
         # whole purpose is to drive osascript to type into iTerm, and macOS TCC persists an
-        # Automation grant against a stable client IDENTITY — not merely a stable path. uv is a
+        # Automation grant against a stable client IDENTITY -- not merely a stable path. uv is a
         # LAUNCHER and a launcher can never be the grantee; worse, uv's managed CPython is
         # itself ad-hoc signed (`Identifier=-`), so pointing at it directly still leaves TCC
         # nothing durable to bind. Falling back when nothing better resolves is deliberate: a
@@ -271,7 +273,7 @@ def main() -> int:
             else ["uv", "run", "--script", "--quiet", str(watcher)]
         )
         # ACTUALLY BLOCK. Until 2026-08-18 this Popen'd and returned 0 immediately while the
-        # 40-line comment above asserted "BLOCKING, NOT DETACHED" — the comment was
+        # 40-line comment above asserted "BLOCKING, NOT DETACHED" -- the comment was
         # aspirational, and the cost was measured on a sibling project that morning: fire at
         # 11:11:17, /clear landed 11:19:59, an 8m39s window in which any turn (a user prompt,
         # a 5-minute heartbeat fire) ran on the fat cold context and paid exactly the ~700k
@@ -284,7 +286,7 @@ def main() -> int:
         # attached, so both ceilings compose: our wait releases session start, never kills
         # the work.
         proc = subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected script
-            [*argv, "--project-root", str(root), "--on-resume"],
+            [*argv, "--project-root", str(root), "--on-resume", "--session-id", session_id],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -293,16 +295,16 @@ def main() -> int:
         state.log_line("cold-cache-clear", f"watcher started (blocking) for {root}")
         try:
             # Strictly ABOVE the watcher's own 2600 s deadline + ~200 s fallback headroom
-            # would exceed the hook's 2800 s budget, so: 2700 — past the deadline (the
+            # would exceed the hook's 2800 s budget, so: 2700 -- past the deadline (the
             # common case resolves far earlier), below hooks.json's 2800 so OUR release
             # fires before Claude Code kills the hook, and the detached child finishes the
             # fallback path on its own either way.
             rc = proc.wait(timeout=2700)
-            state.log_line("cold-cache-clear", f"watcher exited rc={rc} — session start released")
+            state.log_line("cold-cache-clear", f"watcher exited rc={rc} -- session start released")
         except subprocess.TimeoutExpired:
             state.log_line(
                 "cold-cache-clear",
-                "watcher still running at the 2700s wait ceiling — releasing session start; "
+                "watcher still running at the 2700s wait ceiling -- releasing session start; "
                 "the detached child continues its fallback on its own",
             )
     except Exception as exc:  # noqa: BLE001 -- NEVER break session start

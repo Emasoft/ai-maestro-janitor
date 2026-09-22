@@ -136,6 +136,95 @@ def test_context_tokens_for_none_on_bad_path(tmp_path: Path) -> None:
     assert ccc.context_tokens_for(tmp_path / "does-not-exist.jsonl") is None
 
 
+
+def _write_transcript_with_usage(path: Path, tokens: int) -> None:
+    """A minimal one-entry transcript whose sole assistant usage sums to `tokens`."""
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "uuid": "u1",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "message": {"id": "m1", "usage": {"input_tokens": tokens}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_context_tokens_for_resume_prefers_the_live_reading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the plain (tail-window) reading succeeds, the resume-lane fallback is never consulted."""
+    import token_meter
+
+    t = tmp_path / "s.jsonl"
+    _write_transcript_with_usage(t, 55_000)
+
+    def _boom(*a: object, **k: object) -> None:
+        raise AssertionError("resolve_context must not be called when the live reading succeeds")
+
+    monkeypatch.setattr(token_meter, "resolve_context", _boom)
+    got = ccc.context_tokens_for_resume(t, project_dir=tmp_path, session_id="s1", now=1_000_000)
+    assert got == 55_000
+
+
+def test_context_tokens_for_resume_derives_from_the_statusline_snapshot_when_the_tail_read_misses(
+    tmp_path: Path,
+) -> None:
+    """TRDD-L32WC0H7 card 1 follow-up item 1: a resumed session whose live tail reading is None
+    (e.g. the last usage entry sits outside token_meter's tail window) is measured via
+    token_meter.resolve_context's statusline-snapshot fallback instead of staying unmeasurable —
+    this is the "derive from the transcript" fix the restart lane needs to be reachable at all."""
+    import json
+
+    t = tmp_path / "s.jsonl"
+    t.write_text("", encoding="utf-8")  # empty file -> live reading is 0, not None; use a missing one instead
+    missing = tmp_path / "does-not-exist.jsonl"
+
+    snap_dir = tmp_path / ".claude" / "janitor"
+    snap_dir.mkdir(parents=True)
+    (snap_dir / "context-usage.s1.json").write_text(
+        json.dumps({"pct": 40, "tokens": 400_000, "window": 1_000_000, "ts": 999_999}),
+        encoding="utf-8",
+    )
+    got = ccc.context_tokens_for_resume(missing, project_dir=tmp_path, session_id="s1", now=1_000_000)
+    assert got == 400_000
+
+
+def test_context_tokens_for_resume_stays_none_when_neither_source_has_anything(
+    tmp_path: Path,
+) -> None:
+    """No live reading and no statusline snapshot: genuinely unmeasurable, never guessed."""
+    missing = tmp_path / "does-not-exist.jsonl"
+    got = ccc.context_tokens_for_resume(missing, project_dir=tmp_path, session_id="no-such-session", now=1_000_000)
+    assert got is None
+
+
+
+def test_context_tokens_for_resume_discards_a_stale_snapshot(tmp_path: Path) -> None:
+    """Adversarial-review finding (TRDD-L32WC0H7 card 1 follow-up): a snapshot older than
+    token_meter's own staleness window must NOT authorize a clear — it is a cached number a
+    different process wrote, and trusting it blindly would regress the exact failure mode item 1
+    was written to close (a wrong-but-present reading silently authorizing a destructive /clear).
+    """
+    import json
+
+    import token_meter
+
+    missing = tmp_path / "does-not-exist.jsonl"
+    snap_dir = tmp_path / ".claude" / "janitor"
+    snap_dir.mkdir(parents=True)
+    stale_ts = 1_000_000 - token_meter._CONTEXT_SNAPSHOT_STALE_AGE_S - 1
+    (snap_dir / "context-usage.s1.json").write_text(
+        json.dumps({"pct": 40, "tokens": 400_000, "window": 1_000_000, "ts": stale_ts}),
+        encoding="utf-8",
+    )
+    got = ccc.context_tokens_for_resume(missing, project_dir=tmp_path, session_id="s1", now=1_000_000)
+    assert got is None
+
+
 def test_newest_transcript_picks_latest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """newest_transcript returns the most-recently-written *.jsonl for a project."""
     import os

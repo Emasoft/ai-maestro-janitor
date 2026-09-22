@@ -79,6 +79,31 @@ def test_source_clear_never_evaluates_cache_staleness(monkeypatch, tmp_path):
     assert _run_main_with_source(monkeypatch, "clear", tmp_path) == 0
 
 
+
+def test_resume_source_routes_through_the_shared_recovery_helper_and_the_widened_reader(
+    monkeypatch, tmp_path
+):
+    """TRDD-L32WC0H7 card 1 follow-up items 1+2: the SessionStart hook must feed
+    `should_clear_on_resume` the SHARED `external_clear.recovery_pending` reading (not an inline
+    flag check) and `cold_cache_compact.context_tokens_for_resume` (not the plain tail-only
+    reader) — this proves the WIRING, independent of the deciders' own already-pinned policy."""
+    captured: dict = {}
+
+    def _fake_should_clear_on_resume(**kwargs):
+        captured.update(kwargs)
+        return ec.ClearVerdict(False, why="test-stub")
+
+    # No signal from the (test-suite-blocked) agentlensPro subprocess -- irrelevant to this
+    # test, which is only about WHAT gets passed to should_clear_on_resume, not the verdict.
+    monkeypatch.setattr(ec, "cache_certainly_expired", lambda *a, **kw: None)
+    monkeypatch.setattr(ec, "recovery_pending", lambda sd: True)
+    monkeypatch.setattr(ccc, "context_tokens_for_resume", lambda *a, **kw: 424_242)
+    monkeypatch.setattr(ec, "should_clear_on_resume", _fake_should_clear_on_resume)
+    assert _run_main_with_source(monkeypatch, "resume", tmp_path) == 0
+    assert captured["recovery_pending"] is True
+    assert captured["context_tokens"] == 424_242
+
+
 def test_a_failed_attempt_records_evaluated_never_fired(tmp_path):
     """Item 6 part 2. `mark_evaluated` (spacing) and `mark_fired`/`mark_clear_fired` (cooldown)
     are DIFFERENT stamps — recording only the former must leave the cooldown/`in_cooldown` gate

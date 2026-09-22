@@ -665,13 +665,16 @@ def test_recovery_pending_vetoes_the_resume_clear():
     assert v.fire is False and "recovery" in v.why
 
 
-def test_recovery_pending_defaults_false_so_the_unowned_caller_is_unaffected():
-    """`external_handoff_clear.py::_decide` calls this WITHOUT the kwarg. This is a REGRESSION
-    smoke test, not an isolation test of the default's effect on its own (that is
-    `test_recovery_pending_vetoes_the_resume_clear` above, which flips only that one kwarg and
-    proves the fire flips with it) — it only re-confirms every OTHER term at the same values
-    still fires when `recovery_pending` is omitted entirely, i.e. that adding the parameter did
-    not change the call's shape or its default outcome for a caller that never learned about it."""
+def test_recovery_pending_defaults_false_so_an_omitting_caller_is_unaffected():
+    """SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 follow-up item 2): this used to say
+    `external_handoff_clear.py::_decide` calls this WITHOUT the kwarg — no longer true, `_decide`
+    now always passes the real `external_clear.recovery_pending(sd)` reading. The default still
+    exists and is still worth pinning: it is a REGRESSION smoke test, not an isolation test of
+    the default's effect on its own (that is `test_recovery_pending_vetoes_the_resume_clear`
+    above, which flips only that one kwarg and proves the fire flips with it) — it only
+    re-confirms every OTHER term at the same values still fires when `recovery_pending` is
+    omitted entirely, i.e. that adding the parameter did not change the call's shape or its
+    default outcome for a caller that never learned about it."""
     v = ec.should_clear_on_resume(
         source="resume",
         cache_expired=True,
@@ -680,4 +683,42 @@ def test_recovery_pending_defaults_false_so_the_unowned_caller_is_unaffected():
         in_cooldown=False,
         already_fired_this_session=False,
     )
+    assert v.fire is True
+
+
+
+# --- card 1 follow-up item 2: the shared recovery_pending helper + the daemon-lane veto ---
+
+
+def test_recovery_pending_true_on_each_of_the_three_flags(tmp_path):
+    """Any one of the three pending-recovery flags is enough — `recovery_pending` is an OR."""
+    for flag in ("rate-limited.flag", "resume-after-compact.flag", "resume-after-clear.flag"):
+        d = tmp_path / flag
+        d.write_text("", encoding="utf-8")
+        assert ec.recovery_pending(tmp_path) is True
+        d.unlink()
+
+
+def test_recovery_pending_false_with_no_flags(tmp_path):
+    assert ec.recovery_pending(tmp_path) is False
+
+
+def test_recovery_pending_fails_open_on_an_unreadable_dir(tmp_path):
+    """A state dir that does not exist (or cannot be read) reads as "nothing pending", the same
+    asymmetry `_fire_recorded` documents elsewhere: a missed veto costs one wrongly-cleared
+    session, a false one costs the whole lever, silently, on every resume."""
+    assert ec.recovery_pending(tmp_path / "does-not-exist") is False
+
+
+def test_should_clear_externally_vetoes_on_recovery_pending():
+    """card 1 follow-up item 2: `external_handoff_clear.py::_decide` used to reach
+    `should_clear_externally` with no recovery guard at all — this pins the new parameter on the
+    DAEMON lane, the sibling of `test_recovery_pending_vetoes_the_resume_clear` above."""
+    v = verdict(recovery_pending=True)
+    assert v.fire is False and "recovery" in v.why
+
+
+def test_should_clear_externally_recovery_pending_defaults_false():
+    """Every existing caller/test that never learned about the new parameter keeps firing."""
+    v = verdict()
     assert v.fire is True
