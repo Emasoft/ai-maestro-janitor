@@ -65,6 +65,7 @@ def test_runnable_shebang_scripts_are_executable_in_git():
         "scripts/reload_trigger.py",
         "scripts/identify_environment.py",
         "scripts/lib/terminal_trigger.py",
+        "scripts/jev_compact.py",
     ]
     out = subprocess.run(
         ["git", "ls-files", "-s", *runnable],

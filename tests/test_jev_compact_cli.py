@@ -164,7 +164,7 @@ class _FakeClient:
         self.closed = True
 
 
-def test_probe_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_ok(_isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient(noul=0.73)
     monkeypatch.setattr(jev_compact, "make_client", lambda: client)
     code, out = _run(["probe"])
@@ -172,9 +172,13 @@ def test_probe_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "probe ok" in out
     assert "noul=0.73" in out
     assert client.closed
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["kind"] == "ok"
 
 
-def test_probe_make_client_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_make_client_raises(
+    _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from jevctx.types import JevAuthError
 
     def _raise() -> Any:
@@ -184,9 +188,13 @@ def test_probe_make_client_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     code, out = _run(["probe"])
     assert code == 2
     assert "no key" in out
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["kind"] == "auth"
 
 
-def test_probe_ask_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_ask_raises(
+    _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from jevctx.types import JevUnavailableError
 
     class _FailingClient(_FakeClient):
@@ -199,6 +207,8 @@ def test_probe_ask_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     assert code == 2
     assert "503" in out
     assert client.closed
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["kind"] == "unavailable"
 
 
 def _keep_only(*keywords: str):
@@ -246,7 +256,7 @@ def test_compact_declines_on_recent_probe_failure(
 ) -> None:
     _isolated_control_dir.mkdir(parents=True, exist_ok=True)
     stamp = {"ok": False, "reason": "simulated outage", "ts": time.time(),
-              "cost": None, "model": None, "provider": "openrouter"}
+              "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
     def _must_not_be_called() -> Any:
@@ -261,6 +271,29 @@ def test_compact_declines_on_recent_probe_failure(
     assert code == 5
     assert "declined: recent probe failure: simulated outage" in output
     assert not out.exists()
+
+
+@pytest.mark.parametrize("kind", ["auth", "budget"])
+def test_compact_does_not_decline_on_non_outage_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """An `auth`/`budget` stamp is scoped to one key/request, not the endpoint -- the fast
+    decline (exit 5) must key on `kind == "unavailable"` alone, so a fresh attempt still
+    tries the network instead of being blacked out by a config bug from a different shell."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated non-outage failure", "ts": time.time(),
+              "cost": None, "model": None, "provider": "openrouter", "kind": kind}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert out.exists()
 
 
 def test_compact_no_digest_material(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,6 +344,34 @@ def test_compact_scorer_error_writes_failure_stamp(
     stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
     assert stamp["ok"] is False
     assert "simulated 503" in stamp["reason"]
+    assert stamp["kind"] == "unavailable"
+
+
+def test_compact_budget_error_exits_7_with_budget_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`JevBudgetError` during scoring is the planner's own bug, not an outage -- exit 7
+    with a `budget:`-prefixed message and a `kind="budget"` stamp, distinct from the generic
+    `compact failed:` / `kind="unavailable"` path the JevUnavailableError test above covers."""
+    from jevctx.types import JevBudgetError
+
+    class _BudgetBustingClient:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            raise JevBudgetError("too many questions for one state")
+
+    monkeypatch.setattr(jev_compact, "make_client", lambda: _BudgetBustingClient())
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 7
+    assert "budget: too many questions for one state" in output
+    assert not out.exists()
+
+    stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
+    assert stamp["ok"] is False
+    assert stamp["kind"] == "budget"
 
 
 def test_expand_round_trips_a_composed_pointer_id() -> None:

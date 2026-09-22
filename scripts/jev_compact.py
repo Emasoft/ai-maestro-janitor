@@ -144,12 +144,20 @@ def write_probe_stamp(
 
 
 def _stamp_kind_for_error(exc: JevError) -> str:
-    """Classify a `JevError` into the probe-stamp `kind` — see `write_probe_stamp`."""
+    """Classify a `JevError` into the probe-stamp `kind` — see `write_probe_stamp`.
+
+    `JevUnavailableError` and any OTHER `JevError` subclass (e.g. a malformed-response
+    condition this CLI raises itself, not from jevctx) both map to "unavailable" -- an
+    unrecognized failure shape is safer treated as "assume outage" than silently falling
+    through the decline gate on an error `compact` doesn't know how to name.
+    """
     if isinstance(exc, JevAuthError):
         return "auth"
     if isinstance(exc, JevBudgetError):
         return "budget"
-    return "unavailable"  # JevUnavailableError, or any other JevError -- treat as an outage
+    if isinstance(exc, JevUnavailableError):
+        return "unavailable"
+    return "unavailable"
 
 
 def _current_provider() -> str:
