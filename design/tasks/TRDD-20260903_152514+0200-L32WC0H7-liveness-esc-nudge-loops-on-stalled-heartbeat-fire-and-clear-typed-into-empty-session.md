@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: dev
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-22T21:44:04+0200
+updated: 2026-09-22T21:53:23+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -15,7 +15,7 @@ related-trdds: [UA4FAX67, WKTD5JTC, P7WU40G9, O7UCNNN2, G043V3V0, 9ZPU69UC]
 npt: []
 eht: []
 implementation-commits: [9cc22049]
-review-after: 2026-09-24
+review-after: 
 assignee: ai-maestro-janitor main session
 created-by: ai-maestro-janitor main session
 ---
@@ -25,7 +25,8 @@ created-by: ai-maestro-janitor main session
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-22
 
 - 2026-09-22 — card 1 of docs_dev/jev-compaction-spec.md is being implemented under this card (trigger + loop guards, recovery guard, iTerm timeout targeting).
-- **HELD AT `testing` — NOT `complete`.** The implementation is done; the card is not, because
+- When card 1 lands, return this card to `testing` until F5 (one real stalled fire recovering with a single nudge) is observed in the field — that acceptance is unchanged.
+- **Prior thread (2026-09-17), still open:** F0–F6 are implemented; the card was HELD AT `testing` — NOT `complete` — because
   F5 and the six live acceptance criteria below need a real stalled fire on this host, which
   cannot be manufactured. **Unblock condition:** publish, then observe one stalled fire recover
   with a SINGLE nudge; then move to `complete`. This matches the ten other cards left at
@@ -298,6 +299,10 @@ Mechanism, verified in code + transcript:
 - 2026-09-22T21:44:04+0200 — column → dev. card 1 (trigger and loop guards) in progress 2026-09-22
 
 ## Notes and lessons learned
+
+
+
+
 
 
 
