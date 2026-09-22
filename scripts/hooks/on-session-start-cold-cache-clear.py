@@ -175,6 +175,27 @@ def main() -> int:
                 ttl_minutes=ec.read_ttl_minutes(sd),
             )
         )
+        # RECOVERY GUARD, card 1 item 5 (TRDD-L32WC0H7; owner: "beware of ... truncating other
+        # operations, like resuming after api error or model expired time limit window"). This
+        # hook is the ONE production caller of `should_clear_on_resume` that can fire a
+        # SessionStart WHILE a rate-limit / API-error / compact / clear resume cue is still
+        # armed on disk — dispatch.py's own heartbeat has not necessarily run yet to replay
+        # that interrupted task to the model. Clearing here would destroy the context the
+        # pending cue is about to need before it is ever read. Best-effort, fail-open (a read
+        # error is treated as "no cue pending" — the SAME asymmetry `_fire_recorded` already
+        # documents: a missed veto costs one wrongly-cleared session, a false one costs the
+        # whole lever, silently, on every resume).
+        try:
+            recovery_pending = any(
+                (sd / f).is_file()
+                for f in (
+                    state.RATE_LIMITED_FLAG,  # same flag for rate-limit AND generic API error
+                    "resume-after-compact.flag",
+                    "resume-after-clear.flag",
+                )
+            )
+        except OSError:
+            recovery_pending = False
         verdict = ec.should_clear_on_resume(
             source=source,
             cache_expired=cache_expired,
@@ -184,6 +205,7 @@ def main() -> int:
             # cooldown can never be judged against instants that straddle a second boundary.
             in_cooldown=cold_cache_compact.clear_in_cooldown(sd, now=now),
             already_fired_this_session=already,
+            recovery_pending=recovery_pending,
         )
         state.log_line(
             "cold-cache-clear",

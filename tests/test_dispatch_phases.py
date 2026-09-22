@@ -3215,6 +3215,35 @@ def _arm_idle_clear(
     return sent
 
 
+def test_cadence_active_waiting_vetoes_on_a_pending_recovery_flag(env_isolation: dict) -> None:
+    """Card 1 item 5 (TRDD-L32WC0H7; owner: "beware of ... truncating other operations, like
+    resuming after api error or model expired time limit window"). The PRE-EXISTING comment on
+    `_cadence_active_waiting` explains why it read only the post-consumption `last-resume.ts`
+    stamp, not the raw flags: 'those are unlinked by their own phase, which then early-returns
+    from main() before either idle phase runs, so testing them here would always read False'.
+    That is true only for THIS process's own phase order. It is false for the external-clear
+    watcher (`external_handoff_clear.py`, spawned by
+    `scripts/hooks/on-session-start-cold-cache-clear.py` at SessionStart), which borrows this
+    exact function from a SEPARATE process with no such ordering guarantee — see the comment
+    this function ends on: "this predicate is borrowed by the external-clear watcher". So each
+    of the three PENDING flags must veto directly, not just their post-consumption stamp.
+    """
+    dispatch = _import_dispatch()
+    sd = dispatch.state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    assert dispatch._cadence_active_waiting(sd, now) is False, "nothing pending -> not waiting"
+    for flag_name in (
+        "rate-limited.flag",
+        "resume-after-compact.flag",
+        "resume-after-clear.flag",
+    ):
+        flag = sd / flag_name
+        flag.write_text("x", encoding="utf-8")
+        assert dispatch._cadence_active_waiting(sd, now) is True, f"{flag_name} must veto"
+        flag.unlink()
+
+
 def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict, monkeypatch) -> None:
     """The whole point (owner directive 2026-08-04): an abandoned session must handoff and
     clear AUTOMATICALLY. This phase used to print 'run /janitor-handoff-and-clear' — which the
@@ -3235,12 +3264,23 @@ def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict,
     assert sent[0][1].get("esc_first") is False
 
 
-def test_idle_clear_fires_regardless_of_context_SIZE(env_isolation: dict, monkeypatch) -> None:
-    """Size is not a gate any more. A 40k idle session clears just like a 500k one — the
-    directive is about an abandoned session keeping its context alive, not about how much the
-    clear reclaims. The old 350k floor is exactly how the compact path became unreachable."""
+def test_idle_clear_holds_off_a_tiny_context_card1_item3(env_isolation: dict, monkeypatch) -> None:
+    """SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 3): size USED TO NOT be a gate ("a 40k
+    idle session clears just like a 500k one"). It is again, reusing the `*_MIN_CONTEXT_TOKENS`
+    pattern via `cold_cache_compact.clear_min_context_tokens()` (default 300k) — a 40k idle
+    session has nothing worth an irreversible `/clear` to reclaim, and the round-trip costs a
+    real keystroke for zero gain."""
     dispatch = _import_dispatch()
     sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, ctx=40_000)
+    assert dispatch._phase_idle_clear_nudge() is False
+    assert sent == [], "a tiny context must not get an irreversible /clear typed into it"
+
+
+def test_idle_clear_still_fires_on_a_big_context(env_isolation: dict, monkeypatch) -> None:
+    """The companion to the item-3 floor test above: idle time still decides for a context that
+    IS big enough — the reinstated gate must skip nothing-to-reclaim, not silence the lever."""
+    dispatch = _import_dispatch()
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, ctx=500_000)
     assert dispatch._phase_idle_clear_nudge() is True
     assert [c for c, _ in sent] == ["/janitor-handoff-and-clear"]
 

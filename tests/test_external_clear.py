@@ -155,14 +155,16 @@ def test_small_context_is_not_worth_clearing():
     assert v.fire is False and "nothing worth reclaiming" in v.why
 
 
-def test_unknown_context_does_not_veto_the_2026_08_04_correction():
-    """An unmeasurable transcript skips the size clause instead of disabling the lever.
-
-    Pinned to the warm 60-min TTL so only the long-idle trigger can fire — otherwise the
-    miss trigger would carry the test and it would pass without exercising the correction.
+def test_unknown_context_now_vetoes_card1_item1():
+    """SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 1): an unmeasurable transcript USED TO
+    skip the size clause and let the idle/miss terms decide alone (the 2026-08-04 correction
+    this test used to pin). That was backwards for a gate whose job is "is there enough here to
+    justify a destructive /clear" — not knowing the size is exactly the case where the honest
+    answer is "assume no". Pinned to the warm 60-min TTL so only the long-idle trigger could
+    fire if the floor did not veto first — proving the veto now wins ahead of it.
     """
     v = verdict(context_tokens=None, ttl_minutes=60, last_turn_age_s=30)
-    assert v.fire is True and v.trigger == ec.TRIGGER_LONG_IDLE
+    assert v.fire is False and "unmeasurable" in v.why
 
 
 # --- should_clear_externally: the two triggers -------------------------------
@@ -580,3 +582,102 @@ def test_the_expiry_probe_gets_its_own_generous_timeout():
 
     assert alp._CACHE_EXPIRED_TIMEOUT_S >= 20.0
     assert alp._CACHE_EXPIRED_TIMEOUT_S is not alp._TIMEOUT_S
+
+
+# --- card 1 items 2+7: every clear decision logs its context reading + autoCompactEnabled ----
+
+
+def _read_log(name: str) -> str:
+    import state
+
+    path = state.log_dir() / f"{name}.log"
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def test_a_decline_logs_the_context_reading_and_autocompact_setting(tmp_path, monkeypatch):
+    """Card 1 items 2+7: a DECLINE must be as visible as a fire — this is what makes a dead
+    lever distinguishable from a healthy-but-quiet one, and what lets a threshold tuned while
+    `autoCompactEnabled` was believed false (it is TRUE, measured 2026-09-22) be re-checked
+    against the setting that actually governed the decision at the time."""
+    import state
+
+    monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
+    state.log_dir.cache_clear()
+    # Short idle AND a warm-TTL next fire, so BOTH triggers miss and the gate declines cleanly
+    # ("idle ... still warm") rather than firing on next-fire-misses.
+    v = verdict(idle_seconds=100, ttl_minutes=60)
+    assert v.fire is False
+    log = _read_log("external-clear")
+    assert "decline" in log
+    assert "context=460000" in log  # FIRING's context_tokens, unchanged by this override
+    assert "autoCompactEnabled=True" in log  # no settings.json on this fake HOME -> default True
+
+
+def test_a_fire_logs_unmeasurable_context_literally(tmp_path, monkeypatch):
+    """The `context=unmeasurable` spelling from card 1 item 2, not a bare `None` or `-1` that a
+    log reader would have to know the code to interpret."""
+    import state
+
+    monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
+    state.log_dir.cache_clear()
+    v = verdict(context_tokens=None)
+    assert v.fire is False  # card 1 item 1: unmeasurable never satisfies the floor
+    log = _read_log("external-clear")
+    assert "context=unmeasurable" in log
+
+
+def test_should_clear_on_resume_also_logs(tmp_path, monkeypatch):
+    """The resume-gate wrapper gets the same guarantee as the externally-clear one — a single
+    shared `_log_clear_decision` helper, not a copy that could drift."""
+    import state
+
+    monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
+    state.log_dir.cache_clear()
+    v = ec.should_clear_on_resume(
+        source="startup",
+        cache_expired=None,
+        context_tokens=200_000,
+        min_context=300_000,
+        in_cooldown=False,
+        already_fired_this_session=False,
+    )
+    assert v.fire is False
+    log = _read_log("clear-on-resume")
+    assert "decline" in log and "context=200000" in log and "autoCompactEnabled=True" in log
+
+
+# --- card 1 item 5: recovery guard on the resume gate -------------------------------------
+
+
+def test_recovery_pending_vetoes_the_resume_clear():
+    """`recovery_pending=True` must refuse even though every other term is satisfied — a
+    rate-limit / API-error / compact / clear resume cue still armed on disk means the
+    "no in-flight work to destroy" premise the whole resume gate rests on does not hold yet."""
+    v = ec.should_clear_on_resume(
+        source="resume",
+        cache_expired=True,
+        context_tokens=500_000,
+        min_context=150_000,
+        in_cooldown=False,
+        already_fired_this_session=False,
+        recovery_pending=True,
+    )
+    assert v.fire is False and "recovery" in v.why
+
+
+def test_recovery_pending_defaults_false_so_the_unowned_caller_is_unaffected():
+    """`external_handoff_clear.py::_decide` calls this WITHOUT the kwarg. This is a REGRESSION
+    smoke test, not an isolation test of the default's effect on its own (that is
+    `test_recovery_pending_vetoes_the_resume_clear` above, which flips only that one kwarg and
+    proves the fire flips with it) — it only re-confirms every OTHER term at the same values
+    still fires when `recovery_pending` is omitted entirely, i.e. that adding the parameter did
+    not change the call's shape or its default outcome for a caller that never learned about it."""
+    v = ec.should_clear_on_resume(
+        source="resume",
+        cache_expired=True,
+        context_tokens=500_000,
+        min_context=150_000,
+        in_cooldown=False,
+        already_fired_this_session=False,
+    )
+    assert v.fire is True

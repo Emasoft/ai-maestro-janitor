@@ -2926,6 +2926,11 @@ def _phase_idle_clear_nudge() -> bool:
             user_present=present,
             active_waiting=active,
             min_idle_s=cold_cache_compact.clear_min_idle_seconds(),
+            # card 1 item 3 (TRDD-L32WC0H7): `ctx` was already measured above for the print
+            # line — feeding it into the gate too is the only change; a tiny idle context has
+            # nothing worth an irreversible `/clear` to reclaim.
+            context_tokens=ctx,
+            min_context_tokens=cold_cache_compact.clear_min_context_tokens(),
         ):
             return False
         hours = (idle_s or 0) // 3600
@@ -4040,6 +4045,36 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     (or its stamp) this collapses to the exact pre-existing behavior.
     """
     try:
+        # RECOVERY GUARD, card 1 item 5 (TRDD-L32WC0H7; owner: "beware of ... truncating other
+        # operations, like resuming after api error or model expired time limit window"). The
+        # comment on the STAMP-not-FLAG design below is true only for THIS PROCESS's own phase
+        # order: dispatch.py's own resume phases (_phase_rate_limit_recovery /
+        # _phase_compact_resume / _phase_clear_resume) run before the idle nudges and consume
+        # their flag in the SAME fire, so by the time this function runs here the flag is
+        # already gone. That ordering guarantee does NOT hold for the external-clear watcher
+        # (`external_handoff_clear.py`, spawned detached by
+        # `scripts/hooks/on-session-start-cold-cache-clear.py` at SessionStart — see the
+        # comment above this function): it is a SEPARATE process with no relationship to this
+        # session's own heartbeat phase order, so a SessionStart can spawn it WHILE a
+        # rate-limit / API-error / compact / clear resume is still pending, unconsumed, on
+        # disk. Racing an automatic clear into that exact window is the "truncating a resume"
+        # the owner named. So the three flags are checked directly here too, best-effort and
+        # fail-open like every other branch in this function.
+        #
+        # DISCLOSED SCOPE NOTE (adversarial review of this card): this function is SHARED — its
+        # only other caller is `_phase_proactive_idle_compact`, the PREVENTIVE /compact nudge —
+        # so this fix extends the recovery guard to that lossy-compact path too, not just the
+        # clear paths item 5's text names. That is a DELIBERATE keep, not an accident: a
+        # compaction racing an unconsumed resume cue would truncate the same recovery the owner
+        # was describing, just via a different destructive action. Splitting it out would mean
+        # deliberately leaving that sibling path unguarded, which nobody asked for.
+        for _pending_flag in (
+            state.RATE_LIMITED_FLAG,  # rate-limit / API-error (StopFailure writes one flag for both)
+            "resume-after-compact.flag",
+            "resume-after-clear.flag",
+        ):
+            if (sd / _pending_flag).is_file():
+                return True
         last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
         resume_recent = last_resume > 0 and 0 <= now - last_resume < _RESUME_RECENCY_WINDOW_S
         if resume_recent and not _daemon_wake_covered_fresh(sd, now):

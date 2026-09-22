@@ -113,6 +113,15 @@ _LAST_COMPACT_STAMP = state.LAST_COMPACT_STAMP  # high-water mark, written by th
 CLEAR_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_ENABLED"
 CLEAR_MIN_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_MIN_IDLE_SECONDS"
 CLEAR_COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_COOLDOWN_SECONDS"
+# TRDD-L32WC0H7 card 1 item 3 (owner spec, 2026-09-22) — REVERSES the "SIZE IS NOT A TERM"
+# directive `should_clear_when_long_idle`'s own docstring below used to cite (2026-08-04): the
+# same-shaped `*_MIN_CONTEXT_TOKENS` pattern the reactive compact/clear gates already use
+# (`MIN_CONTEXT_ENV` above, `external_clear.MIN_CONTEXT_ENV`) is reinstated here too, so a
+# TINY idle session — nothing to reclaim either way — no longer gets typed into with an
+# irreversible `/clear` for zero gain. Matches `external_clear`'s card-1-item-1 invariant: an
+# UNMEASURABLE context never satisfies this gate either (see `should_clear_when_long_idle`).
+CLEAR_MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_IDLE_CLEAR_MIN_CONTEXT_TOKENS"
+DEFAULT_CLEAR_MIN_CONTEXT_TOKENS = 300_000  # matches external_clear.DEFAULT_MIN_CONTEXT_TOKENS
 # 1h (owner directive 2026-08-04, overriding the earlier 6h): *"if the project main agent is
 # just running the janitor beats while doing nothing else for more than 1 hour, it MUST handoff
 # and clear automatically"*. The old 6h reasoned that an hour-idle session "may simply be
@@ -403,6 +412,10 @@ def clear_cooldown_seconds() -> int:
     return state.coerce_int(state.plugin_option(CLEAR_COOLDOWN_ENV), DEFAULT_CLEAR_COOLDOWN_SECONDS)
 
 
+def clear_min_context_tokens() -> int:
+    return state.coerce_int(state.plugin_option(CLEAR_MIN_CONTEXT_ENV), DEFAULT_CLEAR_MIN_CONTEXT_TOKENS)
+
+
 def clear_in_cooldown(state_dir: Path, *, now: int) -> bool:
     last = state.read_int_state(state_dir / _CLEAR_FIRED_STAMP, 0)
     return last > 0 and 0 <= now - last < clear_cooldown_seconds()
@@ -446,19 +459,27 @@ def should_clear_when_long_idle(
     user_present: bool,
     active_waiting: bool,
     min_idle_s: int,
+    context_tokens: int | None,
+    min_context_tokens: int,
 ) -> bool:
-    """PURE. Has this session done nothing but beat its heartbeat for long enough that
-    `/clear` beats leaving it alone?
+    """PURE. Has this session done nothing but beat its heartbeat for long enough — on a
+    context actually big enough to be worth reclaiming — that `/clear` beats leaving it alone?
 
-    SIZE IS NOT A TERM (owner directive 2026-08-04, overriding the earlier 350k floor):
-    *"if the project main agent is just running the janitor beats while doing nothing else
-    for more than 1 hour, it MUST handoff and clear automatically"*. The old size gate was
-    reasoned from the compaction floor — below ~308k `/clear` reclaims little more than
-    `/compact` — but that argues about how much a clear SAVES, not whether an abandoned
-    session should keep its context alive, and it is the same class of mistake that made the
-    compact path unreachable: a threshold high enough to never be met is a feature that does
-    not exist. Dropping it also removes the unknown-context veto, which silently disabled the
-    lever on any session whose transcript could not be measured.
+    SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 3): SIZE USED TO NOT BE A TERM at all
+    (owner directive 2026-08-04, overriding the then-earlier 350k floor): *"if the project main
+    agent is just running the janitor beats while doing nothing else for more than 1 hour, it
+    MUST handoff and clear automatically"*. That directive is still honored — idle time alone
+    still decides WHETHER an abandoned session gets cleared — but the reinstated
+    `min_context_tokens` floor answers a DIFFERENT question the 2026-08-04 text never addressed:
+    a session idle for an hour on a nearly-empty context has nothing worth an irreversible
+    `/clear` to reclaim, and typing the command in costs a real round-trip for zero gain. The
+    floor is deliberately tiny (`DEFAULT_CLEAR_MIN_CONTEXT_TOKENS`, matching
+    `external_clear.DEFAULT_MIN_CONTEXT_TOKENS`) — it exists to skip a NOTHING-to-reclaim clear,
+    not to resurrect the old "clear rarely fires" bar.
+
+    `context_tokens is None` NEVER satisfies this gate (card 1 item 1's invariant, applied here
+    too): an unmeasurable transcript is not evidence there is something worth reclaiming, so it
+    reads the same as a too-small one — refuse, same as `external_clear`'s two size gates.
 
     `None` idle is still a veto: an unknown idle age must never authorize a DESTRUCTIVE
     action. `user_present` and `active_waiting` remain vetoes — a session someone is typing
@@ -473,6 +494,8 @@ def should_clear_when_long_idle(
     if user_present or active_waiting:
         return False
     if idle_seconds is None:
+        return False
+    if context_tokens is None or context_tokens < min_context_tokens:
         return False
     return idle_seconds >= min_idle_s
 

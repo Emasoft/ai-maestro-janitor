@@ -323,13 +323,19 @@ class _ClearKwargs(TypedDict):
     user_present: bool
     active_waiting: bool
     min_idle_s: int
+    context_tokens: int | None
+    min_context_tokens: int
 
 
-def _clear_kw(**over: bool | int) -> _ClearKwargs:
+def _clear_kw(**over: bool | int | None) -> _ClearKwargs:
     kw: _ClearKwargs = {
         "user_present": False,
         "active_waiting": False,
         "min_idle_s": 3600,
+        # Large enough to clear the reinstated floor by default — most tests below are about
+        # idle time / vetoes, not size, so the size term should not have to be repeated everywhere.
+        "context_tokens": 500_000,
+        "min_context_tokens": 300_000,
     }
     kw.update(over)  # type: ignore[typeddict-item]  # `over` is a caller-supplied partial override
     return kw
@@ -338,24 +344,36 @@ def _clear_kw(**over: bool | int) -> _ClearKwargs:
 def test_an_hour_of_nothing_but_heartbeats_is_cleared():
     """The case the directive names (owner 2026-08-04): *"if the project main agent is just
     running the janitor beats while doing nothing else for more than 1 hour, it MUST handoff
-    and clear automatically"*. One hour, nobody present, nothing waiting → clear."""
+    and clear automatically"*. One hour, nobody present, nothing waiting, big enough context
+    → clear."""
     assert ccc.should_clear_when_long_idle(3_601, **_clear_kw()) is True
 
 
-def test_context_size_is_NOT_a_gate():
-    """SIZE MUST NOT VETO. The previous 350k floor was reasoned from what a clear SAVES, but
-    the directive is about whether an abandoned session should keep its context alive at all —
-    and a threshold high enough to rarely be met is how the compact path became a feature that
-    could never fire (its 716k bar sat above the harness's own ~670k compaction point).
+def test_context_size_IS_a_gate_again_card1_item3():
+    """SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 3): size is back as a term, reusing the
+    `*_MIN_CONTEXT_TOKENS` pattern. The 2026-08-04 directive this test used to pin ("size must
+    not veto") answered a different question — WHETHER an abandoned session should ever clear —
+    and the floor reinstated here is deliberately tiny: it exists only to skip a nothing-to-
+    reclaim clear on a near-empty idle session, not to resurrect a bar high enough to never
+    fire (the mistake that made the old compact path unreachable)."""
+    assert ccc.should_clear_when_long_idle(
+        3_601, **_clear_kw(context_tokens=100, min_context_tokens=300_000)
+    ) is False, "a context too small to be worth reclaiming must not authorize a /clear"
+    assert ccc.should_clear_when_long_idle(3_601, **_clear_kw()) is True  # big context still fires
 
-    A tiny idle session still clears: it costs almost nothing and it is what was asked for."""
-    assert ccc.should_clear_when_long_idle(3_601, **_clear_kw()) is True  # size never consulted
     import inspect
 
     params = inspect.signature(ccc.should_clear_when_long_idle).parameters
-    assert "context_tokens" not in params and "min_context_tokens" not in params, (
-        "a size term is back in the clear gate — the directive says idle time decides"
+    assert "context_tokens" in params and "min_context_tokens" in params, (
+        "the size term must be an explicit input — card 1 item 3 reinstated it"
     )
+
+
+def test_unmeasurable_context_never_satisfies_the_min_context_gate():
+    """Card 1 item 1's invariant, applied to the reinstated clear-gate floor too: an unmeasurable
+    transcript is not evidence there is something worth reclaiming, so it must refuse exactly
+    like a too-small one — never silently skip the size clause and decide on idle time alone."""
+    assert ccc.should_clear_when_long_idle(3_601, **_clear_kw(context_tokens=None)) is False
 
 
 def test_every_remaining_veto_blocks_the_clear_independently():
@@ -372,10 +390,7 @@ def test_an_UNKNOWN_idle_age_never_authorizes_a_clear():
     """`None` is not zero and must not read as 'idle forever'. `transcript_activity` returns
     None when it cannot read the transcript — a fresh session, a moved checkout, a permissions
     error. Treating None as a satisfied gate would clear a session precisely when we know least
-    about it, which is the worst possible moment for an irreversible action.
-
-    Note this is now the ONLY None that can appear here: dropping the size term also dropped an
-    unknown-CONTEXT veto that silently disabled the lever on any unmeasurable transcript."""
+    about it, which is the worst possible moment for an irreversible action."""
     assert ccc.should_clear_when_long_idle(None, **_clear_kw()) is False
 
 

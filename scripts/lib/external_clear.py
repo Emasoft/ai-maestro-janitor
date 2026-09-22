@@ -1291,6 +1291,35 @@ def seconds_until_next_fire(cron: str, now: int) -> int | None:
     return minutes_ahead * 60 - tm.tm_sec
 
 
+def _log_clear_decision(label: str, verdict: ClearVerdict, *, context_tokens: int | None) -> None:
+    """Card 1 items 2+7 (TRDD-L32WC0H7): every clear decision — fire OR decline — gets ONE log
+    line naming the context-token reading it used (`context=unmeasurable` when the transcript
+    couldn't be measured) and the harness's live `autoCompactEnabled` setting.
+
+    WHY THIS LIVES HERE, NOT INSIDE THE DECIDE FUNCTIONS: `_should_clear_on_resume_decide` /
+    `_should_clear_externally_decide` are exercised directly, by name, as PURE functions over
+    injected facts across the whole existing test suite (`test_external_clear.py`'s own module
+    docstring: "every gate here is a PURE function over injected facts, so the tests call it
+    directly") — an I/O side effect inside them would contradict that contract without changing
+    a single assertion, which is exactly the kind of silent regression this project's mutation
+    tests exist to catch. Putting the log write in the thin `should_clear_*` wrappers instead
+    keeps the decision pure and testable while still guaranteeing every REAL caller (there is
+    exactly one production entry point per gate) gets the log line — a root-cause fix in the one
+    place both callers route through, not a copy pasted into each.
+
+    Best-effort: a log failure must never break the decision it only records.
+    """
+    try:
+        ctx = "unmeasurable" if context_tokens is None else str(context_tokens)
+        state.log_line(
+            label,
+            f"{'fire' if verdict.fire else 'decline'} trigger={verdict.trigger or '-'} "
+            f"context={ctx} autoCompactEnabled={harness_auto_compacts()} why={verdict.why}",
+        )
+    except Exception:  # noqa: BLE001 -- logging must never break the caller's decision
+        pass
+
+
 def next_fire_misses_cache(
     *,
     last_turn_age_s: int | None,
@@ -1315,7 +1344,7 @@ def next_fire_misses_cache(
     return (last_turn_age_s + seconds_to_next_fire) >= ttl_minutes * 60
 
 
-def should_clear_on_resume(
+def _should_clear_on_resume_decide(
     *,
     source: str,
     cache_expired: bool | None,
@@ -1323,6 +1352,7 @@ def should_clear_on_resume(
     min_context: int,
     in_cooldown: bool,
     already_fired_this_session: bool,
+    recovery_pending: bool = False,
 ) -> ClearVerdict:
     """PURE. Shrink a session that was RESUMED onto a dead prompt cache, before its first turn.
 
@@ -1358,16 +1388,30 @@ def should_clear_on_resume(
         the rest down.
       * `already_fired_this_session` — belt to the cooldown's braces, keyed on the session id:
         if SessionStart is ever delivered twice for one session, the second is a no-op.
+      * `recovery_pending` (card 1 item 5, TRDD-L32WC0H7; owner: "beware of ... truncating
+        other operations, like resuming after api error or model expired time limit window") —
+        a rate-limit / API-error / compact / clear resume cue is still armed, unconsumed, on
+        disk. The "no in-flight work to destroy" premise this whole gate rests on (see above)
+        is FALSE exactly then: a `SessionStart` can land while `dispatch.py`'s own heartbeat has
+        not yet run the phase that would replay the interrupted task to the model. Clearing in
+        that window destroys the context the pending resume cue is about to need, before the
+        cue is ever read — silently truncating the recovery the owner named. The CALLER (this
+        gate's only production entry point, `scripts/hooks/on-session-start-cold-cache-clear.py`)
+        computes this from the same three flag files `dispatch._cadence_active_waiting` checks;
+        it is a plain bool here so the gate itself stays free of filesystem I/O.
 
-    `context_tokens is None` deliberately does NOT veto, matching the correction made to
-    `should_clear_externally`: an unmeasurable transcript must not silently disable the lever.
-    A KNOWN-small context does veto — under `min_context` there is nothing worth reclaiming and
-    a clear would cost the user their scrollback for no gain.
+    SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 1): `context_tokens is None` used to NOT
+    veto here either, "matching" the sibling gate's now-reversed shape. Both flip together: an
+    unmeasurable transcript vetoes on the floor exactly like a too-small one. A KNOWN-small
+    context still vetoes — under `min_context` there is nothing worth reclaiming and a clear
+    would cost the user their scrollback for no gain.
     """
     if source not in RESUME_SOURCES:
         return ClearVerdict(False, why=f"source={source or '?'} — not a load-after-away")
     if already_fired_this_session:
         return ClearVerdict(False, why="already fired for this session")
+    if recovery_pending:
+        return ClearVerdict(False, why="recovery cue pending — not truncating the resume")
     if in_cooldown:
         return ClearVerdict(False, why="cooldown")
     if cache_expired is not True:
@@ -1375,9 +1419,16 @@ def should_clear_on_resume(
             False,
             why="cache warm" if cache_expired is False else "cache state unknown — not clearing",
         )
-    if context_tokens is not None and context_tokens < min_context:
+    # INVERTED alongside `should_clear_externally` (card 1 item 1) — see that function's own
+    # comment for the why; the two gates must not diverge on the same question.
+    if context_tokens is None or context_tokens < min_context:
         return ClearVerdict(
-            False, why=f"context {context_tokens} < {min_context} — nothing worth reclaiming"
+            False,
+            why=(
+                "context unmeasurable — treated as below floor"
+                if context_tokens is None
+                else f"context {context_tokens} < {min_context} — nothing worth reclaiming"
+            ),
         )
     return ClearVerdict(
         True,
@@ -1385,6 +1436,41 @@ def should_clear_on_resume(
         f"resumed on a dead cache (context={context_tokens if context_tokens is not None else '?'})"
         " — shrinking before the first turn pays full price for it",
     )
+
+
+def should_clear_on_resume(
+    *,
+    source: str,
+    cache_expired: bool | None,
+    context_tokens: int | None,
+    min_context: int,
+    in_cooldown: bool,
+    already_fired_this_session: bool,
+    recovery_pending: bool = False,
+) -> ClearVerdict:
+    """PUBLIC entry point. Decides via `_should_clear_on_resume_decide` (kept PURE — see its own
+    docstring for the whole policy) then logs the decision (card 1 items 2+7). Review note: THIS
+    wrapper is NOT the pure function the "tests call directly with injected facts" claim is
+    about — `_should_clear_on_resume_decide` is, and it stays free of the log write. This wrapper
+    is the ONE place the real SessionStart caller routes through, so it is also the one place
+    that needs to know how to log.
+
+    `recovery_pending` DEFAULTS FALSE, deliberately: `external_handoff_clear.py::_decide` (the
+    watcher's own confirmatory re-check, spawned only AFTER the SessionStart hook's own call to
+    this same function already vetoed on it) calls this without the argument, and must keep
+    working unchanged — it is not this repo's file to edit for card 1. The hook is the real gate.
+    """
+    verdict = _should_clear_on_resume_decide(
+        source=source,
+        cache_expired=cache_expired,
+        context_tokens=context_tokens,
+        min_context=min_context,
+        in_cooldown=in_cooldown,
+        already_fired_this_session=already_fired_this_session,
+        recovery_pending=recovery_pending,
+    )
+    _log_clear_decision("clear-on-resume", verdict, context_tokens=context_tokens)
+    return verdict
 
 
 def cache_certainly_expired(project_dir: str | Path | None = None) -> bool | None:
@@ -1481,7 +1567,7 @@ class ClearVerdict:
     why: str = ""
 
 
-def should_clear_externally(
+def _should_clear_externally_decide(
     *,
     idle_seconds: int | None,
     last_turn_age_s: int | None,
@@ -1537,10 +1623,13 @@ def should_clear_externally(
     measurement is what makes the log line worth reading. Its `None` is "no signal", never
     `False`: an absent CLI must leave the other two triggers exactly as they were.
 
-    `context_tokens is None` is NOT a veto, and that is a correction, not an oversight: the
-    unknown-context veto is exactly what silently disabled `should_clear_when_long_idle` for
-    every session whose transcript could not be measured (owner directive 2026-08-04). An
-    unmeasurable context skips the size clause and the idle/miss terms decide alone.
+    SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 1): `context_tokens is None` USED TO skip
+    the size clause and let the idle/miss terms decide alone (owner directive 2026-08-04, dated
+    correction — that directive was about the SEPARATE `should_clear_when_long_idle` idle-time
+    lever, not this size floor, and reusing its reasoning here was the bug). An unmeasurable
+    context now VETOES on the floor exactly like a too-small one: "we don't know if there is
+    anything worth reclaiming" and "there is nothing worth reclaiming" both mean the same thing
+    to a gate that must justify a destructive `/clear`.
     """
     if in_cooldown:
         return ClearVerdict(False, why="cooldown")
@@ -1584,9 +1673,21 @@ def should_clear_externally(
             f"context {context_tokens} >= high-water {context_high_water} and the harness no "
             "longer auto-compacts — without a clear this session stops at the context limit",
         )
-    if context_tokens is not None and context_tokens < min_context:
+    # INVERTED, card 1 item 1 (owner, 2026-09-22 spec, superseding the 2026-08-04 directive this
+    # branch used to cite in its own name): an UNMEASURABLE context must NOT skip the min-context
+    # floor, it must FAIL it. The old `context_tokens is not None and …` shape let a transcript
+    # that could not be measured slide past the floor and decide on `cache_expired`/idle alone —
+    # exactly backwards for a gate whose whole job is "is there enough here to be worth a
+    # destructive `/clear`": not knowing the size is the ONE case where the honest answer is
+    # "assume no". `context_tokens is None` now reads as "unmeasurable ⇒ below the floor".
+    if context_tokens is None or context_tokens < min_context:
         return ClearVerdict(
-            False, why=f"context {context_tokens} < {min_context} — nothing worth reclaiming"
+            False,
+            why=(
+                "context unmeasurable — treated as below floor"
+                if context_tokens is None
+                else f"context {context_tokens} < {min_context} — nothing worth reclaiming"
+            ),
         )
 
     if cache_expired is True:
@@ -1616,6 +1717,48 @@ def should_clear_externally(
     return ClearVerdict(
         False, why=f"idle {idle_seconds}s < {min_idle_s}s and the next fire is still warm"
     )
+
+
+def should_clear_externally(
+    *,
+    idle_seconds: int | None,
+    last_turn_age_s: int | None,
+    ttl_minutes: int,
+    seconds_to_next_fire: int | None,
+    context_tokens: int | None,
+    min_context: int,
+    min_idle_s: int,
+    headroom_s: int,
+    active_waiting: bool,
+    in_cooldown: bool,
+    awaiting_user: bool,
+    cache_expired: bool | None = None,
+    context_high_water: int = 0,
+) -> ClearVerdict:
+    """PUBLIC entry point. Decides via `_should_clear_externally_decide` (kept PURE — see its
+    own docstring for the whole policy) then logs the decision (card 1 items 2+7). Review note:
+    THIS wrapper is NOT the pure function the "tests call directly with injected facts" claim is
+    about — `_should_clear_externally_decide` is, and it stays free of the log write. This
+    wrapper is the ONE place the real watcher caller routes through, so it is also the one place
+    that needs to know how to log.
+    """
+    verdict = _should_clear_externally_decide(
+        idle_seconds=idle_seconds,
+        last_turn_age_s=last_turn_age_s,
+        ttl_minutes=ttl_minutes,
+        seconds_to_next_fire=seconds_to_next_fire,
+        context_tokens=context_tokens,
+        min_context=min_context,
+        min_idle_s=min_idle_s,
+        headroom_s=headroom_s,
+        active_waiting=active_waiting,
+        in_cooldown=in_cooldown,
+        awaiting_user=awaiting_user,
+        cache_expired=cache_expired,
+        context_high_water=context_high_water,
+    )
+    _log_clear_decision("external-clear", verdict, context_tokens=context_tokens)
+    return verdict
 
 
 def terminal_from_record(record: Mapping[str, str]) -> dict[str, str]:
