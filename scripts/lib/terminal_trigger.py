@@ -544,14 +544,21 @@ def _read_iterm_pane_text(sid: str) -> str | None:
         # the timeout is still correctly surfaced to the caller via the `return None` below
         # regardless of whether this line lands, but silently discarding a disk-full signal
         # with nowhere else it is ever recorded is its own failure worth seeing (review finding).
+        # The stderr fallback is caught as bare `Exception`, not just `OSError`: a detached
+        # child process can run with `sys.stderr` set to `None` or a closed handle, and writing
+        # to it then can raise `AttributeError`/`ValueError` rather than `OSError` — the read
+        # result is what callers act on, a lost log line never is, so nothing here may escape.
         try:
             state.log_line(
                 "terminal_trigger",
                 f"iterm read timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
                 f"load1={os.getloadavg()[0]:.2f} sid={sid} — retrying direct session target",
             )
-        except OSError as exc:
-            print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
+            try:
+                print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+            except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+                pass
         direct_script = _iterm_direct_session_script(sid, ["            return contents"])
         try:
             proc = _run_osascript(direct_script, timeout=_ITERM_READ_TIMEOUT_S)
@@ -562,8 +569,11 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                     f"iterm read retry also timed out after {_ITERM_READ_TIMEOUT_S:.0f}s "
                     f"load1={os.getloadavg()[0]:.2f} sid={sid} — giving up",
                 )
-            except OSError as exc:
-                print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+            except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
+                try:
+                    print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+                except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+                    pass
             return None
         # Only shape/exit-code validated here, NOT emptiness: a live check against a real
         # session proved `_iterm_direct_session_script` returns byte-identical text to the
@@ -581,8 +591,31 @@ def _read_iterm_pane_text(sid: str) -> str | None:
                     f"iterm direct-session retry returned no usable text sid={sid} "
                     f"rc={proc.returncode if proc else None} — treating as unreadable",
                 )
-            except OSError as exc:
-                print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+            except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
+                try:
+                    print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+                except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+                    pass
+            return None
+        # The retry only runs after the PRIMARY read already timed out 15s ago — an empty
+        # result here is far more likely a mid-repaint frame caught by the retry's own single
+        # attempt than a genuinely blank pane, unlike an empty PRIMARY read (returned as-is
+        # below). Callers treat "" as "prompt field empty -> safe to type"; conflating a
+        # possibly-stale empty snapshot with that signal risks a stray keystroke landing in a
+        # non-empty prompt. So the retry leg is held to a stricter bar: empty here means
+        # "unread", not "empty".
+        if not proc.stdout.strip():
+            try:
+                state.log_line(
+                    "terminal_trigger",
+                    f"iterm direct-session retry returned empty after timeout sid={sid} "
+                    "— treating as unread",
+                )
+            except Exception as exc:  # noqa: BLE001 - logging is best-effort, never fatal
+                try:
+                    print(f"terminal_trigger: log_line failed: {exc}", file=sys.stderr)
+                except Exception:  # noqa: BLE001 - stderr itself may be closed/None
+                    pass
             return None
         return proc.stdout
     return proc.stdout if proc and proc.returncode == 0 else None
