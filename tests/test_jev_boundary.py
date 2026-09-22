@@ -34,6 +34,18 @@ _FORBIDDEN_MODULE_FILES = (
 # (see module docstring) and is the only thing that imports jevctx/jev_compaction in-process.
 _ALLOWED_EXCEPTION = "scripts/jev_compact.py"
 
+# The two allowed importers of llm_ext_summary (TRDD-RAEGS1D5 card 3 C2): the manual lane's
+# own composer -- the ONE entry that actually matters today, since compose_agent_handoff.py
+# has a shebang and lives directly under scripts/, so the _SHEBANG_DIRS glob below scans it
+# and would flag `import llm_ext_summary as les` without this exemption (verified) -- and the
+# module itself, listed for defense-in-depth even though scripts/lib/ is not currently a scan
+# root (neither _SHEBANG_DIRS nor _FORBIDDEN_MODULE_FILES reaches it), so this second entry is
+# a no-op guard against a future rescoping, not something exercised by this test today.
+_LLM_EXT_SUMMARY_ALLOWED = (
+    "scripts/compose_agent_handoff.py",
+    "scripts/lib/llm_ext_summary.py",
+)
+
 
 def _imports(module_text: str, name: str) -> bool:
     """A real top-level import of `name`, not a mention in a comment/string, and not a
@@ -59,11 +71,18 @@ def _has_shebang(path: Path) -> bool:
         return fh.readline().startswith("#!")
 
 
+
 def test_no_hook_or_named_lib_script_imports_jevctx_or_httpx() -> None:
     """Hook/detector/daemon/dispatch scripts run stdlib-only under `uv run --script` (or
     in-process, for the explicit lib modules) -- an in-process `import jevctx`/`import httpx`
     would kill them at import time since neither is declared in their own PEP-723 header.
-    `jev_compact.py` is the sole, deliberate exception (its own separate process boundary)."""
+    `jev_compact.py` is the sole, deliberate exception (its own separate process boundary).
+
+    Also bans `llm_ext_summary` from the same automatic-lane file set (TRDD-RAEGS1D5 card 3
+    C2): that module is the MANUAL summarizer's own copy, and the automatic lane must never
+    import it -- `scripts/compose_agent_handoff.py` (the manual lane's composer) and
+    `scripts/lib/llm_ext_summary.py` itself are the only allowed importers.
+    """
     candidates: list[Path] = []
     for d in _SHEBANG_DIRS:
         for p in sorted(d.glob("*.py")):
@@ -81,5 +100,11 @@ def test_no_hook_or_named_lib_script_imports_jevctx_or_httpx() -> None:
         if _imports(p.read_text(), "jevctx")
         or _imports(p.read_text(), "httpx")
         or _imports(p.read_text(), "jev_compaction")
+        or (
+            _imports(p.read_text(), "llm_ext_summary")
+            and p.relative_to(_REPO_ROOT).as_posix() not in _LLM_EXT_SUMMARY_ALLOWED
+        )
     ]
-    assert offenders == [], f"scripts importing jevctx/httpx/jev_compaction in-process: {offenders}"
+    assert offenders == [], (
+        f"scripts importing jevctx/httpx/jev_compaction/llm_ext_summary in-process: {offenders}"
+    )
