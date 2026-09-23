@@ -3192,7 +3192,14 @@ def _arm_idle_clear(
     longer types `/janitor-handoff-and-clear` for the model to run — a manual-only skill an
     automatic caller must never invoke — it calls the SAME chain-spawning seam
     `on-stop-token-meter._maybe_clear` already uses). `sent` collects the kwargs of each call,
-    so a caller can assert `then` never contains a handoff skill and the call count."""
+    so a caller can assert `then` never contains a handoff skill and the call count.
+
+    TRDD-RAEGS1D5 card 5: the stub ALSO stamps `cold_cache_compact.mark_clear_fired` on a
+    spawn whose kwargs carry `count_toward_cooldown=True` — the real `spawn_shrink_chain` now
+    owns that stamp itself (this phase no longer stamps it directly), so a stub that stayed
+    silent would make `test_idle_clear_does_not_refire_during_cooldown` pass for the wrong
+    reason: the phase's OWN `clear_in_cooldown` check (never mocked here) is what must block
+    the second fire, exactly as it does against the real chain in production."""
     sent: list = []
     import clear_trigger
     import cold_cache_compact
@@ -3204,11 +3211,14 @@ def _arm_idle_clear(
     monkeypatch.setattr(fleet_scan, "transcript_activity", lambda root, now: (idle_s, 0, False))
     monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda root: Path("/tmp/x.jsonl"))
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx)
-    monkeypatch.setattr(
-        clear_trigger,
-        "spawn_shrink_chain",
-        lambda **kw: sent.append(kw) or result,
-    )
+
+    def _stub_spawn(**kw):
+        sent.append(kw)
+        if result[0] and kw.get("count_toward_cooldown"):
+            cold_cache_compact.mark_clear_fired(dispatch.state.state_dir(), now=int(time.time()))
+        return result
+
+    monkeypatch.setattr(clear_trigger, "spawn_shrink_chain", _stub_spawn)
     return sent
 
 

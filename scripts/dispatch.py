@@ -2827,6 +2827,11 @@ def _phase_idle_clear_nudge() -> bool:
         # pane, all without any model turn in between. The fresh session's own SessionStart then
         # composes and injects the Jev-compacted context (card 3), so nothing here authors a
         # handoff -- there is no handoff to author.
+        #
+        # `count_toward_cooldown=True` (TRDD-RAEGS1D5 card 5): this is an AUTOMATIC clear, so it
+        # must stamp the shared cooldown -- and now does so INSIDE `spawn_shrink_chain` itself
+        # (the one place every trigger funnels through), not here, so a second automatic caller
+        # can never forget the stamp the way the Stop-boundary clear once did.
         spawned, why = clear_trigger.spawn_shrink_chain(
             then=list(clear_trigger.BOOTSTRAP_CMDS),
             directive=(
@@ -2841,11 +2846,8 @@ def _phase_idle_clear_nudge() -> bool:
             # payload must name THIS fire's own session or a second pane's clear could sidecar
             # the wrong transcript.
             transcript_path=str(_session_transcript_path() or "") or None,
+            count_toward_cooldown=True,
         )
-        # STAMP ONLY ON A SPAWN — the cooldown exists so a CLEARED session does not re-clear; a
-        # stamp on a refused/unspawned chain would instead silently suppress the next
-        # heartbeat's retry for no reason. Same invariant `spawn_shrink_chain`'s own callers
-        # (on-stop-token-meter.py) already rely on.
         if not spawned:
             # Logged (not printed) so an abandoned session does not emit a line every 5 minutes
             # that nobody is there to read.
@@ -2853,7 +2855,6 @@ def _phase_idle_clear_nudge() -> bool:
                 "dispatch", f"idle-clear: not spawned ({why}) — not stamping, will retry"
             )
             return False
-        cold_cache_compact.mark_clear_fired(sd, now=now)
         print(
             f"[janitor-idle-clear] nothing but heartbeats for ~{hours}h "
             f"(~{(ctx or 0) // 1000}k context) — firing a Jev compaction so the "

@@ -509,15 +509,54 @@ def _run_chain_payload(payload_b64: str) -> int:
             pass
         return True, "no live agents, no recent interrupt"
 
+    def _recovery_ok() -> tuple[bool, str]:
+        # FOURTH cancel, TRDD-RAEGS1D5 card 5: a rate-limit / API-error resume, or a
+        # compact-resume, still unconsumed on disk means dispatch.py's own
+        # `_phase_compact_resume` / a rate-limit resume-wake has NOT yet replayed the
+        # interrupted task to the model -- a `/clear` right now would destroy the context
+        # that replay is about to need before it is ever read. Runs for EVERY trigger, same
+        # as `_agents_and_interrupt_ok`: the recovery window is a property of the SESSION,
+        # not of why this particular chain fired.
+        #
+        # `resume-after-clear.flag` is EXCLUDED from the check, but ONLY when THIS CHAIN
+        # INSTANCE is the one that wrote it (`persisted["done"]`, flipped by
+        # `_persist_resume_state` above -- the same closure scope, so it can only be True
+        # after THIS process actually ran that write). A blind file-existence check was
+        # reviewed and rejected: `resume-after-clear.flag` has one path per state dir, not
+        # one per chain instance, so an existence-only check cannot tell "the flag I am about
+        # to / just wrote" from a STALE flag orphaned by a crashed prior chain, or from
+        # another PANE's still-pending chain (the state dir is per-project, not per-pane) --
+        # either would wrongly forgive a genuinely unconsumed recovery and let `/clear` fire
+        # over it. `persisted["done"]` has neither failure mode: it is this process's own
+        # record of its own write, so a flag that predates it is never mistaken for one.
+        try:
+            import external_clear  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+            if not external_clear.recovery_pending(sd):
+                return True, "no recovery pending"
+        except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
+            return True, "recovery probe unavailable — continuing"
+        if persisted["done"]:
+            other_pending = (
+                (sd / state.RATE_LIMITED_FLAG).is_file()
+                or (sd / "resume-after-compact.flag").is_file()
+            )
+            if not other_pending:
+                return True, "only this chain's own resume-after-clear.flag is pending — continuing"
+        return False, "recovery pending (rate-limit/API-error or an unconsumed compact-resume)"
+
     def _still_wanted() -> tuple[bool, str]:
-        """Three cancels. The activity + agent/interrupt checks run for EVERY trigger; the
-        cache check only for a chain fired BECAUSE the cache was cold."""
+        """Four cancels. The activity + agent/interrupt + recovery checks run for EVERY
+        trigger; the cache check only for a chain fired BECAUSE the cache was cold."""
         back_ok, back_why = _user_came_back()
         if not back_ok:
             return False, back_why
         agents_ok, agents_why = _agents_and_interrupt_ok()
         if not agents_ok:
             return False, agents_why
+        recovery_ok, recovery_why = _recovery_ok()
+        if not recovery_ok:
+            return False, recovery_why
         if not data.get("cache_gated"):
             return True, back_why
         return _clear_still_wanted()
@@ -626,6 +665,7 @@ def spawn_shrink_chain(
     delay: float = 2.0,
     settle_between_s: float = 0.0,
     transcript_path: str | None = None,
+    count_toward_cooldown: bool = False,
 ) -> tuple[bool, str]:
     """Run the verified `/clear` chain with a CALLER-SUPPLIED bootstrap. Returns (spawned, why).
 
@@ -655,6 +695,18 @@ def spawn_shrink_chain(
     sidecar the fresh session's post-clear-compact hook consumes. `reload_trigger.py --shrink`
     is the one caller that still passes None here: a reload is not a compaction, so it must
     write no sidecar and trigger no compose (its own module docstring's contract).
+
+    `count_toward_cooldown` (TRDD-RAEGS1D5 card 5 addendum): this is the one place every
+    shrink-chain caller (idle nudge, the Stop-boundary clear, and the two reload triggers)
+    funnels through, so it is the one shared site that can stamp the `cold_cache_compact`
+    cooldown for all of them without duplicating the stamp call in each caller. Defaults to
+    False — most callers of THIS function are reload triggers, and a reload-shrink is not a
+    compaction the user is waiting out; stamping it would block a REAL clear from firing for
+    the rest of the cooldown window over a `/reload-plugins` that changed nothing about context
+    size. The two AUTOMATIC clear-firing callers (the idle nudge in dispatch.py, and the
+    Stop-boundary clear in hooks/on-stop-token-meter.py) pass `count_toward_cooldown=True`
+    explicitly — never inferred from `transcript_path`, which both of those callers also pass,
+    so it cannot double as the reload/clear discriminator.
     """
     terminal = terminal_trigger.self_terminal(os.environ)
     if not terminal_trigger.channel_is_readable(terminal):
@@ -679,17 +731,22 @@ def spawn_shrink_chain(
     chain_env = (
         {**os.environ, "JANITOR_TRANSCRIPT_PATH": transcript_path} if transcript_path else None
     )
+    sd = _project_root() / ".janitor" / "state"
     _spawn_chain({
         "delay": delay,
         "terminal": terminal,
         "first": CLEAR_CMD,
         "then": list(then),
-        "state_dir": str(_project_root() / ".janitor" / "state"),
+        "state_dir": str(sd),
         "gate_baseline": _gate_baseline(),
         "directive": directive,
         "settle_between_s": settle_between_s,
         "transcript_path": transcript_path,
     }, env=chain_env)
+    if count_toward_cooldown:
+        import cold_cache_compact  # noqa: PLC0415 -- lazy; scripts/lib is on path
+
+        cold_cache_compact.mark_clear_fired(sd, now=int(time.time()))
     return True, "chain spawned"
 
 

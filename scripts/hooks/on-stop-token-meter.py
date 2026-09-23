@@ -107,6 +107,13 @@ def _maybe_clear(project_dir: str, transcript_path: str, state, token_meter) -> 
     """At the turn boundary, launch the external /clear chain once context is at/above
     the clear point -- unless a live background agent or a fresh user interrupt says
     otherwise (both DEFER and log why), up to the ceiling past which it clears regardless.
+
+    `count_toward_cooldown=True` (TRDD-RAEGS1D5 card 5): this is an AUTOMATIC clear, so it
+    must stamp the shared `cold_cache_compact` cooldown -- previously it stamped NOTHING, so
+    the cooldown the idle nudge (dispatch.py) and the daemon path both respect was blind to a
+    clear fired from THIS turn boundary, letting a second automatic trigger re-fire seconds
+    later. `spawn_shrink_chain` now owns the stamp itself, at spawn time, so passing True here
+    is the whole fix -- no separate `mark_clear_fired` call needed in this hook.
     """
     try:
         tokens = token_meter.latest_context_size(transcript_path)
@@ -170,6 +177,7 @@ def _maybe_clear(project_dir: str, transcript_path: str, state, token_meter) -> 
             then=list(clear_trigger.BOOTSTRAP_CMDS),
             directive=_CLEAR_DIRECTIVE,
             transcript_path=transcript_path,
+            count_toward_cooldown=True,
         )
         state.log_line("token-meter", f"clear at {pct}% ({tokens} tokens): {'spawned' if spawned else 'NOT spawned'} -- {why}")
     except Exception as exc:  # noqa: BLE001 -- the chain launch must never break this hook

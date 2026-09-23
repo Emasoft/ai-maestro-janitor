@@ -96,8 +96,16 @@ def _fake_clear_trigger_module(*, spawned: bool = True, why: str = "chain spawne
     mod.BOOTSTRAP_CMDS = ("/janitor-arm", "/janitor-resume")  # type: ignore[attr-defined]
     calls: list[dict] = []
 
-    def spawn_shrink_chain(*, then, directive, delay=2.0, settle_between_s=0.0, transcript_path=None):
-        calls.append({"then": list(then), "directive": directive, "transcript_path": transcript_path})
+    def spawn_shrink_chain(
+        *, then, directive, delay=2.0, settle_between_s=0.0, transcript_path=None,
+        count_toward_cooldown=False,
+    ):
+        calls.append({
+            "then": list(then),
+            "directive": directive,
+            "transcript_path": transcript_path,
+            "count_toward_cooldown": count_toward_cooldown,
+        })
         return spawned, why
 
     mod.spawn_shrink_chain = spawn_shrink_chain  # type: ignore[attr-defined]
@@ -375,6 +383,9 @@ class TestTurnBoundaryClear(unittest.TestCase):
             self.mod._maybe_clear("/proj", "/proj/t.jsonl", state, tm)
         self.assertEqual(len(fake_ct._calls), 1, "past the ceiling the chain must be launched regardless of a live agent")
         self.assertTrue(any("past ceiling" in ln for ln in state.lines), state.lines)
+        # TRDD-RAEGS1D5 card 5: this is an AUTOMATIC clear, so it must opt into the shared
+        # cooldown stamp -- `spawn_shrink_chain` itself now owns writing the stamp.
+        self.assertTrue(fake_ct._calls[0]["count_toward_cooldown"])
 
     def test_760k_with_a_recent_interrupt_defers(self) -> None:
         sys.modules["pending_agents"] = _fake_pending_agents_module(live_count=0)
@@ -395,6 +406,10 @@ class TestTurnBoundaryClear(unittest.TestCase):
             self.mod._maybe_clear("/proj", "/proj/t.jsonl", state, tm)
         self.assertEqual(len(fake_ct._calls), 1)
         self.assertEqual(fake_ct._calls[0]["transcript_path"], "/proj/t.jsonl")
+        # TRDD-RAEGS1D5 card 5: this Stop-boundary clear used to stamp NOTHING, leaving the
+        # shared cooldown blind to it -- it must now opt into the stamp `spawn_shrink_chain`
+        # owns internally.
+        self.assertTrue(fake_ct._calls[0]["count_toward_cooldown"])
 
 
 if __name__ == "__main__":

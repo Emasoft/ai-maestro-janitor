@@ -483,6 +483,112 @@ def test_still_wanted_cancels_on_a_recent_interrupt(tmp_path: Path, monkeypatch)
     assert ok is False
     assert "interrupted" in why
 
+def _no_agents_no_interrupt(monkeypatch) -> None:
+    """Baseline fakes so `_agents_and_interrupt_ok` returns True and `_recovery_ok` is the
+    only cancel under test."""
+    fake_pa = types.ModuleType("pending_agents")
+    fake_pa.load_pending = lambda now=None, *, state_dir=None: []  # type: ignore[attr-defined]
+    fake_pa.agent_is_live = lambda entry, now, stale_s: False  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pending_agents", fake_pa)
+
+    fake_ui = types.ModuleType("user_intent")
+    fake_ui.recently_interrupted = lambda *a, **kw: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "user_intent", fake_ui)
+
+
+def test_still_wanted_cancels_on_a_pending_rate_limit_flag(tmp_path: Path, monkeypatch) -> None:
+    """TRDD-RAEGS1D5 card 5 item 2: a rate-limit / API-error resume still unconsumed on disk
+    means the interrupted task has not yet been replayed to the model -- a /clear right now
+    would destroy the context that replay needs. `rate-limited.flag` alone must veto."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "recovery pending" in why
+
+
+def test_still_wanted_cancels_on_an_unconsumed_compact_resume(tmp_path: Path, monkeypatch) -> None:
+    """The compact-resume flag is the second recovery-pending signal: dispatch.py's own
+    `_phase_compact_resume` has not yet replayed the compacted task to the model."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / "resume-after-compact.flag").write_text("1", encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "recovery pending" in why
+
+
+def test_still_wanted_ignores_its_own_resume_after_clear_flag(tmp_path: Path, monkeypatch) -> None:
+    """`resume-after-clear.flag` must NOT veto once THIS chain has itself written it (via
+    `_persist_resume_state`, captured here as `pre_submit_first` and invoked directly rather
+    than pre-seeded on disk) -- a retry loop that re-validates `still_wanted` after that write
+    (Enter deferred on a busy pane, the chain loops again) must not self-veto on its own write.
+
+    Deliberately does NOT pre-write the flag by hand: `_recovery_ok` keys off `persisted["done"]`
+    (this process's own record of its own write), not off file existence, precisely so a STALE
+    flag from a different chain instance (crash, or another pane) still vetoes -- see
+    `test_still_wanted_still_vetoes_on_a_stale_resume_after_clear_flag` below for that case."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+    captured["pre_submit_first"]()  # simulates THIS chain having just written the flag
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+def test_still_wanted_still_vetoes_on_a_stale_resume_after_clear_flag(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A `resume-after-clear.flag` already on disk BEFORE this chain instance has written
+    anything is necessarily a STALE marker -- from a crashed prior chain, or another pane's
+    still-pending one (the state dir is per-project, not per-pane) -- and must still veto.
+    This is the failure mode a blind existence check would miss (adversarial review finding,
+    TRDD-RAEGS1D5 card 5): only `persisted["done"]` can distinguish "mine" from "someone else's"."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / "resume-after-clear.flag").write_text("continue TRDD-Z582IKIR", encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+    # `pre_submit_first` is deliberately NEVER called here -- this chain instance has not
+    # written anything, so `persisted["done"]` stays False.
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "recovery pending" in why
+
 
 def test_cancel_at_land_gets_its_own_distinct_log_line(tmp_path: Path, monkeypatch) -> None:
     """A `still_wanted`-cancelled chain logs `clear cancelled at land: <reason>` on top of
