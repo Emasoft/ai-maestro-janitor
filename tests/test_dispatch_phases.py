@@ -13,7 +13,9 @@ point at tmp_path so the user's real state is never touched.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import sys
 import time
 from io import StringIO
@@ -3003,6 +3005,115 @@ def _seed_state_dir(dispatch):
 
     state.init_state()
     return state.state_dir()
+
+
+# ---------- TRDD-I63GQJTK: background-worker progress on an otherwise-quiet fire -------
+#
+# "you stopped again? and the janitor is the one supposedly tasked with guarantee
+# continuity... and it fails in its very plugin repo.." (owner, 2026-09-23) — a background
+# worker ran real tests for 35 minutes while every heartbeat printed only [janitor-quiet].
+# These four tests are the acceptance box verbatim: a running worker prints one progress
+# line, an idle session prints nothing, a worker silent past the 15-minute threshold with no
+# running tool call raises a stall finding, and one silent past the threshold but WITH a
+# running tool call does not.
+
+
+def _touch_transcript(path: Path, *, mtime: float, tool_use: bool = False) -> None:
+    """A minimal, valid transcript file with an EXPLICIT mtime — `os.utime` gives every test
+    below a controlled clock instead of racing the real one. `tool_use=True` makes the last
+    record an unanswered tool_use block, the shape `pending_agents.agent_is_live`'s tool-wait
+    grace window checks (a Bash call still in flight writes nothing further while it runs)."""
+    if tool_use:
+        rec = {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]},
+        }
+    else:
+        rec = {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}}
+    path.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    os.utime(path, (mtime, mtime))
+
+
+def test_background_worker_progress_running_worker_prints_exactly_one_line(env_isolation: dict) -> None:
+    """Acceptance box 1: a session with a running (fresh) worker shows ONE progress line —
+    a count and how recent the newest activity was — and nothing that identifies the worker."""
+    dispatch = _import_dispatch()
+    import pending_agents
+
+    sd = _seed_state_dir(dispatch)
+    transcript = sd / "agent-1.jsonl"
+    now = time.time()
+    _touch_transcript(transcript, mtime=now)
+    pending_agents.add("agent-1", description="test worker", transcript=str(transcript))
+
+    out = _capture_stdout(dispatch._phase_background_worker_progress)
+    lines = out.splitlines()
+    assert len(lines) == 1, out
+    assert lines[0] == "1 background worker running; newest activity under 1 min ago", lines[0]
+    assert "agent-1" not in out, "no id belongs on the quiet-fire surface"
+    assert str(sd) not in out, "no path belongs on the quiet-fire surface"
+
+
+def test_background_worker_progress_idle_session_prints_nothing(env_isolation: dict) -> None:
+    """Acceptance box 3: no pending agents at all → the zero-noise contract holds."""
+    dispatch = _import_dispatch()
+    _seed_state_dir(dispatch)
+    assert _capture_stdout(dispatch._phase_background_worker_progress) == ""
+
+
+def test_background_worker_progress_stalled_worker_raises_a_finding(env_isolation: dict) -> None:
+    """Acceptance box 2 + the card's own threshold: silent > 15 min AND no running tool call
+    → a findings-ledger entry, plus one line saying so."""
+    dispatch = _import_dispatch()
+    import findings_ledger
+    import pending_agents
+
+    sd = _seed_state_dir(dispatch)
+    transcript = sd / "agent-stalled.jsonl"
+    old = time.time() - (20 * 60)  # 20 min silent, well past the 15-min threshold
+    _touch_transcript(transcript, mtime=old, tool_use=False)
+    pending_agents.add("agent-stalled", description="stuck worker", transcript=str(transcript), now=int(old))
+
+    out = _capture_stdout(dispatch._phase_background_worker_progress)
+    assert "silent" in out and "/janitor-findings" in out, out
+    assert "agent-stalled" not in out, "no id belongs on the quiet-fire surface"
+
+    ledger = findings_ledger.ledger_path()
+    entries = [json.loads(ln) for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert any(e.get("code") == "WORKER-STALLED" for e in entries), entries
+
+
+def test_background_worker_progress_running_tool_call_is_not_stalled(env_isolation: dict) -> None:
+    """Acceptance box 4: silent > 15 min but the LAST transcript entry is an unanswered
+    tool_use (a Bash call in flight, the card's own example: a 9-minute test run) → NOT
+    stalled. A real child process runs alongside the transcript for the duration of the
+    check, matching the house convention (test_clear_preserves_live_subagent.py) of standing
+    a genuine OS process in for "a worker is alive", rather than a Mock or a bare dict."""
+    dispatch = _import_dispatch()
+    import findings_ledger
+    import pending_agents
+
+    sd = _seed_state_dir(dispatch)
+    transcript = sd / "agent-running.jsonl"
+    old = time.time() - (20 * 60)
+    _touch_transcript(transcript, mtime=old, tool_use=True)
+    pending_agents.add("agent-running", description="long test run", transcript=str(transcript), now=int(old))
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+    try:
+        out = _capture_stdout(dispatch._phase_background_worker_progress)
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+
+    assert "silent" not in out, out
+    lines = out.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("1 background worker running"), out
+
+    ledger = findings_ledger.ledger_path()
+    if ledger.exists():
+        entries = [json.loads(ln) for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        assert not any(e.get("code") == "WORKER-STALLED" for e in entries), entries
 
 
 def _isolate_home(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> Path:

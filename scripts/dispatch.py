@@ -1054,9 +1054,16 @@ def _emit_quiet_if_idle() -> None:
     MAY coexist with detector drift lines: it means "no ACTION this fire", not "nothing to
     surface". The genuinely-silent skips (the informational-notice early returns) are left
     byte-silent on purpose and never reach here.
+
+    TRDD-I63GQJTK: right after the token, `_phase_background_worker_progress()` gets its one
+    chance to say whether background work explains the silence — a session with an in-flight
+    worker looked identical to a stalled one from the owner's seat (35 minutes of
+    `[janitor-quiet]` while a background worker ran real tests). It is a no-op (prints
+    nothing) for a genuinely idle session, so the zero-noise contract holds.
     """
     if not _decision_fired:
         print("[janitor-quiet]")
+        _phase_background_worker_progress()
 
 
 def _record_default_outcome(name: str, outcome: str, started: int) -> None:
@@ -1411,6 +1418,175 @@ def _fresh_external_agent_count(now: int, state_dir: Path | None = None) -> int:
         )
     except Exception:  # noqa: BLE001
         return 0
+
+
+# TRDD-I63GQJTK: a quiet fire with background work in flight looked identical, from the
+# owner's seat, to a stalled session (owner, 2026-09-23: "you stopped again? and the janitor
+# is the one supposedly tasked with guarantee continuity"). "Cause and threshold" (the card's
+# own review note) fixes the AND-condition at 15 minutes with no transcript activity AND no
+# running child process — long enough that a full test run (its own example: 9 minutes) never
+# false-positives, short enough to still catch a genuinely dead worker inside one session.
+_BACKGROUND_STALL_THRESHOLD_S = 15 * 60
+
+
+def _worker_reported_activity_age_s(entry: dict, now: int) -> int:
+    """Seconds since this worker's newest OBSERVABLE activity — for the progress line's
+    human-readable "newest activity ... ago" only (see `_worker_is_stalled` for the actual
+    stall predicate, which additionally treats a running tool call as activity).
+
+    The newest transcript write, or — before a transcript exists at all (the
+    SubagentStart-to-first-turn gap `pending_agents.resolve_transcript` documents) — the time
+    the worker was spawned, so a worker that has not had a chance to write anything yet does
+    not report as ancient."""
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        path = pending_agents.resolve_transcript(entry)
+    except Exception:  # noqa: BLE001
+        path = ""
+    if path:
+        try:
+            return max(0, now - int(Path(path).stat().st_mtime))
+        except OSError:
+            pass
+    ts = entry.get("ts", 0)
+    return max(0, now - int(ts)) if isinstance(ts, int) else 0
+
+
+def _worker_is_stalled(entry: dict, now: int) -> bool:
+    """True iff this worker has shown no observable activity for more than
+    `_BACKGROUND_STALL_THRESHOLD_S` — TRDD-I63GQJTK's 15-minute AND-condition.
+
+    Reuses `pending_agents.agent_is_live` rather than re-deriving its logic: a fresh
+    transcript write IS "transcript activity", and its "last transcript entry is an
+    unanswered tool_use" check IS "a running child process" from what this out-of-process
+    cron fire can observe — a long Bash call (the card's own example: a 9-minute full test
+    run) writes nothing to the transcript while it runs, so treating that tool-wait as
+    activity is exactly what keeps a live full-suite run from being flagged. Passing
+    `_BACKGROUND_STALL_THRESHOLD_S` as `agent_is_live`'s `stale_s` also folds in its existing
+    ~25-minute hard ceiling on the tool-wait grace (`KEEP_GOING_TOOL_WAIT_S`), so a transcript
+    permanently stuck on an unanswered tool_use does not read as "live" forever.
+
+    Guarded by the entry's own spawn time (`ts`) first: a worker whose transcript file does
+    not exist yet makes `agent_is_live` return False immediately (no transcript to check at
+    all), which would flag a stall seconds after spawn without this floor — a worker cannot
+    have been silent for 15 minutes when it was spawned 15 seconds ago. This guard is
+    unconditional on age alone (review finding, TRDD-I63GQJTK): ANY worker younger than
+    `_BACKGROUND_STALL_THRESHOLD_S`, not only one with no transcript yet, gets the same grace
+    — deliberately, since the alternative (checking transcript existence instead of age)
+    would flag a worker whose first tool_use appears dead within its first 15 minutes, which
+    is exactly the false-positive the threshold exists to prevent.
+    """
+    ts = entry.get("ts", 0)
+    spawn_age = now - int(ts) if isinstance(ts, int) else 0
+    if spawn_age <= _BACKGROUND_STALL_THRESHOLD_S:
+        return False
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        return not pending_agents.agent_is_live(entry, now, _BACKGROUND_STALL_THRESHOLD_S)
+    except Exception:  # noqa: BLE001 - a manifest bug must never manufacture a false stall
+        return False
+
+
+def _minutes_ago_phrase(age_s: int) -> str:
+    """`under 1 min` / `N min` / `N h` — a tiny local formatter. `findings_ledger._age_phrase`
+    does the same job but is module-private; reimplementing three lines beats importing a
+    private helper across a module boundary."""
+    if age_s < 60:
+        return "under 1 min"
+    if age_s < 3600:
+        return f"{age_s // 60} min"
+    return f"{age_s // 3600} h"
+
+
+def _record_worker_stall(age_s: int, agent_id: str) -> None:
+    """The findings-ledger half of a stall: one LOW entry, deduped per worker per local day
+    (same shape as `_phase_self_cost_alarm`'s dedupe) so an ongoing stall re-alarms once a day
+    instead of on every ~5-minute quiet fire. `agent_id` is used ONLY as the dedupe key, never
+    printed — the heartbeat protocol forbids an id on a quiet-fire line."""
+    sd = state.state_dir()
+    today = datetime.now().astimezone().strftime("%Y%m%d")
+    line = dedupe.emit_once(
+        sd / "background-worker-stall-seen.txt",
+        f"{agent_id}@{today}",
+        f"a background worker has been silent for {age_s // 60} min with no running tool "
+        f"call — see /janitor-findings.",
+    )
+    if line is not None:
+        print(line)
+        # LOW: an advisory, not a defect — the print above is already the human surface, so
+        # `notify` stays None (same reasoning as `_phase_self_cost_alarm`). This call is
+        # already gated by the SAME dedupe.emit_once() above as the print, so the ledger
+        # entry lands exactly when the line does — once per worker per local day, not on
+        # every ~5-minute quiet fire. record()'s return is ignored; it is the OTHER
+        # (actor="human") re-print suppression this call does not use.
+        findings_ledger.record(
+            sev="LOW", code="WORKER-STALLED", src="background-worker-progress",
+            msg=f"background worker silent {age_s}s, no running tool call", ref="",
+        )
+
+
+def _phase_background_worker_progress() -> None:
+    """TRDD-I63GQJTK: on an otherwise-quiet fire, say whether background work explains the
+    silence instead of leaving the owner to read a stalled session from nothing.
+
+    Called from `_emit_quiet_if_idle`, AFTER it prints `[janitor-quiet]` — this phase never
+    runs on a fire that already took an action (that fire already has something to show for
+    itself, so a progress line would be redundant).
+
+    Three outcomes:
+      * no pending agents at all → print nothing (the zero-noise contract for a genuinely
+        idle session — acceptance box step 3).
+      * at least one pending agent → exactly ONE progress line: a count and how long ago the
+        newest activity was, no ids, no paths, no file names (the protocol's "never print a
+        path, an id, or a state-file name" line applies here same as anywhere else on a quiet
+        fire) — acceptance box step 1.
+      * a stalled worker on top of that → ALSO one findings-ledger line per stalled worker
+        (deduped per day) — acceptance box step 2. The progress line above still covers the
+        whole set; the stall line is additional, not a replacement.
+
+    Reuses `pending_agents.load_pending` (read-only) — NOT `_pending_agent_directive_lines`
+    (which spends a nudge from the resume budget on every listing, see its own docstring):
+    this phase fires on every quiet heartbeat (~5 min), and nudging that often would evict a
+    live agent from the `[janitor-resume]` listing in three fires flat — the exact bug
+    `NUDGE_MIN_INTERVAL_S` exists to prevent — for a feature that has nothing to do with
+    resume. This IS "whatever source `_pending_agent_directive_lines` uses" per the card: the
+    `pending_agents` manifest, not that function's nudge-charging side effect.
+
+    SCOPE (review finding, TRDD-I63GQJTK): this manifest only tracks Agent-tool subagents
+    (written by `on-subagent-start.py`/`on-subagent-stop.py`) — the repo has no mechanism
+    tracking a raw `Bash(run_in_background: true)` shell at all. A session waiting only on
+    such a shell, with no Agent-tool subagent in flight, still shows nothing here and still
+    prints only `[janitor-quiet]`. Extending coverage to background shells would need new
+    tracking infrastructure (a hook + manifest, mirroring `pending_agents.py`) — out of scope
+    for this card, which the owner's report and the card's own example ("a background worker
+    was implementing and running real-transcript acceptance tests") both describe as an
+    Agent-tool worker.
+    """
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        now = int(time.time())
+        entries = pending_agents.load_pending(now)
+    except Exception as exc:  # noqa: BLE001 - a quiet-fire nicety must never break a fire
+        state.log_line("dispatch", f"background-worker progress failed: {exc}")
+        return
+    if not entries:
+        return
+
+    n = len(entries)
+    newest_age = min(_worker_reported_activity_age_s(e, now) for e in entries)
+    print(
+        f"{n} background worker{'s' if n != 1 else ''} running; "
+        f"newest activity {_minutes_ago_phrase(newest_age)} ago"
+    )
+
+    for entry in entries:
+        if not _worker_is_stalled(entry, now):
+            continue
+        agent_id = str(entry.get("agentId", "") or "")
+        _record_worker_stall(_worker_reported_activity_age_s(entry, now), agent_id)
 
 
 def _phase_rate_limit_recovery() -> bool:

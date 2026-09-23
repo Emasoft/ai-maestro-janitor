@@ -19,10 +19,12 @@ terminal survival token; a full fire may stack several action tokens plus drift,
 `[janitor-quiet]`.
 
 **Output contract (owner directive 2026-08-12) — a fire prints `janitor heartbeat`, and ONLY
-adds to it when something genuinely needs the human.** On `[janitor-quiet]` or empty stdout,
-reply with exactly `janitor heartbeat` and nothing else — no tool calls, no "all quiet" prose,
-no counts. When stdout DOES carry drift lines, print `janitor heartbeat` then those lines
-verbatim, adding at most 2 lines of your own.
+adds to it when something genuinely needs the human.** On a bare `[janitor-quiet]` with
+nothing else on stdout, or on empty stdout, reply with exactly `janitor heartbeat` and
+nothing else — no tool calls, no invented "all quiet" prose, no invented counts. When stdout
+carries more than the bare token — drift lines, or the one-line background-worker progress
+note `[janitor-quiet]` may be followed by (TRDD-I63GQJTK) — print `janitor heartbeat` then
+those lines verbatim, adding at most 2 lines of your own.
 
 **Never print a path, an id, or a state-file name that the human did not ask for.** Routine
 advisories are already recorded in the findings ledger by the dispatcher's quiet filter and are
