@@ -48,7 +48,6 @@ _SYSTEM_PREFIXES = (
 )
 _COMMAND_NAME_PREFIX = "<command-name>"
 _COMMAND_NAME_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
-_COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 
 #: TRDD-RAEGS1D5, coordinator correction (2): the janitor itself TYPES these into the pane
 #: with real keystrokes -- Claude Code records that identically to an owner-typed command
@@ -135,11 +134,12 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
        like `/task ...`/`/loop 5m ...` as "system"), EXCEPT a `<command-name>` naming the
        janitor's own typed automation (`/clear`, `/compact`, `/reload-plugins`, `/janitor-*`,
        `/ai-maestro-janitor:*`, bare or plugin-qualified, with or without the leading slash)
-       WITHOUT a non-empty `<command-args>` -> "system" (coordinator correction: the janitor
-       types these into the pane with real keystrokes, recorded identically to an owner-typed
-       command -- unrecognised as automation, they'd fill an unattended session's digest "last
-       three human messages" with the janitor's own housekeeping instead of the owner's
-       words); otherwise `<local-command-stdout>`, `<local-command-caveat>`,
+       -> "system" ALWAYS, even with a non-empty `<command-args>` (coordinator correction 4,
+       superseding an earlier args-presence tie-breaker: the janitor itself types
+       `/reload-plugins --force` and `/janitor-compact-context --hard` -- args riding along
+       does not make it the owner's words. The args exception applies only to NON-automation
+       commands, which fall to "human" regardless of args -- command name alone decides for
+       automation); otherwise `<local-command-stdout>`, `<local-command-caveat>`,
        `<command-message>`, `[janitor-heartbeat]` or `[Request interrupted` -> "system".
     5. `origin.kind` (Claude Code's own newer, most specific signal, so it outranks
        `turnOrigin`/`promptSource` below): `human` -> "human"; `task-notification` ->
@@ -190,15 +190,14 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
         name_match = _COMMAND_NAME_RE.search(text)
         command_name = name_match.group(1).strip() if name_match else ""
         if _is_automation_command_name(command_name):
-            # Coordinator correction (2): the janitor's own typed automation is "system"
-            # UNLESS real args rode along -- a bare `/janitor-resume` is the automation
-            # firing itself, but `/task ...`/`/loop 5m <prompt>` (not in the automation list)
-            # or an automation command someone genuinely typed WITH args is still the
-            # owner's own words, so args presence is the tie-breaker, not the name alone.
-            args_match = _COMMAND_ARGS_RE.search(text)
-            args_text = args_match.group(1).strip() if args_match else ""
-            if not args_text:
-                return "system"
+            # Coordinator correction (4, superseding correction 2's args tie-breaker): the
+            # janitor's own typed automation is ALWAYS "system", even with non-empty args --
+            # it types `/reload-plugins --force` and `/janitor-compact-context --hard` itself,
+            # so an args-presence check would have wrongly promoted those back to "human". The
+            # args exception applies ONLY to non-automation commands (`/task ...`,
+            # `/loop 5m <prompt>`), which fall through to "human" below regardless of args --
+            # command NAME alone decides for automation, never args.
+            return "system"
         return "human"
     if text.startswith(_SYSTEM_PREFIXES):
         return "system"

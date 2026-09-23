@@ -7,6 +7,7 @@ field combination that table measured on real transcripts, not a guessed shape.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -185,10 +186,12 @@ def test_task_command_with_args_is_human() -> None:
     assert tr.classify_record(entry) == "human"
 
 
-def test_automation_command_with_real_args_is_human() -> None:
-    # An automation-named command IS still "human" when real args rode along -- the args
-    # tie-breaker means a genuinely owner-typed `/janitor-arm --scope project` is not
-    # mistaken for the janitor's own bare automation firing.
+def test_automation_command_with_real_args_is_still_system() -> None:
+    # Coordinator correction (4), superseding correction (2)'s args tie-breaker: the janitor
+    # itself types `/reload-plugins --force` and `/janitor-compact-context --hard` -- an
+    # automation-named command is "system" by NAME ALONE, regardless of args. A former
+    # version of this test asserted "human" here; that assertion was the defect this
+    # correction fixes.
     entry = {
         "origin": {"kind": "human"},
         "message": {
@@ -199,7 +202,84 @@ def test_automation_command_with_real_args_is_human() -> None:
             )
         },
     }
-    assert tr.classify_record(entry) == "human"
+    assert tr.classify_record(entry) == "system"
+
+
+def test_reload_plugins_with_force_flag_is_system() -> None:
+    # The exact example from the coordinator's rationale: `/reload-plugins --force`.
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-message>reloading…</command-message>\n"
+                "<command-name>/reload-plugins</command-name>\n"
+                "<command-args>--force</command-args>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "system"
+
+
+# --- derive the plugin's OWN command names and assert each is always "system" ---
+
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+_SKILL_NAME_RE = re.compile(r"^name:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def _plugin_command_names() -> list[str]:
+    """Every command name this plugin ships: `skills/*/SKILL.md`'s frontmatter `name:`, plus
+    `commands/*.md` filenames (a Claude Code command's name is its filename stem) when that
+    directory exists. TRDD-RAEGS1D5 coordinator correction (5): derived from the actual
+    shipped files, not hand-copied, so a new command can never silently slip past the
+    automation-name allowlist without this test catching it."""
+    names: list[str] = []
+    for skill_md in sorted((_PLUGIN_ROOT / "skills").glob("*/SKILL.md")):
+        text = skill_md.read_text(encoding="utf-8")
+        # Frontmatter is the first `---`-delimited block; search only inside it so a stray
+        # "name:" mentioned later in the body can never be mistaken for the skill's own name.
+        frontmatter_end = text.find("\n---", 3)
+        frontmatter = text[:frontmatter_end] if frontmatter_end != -1 else text
+        match = _SKILL_NAME_RE.search(frontmatter)
+        if match:
+            names.append(match.group(1))
+    commands_dir = _PLUGIN_ROOT / "commands"
+    if commands_dir.is_dir():
+        names.extend(p.stem for p in sorted(commands_dir.glob("*.md")))
+    return names
+
+
+def _command_message_entry(command_name: str, *, with_args: bool) -> dict:
+    content = f"<command-message>running…</command-message>\n<command-name>{command_name}</command-name>"
+    if with_args:
+        content += "\n<command-args>some args</command-args>"
+    return {"origin": {"kind": "human"}, "message": {"content": content}}
+
+
+def test_every_shipped_plugin_command_classifies_as_system() -> None:
+    names = _plugin_command_names()
+    assert names, "expected at least one skill/command name -- an empty list would make this test vacuous"
+    # Review finding: `assert names` only catches TOTAL silent loss (the regex matching
+    # nothing anywhere), not PARTIAL loss -- a `name:` line the regex fails on (e.g. a
+    # trailing same-line comment breaking the `\s*$` end-anchor) would silently drop just
+    # that one skill from the list instead of failing this test, exactly the "new command
+    # slips past unnoticed" scenario this test exists to prevent. Pin the derived count
+    # against the actual file count so a partial miss fails loudly instead of quietly.
+    skill_file_count = len(list((_PLUGIN_ROOT / "skills").glob("*/SKILL.md")))
+    assert len(names) >= skill_file_count, (
+        f"derived {len(names)} command name(s) but found {skill_file_count} SKILL.md "
+        "file(s) -- the frontmatter regex silently failed to match one or more of them"
+    )
+    for name in names:
+        for qualified in (name, f"ai-maestro-janitor:{name}"):
+            for prefixed in (qualified, f"/{qualified}"):
+                for with_args in (False, True):
+                    entry = _command_message_entry(prefixed, with_args=with_args)
+                    role = tr.classify_record(entry)
+                    assert role == "system", (
+                        f"{prefixed!r} (with_args={with_args}) classified {role!r}, "
+                        "not 'system' -- a shipped plugin command must never silently "
+                        "count as the owner's own words"
+                    )
 
 
 def test_interrupt_marker_is_system() -> None:
