@@ -1330,3 +1330,121 @@ def test_inject_mode_owner_share_capped_and_nonuser_items_survive() -> None:
     # (4) non-user items are no longer crowded out.
     tool_headers = [line for line in doc.splitlines() if line.startswith("-- tool t")]
     assert len(tool_headers) >= 3, f"expected >=3 tool items, got {len(tool_headers)}"
+
+
+def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_injected_copy_is_unchanged() -> None:
+    """TRDD-RAEGS1D5 (coordinator addition, full-copy decision-pointer uncap): the FULL
+    (`--out`) render must name EVERY elided decision-passing owner item by a pointer, with NO
+    `max_elided_pointers` cap -- the 258 MB real transcript had 250 decision-passing owner
+    items and only 40 pointer slots, so 180 were reachable only via `expand --list --grep`,
+    never named in the document a resumed session actually reads. The non-decision elided
+    items (here, relevant "tool" items) still respect the pre-existing 40-pointer cap, and the
+    byte-budgeted INJECTED copy is unaffected -- it still applies ONE `max_elided_pointers` cap
+    over every elided item together, decision-passing or not, exactly as before this fix.
+    """
+    guaranteed = _item("guaranteed:0", "user", "the newest decision", turn=1000, tokens=10)
+    decision_items = [
+        _item(f"dec{i}:0", "user", f"policy decision number {i} text " * 40, turn=i, tokens=1000)
+        for i in range(50)
+    ]
+    tool_items = [
+        _item(f"tool{i}:0", "tool", f"relevant tool output {i} " * 40, turn=100 + i, tokens=1000)
+        for i in range(60)
+    ]
+    items = [guaranteed, *decision_items, *tool_items]
+    scores = {
+        "guaranteed:0": jc.Scores(relevance=0.5, decision=0.9, oversized=False, kept=True,
+                                   decision_passed=True),
+        **{
+            it.id: jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                              decision_passed=True)
+            for it in decision_items
+        },
+        **{
+            it.id: jc.Scores(relevance=0.95, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False)
+            for it in tool_items
+        },
+    }
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+
+    # A tiny budget: only the guaranteed slot fits (unconditional), every other 1000-token
+    # item -- decision or tool -- is evicted from "kept" and lands in "## Elided", which is
+    # the code path this fix changes.
+    full_doc = jc.compose(items, scores, budget_tokens=50, header=header)
+    assert "-- user guaranteed:0 --" in full_doc
+    for it in decision_items:
+        assert f"-- user {it.id} --" not in full_doc  # sanity: genuinely elided, not kept
+
+    elided_section = full_doc.split("## Elided\n", 1)[1]
+    # (1) every elided decision item gets a pointer, uncapped, in the compact format --
+    # never the standard `[[elided id=...]]` shape (that would cost more bytes at this count).
+    for it in decision_items:
+        assert f"{it.id}: " in elided_section, f"{it.id} missing a decision pointer"
+        assert f"[[elided id={it.id} " not in elided_section
+
+    # (2) the non-decision (tool) elided items stay under the pre-existing 40-pointer cap.
+    tool_pointer_lines = [
+        line for line in elided_section.splitlines() if line.startswith("[[elided id=tool")
+    ]
+    assert len(tool_pointer_lines) == jc._MAX_ELIDED_POINTERS
+    assert "[[elided: 20 more items not listed" in full_doc
+
+    # (3) the injected copy is unaffected: still one cap over every elided item, never the
+    # compact format (`max_item_bytes` is always set for it, see `render`'s per-item cap).
+    inject_doc = jc.compose(
+        items, scores, budget_tokens=50, header=header,
+        max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
+    )
+    inject_pointer_lines = [
+        line for line in inject_doc.splitlines() if line.startswith("[[elided id=")
+    ]
+    assert len(inject_pointer_lines) == jc._MAX_ELIDED_POINTERS
+    inject_lines = inject_doc.splitlines()
+    assert not any(line.startswith(f"{it.id}: ") for it in decision_items for line in inject_lines)
+
+
+def test_decision_pointer_hard_ceiling_keeps_newest_and_summarizes_the_rest() -> None:
+    """TRDD-RAEGS1D5 (adversarial-review finding 1 on the full-copy decision-pointer uncap
+    above, hard ceiling): uncapping every elided decision-passing item with NO ceiling at all
+    reproduces the exact unbounded-growth failure `_MAX_ELIDED_POINTERS` was built to prevent
+    (one pointer line per elided item, uncapped, measured ~2.4 MB on the largest real
+    transcript) -- just scoped to decision items instead of every elided item. Past
+    `_MAX_DECISION_POINTERS` (400), the OLDEST decision items fold into one summary line
+    instead of each getting a pointer; the NEWEST ones are the ones kept, since what the owner
+    said most recently matters most on resume.
+    """
+    n = jc._MAX_DECISION_POINTERS + 25
+    guaranteed = _item("guaranteed:0", "user", "the newest decision", turn=n + 10, tokens=10)
+    decision_items = [
+        _item(f"dec{i}:0", "user", f"policy decision number {i} " * 5, turn=i, tokens=1000)
+        for i in range(n)
+    ]
+    items = [guaranteed, *decision_items]
+    scores = {
+        "guaranteed:0": jc.Scores(relevance=0.5, decision=0.9, oversized=False, kept=True,
+                                   decision_passed=True),
+        **{
+            it.id: jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                              decision_passed=True)
+            for it in decision_items
+        },
+    }
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+
+    # Same tiny-budget trick as the previous test: only the guaranteed slot is admitted, every
+    # decision item is genuinely elided -- 425 of them, 25 over the ceiling.
+    doc = jc.compose(items, scores, budget_tokens=50, header=header)
+    assert "-- user guaranteed:0 --" in doc
+
+    elided_section = doc.split("## Elided\n", 1)[1]
+    oldest_25 = decision_items[:25]  # turn 0-24, the lowest -- must be dropped
+    newest_400 = decision_items[25:]  # turn 25-449, the highest -- must survive
+
+    for it in oldest_25:
+        assert f"{it.id}: " not in elided_section, f"{it.id} should have been dropped (oldest)"
+    for it in newest_400:
+        assert f"{it.id}: " in elided_section, f"{it.id} should have survived (newest)"
+
+    assert "... and 25 more decision items: run `" in doc
+    assert "expand --transcript /tmp/t.jsonl --list --grep TEXT` to list them" in doc

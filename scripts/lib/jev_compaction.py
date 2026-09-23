@@ -887,6 +887,34 @@ def _format_pointer(item: Item) -> str:
     return format_pointer(Pointer(id=item.id, lines=None, tokens=item.tokens, summary=summary))
 
 
+# Coordinator addition (TRDD-RAEGS1D5, full-copy decision-pointer uncap): ~60 chars, not
+# `_POINTER_PREVIEW_CHARS`'s 80 -- these lines are UNCAPPED (see `_MAX_ELIDED_POINTERS`'s own
+# docstring below), and on the 258 MB transcript ~74% of owner messages pass the decision
+# question (28/38 measured on the 49 MB one), so keeping the per-line cost down matters more
+# here than for the ordinary, still-capped-at-40 pointer list.
+_DECISION_POINTER_PREVIEW_CHARS = 60
+
+
+def _format_decision_pointer(item: Item) -> str:
+    """Compact one-line stand-in for an elided decision-passing owner item, used ONLY for the
+    now-uncapped decision pointers in the FULL (`--out`) render (see `_MAX_ELIDED_POINTERS`).
+    Just the id and a short preview -- no `tokens=`/`[[elided ...]]` wrapper -- because at
+    up to ~185 of these on the 258 MB transcript, the full `_format_pointer` line (id +
+    `tokens=N` + an 80-char preview) would cost noticeably more bytes for no added value: the
+    model already knows this is a decision item from the section header, it only needs the id
+    to `expand` and enough text to recognize which one. Deliberately NOT parsed back by
+    `pipeline.find_pointers`/`parse_pointer` (unlike `_format_pointer`'s output) -- nothing
+    downstream reads the full document back into `Pointer` objects; `expand <id>` looks the id
+    up in the transcript directly, never in this rendered text.
+    """
+    summary = ""
+    for line in item.text.splitlines():
+        if line.strip():
+            summary = _truncate(line, _DECISION_POINTER_PREVIEW_CHARS)
+            break
+    return f"{item.id}: {summary}"
+
+
 # Spec: "Oversized single item (jev marks oversized) -> never inlined; pointer + first 20
 # lines" -- a DIFFERENT, richer pointer than a plain budget-dropped item gets (that one is
 # just the single-line `_format_pointer` above). An oversized item never even reached Jev
@@ -912,7 +940,33 @@ _DIGEST_TRUNCATED_NOTE = "\n\n[[digest truncated to fit the handoff budget]]"
 # `budget_tokens` (that budget only bounds KEPT items). Cap the pointer list so its size no longer
 # scales with transcript size; the items dropped from the list are still `expand`-able by id, the
 # model just is not told about them by name.
+#
+# TRDD-RAEGS1D5 (full-copy decision-pointer uncap): this cap governs only the NON-decision-
+# passing elided items in the FULL (`--out`) render -- an elided item that passed the decision
+# question is never counted against it there (see `compose()`'s elided-selection code and
+# `_format_decision_pointer`). Real data: the 258 MB transcript had 250 decision-passing owner
+# items elided-or-kept and only 40 pointer slots total, so 180 of them were reachable by id
+# only through `expand --list --grep`, never named in the document the resumed session
+# actually reads -- the FULL copy is written to disk precisely so it can afford to name all of
+# them. The injected copy (`--inject-out`, byte-budgeted) is unaffected: it always passes
+# `max_item_bytes`, which keeps this cap applying to EVERY elided item there, decision-passing
+# or not -- a small, hard byte ceiling has no room to spare regardless of an item's priority.
 _MAX_ELIDED_POINTERS = 40
+
+# TRDD-RAEGS1D5 (decision-pointer hard ceiling, adversarial-review finding 1 on the
+# full-copy decision-pointer uncap above): uncapping `decision_elided` removed the OLD
+# unbounded-growth failure (one pointer line per elided item, uncapped, measured ~2.4 MB on
+# the largest real transcript -- `_MAX_ELIDED_POINTERS`'s own docstring above) only for
+# NON-decision items; `decision_elided` itself had no ceiling at all. On real data ~74% of
+# owner messages pass the decision question (28/38 on the 49 MB transcript), so a transcript
+# with more, or more decision-dense, owner turns than the 258 MB one measured (214 decision
+# pointers, 61 KB) can reproduce that same failure through this new path. Past this many
+# elided decision items, the OLDEST are dropped in favor of one summary line -- see
+# `compose()`'s elided-selection code -- keeping the newest ones (what the owner said most
+# recently matters most on resume), never the highest-scoring: every decision item already
+# shares the same top-level `_pointer_priority` tier (`decision_passed=True`), so a score-based
+# tiebreak has no more principled claim than recency does.
+_MAX_DECISION_POINTERS = 400
 
 # TRDD-RAEGS1D5 (injected-copy content fix): measured on three real transcripts (reports/
 # compaction-replacement/), the injected copy `jev_compact.py compact --inject-out` writes came
@@ -1098,7 +1152,18 @@ def compose(
     elided pointer, but `decision_passed` ones get first claim on the limited pointer slots
     over any merely-relevant item (`_pointer_priority`, used everywhere this function ranks or
     trims the elided-pointer list) -- a stated decision the user gave is never silently
-    unreachable just because the item that carried it did not fit inline.
+    unreachable just because the item that carried it did not fit inline. In the FULL
+    (`--out`) render specifically (`max_item_bytes is None`), this goes further: every elided
+    `decision_passed` item gets a pointer, essentially uncapped -- `max_elided_pointers` governs
+    only the remaining, non-decision-passing elided items there (see `_MAX_ELIDED_POINTERS`'s
+    own docstring for the real-transcript defect this closes). It renders as a compact
+    `id: preview` line (`_format_decision_pointer`), not the ordinary `_format_pointer` shape,
+    to keep the size growth from potentially hundreds of extra lines down. Past
+    `_MAX_DECISION_POINTERS` (400) even that list is bounded -- the newest survive, the rest
+    fold into one summary line (see that constant's own docstring for why an unbounded
+    decision-pointer list would reproduce the exact failure `_MAX_ELIDED_POINTERS` exists to
+    prevent). The injected copy is unaffected -- `max_item_bytes` is always set there, so it
+    keeps the single `max_elided_pointers` cap over every elided item, decision-passing or not.
 
     `max_item_bytes`, when given (TRDD-RAEGS1D5 injected-copy content fix -- see
     `DEFAULT_INJECT_ITEM_BYTES`): the render itself changes, not just the backstop. `--out`
@@ -1262,24 +1327,63 @@ def compose(
         # slot to a merely-relevant item just because the latter scores marginally higher.
         return (scores[it.id].decision_passed, max_score(it))
 
-    if len(elided_items) > max_elided_pointers:
+    # TRDD-RAEGS1D5 (full-copy decision-pointer uncap): in the FULL render only
+    # (`max_item_bytes is None` -- the injected copy always passes it, see `render`'s per-item
+    # cap check elsewhere in this function), split off every elided decision-passing item
+    # BEFORE the cap is applied, so it is never competing for one of `max_elided_pointers`
+    # slots at all -- `decision_passed` can only ever be True for a "user"/owner item
+    # (`score_items` only ever asks the decision question of a "user" batch), so this already
+    # selects exactly "elided decision-passing owner item". `_MAX_ELIDED_POINTERS`'s own
+    # docstring above has the real-data motivation. In the injected render `decision_elided`
+    # stays empty and `other_elided` is every elided item, unchanged from before this fix.
+    if max_item_bytes is None:
+        decision_elided = [it for it in elided_items if scores[it.id].decision_passed]
+        other_elided = [it for it in elided_items if not scores[it.id].decision_passed]
+    else:
+        decision_elided = []
+        other_elided = elided_items
+
+    # TRDD-RAEGS1D5 (decision-pointer hard ceiling): see `_MAX_DECISION_POINTERS`'s own
+    # docstring for why this exists. Newest-first, unlike `_pointer_priority` elsewhere in
+    # this function -- every item here already shares one priority tier (decision_passed),
+    # so recency is what actually distinguishes them for a resumed session.
+    decision_hidden_count = 0
+    if len(decision_elided) > _MAX_DECISION_POINTERS:
+        newest_first = sorted(decision_elided, key=lambda it: it.turn, reverse=True)
+        shown_decision = newest_first[:_MAX_DECISION_POINTERS]
+        decision_hidden_count = len(decision_elided) - len(shown_decision)
+    else:
+        shown_decision = decision_elided
+
+    if len(other_elided) > max_elided_pointers:
         # Highest priority first -- decision_passed items before any non-decision one,
         # highest max(relevance, decision) as the tiebreak -- the items most worth a pointer
         # are the ones the model was closest to keeping, not an arbitrary chronological
         # head/tail.
         top_ids = {
             it.id
-            for it in sorted(elided_items, key=_pointer_priority, reverse=True)[:max_elided_pointers]
+            for it in sorted(other_elided, key=_pointer_priority, reverse=True)[:max_elided_pointers]
         }
-        shown_elided = [it for it in elided_items if it.id in top_ids]
-        hidden_count = len(elided_items) - len(shown_elided)
+        shown_other = [it for it in other_elided if it.id in top_ids]
+        hidden_count = len(other_elided) - len(shown_other)
     else:
-        shown_elided = elided_items
+        shown_other = other_elided
+    shown_elided = shown_decision + shown_other
 
     transcript_path = header.get("transcript_path", "")
     usage = header.get("usage") or {}
+    # Shared by both "N more not listed" summary lines below (the pre-existing one and the
+    # decision-ceiling one) -- same underlying `expand --list` command either way, so it is
+    # built once instead of twice.
+    expand_list_cmd = (
+        'uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript '
+        f"{transcript_path} --list --grep TEXT"
+    )
 
-    def render(kept_order: list[Item], elided: list[Item], hidden: int, digest_text: str) -> str:
+    def render(
+        kept_order: list[Item], elided: list[Item], hidden: int, digest_text: str,
+        decision_hidden: int = 0,
+    ) -> str:
         lines: list[str] = [
             "# Compacted context (Jev compaction)",
             f"transcript: {transcript_path}",
@@ -1329,6 +1433,13 @@ def compose(
         elided_ids = {it.id for it in elided}
         for it in items:
             if it.id in elided_ids:
+                # TRDD-RAEGS1D5 (full-copy decision-pointer uncap): a decision-passing item
+                # is never oversized or blocked (`score_items` sets `decision_passed=False`
+                # on both paths -- see their own Scores construction), so the compact line is
+                # always the whole story for it; nothing below this branch ever applies.
+                if max_item_bytes is None and scores[it.id].decision_passed:
+                    lines.append(_format_decision_pointer(it))
+                    continue
                 lines.append(_format_pointer(it))
                 if scores[it.id].oversized:
                     # TRDD-RAEGS1D5 requirement 4: the 20-line oversized preview is fine in
@@ -1345,17 +1456,22 @@ def compose(
                     # cannot tell "Jev never got to see this" apart from "Jev saw it and it
                     # wasn't worth keeping", and only the former is worth a manual `expand`.
                     lines.append("unscored (provider firewall)")
+        if decision_hidden:
+            # TRDD-RAEGS1D5 (decision-pointer hard ceiling): the `_MAX_DECISION_POINTERS`
+            # trim's own summary line -- the OLDEST decision items past the ceiling, never
+            # named individually (see that constant's docstring for why), still reachable by
+            # the same `expand --list` command the "more items not listed" line below uses.
+            lines.append(
+                f"... and {decision_hidden} more decision items: run `{expand_list_cmd}` "
+                "to list them"
+            )
         if hidden:
             # Card 5 content-fit (TRDD-RAEGS1D5, item 3): a bare "N more items not listed" was
             # a dead end -- `expand` needs an id, and an id not shown here could never be
             # named. `expand --list [--grep TEXT]` (added alongside this line) walks the SAME
             # transcript and prints every item's id, so this points the model at that instead
             # of leaving it to guess or give up.
-            lines.append(
-                f"[[elided: {hidden} more items not listed -- list/search them with: uv run "
-                '--script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript '
-                f'{transcript_path} --list --grep TEXT]]'
-            )
+            lines.append(f"[[elided: {hidden} more items not listed -- list/search them with: {expand_list_cmd}]]")
 
         if full_context_path:
             # Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
@@ -1484,7 +1600,7 @@ def compose(
     else:
         kept_order_list = [it for it in items if it.id in kept_ids]  # `items` is chronological
 
-    doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
+    doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
     if max_bytes is None or len(doc.encode("utf-8")) <= max_bytes:
         return doc
 
@@ -1510,7 +1626,7 @@ def compose(
     while evict_order and len(doc.encode("utf-8")) > max_bytes:
         dropped_id = evict_order.pop(0).id
         kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
-        doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
 
     if len(doc.encode("utf-8")) > max_bytes and shown_elided:
         # Ascending `_pointer_priority` -- ties broken by lowest score, but a decision_passed
@@ -1521,7 +1637,7 @@ def compose(
             dropped = ranked.pop(0)
             shown_elided = [it for it in shown_elided if it.id != dropped.id]
             hidden_count += 1
-            doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
+            doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
 
     if len(doc.encode("utf-8")) > max_bytes and digest_text:
         overflow = len(doc.encode("utf-8")) - max_bytes
@@ -1529,6 +1645,6 @@ def compose(
         note_bytes = len(_DIGEST_TRUNCATED_NOTE.encode("utf-8"))
         keep = max(0, len(digest_bytes) - overflow - note_bytes)
         digest_text = digest_bytes[:keep].decode("utf-8", "ignore").rstrip() + _DIGEST_TRUNCATED_NOTE
-        doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
 
     return doc
