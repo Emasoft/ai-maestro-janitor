@@ -81,6 +81,34 @@ def test_command_message_wrapper_is_system() -> None:
     assert tr.classify_record(entry) == "system"
 
 
+def test_typed_slash_command_with_args_and_human_origin_is_human() -> None:
+    # TRDD-RAEGS1D5 defect 1 (review): a typed slash command like `/loop 5m <prompt>` wraps
+    # in `<command-message>` (matched by rule 4's generic system-prefix list) but ALSO carries
+    # `<command-name>` and `<command-args>`, with origin.kind "human" -- measured on real
+    # transcripts, this is the owner's own instruction, not harness noise.
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-message>loop is running…</command-message>\n"
+                "<command-name>/loop</command-name>\n"
+                "<command-args>5m fix the failing test</command-args>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "human"
+
+
+def test_command_message_without_command_name_stays_system() -> None:
+    # Same wrapper text, but no <command-name> tag at all -- not a typed slash command, so
+    # the generic system-prefix rule still applies (unlike the test above).
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {"content": "<command-message>some-command</command-message>"},
+    }
+    assert tr.classify_record(entry) == "system"
+
+
 def test_interrupt_marker_is_system() -> None:
     entry = {"message": {"content": [{"type": "text", "text": "[Request interrupted by user]"}]}}
     assert tr.classify_record(entry) == "system"
@@ -107,14 +135,44 @@ def test_auto_continuation_origin_is_system() -> None:
     assert tr.classify_record(entry) == "system"
 
 
-def test_unclassified_origin_falls_through_to_turn_origin() -> None:
-    # Measured value "unclassified" (mostly on list/tool records) must fall through rule 5
-    # rather than being treated as an unrecognised-but-terminal value.
+def test_unknown_origin_kind_is_never_human_and_is_named_on_stderr(capsys) -> None:
+    # TRDD-RAEGS1D5 defect 2 (review): an explicit origin.kind this classifier doesn't
+    # recognise used to fall through to turnOrigin -> promptSource -> the final "human"
+    # fallback, so a future system-authored kind would silently count as the owner's own
+    # words. It must now route to "notification" and be named on stderr, even when a later
+    # field (turnOrigin here) would have said "human". Uses a value OTHER than "unclassified"
+    # -- that one is a real, frequent, deliberately-non-deciding value (coordinator
+    # correction below), not an example of a genuinely unrecognised kind.
     entry = {
-        "isMeta": False, "origin": {"kind": "unclassified"}, "turnOrigin": "human",
+        "isMeta": False, "origin": {"kind": "some-future-kind"}, "turnOrigin": "human",
+        "message": {"content": "hi"},
+    }
+    assert tr.classify_record(entry) == "notification"
+    assert "some-future-kind" in capsys.readouterr().err
+
+
+def test_unknown_origin_kind_is_named_on_stderr_only_once_per_process(capsys) -> None:
+    # Coordinator correction: printing unconditionally floods stderr in jev_compaction.py and
+    # the hooks on a bulk transcript scan -- at most one stderr line per distinct unrecognised
+    # value per process, tracked in a module-level set.
+    entry = {"isMeta": False, "origin": {"kind": "yet-another-kind"}, "message": {"content": "x"}}
+    assert tr.classify_record(entry) == "notification"
+    assert tr.classify_record(entry) == "notification"
+    err_lines = capsys.readouterr().err.splitlines()
+    assert len([line for line in err_lines if "yet-another-kind" in line]) == 1
+
+
+def test_unclassified_origin_kind_is_no_decision_and_falls_through(capsys) -> None:
+    # Coordinator correction (2026-09-23): origin.kind "unclassified" is measured on 7,190
+    # real records, mostly list/tool_result carriers -- it means "origin gives no decision",
+    # NOT an unrecognised kind, so it must fall through to turnOrigin/promptSource/legacy
+    # exactly like a missing `kind`, and must never print to stderr or become "notification".
+    entry = {
+        "isMeta": False, "origin": {"kind": "unclassified"}, "promptSource": "typed",
         "message": {"content": "hi"},
     }
     assert tr.classify_record(entry) == "human"
+    assert capsys.readouterr().err == ""
 
 
 def test_turn_origin_scheduled_without_origin_is_system() -> None:
