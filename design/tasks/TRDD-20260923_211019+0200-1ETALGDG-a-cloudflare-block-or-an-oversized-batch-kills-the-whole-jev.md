@@ -3,7 +3,7 @@ trdd-id: 1ETALGDG
 title: A Cloudflare block or an oversized batch kills the whole Jev compaction instead of splitting the batch
 column: todo
 created: 2026-09-23T21:10:19+0200
-updated: 2026-09-23T21:10:19+0200
+updated: 2026-09-23T21:11:38+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-23T21:10:19+0200
+derived: true
 ---
 
 # A Cloudflare block or an oversized batch kills the whole Jev compaction instead of splitting the batch

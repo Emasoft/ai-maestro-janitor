@@ -3,7 +3,7 @@ trdd-id: HWF3QFAB
 title: Jev uses the reference RETRIEVE_QUESTION, format_pointer and asks the decision question only of the user's own messages
 column: testing
 created: 2026-09-23T20:17:58+0200
-updated: 2026-09-23T21:10:50+0200
+updated: 2026-09-23T21:11:38+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: refactor
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-23T20:17:58+0200
+derived: true
 ---
 
 # Jev uses the reference RETRIEVE_QUESTION, format_pointer and asks the decision question only of the user's own messages

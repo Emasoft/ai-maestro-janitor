@@ -3,7 +3,7 @@ trdd-id: 0UQSAFCW
 title: The recent-turns tail injected after a clear is full of heartbeat and notification records
 column: testing
 created: 2026-09-23T20:17:58+0200
-updated: 2026-09-23T21:10:49+0200
+updated: 2026-09-23T21:11:38+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-23T20:17:58+0200
+derived: true
 ---
 
 # The recent-turns tail injected after a clear is full of heartbeat and notification records
