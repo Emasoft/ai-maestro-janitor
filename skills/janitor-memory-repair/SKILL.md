@@ -132,23 +132,58 @@ not a permanent silence. `--reason` must let the next reader re-check it.
 
 Two checklist fixes are already atomic, locked memgrep writes and are never part of the
 staged-copy pass — run whichever apply to the candidate page BEFORE
-`memory_txn_cli.py begin`, never inside the staged copy and never after `commit`:
+`memory_txn_cli.py begin`, never inside the staged copy and never after `commit`.
 
-- the one-sided link: `memgrep reference-mem-topic --page <this page> --to <target page>
-  --base-sha256 <sha256 of the page as just read>`
-- the atom `desc:` backfill: `memgrep update-mem-atom --page <page> --atom <id>
-  --desc "<text>" --base-sha256 <sha256 of the page as just read>`
+**Re-read the page and recompute `--base-sha256` immediately before EACH verb call** —
+never reuse one sha for both. The first verb's write changes the page's bytes, so a sha
+computed once up front is already stale for the second verb: on a page needing both
+fixes, that stale sha makes the second call refuse every time.
 
-Compute `--base-sha256` from the page as you just read it (`sha256sum <page> | cut -d'
-' -f1`) so a stale write refuses instead of clobbering a concurrent edit. **On refusal**
-(stale sha, or any other error): report the refusal and continue with whatever other
-fixes the page still needs — a refused pre-transaction fix is not a reason to skip the
-rest of the checklist, nor to abandon the staged-copy pass for this page.
+1. **The one-sided link — dry-run first, and only write if the TARGET is unaffected.**
+   `reference-mem-topic` always wires both ends, but repair is single-page (IRON RULE 3)
+   and a live write to the TARGET page could stale another chore's open transaction on
+   it. Check before writing:
 
-A page whose ONLY defects were these two verb-covered fixes needs no `begin`/`commit`
-at all — the pre-transaction step alone completed the repair. It still prints the normal
-per-page Output line and still closes the claim (`set-report` + `complete`), exactly as
-a page that went through the transaction core (see Output and Close the claim below).
+   ```bash
+   sha=$({ sha256sum <this page> 2>/dev/null || shasum -a 256 <this page>; } | cut -d' ' -f1)
+   memgrep reference-mem-topic --page <this page> --to <target page> --dry-run
+   #   → "would link <this page> <-> <target page> (page {gains a link|unchanged}, to {gains a link|unchanged})"
+   ```
+
+   - `to unchanged` (only THIS page would change, or neither would — `page unchanged, to
+     unchanged` means the link is already bidirectional, nothing to do) → safe, run it
+     for real: `memgrep reference-mem-topic --page <this page> --to <target page>
+     --base-sha256 "$sha"` (a no-change run is harmless, but skip it outright if you can
+     tell from the dry-run text that nothing would change).
+   - `to gains a link` (the TARGET would also change) → do NOT run it live. Skip this
+     verb and report the one-sided link as a finding instead (the librarian/another
+     pass owns the target-side write). **This is the common outcome, not an edge case**
+     — most one-sided-link defects are THIS page having the only copy of the link, so
+     expect most of them to end up reported, not auto-fixed, here. That is IRON RULE 3
+     (single-page) working as intended, not a malfunction.
+
+2. **The atom `desc:` backfill:**
+   `sha=$({ sha256sum <page> 2>/dev/null || shasum -a 256 <page>; } | cut -d' ' -f1); memgrep update-mem-atom --page <page>
+   --atom <id> --desc "<text>" --base-sha256 "$sha"`.
+
+**On refusal** (stale sha, or any other error) from either verb: report the refusal and
+continue with whatever other fixes the page still needs — a refused pre-transaction fix
+is not a reason to skip the rest of the checklist, nor to abandon the staged-copy pass
+for this page.
+
+**Re-read the page again after the pre-transaction step, before `begin`.** A verb call
+that wrote changed the page's bytes; re-diagnose the checklist against the CURRENT page
+so the candidate set handed to the staged-copy pass reflects what's actually still
+broken, not what was broken before the pre-transaction fixes landed. This re-diagnosis
+happens BEFORE the "does this page still need `begin`/`commit`" decision below, not
+after — the decision is made from the post-fix diagnosis, never the stale one that
+selected the page as a candidate.
+
+A page whose ONLY defects were these two verb-covered fixes (and both were applied, or
+correctly skipped/reported) needs no `begin`/`commit` at all — the pre-transaction step
+alone completed the repair. It still prints the normal per-page Output line and still
+closes the claim (`set-report` + `complete`), exactly as a page that went through the
+transaction core (see Output and Close the claim below).
 
 ## EXECUTE the repair THROUGH the transaction core
 
