@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: todo
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-23T22:48:31+0200
+updated: 2026-09-23T22:53:31+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -29,3 +29,5 @@ Owner directive 2026-09-23 (verbatim): "what? delete the part about the edit too
 - Owner: "even if the whole wikimem is going to be rewritten, and the agent passes the whole content of the wikimem as a parameter to the memgrep, the memgrep guarantees that the content will be linted, fixed if possible, formatted correctly, verified against the mandatory rule of 10 key-phrases minimum per atom, and all specs checked and verified, or it will block the edit and return error."
 - Derived by us: every memgrep write verb, including a whole-page replace, runs one pipeline before anything touches disk: parse, auto-fix what is safely fixable, format canonically, lint, validate every spec (at least 10 key-phrases per atom, frontmatter, TOC, links both ends, lessons, no control bytes), and writes atomically only on a clean result; otherwise it writes nothing and exits non-zero naming each violation.
 - Owner: "memgrep is a writing gate ensuring that no malformed memory file is ever written."
+- Owner: "atom over size : yes, warn only. but only up to a certain size. over a certain treshold that i let you decide, it should warn but also open a ticket with the janitor to lazily refactor the atom into 2 atoms."
+- Threshold chosen by us under that delegation: over the existing budget (MEMGREP_ATOM_MAX_CHARS, default 1,500 chars) memgrep warns and writes (unchanged); over 2x the budget (3,000 chars by default, derived from the same env value so they cannot drift) it warns, writes, and opens ONE janitor support ticket per atom (deduplicated on the atom id) asking the janitor to lazily split that atom into two atoms. Corpus distribution for reference: median 559, p90 1,241, p95 1,624 chars.
