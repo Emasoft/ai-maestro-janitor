@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-24T00:17:23+0200
+updated: 2026-09-24T00:19:16+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -93,3 +93,7 @@ Release note (measured 2026-09-24, reports/memgrep-sole-writer/20260924_001402+0
 - Lint writes: bare memgrep lint becomes read-only; fixes happen through the write gate or an explicit --fix. Five janitor callers rely on the silent fix today and get updated. (Alternative: keep fixing, one brief lock per page.)
 - Prose-only pages: a whole-page rewrite that removes non-atom prose is refused until the page is atomized; removed facts move under Superseded. (Alternative: allow, printing every removed paragraph.)
 - Still open from earlier: keep or drop the duplicate-ticket dedupe (tickets.py already dedupes natively).
+
+## Implementation plan (reviewed in two rounds, 2026-09-24 note)
+
+A page with more than one forbidden control byte cannot be repaired one span at a time (each partial fix leaves a byte in the result, so the gate refuses it); the repair path is update-mem-topic --replace-all when every occurrence takes the same fix, else the A3 whole-page replace.
