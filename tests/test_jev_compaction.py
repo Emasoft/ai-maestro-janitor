@@ -238,7 +238,10 @@ def test_elided_pointer_list_is_capped_with_an_m_more_line() -> None:
         assert f"id={it.id} " in doc
     for it in items[: n - jc._MAX_ELIDED_POINTERS]:
         assert f"id={it.id} " not in doc
-    assert f"[[elided: {n - jc._MAX_ELIDED_POINTERS} more items not listed]]" in doc
+    assert f"[[elided: {n - jc._MAX_ELIDED_POINTERS} more items not listed" in doc
+    # Card 5 content-fit: the "N more" line names a live way back to an unlisted item (item 3
+    # of the card) -- `expand --list`, not a dead end.
+    assert "--list --grep" in doc
     assert "pointers expand with:" in doc
 
 
@@ -250,6 +253,39 @@ def test_elided_pointer_list_under_the_cap_has_no_m_more_line() -> None:
                       header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
     assert "more items not listed" not in doc
     assert "pointers expand with:" in doc
+
+
+def test_max_bytes_backstop_drops_relevance_only_items_before_a_decision_passed_one() -> None:
+    """Review finding, card 5 content-fit (TRDD-RAEGS1D5): `compose()`'s `max_bytes` backstop
+    must drop kept items by the SAME `evict_key` priority the `budget_tokens` eviction already
+    uses, never bare chronological order -- otherwise it would sacrifice an OLD
+    `decision_passed` item (a user instruction/correction) before a NEWER relevance-only one,
+    exactly the loss `evict_key` exists to prevent at the first checkpoint, reintroduced here
+    at the second. Four items, budget_tokens generous (so the FIRST eviction pass keeps all
+    four); `max_bytes` tight enough that only one item can survive the backstop -- it must be
+    the oldest, decision-passed one, not simply the newest one."""
+    decision_item = _item("old-decision", "user", "IMPORTANT decision text", turn=0, tokens=5)
+    relevance_items = [
+        _item(f"new-relevance-{i}", "user", f"background text {i}", turn=i, tokens=5)
+        for i in range(1, 4)
+    ]
+    items = [decision_item, *relevance_items]
+    scores = {
+        decision_item.id: jc.Scores(relevance=0.5, decision=0.6, oversized=False, kept=True,
+                                     decision_passed=True),
+        **{
+            it.id: jc.Scores(relevance=0.9, decision=0.1, oversized=False, kept=True,
+                              decision_passed=False)
+            for it in relevance_items
+        },
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      max_bytes=310)
+    assert len(doc.encode("utf-8")) <= 310
+    assert f"-- user {decision_item.id} --" in doc
+    for it in relevance_items:
+        assert f"-- user {it.id} --" not in doc
 
 
 def test_tool_result_without_matching_tool_use_falls_back(tmp_path: Path) -> None:

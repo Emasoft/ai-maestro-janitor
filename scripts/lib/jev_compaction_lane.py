@@ -246,10 +246,30 @@ def read_probe_stamp() -> dict | None:
 # `summarize_previous_session.py`) instead gets its OWN, larger budget, shared here so both
 # callers pass the identical numbers instead of hand-copied magic constants.
 LANE_INJECTION_MAX_BYTES = 8192
-# ~8KB of latin text at `jevctx.tokens.LATIN_CHARS_PER_TOKEN` (3.5 chars/token) is ~2340 tokens;
-# rounded down so the KEPT-items budget alone (before the digest/header/pointers `compose_
-# handoff` also has to fit) leaves headroom inside `LANE_INJECTION_MAX_BYTES`.
-LANE_BUDGET_TOKENS = 2000
+# Card 5 content-fit MEASURED FACT (reports/compaction-replacement/, TRDD-RAEGS1D5): a real
+# 118-item transcript compacted at the OLD LANE_BUDGET_TOKENS (2000) plus the default 4000-token
+# digest and the 40-pointer cap produced a 19,731-byte document -- the DIGEST (11,038 bytes, not
+# the kept-items budget) dominated, and the pointer list was the second-largest contributor
+# (5,879 bytes / 40 pointers). Retuned so the WHOLE document fits its share of
+# `LANE_INJECTION_MAX_BYTES` in the common case, not just the kept-items text. The same
+# transcript at the three numbers below (`LANE_BUDGET_TOKENS`, `LANE_DIGEST_TOKENS`,
+# `LANE_MAX_ELIDED_POINTERS`) produced ~4,216 bytes total -- `LANE_COMPACTED_MAX_BYTES` is the
+# backstop for a DIFFERENT transcript that still overflows this budget.
+LANE_BUDGET_TOKENS = 400
+# The default `--digest-tokens` (4000, jev_compact.py) alone produced an 11 KB digest -- larger
+# than the WHOLE injection budget. 500 tokens measured at ~1,314 bytes (header + digest).
+LANE_DIGEST_TOKENS = 500
+# `jev_compaction.py::compose`'s `max_elided_pointers` (default 40) was the single largest
+# line-count contributor once the digest was capped. 12 pointers measured at ~1,732 bytes --
+# still enough to name the highest-scoring elided items, far short of showing all 40.
+LANE_MAX_ELIDED_POINTERS = 12
+# The backstop forwarded to `jev_compaction.py compact --max-bytes` (via `run_compact`) -- see
+# `jev_compaction.py::compose`'s own docstring for the drop-oldest-kept-first / drop-lowest-
+# score-pointer-first / truncate-digest-last degrade order it applies once this is exceeded. Set
+# above the ~4,216-byte measured common case for headroom, but well under
+# `LANE_INJECTION_MAX_BYTES` so `external_clear.compose_handoff` (facts + this + the recent-turns
+# tail) still has room for the other two parts of its own single budget.
+LANE_COMPACTED_MAX_BYTES = 5000
 
 
 def record_finding(*, sev: str, code: str, msg: str) -> None:
@@ -401,16 +421,20 @@ def record_once_per_reason(sd: Path, key: str, reason: str) -> str | None:
 def run_compact(
     plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
     heads_args: list[str], timeout: int = 120, budget_tokens: int | None = None,
+    digest_tokens: int | None = None, max_elided_pointers: int | None = None,
+    max_bytes: int | None = None,
 ) -> tuple[subprocess.CompletedProcess[str] | None, bool]:
     """Exec `jev_compact.py compact` BY PATH (it is git-tracked 100755, own shebang runs it) and
     return `(proc, timed_out)`. 120s: jev's own client retries 3x with <=8s backoff on a 15s
     request timeout; six parallel batches bound the worst case near 70s; the 15-min summary hold
     is the outer bound (docs_dev/jev-card3c-brief.md C1). A `TimeoutExpired` is a bug exit here,
-    never retried in-process — retrying would risk landing past the hold's own deadline.
+    never retried in-process -- retrying would risk landing past the hold's own deadline.
 
-    `budget_tokens`, when given, is forwarded as `--budget-tokens` (the CLI's own flag; default
-    left to `jev_compact.py` otherwise) — the automatic lane passes `LANE_BUDGET_TOKENS` so its
-    kept-items text stays inside `LANE_INJECTION_MAX_BYTES` once composed."""
+    `budget_tokens`, `digest_tokens`, `max_elided_pointers`, `max_bytes`, each when given, are
+    forwarded as the matching `jev_compact.py compact` CLI flag (all optional there too --
+    unset keeps that CLI's own defaults). The automatic lane passes its own `LANE_*` constants
+    (card 5 content-fit, TRDD-RAEGS1D5) so the composed document fits `LANE_INJECTION_MAX_BYTES`
+    once assembled by `external_clear.compose_handoff`."""
     cmd = [
         str(plugin_root / "scripts" / "jev_compact.py"), "compact",
         "--transcript", transcript, "--out", str(out_path),
@@ -418,6 +442,12 @@ def run_compact(
     ]
     if budget_tokens is not None:
         cmd += ["--budget-tokens", str(budget_tokens)]
+    if digest_tokens is not None:
+        cmd += ["--digest-tokens", str(digest_tokens)]
+    if max_elided_pointers is not None:
+        cmd += ["--max-elided-pointers", str(max_elided_pointers)]
+    if max_bytes is not None:
+        cmd += ["--max-bytes", str(max_bytes)]
     try:
         proc = subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
     except subprocess.TimeoutExpired:

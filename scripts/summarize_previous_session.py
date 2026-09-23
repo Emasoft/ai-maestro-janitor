@@ -174,6 +174,8 @@ def _main() -> int:
     proc, timed_out = jcl.run_compact(
         PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
         heads_args=heads_args, budget_tokens=jcl.LANE_BUDGET_TOKENS,
+        digest_tokens=jcl.LANE_DIGEST_TOKENS, max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS,
+        max_bytes=jcl.LANE_COMPACTED_MAX_BYTES,
     )
 
     if timed_out or proc is None or proc.returncode != jcl.EXIT_OK:

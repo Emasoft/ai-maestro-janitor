@@ -422,6 +422,12 @@ def _oversized_preview(item: Item) -> str:
     return "\n".join(item.text.splitlines()[:_OVERSIZED_PREVIEW_LINES])
 
 
+
+# Card 5 content-fit measured fact (reports/compaction-replacement/): the appended note for a
+# digest truncated by compose()'s max_bytes backstop -- see compose()'s own docstring.
+_DIGEST_TRUNCATED_NOTE = "\n\n[[digest truncated to fit the handoff budget]]"
+
+
 # Card 5 measured fact (docs_dev/jev-compaction-spec.md card 5 / reports/compaction-replacement/
 # 20260923_064108+0200-hook-output-experiments.md): the largest real transcript elides ~18,041
 # items -- one pointer line per elided item made `compose()` itself emit ~2.4 MB, independent of
@@ -437,6 +443,8 @@ def compose(
     *,
     budget_tokens: int = 8000,
     header: dict[str, Any],
+    max_elided_pointers: int = _MAX_ELIDED_POINTERS,
+    max_bytes: int | None = None,
 ) -> str:
     """Assemble the final injected document: header, kept items verbatim, then pointers.
 
@@ -444,6 +452,23 @@ def compose(
     dict (`{"tokens": int, "cost": float}` from the Jev response). The transcript path is
     written out exactly twice by design -- once in the header, once in the fixed trailing
     "expand with" line -- never inside an individual pointer.
+
+    `max_bytes`, when given, is a BACKSTOP (card 5 content-fit, TRDD-RAEGS1D5): the caller is
+    expected to size `budget_tokens` / the digest / `max_elided_pointers` so the document
+    already fits in the common case (measured: reports/compaction-replacement/ -- the pointer
+    list, not the kept-items budget, dominated the old default). This only degrades further
+    when a PARTICULAR transcript still overflows -- e.g. an unusually verbose digest or long
+    pointer previews -- and it degrades in priority order, never a blind byte slice: (1) drop
+    kept items by the SAME `evict_key` priority the `budget_tokens` eviction above already
+    uses -- lowest (decision_passed, max_score) first, oldest among ties -- never bare
+    chronological order, so a decision-passed item (a user instruction/correction) is not
+    sacrificed ahead of a newer, lower-priority one just for being older, (2) drop pointers
+    LOWEST-SCORE-first (the ones already least likely to be worth expanding), (3) truncate the
+    digest text itself. The trailing "pointers
+    expand with:" line is NEVER dropped by any of this -- it is the model's only way back to
+    everything elided, and a blind `raw[:room]` slice downstream (`external_clear.compose_
+    handoff`, before this fix) used to cut it off along with the newest kept items because both
+    sit at the tail of the joined string.
     """
     # Oversized is re-checked here, not just trusted from `scores[...].kept`, because
     # "never inlined" is the compose-time invariant the spec actually cares about -- this
@@ -476,16 +501,16 @@ def compose(
             total_tokens -= it.tokens
 
     # `items` is already chronological, so filtering it (rather than re-sorting) keeps the
-    # elided list chronological for free -- `_MAX_ELIDED_POINTERS` below only needs to pick
+    # elided list chronological for free -- `max_elided_pointers` below only needs to pick
     # WHICH ids survive, not reorder anything.
     elided_items = [it for it in items if it.id not in kept_ids]
     hidden_count = 0
-    if len(elided_items) > _MAX_ELIDED_POINTERS:
+    if len(elided_items) > max_elided_pointers:
         # Highest max(relevance, decision) first -- the items most worth a pointer are the
         # ones the model was closest to keeping, not an arbitrary chronological head/tail.
         top_ids = {
             it.id
-            for it in sorted(elided_items, key=max_score, reverse=True)[:_MAX_ELIDED_POINTERS]
+            for it in sorted(elided_items, key=max_score, reverse=True)[:max_elided_pointers]
         }
         shown_elided = [it for it in elided_items if it.id in top_ids]
         hidden_count = len(elided_items) - len(shown_elided)
@@ -495,39 +520,88 @@ def compose(
     transcript_path = header.get("transcript_path", "")
     usage = header.get("usage") or {}
 
-    lines: list[str] = [
-        "# Compacted context (Jev compaction)",
-        f"transcript: {transcript_path}",
-        f"session: {header.get('session_key', '')}",
-        "",
-        "## Digest",
-        header.get("digest", ""),
-        "",
-        f"usage: tokens={usage.get('tokens', '?')} cost={usage.get('cost', '?')}",
-        "",
-        "## Kept items",
-    ]
+    def render(kept: set[str], elided: list[Item], hidden: int, digest_text: str) -> str:
+        lines: list[str] = [
+            "# Compacted context (Jev compaction)",
+            f"transcript: {transcript_path}",
+            f"session: {header.get('session_key', '')}",
+            "",
+            "## Digest",
+            digest_text,
+            "",
+            f"usage: tokens={usage.get('tokens', '?')} cost={usage.get('cost', '?')}",
+            "",
+            "## Kept items",
+        ]
+        for it in items:  # `items` is already chronological -- preserve it verbatim
+            if it.id in kept:
+                lines.append(f"-- {it.kind} {it.id} --")
+                lines.append(it.text)
 
-    for it in items:  # `items` is already chronological -- preserve it verbatim
-        if it.id in kept_ids:
-            lines.append(f"-- {it.kind} {it.id} --")
-            lines.append(it.text)
+        lines.append("")
+        lines.append("## Elided")
+        elided_ids = {it.id for it in elided}
+        for it in items:
+            if it.id in elided_ids:
+                lines.append(_format_pointer(it))
+                if scores[it.id].oversized:
+                    lines.append(_oversized_preview(it))
+        if hidden:
+            # Card 5 content-fit (TRDD-RAEGS1D5, item 3): a bare "N more items not listed" was
+            # a dead end -- `expand` needs an id, and an id not shown here could never be
+            # named. `expand --list [--grep TEXT]` (added alongside this line) walks the SAME
+            # transcript and prints every item's id, so this points the model at that instead
+            # of leaving it to guess or give up.
+            lines.append(
+                f"[[elided: {hidden} more items not listed -- list/search them with: uv run "
+                '--script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript '
+                f'{transcript_path} --list --grep TEXT]]'
+            )
 
-    lines.append("")
-    lines.append("## Elided")
-    shown_ids = {it.id for it in shown_elided}
-    for it in items:
-        if it.id in shown_ids:
-            lines.append(_format_pointer(it))
-            if scores[it.id].oversized:
-                lines.append(_oversized_preview(it))
-    if hidden_count:
-        lines.append(f"[[elided: {hidden_count} more items not listed]]")
+        lines.append("")
+        lines.append(
+            'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
+            f"expand --transcript {transcript_path} <id>"
+        )
+        return "\n".join(lines)
 
-    lines.append("")
-    lines.append(
-        'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
-        f"expand --transcript {transcript_path} <id>"
-    )
+    digest_text = header.get("digest", "")
+    doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+    if max_bytes is None or len(doc.encode("utf-8")) <= max_bytes:
+        return doc
 
-    return "\n".join(lines)
+    # Backstop degrade, in priority order -- see the docstring. Each step only runs if the
+    # previous one was not enough; `kept_order`/`ranked` are popped from one end so this is
+    # bounded (at most `len(items)` iterations total) and never loops forever.
+    #
+    # `kept_order` is sorted by `evict_key` -- the SAME (decision_passed, max_score, turn)
+    # priority the budget_tokens eviction above already uses -- not by bare chronological
+    # position (review finding, card 5 content-fit): a plain "oldest first" pop would drop a
+    # decision-passed item (a user instruction/correction the budget eviction deliberately
+    # protects) ahead of a newer, lower-priority relevance-only item just because it happens
+    # to be older, reintroducing at this second checkpoint exactly the loss `evict_key` exists
+    # to prevent at the first one. Oldest-among-equal-priority is still the tiebreaker
+    # (`evict_key`'s third field), matching the "oldest kept items first" instruction wherever
+    # priority does not already decide it.
+    kept_order = sorted((it for it in items if it.id in kept_ids), key=evict_key)
+    while kept_order and len(doc.encode("utf-8")) > max_bytes:
+        kept_ids.discard(kept_order.pop(0).id)
+        doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+
+    if len(doc.encode("utf-8")) > max_bytes and shown_elided:
+        ranked = sorted(shown_elided, key=max_score)  # lowest score first == first to drop
+        while ranked and len(doc.encode("utf-8")) > max_bytes:
+            dropped = ranked.pop(0)
+            shown_elided = [it for it in shown_elided if it.id != dropped.id]
+            hidden_count += 1
+            doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+
+    if len(doc.encode("utf-8")) > max_bytes and digest_text:
+        overflow = len(doc.encode("utf-8")) - max_bytes
+        digest_bytes = digest_text.encode("utf-8")
+        note_bytes = len(_DIGEST_TRUNCATED_NOTE.encode("utf-8"))
+        keep = max(0, len(digest_bytes) - overflow - note_bytes)
+        digest_text = digest_bytes[:keep].decode("utf-8", "ignore").rstrip() + _DIGEST_TRUNCATED_NOTE
+        doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+
+    return doc

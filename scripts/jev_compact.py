@@ -40,18 +40,22 @@ Sub-commands:
                                             scorer failure) during THIS attempt; the probe
                                             stamp is written ok=false with the reason and a
                                             `kind` (below) so the NEXT attempt can decide
-                                            whether to decline fast via exit 5. `kind=
-                                            "unreachable"` (a transport failure -- no
-                                            response ever came back, may be local to this
-                                            machine/lane) never declines a later attempt
-                                            either, same as `auth`/`budget` -- a real
-                                            `kind="unavailable"` (a 5xx response, Jev
+                                            whether to decline fast via exit 5. `kind="auth"`/
+                                            `"budget"` never decline a later attempt -- those
+                                            are scoped to one key/request, not the endpoint. A
+                                            real `kind="unavailable"` (a 5xx response, Jev
                                             itself degraded) declines for the full
-                                            `PROBE_FAIL_TTL_S`; `kind="rate_limited"` (a
-                                            429, a per-key limit rather than an outage)
-                                            declines too, but only for the much shorter
-                                            window `cmd_compact` derives from the
-                                            server's own `Retry-After` value.
+                                            `PROBE_FAIL_TTL_S`; `kind="unreachable"` (a
+                                            transport failure -- no response ever came back,
+                                            may be local to this machine/lane) declines for
+                                            the shorter `PROBE_UNREACHABLE_TTL_S` (5min) --
+                                            long enough to skip the retry/backoff wall on a
+                                            flapping network, short enough that a fixed local
+                                            issue (DNS, a VPN) is retried again soon;
+                                            `kind="rate_limited"` (a 429, a per-key limit
+                                            rather than an outage) declines too, but only for
+                                            the much shorter window `cmd_compact` derives from
+                                            the server's own `Retry-After` value.
                                       (2..4 are `probe`/`expand`'s own codes, listed above —
                                       one flat exit-code space across all three sub-commands
                                       so a caller never confuses e.g. `expand`'s 3 with
@@ -110,6 +114,14 @@ from jevctx.types import (  # noqa: E402
 PROBE_STAMP_NAME = "jev-probe.json"
 PROBE_OK_TTL_S = 6 * 3600
 PROBE_FAIL_TTL_S = 30 * 60
+# `kind="unreachable"` (DNS/TLS/offline -- no HTTP response ever came back) decline window.
+# Card 5 content-fit (TRDD-RAEGS1D5): this used to live ONLY in `on-session-start-post-clear-
+# compact.py`'s own `_PROBE_UNREACHABLE_TTL_S`, so `summarize_previous_session.py`'s detached
+# lane (which also calls `run_compact` -> this CLI, but had no such pre-check of its own) paid
+# the full retry/backoff wall (~70s) on every network outage while the hook's copy declined in
+# microseconds -- two lanes, two policies for the same stamp. Moved into `cmd_compact`'s own
+# decline gate, next to `PROBE_FAIL_TTL_S`, so every caller of this CLI honours ONE policy.
+PROBE_UNREACHABLE_TTL_S = 5 * 60
 
 # `kind="rate_limited"` decline window (see `cmd_compact`): a 429 is a per-key limit, not
 # a whole-endpoint outage, so it earns a much shorter fast-decline TTL than
@@ -343,6 +355,33 @@ def _extract_block(entry: dict[str, Any], index: int) -> str | None:
 
 def cmd_expand(args: argparse.Namespace) -> int:
     transcript = Path(args.transcript)
+
+    if args.list:
+        # Card 5 content-fit (TRDD-RAEGS1D5, item 3): the "N more items not listed" line in
+        # `jev_compaction.py::compose()`'s output used to be a dead end -- `expand` needs an id,
+        # and an id never shown could never be named. Reuses `jc.extract_items`, the SAME
+        # transcript walk `compact` itself does -- no re-scoring, no Jev call, just a parse.
+        try:
+            items = jc.extract_items(str(transcript))
+        except OSError as exc:
+            print(f"expand --list failed: {exc}", file=sys.stderr)
+            return 3
+        needle = args.grep.lower() if args.grep else None
+        shown = 0
+        for it in items:
+            if needle is not None and needle not in it.text.lower():
+                continue
+            first_line = it.text.splitlines()[0] if it.text else ""
+            print(f"{it.id}\t{it.kind}\t{first_line[:80]}")
+            shown += 1
+        if shown == 0:
+            print("(no matching items)", file=sys.stderr)
+        return 0
+
+    if not args.id:
+        print("expand failed: an id is required unless --list is given", file=sys.stderr)
+        return 3
+
     try:
         target_uuid, index_str = args.id.rsplit(":", 1)
         index = int(index_str)
@@ -389,6 +428,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
         ttl: float | None = None
         if kind == "unavailable":
             ttl = PROBE_FAIL_TTL_S
+        elif kind == "unreachable":
+            ttl = PROBE_UNREACHABLE_TTL_S
         elif kind == "rate_limited":
             retry_after_s = stamp.get("retry_after_s")
             base = retry_after_s if isinstance(retry_after_s, (int, float)) else _RATE_LIMIT_FALLBACK_TTL_S
@@ -450,6 +491,16 @@ def cmd_compact(args: argparse.Namespace) -> int:
     usage_tokens = getattr(usage, "input_tokens", 0) + getattr(usage, "output_tokens", 0)
     usage_cost = getattr(usage, "cost", 0.0)
 
+
+    # Card 5 content-fit (TRDD-RAEGS1D5): only override jc.compose's own defaults when the
+    # caller (the automatic lane) actually passed a value -- a bare `compact` invocation keeps
+    # the full pointer cap and no byte backstop, unchanged from before this flag existed.
+    compose_kwargs: dict[str, Any] = {}
+    if args.max_elided_pointers is not None:
+        compose_kwargs["max_elided_pointers"] = args.max_elided_pointers
+    if args.max_bytes is not None:
+        compose_kwargs["max_bytes"] = args.max_bytes
+
     doc = jc.compose(
         items, scores, budget_tokens=args.budget_tokens,
         header={
@@ -458,6 +509,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
             "digest": digest,
             "usage": {"tokens": usage_tokens, "cost": usage_cost},
         },
+        **compose_kwargs,
     )
     state.atomic_write(Path(args.out), doc)
     write_probe_stamp(ok=True, reason=None, cost=usage_cost, model=None, provider=provider,
@@ -478,7 +530,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_expand = sub.add_parser("expand", help="print the original bytes of one transcript item")
     p_expand.add_argument("--transcript", required=True)
-    p_expand.add_argument("id")
+    p_expand.add_argument("id", nargs="?", default=None)
+    # Card 5 content-fit (TRDD-RAEGS1D5, item 3): list/search every item's id instead of
+    # expanding one -- the way back to an id the capped pointer list didn't name.
+    p_expand.add_argument("--list", action="store_true")
+    p_expand.add_argument("--grep", default=None)
 
     p_compact = sub.add_parser("compact", help="compose the compacted context (card 3)")
     p_compact.add_argument("--transcript", required=True)
@@ -498,6 +554,13 @@ def main(argv: list[str] | None = None) -> int:
         "--decision-threshold", type=float,
         default=_coerce_float(state.plugin_option(_DECISION_ENV), jc.DEFAULT_DECISION_THRESHOLD),
     )
+    # Card 5 content-fit (TRDD-RAEGS1D5): both default to None -- unset means "let jc.compose
+    # use its own defaults" (the full pointer cap, no byte backstop), so a manual `compact`
+    # invocation with neither flag behaves EXACTLY as before this change. Only a caller that
+    # knows its own injection budget (jev_compaction_lane.py, for the automatic lane) passes
+    # them.
+    p_compact.add_argument("--max-elided-pointers", type=int, default=None)
+    p_compact.add_argument("--max-bytes", type=int, default=None)
 
     args = parser.parse_args(argv)
     if args.command == "probe":

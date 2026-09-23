@@ -455,16 +455,48 @@ def test_probe_ask_raises_unreachable_when_status_is_none(
     assert stamp["kind"] == "unreachable"
 
 
-def test_compact_does_not_decline_on_unreachable_stamp(
+def test_compact_declines_on_recent_unreachable_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A `kind="unreachable"` stamp is a LOCAL transport problem (this machine/lane), not
-    evidence the Jev endpoint itself is down -- the fast-decline gate (exit 5) never
-    declines on it, same as the existing auth/budget non-decline test (only
-    `kind == "unavailable"` and `kind == "rate_limited"` ever decline)."""
+    """Card 5 content-fit (TRDD-RAEGS1D5, item 4): a fresh `kind="unreachable"` stamp (DNS/TLS/
+    offline -- no HTTP response ever came back) now declines fast (exit 5), same policy as
+    `kind="unavailable"`, just with a shorter `PROBE_UNREACHABLE_TTL_S` TTL. This used to be
+    true ONLY inside `on-session-start-post-clear-compact.py`'s own duplicate pre-check --
+    `summarize_previous_session.py`'s detached lane had none and paid the full retry/backoff
+    wall on the same outage. Moved into `cmd_compact`'s own gate so every caller of this CLI
+    (not just one hook) honours the same decline, superseding the old `test_compact_does_not_
+    decline_on_unreachable_stamp` (which asserted the now-retired non-decline behaviour)."""
     _isolated_control_dir.mkdir(parents=True, exist_ok=True)
     stamp = {"ok": False, "reason": "simulated local networking failure", "ts": time.time(),
               "cost": None, "model": None, "provider": "openrouter", "kind": "unreachable"}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    def _must_not_be_called() -> Any:
+        raise AssertionError("make_client must not be called on a fast decline")
+
+    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 5
+    assert "declined: recent probe failure: simulated local networking failure" in output
+    assert not out.exists()
+
+
+def test_compact_does_not_decline_once_unreachable_ttl_has_passed(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An `kind="unreachable"` stamp older than `PROBE_UNREACHABLE_TTL_S` (5min) must NOT
+    decline -- a fixed local issue (DNS, a VPN) is worth retrying again, unlike a real
+    `kind="unavailable"` outage's much longer `PROBE_FAIL_TTL_S` (30min)."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {
+        "ok": False, "reason": "simulated local networking failure",
+        "ts": time.time() - (jev_compact.PROBE_UNREACHABLE_TTL_S + 5),
+        "cost": None, "model": None, "provider": "openrouter", "kind": "unreachable",
+    }
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
     client = FakeJevClient(_keep_only("bug"))

@@ -237,6 +237,66 @@ def test_large_compacted_context_still_injects_under_9000_bytes(tmp_path, monkey
     assert "pointers expand with:" in out
 
 
+def test_large_multibyte_compacted_context_stays_under_9000_bytes_with_no_split_char(
+    tmp_path, monkeypatch,
+):
+    """Card 5 content-fit (TRDD-RAEGS1D5, item 2): every byte-budget cut in this lane
+    (`compose_handoff`'s `raw[:room]` slice, `jev_compaction.py::compose`'s own `max_bytes`
+    backstop) counts UTF-8 BYTES, not characters -- a fixture built only of ASCII never
+    exercises the boundary where a 3-byte character (an em dash, a checkmark, box-drawing) can
+    straddle a cut point. This fixture is HEAVY in exactly those: the whole document (header +
+    body, including `_INJECTION_HEADER` itself, which already contains an em dash) must still
+    print at <= 9,000 bytes, and decoding the printed bytes back with `errors="strict"` must
+    succeed with no U+FFFD replacement character -- a split multi-byte sequence would either
+    raise or leave one behind; `raw[:room].decode("utf-8", "ignore")` silently DROPS a dangling
+    partial sequence instead of emitting a corrupt glyph, which is what this test pins."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%10")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%10"}, transcript=str(transcript))
+
+    # "— ✓ " repeated: every character here is 3 bytes in UTF-8 (em dash U+2014, checkmark
+    # U+2713, box-drawing U+2500), so a byte-count cut is highly likely to land mid-character
+    # unless the surrounding code decodes with "ignore" rather than a bare index slice.
+    multibyte_line = "— ✓ ━ " * 40
+    huge_doc = (
+        "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Kept items\n"
+        + ((multibyte_line + "\n") * 500)
+        + "\n## Elided\n"
+        + "\n".join(f'[[elided id=e{i}:0 tokens=10 "{multibyte_line}"]]' for i in range(500))
+        + '\n\npointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py"'
+        " expand --transcript /tmp/x <id>"
+    )
+    assert len(huge_doc.encode("utf-8")) > 30_000, "the fixture must actually be large"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=huge_doc)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+    out_bytes = out.encode("utf-8")
+
+    assert rc == 0
+    assert len(out_bytes) <= 9000, f"injection was {len(out_bytes)} bytes"
+    # Round-trips cleanly (no exception) and carries no replacement character -- either would
+    # mean a multi-byte sequence was cut in half somewhere along the way.
+    assert out_bytes.decode("utf-8", "strict") == out
+    assert "�" not in out
+
+
 def test_two_panes_do_not_cross(tmp_path, monkeypatch):
     """A sidecar written for pane A must be invisible to a session running in pane B."""
     project_dir = tmp_path / "project"
@@ -383,15 +443,18 @@ def test_tmux_wins_over_iterm_when_both_env_vars_are_set(tmp_path, monkeypatch):
 def test_declines_fast_on_a_fresh_unreachable_probe_stamp_without_spawning_jev_compact(
     tmp_path, monkeypatch,
 ):
-    """`jev_compact.py compact`'s OWN in-process fast-decline only short-circuits
-    `kind="unavailable"`/`"rate_limited"` -- a `"unreachable"` stamp (DNS/TLS/offline, no HTTP
-    response at all) would still run the full subprocess and pay its retry/backoff wall on
-    every `/clear`. This hook must decline BEFORE spawning `jev_compact.py compact` at all when
-    the stamp is `kind="unreachable"` and younger than `_PROBE_UNREACHABLE_TTL_S` -- pinned here
-    by making the stub script itself the failure signal (it must never run)."""
+    """Card 5 content-fit (TRDD-RAEGS1D5, item 4): the fast-decline on a fresh
+    `kind="unreachable"` stamp (DNS/TLS/offline, no HTTP response at all) used to live ONLY in
+    this hook's own pre-check -- moved into `jev_compact.py compact`'s own decline gate (next
+    to `PROBE_FAIL_TTL_S`'s existing `"unavailable"` handling) so `summarize_previous_
+    session.py`'s detached lane honours it too, not just this hook. This test therefore runs
+    the REAL `jev_compact.py` (not a stub) -- the fast-decline being asserted now lives THERE,
+    and a stub standing in for it would only prove this test file agrees with itself."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    plugin_root = tmp_path / "plugin"
+    # The REAL plugin root, so `run_compact` execs the REAL `jev_compact.py` -- its OWN decline
+    # gate is what this test pins, not a hook-side duplicate that no longer exists.
+    plugin_root = _PROJECT_ROOT
     _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
     monkeypatch.setenv("TMUX_PANE", "%6")
 
@@ -409,16 +472,6 @@ def test_declines_fast_on_a_fresh_unreachable_probe_stamp_without_spawning_jev_c
                     "ts": time.time() - 5}),
         encoding="utf-8",
     )
-
-    # The stub is a script that would fail loudly if `jev_compact.py compact` were ever spawned
-    # -- a decline before `run_compact` means this file is never even executed.
-    script = plugin_root / "scripts" / "jev_compact.py"
-    script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text(
-        "#!/usr/bin/env python3\nimport sys\nsys.exit('must never run on a fresh unreachable stamp')\n",
-        encoding="utf-8",
-    )
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
@@ -438,6 +491,41 @@ def test_declines_fast_on_a_fresh_unreachable_probe_stamp_without_spawning_jev_c
     assert group and group[0].read_text(encoding="utf-8").lstrip().startswith(
         handoff_files.TEMPLATE_MARKER
     ), "a declined-unreachable compact must still land a TEMPLATE-marked handoff, never silence"
+
+
+def test_unresolvable_pane_key_is_logged_not_silent(tmp_path, monkeypatch):
+    """Card 5 content-fit (TRDD-RAEGS1D5, item 5): when `self_terminal()` cannot resolve a
+    pane (`kind == "unknown"` -- Apple Terminal, plain xterm, or a detection failure), the hook
+    used to just `return 0` with no trace anywhere. That is indistinguishable from "nothing to
+    do" when it might instead be "detection broke" -- log ONE line naming the kind so the two
+    are distinguishable in `jev-post-clear-hook.log`."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    # No TMUX_PANE, no ITERM_SESSION_ID -- `self_terminal()` falls through to
+    # `{"kind": "unknown"}`, so `pane_key_from_terminal` returns None.
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.delenv("ITERM_SESSION_ID", raising=False)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+
+    assert rc == 0
+    assert buf.getvalue() == ""
+    log_path = state.log_dir() / "jev-post-clear-hook.log"
+    assert log_path.is_file(), "the unresolvable-pane-key case must leave a trace, not silence"
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "no pane key" in log_text
+    assert "kind='unknown'" in log_text
 
 
 def test_hooks_json_registers_the_new_hook_with_timeout_90():
