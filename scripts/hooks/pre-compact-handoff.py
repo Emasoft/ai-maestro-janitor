@@ -386,9 +386,10 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
         seek-to-tail bounds the work regardless of session length (a fragmentary
         first line after the seek is dropped).
       * Every line is parsed defensively — a malformed line is skipped, never fatal.
-      * Heartbeat-cron `user` prompts, `isMeta`/`isSidechain`/`isCompactSummary`
-        turns, and pure tool_use / tool_result / thinking turns are filtered out so
-        the `n` slots hold real exchange.
+      * Non-conversation `user` records — heartbeat-cron prompts, task notifications,
+        command wrappers, `isMeta`/`isSidechain`/`isCompactSummary` turns — are dropped via
+        `lib.transcript_roles.classify_record` (TRDD-91D2VHW3); pure tool_use / tool_result /
+        thinking turns are filtered out too, so the `n` slots hold real exchange.
       * Each kept turn is truncated to `_MAX_TURN_CHARS`.
     Any failure (or nothing usable) returns None → the caller renders
     "(recent conversation unavailable)". Returns (role, text) newest-LAST.
@@ -409,6 +410,27 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
     if seeked and lines:
         lines = lines[1:]  # drop the probably-partial first line after the tail seek
 
+    # TRDD-91D2VHW3 (card 2b): the old isMeta/isSidechain/isCompactSummary + heartbeat-prefix
+    # filter let OTHER `type: "user"` record classes through unfiltered — a task-notification
+    # or a `<local-command-stdout>`/`<command-message>` wrapper was kept and rendered into the
+    # handoff as if the human had typed it. Route every record through the one shared
+    # classifier instead of re-deriving the same rules here (the whole point of card 1's
+    # `transcript_roles` module: one classification, reused everywhere). Dual-form import —
+    # detector/test context puts `scripts/lib` on sys.path (bare `import transcript_roles`),
+    # the hook's own `main()` puts `scripts/` on sys.path first (`from lib import
+    # transcript_roles`) — same guard shape as `leanctx_allowlist._autoallow_enabled`.
+    # Review finding on this card: neither convention applying (an ImportError from BOTH
+    # attempts) must degrade to this function's own documented contract ("any failure
+    # returns None"), not propagate and rely on a caller's blanket except — `_build_handoff`
+    # happens to wrap this call today, but `_recent_turns` must stay self-contained.
+    try:
+        try:
+            from lib import transcript_roles as tr  # hook context: scripts/ on sys.path
+        except ImportError:
+            import transcript_roles as tr  # type: ignore[no-redef]  # detector/test context
+    except ImportError:
+        return None
+
     turns: list[tuple[str, str]] = []
     for line in lines:
         line = line.strip()
@@ -422,7 +444,14 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
             continue
         if obj.get("type") not in ("user", "assistant"):
             continue
-        if obj.get("isMeta") or obj.get("isSidechain") or obj.get("isCompactSummary"):
+        role_class = tr.classify_record(obj)
+        if role_class == "skip":
+            continue
+        # Only a "human"-classified USER record is real conversation; a notification/system/
+        # peer record is dropped. The assistant's own reply is kept whenever it isn't itself
+        # skip-classified — it is the answer to whatever human turn preceded it, not a second
+        # thing needing its own human/system split.
+        if obj.get("type") == "user" and role_class != "human":
             continue
         message = obj.get("message")
         role = str((message.get("role") if isinstance(message, dict) else None) or obj.get("type") or "")
@@ -430,8 +459,6 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
         text = _extract_text(content).strip()
         if not text:
             continue  # pure tool_use / tool_result / thinking turn — no conversation
-        if role == "user" and text.startswith("[janitor-heartbeat]"):
-            continue  # the cron heartbeat prompt, not user conversation
         turns.append((role, text))
 
     if not turns:

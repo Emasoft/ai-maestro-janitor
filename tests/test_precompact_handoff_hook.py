@@ -529,6 +529,63 @@ def test_recent_turns_filters_and_order(tmp_path: Path) -> None:
     assert all(t != "second question" for _, t in turns)
 
 
+def test_recent_turns_excludes_task_notification(tmp_path: Path) -> None:
+    """TRDD-91D2VHW3: a task-notification record is not human conversation — must be dropped."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("<task-notification>\n<status>completed</status>\n...</task-notification>"),
+        _umsg("real human question"),
+        _amsg("real human answer"),
+    ])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert all("task-notification" not in t for _, t in turns)
+    assert ("user", "real human question") in turns
+
+
+def test_recent_turns_excludes_local_command_stdout(tmp_path: Path) -> None:
+    """TRDD-91D2VHW3: a `<local-command-stdout>` wrapper is a command result, not human text."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("<local-command-stdout>\nsome command output\n</local-command-stdout>"),
+        _umsg("real human question"),
+        _amsg("real human answer"),
+    ])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert all("local-command-stdout" not in t for _, t in turns)
+    assert ("user", "real human question") in turns
+
+
+def test_recent_turns_excludes_command_message(tmp_path: Path) -> None:
+    """TRDD-91D2VHW3: a `<command-message>` wrapper is a slash-command echo, not human text."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("<command-message>some-command</command-message>"),
+        _umsg("real human question"),
+        _amsg("real human answer"),
+    ])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert all("command-message" not in t for _, t in turns)
+    assert ("user", "real human question") in turns
+
+
+def test_recent_turns_keeps_human_message(tmp_path: Path) -> None:
+    """A plain human record (classify_record → "human") is kept, alongside its assistant reply."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("fix the deploy script"),
+        _amsg("done — deploy script fixed"),
+    ])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns == [("user", "fix the deploy script"), ("assistant", "done — deploy script fixed")]
+
+
 def test_recent_turns_prepends_last_user_on_assistant_streak(tmp_path: Path) -> None:
     """A long assistant streak (last n all assistant) still surfaces the most recent user ask."""
     hook = _hook()
