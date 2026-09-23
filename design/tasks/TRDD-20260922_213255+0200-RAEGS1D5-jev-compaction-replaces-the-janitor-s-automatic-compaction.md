@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-23T19:58:47+0200
+updated: 2026-09-23T20:00:09+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-22T21:32:55+0200
-npt: [541CBN36]
+npt: [541CBN36, CC0CZLMO]
 relevant-rules: []
 implementation-commits: [051625a4, 0b883373]
 ---
@@ -25,7 +25,7 @@ implementation-commits: [051625a4, 0b883373]
 
 - Cards 1-4 and card 5 (post-clear Jev injection, cooldown/recovery vetoes, hook-output caps) landed. NPT TRDD-541CBN36 closed 2026-09-23 after its last defect (OpenRouter 402/403 -> JevAuthError, 0b883373). The stale pane-key test was fixed in 051625a4; it had failed since the 2026-09-23 reader switch, and eba1f1ff landed on that red suite (process gap).
 - Scope audit 2026-09-23 (reports/compaction-replacement/20260923_105904+0200-raegs1d5-scope-audit.md): 16 of 17 card-3/4 items done. Item 8 (fleet-lease renamed to compaction-lane, a lock on the automatic lane) DROPPED by owner decision 2026-09-23: the compaction only reads the closed session's transcript file, so no lock is needed; the manual llm-ext lane keeps its existing fleet lease unchanged.
-- NO PUBLISH (owner, 2026-09-23 evening) until BOTH (a) the reference jev-compaction modules are adopted per the gap analysis (reports/compaction-replacement/*-jev-reference-gap-analysis.md) and (b) a real-transcript compaction passes on the FINAL tree within the lane time limits (sync 60 s, detached 5-min budget) — see "Owner directives 2026-09-23 evening" below. NEXT ACTION: land the retry-then-llm-ext fallback (worker running), the extraction fix (task-notification records and heartbeat turns are not human), then the reference adoption and parallel batch scoring; re-run the real-transcript test (4.7 MB took 10 s, 49 MB took 168 s on HEAD).
+- NO PUBLISH until a real-transcript Jev compaction passes on the FINAL tree (owner, 2026-09-23 evening: "don't publish until you tested the compaction of jev on a true session jsonl file from projects"). Derived by us, owner to confirm scope: the pass must fit the lane time limits (sync 60 s, detached 5-min budget), and the reference modules the gap analysis (reports/compaction-replacement/*-jev-reference-gap-analysis.md) marks as needed are adopted first (the owner said most reference functions are still not implemented). llm-ext cannot produce output on this machine until Emasoft/llm-externalizer-plugin#15 is fixed, so a Jev failure lands on the fact-only template; large sessions are rescued only by the 5-minute detached Jev attempt. NEXT ACTION: land the retry-then-llm-ext fallback (worker running), the extraction fix (task-notification records and heartbeat turns are not human; worker running), then TRDD for parallel batch scoring and the reference adoption; re-run the real-transcript test (4.7 MB took 10 s, 49 MB took 168 s on HEAD).
 - Owner decisions 2026-09-23 (verbatim in "## Owner decisions 2026-09-23 (verbatim)" below): (1) NO LOCK on the automatic Jev lane — the owner's reason is that the compaction only reads the closed session's transcript; the residual risk of concurrent compactions hitting the OpenRouter rate limit is accepted and handled by retries. (2) Pane-key unification is NOT decided: the owner asked why; it was explained as optional tidy-up and proposed to leave it unless the owner asks; awaiting the owner. (3) If Jev is still not working after 5 minutes of failed retries, the llm-ext compaction MUST run as a fallback; this applies to ANY Jev failure, not only unrecognised errors, and no failure may pause compaction for 30 minutes. Retries must follow OpenRouter's documented error meanings (429 honouring Retry-After; 5xx/524/529/408 and transport errors retried with backoff within the 5 minutes). Proposed, awaiting owner confirmation: errors retrying cannot fix (400, 401, 402, 403, 404) fall back to llm-ext immediately; 413 retries once with smaller batches. (The owner's "no, absolutely" answered a double-negative question; it is read as "no 30-minute pause", which the owner's next sentence supports.)
 - Supersession (owner, 2026-09-23): the llm-ext summary is allowed in the automatic lane ONLY as this fallback, which relaxes this card's "never generated prose" rule for the fallback case alone; /janitor-handoff-and-clear and /janitor-write-handoff are still never typed automatically.
 - Follow-ups from the 402/403 fix, not yet carded: the JEV-AUTH-REJECTED headline says "key rejected" even for a 402 credits problem; the per-reason dedupe can re-fire if the 402 body text varies.
