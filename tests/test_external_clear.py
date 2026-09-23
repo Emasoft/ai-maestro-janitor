@@ -914,6 +914,91 @@ def test_recent_messages_skips_tool_noise(tmp_path):
     assert got == ["USER: hello", "ASSISTANT: hi back"]
 
 
+# TRDD-0UQSAFCW (card 2a): before this fix, `recent_messages` filtered nothing -- in a
+# heartbeat-driven session its output was almost entirely `[janitor-heartbeat]` prompts and
+# bare "janitor heartbeat" replies. These three tests are the card's own acceptance list.
+
+
+def test_recent_messages_yields_human_turns_in_a_heartbeat_dominated_fixture(tmp_path):
+    """A session with many heartbeat prompt/reply pairs must still surface the human's own
+    exchange, not the heartbeat noise surrounding it."""
+    t = tmp_path / "s.jsonl"
+    records = []
+    for i in range(5):
+        records.append({
+            "type": "user", "uuid": f"hb-{i}",
+            "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\nrun the dispatcher stub {i}"},
+        })
+        records.append({
+            "type": "assistant", "uuid": f"hb-reply-{i}",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "janitor heartbeat"}]},
+        })
+    records.append({
+        "type": "user", "uuid": "human-1",
+        "message": {"role": "user", "content": [{"type": "text", "text": "please fix the bug in module X"}]},
+    })
+    records.append({
+        "type": "assistant", "uuid": "human-1-reply",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": "Fixed the bug, tests are green."}]},
+    })
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    got = ec.recent_messages(str(t))
+    assert got == [
+        "USER: please fix the bug in module X",
+        "ASSISTANT: Fixed the bug, tests are green.",
+    ], f"heartbeat noise leaked into the tail: {got}"
+
+
+def test_recent_messages_a_task_notification_never_appears_as_a_human_line(tmp_path):
+    """A `<task-notification>` delivery is not the human's own words and must never surface as
+    a USER: line -- it must not appear in the output at all."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {
+            "type": "user", "uuid": "human-1",
+            "message": {"role": "user", "content": [{"type": "text", "text": "start the release"}]},
+        },
+        {
+            "type": "user", "uuid": "notif-1",
+            "message": {"role": "user", "content": "<task-notification>\nAgent X finished: did the thing.\n</task-notification>"},
+        },
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    got = ec.recent_messages(str(t))
+    assert got == ["USER: start the release"]
+    assert not any("did the thing" in line for line in got), f"notification leaked in: {got}"
+
+
+def test_recent_messages_a_mid_turn_human_attachment_appears(tmp_path):
+    """A queued mid-turn owner message (`type: "attachment"`, `commandMode: "prompt"`,
+    `origin.kind: "human"`) is the owner's own words and must appear as a USER: line -- but a
+    same-shaped attachment from a PEER (cross-session message riding the same queue, measured
+    on a real transcript per jev_compaction.extract_items's defect-5 fix) must not."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {
+            "type": "attachment", "uuid": "att-human",
+            "attachment": {
+                "type": "queued_command", "commandMode": "prompt",
+                "origin": {"kind": "human"}, "prompt": "you are slow, hurry up",
+            },
+        },
+        {
+            "type": "attachment", "uuid": "att-peer",
+            "attachment": {
+                "type": "queued_command", "commandMode": "prompt",
+                "origin": {"kind": "peer"}, "prompt": "a peer message must not appear",
+            },
+        },
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    got = ec.recent_messages(str(t))
+    assert got == ["USER: you are slow, hurry up"]
+
+
 # ---------- the fleet lane (moved from tests/test_external_clear_retry.py, ------------------
 # TRDD-RAEGS1D5 card 3 C2: `acquire_fleet_lease` & co. STAYED in external_clear.py — card 3 C3
 # renames them — while the retry-loop tests that also lived in that file moved to

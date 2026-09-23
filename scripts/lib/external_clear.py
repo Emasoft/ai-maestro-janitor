@@ -52,6 +52,12 @@ if str(_HERE) not in sys.path:
 import agentlens_probe as alp  # noqa: E402  -- sibling lib (the reactive expiry read)
 import state  # noqa: E402  -- sibling lib
 
+# TRDD-0UQSAFCW: the ONE shared classifier `recent_messages` uses to tell a human turn apart
+# from a heartbeat prompt/reply, task notification, or system record -- stdlib-only (verified
+# by tests/test_jev_boundary.py), so importing it here does not pull jevctx/httpx into this
+# in-process module the way `jev_compaction` would.
+import transcript_roles  # noqa: E402  -- sibling lib
+
 # --- config knobs (userConfig → env; read via the shared coercers) ----------
 ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_ENABLED"
 MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_EXTERNAL_IDLE_CLEAR_MIN_CONTEXT_TOKENS"
@@ -506,39 +512,124 @@ def await_fleet_lease(
 # themselves stayed here instead of moving with it.
 
 
+# TRDD-0UQSAFCW: bounded tail read for `recent_messages`, sized off a real measurement (not
+# guessed) -- 512 KiB held 32 kept human/assistant lines on a real 4.6 MB / 2233-line heartbeat-
+# dominated session transcript (reports/compaction-replacement/…-jev-card-2a.md), comfortably
+# above the default `limit=12`. Mirrors the seek-from-EOF shape already used elsewhere in this
+# repo (`fleet_scan._tail_lines`, `pre-compact-handoff._TAIL_BYTES`) rather than importing either:
+# this module must stay import-light (tests/test_jev_boundary.py) and `pre-compact-handoff.py`
+# is a hook script (its own PEP-723 process, not something a lib module may import).
+_RECENT_MESSAGES_TAIL_BYTES = 524_288
+
+
+def _tail_text_lines(path: Path, max_bytes: int) -> list[str]:
+    """Text lines of the last `max_bytes` of `path`. [] on any I/O failure (never raises --
+    `recent_messages` is on the SessionStart injection path and a bad transcript must not
+    block it, matching the OSError handling this replaces)."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > max_bytes:
+                fh.seek(size - max_bytes)
+            data = fh.read(max_bytes + 1)
+    except OSError:
+        return []
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if len(lines) > 1 and size > max_bytes:
+        # The seek almost certainly landed mid-record; that partial first line fails
+        # json.loads on its own, but dropping it explicitly documents why rather than
+        # relying on the parse error to silently absorb it.
+        lines = lines[1:]
+    return lines
+
+
+def _record_text(content: Any, *, drop_heartbeat_reply: bool = False) -> str:
+    """Join a `message.content`'s `text`-type blocks (or return a plain string as-is).
+
+    TRDD-0UQSAFCW: `drop_heartbeat_reply` checks EACH text block individually before
+    joining, mirroring `jev_compaction.extract_items`'s per-block handling (TRDD-RAEGS1D5
+    defect 1) -- collapsing the whole message into one string FIRST and checking that would
+    let a real text block hide behind a heartbeat-reply block that happens to share the
+    message, and would also mis-measure `is_heartbeat_reply`'s own line-count cap against
+    text that was never on its own in the transcript.
+    """
+    if isinstance(content, str):
+        if drop_heartbeat_reply and transcript_roles.is_heartbeat_reply(content):
+            return ""
+        return content
+    if isinstance(content, list):
+        parts = [
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and not (drop_heartbeat_reply and transcript_roles.is_heartbeat_reply(block.get("text", "")))
+        ]
+        return " ".join(parts)
+    return ""
+
+
 def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
     """The last `limit` conversation turns as `ROLE: text` lines. ZERO model tokens.
 
-    Read straight off the JSONL, so this part of the payload costs nothing and cannot be
+    Read straight off the JSONL TAIL, so this part of the payload costs nothing and cannot be
     paraphrased — which matters because it is the part a resuming session checks its own
     understanding against. Tool payloads and thinking blocks are skipped: they are the bulk of
     a transcript and the least useful thing to restore into a context we are trying to empty.
+
+    TRDD-0UQSAFCW (card 2a, Jev reference gap analysis §2.1): this used to keep EVERY
+    `user`/`assistant` record verbatim and read the whole file. In a heartbeat-driven session
+    the tail was almost entirely `[janitor-heartbeat]` prompts, bare "janitor heartbeat"
+    replies and `<task-notification>` deliveries, crowding out the human's own words out of a
+    small `limit`. Fixed by sharing `transcript_roles.classify_record` (card 1, TRDD-RAEGS1D5)
+    with `jev_compaction.py` -- the SAME entry is never classified two different ways in two
+    different files: a `user` record is kept only when it classifies "human" (so sidechain,
+    compact-summary, meta, system, notification and peer records are all dropped); a mid-turn
+    queued attachment (`type: "attachment"`, `attachment.type == "queued_command"`) is kept
+    only when it is the owner's own words (`commandMode == "prompt"` AND
+    `origin.kind == "human"` -- a real transcript measured most `commandMode: "prompt"`
+    attachments as `origin.kind: "peer"`, a cross-session message, not the owner typing); and
+    an assistant text block is dropped only when it is nothing but the bare heartbeat-protocol
+    reply (`transcript_roles.is_heartbeat_reply`), never a whole assistant turn.
     """
     out: list[str] = []
-    try:
-        with Path(transcript).open(encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                msg = rec.get("message") or {}
-                role = msg.get("role") or rec.get("type") or ""
-                if role not in ("user", "assistant"):
-                    continue
-                content = msg.get("content")
-                if isinstance(content, list):
-                    text = " ".join(
-                        c.get("text", "") for c in content
-                        if isinstance(c, dict) and c.get("type") == "text"
-                    )
-                else:
-                    text = str(content or "")
-                text = " ".join(text.split())
-                if text:
-                    out.append(f"{role.upper()}: {text}")
-    except OSError:
-        return []
+    for raw in _tail_text_lines(Path(transcript), _RECENT_MESSAGES_TAIL_BYTES):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("isSidechain"):
+            continue  # a subagent's own turn, never the main conversation's tail
+
+        msg = rec.get("message") or {}
+        entry_type = rec.get("type") or msg.get("role") or ""
+        if entry_type == "user":
+            if transcript_roles.classify_record(rec) != "human":
+                continue
+            role_label, text = "USER", _record_text(msg.get("content"))
+        elif entry_type == "attachment":
+            attachment = rec.get("attachment")
+            if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+                continue
+            origin = attachment.get("origin")
+            origin_kind = origin.get("kind") if isinstance(origin, dict) else None
+            if attachment.get("commandMode") != "prompt" or origin_kind != "human":
+                continue  # queued task-notification, or a peer/cross-session attachment
+            role_label, text = "USER", str(attachment.get("prompt") or "")
+        elif entry_type == "assistant":
+            if rec.get("isApiErrorMessage"):
+                continue  # a transport-error placeholder, not real assistant output
+            role_label = "ASSISTANT"
+            text = _record_text(msg.get("content"), drop_heartbeat_reply=True)
+        else:
+            continue
+
+        text = " ".join(text.split())
+        if text:
+            out.append(f"{role_label}: {text}")
     return out[-limit:]
 
 _POINTER_EXPAND_PREFIX = "pointers expand with:"
