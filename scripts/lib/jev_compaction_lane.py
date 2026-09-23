@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -228,7 +229,19 @@ def fmt_age(seconds: float) -> str:
 def read_probe_stamp() -> dict | None:
     """The current Jev probe stamp (`jev_compact.py`'s own contract — see its module
     docstring), or `None` if it doesn't exist / isn't valid JSON. Read-only: this lane never
-    writes the stamp, only `jev_compact.py` itself does."""
+    writes the stamp, only `jev_compact.py` itself does.
+
+    TRDD-RAEGS1D5 owner review finding #7: the stamp lives under `global_state.control_dir()`
+    -- MACHINE-WIDE, not per-project (same file every janitor-armed session on this box
+    reads/writes). Between one caller's `jev_compact.py compact` failing (which writes this
+    stamp) and that SAME caller reading it back a moment later (here), a DIFFERENT session's
+    own compaction attempt can legitimately land in between and overwrite it with its own
+    kind/reason -- the finding this lane then records could describe the other session's
+    failure, not the one that triggered this read. Accepted at LOW severity: the stamp is a
+    best-effort diagnostic (which kind of outage, how old), never a correctness input (the
+    decline gate re-reads it fresh on its own next call, so a stale/foreign read here cannot
+    cause a wrong compact/decline decision, only a momentarily misattributed finding message).
+    """
     path = global_state.control_dir() / PROBE_STAMP_NAME
     try:
         raw = path.read_text(encoding="utf-8")
@@ -562,6 +575,17 @@ def _run_llm_ext_fallback(
     `timeout_s + _LLM_EXT_OUTER_SLACK_S` bounds the whole subprocess -- `llm_ext_compact.py`
     already bounds its OWN internal attempt at `timeout_s`; the slack only guards against a
     `uv`/launcher hang before that internal timer starts (advisor §4).
+
+    Runs in ITS OWN process group (`start_new_session=True`) and, on the outer timeout, kills
+    the WHOLE group (`os.killpg`), not just this one child (owner review finding #4,
+    TRDD-RAEGS1D5). `llm_ext_compact.py`'s own shebang is `uv run --script`, which execs `uv`,
+    which in turn launches the real llm-ext binary as ITS OWN child -- two more generations of
+    process below the one `subprocess.run(cmd, timeout=...)` used to reach. A plain
+    `Popen.kill()` (or `subprocess.run`'s own timeout handling, which only signals the direct
+    child) leaves those grandchildren running past the hold's own deadline with nothing left
+    to reap them. `start_new_session=True` makes this process (and everything IT spawns,
+    unless one of them calls `setsid` itself) share one process group whose id equals this
+    child's own pid, so `os.killpg(proc.pid, ...)` reaches the whole tree in one signal.
     """
     if timeout_s < _MIN_JEV_ATTEMPT_S:
         # Not enough of the hold left to plausibly get a real llm-ext summary back --
@@ -571,19 +595,31 @@ def _run_llm_ext_fallback(
     script = plugin_root / "scripts" / "llm_ext_compact.py"
     cmd = [str(script), "--transcript", transcript, "--timeout-s", str(int(timeout_s))]
     try:
-        proc = subprocess.run(
-            cmd, timeout=timeout_s + _LLM_EXT_OUTER_SLACK_S, capture_output=True, text=True,
+        proc = subprocess.Popen(  # noqa: S603 - explicit args, no shell
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired:
-        return False, "llm-ext fallback timed out (outer bound)"
     except OSError as exc:
         return False, f"llm-ext fallback spawn failed: {exc!r}"
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s + _LLM_EXT_OUTER_SLACK_S)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass  # already gone, or this platform/sandbox denies killpg -- nothing more to do
+        try:
+            proc.communicate(timeout=5)  # reap the now-dead group leader
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+        return False, "llm-ext fallback timed out (outer bound)"
     if proc.returncode == 0:
-        text = (proc.stdout or "").strip()
+        text = (stdout or "").strip()
         if text:
             return True, text
         return False, "llm-ext fallback produced no output"
-    return False, (proc.stderr or "").strip()[-400:] or f"llm-ext fallback exited {proc.returncode}"
+    return False, (stderr or "").strip()[-400:] or f"llm-ext fallback exited {proc.returncode}"
 
 
 def run_compact_with_fallback(
@@ -688,8 +724,21 @@ def run_compact_with_fallback(
         break
 
     # Jev exhausted (deadline reached, or a non-retryable stop). Record WHY, per the existing
-    # exit-code -> findings-ledger mapping, then try the fallback exactly once.
+    # exit-code -> findings-ledger mapping, then try the fallback exactly once -- EXCEPT for
+    # two exit codes where trying it is certain to be pointless (owner review finding #2,
+    # TRDD-RAEGS1D5): EXIT_COMMAND_NOT_FOUND (127) means `uv` is missing from this session's
+    # PATH, and `llm_ext_compact.py` is exec'd BY PATH with the IDENTICAL `uv run --script`
+    # shebang -- it would fail the same way, for the same reason, wasting the rest of the hold
+    # to learn nothing new. EXIT_DECLINED_NO_DIGEST (6) means the transcript itself carries no
+    # digest material (no human message, no TRDD STATE head) -- there is nothing in it for
+    # llm-ext to summarize either, so the fallback can only reach the same "nothing to
+    # summarize" conclusion the mechanical template already states directly.
     handle_nonzero_exit(last_proc, timed_out=last_timed_out, sd=sd)
+
+    if last_proc is not None and last_proc.returncode == EXIT_COMMAND_NOT_FOUND:
+        return SOURCE_FAILED, None, "uv not on PATH -- llm-ext would fail identically"
+    if last_proc is not None and last_proc.returncode == EXIT_DECLINED_NO_DIGEST:
+        return SOURCE_FAILED, None, "no digest material -- nothing for llm-ext to summarize either"
 
     ok, payload = _run_llm_ext_fallback(
         plugin_root, transcript=transcript, timeout_s=llm_ext_timeout_s,

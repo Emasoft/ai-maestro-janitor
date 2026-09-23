@@ -81,16 +81,6 @@ _LLM_EXT_T_MAX_S = 600.0
 # handoff, releasing the hold) has room to run before the hold's own TTL could expire under it.
 _LLM_EXT_T_SAFETY_MARGIN_S = 30.0
 
-# Module-level so a test can monkeypatch them (e.g. `monkeypatch.setattr(sps, "_sleep_fn",
-# fake.sleep)`) and make the retry loop's real sleeps instant without touching production
-# behaviour, which always sees the real `time.time`/`time.sleep`. `jev_deadline` below is
-# derived from `_now_fn()`, not a bare `time.time()` call, so a faked clock and the loop's own
-# `now_fn` (passed straight through to `run_compact_with_fallback`) always agree on "now" --
-# a mismatch there (deadline computed from real time, loop measured against a fake one) would
-# make the loop's own budget check meaningless.
-_now_fn: Any = time.time
-_sleep_fn: Any = time.sleep
-
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -106,7 +96,9 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(list(argv))
 
 
-def main(argv: Sequence[str] = ()) -> int:
+def main(
+    argv: Sequence[str] = (), *, now_fn: Any = time.time, sleep_fn: Any = time.sleep,
+) -> int:
     """Entry point — wraps `_main` so a crash is LOGGED, not silent (TRDD-QZVAEWQH).
 
     Measured incident: AgentlensPro 2026-09-02 04:24 took the summary hold and never logged
@@ -122,15 +114,24 @@ def main(argv: Sequence[str] = ()) -> int:
     PYTEST'S OWN command line instead of this script's -- `-x`, a test node id, etc. would hit
     `--transcript`'s parser as unrecognized arguments and raise `SystemExit(2)` out of every
     single test in that file.
+
+    `now_fn`/`sleep_fn` default to the real `time.time`/`time.sleep` and are threaded straight
+    through to `jcl.run_compact_with_fallback` (TRDD-RAEGS1D5 owner review finding #5): EXPLICIT
+    parameters, not the module-level mutable `_now_fn`/`_sleep_fn` hooks this used to be --
+    those made "the clock a test sees" a piece of global, monkeypatchable state shared across
+    every test in the file (order-dependent, easy to leave patched), where an ordinary keyword
+    argument a test passes at its own call site is neither.
     """
     try:
-        return _main(list(argv))
+        return _main(list(argv), now_fn=now_fn, sleep_fn=sleep_fn)
     except Exception as exc:  # noqa: BLE001 - log then re-raise, never swallow
         state.log_line(_LOG, f"crashed: {exc!r}")
         raise
 
 
-def _main(argv: Sequence[str] = ()) -> int:
+def _main(
+    argv: Sequence[str] = (), *, now_fn: Any = time.time, sleep_fn: Any = time.sleep,
+) -> int:
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or ".").resolve()
     sd = state.state_dir()
     now = int(time.time())
@@ -239,21 +240,21 @@ def _main(argv: Sequence[str] = ()) -> int:
 
     # Owner decision 2026-09-23 (TRDD-RAEGS1D5): retry Jev for up to `_JEV_RETRY_BUDGET_S`
     # (5min), THEN fall back to llm-ext -- both bounded within this run's own 15-minute hold.
-    jev_deadline = _now_fn() + state.coerce_int(
+    jev_deadline = now_fn() + state.coerce_int(
         os.environ.get(_JEV_RETRY_BUDGET_ENV), _DEFAULT_JEV_RETRY_BUDGET_S
     )
     # T = hold_expiry - now - safety_margin, capped at `_LLM_EXT_T_MAX_S` (advisor §4
     # arithmetic: 570s worst case when Jev used its whole budget, capped at 600 when Jev
     # failed fast and most of the 15-minute hold is still free).
     llm_ext_timeout_s = max(
-        0.0, min(float(pending["expires"]) - _now_fn() - _LLM_EXT_T_SAFETY_MARGIN_S,
+        0.0, min(float(pending["expires"]) - now_fn() - _LLM_EXT_T_SAFETY_MARGIN_S,
                   _LLM_EXT_T_MAX_S),
     )
 
     source, compacted_text, detail = jcl.run_compact_with_fallback(
         PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
         heads_args=heads_args, sd=sd, deadline=jev_deadline,
-        llm_ext_timeout_s=llm_ext_timeout_s, now_fn=_now_fn, sleep_fn=_sleep_fn,
+        llm_ext_timeout_s=llm_ext_timeout_s, now_fn=now_fn, sleep_fn=sleep_fn,
     )
 
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
@@ -292,8 +293,22 @@ def _main(argv: Sequence[str] = ()) -> int:
     trigger = "jev-compaction" if source == jcl.SOURCE_JEV else "jev-compaction-llm-ext-fallback"
     inputs = ec.HandoffInputs(trigger=trigger, findings=findings, cards=in_flight_cards)
     tail = ec.recent_messages(str(prev))
+    summary_text = compacted_text
+    if source == jcl.SOURCE_LLM_EXT and summary_text:
+        # Owner review finding #3 (TRDD-RAEGS1D5): `ec.compose_handoff`'s own fixed header for
+        # this block ("Compacted context (Jev compaction)" / "chosen by Jev scoring") is
+        # written for a REAL Jev compose and is now false for this text -- llm-ext GENERATED
+        # PROSE (a paraphrase from a different model), never verbatim Jev-selected transcript
+        # items. That composer lives in `scripts/lib/external_clear.py`, owned by a different
+        # worker on this card and out of this file's edit scope, so the disclaimer is
+        # prepended to the summary text itself instead -- it becomes the first line the reader
+        # sees inside the block, functionally its header, without touching the shared composer.
+        summary_text = (
+            "_llm-ext generated prose summary (Jev was unavailable) — NOT verbatim "
+            "Jev-selected transcript text._\n\n" + summary_text
+        )
     text = ec.compose_handoff(
-        inputs, now_iso=now_iso, summary=compacted_text, tail=tail,
+        inputs, now_iso=now_iso, summary=summary_text, tail=tail,
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
     )
 

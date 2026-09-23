@@ -97,7 +97,8 @@ def test_release_summary_hold_with_a_foreign_key_leaves_the_pending_record_intac
 
 def test_release_summary_hold_with_the_matching_key_releases_it(tmp_path):
     """The mirror case: a lane releasing ITS OWN hold (the key it captured with) must still
-    work exactly as the unconditional (no-`key`) call always has."""
+    actually release it -- the guard in `test_release_summary_hold_with_a_foreign_key_...`
+    above must not have made every release a no-op."""
     import json
 
     sd = _project(tmp_path) / ".janitor" / "state"
@@ -109,23 +110,6 @@ def test_release_summary_hold_with_the_matching_key_releases_it(tmp_path):
 
     assert not (sd / ehc._PENDING_FILE).is_file()
     assert not ehc.summary_hold_active(sd, int(time.time()))
-
-
-def test_release_summary_hold_with_no_key_stays_unconditional(tmp_path):
-    """Backward compatibility: a caller that passes no `key` at all (`key=None`, the default)
-    releases regardless of whose record it is -- the pre-R4 behaviour, unchanged for callers
-    that have no key of their own to guard with."""
-    import json
-
-    sd = _project(tmp_path) / ".janitor" / "state"
-    (sd / ehc._PENDING_FILE).write_text(
-        json.dumps({"key": "someone-elses-key", "expires": int(time.time()) + 900}),
-        encoding="utf-8",
-    )
-
-    ehc._release_summary_hold(sd)
-
-    assert not (sd / ehc._PENDING_FILE).is_file()
 
 
 # --- _run: NEITHER lane composes (TRDD-QZVAEWQH) ------------------------------

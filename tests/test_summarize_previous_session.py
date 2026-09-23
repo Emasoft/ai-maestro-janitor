@@ -26,6 +26,7 @@ _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
+import external_handoff_clear as ehc  # noqa: E402
 import findings_ledger  # noqa: E402
 import global_state  # noqa: E402
 import handoff_files  # noqa: E402
@@ -117,13 +118,16 @@ def _write_probe_stamp(**fields) -> None:
 
 
 class _FakeClock:
-    """A simulated clock for `sps._now_fn`/`sps._sleep_fn` (TRDD-RAEGS1D5): `sleep()` just
-    advances `now` by the requested duration instead of actually blocking, so a retry loop
-    that would otherwise burn real minutes of wall-clock time (the owner's 5-minute Jev retry
-    budget, `_TRANSIENT_RETRY_SLEEP_S` backoff) converges in milliseconds while still exercising
-    the REAL number of loop iterations the production code would make. `jev_deadline` in
-    `summarize_previous_session._main` is computed from `_now_fn()`, never a bare `time.time()`
-    call, specifically so a faked clock and the retry loop's own budget check always agree."""
+    """A simulated clock passed as `sps.main`'s own `now_fn`/`sleep_fn` keyword arguments
+    (TRDD-RAEGS1D5 owner review finding #5 -- EXPLICIT parameters now, never the module-level
+    mutable `_now_fn`/`_sleep_fn` hooks this used to be): `sleep()` just advances `now` by the
+    requested duration instead of actually blocking, so a retry loop that would otherwise burn
+    real minutes of wall-clock time (the owner's 5-minute Jev retry budget,
+    `_TRANSIENT_RETRY_SLEEP_S` backoff) converges in milliseconds while still exercising the
+    REAL number of loop iterations the production code would make. `jev_deadline` in
+    `summarize_previous_session._main` is computed from the passed-in `now_fn()`, never a bare
+    `time.time()` call, specifically so a faked clock and the retry loop's own budget check
+    always agree."""
 
     def __init__(self, start: float = 1_700_000_000.0) -> None:
         self.now = start
@@ -135,11 +139,10 @@ class _FakeClock:
         self.now += seconds
 
 
-def _install_fake_clock(monkeypatch) -> _FakeClock:
-    clock = _FakeClock()
-    monkeypatch.setattr(sps, "_now_fn", clock.time)
-    monkeypatch.setattr(sps, "_sleep_fn", clock.sleep)
-    return clock
+def _fake_clock() -> _FakeClock:
+    """A fresh `_FakeClock` -- pass `now_fn=clock.time, sleep_fn=clock.sleep` to `sps.main(...)`
+    at each call site (no monkeypatching needed: the clock is an ordinary argument now)."""
+    return _FakeClock()
 
 
 _STUB_JEV_COMPACT_APPENDING = """#!/usr/bin/env python3
@@ -180,6 +183,56 @@ def _stub_llm_ext_compact(plugin_root: Path, *, exit_code: int = 0, text: str = 
     script = plugin_root / "scripts" / "llm_ext_compact.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(_STUB_LLM_EXT_COMPACT.format(text=text, exit_code=exit_code), encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+
+_STUB_JEV_COMPACT_DECLINE_GATE = """#!/usr/bin/env python3
+import json
+import sys
+import time
+from pathlib import Path
+
+argv = sys.argv[1:]
+log = Path({argv_log!r})
+with log.open("a", encoding="utf-8") as f:
+    f.write(json.dumps(argv) + "\\n")
+
+stamp_path = Path({stamp_path!r})
+no_decline = "--no-decline" in argv
+
+if not no_decline and stamp_path.is_file():
+    try:
+        stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    except Exception:
+        stamp = {{}}
+    if stamp.get("kind") == "unavailable" and (time.time() - float(stamp.get("ts", 0) or 0)) < 300:
+        sys.exit(5)  # mirrors jev_compact.py compact's own EXIT_DECLINED_UNAVAILABLE
+
+# --no-decline was given, or no fresh decline-worthy stamp exists -- a REAL (simulated)
+# attempt that fails transiently, the same way an outage would, re-stamping "unavailable" so
+# a caller that forgot --no-decline would fast-decline on its NEXT invocation.
+stamp_path.write_text(
+    json.dumps({{"ok": False, "kind": "unavailable", "reason": "simulated outage",
+                 "ts": time.time()}}),
+    encoding="utf-8",
+)
+sys.exit(7)  # EXIT_JEV_ERROR
+"""
+
+
+def _stub_jev_compact_decline_gate(plugin_root: Path, argv_log: Path, stamp_path: Path) -> None:
+    """A `jev_compact.py` stand-in that MIMICS the real CLI's own decline gate (owner review
+    finding #6(b), TRDD-RAEGS1D5): unlike `_stub_jev_compact_appending` (which always returns
+    the same fixed exit code regardless of `--no-decline`), this stub actually DECLINES (exit
+    5) when `--no-decline` is missing and a fresh `kind="unavailable"` stamp is on disk --
+    proving the lane's retries are genuine only when `--no-decline` is truly threaded through,
+    not merely present in argv."""
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_DECLINE_GATE.format(argv_log=str(argv_log), stamp_path=str(stamp_path)),
+        encoding="utf-8",
+    )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 
 
@@ -308,9 +361,9 @@ def test_nonzero_exit_maps_to_the_right_finding(
         _write_probe_stamp(**stamp)
     # A transient/rate-limited kind retries inside the 5-minute budget -- the fake clock makes
     # those retries converge without any real sleeping (see `_FakeClock`'s own docstring).
-    _install_fake_clock(monkeypatch)
+    clock = _fake_clock()
 
-    rc = sps.main()
+    rc = sps.main(now_fn=clock.time, sleep_fn=clock.sleep)
     assert rc == 0
     out = capsys.readouterr().out
     assert "SUMMARY_FAILED" in out
@@ -343,9 +396,9 @@ def test_kind_rate_limited_with_retry_after_is_medium(tmp_path, monkeypatch, _is
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     _write_probe_stamp(kind="rate_limited", reason="429", retry_after_s=42)
-    _install_fake_clock(monkeypatch)
+    clock = _fake_clock()
 
-    assert sps.main() == 0
+    assert sps.main(now_fn=clock.time, sleep_fn=clock.sleep) == 0
     entries = _ledger_entries()
     hit = [e for e in entries if e["code"] == "JEV-RATE-LIMITED"]
     assert hit and hit[0]["sev"] == "MEDIUM"
@@ -366,9 +419,9 @@ def test_kind_rate_limited_without_retry_after_falls_back_to_unavailable(
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     _write_probe_stamp(kind="rate_limited", reason="429 no window given")
-    _install_fake_clock(monkeypatch)
+    clock = _fake_clock()
 
-    assert sps.main() == 0
+    assert sps.main(now_fn=clock.time, sleep_fn=clock.sleep) == 0
     entries = _ledger_entries()
     assert any(e["code"] == "JEV-SCORER-UNAVAILABLE" for e in entries)
     assert not any(e["code"] == "JEV-RATE-LIMITED" for e in entries)
@@ -388,11 +441,16 @@ def test_auth_finding_deduped_on_the_same_reason(tmp_path, monkeypatch, _isolate
 
     from external_handoff_clear import _release_summary_hold  # noqa: PLC0415
 
+    key = handoff_files.session_key(str(prev))
     assert sps.main() == 0
     sd = state.state_dir()
-    # Re-arm the hold as a second SessionStart would (the first run consumed it by declining,
-    # which leaves it in place -- but a fresh call still needs a fresh transcript reachable).
-    _release_summary_hold(sd)  # simulate the TTL having expired, cleaning up between "starts"
+    # `_main`'s own SOURCE_FAILED branch already released this lane's hold (no
+    # `llm_ext_compact.py` stub exists under this fake plugin_root, so the fallback fails too,
+    # and the final-failure path writes a template + releases -- see `run_compact_with_fallback`'s
+    # docstring). This call is therefore a no-op in practice; it stays as a defensive belt-and-
+    # braces cleanup between the two simulated "starts" below, and R4 (owner review finding #1)
+    # now REQUIRES `key=` explicitly -- there is no unconditional release left to fall back to.
+    _release_summary_hold(sd, key=key)
     assert sps.main() == 0
 
     entries = _ledger_entries()
@@ -405,16 +463,22 @@ def test_timeout_expired_is_a_high_bug_finding(tmp_path, monkeypatch, _isolated_
     prev = _make_prev_transcript(project_dir)
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    # No `llm_ext_compact.py` under this empty plugin root: the llm-ext fallback (owner review
+    # finding #4) now runs via `subprocess.Popen`, not `subprocess.run` -- it is no longer
+    # covered by the `subprocess.run` monkeypatch below, so it must be neutralized separately
+    # (a missing script -> a clean FileNotFoundError/OSError -> "spawn failed", never a real
+    # attempt to launch the production `scripts/llm_ext_compact.py` against a real transcript).
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", tmp_path / "plugin")
 
     def _raise_timeout(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 120))
 
     monkeypatch.setattr(subprocess, "run", _raise_timeout)
-    # Every `subprocess.run` call times out, including the llm-ext fallback's own -- the fake
-    # clock keeps the retry loop's real sleeps from actually happening.
-    _install_fake_clock(monkeypatch)
+    # Every `subprocess.run` call (the Jev side) times out; the fake clock keeps the retry
+    # loop's real sleeps from actually happening.
+    clock = _fake_clock()
 
-    assert sps.main() == 0
+    assert sps.main(now_fn=clock.time, sleep_fn=clock.sleep) == 0
     entries = _ledger_entries()
     assert any(e["code"] == "JEV-COMPACT-FAILED" and "timeout" in e["msg"] for e in entries)
 
@@ -440,14 +504,19 @@ def test_transient_failure_retries_more_than_once_then_llm_ext_fallback_succeeds
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     _write_probe_stamp(kind="unreachable", reason="DNS resolution failed")
-    _install_fake_clock(monkeypatch)
+    clock = _fake_clock()
 
-    rc = sps.main()
+    rc = sps.main(now_fn=clock.time, sleep_fn=clock.sleep)
     assert rc == 0
 
     attempts = [ln for ln in argv_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(attempts) > 1, f"expected more than one real jev_compact attempt, got {attempts}"
     for argv in (json.loads(ln) for ln in attempts):
+        # Owner review finding #6(a): count ONLY jev_compact.py invocations -- `argv_log` is
+        # written exclusively by the `_stub_jev_compact_appending` script (a SEPARATE file from
+        # `_stub_llm_ext_compact`'s own, which never touches this log), but assert it here too
+        # so a future stub that merges the two logs cannot silently make this count vacuous.
+        assert "jev_compact.py" in argv[0], argv
         assert "--no-decline" in argv, argv  # R1: every retry bypasses the stale-outage gate
 
     sd = state.state_dir()
@@ -474,10 +543,10 @@ def test_auth_failure_falls_back_to_llm_ext_without_waiting(tmp_path, monkeypatc
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     _write_probe_stamp(kind="auth", reason="401 invalid key")
-    clock = _install_fake_clock(monkeypatch)
+    clock = _fake_clock()
     start = clock.now
 
-    assert sps.main() == 0
+    assert sps.main(now_fn=clock.time, sleep_fn=clock.sleep) == 0
 
     attempts = [ln for ln in argv_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(attempts) == 1, f"an auth failure must not retry, got {attempts}"
@@ -504,10 +573,10 @@ def test_rate_limited_retry_after_exceeding_the_budget_falls_back_immediately(
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
     # retry_after_s (1000s) comfortably exceeds the whole default 300s retry budget.
     _write_probe_stamp(kind="rate_limited", reason="429", retry_after_s=1000)
-    clock = _install_fake_clock(monkeypatch)
+    clock = _fake_clock()
     start = clock.now
 
-    assert sps.main() == 0
+    assert sps.main(now_fn=clock.time, sleep_fn=clock.sleep) == 0
 
     attempts = [ln for ln in argv_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(attempts) == 1, f"a retry_after past the budget must not retry, got {attempts}"
@@ -542,16 +611,24 @@ def test_jev_timeout_is_never_retried_falls_straight_to_llm_ext(tmp_path, monkey
                 raise AssertionError(
                     "jev_compact.py must be invoked at most once -- a timeout must not retry"
                 )
+            # Owner review finding #6(c): raise the TimeoutExpired WITHOUT touching the fake
+            # clock -- only `run_compact_with_fallback`'s own `sleep_fn` calls may advance
+            # simulated time; a subprocess timeout itself must never appear to have "waited".
             raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
         return real_run(cmd, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", _spy_run)
-    _install_fake_clock(monkeypatch)
+    clock = _fake_clock()
+    start = clock.now
 
-    rc = sps.main()
+    rc = sps.main(now_fn=clock.time, sleep_fn=clock.sleep)
 
     assert rc == 0
     assert jev_calls["n"] == 1, "expected exactly one jev_compact attempt after a timeout"
+    assert clock.now == start, (
+        "a timeout must not sleep/advance the clock before falling back -- only an explicit "
+        "sleep_fn() call may, and a timeout takes the straight-to-fallback break instead"
+    )
     sd = state.state_dir()
     text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
     assert "llm-ext fallback summary" in text
@@ -868,3 +945,248 @@ def test_a_real_non_template_handoff_still_skips(tmp_path, monkeypatch, _isolate
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
 
     assert sps.main() == 0
+
+
+# --- TRDD-RAEGS1D5 adversarial-review follow-up fixes (2026-09-23) -------------------------
+
+
+def test_overlapping_lanes_release_only_the_matching_key(tmp_path, monkeypatch, _isolated_env):
+    """R4, LANE level (owner review finding #1): while lane A is still compacting, lane B's
+    own capture overwrites the SAME shared `summary-pending.json` with ITS key -- lane A's
+    later success must still release only ITS OWN hold record. Here that means a no-op: the
+    CURRENT record on disk belongs to B by the time A finishes, so A's release must leave it
+    fully intact rather than dropping B's still-active hold out from under it."""
+    project_dir = _isolated_env
+    prev_a = _make_prev_transcript(project_dir, name="a.jsonl")
+    prev_b = _make_prev_transcript(project_dir, name="b.jsonl")
+    key_a = handoff_files.session_key(str(prev_a))
+    key_b = handoff_files.session_key(str(prev_b))
+    assert key_a != key_b
+
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev_a)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+
+    sd = state.state_dir()
+    real_run_with_fallback = jcl.run_compact_with_fallback
+
+    def _racing_run_with_fallback(*args, **kwargs):
+        # Simulate lane B's own `_capture_summary_source` landing WHILE lane A is still
+        # compacting -- overwrites the ONE shared summary-pending.json with a DIFFERENT key.
+        ehc._capture_summary_source(sd, {"transcript": str(prev_b)}, int(time.time()))
+        return real_run_with_fallback(*args, **kwargs)
+
+    monkeypatch.setattr(jcl, "run_compact_with_fallback", _racing_run_with_fallback)
+
+    assert sps.main() == 0  # lane A's own run, composing prev_a
+
+    # Lane A wrote ITS OWN handoff and finished successfully...
+    assert handoff_files.newest_group(sd), "lane A's own compose must still have landed"
+    # ...but the CURRENT pending record on disk still belongs to lane B: A's release call
+    # (key=key_a) must have been a no-op against B's record (key=key_b).
+    rec = json.loads((sd / ehc._PENDING_FILE).read_text(encoding="utf-8"))
+    assert rec["key"] == key_b, "lane A's release must not have dropped lane B's own hold"
+    assert ehc.summary_hold_active(sd, int(time.time())), "lane B's hold must still be armed"
+
+
+def test_exit_6_no_digest_never_tries_llm_ext_fallback(tmp_path, monkeypatch, _isolated_env):
+    """Owner review finding #2: exit 6 (`jev_compaction.NoDigest` -- neither a human message
+    nor a TRDD STATE head exists) means there is nothing in the transcript worth summarizing
+    either way. The lane must skip the llm-ext fallback entirely and write the template
+    straight away, rather than spend the rest of the hold re-discovering the same "nothing to
+    summarize" conclusion through a second, slower path."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=jcl.EXIT_DECLINED_NO_DIGEST)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("exit 6 (no digest) must never try the llm-ext fallback")
+
+    monkeypatch.setattr(jcl, "_run_llm_ext_fallback", _boom)
+
+    assert sps.main() == 0
+    entries = _ledger_entries()
+    assert any(e["code"] == "JEV-COMPACT-NO-DIGEST" for e in entries)
+    sd = state.state_dir()
+    text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
+    assert text.lstrip().startswith(handoff_files.TEMPLATE_MARKER)
+    assert not (sd / ehc._PENDING_FILE).is_file()
+
+
+def test_exit_127_command_not_found_never_tries_llm_ext_fallback(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """Owner review finding #2: exit 127 means `uv` is not on this session's PATH. Since
+    `llm_ext_compact.py` is exec'd BY PATH with the IDENTICAL `uv run --script` shebang,
+    trying the fallback would fail the same way for the same reason -- skip it and go
+    straight to the template instead of burning the rest of the hold proving that twice."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    real_run = subprocess.run
+
+    def _spy_run(cmd, **kwargs):
+        if isinstance(cmd, (list, tuple)) and cmd and "jev_compact.py" in str(cmd[0]):
+            return subprocess.CompletedProcess(cmd, 127, stdout="", stderr="uv: command not found")
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _spy_run)
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("exit 127 (uv missing) must never try the llm-ext fallback")
+
+    monkeypatch.setattr(jcl, "_run_llm_ext_fallback", _boom)
+
+    assert sps.main() == 0
+    entries = _ledger_entries()
+    assert any(
+        e["code"] == "JEV-COMPACT-FAILED" and "uv not on PATH" in e["msg"] for e in entries
+    ), entries
+    sd = state.state_dir()
+    text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
+    assert text.lstrip().startswith(handoff_files.TEMPLATE_MARKER)
+    assert not (sd / ehc._PENDING_FILE).is_file()
+
+
+def test_llm_ext_fallback_handoff_declares_itself_not_verbatim_jev_output(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """Owner review finding #3: the llm-ext fallback's compacted-context block must say,
+    before the model reads it as fact, that this is LLM-EXTERNALIZER-GENERATED PROSE -- not
+    the real Jev-selected verbatim transcript items `ec.compose_handoff`'s own fixed header
+    ("Jev compaction" / "chosen by Jev scoring") otherwise implies for every summary it
+    renders, real Jev compose or not."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    argv_log = tmp_path / "argv.jsonl"
+    _stub_jev_compact_appending(plugin_root, argv_log, exit_code=jcl.EXIT_JEV_ERROR)
+    _stub_llm_ext_compact(plugin_root, text="the fallback prose")
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    _write_probe_stamp(kind="auth", reason="401 invalid key")  # non-retryable -> fast fallback
+
+    assert sps.main() == 0
+    sd = state.state_dir()
+    text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
+    assert "llm-ext generated prose" in text
+    assert "not verbatim jev-selected transcript text" in text.lower()
+    # The disclaimer must land BEFORE the real llm-ext text, not after -- it is meant to be
+    # read first, functionally the block's header.
+    assert text.index("llm-ext generated prose") < text.index("the fallback prose")
+
+
+def test_lane_actually_retries_through_a_decline_gate_mimicking_stub(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """Owner review finding #6(b): the OTHER attempt-count test's stub ignores `--no-decline`
+    entirely, so counting invocations there cannot tell "the flag genuinely bypasses the real
+    gate" apart from "the flag is present in argv but does nothing" -- both would produce the
+    identical log. This stub mimics `jev_compact.py compact`'s OWN decline gate (exit 5 on a
+    fresh `kind="unavailable"` stamp UNLESS `--no-decline` is given): more than one REAL
+    attempt is only possible here if `--no-decline` genuinely reaches every retry, because a
+    regression that dropped it would make every attempt after the first fast-decline (exit 5)
+    against the very stamp the first attempt itself wrote."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    argv_log = tmp_path / "argv.jsonl"
+    stamp_path = global_state.control_dir() / "jev-probe.json"
+    # A FRESH decline-worthy stamp already on disk BEFORE the first attempt: without
+    # `--no-decline` threaded through, attempt 1 itself would fast-decline (exit 5) against
+    # this pre-existing stamp, and `len(attempts) > 1` below would fail.
+    _write_probe_stamp(ok=False, kind="unavailable", reason="pre-existing outage", ts=time.time())
+    _stub_jev_compact_decline_gate(plugin_root, argv_log, stamp_path)
+    _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary")
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    clock = _fake_clock()
+
+    rc = sps.main(now_fn=clock.time, sleep_fn=clock.sleep)
+    assert rc == 0
+
+    attempts = [
+        json.loads(ln) for ln in argv_log.read_text(encoding="utf-8").splitlines() if ln.strip()
+    ]
+    assert len(attempts) > 1, f"expected more than one real attempt, got {attempts}"
+
+    # Every real attempt reached the "transient failure" branch (exit 7), never the decline
+    # gate (exit 5) -- proven by the finding the lane recorded: a decline would have produced
+    # the LOW-severity JEV-COMPACT-DECLINED code instead of the MEDIUM JEV-SCORER-UNAVAILABLE
+    # one `handle_nonzero_exit` maps exit 7 + kind=unavailable to.
+    entries = _ledger_entries()
+    assert not any(e["code"] == "JEV-COMPACT-DECLINED" for e in entries), entries
+    assert any(e["code"] == "JEV-SCORER-UNAVAILABLE" for e in entries), entries
+
+
+_STUB_LLM_EXT_SPAWNS_CHILD = """#!/usr/bin/env python3
+import subprocess
+import sys
+import time
+
+pid_file = {pid_file!r}
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+with open(pid_file, "w") as f:
+    f.write(str(child.pid))
+time.sleep(120)
+"""
+
+
+def test_llm_ext_fallback_outer_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
+    """Owner review finding #4: on the outer timeout, `_run_llm_ext_fallback` must kill the
+    WHOLE process group (`os.killpg`), not just the immediate `llm_ext_compact.py` process --
+    its own `uv run --script` shebang launches the real llm-ext binary as a CHILD of that
+    process, and a lone `Popen.kill()` (or `subprocess.run`'s own default timeout handling)
+    would leave it running past the hold's own deadline with nothing left to reap it. This
+    stub stands in for that child by spawning one of its own and recording its pid, so the
+    test can verify the WHOLE group -- not merely the direct child -- actually dies."""
+    plugin_root = tmp_path / "plugin"
+    script = plugin_root / "scripts" / "llm_ext_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    pid_file = tmp_path / "child.pid"
+    script.write_text(
+        _STUB_LLM_EXT_SPAWNS_CHILD.format(pid_file=str(pid_file)), encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    # Shrink both thresholds so the real outer subprocess timeout fires in ~1s instead of the
+    # production 30s-attempt-floor / 15s-slack -- this test still exercises the REAL
+    # `subprocess.Popen` + `communicate(timeout=...)` + `os.killpg` path, just on a fast clock.
+    monkeypatch.setattr(jcl, "_MIN_JEV_ATTEMPT_S", 0.1)
+    monkeypatch.setattr(jcl, "_LLM_EXT_OUTER_SLACK_S", 0.5)
+
+    ok, detail = jcl._run_llm_ext_fallback(
+        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0,
+    )
+    assert ok is False
+    assert "timed out" in detail
+
+    for _ in range(50):
+        if pid_file.is_file() and pid_file.read_text(encoding="utf-8").strip():
+            break
+        time.sleep(0.1)
+    assert pid_file.is_file(), "the child never started -- the test setup itself is broken"
+    child_pid = int(pid_file.read_text(encoding="utf-8").strip())
+
+    import os
+
+    for _ in range(30):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail(f"child pid {child_pid} still alive after the outer timeout's killpg")

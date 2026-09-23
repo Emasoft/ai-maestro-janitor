@@ -122,12 +122,16 @@ def _capture_summary_source(sd: Path, facts: dict, now: int) -> dict | None:
     return record
 
 
-def _release_summary_hold(sd: Path, *, key: str | None = None) -> None:
+def _release_summary_hold(sd: Path, *, key: str) -> None:
     """Drop the hold. Its ABSENCE is the release signal, so this must be unlink-not-rewrite.
 
-    `key`, when given, must match the PENDING RECORD's own `key` field or this is a no-op
-    (TRDD-RAEGS1D5 advisor R4). Before this guard the release was unconditional: a lane that
-    just finished ITS OWN compaction would unlink `summary-pending.json` even if a SECOND,
+    `key` MUST match the PENDING RECORD's own `key` field or this is a no-op (TRDD-RAEGS1D5
+    advisor R4). REQUIRED, no unconditional path -- the ONE production caller
+    (`summarize_previous_session.py::_main`, verified via `tldr impact` before this was made
+    required) already always has its own lane's key in hand by the time it releases, so there
+    is no legitimate caller left that needs to release "whichever record happens to be
+    there". Before this guard existed at all the release was unconditional: a lane that just
+    finished ITS OWN compaction would unlink `summary-pending.json` even if a SECOND,
     still-in-flight lane had since overwritten it with a different transcript's record. The
     retry-then-llm-ext fallback lane can now hold for up to ~15 minutes (a 5-minute Jev retry
     budget plus the llm-ext attempt) instead of the old <=2-minute single `run_compact` call,
@@ -135,20 +139,18 @@ def _release_summary_hold(sd: Path, *, key: str | None = None) -> None:
     iterates, or two panes of one project) collide far more often than before — without this
     check, lane A's release would drop lane B's still-active hold and B's session would then
     resume EARLY, before its own compaction landed, pointing at whichever handoff happens to
-    be newest (`pending_summary_key`'s own fallback) rather than B's.  A missing/unreadable
-    record is treated as "nothing to guard" and falls through to the unlink — idempotent with
-    the no-`key` caller, and a record that's already gone means there is nothing left to
-    protect anyway.
+    be newest (`pending_summary_key`'s own fallback) rather than B's. A missing/unreadable
+    record is treated as "nothing to guard" and falls through to the unlink — a record that's
+    already gone means there is nothing left to protect anyway.
     """
-    if key is not None:
-        import json  # noqa: PLC0415 - only this path needs it
+    import json  # noqa: PLC0415 - only this path needs it
 
-        try:
-            rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
-            if str(rec.get("key") or "") != key:
-                return  # a DIFFERENT lane's still-active hold -- not ours to release
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+    try:
+        rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
+        if str(rec.get("key") or "") != key:
+            return  # a DIFFERENT lane's still-active hold -- not ours to release
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
     try:
         (sd / _PENDING_FILE).unlink()
     except OSError:
