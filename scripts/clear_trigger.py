@@ -451,8 +451,9 @@ def _run_chain_payload(payload_b64: str) -> int:
         # Keyed by PANE, not session or project: two panes of the same project can each have
         # their own clear pending at once and must not cross-contaminate each other's sidecar
         # — the pane is "the one the chain types into" (`data["terminal"]`), and the fresh
-        # session's hook resolves the SAME id from its own env via `state.terminal_pane_key`
-        # (both sides share the sanitisation via `state.pane_key_from_terminal`). No pane id
+        # session's hook resolves the SAME id from its own env via
+        # `state.pane_key_from_terminal(terminal_trigger.self_terminal(env))` (both sides share
+        # the sanitisation via `state.pane_key_from_terminal`). No pane id
         # (an unresolvable terminal) writes no sidecar — that chain never reaches this
         # verified child anyway (the legacy blind-send fallback in main() never calls this).
         transcript_path = str(data.get("transcript_path") or "").strip()

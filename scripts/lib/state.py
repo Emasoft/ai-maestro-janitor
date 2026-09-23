@@ -320,18 +320,28 @@ def terminal_pane_key(env: Mapping[str, str] | None = None) -> str | None:
 
 
 def pane_key_from_terminal(terminal: Mapping[str, str] | None) -> str | None:
-    """The SAME sanitised id as `terminal_pane_key`, computed from a `terminal_trigger.
-    self_terminal()`-shaped dict instead of the environment.
+    """The clear-sidecar key: the id both the clear-chain writers (`clear_trigger.
+    spawn_shrink_chain` via `terminal_trigger.self_terminal()`, and `external_handoff_clear.py`
+    via `external_clear.terminal_from_record()`) and every fresh-session reader
+    (`on-session-start-post-clear-compact.py`, `on-session-start.py`,
+    `summarize_previous_session.py`, each via `pane_key_from_terminal(self_terminal(os.environ))`)
+    resolve from a `terminal_trigger.self_terminal()`-shaped dict instead of the environment.
+
+    On iTerm this currently differs from `terminal_pane_key`: that function sanitises the RAW
+    `$ITERM_SESSION_ID` env var, keeping the `w0t1p0:` window/tab/pane prefix, and is used only
+    to key the per-pane user-presence breadcrumb (`user_intent.py`, `post-compact-resume.py`) --
+    a different id for a different purpose, not a substitute for this one.
 
     TRDD-RAEGS1D5 card 5: the clear chain child persists a per-pane sidecar naming the
     transcript being cleared, keyed off the PANE THE CHAIN TYPES INTO — the `terminal` dict
     already carried in its payload (`{"kind": "tmux", "pane": ...}` or `{"kind": "iterm",
     "session_id": ...}`), not necessarily the childs own env (`_spawn_chain`s `env=`
     override can differ from the parent). The fresh sessions SessionStart hook resolves the
-    SAME id from its own env via `terminal_pane_key` — the two MUST agree on one id for the
-    same pane, so this applies the identical `<source>-<sanitized>` sanitisation keyed off the
-    same source names ("tmux"/"iterm") `self_terminal()` already uses. Returns None for an
-    unresolvable/unknown terminal, mirroring `terminal_pane_key`s own contract.
+    SAME id from its own env via `pane_key_from_terminal(terminal_trigger.self_terminal(env))` --
+    the two MUST agree on one id for the same pane, so this applies the identical
+    `<source>-<sanitized>` sanitisation keyed off the same source names ("tmux"/"iterm")
+    `self_terminal()` already uses. Returns None for an unresolvable/unknown terminal, mirroring
+    `terminal_pane_key`s own contract.
 
     Review finding, 2026-09-23: `session_id` is normalised the SAME WAY `terminal_trigger.
     self_terminal` normalises it -- keep only the text after the LAST `":"`, before sanitising

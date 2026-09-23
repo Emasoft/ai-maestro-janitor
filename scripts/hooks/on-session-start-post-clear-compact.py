@@ -16,8 +16,11 @@ root defect: nothing named WHICH transcript this clear was FOR, so the injection
 `clear_trigger._persist_resume_state` now writes that name down, at the verified Enter, into a
 PER-PANE sidecar (`resume-after-clear.<pane-key>.transcript`) — this hook is its ONE consumer.
 Per-pane, not per-session or per-project, because two panes of the same project can each have
-their own clear in flight and must not read each other's sidecar (see `state.pane_key_from_
-terminal` / `state.terminal_pane_key` — both sides of the handoff compute the SAME sanitised id).
+their own clear in flight and must not read each other's sidecar. Both sides of the handoff
+compute the SAME id via `state.pane_key_from_terminal` — the writers pass it a
+`terminal_trigger.self_terminal()`-shaped dict, this hook passes it
+`terminal_trigger.self_terminal(os.environ)`; `state.terminal_pane_key` is a different function,
+used only for the per-pane user-presence breadcrumb, not for this handoff.
 
 SYNCHRONOUS, deliberately (unlike `summarize_previous_session.py`'s detached hold-and-release).
 Measured: a SessionStart hook's stdout IS injected before the model's first turn, even after a

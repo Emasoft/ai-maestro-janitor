@@ -368,21 +368,44 @@ def test_terminal_pane_key_namespaces_by_source_and_sanitizes():
     assert state.terminal_pane_key({"TMUX_PANE": "%3"}) != state.terminal_pane_key({"KITTY_WINDOW_ID": "3"})
 
 
-def test_pane_key_from_terminal_agrees_with_terminal_pane_key_for_the_same_pane():
-    """TRDD-RAEGS1D5 card 5: the clear chains detached child computes the sidecar key from the
-    `self_terminal()`-shaped payload dict (`pane_key_from_terminal`), and the fresh sessions
-    SessionStart hook computes it from the env (`terminal_pane_key`) -- for the SAME pane both
-    MUST produce the identical id, or the writer and the reader never meet."""
-    assert (
-        state.pane_key_from_terminal({"kind": "tmux", "pane": "%3"})
-        == state.terminal_pane_key({"TMUX_PANE": "%3"})
-        == "tmux-3"
+def test_clear_sidecar_writer_and_reader_compute_the_same_pane_key():
+    """TRDD-RAEGS1D5 card 5: the clear-chain writers -- `clear_trigger.spawn_shrink_chain`
+    (`terminal_trigger.self_terminal(os.environ)`) and `external_handoff_clear.py`
+    (`external_clear.terminal_from_record(fleet_restart.recorded_terminal(...))`) -- and the
+    fresh-session readers (`on-session-start-post-clear-compact.py`, `on-session-start.py`,
+    `summarize_previous_session.py`, all `pane_key_from_terminal(self_terminal(os.environ))`)
+    must resolve the SAME sidecar name for the same pane, through `pane_key_from_terminal` on
+    every side."""
+    import terminal_trigger
+    from external_clear import terminal_from_record
+
+    # iTerm: reader and writer 2 must agree, from a raw w0t1p0:-prefixed env var / fleet record.
+    uuid = "04F9A16F-04B3-42A0-9B20-C1E08CFE1D36"
+    raw = f"w0t1p0:{uuid}"
+    reader_key = state.pane_key_from_terminal(
+        terminal_trigger.self_terminal({"ITERM_SESSION_ID": raw})
     )
-    assert (
-        state.pane_key_from_terminal({"kind": "iterm", "session_id": "w0t1p0:ABC-DEF"})
-        == state.terminal_pane_key({"ITERM_SESSION_ID": "w0t1p0:ABC-DEF"})
-        == "iterm-w0t1p0-ABC-DEF"
+    writer2_key = state.pane_key_from_terminal(terminal_from_record({"iterm_session_id": raw}))
+    assert reader_key == writer2_key == f"iterm-{uuid}"
+
+    # tmux inside iTerm: both writer 2 and the reader prefer tmux when both ids are present.
+    reader_key_tmux = state.pane_key_from_terminal(
+        terminal_trigger.self_terminal({"TMUX_PANE": "%3", "ITERM_SESSION_ID": raw})
     )
+    writer2_key_tmux = state.pane_key_from_terminal(
+        terminal_from_record({"tmux_pane": "%3", "iterm_session_id": raw})
+    )
+    assert reader_key_tmux == writer2_key_tmux == "tmux-3"
+
+    # Hand-built dict normalisation: a raw and an already-stripped session_id yield one key --
+    # the defence for a dict built elsewhere that has not gone through self_terminal/
+    # terminal_from_record and so may still carry the raw prefix.
+    assert (
+        state.pane_key_from_terminal({"kind": "iterm", "session_id": raw})
+        == state.pane_key_from_terminal({"kind": "iterm", "session_id": uuid})
+        == f"iterm-{uuid}"
+    )
+
     # Unknown/unresolvable terminal, or a missing/empty dict, -> None (matches
     # `terminal_pane_key`s own "no per-pane id" contract) — never a half-built key.
     assert state.pane_key_from_terminal({"kind": "unknown"}) is None
