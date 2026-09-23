@@ -2,7 +2,7 @@
 name: reference_cpv_dotclaude_gitignore_fp
 description: "CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude/ / why can't the .claude gitignore MINOR be satisfied / is this a filed false positive not something to fix in our gitignore / claude-plugins-validation issue 120 / does git check-ignore .claude exit 0 when we track .claude/project/memory / can git re-include a path under an excluded parent directory / why not add a bare .claude/ gitignore line / would a bare .claude/ line untrack the memory corpus / when does this publish block auto-unblock / should PROJECT memory move out from under .claude to dodge this check / validate_skill.py broken file reference two different fence handling checks / why does a markdown link example inside a fenced template still trip validate_supporting_files / how to clear a Referenced file not found finding in SKILL.md / does a fenced bash block strip literal paths from the check"
 ocd: 2026-06-14
-lmd: 2026-06-14
+lmd: 2026-09-23
 metadata:
   node_type: memory
   type: project
@@ -11,6 +11,7 @@ metadata:
 publish-globally: false
 ---
 
+^1LNXSGZG [desc: "CPV --strict flags .gitignore missing coverage for .claude/ as a filed false-positive (CPV#120), unsatisfiable while PROJECT memory is tracked under .claude/project/memory/", keywords: cpv_strict_gitignore_claude_minor_false_positive git_check-ignore_claude_exits_1_by_design cannot_reinclude_path_under_excluded_parent memory_tracked_under_claude_project_memory publish_blocked_on_gitignore_coverage_finding auto_unblocks_when_cpv_120_ships do_not_add_bare_claude_gitignore_line move_project_memory_out_of_claude_to_dodge_check claude-plugins-validation_issue_120 mathematically_unsatisfiable_gitignore_coverage, ocd: 2026-06-14, lmd: 2026-06-14]
 CPV `--strict` emits **`[MINOR] .gitignore missing coverage for: Claude Code cache
 directory (.claude/)`** and blocks the janitor publish (exit ≥2). This is a **filed
 false positive — `claude-plugins-validation#120`** — do NOT try to "fix" it in our

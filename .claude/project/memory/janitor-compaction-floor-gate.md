@@ -2,7 +2,7 @@
 name: janitor-compaction-floor-gate
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / prompt is too long / context window full and nothing happened / how do I turn auto-compact back on / claude stopped responding near the context limit / what is the compaction threshold now / why did the janitor clear my session / where did my context go / the summary replaced my conversation / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now / 16 agents hung on the externalized compaction / the fleet froze for 40 minutes after a restart / a resume storm serialized every session behind the llm-ext lane / sessions stuck at startup on a blocking SessionStart hook / the compaction fired below the floor because the installed plugin was a stale rollout"
 ocd: 2026-07-17
-lmd: 2026-09-02
+lmd: 2026-09-23
 metadata:
   node_type: memory
   type: project
@@ -13,6 +13,7 @@ publish-globally: false
 split-lineage: 279f387b68144a63a5744f521e53338f
 ---
 
+^U4I2LDUA [desc: "the janitor's PROACTIVE-idle auto-compact trigger and its terminating gate shipped in v0.49.0 (2026-07-17, TRDD-D3PROACT); the buggy loop-prone size-only gate was caught pre-publish and never shipped", keywords: janitor_compacted_my_context_over_and_over why_is_the_context_still_huge_right_after_a_compaction proactive_idle_auto_compact_trigger cold_cache_compact_on-stop-proactive-compact_hook shipped_in_v0.49.0_2026-07-17_TRDD-D3PROACT loop_fix_commit_1a69ec6_release_bump_b5c298a buggy_loop-prone_form_never_published caught_in_the_pre-publish_batch what_is_the_compaction_threshold_now size-only_gate_never_shipped, ocd: 2026-07-17, lmd: 2026-09-23]
 The janitor's PROACTIVE-idle auto-compact trigger (`cold_cache_compact` +
 `on-stop-proactive-compact.py` + `dispatch._phase_proactive_idle_compact`) and the one gate that
 makes it terminate. Shipped in **v0.49.0** (2026-07-17; TRDD-D3PROACT; the loop fix is `1a69ec6`,
