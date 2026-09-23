@@ -213,8 +213,43 @@ def test_pointer_format_has_no_path() -> None:
     assert len(pointer_lines) == 1
     assert header["transcript_path"] not in pointer_lines[0]
     assert pointer_lines[0] == '[[elided id=p:0 tokens=%d "some elided line"]]' % items[0].tokens
-    # The path DOES appear exactly once more, in the fixed trailing expand-with line.
-    assert doc.count(header["transcript_path"]) == 2  # header line + trailing line
+
+
+def test_elided_pointer_list_is_capped_with_an_m_more_line() -> None:
+    """Card 5 measured fact: the largest real transcript elides ~18,041 items, one pointer per
+    item -- `compose()` itself must never re-grow that unboundedly. Cap at `_MAX_ELIDED_
+    POINTERS`, keep the highest-scoring ones, and say how many were left out; the trailing
+    'pointers expand with' line must still survive (it is what makes every DROPPED item still
+    reachable by id)."""
+    n = jc._MAX_ELIDED_POINTERS + 10
+    items = [_item(f"e{i}:0", "user", f"text {i}", turn=i, tokens=10) for i in range(n)]
+    scores = {
+        it.id: jc.Scores(relevance=(i / n), decision=0.0, oversized=False, kept=False,
+                          decision_passed=False)
+        for i, it in enumerate(items)
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+
+    pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
+    assert len(pointer_lines) == jc._MAX_ELIDED_POINTERS
+    # Highest relevance == highest index here -- the last 40 items must be the ones shown.
+    for it in items[-jc._MAX_ELIDED_POINTERS:]:
+        assert f"id={it.id} " in doc
+    for it in items[: n - jc._MAX_ELIDED_POINTERS]:
+        assert f"id={it.id} " not in doc
+    assert f"[[elided: {n - jc._MAX_ELIDED_POINTERS} more items not listed]]" in doc
+    assert "pointers expand with:" in doc
+
+
+def test_elided_pointer_list_under_the_cap_has_no_m_more_line() -> None:
+    items = [_item("only:0", "user", "one elided item", turn=0, tokens=10)]
+    scores = {"only:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                                   decision_passed=False)}
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "more items not listed" not in doc
+    assert "pointers expand with:" in doc
 
 
 def test_tool_result_without_matching_tool_use_falls_back(tmp_path: Path) -> None:

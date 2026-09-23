@@ -422,6 +422,15 @@ def _oversized_preview(item: Item) -> str:
     return "\n".join(item.text.splitlines()[:_OVERSIZED_PREVIEW_LINES])
 
 
+# Card 5 measured fact (docs_dev/jev-compaction-spec.md card 5 / reports/compaction-replacement/
+# 20260923_064108+0200-hook-output-experiments.md): the largest real transcript elides ~18,041
+# items -- one pointer line per elided item made `compose()` itself emit ~2.4 MB, independent of
+# `budget_tokens` (that budget only bounds KEPT items). Cap the pointer list so its size no longer
+# scales with transcript size; the items dropped from the list are still `expand`-able by id, the
+# model just is not told about them by name.
+_MAX_ELIDED_POINTERS = 40
+
+
 def compose(
     items: list[Item],
     scores: dict[str, Scores],
@@ -466,6 +475,23 @@ def compose(
             kept_ids.discard(it.id)
             total_tokens -= it.tokens
 
+    # `items` is already chronological, so filtering it (rather than re-sorting) keeps the
+    # elided list chronological for free -- `_MAX_ELIDED_POINTERS` below only needs to pick
+    # WHICH ids survive, not reorder anything.
+    elided_items = [it for it in items if it.id not in kept_ids]
+    hidden_count = 0
+    if len(elided_items) > _MAX_ELIDED_POINTERS:
+        # Highest max(relevance, decision) first -- the items most worth a pointer are the
+        # ones the model was closest to keeping, not an arbitrary chronological head/tail.
+        top_ids = {
+            it.id
+            for it in sorted(elided_items, key=max_score, reverse=True)[:_MAX_ELIDED_POINTERS]
+        }
+        shown_elided = [it for it in elided_items if it.id in top_ids]
+        hidden_count = len(elided_items) - len(shown_elided)
+    else:
+        shown_elided = elided_items
+
     transcript_path = header.get("transcript_path", "")
     usage = header.get("usage") or {}
 
@@ -489,11 +515,14 @@ def compose(
 
     lines.append("")
     lines.append("## Elided")
+    shown_ids = {it.id for it in shown_elided}
     for it in items:
-        if it.id not in kept_ids:
+        if it.id in shown_ids:
             lines.append(_format_pointer(it))
             if scores[it.id].oversized:
                 lines.append(_oversized_preview(it))
+    if hidden_count:
+        lines.append(f"[[elided: {hidden_count} more items not listed]]")
 
     lines.append("")
     lines.append(
