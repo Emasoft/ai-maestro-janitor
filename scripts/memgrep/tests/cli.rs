@@ -3849,3 +3849,181 @@ fn lint_flags_a_raw_control_byte_at_error_and_echoes_no_page_content() {
         "the finding must never echo page content: {out}"
     );
 }
+
+/// TRDD-XI10BA5D A1 follow-up item 3: an already-corrupted page (byte predates the write-time
+/// guard) must still be REPAIRABLE — `--old-file` legitimately CONTAINS the bad byte here,
+/// because that is exactly what sits on disk to be located and replaced. Only the RESULT
+/// (`--new-file`, clean) is validated; the old-text anchor is never independently checked.
+#[test]
+fn update_mem_topic_repairs_a_control_byte_sitting_in_frontmatter() {
+    let d = TempDir::new("ctrlbyte-repair-frontmatter");
+    let bad_desc = format!("a fact with a stray byte here{CONTROL_BYTE} in the frontmatter");
+    d.write(
+        "corrupt.md",
+        &format!(
+            "---\ndescription: {bad_desc}\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             body text, unaffected.\n\n## Notes and lessons learned\n"
+        ),
+    );
+    let page = d.join("corrupt.md");
+    let old_fixture = TempFixture::new("old-fm.txt", &bad_desc);
+    let clean_desc = "a fact with the stray byte removed in the frontmatter";
+    let new_fixture = TempFixture::new("new-fm.txt", clean_desc);
+
+    let (out, err, code) = run_full(&[
+        "update-mem-topic",
+        "--page", page.to_str().unwrap(),
+        "--old-file", old_fixture.as_str(),
+        "--new-file", new_fixture.as_str(),
+    ]);
+    assert_eq!(code, 0, "repairing a frontmatter control byte must succeed: stdout={out} stderr={err}");
+
+    let after = std::fs::read_to_string(&page).unwrap();
+    assert!(!after.contains(CONTROL_BYTE), "the byte must be gone from the repaired page: {after:?}");
+    assert!(after.contains(clean_desc), "the clean replacement text must have landed: {after}");
+}
+
+/// Same as above, for a byte sitting in plain prose OUTSIDE any atom (not a `^id [...]` marker
+/// line) — the other surface item 3 names.
+#[test]
+fn update_mem_topic_repairs_a_control_byte_sitting_in_plain_prose_outside_any_atom() {
+    let d = TempDir::new("ctrlbyte-repair-prose");
+    let bad_line = format!("this is plain prose, not an atom, with a stray byte{CONTROL_BYTE} in it");
+    d.write(
+        "corrupt.md",
+        &format!(
+            "---\ndescription: {}\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n{bad_line}\n\n\
+             ## Notes and lessons learned\n",
+            FIXTURE_PAGE_DESC
+        ),
+    );
+    let page = d.join("corrupt.md");
+    let old_fixture = TempFixture::new("old-prose.txt", &bad_line);
+    let clean_line = "this is plain prose, not an atom, with the byte removed in it";
+    let new_fixture = TempFixture::new("new-prose.txt", clean_line);
+
+    let (out, err, code) = run_full(&[
+        "update-mem-topic",
+        "--page", page.to_str().unwrap(),
+        "--old-file", old_fixture.as_str(),
+        "--new-file", new_fixture.as_str(),
+    ]);
+    assert_eq!(code, 0, "repairing a prose control byte must succeed: stdout={out} stderr={err}");
+
+    let after = std::fs::read_to_string(&page).unwrap();
+    assert!(!after.contains(CONTROL_BYTE), "the byte must be gone from the repaired page: {after:?}");
+    assert!(after.contains(clean_line), "the clean replacement line must have landed: {after}");
+
+    let (lint_out, _lint_code) = run_with_code(&["lint", "--no-fix", page.to_str().unwrap()]);
+    assert!(
+        !lint_out.contains("control-byte-in-page"),
+        "the repaired page must no longer be flagged: {lint_out}"
+    );
+}
+
+/// TRDD-XI10BA5D A1 follow-up item 4: a PROJECT-scope page carrying BOTH a control byte AND
+/// missing `publish-globally:` (drift). Bare `memgrep lint` (fix=true, no `--no-fix`) tries to
+/// autofix the drift too, but the rewritten text still carries the byte, so `write_page_bytes`
+/// refuses that fix as well — the refusal must be swallowed PER PAGE, never abort the sweep.
+#[test]
+fn lint_reports_the_control_byte_and_the_refused_publish_globally_fix_without_aborting_the_sweep() {
+    let d = TempDir::new("ctrlbyte-plus-drift");
+    let user_root = TempDir::new("ctrlbyte-plus-drift-user");
+    d.write(
+        "corrupt.md",
+        &format!(
+            "---\ndescription: {}\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             plain prose with a stray control byte here [{CONTROL_BYTE}] embedded in it\n\n\
+             ## Notes and lessons learned\n",
+            FIXTURE_PAGE_DESC
+        ),
+    );
+    // An ordinary PROJECT page in the SAME directory, with its OWN (unrelated) drift, to prove
+    // the sweep still reaches and fixes it after the first page's fix was refused.
+    d.write(
+        "clean.md",
+        &format!(
+            "---\ndescription: {}\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             an ordinary page, no control byte.\n\n## Notes and lessons learned\n",
+            FIXTURE_PAGE_DESC
+        ),
+    );
+
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(["lint", d.as_str()])
+        .env("WIKIMEM_PROJECT_SCOPE_PATH", d.as_str())
+        .env("MEMGREP_USER_MEM_ROOT", user_root.as_str())
+        .output()
+        .expect("failed to run memgrep");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let code = out.status.code().unwrap_or(-1);
+
+    assert_ne!(code, 0, "the control byte must still gate the exit: {stdout}");
+    assert!(stdout.contains("control-byte-in-page"), "the control-byte finding still fires: {stdout}");
+    assert!(
+        stdout.contains("publish-globally-missing"),
+        "the drift finding is STILL present on the corrupt page — proof the fix attempt was \
+         refused rather than silently applied: {stdout}"
+    );
+
+    let corrupt_after = std::fs::read_to_string(d.join("corrupt.md")).unwrap();
+    assert!(
+        corrupt_after.contains(CONTROL_BYTE),
+        "the corrupt page's refused fix must write zero bytes — the byte is still there"
+    );
+    assert!(
+        !corrupt_after.contains("publish-globally"),
+        "the refused fix must not have inserted the field either: {corrupt_after}"
+    );
+
+    // The sweep must still REACH and fix the second page — proof it did not abort after the
+    // first page's fix was refused.
+    let clean_after = std::fs::read_to_string(d.join("clean.md")).unwrap();
+    assert!(
+        clean_after.contains("publish-globally: false"),
+        "the clean page's own drift must still be autofixed, proving the sweep continued past \
+         the corrupt page: {clean_after}"
+    );
+}
+
+/// TRDD-XI10BA5D A1 follow-up item 5: `scripts/lib/memory_content_precheck.py`'s finding regexes
+/// are `^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[(?P<code>[a-z-]+)\]` — severity token, `path:line`,
+/// then the bracketed code — so memgrep's rendering must never drift from that 5-field shape
+/// (severity, path, line, code, message) for a code the Python side keys on.
+#[test]
+fn lint_finding_line_matches_the_five_field_shape_the_python_precheck_regexes_parse() {
+    let d = TempDir::new("ctrlbyte-lint-shape");
+    d.write(
+        "corrupt.md",
+        &format!(
+            "---\ndescription: {}\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             plain prose with a stray control byte here [{CONTROL_BYTE}] in it\n\n\
+             ## Notes and lessons learned\n",
+            FIXTURE_PAGE_DESC
+        ),
+    );
+    let page = d.join("corrupt.md");
+    let (out, _code) = run_with_code(&["lint", "--no-fix", page.to_str().unwrap()]);
+    let line = out
+        .lines()
+        .find(|l| l.contains("control-byte-in-page"))
+        .unwrap_or_else(|| panic!("no control-byte-in-page finding line in: {out}"));
+
+    // Field 1 — severity, the leading whitespace-delimited token.
+    assert!(line.starts_with("ERROR "), "severity leads the line: {line}");
+    // Fields 2 & 3 — `<path>:<line>`, a digit run right after the filename's colon.
+    let after_name = line
+        .split("corrupt.md:")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no `corrupt.md:` path:line field: {line}"));
+    let line_num: String = after_name.chars().take_while(|c| c.is_ascii_digit()).collect();
+    assert!(!line_num.is_empty(), "a numeric line number follows path: {line}");
+    // Field 4 — the bracketed, space-delimited code.
+    assert!(
+        line.contains(" [control-byte-in-page] "),
+        "the bracketed code sits between the path:line field and the message: {line}"
+    );
+    // Field 5 — the message, carrying the byte's hex value.
+    assert!(line.contains("0x08"), "the message names the byte's hex value: {line}");
+}

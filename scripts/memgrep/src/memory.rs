@@ -2627,14 +2627,27 @@ fn find_control_byte(text: &str) -> Option<(usize, usize, usize, u32)> {
 /// would miss `update-mem-topic --old-file/--new-file`, which reads raw bytes from a file and
 /// splices them into the page with no atom-aware check at all — so this check must run on every
 /// surface's FINAL content, not trust any one caller to have sanitised its own input.
+///
+/// A C1 byte (U+0080-U+009F) gets a DIFFERENT cause line (TRDD-XI10BA5D A1 follow-up): the shell
+/// `echo \b`-style explanation is a C0 story — a C1 codepoint almost never comes from a shell
+/// escape. The measured cause there is a mis-decoded Windows-1252 byte (CP1252 puts the curly
+/// quotes and em/en-dashes exactly in 0x80-0x9F; reading that byte as Latin-1/UTF-8 instead of
+/// CP1252 turns the intended punctuation into the C1 control code CP1252 never meant). Naming
+/// the shell-escape cause on a C1 byte would send the operator hunting for a `\b` that was never
+/// there, so the two ranges are told apart here rather than sharing one guess.
 fn reject_control_bytes(text: &str) -> Result<()> {
     if let Some((line, col, offset, cp)) = find_control_byte(text) {
+        let cause = if (0x80..=0x9F).contains(&cp) {
+            "mis-decoded Windows-1252 text (smart quotes or dashes read as Latin-1); replace it \
+             with the intended character."
+        } else {
+            "This usually comes from a shell echo/printf expanding an escape such as \\b to a \
+             literal control byte, or a JSON encode/decode round-trip unescaping one — pipe the \
+             text through a quoted heredoc or --file instead of echo/printf."
+        };
         anyhow::bail!(
             "control byte 0x{cp:02X} at line {line}, column {col} (byte offset {offset}) — not \
-             tab/newline/CR. This usually comes from a shell echo/printf expanding an escape \
-             such as \\b to a literal control byte, or a JSON encode/decode round-trip \
-             unescaping one — pipe the text through a quoted heredoc or --file instead of \
-             echo/printf."
+             tab/newline/CR. {cause}"
         );
     }
     Ok(())
@@ -8640,6 +8653,39 @@ mod tests {
         );
         assert!(reject_control_bytes("clean text, no control bytes here").is_ok());
         assert!(reject_control_bytes("tab\t, newline\n, and cr\r all fine").is_ok());
+    }
+
+    /// A C1 byte (U+0080-U+009F) must NOT get the C0 shell-escape cause line — that explanation
+    /// is a `\b`-style story with nothing to do with a mis-decoded Windows-1252 byte, the
+    /// measured C1 cause (TRDD-XI10BA5D A1 follow-up item 1).
+    #[test]
+    fn reject_control_bytes_gives_c1_its_own_cause_line_not_the_shell_escape_one() {
+        // U+0092 (0x92) is CP1252's right single quotation mark ('), a plausible real-world hit.
+        let err = reject_control_bytes("clean text\u{0092}with a mis-decoded smart quote")
+            .expect_err("a C1 control byte must refuse");
+        let msg = err.to_string();
+        assert!(msg.contains("0x92"), "names the byte: {msg}");
+        assert!(
+            msg.to_lowercase().contains("windows-1252") || msg.to_lowercase().contains("latin-1"),
+            "names the C1 cause (mis-decoded Windows-1252/Latin-1 text): {msg}"
+        );
+        assert!(
+            !msg.to_lowercase().contains("echo") && !msg.to_lowercase().contains("printf"),
+            "must NOT carry the C0 shell-escape cause line: {msg}"
+        );
+
+        // A C0 byte must still carry the ORIGINAL shell-escape cause line, unchanged.
+        let c0_msg = reject_control_bytes("clean text\u{0008}with a stray backspace")
+            .expect_err("a C0 control byte must refuse")
+            .to_string();
+        assert!(
+            c0_msg.to_lowercase().contains("echo") || c0_msg.to_lowercase().contains("printf"),
+            "C0/DEL keeps the shell-escape cause line: {c0_msg}"
+        );
+        assert!(
+            !c0_msg.to_lowercase().contains("windows-1252"),
+            "C0/DEL must NOT carry the C1 cause line: {c0_msg}"
+        );
     }
 
     /// Wired at the ACTUAL write primitive, not just the pure function: `write_page_bytes` is the
