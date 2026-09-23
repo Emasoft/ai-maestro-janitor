@@ -94,7 +94,13 @@ Don't overwrite an existing wikimem. Only seed when the dir is empty of pages:
 ls "$PROJECT_MEM"/wikimem/*.md >/dev/null 2>&1 && echo "wikimem already exists — skip seeding"  # gate on CURATED pages only (L7) — buffer notes / MEMORY.md at the root must not suppress seeding
 ```
 
-If empty, create the overview page with the **Write tool** (real content, not echo).
+If empty, only memgrep verbs may create or edit a wikimem page: scaffold the overview page with
+`memgrep new-mem-topic --tier hub --scope private-project --name <project>-overview
+--description "how does <PROJECT> work" --type project --functionality <project>-overview
+--globs "<source roots>"`, then fill in the body sections shown below (real content, not echo)
+with `memgrep update-mem-topic`. If a needed page edit has no memgrep verb, ABSTAIN and report
+the gap (the page and the operation) — never fall back to the Edit or Write tools, sed, a
+heredoc, or a Python write.
 **Do NOT create, seed, or stub `MEMORY.md`** — in the coexistence model (TRDD-ab232dbd)
 `MEMORY.md` is Anthropic's native, harness-owned memory file (the `# Memory` directive writes +
 auto-loads it). The two memory systems COEXIST. Bootstrap seeds only the wiki entry page.

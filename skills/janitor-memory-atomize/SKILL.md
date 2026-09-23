@@ -148,6 +148,8 @@ uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" commit "<scope_root>" <tx
 #   dropped, ocd unchanged, lmd not regressed, ≥1 marker added, and the ONLY new lines are markers.
 ```
 
+No path through `memory_txn_cli.py`/memgrep for the needed edit → ABSTAIN, report the gap.
+
 **On verify FAIL or any error:** `commit` exits non-zero with the reasons and the txn self-aborts
 (live tree untouched). Read the reason (a dropped/reworded fact → restore it verbatim; a smuggled
 non-marker line → remove it; no marker → actually add one) and re-commit. **Bounded retry ≤3**;

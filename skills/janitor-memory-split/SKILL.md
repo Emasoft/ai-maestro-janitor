@@ -221,6 +221,8 @@ SUCCESS = `commit` exits 0. A verify FAIL or precondition error has already abor
 surface FAILED. Lock contention is a normal abstain, not a failure. Exact surfacing lines, the
 abort command, and the idempotency rule:
 [split-plan-details.md#exit--retry--rollback-contract-step-6](references/split-plan-details.md#exit--retry--rollback-contract-step-6).
+If the split shape needed has no path through the txn core or a memgrep verb, ABSTAIN and
+report the gap — never hand-edit the live page.
 
 ### 7. Close the claim (MANDATORY — a pass that returns without this leaves an orphaned claim)
 

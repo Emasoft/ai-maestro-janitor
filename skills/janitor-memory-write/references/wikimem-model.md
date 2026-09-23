@@ -518,9 +518,10 @@ whole point is that token spend stays proportional to the task.
 **Concurrent-edit discipline (TRDD-7YHT3FNK).** Many agents edit the same corpus, so
 every memgrep WRITE verb takes the scope's write lock (shared with the Python txn
 core — cross-language mutual exclusion) and accepts `--base-sha256` compare-and-swap.
-The two sanctioned edit paths for any wikimem page are the memgrep verbs and the
-harness Edit tool (its own old-string + changed-on-disk guards); raw shell edits
-(`sed`/heredoc/redirection) are a violation — no lock, no staleness check. On the
+Only memgrep verbs may create or edit a wikimem page. The harness Edit/Write tools and raw shell
+edits (`sed`/heredoc/redirection) are a violation — no lock, no staleness check. If a needed
+edit has no memgrep verb, ABSTAIN and report the gap (the page and the operation) rather than
+falling back to any of them. On the
 refusal "The content of the wikimem file changed since your command was enqueued.
 Please reread the file first." — re-read, recompute against the fresh text, retry.
 

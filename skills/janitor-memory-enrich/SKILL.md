@@ -139,7 +139,9 @@ able to re-check it.
 
 After each page, the commit's post-edit verifier runs `memgrep lint`/`validate`. The page
 must come back with its enrich-class findings GONE and no new finding of any class. A page
-that still flags is not done — fix it or refuse it; never leave it half-widened.
+that still flags is not done — fix it or refuse it; never leave it half-widened. If the
+widening needed has no path through the txn core or a memgrep verb, ABSTAIN and report the
+gap — never hand-edit the live page.
 
 ## Report
 

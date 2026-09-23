@@ -112,8 +112,8 @@ lesson field grammar: the FULL REFERENCE above (`## The note format`, `## THE LE
 **Authorship confers NO ownership** — UPDATE another agent's page (safe: verbs SUPERSEDE, never
 overwrite), never hand-author markdown (write verbs: `new-mem-atom`, `update-mem-atom --lesson`
 adds a lesson, `update-mem-atom --lesson --supersedes` fixes a fact, SAME id). Run
-`memgrep validate <page> && memgrep lint <page>` after EVERY edit; edit ONLY via memgrep verbs
-or the Edit tool, never raw shell. On a "changed since enqueued" refusal: re-read, recompute,
+`memgrep validate <page> && memgrep lint <page>` after EVERY edit; only memgrep verbs may create
+or edit a wikimem page. On a "changed since enqueued" refusal: re-read, recompute,
 retry. Full verb list + concurrent-editing mechanics (TRDD-7YHT3FNK):
 the FULL REFERENCE above.
 

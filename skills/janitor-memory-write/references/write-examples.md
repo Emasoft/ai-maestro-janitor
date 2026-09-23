@@ -45,7 +45,9 @@ grammar are all synthesised by the write verbs, so a mistyped block-property, a
 missing `ocd:`, or a malformed footnote is now impossible. Do NOT open the page
 with the Write/Edit tool and do NOT type `^id [...]` or `[^N]: [...]` yourself; the
 tool mints the id, the dates, and the canonical shape. The GRAMMAR is the tool's
-job — your job is the JUDGMENT (which fact, which keywords, which desc).
+job — your job is the JUDGMENT (which fact, which keywords, which desc). If a needed
+page edit has no memgrep verb, ABSTAIN and report the gap (the page and the
+operation) — never fall back to Edit, Write, sed, a heredoc, or a Python write.
 
 **Scaffold the page** with the tier / name / description / type you decided in
 steps 1 & 3 (hubs also carry `--globs`; a hub or component may carry

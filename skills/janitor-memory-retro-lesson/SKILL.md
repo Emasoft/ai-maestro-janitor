@@ -47,7 +47,8 @@ already in lesson form; only body ATOM markers count.
    Nothing is deleted, ever.
 3. **Never edit a live page by hand.** The conversion uses memgrep's own atomic write
    verb (`update-mem-atom --lesson`); the pointer completion rides the `memory_txn_cli --op repair`
-   transaction (staged copy → verify → atomic commit). `resume` the scope first.
+   transaction (staged copy → verify → atomic commit). `resume` the scope first. If a needed
+   edit has no path through memgrep or the txn core, ABSTAIN and report the gap.
 4. **Bounded.** ONE page per pass (all its candidate atoms, capped at
    **5 conversions/run**). The next heartbeat handles the next page — recursion iterates
    across launches, never as nested in-turn work.

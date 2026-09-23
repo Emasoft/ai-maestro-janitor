@@ -154,7 +154,8 @@ The non-negotiables you must uphold:
 - **`commit --op merge`** verifies and applies atomically. FAIL = txn auto-aborted, live tree
   untouched → fix `C` in a FRESH txn, **retry ≤3**, then abandon with a `[janitor-memory] …
   abandoned` finding. Lock/stale = abstain this cycle (crash-resumable — see Bounds & safety
-  recap above).
+  recap above). If the merge shape needed has no path through the txn core or a memgrep verb,
+  ABSTAIN and report the gap — never hand-edit the live page.
 
 ## Idempotency & bounds
 

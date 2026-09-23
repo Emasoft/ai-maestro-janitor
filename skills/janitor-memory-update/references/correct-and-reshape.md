@@ -13,12 +13,14 @@ guardrail):
 
 1. **Clean the fact in place.** Replace the wrong statement in the body with the
    correct one. The body is always the current truth — no "we used to think X"
-   clutter inline. Two sanctioned paths (TRDD-7YHT3FNK — never raw shell, which has
-   neither lock nor staleness guard): `memgrep update-mem-topic --page <page> --old-file F1
+   clutter inline. Only memgrep verbs may create or edit a wikimem page (TRDD-7YHT3FNK —
+   never raw shell, which has neither lock nor staleness guard, and never the harness
+   Edit/Write tools): `memgrep update-mem-topic --page <page> --old-file F1
    --new-file F2` (was: `memgrep edit`; scope-locked, applies only on an exact unique match of the
-   original text; on its changed-since-enqueued refusal, re-read and retry), or the
-   harness Edit tool (its own old-string + changed-on-disk guards). Hand the heavier
-   reshapes of §3 to the `janitor-memory-subconscious-agent`.
+   original text; on its changed-since-enqueued refusal, re-read and retry). Hand the heavier
+   reshapes of §3 to the `janitor-memory-subconscious-agent`. If a needed edit has no memgrep
+   verb, ABSTAIN and report the gap (the page and the operation) — never fall back to Edit,
+   Write, sed, a heredoc, or a Python write.
 2. **Demote the error to a dated lesson — the WHY is the point.** Add it with
    `memgrep update-mem-atom --lesson --page <page> --atom <atom-id> --keywords "<recall phrase>"`
    (the DO-NOT/BECAUSE/DO text on stdin) — the tool files the numbered entry under

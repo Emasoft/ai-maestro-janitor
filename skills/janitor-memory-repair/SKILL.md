@@ -130,6 +130,9 @@ uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" commit "<scope_root>" <tx
 #   verify_repair checks: lessons preserved, keys/tier valid, ocd/lmd, Notes present.
 ```
 
+If the fix needed has no path through the txn core or a memgrep verb, ABSTAIN and report the
+gap — never hand-edit the live page.
+
 **On verify FAIL:** `commit` exits non-zero and self-aborts (live tree untouched).
 Fix the staged copy (restore a dropped lesson, reset a changed `ocd`, add a
 missing key) and re-commit. **Retry ≤3**; then `abort "<scope_root>" <txn_id>`

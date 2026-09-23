@@ -124,10 +124,10 @@ up to it instead (this is what keeps the pyramid from exploding). Honor
 
 **Never hand-write a wikimem `.md`.** memgrep OWNS the syntax — frontmatter, the
 `^id [keywords: …]` atom markers and the `[^N]: […]` lesson grammar are all synthesised
-by the write verbs (`new-mem-topic`, `new-mem-atom`, `update-mem-atom --lesson`; formerly
+by the write verbs (`new-mem-topic`, `new-mem-atom`, `update-mem-atom --lesson`; was
 `new-page`/`add-atom`/`add-lesson`), so a mistyped block-property, a missing `ocd:` or a
-malformed footnote is impossible. Do NOT open the page with Write/Edit and do NOT type
-`^id [...]` or `[^N]: [...]` yourself. The GRAMMAR is the tool's job; yours is the
+malformed footnote is impossible. Never open the page with Write/Edit, never type
+`^id [...]` or `[^N]: [...]` yourself (no verb → ABSTAIN). The GRAMMAR is the tool's job; yours is the
 JUDGMENT — which fact, which keywords, which desc. `--keywords` is always the
 SYMPTOM/recall surface, never the answer's jargon; `--desc` is a required ≤200-char prose
 summary, never a slug; a lesson is ONE mistake, ≤3 lines,

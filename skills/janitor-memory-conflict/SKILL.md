@@ -115,6 +115,8 @@ page is RETIRED (a delete) and its fact + EVERY `[^N]` lesson is FOLDED into the
 survivor (a write), so even a DELETE loses no knowledge. Why a same-slug in-place
 edit is rejected by `verify_merge`:
 [conflict-protocol § same-slug](references/conflict-protocol.md#why-a-same-slug-in-place-edit-does-not-work).
+If the merge shape needed has no path through the txn core or a memgrep verb, ABSTAIN and
+report the gap — never hand-edit the live page.
 
 - **DEMOTE** (the DEFAULT, non-destructive) — keep the page holding the CURRENT truth
   as survivor; retire the obsolete page; fold its still-true-of-the-past fact in as a

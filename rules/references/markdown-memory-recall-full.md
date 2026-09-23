@@ -629,8 +629,8 @@ non-zero exit is a defect to fix NOW, before moving on.
 The write verbs are scope-LOCKED and use `--base-sha256` compare-and-swap: a verb refuses to
 land if the page changed since you last read it, rather than silently clobbering a concurrent
 agent's edit. `memgrep update-mem-topic` (was: `edit`) itself is an exact-unique-match replace —
-it fails loudly on a stale or ambiguous match instead of guessing. Edit wikimem pages ONLY
-through the memgrep verbs or the Edit tool — never raw shell (`sed`/`echo >>`/etc.), which
+it fails loudly on a stale or ambiguous match instead of guessing. Only memgrep verbs may create
+or edit a wikimem page — never the Edit tool, never raw shell (`sed`/`echo >>`/etc.), which
 bypasses both the lock and the syntax guarantees the verbs exist to provide. On a "changed since
 enqueued" refusal: re-read the page, recompute your edit against the new content, and retry —
 never force past the refusal.

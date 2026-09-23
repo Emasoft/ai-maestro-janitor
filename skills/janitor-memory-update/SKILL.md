@@ -154,6 +154,8 @@ in a new page):
    those two fields and never reads the body, so thin metadata is the one defect
    that cannot be fixed later — only the author knows the phrasings a future
    session will search with. Do not lower `MEMGREP_MIN_KEYWORDS` to get past it.
+   If a needed page edit has no memgrep verb, ABSTAIN and report the gap (the page and the
+   operation) — never fall back to Edit, Write, sed, a heredoc, or a Python write.
    **If instead it SUPERSEDES a statement already on the page** (replaces a value,
    reverses a prior choice), this is not a plain add — apply THE UPDATE INVARIANT:
    the new atom goes up top and the OLD atom is moved down below `## Superseded`,

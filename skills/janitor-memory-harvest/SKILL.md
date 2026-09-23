@@ -156,6 +156,10 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
   cannot tell which wiki atoms came from which buffer note.
 
   Then `memgrep reindex "$MEMDIR"`.
+  **Capability gap (TRDD-XI10BA5D):** the CREATE branch's `Write` is the one documented
+  exception — no memgrep verb yet scaffolds a page pre-seeded with mirrored atoms +
+  provenance in one call. Any OTHER page edit with no memgrep verb must ABSTAIN and report
+  the gap.
   **The buffer note is left exactly as it was** — you mirror its content into `wikimem/`, you
   do not move, edit, or delete it.
 
