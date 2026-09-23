@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import jev_compaction as jc  # noqa: E402
+from jevctx.pipeline import find_pointers, parse_pointer  # noqa: E402
 from jevctx.testing import FakeJevClient  # noqa: E402
-from jevctx.types import JevUnavailableError  # noqa: E402
+from jevctx.types import JevUnavailableError, NoulAnswer  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_small.jsonl"
 # TRDD-RAEGS1D5 (2026-09-23): a SEPARATE fixture, not an edit to the shared one above --
@@ -554,7 +557,13 @@ def test_decision_question_never_asked_for_a_non_user_item() -> None:
     Jev's own `state`, so asking it there let that item's text alone earn `decision_passed`
     (and with it `compose`'s eviction protection) no matter how the relevance question answers.
     A permissive client (answers 0.9 to everything it IS asked) must still leave the event
-    item's decision at 0.0/False, because the question was never sent for it."""
+    item's decision at 0.0/False, because the question was never sent for it.
+
+    Card 5 (TRDD-HWF3QFAB) update: "user" and non-"user" items are now planned in SEPARATE
+    batches (16-per-batch/2-questions for "user", 32-per-batch/1-question for everyone else),
+    so these two items land in two DIFFERENT requests -- this asserts the decision question
+    is present in the "user" item's own request and absent from the other's, not merely
+    absent from one shared request."""
     items = [
         _item("u:0", "user", "policy: always use tabs", turn=0),
         _item("e:0", "event", "a task notification's report text", turn=1),
@@ -562,13 +571,16 @@ def test_decision_question_never_asked_for_a_non_user_item() -> None:
     client = FakeJevClient.constant(0.9)
     scores = jc.score_items(items, "digest", client)
 
-    assert len(client.calls) == 1
-    call = client.calls[0]
-    dec_keys = {k for k in call.questions if k.endswith(":dec")}
+    assert len(client.calls) == 2  # one batch per kind-group
+    # Counted per call, not merged into one set: each batch's `question_keys` restarts at
+    # "i0" (jevctx.budget._question_keys), so the "user" batch's lone item and the "other"
+    # batch's lone item both get ref "i0" -- a set across calls would collapse the two
+    # ":rel" keys into one, hiding the very thing this test exists to prove.
+    dec_key_count = sum(1 for call in client.calls for k in call.questions if k.endswith(":dec"))
+    rel_key_count = sum(1 for call in client.calls for k in call.questions if k.endswith(":rel"))
     # Exactly one ref got a :dec question -- the user item's, whichever ref string it got.
-    assert len(dec_keys) == 1
-    rel_keys = {k for k in call.questions if k.endswith(":rel")}
-    assert len(rel_keys) == 2  # both items still get scored for relevance
+    assert dec_key_count == 1
+    assert rel_key_count == 2  # both items still get scored for relevance
 
     assert scores["u:0"].decision == 0.9
     assert scores["e:0"].decision == 0.0
@@ -605,3 +617,153 @@ def test_mid_turn_attachment_from_a_peer_agent_is_event_not_user() -> None:
     by_id = {it.id: it for it in items}
     assert by_id["att4:0"].kind == "event"
     assert by_id["att4:0"].text == "Consultation request from a peer agent, not the owner."
+
+
+# --- TRDD-CC0CZLMO (card 3): score_items fans batches out on a ThreadPoolExecutor ---
+
+
+def test_score_items_deterministic_across_worker_counts() -> None:
+    """Upstream's own invariant (`jevctx/scorer.py`'s
+    `test_results_do_not_depend_on_worker_count`): `max_workers=1` and `max_workers=8` must
+    score the SAME items to the SAME `Scores`, since concurrency only changes execution
+    order, never batch membership or the answers `client.ask` returns."""
+    items = [_item(f"i{i}:0", "assistant", f"text number {i}", turn=i) for i in range(40)]
+    client_serial = FakeJevClient.by_text(lambda t: 0.9 if "3" in t else 0.2)
+    scores_serial = jc.score_items(items, "digest", client_serial, max_workers=1)
+
+    client_parallel = FakeJevClient.by_text(lambda t: 0.9 if "3" in t else 0.2)
+    scores_parallel = jc.score_items(items, "digest", client_parallel, max_workers=8)
+
+    assert scores_serial == scores_parallel
+
+
+def test_score_items_error_propagates_from_any_batch() -> None:
+    """Card 3: fail-closed must hold even with several batches in flight at once -- a
+    `JevError` from ANY one of them must still propagate out of `score_items`, never get
+    swallowed because the other batches succeeded (unlike `jevctx.scorer`'s own
+    `on_error="keep"` default, which this module never uses)."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(4 * 32)]
+    call_count = 0
+    lock = threading.Lock()
+
+    class _FlakyOnThirdCallClient:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            nonlocal call_count
+            with lock:
+                call_count += 1
+                n = call_count
+            if n == 3:
+                raise JevUnavailableError("simulated outage on batch 3")
+            return {key: NoulAnswer(noul=0.9) for key in questions}
+
+    try:
+        jc.score_items(items, "digest", _FlakyOnThirdCallClient(), max_workers=4)
+    except JevUnavailableError:
+        return
+    raise AssertionError("expected the batch-3 failure to propagate")
+
+
+def test_score_items_parallel_is_faster_than_serial() -> None:
+    """Card 3 (TRDD-CC0CZLMO): jevctx's own `scorer.py` fans batches out on a
+    `ThreadPoolExecutor` (`scorer.py:149-154`); ours must too, or a large transcript's serial
+    for-loop exceeds both compaction-lane timeouts (the bug this card fixes -- measured: a
+    49 MB transcript took 168 s on HEAD, over the 60 s sync AND the 120 s detached timeouts).
+    160 non-"user" items pack 32-per-batch (card 5's non-"user" batch size) into 5 batches; a
+    client that sleeps 0.2 s per request makes the serial time ~1.0 s and the max_workers=8
+    time close to 0.2 s -- assert a CLEAR speedup, not an exact ratio (thread-scheduling
+    jitter makes an exact number flaky)."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(160)]
+
+    def sleepy_client() -> Any:
+        inner = FakeJevClient.constant(0.9)
+
+        class _SleepyClient:
+            def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+                time.sleep(0.2)
+                return inner.ask(state, questions)
+
+        return _SleepyClient()
+
+    start = time.monotonic()
+    jc.score_items(items, "digest", sleepy_client(), max_workers=1)
+    serial_elapsed = time.monotonic() - start
+
+    start = time.monotonic()
+    jc.score_items(items, "digest", sleepy_client(), max_workers=8)
+    parallel_elapsed = time.monotonic() - start
+
+    assert parallel_elapsed < serial_elapsed / 2, (
+        f"expected a clear speedup: serial={serial_elapsed:.2f}s parallel={parallel_elapsed:.2f}s"
+    )
+
+
+def test_no_batch_exceeds_32_questions() -> None:
+    """Card 5 (TRDD-HWF3QFAB): "user" items are batched 16-per-request (32 real questions:
+    16 x rel + 16 x dec) and every other kind 32-per-request (32 real questions: 32 x rel) --
+    both group sizes are chosen so neither ever exceeds Jev's `MAX_QUESTIONS_PER_REQUEST`
+    hard cap, even though a "user" batch has half as many ITEMS as a non-"user" one.
+    `FakeJevClient`'s own limit enforcement (`enforce_limits=True` by default) would raise
+    `JevBudgetError` if a batch actually violated the cap -- this also asserts it directly."""
+    user_items = [_item(f"u{i}:0", "user", f"decision {i}", turn=i, tokens=10) for i in range(50)]
+    other_items = [_item(f"o{i}:0", "assistant", f"note {i}", turn=i, tokens=10) for i in range(70)]
+    client = FakeJevClient.constant(0.9)
+    jc.score_items(user_items + other_items, "digest", client)
+
+    assert client.calls  # sanity: the batches actually ran
+    for call in client.calls:
+        assert len(call.questions) <= 32
+
+
+# --- TRDD-HWF3QFAB (card 5): pipeline.format_pointer/RETRIEVE_QUESTION ---
+
+
+def test_every_pointer_in_compose_output_parses_and_count_matches_elided_shown() -> None:
+    """Card 5: `_format_pointer` now goes through `pipeline.format_pointer`, so every
+    pointer `compose()` emits must round-trip through `pipeline.find_pointers` -- proving the
+    escaping is correct, not just "looks right" by eye. The parsed count must equal the
+    number of elided pointer LINES actually shown (the capped list, not every elided item --
+    `compose()` caps at `_MAX_ELIDED_POINTERS`)."""
+    n = jc._MAX_ELIDED_POINTERS + 5
+    items = [_item(f"e{i}:0", "user", f"text {i}", turn=i, tokens=10) for i in range(n)]
+    scores = {
+        it.id: jc.Scores(relevance=(i / n), decision=0.0, oversized=False, kept=False,
+                          decision_passed=False)
+        for i, it in enumerate(items)
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+
+    pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
+    assert len(pointer_lines) == jc._MAX_ELIDED_POINTERS
+    parsed = find_pointers(doc)
+    assert len(parsed) == len(pointer_lines)
+
+
+def test_pointer_summary_escapes_quotes_and_backslashes_and_round_trips() -> None:
+    """Card 5: the local pointer literal this replaced had no escaping at all -- a `"` or
+    `\\` in an item's first line produced a pointer `pipeline.parse_pointer` could not parse
+    back. Prove the round trip: format, then parse, and the summary comes back byte-identical
+    to the original first line."""
+    first_line = 'said "always use \\tabs\\", never spaces'
+    items = [_item("q:0", "user", first_line + "\nmore text", turn=0)]
+    scores = {"q:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                                decision_passed=False)}
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+
+    pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
+    assert len(pointer_lines) == 1
+    parsed = parse_pointer(pointer_lines[0])
+    assert parsed is not None
+    assert parsed.summary == first_line
+
+
+def test_pointer_summary_skips_a_leading_blank_line() -> None:
+    """Card 5: the summary is the first NON-EMPTY line (was: the first line, blank or not --
+    a leading blank line used to produce an empty preview)."""
+    items = [_item("b:0", "user", "\n\n   \nreal first content", turn=0)]
+    scores = {"b:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                                decision_passed=False)}
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert 'id=b:0 tokens=%d "real first content"' % items[0].tokens in doc

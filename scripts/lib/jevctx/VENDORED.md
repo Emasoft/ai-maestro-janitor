@@ -273,3 +273,16 @@ re-export the three modules' public surface: `segment`, `detect_kind`,
 `format_pointer`, `parse_pointer`, `find_pointers`, `ADMIT_QUESTION`,
 `RETRIEVE_QUESTION`, `EXPAND_TOOL_SCHEMA` from `pipeline`. Everything kept
 from the 2026-09-22 trim is unchanged.
+
+## The `pipeline` symbols are now used (2026-09-23, TRDD-HWF3QFAB, card 5)
+
+Re-vendoring `pipeline.py` above (card 4) landed it as unused code until card 5:
+`scripts/lib/jev_compaction.py` imported `RETRIEVE_QUESTION` and `format_pointer`
+directly from `jevctx.pipeline` (`_ref_question` from `jevctx.scorer`, the same
+module's own private helper — a byte-identical duplicate this project used to keep
+locally), replacing the three local copies the gap analysis (`reports/compaction-
+replacement/20260923_200805+0200-jev-reference-gap-analysis.md` §3) flagged as
+drift-prone. `admit`/`retrieve`/`expand`/`reconstruct`/`ADMIT_QUESTION`/
+`EXPAND_TOOL_SCHEMA`/`GateConfig` remain unused (card 6 territory, not this card) —
+still exported from `__init__.py` for whoever implements card 6 next, not dead code
+to prune.

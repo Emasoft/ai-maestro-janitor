@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -29,7 +30,8 @@ if str(_LIB_DIR) not in sys.path:
 
 import transcript_roles  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared classifier
 from jevctx import scorer as _scorer  # noqa: E402
-from jevctx.budget import BudgetPlanner  # noqa: E402
+from jevctx.budget import Batch, BudgetPlanner  # noqa: E402
+from jevctx.pipeline import RETRIEVE_QUESTION, format_pointer  # noqa: E402
 from jevctx.tokens import estimate_tokens  # noqa: E402
 from jevctx.types import (  # noqa: E402
     MAX_QUESTIONS_PER_REQUEST,
@@ -37,6 +39,7 @@ from jevctx.types import (  # noqa: E402
     JevValidationError,
     Noul,
     NoulAnswer,
+    Pointer,
     Question,
     ScoreItem,
 )
@@ -45,7 +48,7 @@ __all__ = [
     "Item",
     "Scores",
     "NoDigest",
-    "RELEVANCE_QUESTION",
+    "RETRIEVE_QUESTION",
     "DECISION_QUESTION",
     "DEFAULT_RELEVANCE_THRESHOLD",
     "DEFAULT_DECISION_THRESHOLD",
@@ -139,23 +142,14 @@ class NoDigest(Exception):
     """
 
 
-# jevctx.pipeline (the source of the canonical RETRIEVE_QUESTION wording) is NOT vendored
-# in this repo (see scripts/lib/jevctx/VENDORED.md -- trimmed to what card 3 needs), so this
-# is copied from its quotation in
-# reports/compaction-replacement/20260922_205137+0200-jev-compaction-study.md §C rather
-# than from source. The `true`/`false` criteria strings are authored here (the report only
-# quotes `instructions`; jevctx's own `true`/`false` text for this question isn't recorded
-# anywhere in this repo).
-RELEVANCE_QUESTION = Noul(
-    instructions=(
-        "Is this stored item relevant to the task described in `task` right now? "
-        "Answer true if it contains facts, identifiers, errors, results, or decisions "
-        "the current task may need. Answer false if it belongs to unrelated work, or "
-        "is superseded by something more recent."
-    ),
-    true="Relevant to the task described in `task`, right now.",
-    false="Belongs to unrelated work, or superseded by something more recent.",
-)
+# Card 5 (TRDD-HWF3QFAB): the relevance question is now `jevctx.pipeline.RETRIEVE_QUESTION`
+# (vendored verbatim, TRDD-RAEGS1D5 card 4) instead of a local copy -- the old local copy
+# mixed an ADMIT-style clause into RETRIEVE's own wording and invented its own true/false
+# criteria text (written before pipeline.py was vendored, from a quotation in
+# reports/compaction-replacement/20260922_205137+0200-jev-compaction-study.md §C, not from
+# source), which measurably inflated relevance ("needed later" is a keep-biased ADMIT
+# question, not "relevant right now") -- see reports/compaction-replacement/
+# 20260923_200805+0200-jev-reference-gap-analysis.md row 13.
 
 # Verbatim per the implementation spec (docs_dev/jev-compaction-spec.md, card 3).
 DECISION_QUESTION = Noul(
@@ -169,6 +163,36 @@ DECISION_QUESTION = Noul(
 
 DEFAULT_RELEVANCE_THRESHOLD = 0.5
 DEFAULT_DECISION_THRESHOLD = 0.5
+
+# Card 5 (TRDD-HWF3QFAB): a "user" item is asked BOTH questions (2 real questions per item,
+# so 16 items -- MAX_QUESTIONS_PER_REQUEST // 2 -- fill one 32-question Jev request);
+# every other kind is asked relevance only (1 real question per item, so a full 32 items
+# fit the same request). Two batch sizes chosen per kind, rather than one shared size that
+# always assumes 2 questions per item (the pre-card-5 approach): since "user" items are the
+# small minority of a real transcript (report row 7/9: task-notifications alone outnumber
+# human messages ~27:1), this roughly halves the batch count -- and with it the digest
+# `state` re-billed on every batch -- for the majority of items.
+_USER_BATCH_MAX_QUESTIONS = MAX_QUESTIONS_PER_REQUEST // 2
+_OTHER_BATCH_MAX_QUESTIONS = MAX_QUESTIONS_PER_REQUEST
+
+# "BudgetPlanner allows it cleanly, otherwise keep the conservative planning and record
+# why" (this card's own spec text) -- it does NOT hold cleanly: jevctx.types's own
+# STATE_PLUS_ALL_QUESTIONS_TOKENS=64000 / STATE_PLUS_LONGEST_QUESTION_TOKENS=32000 do not
+# match the OpenRouter-routed Jev backend this project actually calls
+# (jevctx.provider.make_client -> OpenRouterJevClient, model "~typesafe/jev-latest").
+# MEASURED live against the 4.7 MB real transcript this session (TRDD-HWF3QFAB): a 32-item
+# "other"-group batch at state_tokens=27163 + question_tokens=3862 = 31025 estimated total
+# failed with HTTP 400 `{"error_type": "max_tokens_exceeded"}`; a same-shaped batch at
+# 26384 total succeeded; a synthetic 32-question batch with a small state (~2000 total)
+# also succeeded -- so the failure tracks the REQUEST'S TOTAL estimated size, not the
+# question count alone, and the real ceiling sits well under jevctx's advertised 32000/
+# 64000, somewhere in the ~26-31k band. `BudgetPlanner`'s own "all questions" cap exists
+# to bound exactly this (state + every question), so this overrides it to a value with
+# real margin below that measured band, rather than trusting the vendored constant --
+# `max_questions` above (16/32 items) still applies on top of this and is usually the
+# tighter cap for the "other" group's typically-small notification/assistant items; this
+# only kicks in for the rarer batch that happens to hold several large tool outputs.
+_SAFE_STATE_PLUS_ALL_QUESTIONS_TOKENS = 20_000
 
 
 def _tool_result_text(content: Any) -> str:
@@ -454,19 +478,72 @@ def build_digest(
     return "\n\n".join(parts)
 
 
-def _ref_question(question: Noul, ref: str) -> Noul:
-    """A copy of `question` whose instructions name `ref`.
+def _score_batch(
+    batch: Batch,
+    *,
+    asks_decision: bool,
+    items_by_id: dict[str, Item],
+    digest: str,
+    client: JevClient,
+    relevance_threshold: float,
+    decision_threshold: float,
+) -> dict[str, Scores]:
+    """Score one batch; the unit `score_items` fans out over a `ThreadPoolExecutor` (card 3,
+    TRDD-CC0CZLMO) -- pulled out of the batch loop so each batch's `client.ask()` round trip
+    can run on its own worker thread. `items_by_id`/`digest`/`client`/the two thresholds are
+    read-only for the whole `score_items` call, so sharing them across threads needs no lock.
 
-    Mirrors `jevctx.scorer._ref_question` (private, so duplicated here rather than reached
-    into across module boundaries): every item in a batch shares one `state`, so the
-    question text is the only thing that tells the model which ref+question pair an answer
-    is about.
+    `asks_decision` replaces the old per-item `kind == "user"` check (TRDD-RAEGS1D5 defect 3):
+    card 5 (TRDD-HWF3QFAB) groups items by kind into homogeneous batches before this is ever
+    called, so every item in one batch shares the same answer -- checking it once per batch
+    is simpler and correct by construction (a batch can never mix a "user" item with a
+    non-"user" one). A non-"user" item still never gets a `:dec` question sent for it: Jev's
+    `state` carries only `{ref, text}` (no author), so asking it there would let that item's
+    text alone earn `decision_passed` and `compose`'s eviction protection, defeating the
+    question's own point.
     """
-    return Noul(
-        instructions=f"Considering item {ref} only: {question.instructions}",
-        true=question.true,
-        false=question.false,
-    )
+    if batch.meta.get("oversized"):
+        # Never sent -- fail-open at the library level regardless of caller intent, exactly
+        # like jevctx.scorer's own oversized handling. `compose` still refuses to inline it
+        # because `oversized=True` here (spec: "never inlined").
+        it = items_by_id[batch.items[0].id]
+        return {it.id: Scores(relevance=1.0, decision=1.0, oversized=True,
+                               kept=False, decision_passed=False)}
+
+    refs = batch.question_keys
+    state = _scorer.build_state(digest, batch.items, refs)
+    questions: dict[str, Question] = {}
+    for ref in refs:
+        questions[f"{ref}:rel"] = _scorer._ref_question(RETRIEVE_QUESTION, ref)
+        if asks_decision:
+            questions[f"{ref}:dec"] = _scorer._ref_question(DECISION_QUESTION, ref)
+
+    answers = client.ask(state, questions)  # a JevError here propagates -- see score_items
+
+    result: dict[str, Scores] = {}
+    for ref, lib_item in zip(refs, batch.items, strict=True):
+        it = items_by_id[lib_item.id]
+        rel_answer = answers.get(f"{ref}:rel")
+        if not isinstance(rel_answer, NoulAnswer):
+            raise JevValidationError(
+                f"expected a NoulAnswer for ref {ref!r}, got {type(rel_answer).__name__}"
+            )
+        rel = rel_answer.value
+        if asks_decision:
+            dec_answer = answers.get(f"{ref}:dec")
+            if not isinstance(dec_answer, NoulAnswer):
+                raise JevValidationError(
+                    f"expected a NoulAnswer for ref {ref!r}, got {type(dec_answer).__name__}"
+                )
+            dec = dec_answer.value
+            decision_passed = dec >= decision_threshold
+        else:
+            dec = 0.0  # never asked -- see this function's docstring
+            decision_passed = False
+        kept = rel >= relevance_threshold or decision_passed
+        result[it.id] = Scores(relevance=rel, decision=dec, oversized=False,
+                                kept=kept, decision_passed=decision_passed)
+    return result
 
 
 def score_items(
@@ -476,117 +553,115 @@ def score_items(
     *,
     relevance_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
     decision_threshold: float = DEFAULT_DECISION_THRESHOLD,
+    max_workers: int = 8,
 ) -> dict[str, Scores]:
-    """Score every item against both Noul questions in ONE fan-out, not two.
+    """Score every item against its question(s), batched by kind, fanned out concurrently.
 
-    A review of the first draft (two sequential `jevctx.scorer.score_items` calls, one per
-    question) found that sends every item's TEXT twice -- once per question's own batch
-    `state` -- doubling exactly the cost `jevctx.budget` exists to avoid (Jev bills for
-    `state`, not for questions). `jevctx.scorer.score_items` has no "two questions per item"
-    mode, so this drives `BudgetPlanner` + `client.ask()` directly instead: each batch's
-    `state.items` carries ONE entry per item (never duplicated), while the `questions` dict
-    carries TWO keys per item (`<ref>:rel`, `<ref>:dec`). `max_questions` is therefore HALVED
-    (`MAX_QUESTIONS_PER_REQUEST // 2`) when planning batches: the planner counts
-    `len(batch.items)` against `max_questions`, but each item now costs 2 real questions in
-    the request, so halving the item cap keeps the actual question count at or under Jev's
-    hard `MAX_QUESTIONS_PER_REQUEST` limit.
+    Sends both questions for a "user" item in ONE request, not two: a review of the first
+    draft (two sequential `jevctx.scorer.score_items` calls, one per question) found that
+    sends every item's TEXT twice -- once per question's own batch `state` -- doubling
+    exactly the cost `jevctx.budget` exists to avoid (Jev bills for `state`, not questions).
+    `jevctx.scorer.score_items` has no "two questions per item" mode, so this drives
+    `BudgetPlanner` + `client.ask()` directly via `_score_batch` instead.
 
-    Always raises on a scorer failure -- never fails open like the library's own default.
-    The one caller (`scripts/jev_compact.py compact`) must fall back to the fact-only
-    template on any Jev error, never silently keep everything.
+    Card 5 (TRDD-HWF3QFAB): items are split into two groups BEFORE planning -- `kind ==
+    "user"` (both questions, `_USER_BATCH_MAX_QUESTIONS` == 16 items per batch, so the real
+    question count never exceeds Jev's 32-per-request cap) and everything else (relevance
+    only, `_OTHER_BATCH_MAX_QUESTIONS` == 32 items per batch). Splitting up front -- rather
+    than the pre-card-5 approach of planning every item as if it cost 2 questions and only
+    skipping the `:dec` one for non-"user" items at send time -- means a transcript's
+    overwhelming non-"user" majority (report row 7/9: task-notifications alone outnumber
+    human messages ~27:1) now packs twice as many items per request, roughly halving both
+    the batch count and the digest `state` re-billed on every one of them.
 
-    TRDD-RAEGS1D5 defect 3 (adversarial review of 2353a88a): the DECISION question ("a
-    decision, constraint, correction or instruction the user stated") is only ever meaningful
-    for a genuinely human item -- Jev's `state` carries only `{ref, text}` (no author), so
-    asking it of an assistant/tool/event item let THAT item's text alone earn `decision_passed`
-    and gain `compose`'s eviction protection, defeating the question's own point. Only
-    `kind == "user"` items get a `:dec` question below; every other kind gets `decision=0.0`,
-    `decision_passed=False` without ever asking.
+    Card 3 (TRDD-CC0CZLMO): batches are planned once, then run concurrently on a
+    `ThreadPoolExecutor(max_workers)` -- mirrors `jevctx.scorer.score_items`'s own fan-out
+    (scorer.py:149-154), which a serial `for batch in batches` loop here used to leave
+    unused; a 49 MB / 7075-item real transcript measured 168s serial on HEAD, over both the
+    60s sync and the 120s (then-)detached compaction-lane timeouts. FAIL-CLOSED, unlike the
+    library's own default (never fails open like `jevctx.scorer.score_items`'s
+    `on_error="keep"`): the first `JevError` -- raised inside a worker thread, surfaced by
+    `future.result()` -- cancels every batch that has not started yet (`future.cancel()`; a
+    batch already mid-flight on another worker thread cannot be interrupted, only prevented
+    from ever starting) and propagates. The one caller (`scripts/jev_compact.py compact`)
+    must fall back to the fact-only template on any Jev error, never silently keep
+    everything. DETERMINISTIC regardless of `max_workers`: batch membership is decided by
+    `BudgetPlanner.plan` up front (never by execution order), and results are merged into
+    `scores`, a dict keyed by item id, so the ORDER batches finish in cannot change the
+    final content -- only how fast it arrives.
     """
     if not items:
         return {}
 
-    lib_items = [ScoreItem(id=it.id, text=it.text, tokens=it.tokens) for it in items]
     items_by_id = {it.id: it for it in items}
 
-    rel_tokens = estimate_tokens(_ref_question(RELEVANCE_QUESTION, "i0").to_payload())
-    dec_tokens = estimate_tokens(_ref_question(DECISION_QUESTION, "i0").to_payload())
-    # `BudgetPlanner._fits` uses `question_tokens` two ways: (a) `state + question_tokens *
-    # count` against the "all questions" cap -- correct here, since `count` items really do
-    # cost `question_tokens` (both questions) each; and (b) `state + question_tokens` against
-    # the "longest single question" cap -- an intentional OVER-estimate here (a real batch's
-    # longest single question is only ~half of `question_tokens`), which is conservative in
-    # the safe direction (packs batches a bit smaller / more round trips, never overflows a
-    # real Jev limit) rather than under-estimating and risking a 422.
-    #
-    # Still planned as if EVERY item costs both questions, even after defect 3 below (a
-    # non-`user` item only ever gets the relevance one) -- an over-estimate for those items,
-    # never an under-estimate, so a batch still never exceeds Jev's real per-request limit.
-    # Sizing batches by kind (human items 2 questions, others 1) is the reference's own Card 5
-    # batching rework and out of scope for this fix (reports/compaction-replacement/
-    # 20260923_200805+0200-jev-reference-gap-analysis.md, card 5).
-    question_tokens = rel_tokens + dec_tokens
+    rel_tokens = estimate_tokens(_scorer._ref_question(RETRIEVE_QUESTION, "i0").to_payload())
+    dec_tokens = estimate_tokens(_scorer._ref_question(DECISION_QUESTION, "i0").to_payload())
     envelope_tokens = estimate_tokens(_scorer.build_state(digest, [], []))
 
-    planner = BudgetPlanner(max_questions=MAX_QUESTIONS_PER_REQUEST // 2)
-    batches = planner.plan(lib_items, question_tokens, envelope_tokens)
+    user_items = [ScoreItem(id=it.id, text=it.text, tokens=it.tokens)
+                  for it in items if it.kind == "user"]
+    other_items = [ScoreItem(id=it.id, text=it.text, tokens=it.tokens)
+                   for it in items if it.kind != "user"]
+
+    user_batches = BudgetPlanner(
+        max_questions=_USER_BATCH_MAX_QUESTIONS,
+        state_plus_all_questions=_SAFE_STATE_PLUS_ALL_QUESTIONS_TOKENS,
+    ).plan(user_items, rel_tokens + dec_tokens, envelope_tokens)
+    other_batches = BudgetPlanner(
+        max_questions=_OTHER_BATCH_MAX_QUESTIONS,
+        state_plus_all_questions=_SAFE_STATE_PLUS_ALL_QUESTIONS_TOKENS,
+    ).plan(other_items, rel_tokens, envelope_tokens)
+    # (batch, asks_decision) -- the flag that was `items_by_id[...].kind == "user"` per item
+    # before card 5 is now decided once per batch, since a batch never mixes the two groups.
+    work: list[tuple[Batch, bool]] = (
+        [(b, True) for b in user_batches] + [(b, False) for b in other_batches]
+    )
 
     scores: dict[str, Scores] = {}
-    for batch in batches:
-        if batch.meta.get("oversized"):
-            # Never sent -- fail-open at the library level regardless of caller intent,
-            # exactly like jevctx.scorer's own oversized handling. `compose` still refuses
-            # to inline it because `oversized=True` here (spec: "never inlined").
-            it = items_by_id[batch.items[0].id]
-            scores[it.id] = Scores(relevance=1.0, decision=1.0, oversized=True,
-                                    kept=False, decision_passed=False)
-            continue
-
-        refs = batch.question_keys
-        state = _scorer.build_state(digest, batch.items, refs)
-        questions: dict[str, Question] = {}
-        for ref, lib_item in zip(refs, batch.items, strict=True):
-            questions[f"{ref}:rel"] = _ref_question(RELEVANCE_QUESTION, ref)
-            # Defect 3: only a genuinely human item gets asked "is this a decision the user
-            # stated" -- see this function's own docstring.
-            if items_by_id[lib_item.id].kind == "user":
-                questions[f"{ref}:dec"] = _ref_question(DECISION_QUESTION, ref)
-
-        answers = client.ask(state, questions)  # a JevError here propagates -- see docstring
-
-        for ref, lib_item in zip(refs, batch.items, strict=True):
-            it = items_by_id[lib_item.id]
-            rel_answer = answers.get(f"{ref}:rel")
-            if not isinstance(rel_answer, NoulAnswer):
-                raise JevValidationError(
-                    f"expected a NoulAnswer for ref {ref!r}, got {type(rel_answer).__name__}"
-                )
-            rel = rel_answer.value
-            if it.kind == "user":
-                dec_answer = answers.get(f"{ref}:dec")
-                if not isinstance(dec_answer, NoulAnswer):
-                    raise JevValidationError(
-                        f"expected a NoulAnswer for ref {ref!r}, got {type(dec_answer).__name__}"
-                    )
-                dec = dec_answer.value
-                decision_passed = dec >= decision_threshold
-            else:
-                # Never asked -- see this function's docstring (defect 3).
-                dec = 0.0
-                decision_passed = False
-            kept = rel >= relevance_threshold or decision_passed
-            scores[it.id] = Scores(relevance=rel, decision=dec, oversized=False,
-                                    kept=kept, decision_passed=decision_passed)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [
+            pool.submit(
+                _score_batch, batch, asks_decision=asks_decision, items_by_id=items_by_id,
+                digest=digest, client=client, relevance_threshold=relevance_threshold,
+                decision_threshold=decision_threshold,
+            )
+            for batch, asks_decision in work
+        ]
+        try:
+            for future in as_completed(futures):
+                scores.update(future.result())
+        except BaseException:
+            # Fail-closed (see docstring): stop every batch that hasn't started yet. A batch
+            # already running on another worker thread can't be interrupted -- `.cancel()`
+            # on it is a documented no-op (returns False) -- so this only shrinks how much
+            # MORE work happens after the first failure; the `with` block above still waits
+            # for whatever was already in flight before this exception leaves the function.
+            for f in futures:
+                f.cancel()
+            raise
     return scores
 
 
 def _format_pointer(item: Item) -> str:
-    first_line = item.text.splitlines()[0] if item.text else ""
-    preview = _truncate(first_line, _POINTER_PREVIEW_CHARS)
-    # WHY no path here: a pointer must never hand the model something it could `Read` --
-    # the transcript is 24-258 MB (docs_dev/jev-compaction-spec.md card 3) -- so the path
-    # lives once, in the header, never per pointer.
-    return f'[[elided id={item.id} tokens={item.tokens} "{preview}"]]'
+    """The elided-item stand-in text, via `jevctx.pipeline.format_pointer` (card 5,
+    TRDD-HWF3QFAB). The local literal this replaced had no escaping -- a `"` or `\\` in an
+    item's first line produced a pointer `pipeline.parse_pointer`/`find_pointers` could not
+    parse back -- and previewed the literal first line even when it was blank; the summary
+    below is the first NON-EMPTY line instead, truncated the same way as before. `lines=None`:
+    this project's pointer ids resolve straight into the transcript JSONL
+    (`jev_compact.py::_extract_block`), never into a sub-span of one block, so the
+    `lines=a-b` field `format_pointer` supports for segment-level pointers (card 6, not this
+    one) never applies here. WHY no path either: a pointer must never hand the model
+    something it could `Read` -- the transcript is 24-258 MB (docs_dev/jev-compaction-spec.md
+    card 3) -- so the path lives once, in the header, never per pointer.
+    """
+    summary = ""
+    for line in item.text.splitlines():
+        if line.strip():
+            summary = _truncate(line, _POINTER_PREVIEW_CHARS)
+            break
+    return format_pointer(Pointer(id=item.id, lines=None, tokens=item.tokens, summary=summary))
 
 
 # Spec: "Oversized single item (jev marks oversized) -> never inlined; pointer + first 20
