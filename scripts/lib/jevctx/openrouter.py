@@ -24,6 +24,8 @@ fix in step. ``usage.cost`` (USD) is the one field ``HttpJevClient`` does not ca
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import random
 import threading
@@ -47,6 +49,7 @@ from jevctx.types import (
     RATE_LIMIT_RPM,
     Answer,
     JevAuthError,
+    JevError,
     JevUnavailableError,
     JevValidationError,
     Question,
@@ -54,7 +57,23 @@ from jevctx.types import (
     parse_answer,
 )
 
-__all__ = ["API_KEY_ENV", "DEFAULT_BASE_URL", "DEFAULT_MODEL", "OpenRouterJevClient", "OpenRouterUsage"]
+__all__ = [
+    "API_KEY_ENV", "DEFAULT_BASE_URL", "DEFAULT_MODEL", "JevBlockedError",
+    "OpenRouterJevClient", "OpenRouterUsage",
+]
+
+# TRDD-1ETALGDG (2026-09-23): a real-transcript 403 against typesafe.ai (the backend
+# OpenRouter proxies Jev to) turned out to be a Cloudflare EDGE block -- an HTML "Attention
+# Required"/"Sorry, you have been blocked" page, forwarded through OpenRouter verbatim --
+# not a real OpenRouter account/key rejection (which is always JSON). The two look identical
+# at the HTTP-status level (both 403) but mean opposite things: an edge block is provoked by
+# THIS one request's content/volume and is worth retrying with a smaller/different request
+# (jev_compaction.py::score_items splits the batch); a real OpenRouter 403 is an account/key
+# state no retry or split fixes, so it stays JevAuthError. When set, JEV_DEBUG_LOG appends one
+# JSON line per 403 response (status/cf-ray/content-type/a sha256 of the body -- never the
+# body itself) for the bisection this card's investigation needed; unset by default, so a
+# normal run never pays for it.
+_DEBUG_LOG_ENV = "JEV_DEBUG_LOG"
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/alpha"
 DEFAULT_MODEL = "~typesafe/jev-latest"
@@ -82,6 +101,76 @@ class OpenRouterUsage(Usage):
             self.output_tokens += output_tokens
             self.requests += 1
             self.cost += cost
+
+
+class JevBlockedError(JevError):
+    """A 403 from a Cloudflare edge in front of the Jev backend, not a real OpenRouter
+    error (TRDD-1ETALGDG). Kept distinct from ``JevAuthError`` (a real 402/403 JSON
+    response — an account/key state, no retry fixes it) because an edge block is provoked
+    by THIS one request's own content or volume, scoped to the batch that tripped it —
+    ``jev_compaction.py::score_items`` catches it and splits the batch instead of treating
+    it as an outright auth failure; ``jev_compact.py``'s probe-stamp classifier gives it its
+    own ``kind="blocked"`` (non-declining, like auth/budget/invalid — never evidence the
+    whole endpoint is down).
+
+    ``cf_ray``/``body_sha256`` mirror ``JevUnavailableError``'s ``status``/``cause`` pattern
+    (types.py, commit 40cc06d1 follow-up): public attributes with safe defaults, carrying
+    the block response's own Cloudflare trace id and a hash of its body (never the body
+    itself — it may contain the transcript content that tripped the block) for whoever
+    reads the stamp/finding.
+    """
+
+    def __init__(
+        self, message: str = "", *, cf_ray: str | None = None, body_sha256: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.cf_ray = cf_ray
+        self.body_sha256 = body_sha256
+
+
+def _is_cloudflare_block(response: httpx.Response) -> bool:
+    """True iff a 403 ``response`` looks like a Cloudflare edge block rather than a genuine
+    OpenRouter JSON error (TRDD-1ETALGDG). Two independent signals, either is enough: (1) the
+    body is HTML carrying Cloudflare's own block-page wording — "Attention Required" / "you
+    have been blocked" are the exact phrases this card's real-transcript capture recorded
+    (reports/compaction-replacement/20260923_211019+0200-*.md); or (2) a ``cf-ray`` response
+    header (Cloudflare's own per-request trace id, stamped on every edge-terminated response)
+    on a body that is NOT valid JSON — a genuine OpenRouter error always returns JSON, so a
+    non-JSON body already means the edge intercepted the request before OpenRouter's own
+    error handler ever saw it.
+    """
+    if "cf-ray" in response.headers:
+        try:
+            response.json()
+        except ValueError:
+            return True
+    text_lower = response.text.lower()
+    return "attention required" in text_lower or "you have been blocked" in text_lower
+
+
+def _log_403_debug(response: httpx.Response) -> None:
+    """Append one diagnostic JSON line to ``$JEV_DEBUG_LOG`` for every 403 response — the
+    step-1 bisection instrumentation this card's investigation needed (status, cf-ray,
+    content-type, a sha256 of the body — never the body itself, which may carry the
+    transcript content that tripped the block). A no-op when the env var is unset (default),
+    and best-effort when set: a log-write failure must never fail the actual request.
+    """
+    path = os.environ.get(_DEBUG_LOG_ENV)
+    if not path:
+        return
+    record = {
+        "ts": time.time(),
+        "status": response.status_code,
+        "cf_ray": response.headers.get("cf-ray"),
+        "content_type": response.headers.get("content-type"),
+        "body_sha256": hashlib.sha256(response.content).hexdigest(),
+        "body_len": len(response.content),
+    }
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
 
 
 class OpenRouterJevClient:
@@ -185,6 +274,24 @@ class OpenRouterJevClient:
                 # JevValidationError below instead becomes kind="invalid" -- also
                 # non-declining, scoped to this one request (TRDD-RAEGS1D5 corrected the
                 # stale claim here that it became a declining "unavailable" stamp).
+                #
+                # TRDD-1ETALGDG: a 403 gets ONE extra check first -- a Cloudflare edge
+                # block (HTML "Attention Required"/"you have been blocked", or a cf-ray
+                # header on a non-JSON body) is NOT a real OpenRouter 403 (see
+                # `_is_cloudflare_block`'s docstring); it raises the distinct
+                # `JevBlockedError` instead, so `score_items` retries by splitting the
+                # batch rather than treating it as an unfixable account/key rejection.
+                # 402 never gets this check -- "insufficient credits" has no Cloudflare
+                # edge-block shape to confuse it with.
+                if response.status_code == 403:
+                    _log_403_debug(response)
+                    if _is_cloudflare_block(response):
+                        raise JevBlockedError(
+                            f"Jev (OpenRouter) request blocked by an edge firewall (403): "
+                            f"{_error_detail(response)[:200]}",
+                            cf_ray=response.headers.get("cf-ray"),
+                            body_sha256=hashlib.sha256(response.content).hexdigest(),
+                        )
                 if response.status_code in (402, 403):
                     raise JevAuthError(f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}")
                 if response.status_code == 422:

@@ -77,7 +77,9 @@ where ``armed.flag`` and the daemon's other control-plane files already live), s
 "model": None, "provider": str, "kind": str, "retry_after_s": float|None}``. ``model`` is
 always ``None`` — nothing in this CLI's probe response carries a model name to put there.
 ``kind`` is one of ``"unavailable"``, ``"unreachable"``, ``"rate_limited"``, ``"auth"``,
-``"budget"``, ``"invalid"``, ``"unknown"``, ``"ok"`` (see ``write_probe_stamp``) — it is
+``"budget"``, ``"invalid"``, ``"blocked"`` (TRDD-1ETALGDG — a Cloudflare edge block, never
+declining, see ``_stamp_kind_for_error``), ``"unknown"``, ``"ok"`` (see ``write_probe_stamp``)
+— it is
 what `compact`'s decline gate keys on, not ``ok`` alone. ``retry_after_s`` is only ever
 non-``None`` for ``kind="rate_limited"`` (the server's own ``Retry-After`` header value, in
 seconds). Two TTLs, read by different callers: ``PROBE_OK_TTL_S`` (6h) documents how long an
@@ -106,6 +108,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 import global_state  # noqa: E402  -- needs the sys.path line above
 import jev_compaction as jc  # noqa: E402
 import state  # noqa: E402
+from jevctx.openrouter import JevBlockedError  # noqa: E402  -- TRDD-1ETALGDG, see _stamp_kind_for_error
 from jevctx.provider import DEFAULT_PROVIDER, PROVIDER_ENV, make_client  # noqa: E402
 from jevctx.tokens import estimate_tokens  # noqa: E402
 from jevctx.types import (  # noqa: E402
@@ -194,9 +197,10 @@ def write_probe_stamp(
     """Atomically write the probe stamp — see module docstring for the shape/TTLs.
 
     ``kind`` classifies WHY (one of ``"unavailable"``, ``"unreachable"``,
-    ``"rate_limited"``, ``"auth"``, ``"budget"``, ``"invalid"``, ``"unknown"``, ``"ok"``)
+    ``"rate_limited"``, ``"auth"``, ``"budget"``, ``"invalid"``, ``"blocked"``,
+    ``"unknown"``, ``"ok"``)
     — `compact`'s fast-decline gate keys on it, not on ``ok`` alone: an
-    ``auth``/``budget``/``invalid``/``unknown`` failure is scoped to THIS caller's
+    ``auth``/``budget``/``invalid``/``blocked``/``unknown`` failure is scoped to THIS caller's
     key/request/attempt, not evidence the Jev endpoint itself is down, so none of them
     black out compaction for every other shell on the machine the way an ``unavailable``
     stamp correctly does. ``unreachable`` is the same non-decline-by-default treatment for
@@ -237,7 +241,17 @@ def _stamp_kind_for_error(exc: JevError) -> str:
     Any OTHER, genuinely unrecognized `JevError` subclass maps to `"unknown"` -- also
     non-declining (retrying/falling back on an unclassified error is safe; blacking out
     every other caller's compaction on one is not).
+
+    `JevBlockedError` (TRDD-1ETALGDG) maps to `"blocked"` -- `jev_compaction.py::score_items`
+    only ever lets one escape after every batch has been split down and retried per its own
+    caps (see its docstring), so by the time this CLI sees one, the whole attempt genuinely
+    could not compact anything. Still non-declining, same reasoning as `"invalid"`: a
+    Cloudflare edge block is provoked by THIS request's content/volume, not evidence the
+    OpenRouter endpoint itself is down, so it must not black out every other caller's
+    compaction the way `"unavailable"` correctly does.
     """
+    if isinstance(exc, JevBlockedError):
+        return "blocked"
     if isinstance(exc, JevAuthError):
         return "auth"
     if isinstance(exc, JevBudgetError):

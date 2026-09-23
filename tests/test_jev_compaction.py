@@ -12,9 +12,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import jev_compaction as jc  # noqa: E402
+import pytest  # noqa: E402
+from jevctx.openrouter import JevBlockedError  # noqa: E402
 from jevctx.pipeline import find_pointers, parse_pointer  # noqa: E402
 from jevctx.testing import FakeJevClient  # noqa: E402
-from jevctx.types import JevUnavailableError, NoulAnswer  # noqa: E402
+from jevctx.types import JevUnavailableError, JevValidationError, NoulAnswer  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_small.jsonl"
 # TRDD-RAEGS1D5 (2026-09-23): a SEPARATE fixture, not an edit to the shared one above --
@@ -661,6 +663,104 @@ def test_score_items_error_propagates_from_any_batch() -> None:
     except JevUnavailableError:
         return
     raise AssertionError("expected the batch-3 failure to propagate")
+
+
+# --- TRDD-1ETALGDG: a Cloudflare block / oversized batch splits instead of aborting ---
+
+
+def test_score_items_splits_a_blocked_batch_and_pointers_the_poison_item(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A client that blocks (`JevBlockedError`) any request whose state carries one marked
+    item's text must not abort the whole compaction -- `score_items` splits the batch down
+    until that item is isolated alone, still fails there too (proving it "still fails alone",
+    the card's own test wording), and becomes a pointer (`kept=False`) -- every OTHER item
+    from the same original batch is still scored normally, and exactly one finding line on
+    stderr names the poison item."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(8)]
+    poison_id = "i3:0"
+    poison_marker = "text 3"  # substring-unique among "text 0".."text 7"
+
+    class _BlocksAnyBatchContainingMarker:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            texts = [entry["text"] for entry in state["items"]]
+            if any(poison_marker in t for t in texts):
+                raise JevBlockedError(
+                    "simulated cloudflare block", cf_ray="test-ray", body_sha256="ab" * 32
+                )
+            return {key: NoulAnswer(noul=0.9) for key in questions}
+
+    scores = jc.score_items(items, "digest", _BlocksAnyBatchContainingMarker(), max_workers=1)
+
+    assert set(scores) == {it.id for it in items}  # nothing dropped -- every item scored
+    assert scores[poison_id].kept is False
+    assert scores[poison_id].oversized is False  # a pointer, not the 20-line oversized preview
+    for it in items:
+        if it.id != poison_id:
+            assert scores[it.id].kept is True, f"{it.id} should have scored normally"
+
+    finding_lines = [line for line in capsys.readouterr().err.splitlines() if poison_id in line]
+    assert len(finding_lines) == 1, f"expected exactly one finding line, got: {finding_lines}"
+
+
+def test_score_items_splits_a_max_tokens_exceeded_batch_and_succeeds() -> None:
+    """The live HTTP 400 `max_tokens_exceeded` case (commit 61cad99c's own measured
+    defect: a batch `BudgetPlanner`'s token ESTIMATE thought fit, the real backend
+    didn't) -- splitting the batch in half must recover it, with every item still scored,
+    no pointers and no finding."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(8)]
+
+    class _RejectsBatchesOverFourItems:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            if len(state["items"]) > 4:
+                raise JevValidationError(
+                    "Jev (OpenRouter) returned 400: {'error_type': 'max_tokens_exceeded'}"
+                )
+            return {key: NoulAnswer(noul=0.9) for key in questions}
+
+    scores = jc.score_items(items, "digest", _RejectsBatchesOverFourItems(), max_workers=1)
+
+    assert set(scores) == {it.id for it in items}
+    assert all(s.kept for s in scores.values())
+
+
+def test_score_items_raises_when_every_batch_is_blocked() -> None:
+    """When literally nothing could be scored -- every batch blocked all the way down to
+    single items -- `score_items` must raise, not return an all-pointers dict as if it had
+    succeeded: `jev_compact.py`'s caller falls back to the fact-only template on any Jev
+    error, and an all-pointers "success" would skip that fallback for a document with zero
+    usable content."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(3)]
+
+    class _AlwaysBlocks:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            raise JevBlockedError("simulated total block")
+
+    with pytest.raises(JevBlockedError):
+        jc.score_items(items, "digest", _AlwaysBlocks(), max_workers=1)
+
+
+def test_score_items_retry_cap_bounds_total_split_requests() -> None:
+    """A backend that blocks EVERY request, even split ones, must not let `score_items`
+    grind through unbounded splits -- `max_retried_requests` caps the total EXTRA
+    (non-original) requests, and hitting it raises rather than degrading further."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(8)]
+
+    class _AlwaysBlocks:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            self.calls += 1
+            raise JevBlockedError("simulated total block")
+
+    client = _AlwaysBlocks()
+    with pytest.raises(JevBlockedError):
+        jc.score_items(items, "digest", client, max_workers=1, max_retried_requests=1)
+
+    # Unbounded, an 8-item batch could split down to 1-item leaves over several levels
+    # (many more than 4 requests); the cap=1 must have stopped it almost immediately.
+    assert client.calls <= 4, f"expected the retry cap to bound the requests, got {client.calls}"
 
 
 def test_score_items_parallel_is_faster_than_serial() -> None:

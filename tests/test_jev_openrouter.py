@@ -209,7 +209,9 @@ def test_402_403_raise_jev_auth_error_not_validation_error(monkeypatch: pytest.M
     """402 (insufficient credits) / 403 (forbidden -- bad key permissions, a guardrail
     block, or a moderation flag) are non-retryable account/request states -- must raise
     JevAuthError (not the catch-all JevValidationError) with no retry, so jev_compact.py
-    stamps kind="auth" instead of misreporting a Jev outage (TRDD-541CBN36)."""
+    stamps kind="auth" instead of misreporting a Jev outage (TRDD-541CBN36). A bare,
+    header-less 403 (no cf-ray, no HTML body) must still classify as a real OpenRouter
+    error, not a Cloudflare block (TRDD-1ETALGDG) -- see the two tests below for that split."""
     monkeypatch.setenv(API_KEY_ENV, "or-key")
     call_count = {"n": 0}
 
@@ -224,3 +226,48 @@ def test_402_403_raise_jev_auth_error_not_validation_error(monkeypatch: pytest.M
         client.ask(STATE, QUESTIONS)
     client.close()
     assert call_count["n"] == 1
+
+
+def test_403_cloudflare_html_block_raises_jev_blocked_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-1ETALGDG: a Cloudflare edge block (an HTML body carrying its own "you have been
+    blocked" wording, plus a `cf-ray` trace header) is NOT a real OpenRouter 403 -- it must
+    raise the distinct `JevBlockedError`, carrying the response's own cf-ray and a hash of
+    its body, so `jev_compaction.py::score_items` retries by splitting the batch instead of
+    treating it as an unfixable account/key rejection."""
+    from jevctx.openrouter import JevBlockedError
+
+    monkeypatch.setenv(API_KEY_ENV, "or-key")
+    html_body = "<html><body>Sorry, you have been blocked</body></html>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            headers={"cf-ray": "abcdef1234567890-SJC", "content-type": "text/html"},
+            text=html_body,
+        )
+
+    client = OpenRouterJevClient(
+        transport=httpx.MockTransport(handler), max_retries=1, sleep=lambda s: None
+    )
+    with pytest.raises(JevBlockedError) as excinfo:
+        client.ask(STATE, QUESTIONS)
+    client.close()
+    assert excinfo.value.cf_ray == "abcdef1234567890-SJC"
+    assert len(excinfo.value.body_sha256) == 64  # a full sha256 hex digest, never the body itself
+
+
+def test_403_json_error_still_raises_jev_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real OpenRouter 403 -- a JSON body, no Cloudflare wording and no cf-ray header --
+    must still raise `JevAuthError` unchanged (TRDD-1ETALGDG: the classifier must not
+    over-fire on every 403)."""
+    monkeypatch.setenv(API_KEY_ENV, "or-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": "forbidden: bad key permissions"})
+
+    client = OpenRouterJevClient(
+        transport=httpx.MockTransport(handler), max_retries=1, sleep=lambda s: None
+    )
+    with pytest.raises(JevAuthError, match="403"):
+        client.ask(STATE, QUESTIONS)
+    client.close()

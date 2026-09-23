@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,7 @@ if str(_LIB_DIR) not in sys.path:
 import transcript_roles  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared classifier
 from jevctx import scorer as _scorer  # noqa: E402
 from jevctx.budget import Batch, BudgetPlanner  # noqa: E402
+from jevctx.openrouter import JevBlockedError  # noqa: E402  -- TRDD-1ETALGDG, see score_items
 from jevctx.pipeline import RETRIEVE_QUESTION, format_pointer  # noqa: E402
 from jevctx.tokens import estimate_tokens  # noqa: E402
 from jevctx.types import (  # noqa: E402
@@ -193,6 +195,55 @@ _OTHER_BATCH_MAX_QUESTIONS = MAX_QUESTIONS_PER_REQUEST
 # tighter cap for the "other" group's typically-small notification/assistant items; this
 # only kicks in for the rarer batch that happens to hold several large tool outputs.
 _SAFE_STATE_PLUS_ALL_QUESTIONS_TOKENS = 20_000
+
+# TRDD-1ETALGDG: a real-transcript compaction hit a Cloudflare edge block (`JevBlockedError`)
+# and a live HTTP 400 `max_tokens_exceeded` (a batch `BudgetPlanner` estimated as fitting but
+# didn't) -- both used to abort the WHOLE compaction on the first bad batch. `score_items` now
+# splits a batch that hits either in half and retries the halves (see `_score_batch_resilient`),
+# bounded by two independent caps so a persistently-blocking backend can't turn one bad batch
+# into an unbounded retry storm: `_MAX_SPLIT_DEPTH` bounds how many times any ONE batch is
+# halved (5 halvings takes the largest batch this module ever plans, 32 items -- `card 5's
+# _OTHER_BATCH_MAX_QUESTIONS` -- down to 1: 32->16->8->4->2->1), and `_MAX_RETRIED_REQUESTS`
+# bounds the TOTAL extra (non-original) requests across the whole `score_items` call.
+_MAX_SPLIT_DEPTH = 5
+_MAX_RETRIED_REQUESTS = 64
+
+# The exact `error_type` OpenRouter's JSON body carries for the live 400 commit 61cad99c
+# measured (`{"error_type": "max_tokens_exceeded"}`) -- `_error_detail` folds an error body
+# with no top-level "error"/"message" key into `str(payload)`, so this substring survives into
+# `JevValidationError`'s own message regardless of the dict's exact key order/quoting.
+_MAX_TOKENS_EXCEEDED_MARKER = "max_tokens_exceeded"
+
+
+def _is_max_tokens_exceeded(exc: JevValidationError) -> bool:
+    """True iff `exc` is the live HTTP 400 `max_tokens_exceeded` response (a batch the
+    planner's own token ESTIMATE thought fit, but the backend's real tokenizer didn't) --
+    as opposed to any OTHER `JevValidationError` (a 404/413/422/malformed-response bug in
+    the request shape itself, which splitting the batch cannot fix and must not retry)."""
+    return _MAX_TOKENS_EXCEEDED_MARKER in str(exc)
+
+
+class _RetryBudget:
+    """Thread-safe counter for `score_items`'s `_MAX_RETRIED_REQUESTS` cap.
+
+    Shared across every batch's split-retry recursion (one instance per `score_items` call),
+    not per-batch: `ThreadPoolExecutor` runs many ORIGINAL batches concurrently, and the cap
+    exists to bound the EXTRA load a block/oversize storm puts on the backend across all of
+    them together, not to give each batch its own separate budget.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._used = 0
+        self._lock = threading.Lock()
+
+    def take(self) -> bool:
+        """Reserve one retried request; `False` if the cap is already spent."""
+        with self._lock:
+            if self._used >= self._limit:
+                return False
+            self._used += 1
+            return True
 
 
 def _tool_result_text(content: Any) -> str:
@@ -546,6 +597,105 @@ def _score_batch(
     return result
 
 
+def _halve(batch: Batch) -> tuple[Batch, Batch]:
+    """Split `batch` into two order-preserving halves, each with its own `i0..iN-1` refs.
+
+    Never re-runs `BudgetPlanner`: both halves are strict subsets of a batch that already
+    fit under every cap, so they fit too -- no re-planning needed, just fewer items sharing
+    the same relative ref numbering `_score_batch` already expects.
+    """
+    mid = len(batch.items) // 2
+    left, right = batch.items[:mid], batch.items[mid:]
+    return (
+        Batch(items=left, question_keys=[f"i{i}" for i in range(len(left))]),
+        Batch(items=right, question_keys=[f"i{i}" for i in range(len(right))]),
+    )
+
+
+def _score_batch_resilient(
+    batch: Batch,
+    *,
+    asks_decision: bool,
+    items_by_id: dict[str, Item],
+    digest: str,
+    client: JevClient,
+    relevance_threshold: float,
+    decision_threshold: float,
+    retry_budget: _RetryBudget,
+    origin_index: int,
+    max_split_depth: int,
+    depth: int = 0,
+) -> tuple[dict[str, Scores], list[str]]:
+    """`_score_batch`, but a `JevBlockedError` or a `max_tokens_exceeded` `JevValidationError`
+    splits the batch in half and retries the halves instead of aborting the whole
+    `score_items` call (TRDD-1ETALGDG).
+
+    Recurses SERIALLY within this one worker thread -- never through `score_items`'s
+    `ThreadPoolExecutor` -- so a block/oversize storm never compounds into MORE concurrent
+    requests against whatever tripped it ("no fan-out of blocked siblings", the card's own
+    wording). Each half's retry costs one unit of `retry_budget` (the ORIGINAL per-batch
+    attempt from `score_items`'s own work list is never charged, only a split-triggered
+    retry is); if the budget is spent, this re-raises the triggering error immediately,
+    which `score_items`'s existing fail-closed handling turns into a whole-call failure --
+    deliberate: a backend blocking/oversizing enough to exhaust the cap needs the caller
+    to fall back, not to keep grinding through more splits.
+
+    Returns `(scores, blocked_ids)`: `blocked_ids` names every item that was still
+    unscoreable even alone, once `max_split_depth` (or a single-item batch) was reached --
+    `score_items` turns each into a pointer-only entry and prints one finding line per item,
+    never a raise, UNLESS every batch in the whole call ends up blocked (checked once, in
+    `score_items`, after every batch has finished).
+    """
+    try:
+        return (
+            _score_batch(
+                batch, asks_decision=asks_decision, items_by_id=items_by_id, digest=digest,
+                client=client, relevance_threshold=relevance_threshold,
+                decision_threshold=decision_threshold,
+            ),
+            [],
+        )
+    except (JevBlockedError, JevValidationError) as exc:
+        is_retryable = isinstance(exc, JevBlockedError) or _is_max_tokens_exceeded(exc)
+        if not is_retryable:
+            raise  # a non-max_tokens_exceeded JevValidationError is a request-shape bug --
+            # splitting the batch cannot fix a malformed request, so this propagates exactly
+            # like it did before this card (JevValidationError.__doc__: "never retried").
+
+        if len(batch.items) <= 1 or depth >= max_split_depth:
+            # Terminal: never scored, never inlined (verbatim guarantee -- the item's own
+            # text is never touched, it just never reaches Jev again). One finding line per
+            # item, carrying exactly the step-1 bisection facts the card asked for: which
+            # origin batch, how many split levels, the item id, and -- for a block -- the
+            # response's own cf-ray/body-hash (never the body itself).
+            detail = ""
+            if isinstance(exc, JevBlockedError):
+                detail = f" cf_ray={exc.cf_ray} body_sha256={exc.body_sha256[:16]}"
+            for it in batch.items:
+                print(
+                    f"jev: item {it.id} never scored (origin_batch={origin_index} "
+                    f"depth={depth} {type(exc).__name__}{detail}) -- inlined as a pointer",
+                    file=sys.stderr,
+                )
+            return {}, [it.id for it in batch.items]
+
+        left, right = _halve(batch)
+        merged: dict[str, Scores] = {}
+        blocked: list[str] = []
+        for half in (left, right):
+            if not retry_budget.take():
+                raise  # cap exhausted -- see docstring: bail the whole call, don't degrade
+            half_scores, half_blocked = _score_batch_resilient(
+                half, asks_decision=asks_decision, items_by_id=items_by_id, digest=digest,
+                client=client, relevance_threshold=relevance_threshold,
+                decision_threshold=decision_threshold, retry_budget=retry_budget,
+                origin_index=origin_index, max_split_depth=max_split_depth, depth=depth + 1,
+            )
+            merged.update(half_scores)
+            blocked.extend(half_blocked)
+        return merged, blocked
+
+
 def score_items(
     items: list[Item],
     digest: str,
@@ -554,6 +704,8 @@ def score_items(
     relevance_threshold: float = DEFAULT_RELEVANCE_THRESHOLD,
     decision_threshold: float = DEFAULT_DECISION_THRESHOLD,
     max_workers: int = 8,
+    max_split_depth: int = _MAX_SPLIT_DEPTH,
+    max_retried_requests: int = _MAX_RETRIED_REQUESTS,
 ) -> dict[str, Scores]:
     """Score every item against its question(s), batched by kind, fanned out concurrently.
 
@@ -589,6 +741,20 @@ def score_items(
     `BudgetPlanner.plan` up front (never by execution order), and results are merged into
     `scores`, a dict keyed by item id, so the ORDER batches finish in cannot change the
     final content -- only how fast it arrives.
+
+    TRDD-1ETALGDG: each batch now runs through `_score_batch_resilient` instead of
+    `_score_batch` directly -- a `JevBlockedError` (a Cloudflare edge block, see
+    `jevctx.openrouter`) or a `max_tokens_exceeded` `JevValidationError` splits that ONE
+    batch and retries the halves (bounded by `max_split_depth`/`max_retried_requests`)
+    rather than aborting the whole call the way every other `JevError` still does. An item
+    that is still unscoreable once split all the way down becomes a pointer-only `Scores`
+    entry (`kept=False, oversized=False` -- rendered by `compose()` exactly like any other
+    below-threshold item, no inlined text: the verbatim guarantee holds because a
+    never-scored item's text is never sent again, let alone altered) instead of failing the
+    whole compaction -- UNLESS literally every batch ends up blocked, which raises
+    `JevBlockedError` (nothing was actually compacted, so this must count as a Jev failure
+    and let the caller fall back, not silently emit an all-pointers document as if it
+    succeeded).
     """
     if not items:
         return {}
@@ -619,18 +785,24 @@ def score_items(
     )
 
     scores: dict[str, Scores] = {}
+    blocked_ids: list[str] = []
+    retry_budget = _RetryBudget(max_retried_requests)
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [
             pool.submit(
-                _score_batch, batch, asks_decision=asks_decision, items_by_id=items_by_id,
-                digest=digest, client=client, relevance_threshold=relevance_threshold,
-                decision_threshold=decision_threshold,
+                _score_batch_resilient, batch, asks_decision=asks_decision,
+                items_by_id=items_by_id, digest=digest, client=client,
+                relevance_threshold=relevance_threshold, decision_threshold=decision_threshold,
+                retry_budget=retry_budget, origin_index=origin_index,
+                max_split_depth=max_split_depth,
             )
-            for batch, asks_decision in work
+            for origin_index, (batch, asks_decision) in enumerate(work)
         ]
         try:
             for future in as_completed(futures):
-                scores.update(future.result())
+                batch_scores, batch_blocked = future.result()
+                scores.update(batch_scores)
+                blocked_ids.extend(batch_blocked)
         except BaseException:
             # Fail-closed (see docstring): stop every batch that hasn't started yet. A batch
             # already running on another worker thread can't be interrupted -- `.cancel()`
@@ -640,6 +812,18 @@ def score_items(
             for f in futures:
                 f.cancel()
             raise
+
+    if blocked_ids and not scores:
+        # Every batch ended up blocked -- nothing was actually compacted (see docstring):
+        # this is a Jev failure, not a (useless) all-pointers success.
+        raise JevBlockedError(
+            f"every batch was blocked or oversized ({len(blocked_ids)} item(s)); "
+            "nothing could be scored"
+        )
+    for item_id in blocked_ids:
+        # Never scored, never inlined -- see docstring's verbatim-guarantee note.
+        scores[item_id] = Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                                  decision_passed=False)
     return scores
 
 

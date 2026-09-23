@@ -415,8 +415,12 @@ def handle_nonzero_exit(
                 "— fact-only context injected",
             )
             return
-        # kind == "budget", or any other unrecognized string — a bug in THIS attempt, not a
-        # known outage shape; never decline the next one on it.
+        # kind == "budget" or "blocked" (TRDD-1ETALGDG -- a Cloudflare edge block that
+        # persisted past every split-retry `score_items` tried), or any other unrecognized
+        # string — scoped to THIS attempt, not a known whole-endpoint outage shape; never
+        # decline the next one on it. No dedicated branch needed: `reason` already carries
+        # the specific "blocked"/"budget" detail, and this generic wording is accurate for
+        # both.
         record_finding(
             sev="HIGH", code="JEV-COMPACT-FAILED",
             msg=f"[jev-compaction] jev_compact failed (exit {proc.returncode}): {reason}",
