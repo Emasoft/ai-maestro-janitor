@@ -2,7 +2,7 @@
 name: review-fork-gate-when-to-spawn-and-when-not
 description: "the review-fork gate fires on every turn / should I spawn a fork for a docs-only commit / the adversarial review loop is eating the session / forks keep finding smaller and smaller things / when is a review fork worth it / prose-only turn still triggered the gate / how do I stop reviewing my own prose / the gate blocks my turn and I have nothing to review / review-supervisor says N changes unreviewed / diminishing returns on adversarial review / should I fork after every commit / stopping criterion for review forks / the fork found a defect in the fix for the last fork's defect / agentlenspro review-gate keeps firing / is a card closure worth a review fork"
 ocd: 2026-09-05
-lmd: 2026-09-05
+lmd: 2026-09-23
 publish-globally: true
 metadata:
   node_type: memory
@@ -13,7 +13,7 @@ metadata:
 # review-fork-gate-when-to-spawn-and-when-not
 
 
-^ATOM-0GLJ-EK3A [desc: "Fork when the turn changed EXECUTABLE BEHAVIOUR, asserted a VERDICT, or CHARACTERISED WHAT EVIDENCE ESTABLISHES — that third clause is load-bearing: without it the rule suppresses review of exactly th", keywords: should_I_spawn_a_fork_for_a_docs-only_commit review-fork_gate_fires_on_every_turn prose-only_turn_triggered_the_gate when_is_a_review_fork_worth_it stopping_criterion_for_review_forks the_adversarial_review_loop_is_eating_the_session forks_finding_smaller_and_smaller_things diminishing_returns_on_adversarial_review is_a_card_closure_worth_a_fork gate_blocks_the_turn_with_nothing_to_review how_to_decline_the_review_gate_honestly review-supervisor_says_changes_unreviewed, ocd: 2026-09-05, lmd: 2026-09-05]
+^ATOM-0GLJ-EK3A [desc: "Fork when the turn changed EXECUTABLE BEHAVIOUR, asserted a VERDICT, or CHARACTERISED WHAT EVIDENCE ESTABLISHES — that third clause is load-bearing; the gate also fires again after I commit, because a", keywords: should_I_spawn_a_fork_for_a_docs-only_commit review-fork_gate_fires_on_every_turn prose-only_turn_triggered_the_gate when_is_a_review_fork_worth_it stopping_criterion_for_review_forks the_adversarial_review_loop_is_eating_the_session forks_finding_smaller_and_smaller_things diminishing_returns_on_adversarial_review is_a_card_closure_worth_a_fork gate_blocks_the_turn_with_nothing_to_review how_to_decline_the_review_gate_honestly review-supervisor_says_changes_unreviewed, ocd: 2026-09-05, lmd: 2026-09-23]
 **SPAWN a review fork when the turn (a) changed EXECUTABLE BEHAVIOUR — code, a test, a script, a
 config the machine reads; (b) asserted a VERDICT — closing a card, claiming a fix works, a rules
 interpretation, a memory write; or (c) CHARACTERISED WHAT EVIDENCE ESTABLISHES — "this shows X",
@@ -46,6 +46,8 @@ or (c); read the diff for those.
 reviewing this card's prose" is not "stop reviewing". Do the fixes it names, then stop on that
 subject regardless of what a further review would say; rescoping to a different subject is
 legitimate and is not defiance.
+
+**A commit after the review fork re-arms the gate — commit first, then spawn the fork last.** [^1]
 
 
 ^ATOM-D8ML-JZ6R [desc: "The corrected rule reduces to 'fork unless the turn is MECHANICAL or purely SUBTRACTIVE' — the exemption is small by construction, and its value is a checkable reason to decline, not a large saving", keywords: does_the_criterion_exempt_anything_at_all is_clause_c_too_broad what_turn_correctly_gets_no_fork fork_unless_mechanical_or_subtractive how_much_does_the_rule_actually_suppress can_I_decline_the_gate_honestly using_the_rule_as_a_rationalisation if_you_cannot_name_which_clause_fires examples_of_turns_needing_no_review the_criterion's_real_yield, ocd: 2026-09-05, lmd: 2026-09-05]
@@ -141,3 +143,5 @@ memory is recalled by symptom and outlives the case. An atom about not minting r
 not mint one.)*
 
 ## Notes and lessons learned
+
+[^1]: [id: ATOM-4YHQ-4RO2, status: valid, keywords: "review_gate_fires_again_after_commit second_review_fork_for_the_same_change NO_REVIEW_POSSIBLE_exit_rejected commit_after_review_re-arms_the_gate positional_exit_review_gate write_after_the_last_review review_fork_costs_500k_tokens commit_then_review_order Stop_hook_review-gate_loop agentlenspro_review-gate", ocd: 2026-09-23, lmd: 2026-09-23] DO NOT commit (or run any write-shaped command) AFTER spawning the review fork for that same change, BECAUSE the Stop-hook gate is positional: a write after the last review re-arms it, and the `REVIEW-GATE: NO REVIEW POSSIBLE` exit is rejected whenever a spawn was possible, so a verified one-line edit costs a second ~500k-token review (measured 2026-09-24, commits 3bcea8ac and 0e5d02a1). DO commit first, then spawn the review fork as the last tool call of the turn.
