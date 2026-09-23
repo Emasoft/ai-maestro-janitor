@@ -3,7 +3,7 @@ trdd-id: I63GQJTK
 title: A heartbeat during in-flight background work prints only janitor heartbeat, so a working session looks stalled to the owner
 column: todo
 created: 2026-09-23T22:35:38+0200
-updated: 2026-09-23T22:35:38+0200
+updated: 2026-09-23T22:36:06+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -23,3 +23,8 @@ Owner, 2026-09-23 22:35 (verbatim): "you stopped again? and the janitor is the o
 ## Approval log
 
 - 2026-09-23T22:35:38+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Cause and threshold (review 2026-09-23)
+
+- Cause, stated honestly: the orchestrator knew workers were in flight and the owner was asking for speed, yet relayed nothing on quiet fires; the protocol forbids extra lines on quiet fires and gives no sanctioned way to report progress, but the silence was the orchestrator's choice, not something the protocol forced.
+- Stall threshold: a worker counts as stalled only after 15 minutes with no transcript activity AND no running child process (a long Bash call such as a 9-minute full test run updates no transcript), so full-suite runs never raise false stalls.
