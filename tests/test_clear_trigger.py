@@ -437,6 +437,92 @@ def _capture_still_wanted(mod, monkeypatch) -> dict:
     return captured
 
 
+
+NBSP = " "
+
+
+def _real_pane_text(field: str) -> str:
+    """Shaped like a real tmux/iTerm capture: box rule, marker + NBSP + field, box rule --
+    same fixture convention as `tests/test_inject_still_wanted.py::_pane`. The shape is
+    load-bearing: an invented pane format parses as 'busy' to `prompt_field_is_empty`/
+    `prompt_field_shows_only`, which silently defeats the whole point of driving the real
+    `inject_until_sent` state machine below."""
+    return "some earlier output\n" + "─" * 40 + f"\n❯{NBSP}{field}\n" + "─" * 40 + "\n"
+
+
+def _fake_tmux_io(monkeypatch, mod):
+    """TRDD-RAEGS1D5 card 5 item 4: patches ONLY the two I/O primitives
+    `terminal_trigger` bottoms out on for a tmux channel -- `subprocess.run` (the keystroke
+    sender `terminal_trigger._run_steps` uses for `tmux send-keys`) and
+    `terminal_trigger.state.run_subprocess` (the pane read-back `read_pane_text`'s tmux
+    branch uses for `tmux capture-pane`) -- against a tiny stateful pane. Everything ABOVE
+    that -- `inject_until_sent`'s type/read-back/submit state machine, `run_chained_inject`'s
+    gate wait, and `_run_chain_payload`'s real `still_wanted`/`pre_submit_first` closures --
+    is unmodified production code, never a test-controlled fake of `run_chained_inject`
+    itself (the shape the two tests this replaces used, and the shape that made them
+    self-fulfilling: whether `pre_submit_first` ran was decided by the TEST, not by any
+    real cancel logic).
+
+    Returns the mutable `field` dict so a test can assert nothing was ever typed.
+    """
+    field = {"text": ""}
+
+    def _fake_run(argv, **_kwargs):
+        # argv shape fixed by `terminal_trigger.build_type_only_steps` /
+        # `build_submit_steps` / `build_clear_field_steps`:
+        #   ["tmux", "send-keys", "-t", pane, "-l", text]   (type)
+        #   ["tmux", "send-keys", "-t", pane, "Enter"]       (submit)
+        #   ["tmux", "send-keys", "-t", pane, "C-a"|"C-k"|"C-u"]  (clear)
+        if len(argv) >= 5 and argv[0] == "tmux" and argv[1] == "send-keys":
+            key = argv[4]
+            if key == "-l" and len(argv) >= 6:
+                field["text"] = argv[5]
+            elif key in ("Enter", "C-a", "C-k", "C-u"):
+                field["text"] = ""
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    def _fake_run_subprocess(cmd, **_kwargs):
+        if cmd[:2] == ["tmux", "capture-pane"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=_real_pane_text(field["text"]))
+        return subprocess.CompletedProcess(cmd, 1)
+
+    monkeypatch.setattr(mod.terminal_trigger.state, "run_subprocess", _fake_run_subprocess)
+    return field
+
+
+def _no_agents_no_interrupt_no_typing(monkeypatch) -> None:
+    """`_no_agents_no_interrupt` plus a `user_intent.typing_now` stub -- needed ONLY by a
+    test that drives the REAL `inject_until_sent` (via `_fake_tmux_io`), whose default
+    `is_typing` probe lazily imports `user_intent.typing_now`. Every OTHER test in this file
+    replaces `run_chained_inject` wholesale, so `inject_until_sent` never runs and never
+    reaches that probe -- adding it to the shared `_no_agents_no_interrupt` would be an
+    unused, misleading attribute on every other caller."""
+    _no_agents_no_interrupt(monkeypatch)
+    ui = sys.modules["user_intent"]
+    ui.typing_now = lambda *a, **kw: False  # type: ignore[attr-defined]
+
+
+def _real_chain_payload(tmp_path: Path, *, count_toward_cooldown: bool) -> str:
+    """`_payload_with_cooldown_flag`, but with a REAL tmux pane id -- `_fake_tmux_io`'s
+    fakes key off `valid_tmux_pane`, which a bare `{"kind": "tmux"}` (no `pane`) fails."""
+    import base64
+    import json as _json
+
+    payload = {
+        "delay": 0.0,
+        "terminal": {"kind": "tmux", "pane": "%1"},
+        "first": "/clear",
+        "then": ["/janitor-arm", "/janitor-resume"],
+        "state_dir": str(tmp_path / ".janitor" / "state"),
+        "gate_baseline": 0,
+        "directive": "resume",
+        "count_toward_cooldown": count_toward_cooldown,
+    }
+    return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
+
+
 def test_still_wanted_cancels_on_a_live_agent(tmp_path: Path, monkeypatch) -> None:
     """A background agent (review fork, lean-worker) spawned after the verdict must still
     be able to cancel a /clear that has not landed yet."""
@@ -668,6 +754,129 @@ def test_still_wanted_repeats_the_wedge_veto_until_the_pane_state_changes(
     assert ok3 is True, why3
 
 
+
+def test_still_wanted_cancels_when_the_current_model_window_is_exhausted_now(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Refinement (c), orchestrator review: `_pane_policy_conflict_ok` also vetoes on a
+    usage-PERCENTAGE verdict invisible in pane text -- reusing (never reimplementing) the
+    REAL `token_burn.model_fallback_verdict`, the same function `detectors/model-fallback.py`
+    calls (only `rotator_usage` is faked here, to supply the account -- `token_burn` runs
+    for real against a crafted usage payload, closing a review gap the first draft of this
+    test left open: faking BOTH modules only proved `_pane_policy_conflict_ok` wires a
+    verdict-shaped dict into a veto, never that the real function's `require_active=True`
+    semantics -- exhausted at 100%, not merely high -- actually hold here.
+    `test_window_burn_rate.py::test_model_fallback_require_active_*` separately proves that
+    truth table against `token_burn.model_fallback_verdict` in isolation; this test proves
+    `clear_trigger.py`'s own integration with it). Pane text is a normal idle prompt -- this
+    veto must fire independently of the RETRY_WEDGE one above."""
+    import datetime as _dt
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    idle_text = (
+        _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
+    ).read_text(encoding="utf-8")
+    monkeypatch.setattr(mod.terminal_trigger, "read_pane_text", lambda terminal: idle_text)
+
+    now = int(_dt.datetime.now(tz=_dt.timezone.utc).timestamp())
+    resets_at = (
+        _dt.datetime.fromtimestamp(now + 3600, tz=_dt.timezone.utc)
+        .replace(tzinfo=None).isoformat() + "Z"
+    )
+    # Same shape /api/oauth/usage emits (test_window_burn_rate.py's `_usage`/`_limit`
+    # helpers, verified against a live payload 2026-08-01): account windows comfortable,
+    # ONE model-scoped weekly limit at 100% -- the only reading `require_active=True`
+    # accepts.
+    usage = {
+        "five_hour": {"utilization": 20.0, "resets_at": resets_at},
+        "seven_day": {"utilization": 20.0, "resets_at": resets_at},
+        "limits": [
+            {
+                "kind": "weekly_scoped", "group": "weekly", "percent": 100.0,
+                "severity": "critical", "resets_at": resets_at,
+                "scope": {"model": {"id": None, "display_name": "Fable"}, "surface": None},
+                "is_active": True,
+            },
+        ],
+    }
+    fake_ru = types.ModuleType("rotator_usage")
+    fake_ru.accounts_usage = (  # type: ignore[attr-defined]
+        lambda: [{"is_live": True, "usage": usage, "sample_age_s": 5}]
+    )
+    monkeypatch.setitem(sys.modules, "rotator_usage", fake_ru)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "exhausted now" in why
+    assert "Fable" in why
+
+
+def test_still_wanted_proceeds_when_no_live_account_usage_is_available(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fail-open side of the same veto: no live-account sample (the daemon's own usage-scan
+    heartbeat has not run, or the rotator has no live account at all) must never cancel a
+    pending clear -- an unmeasured window is not a proven-exhausted one, same asymmetry as
+    every other cancel in this function."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+
+    idle_text = (
+        _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
+    ).read_text(encoding="utf-8")
+    monkeypatch.setattr(mod.terminal_trigger, "read_pane_text", lambda terminal: idle_text)
+
+    fake_ru = types.ModuleType("rotator_usage")
+    fake_ru.accounts_usage = lambda: []  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "rotator_usage", fake_ru)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+
+def test_pane_policy_veto_log_is_rate_limited_across_repeated_polls(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Refinement (b), orchestrator review: `still_wanted` is re-asked roughly every 8s for
+    up to an hour, so an un-rate-limited log line per veto could write ~450 lines for one
+    stuck pane. Three consecutive polls of the SAME wedge must log at most once."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    wedge_text = (
+        _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "real-wedged-session-limit.txt"
+    ).read_text(encoding="utf-8")
+    monkeypatch.setattr(mod.terminal_trigger, "read_pane_text", lambda terminal: wedge_text)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    for _ in range(3):
+        ok, _why = captured["still_wanted"]()
+        assert ok is False
+
+    veto_lines = [line for line in logs if "veto — pane shows retry_wedge" in line]
+    assert len(veto_lines) == 1, veto_lines
+
+
 def test_cancel_at_land_gets_its_own_distinct_log_line(tmp_path: Path, monkeypatch) -> None:
     """A `still_wanted`-cancelled chain logs `clear cancelled at land: <reason>` on top of
     the plain FAILED line, so the miss rate is greppable on its own."""
@@ -896,45 +1105,67 @@ def _payload_with_cooldown_flag(tmp_path: Path, *, count_toward_cooldown: bool) 
 
 
 def test_completed_chain_with_cooldown_flag_stamps_at_verified_enter(tmp_path: Path, monkeypatch) -> None:
-    """The regression case, positive side: a chain that reaches `pre_submit_first` (the verified
-    Enter) with `count_toward_cooldown=True` in its payload leaves `clear_in_cooldown` True."""
+    """The regression case, positive side, driven through the REAL
+    `terminal_trigger.run_chained_inject` (TRDD-RAEGS1D5 card 5 item 4 -- replaces the
+    earlier version, which asserted only that a TEST-CONTROLLED fake of `run_chained_inject`
+    decided to call `pre_submit_first`, never that the real `still_wanted`/`inject_until_sent`
+    machinery reaches it). `still_wanted` never vetoes here (no recovery flags, no wedge, no
+    live agent), so the real chain types `/clear`, reaches the verified Enter for real, and
+    that must leave `clear_in_cooldown` True."""
     import time as _time
 
     import cold_cache_compact
 
     mod = _import()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("JANITOR_HID_IDLE_OVERRIDE_S", "9999")
     logs: list[str] = []
     monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
-    captured = _capture_still_wanted(mod, monkeypatch)
-    _no_agents_no_interrupt(monkeypatch)
-
-    mod._run_chain_payload(_payload_with_cooldown_flag(tmp_path, count_toward_cooldown=True))
-    captured["pre_submit_first"]()  # simulates reaching the verified Enter
+    _no_agents_no_interrupt_no_typing(monkeypatch)
+    field = _fake_tmux_io(monkeypatch, mod)
 
     sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod._GATE_STAMP).write_text("999999999999", encoding="utf-8")  # already > baseline 0
+
+    rc = mod._run_chain_payload(_real_chain_payload(tmp_path, count_toward_cooldown=True))
+
+    assert rc == 0
+    assert field["text"] == "", "the final Enter must have cleared the field"
     assert cold_cache_compact.clear_in_cooldown(sd, now=int(_time.time())) is True
 
 
 
 def test_aborted_before_enter_chain_never_stamps_the_cooldown(tmp_path: Path, monkeypatch) -> None:
-    """The regression case, negative side: a chain that self-cancels BEFORE `pre_submit_first`
-    is ever called (recovery veto, busy-pane giveup, warm cache) must leave the cooldown
-    completely untouched -- a real clear must still be able to fire for the rest of the window."""
+    """The regression case, negative side, driven through the REAL
+    `terminal_trigger.run_chained_inject` (TRDD-RAEGS1D5 card 5 item 4 -- replaces the
+    earlier version, which never called `pre_submit_first` only because the TEST chose not
+    to, not because any real cancel fired). A FRESH `rate-limited.flag` makes the real
+    `_recovery_ok` cancel fire on the very first `still_wanted()` poll inside
+    `inject_until_sent` -- before it ever reads the pane to type -- so `pre_submit_first`
+    must never run, no keystroke must ever be sent, and the cooldown must stay untouched so a
+    real clear can still fire for the rest of the window."""
     import time as _time
 
     import cold_cache_compact
 
     mod = _import()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("JANITOR_HID_IDLE_OVERRIDE_S", "9999")
     logs: list[str] = []
     monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
-    _no_agents_no_interrupt(monkeypatch)
-
-    mod._run_chain_payload(_payload_with_cooldown_flag(tmp_path, count_toward_cooldown=True))
-    # `pre_submit_first` deliberately NEVER called -- the chain aborted before the Enter.
+    _no_agents_no_interrupt_no_typing(monkeypatch)
+    field = _fake_tmux_io(monkeypatch, mod)
 
     sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+    (sd / "rate-limited-since.ts").write_text(str(int(_time.time())), encoding="utf-8")
+
+    rc = mod._run_chain_payload(_real_chain_payload(tmp_path, count_toward_cooldown=True))
+
+    assert rc == 1
+    assert field["text"] == "", "cancelled before the first type_fn() ever ran"
     assert cold_cache_compact.clear_in_cooldown(sd, now=int(_time.time())) is False
 
 
@@ -983,6 +1214,115 @@ def test_still_wanted_still_vetoes_on_a_fresh_rate_limit_flag(tmp_path: Path, mo
     (sd / "rate-limited-since.ts").write_text(str(fresh_since), encoding="utf-8")
 
     mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "recovery pending" in why
+
+
+
+def test_still_wanted_ignores_an_orphan_rate_limit_flag_with_no_since_sidecar(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Item 1 (orchestrator review of 1b5ceec8): `rate-limited-since.ts` missing used to make
+    `read_int_state(since, now_ts)`'s own default read as age 0 -- FRESH FOREVER, an orphaned
+    flag (no sidecar ever written for it) vetoing every automatic /clear indefinitely. Falls
+    back to the flag's own (old) mtime, the same pattern `on-session-start.py` already uses
+    for this exact flag -- a flag whose mtime alone is already past the max age must not veto
+    just because its `.ts` sidecar happens to be missing."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    import time as _time
+
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    flag = sd / mod.state.RATE_LIMITED_FLAG
+    flag.write_text("1", encoding="utf-8")
+    old = int(_time.time()) - (25 * 3600)  # 25h old, past the 24h default
+    os.utime(flag, (old, old))
+    assert not (sd / "rate-limited-since.ts").exists(), "the orphan case: no sidecar at all"
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+
+def _chain_payload_with_recovered_after(tmp_path: Path, *, recovered_after: int) -> str:
+    import base64
+    import json as _json
+
+    payload = {
+        "delay": 0.0,
+        "terminal": {"kind": "tmux"},
+        "first": "/clear",
+        "then": ["/janitor-arm", "/janitor-resume"],
+        "state_dir": str(tmp_path / ".janitor" / "state"),
+        "gate_baseline": 0,
+        "directive": "resume",
+        "recovered_after": recovered_after,
+    }
+    return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
+
+
+def test_recovered_after_ignores_a_fresh_rate_limit_flag_predating_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Item 2: `on-stop-token-meter.py` only calls `_maybe_clear` after a Stop that
+    SUCCEEDED -- proof this session already ran a full turn past whatever earlier
+    rate-limit/API-error wrote `rate-limited.flag`, however fresh that flag still reads on
+    its own 24h clock. `recovered_after` (this Stop's own epoch) must let `_recovery_ok`
+    ignore a flag written BEFORE it, even though the same flag alone (no `recovered_after`)
+    still vetoes -- see the sibling test below."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+    since = int(_time.time()) - 60  # 1 minute old -- still "fresh" on the plain age check
+    (sd / "rate-limited-since.ts").write_text(str(since), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload_with_recovered_after(tmp_path, recovered_after=int(_time.time())))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+
+def test_the_idle_path_keeps_the_veto_on_the_same_fresh_flag_with_no_recovered_after(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Item 2, the other side: a caller with no successful-Stop evidence of its own (the
+    idle-nudge path, `dispatch.py`) passes no `recovered_after` and must keep vetoing on the
+    SAME fresh flag the test above bypasses -- the bypass is per-caller, not a global
+    loosening of the age check."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+    since = int(_time.time()) - 60
+    (sd / "rate-limited-since.ts").write_text(str(since), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))  # no recovered_after
 
     ok, why = captured["still_wanted"]()
     assert ok is False

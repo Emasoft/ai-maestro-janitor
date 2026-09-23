@@ -114,6 +114,14 @@ def _maybe_clear(project_dir: str, transcript_path: str, state, token_meter) -> 
     clear fired from THIS turn boundary, letting a second automatic trigger re-fire seconds
     later. `spawn_shrink_chain` now owns the stamp itself, at spawn time, so passing True here
     is the whole fix -- no separate `mark_clear_fired` call needed in this hook.
+
+    `recovered_after=int(time.time())` (TRDD-RAEGS1D5 card 5, orchestrator review item 2):
+    this hook only runs after a Stop that SUCCEEDED -- proof this session already ran a full
+    turn past whatever earlier rate-limit/API-error `on-stop-failure.py` may have flagged,
+    however fresh `rate-limited.flag` still reads on its own 24h clock. Without this, one
+    transient error could lock EVERY automatic clear at this turn-boundary out for up to a
+    day, while the harness's own ~95%-context auto-compact fires instead. The idle-nudge path
+    (`dispatch.py`) passes no such evidence and keeps the plain age veto.
     """
     try:
         tokens = token_meter.latest_context_size(transcript_path)
@@ -178,6 +186,7 @@ def _maybe_clear(project_dir: str, transcript_path: str, state, token_meter) -> 
             directive=_CLEAR_DIRECTIVE,
             transcript_path=transcript_path,
             count_toward_cooldown=True,
+            recovered_after=int(time.time()),
         )
         state.log_line("token-meter", f"clear at {pct}% ({tokens} tokens): {'spawned' if spawned else 'NOT spawned'} -- {why}")
     except Exception as exc:  # noqa: BLE001 -- the chain launch must never break this hook

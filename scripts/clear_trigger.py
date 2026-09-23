@@ -393,6 +393,30 @@ def _run_chain_payload(payload_b64: str) -> int:
     verdict_ts = int(data.get("verdict_ts") or 0)
     persisted = {"done": False}
 
+    # Refinement (b), orchestrator review (TRDD-RAEGS1D5 card 5): `still_wanted` is re-asked
+    # roughly every 8s for up to an hour (`_CLEAR_CHAIN_GIVEUP_S`) -- an un-rate-limited log
+    # line per veto could write ~450 lines for one stuck pane. One line per DISTINCT reason
+    # per `_VETO_LOG_INTERVAL_S`, keyed on the reason so a wedge that clears and later
+    # recurs still gets a fresh line.
+    _last_veto_log: dict[str, float] = {}
+    _VETO_LOG_INTERVAL_S = 60.0
+
+    def _log_veto_once(reason: str, detail: str) -> None:
+        now_m = time.monotonic()
+        last = _last_veto_log.get(reason, 0.0)
+        if now_m - last >= _VETO_LOG_INTERVAL_S:
+            _last_veto_log[reason] = now_m
+            state.log_line("clear-trigger", detail)
+
+    # Refinement (c), orchestrator review: same pin as `detectors/model-fallback.py`'s
+    # `_SCOPED_HIGH` / `_ACCOUNT_HEADROOM` -- duplicated here (local to this function, not
+    # module-level) rather than imported, because that detector module is not on the chain
+    # child's `sys.path` (only `scripts/lib` is) -- so `_pane_policy_conflict_ok`'s
+    # no-headroom veto agrees with the daemon's own model-fallback decision instead of
+    # drifting from it.
+    _NO_HEADROOM_SCOPED_HIGH = 90.0
+    _NO_HEADROOM_ACCOUNT_HEADROOM = 90.0
+
     def _persist_resume_state() -> None:
         # Called by inject_until_sent IMMEDIATELY before Enter on /clear, and nowhere else.
         # main() used to write these before firing; once the child can defer for minutes, that
@@ -457,6 +481,15 @@ def _run_chain_payload(payload_b64: str) -> int:
         # the verified Enter, so a chain that self-cancels earlier (recovery pending, warm
         # cache, user came back, busy-pane giveup) never reaches this line and never spends the
         # cooldown window on a `/clear` that didn't land.
+        #
+        # Item 6 (orchestrator review): `.get(...)`, not `["count_toward_cooldown"]` --
+        # `external_handoff_clear.py::_fire` builds a payload for this SAME child without
+        # this key at all (it stamps its own way, at spawn, per the advisor's D12
+        # spawn-storm reasoning), so a missing key must read as "don't stamp", never as a
+        # KeyError. A truly new caller that hand-built a payload and forgot the key would
+        # silently not stamp either -- `spawn_shrink_chain` is the one sanctioned way to
+        # reach this child for every caller except `_fire`, so that is a narrow, documented,
+        # pre-existing contract, not a gap this task introduced.
         if data.get("count_toward_cooldown"):
             try:
                 import cold_cache_compact  # noqa: PLC0415 -- lazy; scripts/lib is on path
@@ -597,10 +630,33 @@ def _run_chain_payload(payload_b64: str) -> int:
         # vetoing here exactly when it stops mattering to dispatch.py too.
         now_ts = int(time.time())
 
-        def _flag_fresh(flag: Path, since: Path, max_age_s: float) -> bool:
+        def _flag_fresh(
+            flag: Path, since: Path, max_age_s: float, *, recovered_after: int | None = None
+        ) -> bool:
+            # Item 1 fix (orchestrator review of 1b5ceec8): `read_int_state(since, now_ts)`'s
+            # own default used to make a flag with NO `.ts` sidecar read as age 0 -- FRESH
+            # FOREVER, an orphaned flag (no writer ever crashes before its sidecar, but a
+            # much older code path or a hand-placed flag might) vetoing every automatic
+            # `/clear` in the project indefinitely, the exact lockout this age-bound exists
+            # to close. Falls back to the FLAG's own mtime instead, the same pattern
+            # `on-session-start.py::_inject_post_clear_handoff` already uses for this exact
+            # flag (`written_at or state.file_mtime(flag)`) -- a missing sidecar is common
+            # (nothing writes one for a hand-dropped or historical flag), never a reason to
+            # treat it as brand new.
             if not flag.is_file():
                 return False
-            return (now_ts - state.read_int_state(since, now_ts)) < max_age_s
+            written_at = state.read_int_state(since, 0) or state.file_mtime(flag)
+            # Item 2 fix: a caller at a SUCCESSFUL Stop (on-stop-token-meter.py) knows this
+            # session just ran a full turn to completion -- proof an EARLIER rate-limit/
+            # API-error is no longer live, however fresh its flag still reads on its own
+            # max-age clock. `recovered_after` is that Stop's own epoch, threaded through
+            # `spawn_shrink_chain`'s payload; a flag written BEFORE it predates the proof and
+            # stops vetoing regardless of `max_age_s`. A caller with no such evidence (the
+            # idle-nudge path, `dispatch.py`) passes None here and keeps the plain age check
+            # unchanged -- "the idle path keeps the veto while the flag is fresh."
+            if recovered_after is not None and written_at < recovered_after:
+                return False
+            return (now_ts - written_at) < max_age_s
 
         def _env_seconds(var: str, default: float, *, hours: bool = False) -> float:
             raw = os.environ.get(var, "").strip()
@@ -610,10 +666,21 @@ def _run_chain_payload(payload_b64: str) -> int:
                 value = default
             return value * 3600 if hours else value
 
+        # Item 2: ONLY the rate-limited flag gets `recovered_after` -- a compact-resume or a
+        # clear-resume being unconsumed is not something a later successful Stop disproves
+        # (those two are cleared by their OWN consumer, dispatch.py's resume phases, not by
+        # "a turn happened"), so widening the bypass to all three would forgive a genuinely
+        # pending resume the same review flagged as a real risk in the age-bound alone.
+        _recovered_after_raw = data.get("recovered_after")
+        recovered_after = (
+            int(_recovered_after_raw) if isinstance(_recovered_after_raw, (int, float)) else None
+        )
+
         any_fresh = (
             _flag_fresh(
                 sd / state.RATE_LIMITED_FLAG, sd / "rate-limited-since.ts",
                 _env_seconds("CLAUDE_PLUGIN_OPTION_RATE_LIMIT_FLAG_MAX_AGE_HOURS", 24, hours=True),
+                recovered_after=recovered_after,
             )
             or _flag_fresh(
                 sd / "resume-after-compact.flag", sd / "resume-after-compact.ts",
@@ -636,25 +703,32 @@ def _run_chain_payload(payload_b64: str) -> int:
         return False, "recovery pending (rate-limit/API-error or an unconsumed compact-resume)"
 
     def _pane_policy_conflict_ok() -> tuple[bool, str]:
-        # FIFTH cancel, this task (owner report §3.6 finding): `_CHAIN_LOCK` only serialises
-        # THIS chain's own retries -- it says nothing about, and is never taken by, the
-        # daemon's SEPARATE `pane_actuate.act()` keystroke loop (the model-fallback ladder,
+        # FIFTH cancel (owner report §3.6 finding): `_CHAIN_LOCK` only serialises THIS
+        # chain's own retries -- it says nothing about, and is never taken by, the daemon's
+        # SEPARATE `pane_actuate.act()` keystroke loop (the model-fallback ladder,
         # `scripts/detectors/model-fallback.py` -> `Event.NO_HEADROOM`; the rotation/recovery
         # rungs, `daemon.py` -> `Event.ROTATION_LANDED` / `RECOVERY_RUNG`), so both actuators
-        # CAN type into the same pane in the same window. `NO_HEADROOM` itself is driven by
-        # `token_burn.model_fallback_verdict`'s usage PERCENTAGE (see `model_fallback.py`),
-        # invisible in the pane text -- it cannot be classified from a screen read at all. But
-        # `pane_policy`'s own module docstring names ONE state that is a conflict REGARDLESS of
-        # which event fires: `RETRY_WEDGE`. Every event branch `_at_wedge` handles -- rotation
-        # flush, no-headroom flush-then-switch, and every caller-driven rung -- starts by
-        # flushing that wedge (`pane_policy._flush_wedge`), so a wedge on screen means the
-        # daemon's next beat will press ESC into this exact field: that IS "an actuator must
-        # act here", and it is the one such state a text classifier can actually see. Every
-        # other pane_policy row either never types (`WORKING`'s NO_HEADROOM is refused
-        # outright, `AWAITING_USER` types nothing but a dismiss-only ESC) or needs off-screen
-        # state this classifier has no access to (`IDLE`'s CRON_DEAD/NO_HEADROOM rows) --
-        # widening the veto to cover those would block /clear from ever firing into a normal
-        # idle pane, which is the state it MUST be able to type into.
+        # CAN type into the same pane in the same window. `pane_policy`'s own module
+        # docstring names ONE state that is a conflict REGARDLESS of which event fires:
+        # `RETRY_WEDGE`. Every event branch `_at_wedge` handles -- rotation flush, no-headroom
+        # flush-then-switch, and every caller-driven rung -- starts by flushing that wedge
+        # (`pane_policy._flush_wedge`), so a wedge on screen means the daemon's next beat will
+        # press ESC into this exact field: that IS "an actuator must act here", and it is the
+        # one such state a text classifier can actually see. Every other pane_policy row
+        # either never types (`WORKING`'s NO_HEADROOM is refused outright, `AWAITING_USER`
+        # types nothing but a dismiss-only ESC) or needs off-screen state this classifier has
+        # no access to (`IDLE`'s CRON_DEAD row) -- widening the veto to cover those would
+        # block /clear from ever firing into a normal idle pane, which is the state it MUST
+        # be able to type into.
+        #
+        # Refinement (a), orchestrator review: this reads the pane at the TOP of every
+        # `_still_wanted()` call. `inject_until_sent` re-asks `still_wanted` on EVERY loop
+        # iteration, before its own typing/verification reads -- so on the iteration that
+        # finally reaches Enter, THIS is the read taken at the start of that same iteration,
+        # never a value cached from an earlier 8s poll. It is not the literal read
+        # `inject_until_sent` uses to verify the typed command (that happens deeper inside
+        # `terminal_trigger.py`, a file this task does not own) -- the closest this module
+        # can get to "nearest Enter" without touching a file outside its scope.
         try:
             text = terminal_trigger.read_pane_text(data["terminal"])
         except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
@@ -668,7 +742,58 @@ def _run_chain_payload(payload_b64: str) -> int:
         except Exception:  # noqa: BLE001 — a classification fault must never kill a pending clear
             return True, "pane classification unavailable — continuing"
         if classified.status.kind == pane_state.StatusKind.RETRY_WEDGE:
+            _log_veto_once(
+                "retry_wedge",
+                "clear-trigger: veto — pane shows retry_wedge, pane_policy will flush/switch it",
+            )
             return False, "pane shows retry_wedge — pane_policy will flush/switch it, not /clear"
+
+        # Refinement (c), orchestrator review: RETRY_WEDGE above is the one conflict state a
+        # pane TEXT read can see. `NO_HEADROOM` cannot be -- it is a usage-PERCENTAGE verdict
+        # (`token_burn.model_fallback_verdict`), with no on-screen marker at all. Reused, not
+        # reimplemented, from `detectors/model-fallback.py`'s own gate: `require_active=True`
+        # pins this to "the window reads 100% NOW" (see that function's own docstring --
+        # `require_active=False` is the rotator's early-warning caller, which decides whether
+        # to rotate AHEAD of time; `require_active=True` is the model-SWITCH caller, which
+        # types into a live pane and must not fire on a merely-high reading). This is the
+        # SAME choice: a Stop-boundary clear must not abort on a projection that the window
+        # will run out soon, only on one that already has -- otherwise every clear near a
+        # window's end aborts and the harness's own ~95%-context auto-compact wins instead.
+        #
+        # Needs `rotator_usage.accounts_usage()`'s live-account sample (usage dict +
+        # `sample_age_s`) -- the SAME probe cache the daemon's own usage-scan heartbeat keeps
+        # warm. A detached chain child does not gather this itself, only reads whatever is
+        # already on disk. `model_fallback_verdict` already refuses on an unproven or expired
+        # snapshot (returns None), so a missing/stale input fails OPEN here too -- the same
+        # asymmetry as every other cancel in this function -- and any other probe fault
+        # (rotator state absent, import error) fails open identically via the bare except.
+        try:
+            import rotator_usage  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+            import token_burn  # noqa: PLC0415
+
+            acct = next(
+                (a for a in rotator_usage.accounts_usage() if a.get("is_live")), None
+            )
+            if acct is not None:
+                verdict = token_burn.model_fallback_verdict(
+                    acct.get("usage") or {}, int(time.time()),
+                    scoped_high=_NO_HEADROOM_SCOPED_HIGH,
+                    account_headroom=_NO_HEADROOM_ACCOUNT_HEADROOM,
+                    snapshot_age_s=acct.get("sample_age_s"),
+                    require_active=True,
+                )
+                if verdict is not None:
+                    _log_veto_once(
+                        "no_headroom",
+                        f"clear-trigger: veto — model {verdict.get('model')} window exhausted "
+                        f"now ({verdict.get('scoped_util')}%), pane_policy will switch it",
+                    )
+                    return False, (
+                        f"model {verdict.get('model')} window exhausted now — pane_policy "
+                        "will switch it, not /clear"
+                    )
+        except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
+            pass
         return True, "no actuator-conflict state on pane"
 
     def _still_wanted() -> tuple[bool, str]:
@@ -796,6 +921,7 @@ def spawn_shrink_chain(
     settle_between_s: float = 0.0,
     transcript_path: str | None = None,
     count_toward_cooldown: bool = True,
+    recovered_after: int | None = None,
 ) -> tuple[bool, str]:
     """Run the verified `/clear` chain with a CALLER-SUPPLIED bootstrap. Returns (spawned, why).
 
@@ -840,6 +966,14 @@ def spawn_shrink_chain(
     `count_toward_cooldown=False` explicitly — a reload-shrink is not a compaction the user
     is waiting out, and stamping it would block a REAL clear from firing for the rest of the
     cooldown window over a `/reload-plugins` that changed nothing about context size.
+
+    `recovered_after` (TRDD-RAEGS1D5 card 5, orchestrator review item 2): the epoch of a
+    SUCCESSFUL Stop this call is racing against, carried into the payload so the child's
+    `_recovery_ok` can ignore a `rate-limited.flag` written BEFORE that success -- a
+    successful Stop already proves any earlier rate-limit/API-error is no longer live,
+    however fresh the flag still reads on its own max-age clock. `on-stop-token-meter.py`
+    passes its own Stop's `int(time.time())`; every other caller (the idle nudge, the two
+    reload triggers) leaves it None and keeps the plain age check unchanged.
 
     Review finding (post-2f463d3b): the stamp used to fire HERE, right after the child was
     spawned — before anything is verified. A chain that then self-cancels (recovery pending,
@@ -889,6 +1023,9 @@ def spawn_shrink_chain(
         # TRDD-RAEGS1D5 card 5 regression fix: carried through so the CHILD can stamp the
         # cooldown at the verified Enter instead of the parent stamping blind at spawn.
         "count_toward_cooldown": count_toward_cooldown,
+        # TRDD-RAEGS1D5 card 5 item 2: carried through so the CHILD's `_recovery_ok` can
+        # ignore a `rate-limited.flag` predating this caller's own successful Stop.
+        "recovered_after": recovered_after,
     }, env=chain_env)
     return True, "chain spawned"
 

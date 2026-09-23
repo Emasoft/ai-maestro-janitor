@@ -98,13 +98,14 @@ def _fake_clear_trigger_module(*, spawned: bool = True, why: str = "chain spawne
 
     def spawn_shrink_chain(
         *, then, directive, delay=2.0, settle_between_s=0.0, transcript_path=None,
-        count_toward_cooldown=False,
+        count_toward_cooldown=False, recovered_after=None,
     ):
         calls.append({
             "then": list(then),
             "directive": directive,
             "transcript_path": transcript_path,
             "count_toward_cooldown": count_toward_cooldown,
+            "recovered_after": recovered_after,
         })
         return spawned, why
 
@@ -410,6 +411,15 @@ class TestTurnBoundaryClear(unittest.TestCase):
         # shared cooldown blind to it -- it must now opt into the stamp `spawn_shrink_chain`
         # owns internally.
         self.assertTrue(fake_ct._calls[0]["count_toward_cooldown"])
+        # TRDD-RAEGS1D5 card 5 item 2: this hook only runs after a Stop that SUCCEEDED --
+        # `recovered_after` must be a real, roughly-now epoch, not the default None, so a
+        # fresh `rate-limited.flag` from an EARLIER turn's transient API error cannot lock
+        # this clear out for up to a day.
+        import time as _time
+
+        recovered_after = fake_ct._calls[0]["recovered_after"]
+        self.assertIsNotNone(recovered_after)
+        self.assertAlmostEqual(recovered_after, int(_time.time()), delta=5)
 
 
 if __name__ == "__main__":
