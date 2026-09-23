@@ -150,8 +150,7 @@ fixes, that stale sha makes the second call refuse every time.
 
    ```bash
    sha=$({ sha256sum <this page> 2>/dev/null || shasum -a 256 <this page>; } | cut -d' ' -f1)
-   [ -n "$sha" ] || { echo "unreadable: <this page> — report and skip its verb fixes"; }
-   memgrep reference-mem-topic --page <this page> --to <target page> --dry-run
+   if [ -n "$sha" ]; then memgrep reference-mem-topic --page <this page> --to <target page> --dry-run; else echo "unreadable: <this page> — report and skip its verb fixes"; fi
    #   → "would link <this page> <-> <target page> (page {gains a link|unchanged}, to {gains a link|unchanged})"
    ```
 
@@ -173,8 +172,7 @@ fixes, that stale sha makes the second call refuse every time.
 
    ```bash
    sha=$({ sha256sum <page> 2>/dev/null || shasum -a 256 <page>; } | cut -d' ' -f1)
-   [ -n "$sha" ] || { echo "unreadable: <page> — report and skip its verb fixes"; }
-   memgrep update-mem-atom --page <page> --atom <id> --desc "<text>" --base-sha256 "$sha"
+   if [ -n "$sha" ]; then memgrep update-mem-atom --page <page> --atom <id> --desc "<text>" --base-sha256 "$sha"; else echo "unreadable: <page> — report and skip its verb fixes"; fi
    ```
 
 **On refusal** (stale sha, or any other error) from either verb: report the refusal and
