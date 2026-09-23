@@ -169,3 +169,51 @@ def test_at_most_one_automatic_clear_per_session_whatever_the_trigger(tmp_path):
         already_fired_this_session=False,
     )
     assert v_resume.fire is False and v_resume.why == "cooldown"
+
+
+def test_restart_with_a_stale_cache_spawns_the_jev_clear_watcher(monkeypatch, tmp_path):
+    """TRDD-RAEGS1D5 card 4 item 4: SessionStart source in {startup, resume} with a stale/
+    expired cache must actually SPAWN the watcher (`external_handoff_clear.py --on-resume`) —
+    the same clear-then-inject-compacted-context chain every other automatic lever uses. This
+    is the positive half of `test_resume_source_routes_through_the_shared_recovery_helper_and_
+    the_widened_reader` above, which only proved what gets PASSED to the decider, not that a
+    firing verdict actually launches the chain."""
+    captured: dict = {}
+    real_popen = __import__("subprocess").Popen
+    watcher_path = str(_ROOT / "scripts" / "external_handoff_clear.py")
+
+    def _fake_popen(argv, **kwargs):  # noqa: ANN001, ANN003
+        # Only intercept the watcher spawn — other subprocess.Popen calls in this same
+        # process (e.g. a codesign probe elsewhere in the import chain) must run for real,
+        # since this module-level patch applies to the shared `subprocess` object.
+        if any(watcher_path in str(a) for a in argv):
+            captured["argv"] = argv
+
+            class _Proc:
+                def wait(self, timeout=None):  # noqa: ANN001, ARG002
+                    return 0
+
+            return _Proc()
+        return real_popen(argv, **kwargs)
+
+    import global_state as gs  # noqa: PLC0415 -- local import, matches the hook's own lazy style
+
+    monkeypatch.setattr(ec, "cache_certainly_expired", lambda *a, **kw: None)
+    monkeypatch.setattr(ec, "recovery_pending", lambda sd: False)
+    monkeypatch.setattr(ccc, "context_tokens_for_resume", lambda *a, **kw: 500_000)
+    monkeypatch.setattr(
+        ec, "should_clear_on_resume", lambda **kw: ec.ClearVerdict(True, why="cache-expired")
+    )
+    # The TCC-stable interpreter resolution shells out to `codesign` for real — this suite's
+    # subprocess sandbox denies that by default (deliberately: an allow-list, not a block-list).
+    # Not what this test is about, so pin it to a fixed path instead of touching the sandbox.
+    monkeypatch.setattr(gs, "automation_python_path", lambda: sys.executable)
+    # Patch the SHARED `subprocess` module object directly, not a `_hook()` module's own
+    # attribute — `_run_main_with_source` (below) calls `_hook()` again internally, a FRESH
+    # module instance, so patching an already-imported hook object's `.subprocess` here would
+    # patch a copy nobody executes.
+    monkeypatch.setattr(__import__("subprocess"), "Popen", _fake_popen)
+    assert _run_main_with_source(monkeypatch, "startup", tmp_path) == 0
+    assert "argv" in captured, "the watcher subprocess was never spawned"
+    assert watcher_path in [str(a) for a in captured["argv"]]
+    assert "--on-resume" in captured["argv"]

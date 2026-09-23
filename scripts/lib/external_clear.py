@@ -1,10 +1,12 @@
 """External (ZERO model turn) handoff-and-clear — policy + composition (TRDD-PXP08ZQC).
 
-The in-model lever (`dispatch._phase_idle_clear_nudge` → `/janitor-handoff-and-clear`) works,
-but it costs what it is trying to save: the handoff is authored BY THE MODEL, so an abandoned
-session pays a full turn on its huge context just to write the note that lets it shrink. This
-module is the decision + composition half of doing the same thing from OUTSIDE the model — the
-typist half already exists (`clear_trigger.py`'s verified injection chain).
+The heartbeat's own idle-clear lever (`dispatch._phase_idle_clear_nudge`) fires the SAME
+`clear_trigger.spawn_shrink_chain` this module's decisions feed (TRDD-RAEGS1D5 card 4: it used
+to type `/janitor-handoff-and-clear` for the model to run, costing a full turn on its own huge
+context just to author a handoff before it could shrink — it now calls the chain directly, zero
+model turns, same as this module). This module is the decision + composition half of doing the
+SessionStart-time compaction from OUTSIDE any live session at all — the typist half already
+exists (`clear_trigger.py`'s verified injection chain).
 
 Split exactly like the rest of the codebase: everything here is PURE (all runtime facts are
 injected) so the gate is unit-testable without a live session. The I/O gatherer and the firing

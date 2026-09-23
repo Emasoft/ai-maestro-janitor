@@ -1887,137 +1887,6 @@ def _phase_clear_resume() -> bool:
     return True
 
 
-def _phase_proactive_idle_compact() -> bool:
-    """PREVENTIVE cold-compact (TRDD-D3PROACT). Returns True iff it fired a /compact (caller
-    then returns early, like the reactive cold paths). NEVER raises — a fault degrades to no
-    compact, never a broken heartbeat.
-
-    WHY (user 2026-07-17, "make this fail-proof"): the reactive paths cannot beat the burn — a
-    cron fire re-reads the whole transcript BEFORE dispatch runs, so a cold fire has already paid
-    the 2× cache-creation write by the time _phase_rate_limit_recovery/_phase_compact_resume can
-    queue a /compact. That write is only large when the CONTEXT is large. This phase removes the
-    root cause: when the session is genuinely idle and the context is large, it shrinks NOW during
-    a cheap WARM fire, so whatever cold event comes next (a >1h working turn — crons cannot fire
-    mid-query, so the fire after it is always cold; a rate limit; a restart) reads ~50k, not ~600k.
-    It is the only path that PREVENTS the burn rather than mitigating it after the fact.
-
-    Gates (all injected into the pure `should_compact_proactively_idle`): enabled + off-cooldown,
-    the user is ABSENT from this pane (never compact out from under active work — lossy), the
-    session is NOT active-waiting (no resume/keep-going/directive/pending agents to interrupt),
-    the context is large, AND a compaction could actually reclaim `min_gain` tokens above this
-    session's learned post-compaction floor.
-
-    That LAST gate is what makes this phase terminate, and it is not optional. The original design
-    claimed to be "self-limiting: after the compact the context is small, so the size gate fails
-    next fire." That claim is FALSE and was measured false in this repo on 2026-07-17: a real
-    compaction went 343,007 -> 308,644, and 308,644 is ABOVE the 270,000 threshold — so the size
-    gate NEVER closed and this phase would have re-fired every cooldown, forever, destroying
-    context each time. The cooldown only defers a loop; it cannot end one. See
-    cold_cache_compact.refresh_floor. The floor MEASUREMENT runs BEFORE this phase's action
-    gates (cold_cache_compact.floor_needs_learning): the compaction stamps those gates itself
-    (cooldown + resume recency + keep-going), so a measurement behind them never runs and the
-    floor gate stays inert — the v0.49.0 bug, TRDD-28XF77X6.
-
-    A long unattended session is the PRIME target — it is exactly the one that sits idle for
-    hours and then eats a cold write. It runs AFTER the rate-limit/compact-resume early-returns (those own
-    the reactive cold case and would already have returned) and BEFORE the keep-going nudge, so a
-    fire that compacts does not also emit a now-pointless [janitor-resume] (the compact's own
-    directive re-anchors the resume on the next fire)."""
-    try:
-        import cold_cache_compact  # noqa: PLC0415 -- lazy: fail-open when the lib is absent
-        import user_intent  # noqa: PLC0415 -- lazy: only the idle path needs presence
-
-        sd = state.state_dir()
-        now = int(time.time())
-        if not cold_cache_compact.proactive_idle_enabled():
-            return False
-        # LEARN THE FLOOR FIRST — observation BEFORE the action gates (TRDD-28XF77X6). The
-        # compaction that makes the floor observable stamps every gate below itself
-        # (mark_fired starts the cooldown, its auto-resume stamps last-resume.ts, keep-going
-        # sessions never idle), so in v0.49.0 — where refresh_floor sat behind them — the
-        # floor was never learned in exactly the unattended sessions this phase targets, and
-        # the loop-killing gain gate never engaged. The transcript is read here only while a
-        # compaction is actually unmeasured (once per compaction).
-        ctx = None
-        if cold_cache_compact.floor_needs_learning(sd):
-            ctx = cold_cache_compact.context_tokens_for(
-                cold_cache_compact.newest_transcript(state.project_root())
-            )
-            cold_cache_compact.refresh_floor(sd, ctx)
-        # ACTION gates — they veto the lossy compact, never the measurement above. Cheap
-        # gates (no transcript I/O) first: presence + active-waiting are stat-only.
-        if cold_cache_compact.in_cooldown(sd, now=now):
-            return False
-        present = user_intent.user_is_present(now=now)
-        active = _cadence_active_waiting(sd, now)
-        if present or active:
-            return False
-        if ctx is None:
-            ctx = cold_cache_compact.context_tokens_for(
-                cold_cache_compact.newest_transcript(state.project_root())
-            )
-        floor = cold_cache_compact.read_floor(sd)[0]
-        if not cold_cache_compact.should_compact_proactively_idle(
-            ctx,
-            user_present=present,
-            active_waiting=active,
-            min_context_tokens=cold_cache_compact.min_context_tokens(),
-            floor_tokens=floor,
-            min_gain=cold_cache_compact.min_gain_tokens(),
-        ):
-            return False
-
-        # NO GUARD 2 CHECK HERE (TRDD-PH8SAQKS round 2): `ctx` reaching this point has already
-        # passed `should_compact_proactively_idle`'s own `min_context_tokens` floor above -- the
-        # SAME value `harness_will_autocompact` uses as its band's UPPER bound -- so THIS site's
-        # own `ctx` is always at or past "the harness already missed its turn boundary", where
-        # sending is the correct BACKSTOP, not a race. Guard 2 itself lives in compact_trigger.py's
-        # own main(), which RE-measures context independently before deciding (see
-        # `harness_will_autocompact`'s docstring, disclosed limitation (ii)) -- so its verdict CAN
-        # rarely diverge from this site's own `ctx`; the `GUARD2_STDOUT_MARKER` branch below is
-        # what actually handles that outcome, not an assumption that it cannot occur.
-
-        compact_py = _HERE / "compact_trigger.py"
-        if not compact_py.is_file():
-            return False
-        directive = (
-            "proactive idle compaction: the session was idle with a large context, compacted "
-            "PRE-EMPTIVELY so the next cold resume is cheap — after this, continue your prior "
-            "pending task (read the newest in-flight TRDD's STATE block first)."
-        )
-        proc = state.run_subprocess(
-            [sys.executable, str(compact_py), "--directive", directive],
-            timeout=20,
-            capture=True,
-            detector_name="dispatch",
-        )
-        _stdout = proc.stdout or "" if proc else ""
-        if cold_cache_compact.GUARD2_STDOUT_MARKER in _stdout:
-            # compact_trigger.py's own guard 2 fired (TRDD-PH8SAQKS round 3): the harness is
-            # about to auto-compact this SAME context on its own -- one explicit log line, same
-            # NO-cooldown-stamp treatment as every other no-send outcome below.
-            state.log_line("dispatch", f"proactive idle compact: guard 2 skipped the send (context={ctx})")
-            return False
-        if not (proc and proc.returncode == 0 and "COMPACT_FIRED" in _stdout):
-            # Headless / NO_ITERM / trigger failed — no compaction happens, so DON'T stamp the
-            # cooldown (a stamp with no compact would suppress the SessionStart/rate-limit paths
-            # too — the three trigger points must agree on "fired", per the hook's own note).
-            return False
-        cold_cache_compact.mark_fired(sd, now=now)
-        # Informational NOTICE, NOT a [janitor-resume] marker: this turn must not begin resuming
-        # into a context that is about to be compacted (the real resume arrives post-compaction).
-        print(
-            f"[janitor] session idle with a large context (~{ctx} tokens) — a /compact was queued "
-            "and runs when this turn ends, PRE-EMPTIVELY shrinking it so the next cold resume "
-            "(long turn / rate limit / restart) is cheap. The session auto-resumes after it."
-        )
-        state.log_line("dispatch", f"proactive idle compact fired (context={ctx})")
-        return True
-    except Exception as exc:  # noqa: BLE001 -- degrade to no compact; never break the heartbeat
-        state.log_line("dispatch", f"proactive idle compact skipped: {exc}")
-        return False
-
-
 _CACHE_REFETCH_WINDOW_S = 60.0
 
 
@@ -2854,11 +2723,12 @@ def _keep_going_muted_by_recent_resume(sd: Path, now: int) -> bool:
 
 def _phase_idle_clear_nudge() -> bool:
     """A session left alone firing for a long time with a big context should CLEAR, not just
-    compact. Emits ONE nudge telling the model to run `/janitor-handoff-and-clear`.
+    compact. FIRES a Jev compaction directly (clear + the fresh session's own SessionStart
+    composing and injecting the compacted context) -- it never types a handoff skill.
 
     WHY CLEAR AND NOT COMPACT (owner directive 2026-08-02, stated twice): compaction has a
     FLOOR it provably cannot go below. `cold_cache_compact.refresh_floor`'s docstring records
-    the measurement — a real compaction took 343,007 -> 308,644, only 10%, because the base
+    the measurement -- a real compaction took 343,007 -> 308,644, only 10%, because the base
     install AND THE SUMMARY ITSELF reload every time; that floor is "a property of the install,
     not a number we get to choose". So an abandoned session costs >= floor x 0.1 per fire
     forever, and compacting again reclaims nothing. `/clear` drops the summary and gets under
@@ -2869,32 +2739,30 @@ def _phase_idle_clear_nudge() -> bool:
     so an idle session demotes to the SLOW tier (fewer fires); this shrinks what each fire
     re-reads (smaller fires). A small context at FAST beats a fat one at SLOW.
 
-    WHY IT INJECTS (owner directive 2026-08-04, correcting this phase's original design) — it
-    used to only PRINT "run /janitor-handoff-and-clear". The heartbeat protocol treats a prose
-    line as PAYLOAD to surface, not an instruction to obey, so the lever depended on an
-    attentive reader — on precisely the sessions that by definition have none. It never fired.
+    WHY IT NEVER TYPES A SKILL (TRDD-RAEGS1D5 card 4 item 1, owner: "handoff-and-clear must
+    never be called automatically"): this phase used to type `/janitor-handoff-and-clear` into
+    the pane so the MODEL would author a handoff and then clear. That is a manual-only skill by
+    the owner's own binding vocabulary -- an automatic caller typing it is exactly the violation
+    card 4 exists to remove. Jev compaction already IS "clear, then compose the compacted
+    context" with no model turn in between (the fresh session's own SessionStart composes it
+    out of the old transcript on disk), so this phase now calls the SAME `clear_trigger.
+    spawn_shrink_chain` seam the Stop-hook turn-boundary clear (`on-stop-token-meter._maybe_clear`)
+    already uses, instead of typing a command for the model to run. One fewer moving part (no
+    model turn to wait on), and it can no longer drift into typing a different skill by accident.
 
-    Injecting is not "clearing from outside", which was the original objection: we type the
-    COMMAND into the session's own pane, so the MODEL runs it and authors the handoff first;
-    `clear_trigger.py` then validates that handoff and only then clears. The keystroke
-    machinery already solves delivery — `terminal_trigger` waits for an 8s quiet window,
-    re-reads the input field, and retries until the command is genuinely sent. Still a
-    SELF-trigger: never route this through `fleet_inject`.
-
-    WHY IT CANNOT HIT A BUSY SESSION — a session parked on `ExitPlanMode`/`AskUserQuestion` or
+    WHY IT CANNOT HIT A BUSY SESSION -- a session parked on `ExitPlanMode`/`AskUserQuestion` or
     mid-long-tool cannot end its turn, so its cron never fires and this phase never runs. That
     is structural, not a gate anyone must remember to write.
 
-    Returns True iff it emitted (the caller does NOT early-return; the roster still runs).
+    Returns True iff it spawned the chain (the caller does NOT early-return; the roster still
+    runs).
     """
     try:
         # Lazy, mirroring the sibling compact phase: only the idle path pays these imports,
         # and the heartbeat's hot path stays import-light.
+        import clear_trigger  # noqa: PLC0415 -- the shared /clear + bootstrap chain
         import cold_cache_compact  # noqa: PLC0415
-        import external_clear  # noqa: PLC0415 - terminal_from_record (the shape adapter)
         import fleet_scan  # noqa: PLC0415
-        import session_liveness  # noqa: PLC0415 - capture_terminal_identity (env -> fleet shape)
-        import terminal_trigger  # noqa: PLC0415
         import user_intent  # noqa: PLC0415
 
         if not cold_cache_compact.clear_enabled():
@@ -2918,9 +2786,8 @@ def _phase_idle_clear_nudge() -> bool:
             # destroying the context the pending answer belongs to. Same class as TRDD-OO301H7D,
             # one path over: the flag was already computed here and thrown away by `_`.
             return False
-        ctx = cold_cache_compact.context_tokens_for(
-            cold_cache_compact.newest_transcript(root)
-        )
+        transcript = cold_cache_compact.newest_transcript(root)
+        ctx = cold_cache_compact.context_tokens_for(transcript)
         if not cold_cache_compact.should_clear_when_long_idle(
             idle_s,
             user_present=present,
@@ -2935,72 +2802,36 @@ def _phase_idle_clear_nudge() -> bool:
             return False
         hours = (idle_s or 0) // 3600
         # FIRE IT, don't ask for it (owner directive 2026-08-04: *"it MUST handoff and clear
-        # automatically"*). This used to print a prose line asking the model to run the
-        # command — which the heartbeat protocol correctly treats as PAYLOAD to surface, not
-        # an instruction to obey, so on a genuinely abandoned session (the only kind that
-        # reaches here) there was nobody to read it. A lever that needs an attentive reader
-        # is not automatic.
-        #
-        # Injecting is SAFE and is not "clearing from outside": we type the COMMAND, so the
-        # model itself runs it and authors the handoff before anything is dropped —
-        # `clear_trigger.py` validates that handoff and only then clears. The retry
-        # machinery is already solved in `terminal_trigger` (it waits for an 8s quiet
-        # window, re-reads the field, and keeps trying until the command is really SENT),
-        # so this is a call, not a mechanism to invent.
-        # THE RATIFIED INJECTOR, not the retired one-shot (TRDD-5C42VCUX). This phase used to
-        # call `send_self_command(respect_user_presence=True)` — the exact API
-        # `terminal_trigger.send_verified`'s own docstring says to NEVER use. On iTerm that call
-        # does not merely degrade, it CANNOT WORK: it returns the `USE_ITERM_PATH` sentinel,
-        # which means "caller, run your own osascript". Every sibling trigger script
-        # (compact_trigger, clear_trigger, reload_trigger, resume_trigger, reload_skills_trigger)
-        # has that branch; THIS caller never did, so `sent.startswith("FIRED:")` was False on
-        # EVERY fire and the lever was structurally dead on the owner's own terminal.
-        #
-        # MEASURED 2026-08-06 on this host: `send_self_command(...)` -> `'USE_ITERM_PATH'`,
-        # `.startswith('FIRED:')` -> False. The 2026-08-04 fix that introduced this test cured
-        # the FALSE-POSITIVE half (it used to stamp a 2h cooldown and claim success while typing
-        # nothing) but not the blindness — so the phase went from lying about success to
-        # correctly reporting that it does nothing, forever.
-        #
-        # `send_verified` has no sentinel to forget: it builds steps for whatever channel it is
-        # given, types, RE-READS the pane, and only then submits. Verified on this iTerm session:
-        # channel_is_readable / build_type_only_steps / build_submit_steps / read_pane_text all
-        # succeed. Presence is already a HARD veto above (`present or active -> return False`),
-        # so dropping the retired presence-cancel reintroduces nothing.
-        terminal = external_clear.terminal_from_record(
-            session_liveness.capture_terminal_identity(os.environ)
+        # automatically"*) -- and never by typing a skill for the model to run (card 4 item 1):
+        # `spawn_shrink_chain` IS the fire -- it writes the resume state, types `/clear`, then
+        # the two-command bootstrap (`/janitor-arm`, `/janitor-resume`) into THIS session's own
+        # pane, all without any model turn in between. The fresh session's own SessionStart then
+        # composes and injects the Jev-compacted context (card 3), so nothing here authors a
+        # handoff -- there is no handoff to author.
+        spawned, why = clear_trigger.spawn_shrink_chain(
+            then=list(clear_trigger.BOOTSTRAP_CMDS),
+            directive=(
+                "idle-clear: read the injected SessionStart compacted context FIRST (follow its "
+                "wikimem/TRDD links via memgrep recall on demand), then resume your prior "
+                "in-flight task."
+            ),
+            transcript_path=str(transcript) if transcript else None,
         )
-        ok, why = terminal_trigger.send_verified(
-            terminal,
-            "/janitor-handoff-and-clear",
-            esc_first=False,
-            # BOUNDED, and deliberately LARGER than the 9s the retired call passed — those are
-            # different knobs: 9s was how long to wait for PRESENCE to clear, this is the whole
-            # send budget, and the verified path adds type -> read-back -> submit round-trips on
-            # top of the ratified 8s quiet window (a budget under ~10s could never succeed).
-            # Still short, for the reason the old comment gave and which still holds: this
-            # caller's real retry is the NEXT heartbeat, so a long inner block buys nothing and
-            # stalls every other phase behind it.
-            giveup_s=30.0,
-        )
-        # STAMP ONLY ON A SEND — and "a send" means the keystrokes ACTUALLY WENT OUT. The
-        # cooldown exists so a CLEARED session does not re-clear; stamping after a REFUSED send
-        # would instead mean "the user happened to be typing at 03:00, so skip the clear for two
-        # hours" — the veto silently becoming a mute. Not stamping makes the next heartbeat
-        # retry, which is the coarse outer retry. `send_verified` returns a BOOLEAN, so there is
-        # no longer a set of string statuses a future change could add one to and have it default
-        # to "assume it worked" — the failure that made this phase dead is now unrepresentable.
-        if not ok:
+        # STAMP ONLY ON A SPAWN — the cooldown exists so a CLEARED session does not re-clear; a
+        # stamp on a refused/unspawned chain would instead silently suppress the next
+        # heartbeat's retry for no reason. Same invariant `spawn_shrink_chain`'s own callers
+        # (on-stop-token-meter.py) already rely on.
+        if not spawned:
             # Logged (not printed) so an abandoned session does not emit a line every 5 minutes
             # that nobody is there to read.
             state.log_line(
-                "dispatch", f"idle-clear: not injected ({why}) — not stamping, will retry"
+                "dispatch", f"idle-clear: not spawned ({why}) — not stamping, will retry"
             )
             return False
         cold_cache_compact.mark_clear_fired(sd, now=now)
         print(
             f"[janitor-idle-clear] nothing but heartbeats for ~{hours}h "
-            f"(~{(ctx or 0) // 1000}k context) — firing /janitor-handoff-and-clear so the "
+            f"(~{(ctx or 0) // 1000}k context) — firing a Jev compaction so the "
             "next fires cost almost nothing. Compacting instead would NOT help: it cannot go "
             "below its own floor."
         )
@@ -4061,14 +3892,6 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
         # the owner named. So the three flags are checked directly here too, best-effort and
         # fail-open like every other branch in this function.
         #
-        # DISCLOSED SCOPE NOTE (adversarial review of this card): this function is SHARED -- its
-        # only other caller is `_phase_proactive_idle_compact`, the PREVENTIVE /compact nudge --
-        # so this fix extends the recovery guard to that lossy-compact path too, not just the
-        # clear paths item 5's text names. That is a DELIBERATE keep, not an accident: a
-        # compaction racing an unconsumed resume cue would truncate the same recovery the owner
-        # was describing, just via a different destructive action. Splitting it out would mean
-        # deliberately leaving that sibling path unguarded, which nobody asked for.
-        #
         # SHARED HELPER (card 1 follow-up item 2, TRDD-L32WC0H7): the three-flag check used to
         # be inlined here, in the SessionStart hook, and (missing entirely) in
         # `external_handoff_clear.py::_decide`. `external_clear.recovery_pending` is now the
@@ -4313,14 +4136,14 @@ def main() -> int:
         if _phase_compact_resume():
             return 0
 
-        # Phase 1.2: PREVENTIVE cold-compact (TRDD-D3PROACT). The reactive paths above shrink a
-        # large context only AFTER a cold fire already paid the 2× write; this one shrinks it
-        # PROACTIVELY during a cheap warm idle fire, so the next cold event is cheap. Gated on a
-        # genuinely-idle session (user absent, nothing pending) + a large context. Returns early
-        # like the resume phases so the fire stays minimal before the queued /compact runs. It sits
-        # AFTER the resume phases, which own the reactive cold case.
-        if _phase_proactive_idle_compact():
-            return 0
+        # Phase 1.2 used to be a PREVENTIVE cold-COMPACT here (TRDD-D3PROACT). Retired
+        # (TRDD-RAEGS1D5 card 4): the janitor never types `/compact` again. Its job — shrink a
+        # large context while the cache is still warm, before the next cold event pays for it —
+        # is now covered by two Jev-compaction (clear) levers instead: the Stop-boundary size
+        # trigger (`on-stop-token-meter._maybe_clear`, fires within the SAME turn boundary this
+        # phase used to target) and the heartbeat's own long-idle lever directly below
+        # (`_phase_idle_clear_nudge`). Both clear, which — unlike compact — has no floor to hit
+        # diminishing returns against.
 
     # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons). Still runs during the
     # cooldown — a silent cron-expiry renewal is not "work restarting", it is keeping the

@@ -61,7 +61,6 @@ def test_runnable_shebang_scripts_are_executable_in_git():
     runnable = [
         "scripts/dispatch.py",
         "scripts/daemon.py",
-        "scripts/compact_trigger.py",
         "scripts/reload_trigger.py",
         "scripts/identify_environment.py",
         "scripts/lib/terminal_trigger.py",

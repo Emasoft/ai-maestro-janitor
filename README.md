@@ -424,24 +424,12 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
   `/reports/` + `/reports_dev/` gitignored, plugin.json valid) and prints
   a unicode-bordered table with fix hints for any failures. Read-only —
   safe to run during any session, including paused or disarmed.
-- `/janitor-compact-context` — agent-invocable self-compaction. Records a
-  one-shot resume directive (`<project>/.janitor/state/resume-directive.txt` —
-  "continue TRDD-xxxx at …", consumed once by the `PostCompact` hook) then fires
-  a detached `/compact` at this session's own iTerm pane (matched by
-  `$ITERM_SESSION_ID` UUID, strictly validated). SOFT by default: the command is
-  typed without ESC, so it enqueues and runs when the current turn ends — no
-  in-flight work is discarded. The agent invokes it when the
-  context-watchdog's per-tool-call % injection crosses the threshold; after
-  invoking, the agent ends its turn so `/compact` runs, then auto-resumes on the
-  next heartbeat. iTerm-only for the trigger; elsewhere it records the directive
-  and asks you to `/compact`. Backed by `scripts/compact_trigger.py`. Part of the
-  context-compact watchdog (opt-in — see Hooks).
-  - **`--hard`** — press ESC first, interrupting the in-flight turn so `/compact`
-    runs NOW. For emergencies (context near the wall); the ≥85% enforcement hook
-    requests this explicitly.
-  - **`--handoff`** — run `/janitor-write-handoff` (a rich, script-composed
-    handoff) BEFORE `/compact`, for delicate junctures where the free mechanical
-    PreCompact handoff isn't enough. Combinable with `--hard`.
+- `/janitor-compact-context` — agent-invocable Jev compaction, on demand: the
+  same `/clear` + Jev-compacted-context-injection chain the janitor's automatic
+  levers fire on their own schedule (TRDD-RAEGS1D5), triggered right now instead
+  of waiting. Backed by `scripts/external_handoff_clear.py`; the janitor no
+  longer types `/compact` at all, so this skill has no `--hard`/`--handoff`
+  modes — see the skill's own SKILL.md.
 - `/janitor-write-handoff` — writes a rich session handoff to
   `<project>/.janitor/state/agent-handoff-<session>-<ts>-<pid>.md` (the semantic
   layer — the plan, the next concrete action, the traps already hit) that

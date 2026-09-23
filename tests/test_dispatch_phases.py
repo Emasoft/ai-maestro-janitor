@@ -3184,22 +3184,19 @@ def _arm_idle_clear(
 ):
     """Put the phase in the state where only the decision under test differs.
 
-    `result` is what the stubbed injector returns. It is a PARAMETER, not a hardcoded success,
-    because that hardcoding is what hid a real bug: a stub that always reports success cannot
-    tell a working phase from one that believes every refusal.
+    `result` is what the stubbed chain-spawner returns. It is a PARAMETER, not a hardcoded
+    success, because that hardcoding is what hid a real bug: a stub that always reports success
+    cannot tell a working phase from one that believes every refusal.
 
-    PATCHES `send_verified`, NOT the retired `send_self_command` (TRDD-5C42VCUX). When the
-    phase moved to the ratified injector this helper kept stubbing the old seam, so the REAL
-    `send_verified` ran, could not reach a pane from pytest, and returned False — four tests
-    went red at once. The subtler damage was to the tests that stayed GREEN: with the happy
-    path unable to send, every `assert sent == []` held against a phase that could not have
-    sent anything either way. Restoring this seam is what gives those assertions teeth again.
-    A stubbed seam that no longer matches its caller does not just fail loudly — it quietly
-    hollows out its neighbours."""
+    PATCHES `clear_trigger.spawn_shrink_chain` (TRDD-RAEGS1D5 card 4 item 1: the phase no
+    longer types `/janitor-handoff-and-clear` for the model to run — a manual-only skill an
+    automatic caller must never invoke — it calls the SAME chain-spawning seam
+    `on-stop-token-meter._maybe_clear` already uses). `sent` collects the kwargs of each call,
+    so a caller can assert `then` never contains a handoff skill and the call count."""
     sent: list = []
+    import clear_trigger
     import cold_cache_compact
     import fleet_scan
-    import terminal_trigger
     import user_intent
 
     monkeypatch.setattr(user_intent, "user_is_present", lambda **kw: present)
@@ -3208,9 +3205,9 @@ def _arm_idle_clear(
     monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda root: Path("/tmp/x.jsonl"))
     monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda t: ctx)
     monkeypatch.setattr(
-        terminal_trigger,
-        "send_verified",
-        lambda terminal, cmd, **kw: sent.append((cmd, kw)) or result,
+        clear_trigger,
+        "spawn_shrink_chain",
+        lambda **kw: sent.append(kw) or result,
     )
     return sent
 
@@ -3250,18 +3247,17 @@ def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict,
     heartbeat protocol treats as payload to surface, not an instruction — so on exactly the
     sessions it targets (nobody watching) it never happened. Assert the keystroke, not the
     prose: a test that only checked stdout would have passed against the broken version."""
+    import clear_trigger
+
     dispatch = _import_dispatch()
     sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200)
     assert dispatch._phase_idle_clear_nudge() is True
-    assert len(sent) == 1, "the command was not injected"
-    assert sent[0][0] == "/janitor-handoff-and-clear"
-    # It must not lead with ESC. The retired call carried the keyboard-respecting guarantee in
-    # a `respect_user_presence=True` kwarg that `send_verified` does not have; that guarantee
-    # now lives in the phase's own hard veto and is asserted by
-    # `test_idle_clear_never_fires_on_a_live_session`. What is left to pin HERE is the property
-    # of the keystroke itself: an ESC first would interrupt whatever the pane is showing, and
-    # this phase has no business interrupting anything.
-    assert sent[0][1].get("esc_first") is False
+    assert len(sent) == 1, "the chain was not spawned"
+    # No handoff skill is ever in the bootstrap this phase asks for — that is the actual
+    # card-4 property: an automatic caller must never type a manual-only handoff command.
+    assert "/janitor-handoff-and-clear" not in sent[0]["then"]
+    assert "/janitor-write-handoff" not in sent[0]["then"]
+    assert list(sent[0]["then"]) == list(clear_trigger.BOOTSTRAP_CMDS)
 
 
 def test_idle_clear_holds_off_a_tiny_context_card1_item3(env_isolation: dict, monkeypatch) -> None:
@@ -3282,7 +3278,7 @@ def test_idle_clear_still_fires_on_a_big_context(env_isolation: dict, monkeypatc
     dispatch = _import_dispatch()
     sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200, ctx=500_000)
     assert dispatch._phase_idle_clear_nudge() is True
-    assert [c for c, _ in sent] == ["/janitor-handoff-and-clear"]
+    assert len(sent) == 1
 
 
 def test_idle_clear_holds_off_under_an_hour(env_isolation: dict, monkeypatch) -> None:

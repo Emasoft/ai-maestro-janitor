@@ -82,7 +82,7 @@ def test_the_idle_clear_phase_does_not_use_the_sentinel_returning_api_at_all():
 
 
 _SIBLING_TRIGGER_SCRIPTS = (
-    "compact_trigger.py",
+    # compact_trigger.py retired (TRDD-RAEGS1D5 card 4: the janitor never types /compact again).
     "clear_trigger.py",
     "reload_trigger.py",
     "reload_skills_trigger.py",
