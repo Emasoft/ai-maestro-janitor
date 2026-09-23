@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-23T21:10:49+0200
+updated: 2026-09-23T22:53:46+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -117,3 +117,4 @@ No PRRD rule applies here (relevant-rules field left empty): checked prrdgrep's 
 - Owner: "but most of the functions of the reference repo are still not implemented! https://github.com/Waxmell114514/jev-compaction" — Evidence (ours): reference modules absent from our vendored jevctx: pipeline, segments, store, context, check, ledger, shadow; a gap analysis is running and will drive the rework.
 - Owner: "llm-ext is the fallback in case jev fails" — confirms decision 3.
 - Owner: "open an issue on the llm-externalizer repo (it should be Emasoft/llm-externalizer or Emasoft/llm-externalizer-plugin) and report all issues. but then focus on jev compacting and make it work" — filed Emasoft/llm-externalizer-plugin#15 (llm-ext session-summary spent 941 s on permanent 403s from harness-restricted free models and produced nothing, so the fallback cannot work on this machine until that is fixed).
+- Owner: "wait to complete all before publishing." — Release scope decided: no publish until the Jev rework cards (incl. 6 segmentation, 7 decision log), the memgrep sole-writer card XI10BA5D and the heartbeat-progress card I63GQJTK are all done, then the final gate and the three real-session compactions pass on the final tree.
