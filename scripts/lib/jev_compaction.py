@@ -14,6 +14,7 @@ which lives one directory up (``scripts/lib/jevctx/``).
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -34,6 +35,7 @@ from jevctx import scorer as _scorer  # noqa: E402
 from jevctx.budget import Batch, BudgetPlanner  # noqa: E402
 from jevctx.openrouter import JevBlockedError  # noqa: E402  -- TRDD-1ETALGDG, see score_items
 from jevctx.pipeline import RETRIEVE_QUESTION, format_pointer  # noqa: E402
+from jevctx.segments import segment  # noqa: E402  -- card 6, TRDD-88DOI824, see _segment_tool_result
 from jevctx.tokens import estimate_tokens  # noqa: E402
 from jevctx.types import (  # noqa: E402
     MAX_QUESTIONS_PER_REQUEST,
@@ -41,6 +43,7 @@ from jevctx.types import (  # noqa: E402
     JevValidationError,
     Noul,
     NoulAnswer,
+    Origin,
     Pointer,
     Question,
     ScoreItem,
@@ -106,6 +109,13 @@ class Item:
     skipped, e.g. `thinking`/`tool_use`), so the id stays a valid pointer back into the
     original JSONL for `jev_compact.py expand` to resolve, and is stable across re-runs
     because it depends only on the transcript's own content, never on extraction order.
+
+    Card 6 (TRDD-88DOI824): a large tool result is split into several Items, one per
+    `jevctx.segments.segment()` piece, id "<entry uuid>:<block index>@<a>-<b>" (1-based,
+    inclusive line numbers into the block's own raw text) -- see `_segment_tool_result`.
+    `protected=True` marks a segment whose structural kind is `stacktrace` or `diff`: it
+    ranks above a relevance-only item in `compose()`'s eviction/pointer-slot ordering, below
+    a `decision_passed` one. Always `False` for a non-segmented Item.
     """
 
     id: str
@@ -114,6 +124,7 @@ class Item:
     tokens: int
     ts: str | None
     turn: int
+    protected: bool = False
 
 
 @dataclass(frozen=True)
@@ -324,6 +335,136 @@ def _is_heartbeat_entry(entry: dict[str, Any]) -> bool:
     return _entry_primary_text(entry).startswith(transcript_roles.HEARTBEAT_PREFIX)
 
 
+# Card 6 (TRDD-88DOI824): "tool results above about 1,000 tokens" -- below this, a tool
+# result stays exactly the pre-card-6 shape (one all-or-nothing Item); segmenting a small
+# result would cost more in per-segment pointer/header overhead than it could ever save.
+_SEGMENT_THRESHOLD_TOKENS = 1000
+
+# Card 6: "Protected kinds stacktrace and diff rank above relevance-only items in evict_key,
+# below decision_passed" -- see `Item.protected` and `compose()`'s `evict_key`/
+# `_pointer_priority`/admission-sort tuples, all of which fold this in as a middle tier.
+_PROTECTED_SEGMENT_KINDS = frozenset({"stacktrace", "diff"})
+
+# Card 6: a Read tool result's `cat -n`-style output prefixes EVERY line with
+# "<spaces><digits><TAB>" -- e.g. "     1\tdef foo():". `jevctx.segments.detect_kind`'s
+# `_looks_tabular` check counts exactly one tab per line as tabular when every line's count
+# matches, so this prefix alone misdetects numbered code as `kind="table"` (measured: 2,792
+# of 2,848 real segments) and cuts it every 20 lines (`_ROWS_PER_SEGMENT`) regardless of what
+# the code actually is. `_detection_view` strips it for detection only, never for the stored
+# text -- see that function's own docstring.
+_SEGMENT_LINE_NUM_PREFIX = re.compile(r"^\s*\d+\t")
+
+
+def _detection_view(text: str) -> str:
+    """`text` with the Read-style line-number prefix (`_SEGMENT_LINE_NUM_PREFIX`) stripped
+    from every line, for `jevctx.segments.segment()`'s KIND DETECTION AND CUT POINTS ONLY --
+    never for the text a segment Item actually stores or renders (`_segment_tool_result`
+    slices the CALLER's original, unstripped lines with the `line_span` this view produces).
+
+    The strip is per-LINE and removes only leading characters within a line -- it never
+    changes line COUNT or merges/splits a line -- so a `Segment.line_span` computed against
+    this view is guaranteed to index the original's lines one-to-one, whether or not any line
+    actually matched the prefix (a no-op line passes through unchanged).
+
+    EXCEPT one edge case, guarded against below: `text`'s FINAL line, if it carries no
+    trailing newline (a real, unterminated tail is the normal case -- `splitlines` requires
+    none), can have the prefix match its ENTIRE content (e.g. a Read line whose source line is
+    blank: raw text "   311\\t" with nothing after the tab). Stripped naively, that line
+    becomes the empty string -- and `"".join(...)` would then contribute ZERO bytes for it,
+    so `segment()`'s OWN internal `text.splitlines(keepends=True)` re-split of the joined
+    result would see ONE FEWER line than this function's caller does, shifting every
+    `line_span` after it by one and silently dropping the tail from `_segment_tool_result`'s
+    slice (measured on a real 258 MB transcript: 4 bytes missing, byte-for-byte "311\\t", the
+    losslessness assertion in `_segment_tool_result` is what caught it). A line that would
+    vanish entirely is left UNSTRIPPED instead -- a no-op line already passes through
+    unchanged per the paragraph above, so this is the same fallback, just triggered by an
+    edge case rather than a non-match.
+    """
+    pieces = []
+    for line in text.splitlines(keepends=True):
+        stripped = _SEGMENT_LINE_NUM_PREFIX.sub("", line, count=1)
+        pieces.append(stripped if stripped else line)
+    return "".join(pieces)
+
+
+def _segment_tool_result(
+    item_id_base: str, name: str, tool_input: str, result_text: str, ts: str | None, turn: int,
+) -> list[Item]:
+    """One `tool_result` block -> one or more scorable/inlinable Items.
+
+    Card 6 (TRDD-88DOI824): 601 real tool results of 2k-24k tokens held 32% of all tool
+    tokens in the three largest real transcripts, each all-or-nothing against the budget.
+    Above `_SEGMENT_THRESHOLD_TOKENS`, `jevctx.segments.segment()` (vendored, see
+    `jevctx/VENDORED.md`) splits `result_text` into independently scoreable/admittable
+    pieces instead of one big Item.
+
+    Segmented on `result_text` ALONE, never the `name(input)\\n` prefix this function adds
+    for score-time context below: that prefix is this project's own synthetic addition, never
+    a transcript byte, so including it in what gets segmented would (1) violate "a segment is
+    an exact slice of the original" and (2) shift every segment's line numbers by one relative
+    to `jev_compact.py::_extract_block`, which returns only the RAW tool_result content for a
+    `tool_result` block -- `expand`'s `<uuid>:<n>@<a>-<b>` slicing depends on the two agreeing.
+
+    Below the threshold, or when segmentation yields at most one piece anyway (nothing to
+    split), this returns the PRE-card-6 shape unchanged: one Item, id `item_id_base` (no `@`
+    suffix), text `name(input)\\nresult`.
+
+    Adversarial review (TRDD-88DOI824): the first version of this function let ANY failure in
+    the segmentation path -- a `segment()` bug on unusual real content, or the losslessness
+    check itself firing -- propagate all the way out of `extract_items()`, aborting the WHOLE
+    `compact` run over ONE bad tool result (this is not hypothetical: the real-data
+    acceptance run hit exactly this on the 258 MB transcript before `_detection_view`'s
+    line-vanishing fix, below). That is a real regression in this file's own established risk
+    posture -- `_score_batch_resilient` exists specifically so one bad batch never sinks the
+    whole call -- so segmentation failures degrade the SAME way score-batch failures do: a
+    stderr finding line, then the pre-card-6 whole-item shape, never a crash. The verbatim
+    guarantee still holds either way (a segment's text is always sliced from `result_text`, or
+    `result_text` is kept whole; never paraphrased, never silently corrupted).
+    """
+    whole_item = [Item(item_id_base, "tool", f"{name}({tool_input})\n{result_text}",
+                        estimate_tokens(f"{name}({tool_input})\n{result_text}"), ts, turn)]
+    if estimate_tokens(result_text) <= _SEGMENT_THRESHOLD_TOKENS:
+        return whole_item
+
+    try:
+        origin = Origin(source="tool", ref=name, turn=turn)
+        segs = segment(_detection_view(result_text), origin)
+        if len(segs) <= 1:
+            return whole_item
+
+        original_lines = result_text.splitlines(keepends=True)
+        pieces: list[Item] = []
+        for i, seg in enumerate(segs):
+            if seg.line_span is None:
+                raise AssertionError("segment() returned no line_span for non-empty input")
+            a, b = seg.line_span
+            piece_text = "".join(original_lines[a - 1:b])
+            pieces.append(Item(
+                id=f"{item_id_base}@{a}-{b}", kind="tool", text=piece_text,
+                tokens=estimate_tokens(piece_text), ts=ts, turn=turn + i,
+                protected=seg.kind in _PROTECTED_SEGMENT_KINDS,
+            ))
+        # segments.py's own docstring: losslessness is "guaranteed structurally... not by
+        # care" -- re-checked here anyway because this slices the CALLER's original lines via
+        # a detection-view-derived line_span, one layer removed from segment()'s own guarantee
+        # (which only covers its own input, the detection view, not what we chose to slice
+        # with its cuts).
+        if "".join(p.text for p in pieces) != result_text:
+            raise AssertionError("segmentation lost or altered bytes -- losslessness violated")
+    except Exception as exc:  # noqa: BLE001 (not enabled in this project's ruff config; see
+        # the docstring above) -- deliberately broad: ANY segmentation failure, expected or
+        # not (a future jevctx.segments bug included), must degrade to the whole item, never
+        # take the whole `compact` run down over one tool result.
+        print(
+            f"jev: segmentation failed for {item_id_base} ({type(exc).__name__}: {exc}) -- "
+            "keeping the tool result whole",
+            file=sys.stderr,
+        )
+        return whole_item
+
+    return pieces
+
+
 def extract_items(transcript_path: str | Path) -> list[Item]:
     """Walk one transcript JSONL and return its extracted, chronologically ordered items.
 
@@ -422,10 +563,13 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
                                 tool_use_id, ("<unknown tool>", "")
                             )
                             result_text = _tool_result_text(block.get("content"))
-                            text = f"{name}({tool_input})\n{result_text}"
-                            items.append(Item(f"{uuid}:{idx}", "tool", text,
-                                               estimate_tokens(text), ts, turn))
-                            turn += 1
+                            # Card 6 (TRDD-88DOI824): one or more Items, per
+                            # `_segment_tool_result` -- see that function's own docstring.
+                            new_items = _segment_tool_result(
+                                f"{uuid}:{idx}", name, tool_input, result_text, ts, turn
+                            )
+                            items.extend(new_items)
+                            turn += len(new_items)
                 # else: no content (or an unrecognised shape) -- nothing to extract.
 
             elif entry_type == "attachment":
@@ -871,13 +1015,30 @@ def _format_pointer(item: Item) -> str:
     TRDD-HWF3QFAB). The local literal this replaced had no escaping -- a `"` or `\\` in an
     item's first line produced a pointer `pipeline.parse_pointer`/`find_pointers` could not
     parse back -- and previewed the literal first line even when it was blank; the summary
-    below is the first NON-EMPTY line instead, truncated the same way as before. `lines=None`:
-    this project's pointer ids resolve straight into the transcript JSONL
-    (`jev_compact.py::_extract_block`), never into a sub-span of one block, so the
-    `lines=a-b` field `format_pointer` supports for segment-level pointers (card 6, not this
-    one) never applies here. WHY no path either: a pointer must never hand the model
-    something it could `Read` -- the transcript is 24-258 MB (docs_dev/jev-compaction-spec.md
-    card 3) -- so the path lives once, in the header, never per pointer.
+    below is the first NON-EMPTY line instead, truncated the same way as before. WHY no path
+    either: a pointer must never hand the model something it could `Read` -- the transcript is
+    24-258 MB (docs_dev/jev-compaction-spec.md card 3) -- so the path lives once, in the
+    header, never per pointer.
+
+    `lines=None` always, EVEN for a segment Item (card 6, TRDD-88DOI824): this superseded an
+    earlier note here that said the `lines=a-b` field `format_pointer` supports would carry a
+    segment's span -- it does not, on purpose. A segment's span lives INSIDE `item.id` instead
+    (`<uuid>:<n>@<a>-<b>`, see `_segment_tool_result`), because the whole point is a SINGLE
+    copy-pasteable token for `expand <id>`: rendering `id=<uuid>:<n> lines=a-b` would let the
+    model copy just the `id=` value, and `jev_compact.py expand <uuid>:<n>` (no `@`) returns
+    the WHOLE block, silently wrong for a pointer meant to name one segment.
+
+    Adversarial-review disclosure (TRDD-88DOI824, not fixed): this makes a segment's pointer
+    line UNPARSEABLE by `pipeline.parse_pointer`/`find_pointers` -- their `_POINTER_RE`'s id
+    character class (`[A-Za-z0-9:_.-]+`) does not include `@`, so the regex fails to match at
+    that position and `find_pointers` silently skips the whole line. Same trade-off this
+    module already made once for `_format_decision_pointer` below (see its own docstring) --
+    not fixed here for the same reason: nothing in this project reads `compose()`'s FULL or
+    injected output back through `find_pointers`/`parse_pointer` in production today (`grep`
+    confirmed: only `jevctx.pipeline` itself and this repo's own pointer-format tests call
+    them), so the round-trip guarantee that breaks is currently dormant, not live -- but it IS
+    a real, silent gap for a future consumer who assumes every `[[elided ...]]` line
+    round-trips, and is disclosed here rather than left to be rediscovered.
     """
     summary = ""
     for line in item.text.splitlines():
@@ -1200,23 +1361,55 @@ def compose(
         s = scores[it.id]
         return max(s.relevance, s.decision)
 
-    def evict_key(it: Item) -> tuple[bool, float, int]:
-        # (decision_passed, max_score, turn) ascending: a relevance-only item (`False`)
-        # sorts, and is dropped, BEFORE any item that passed the decision question -- "never
-        # let the budget undo the decision question" (a user-stated decision, constraint,
-        # correction or instruction the user gave later work must obey is worse to lose than
-        # merely-relevant background). Within each group, lowest score first, oldest
-        # (smallest `turn`) among equal scores -- unchanged from before.
-        return (scores[it.id].decision_passed, max_score(it), it.turn)
+    def evict_key(it: Item) -> tuple[bool, bool, float, int]:
+        # (decision_passed, protected, max_score, turn) ascending: a relevance-only item
+        # (`False`, `False`) sorts, and is dropped, BEFORE any item that passed the decision
+        # question -- "never let the budget undo the decision question" (a user-stated
+        # decision, constraint, correction or instruction the user gave later work must obey
+        # is worse to lose than merely-relevant background). Card 6 (TRDD-88DOI824): a
+        # `protected` segment (stacktrace/diff, see `Item.protected`) sits in its own tier
+        # between the two -- it is structurally important even when Jev scores it as
+        # merely-relevant, but never outranks an actual stated decision. Within each tier,
+        # lowest score first, oldest (smallest `turn`) among equal scores.
+        return (scores[it.id].decision_passed, it.protected, max_score(it), it.turn)
 
-    # TRDD-RAEGS1D5 (orchestrator rebalance): the single newest owner-message id, if any --
-    # set below, once the owner tier is built, but declared here (before `render` closes over
-    # it) so `render`'s per-item cap check always has a name to look up, even on the throwaway
-    # empty baseline render that runs before the owner tier is computed.
-    newest_owner_id: str | None = None
+    # TRDD-RAEGS1D5 (orchestrator rebalance) + coordinator ruling: TWO owner items are
+    # guaranteed a slot, uncapped, ahead of every per-item cap -- the chronologically newest
+    # owner message (by `turn`, unconditionally) AND the newest `decision_passed` owner item
+    # (if one exists and differs from the first; they may be the same item, in which case
+    # there is only one). Commit d4fa7685 narrowed the ORIGINAL single guaranteed slot to
+    # "newest decision-passing, else newest plain", which silently dropped the genuinely
+    # newest owner message whenever an OLDER decision-passing one existed (measured on the
+    # 258 MB transcript: item id `92828da9...`, the chronologically newest owner message, was
+    # absent from both the full and the injected copy) -- reintroducing, in the opposite
+    # direction, the same class of bug the pre-d4fa7685 "always newest" rule had (see
+    # `test_guaranteed_owner_slot_prefers_newest_decision_passed_over_newest_plain`'s own
+    # docstring/history for that earlier failure mode). Both guaranteed items now coexist:
+    # neither displaces the other.
+    #
+    # Computed here, from `kept_items` (BEFORE any eviction), because BOTH consumers need it
+    # regardless of whether `total_tokens > budget_tokens` ever triggers eviction below: the
+    # admission branch force-admits these ids at FULL size (never `_owner_item_admission_
+    # cost`-capped), and `render`'s per-item cap check (closing over this name) gives them
+    # `NEWEST_OWNER_ITEM_BYTES` instead of the general `max_item_bytes` in the injected copy
+    # even when NOTHING was evicted at the token level -- the byte-capped render is a
+    # separate, independent budget from `budget_tokens`.
+    owner_kept_all = sorted(
+        (it for it in kept_items if it.kind == "user"), key=lambda it: it.turn, reverse=True,
+    )
+    guaranteed_owner_items: list[Item] = []
+    if owner_kept_all:
+        guaranteed_owner_items.append(owner_kept_all[0])  # newest owner message, always
+        newest_decision_owner_item = next(
+            (it for it in owner_kept_all if scores[it.id].decision_passed), None,
+        )
+        if (newest_decision_owner_item is not None
+                and newest_decision_owner_item.id != owner_kept_all[0].id):
+            guaranteed_owner_items.append(newest_decision_owner_item)
+    guaranteed_owner_ids: set[str] = {it.id for it in guaranteed_owner_items}
     # TRDD-RAEGS1D5 (owner per-item token cap): item id -> the `_OWNER_ITEM_TOKEN_CAP` it was
     # truncated to during the `budget_tokens` admission below -- declared here for the same
-    # reason `newest_owner_id` is (`render` closes over it and needs a name regardless of
+    # reason `guaranteed_owner_ids` is (`render` closes over it and needs a name regardless of
     # whether that admission branch ever runs). Empty means every kept item renders in full;
     # only `--out` (which never sets `max_item_bytes`) actually reaches this in `render` --
     # the injected copy's own byte cap is always tighter and fires first, see `render`'s
@@ -1250,29 +1443,17 @@ def compose(
         # long before the share was actually spent. A capped item still costs its slot in the
         # share and renders as a verbatim prefix + pointer (`token_truncated` below) instead of
         # disappearing whole.
-        owner_kept = sorted(
-            (it for it in kept_items if it.kind == "user"),
-            key=lambda it: it.turn, reverse=True,
-        )
+        # `owner_kept_all`/`guaranteed_owner_items`/`guaranteed_owner_ids` were computed above
+        # `render`'s own name lookup, from `kept_items` -- reused here unchanged (same filter,
+        # same order) rather than recomputed, so the admission decision and the render-cap
+        # exemption can never disagree about which ids are guaranteed.
+        owner_kept = owner_kept_all
         admitted: list[Item] = []
         admitted_tokens = 0
-        rest_of_owner_kept: list[Item] = []
-        if owner_kept:
-            # TRDD-RAEGS1D5 (adversarial-review fix): the guaranteed tier-1 slot is the
-            # newest `decision_passed` owner item when one exists, NOT unconditionally the
-            # newest owner item -- a plain "always newest" rule let a merely-recent,
-            # non-decision message ("ok", "thanks") outrank an OLDER decision_passed one (a
-            # stated constraint/correction) for the one guaranteed slot, silently
-            # reintroducing the exact "budget undoes the decision question" failure mode this
-            # module already fixed once (see `test_budget_eviction_protects_decision_passing_
-            # items_last`'s own history/docstring). `owner_kept` is sorted newest-first, so
-            # the first `decision_passed` item found IS the newest `decision_passed` one.
-            guaranteed_owner_item = next(
-                (it for it in owner_kept if scores[it.id].decision_passed), owner_kept[0],
-            )
-            admitted.append(guaranteed_owner_item)
-            admitted_tokens += guaranteed_owner_item.tokens
-            rest_of_owner_kept = [it for it in owner_kept if it.id != guaranteed_owner_item.id]
+        for guaranteed_it in guaranteed_owner_items:
+            admitted.append(guaranteed_it)
+            admitted_tokens += guaranteed_it.tokens
+        rest_of_owner_kept = [it for it in owner_kept if it.id not in guaranteed_owner_ids]
         owner_token_budget = int(budget_tokens * _OWNER_SHARE)
         # Named distinctly from the byte-tier's own `owner_overflow` below (line ~1311) --
         # same function scope, so mypy's `no-redef` check treats the two as one name/type
@@ -1292,7 +1473,11 @@ def compose(
                 token_truncated[it.id] = _OWNER_ITEM_TOKEN_CAP
         for it in sorted(
             (it for it in kept_items if it.kind != "user"),
-            key=lambda it: (scores[it.id].decision_passed, max_score(it), it.turn),
+            # Card 6 (TRDD-88DOI824): `it.protected` (stacktrace/diff) slots in between
+            # `decision_passed` and plain relevance -- same tier as `evict_key`/
+            # `_pointer_priority` above, so a structurally-important segment is not starved
+            # out of the budget by a merely-more-relevant sibling.
+            key=lambda it: (scores[it.id].decision_passed, it.protected, max_score(it), it.turn),
             reverse=True,
         ):
             if admitted_tokens + it.tokens > budget_tokens:
@@ -1319,13 +1504,15 @@ def compose(
     elided_items = [it for it in items if it.id not in kept_ids]
     hidden_count = 0
 
-    def _pointer_priority(it: Item) -> tuple[bool, float]:
+    def _pointer_priority(it: Item) -> tuple[bool, bool, float]:
         # TRDD-RAEGS1D5 (owner per-item token cap, requirement 1): "evicted decision-passing
         # items get first claim on the pointer slots" -- an owner item the budget admission
         # above could not fit even truncated (see `token_truncated`) still names a decision,
         # constraint or correction the user gave; it must not lose its one remaining pointer
         # slot to a merely-relevant item just because the latter scores marginally higher.
-        return (scores[it.id].decision_passed, max_score(it))
+        # Card 6 (TRDD-88DOI824): a `protected` segment (stacktrace/diff) gets the same
+        # middle-tier claim `evict_key` gives it -- same rationale, same ordering.
+        return (scores[it.id].decision_passed, it.protected, max_score(it))
 
     # TRDD-RAEGS1D5 (full-copy decision-pointer uncap): in the FULL render only
     # (`max_item_bytes is None` -- the injected copy always passes it, see `render`'s per-item
@@ -1398,12 +1585,13 @@ def compose(
         ]
         for it in kept_order:
             lines.append(f"-- {it.kind} {it.id} --")
-            # TRDD-RAEGS1D5 (orchestrator rebalance): the newest owner message gets its own,
-            # larger cap (`NEWEST_OWNER_ITEM_BYTES`) instead of the general `max_item_bytes` --
-            # see that constant's own docstring for why.
+            # TRDD-RAEGS1D5 (orchestrator rebalance) + coordinator ruling: BOTH guaranteed
+            # owner items (the newest message, and the newest decision-passing one when it
+            # differs -- see `guaranteed_owner_ids`'s own docstring above) get the larger
+            # `NEWEST_OWNER_ITEM_BYTES` cap instead of the general `max_item_bytes`.
             cap = (
                 NEWEST_OWNER_ITEM_BYTES
-                if max_item_bytes is not None and it.id == newest_owner_id
+                if max_item_bytes is not None and it.id in guaranteed_owner_ids
                 else max_item_bytes
             )
             text_bytes = it.text.encode("utf-8")
@@ -1540,8 +1728,10 @@ def compose(
         # this repo's own 49 MB/258 MB transcripts had measured 15/15 and 11/11 kept items, ALL
         # kind "user" -- the owner's own messages crowding out every bit of what the session
         # actually DID (its assistant replies, tool calls, task-notification events) -- so:
-        #   1. the single NEWEST owner (`kind == "user"`) message, always -- capped at
-        #      `NEWEST_OWNER_ITEM_BYTES` in `render()`, not `max_item_bytes`.
+        #   1. the guaranteed owner items -- the NEWEST owner (`kind == "user"`) message,
+        #      always, PLUS the newest `decision_passed` owner item when it differs (see
+        #      `guaranteed_owner_ids` above) -- capped at `NEWEST_OWNER_ITEM_BYTES` in
+        #      `render()`, not `max_item_bytes`.
         #   2. further owner messages, newest first with `decision_passed` preferred, while
         #      the running OWNER total stays under `_OWNER_SHARE` of `kept_budget` -- a
         #      ceiling: short owner messages that do not use up the whole share leave the
@@ -1555,8 +1745,10 @@ def compose(
             (it for it in items if it.id in kept_ids and it.kind == "user"),
             key=lambda it: it.turn, reverse=True,
         )
-        newest_owner = owner_all[0] if owner_all else None
-        newest_owner_id = newest_owner.id if newest_owner is not None else None
+        # Coordinator ruling: BOTH guaranteed items (see `guaranteed_owner_ids` above) claim
+        # tier 1 here, not just a single "newest" one -- `owner_all` is already newest-first,
+        # so filtering it keeps the newest-message-first, then-newest-decision-item order.
+        tier1_guaranteed = [it for it in owner_all if it.id in guaranteed_owner_ids]
 
         def _item_cost(it: Item, cap: int) -> int:
             over = len(it.text.encode("utf-8")) > cap
@@ -1569,13 +1761,14 @@ def compose(
         kept_order_list: list[Item] = []
         owner_overflow: list[Item] = []
         owner_bytes_used = 0
-        if newest_owner is not None:
-            kept_order_list.append(newest_owner)
-            owner_bytes_used += _item_cost(newest_owner, NEWEST_OWNER_ITEM_BYTES)
+        for guaranteed_it in tier1_guaranteed:
+            kept_order_list.append(guaranteed_it)
+            owner_bytes_used += _item_cost(guaranteed_it, NEWEST_OWNER_ITEM_BYTES)
 
         owner_budget = int(kept_budget * _OWNER_SHARE) if kept_budget is not None else None
         rest_owner = sorted(
-            owner_all[1:], key=lambda it: (scores[it.id].decision_passed, it.turn), reverse=True,
+            (it for it in owner_all if it.id not in guaranteed_owner_ids),
+            key=lambda it: (scores[it.id].decision_passed, it.turn), reverse=True,
         )
         for it in rest_owner:
             cost = _item_cost(it, max_item_bytes)
@@ -1592,7 +1785,9 @@ def compose(
         )
         relevance_non_owner = sorted(
             (it for it in non_owner if not scores[it.id].decision_passed),
-            key=lambda it: (max_score(it), it.turn), reverse=True,
+            # Card 6 (TRDD-88DOI824): same `protected` middle tier as the token-budget
+            # admission above, so the injected copy's explicit tier order agrees with it.
+            key=lambda it: (it.protected, max_score(it), it.turn), reverse=True,
         )
         kept_order_list.extend(decision_non_owner)
         kept_order_list.extend(relevance_non_owner)

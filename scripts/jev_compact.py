@@ -20,7 +20,13 @@ Sub-commands:
                                       actually probes, never short-circuits on a cached stamp.
   expand --transcript P ID         — prints the ORIGINAL bytes of one item (``ID`` =
                                       ``<uuid>:<n>``) from a transcript JSONL; exits 3 if
-                                      the entry or the block index isn't found.
+                                      the entry or the block index isn't found. Card 6
+                                      (TRDD-88DOI824): ``ID`` may instead be
+                                      ``<uuid>:<n>@<a>-<b>`` (1-based, inclusive line
+                                      numbers) — a segment `jev_compaction.py::
+                                      _segment_tool_result` split a large tool result into —
+                                      and prints exactly lines ``a..b`` of that block's raw
+                                      text; exits 3 if the span is out of range.
   compact --transcript P --out F   — compose the compacted context (card 3) and write it to
                                       F atomically. Exit code contract (a part C caller
                                       branches on these, so each is deliberate and stable):
@@ -432,8 +438,25 @@ def cmd_expand(args: argparse.Namespace) -> int:
         print("expand failed: an id is required unless --list is given", file=sys.stderr)
         return 3
 
+    # Card 6 (TRDD-88DOI824): a segment id is "<uuid>:<n>@<a>-<b>" -- split the span off
+    # FIRST (rsplit on the last "@", matching real ids, which never carry one otherwise) so
+    # the "<uuid>:<n>" half below is parsed exactly as it always was, pre-card-6.
+    id_part = args.id
+    line_span: tuple[int, int] | None = None
+    if "@" in id_part:
+        id_part, span_str = id_part.rsplit("@", 1)
+        try:
+            start_str, end_str = span_str.split("-", 1)
+            line_span = (int(start_str), int(end_str))
+        except ValueError:
+            print(
+                f"expand failed: malformed id {args.id!r}, expected '<uuid>:<n>@<a>-<b>'",
+                file=sys.stderr,
+            )
+            return 3
+
     try:
-        target_uuid, index_str = args.id.rsplit(":", 1)
+        target_uuid, index_str = id_part.rsplit(":", 1)
         index = int(index_str)
     except ValueError:
         print(f"expand failed: malformed id {args.id!r}, expected '<uuid>:<n>'", file=sys.stderr)
@@ -448,6 +471,21 @@ def cmd_expand(args: argparse.Namespace) -> int:
     if text is None:
         print(f"expand failed: no block {index} in entry {target_uuid!r}", file=sys.stderr)
         return 3
+
+    if line_span is not None:
+        # `jev_compaction.py::_segment_tool_result` sliced ITS segment from this SAME raw
+        # block text (never the synthetic "name(input)\n" prefix) -- see that function's own
+        # docstring for why the two must agree on what "the original" is.
+        start, end = line_span
+        lines = text.splitlines(keepends=True)
+        if start < 1 or end < start or end > len(lines):
+            print(
+                f"expand failed: line span {start}-{end} out of range for block {index} "
+                f"in entry {target_uuid!r} ({len(lines)} lines)",
+                file=sys.stderr,
+            )
+            return 3
+        text = "".join(lines[start - 1:end])
 
     print(text)
     return 0

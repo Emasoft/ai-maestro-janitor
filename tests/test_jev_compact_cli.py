@@ -140,6 +140,122 @@ def test_expand_malformed_id_exits_3(tmp_path: Path) -> None:
     assert code == 3
 
 
+def _write_read_transcript(tmp_path: Path) -> tuple[Path, str]:
+    """A one-entry transcript carrying a large, Read-shaped `cat -n` tool_result -- big
+    enough to segment (`jc._SEGMENT_THRESHOLD_TOKENS`). Returns (path, the raw result text)."""
+    lines = []
+    n = 1
+    for i in range(80):
+        for body in (f"def func_{i}():", f"    return {i}", ""):
+            lines.append(f"{n:6d}\t{body}")
+            n += 1
+    result_text = "\n".join(lines) + "\n"
+    entries = [
+        {
+            "type": "assistant", "uuid": "a1", "parentUuid": None,
+            "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/x.py"}},
+            ]},
+        },
+        {
+            "type": "user", "uuid": "u1", "parentUuid": "a1",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": result_text},
+            ]},
+        },
+    ]
+    path = tmp_path / "read_transcript.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    return path, result_text
+
+
+def test_expand_segment_id_is_byte_exact(tmp_path: Path) -> None:
+    # Card 6 (TRDD-88DOI824): a large tool result's segment id is "<uuid>:<n>@<a>-<b>";
+    # `expand` must print EXACTLY lines a..b of that block's raw text, byte-exact -- not just
+    # "some plausible substring". `jc.extract_items` on the SAME transcript is the oracle for
+    # what the real id/text pairing is (this test does not hand-compute a line span).
+    transcript, _result_text = _write_read_transcript(tmp_path)
+    items = [it for it in jc.extract_items(transcript) if it.kind == "tool"]
+    assert len(items) > 1, "the fixture must actually segment, or this test proves nothing"
+    target = items[len(items) // 2]  # a middle segment, not just the first
+    assert "@" in target.id
+
+    code, out = _run(["expand", "--transcript", str(transcript), target.id])
+    assert code == 0
+    assert out == target.text + "\n"  # print() adds exactly one trailing newline
+
+
+def test_expand_segment_id_out_of_range_span_exits_3(tmp_path: Path) -> None:
+    transcript, result_text = _write_read_transcript(tmp_path)
+    n_lines = len(result_text.splitlines())
+    code, _out = _run([
+        "expand", "--transcript", str(transcript), f"u1:0@1-{n_lines + 1000}",
+    ])
+    assert code == 3
+
+
+def test_expand_segment_id_malformed_span_exits_3(tmp_path: Path) -> None:
+    transcript, _result_text = _write_read_transcript(tmp_path)
+    code, _out = _run(["expand", "--transcript", str(transcript), "u1:0@abc-def"])
+    assert code == 3
+
+
+def _write_list_content_read_transcript(tmp_path: Path) -> tuple[Path, str]:
+    """Same large Read-shaped result as `_write_read_transcript`, but the tool_result's own
+    `content` is LIST-shaped (two `text` blocks), not a plain string. Adversarial review
+    (TRDD-88DOI824): `jev_compaction._tool_result_text` and this script's own
+    `_extract_block` independently reconstruct list content via `"\\n".join(...)` over the
+    `text`-typed parts -- nothing exercised that agreement for a SEGMENTED result before this
+    test. `result_text` is built to match `_tool_result_text`'s own join exactly."""
+    lines = []
+    n = 1
+    for i in range(80):
+        for body in (f"def func_{i}():", f"    return {i}", ""):
+            lines.append(f"{n:6d}\t{body}")
+            n += 1
+    mid = len(lines) // 2
+    part_a = "\n".join(lines[:mid])
+    part_b = "\n".join(lines[mid:]) + "\n"
+    result_text = "\n".join([part_a, part_b])  # == _tool_result_text's own reconstruction
+    entries = [
+        {
+            "type": "assistant", "uuid": "a1", "parentUuid": None,
+            "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/x.py"}},
+            ]},
+        },
+        {
+            "type": "user", "uuid": "u1", "parentUuid": "a1",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": [
+                    {"type": "text", "text": part_a},
+                    {"type": "text", "text": part_b},
+                ]},
+            ]},
+        },
+    ]
+    path = tmp_path / "list_content_transcript.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    return path, result_text
+
+
+def test_expand_segment_id_is_byte_exact_for_list_shaped_content(tmp_path: Path) -> None:
+    # Closes the adversarial-review gap: `_tool_result_text` (jev_compaction.py, what gets
+    # segmented) and `_extract_block` (this script, what `expand` slices) reconstruct
+    # list-shaped tool_result content independently -- this proves they agree byte for byte
+    # for a SEGMENTED result, not just the plain-string shape every other test here uses.
+    transcript, result_text = _write_list_content_read_transcript(tmp_path)
+    items = [it for it in jc.extract_items(transcript) if it.kind == "tool"]
+    assert len(items) > 1, "the fixture must actually segment, or this test proves nothing"
+    assert "".join(it.text for it in items) == result_text
+
+    target = items[len(items) // 2]
+    assert "@" in target.id
+    code, out = _run(["expand", "--transcript", str(transcript), target.id])
+    assert code == 0
+    assert out == target.text + "\n"
+
+
 class _FakeAnswer:
     def __init__(self, noul: float) -> None:
         self.noul = noul

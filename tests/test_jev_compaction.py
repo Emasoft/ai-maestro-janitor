@@ -15,6 +15,7 @@ import jev_compaction as jc  # noqa: E402
 import pytest  # noqa: E402
 from jevctx.openrouter import JevBlockedError  # noqa: E402
 from jevctx.pipeline import find_pointers, parse_pointer  # noqa: E402
+from jevctx.segments import detect_kind  # noqa: E402  -- card 6, TRDD-88DOI824
 from jevctx.testing import FakeJevClient  # noqa: E402
 from jevctx.types import JevUnavailableError, JevValidationError, NoulAnswer  # noqa: E402
 
@@ -192,20 +193,25 @@ def test_oversized_pointer_includes_first_20_lines() -> None:
         assert line not in doc
 
 
-def test_budget_eviction_protects_decision_passing_items_last() -> None:
-    # "dec" scores LOWER on max(relevance, decision) than "rel" does (0.9 vs 0.95), AND is the
-    # OLDER of the two (turn=0 vs "rel"'s turn=1) -- neither raw score nor recency favors it.
-    # It still survives: compose()'s guaranteed owner slot always picks the newest
-    # `decision_passed` item over every other owner item, REGARDLESS of recency (see the
-    # guaranteed-slot comment in compose()) -- a decision survives the budget on its own merit,
-    # not because it also happened to be the newest message (see
-    # `test_decision_passed_owner_item_wins_second_slot_when_not_newest` for the case where an
-    # older decision_passed item competes for the SECOND slot instead of the guaranteed one).
+def test_both_guaranteed_owner_items_survive_even_combined_over_budget() -> None:
+    # Coordinator ruling (fixing commit d4fa7685's over-narrowing, superseding this test's
+    # earlier "one guaranteed slot" assertion): TWO owner items are guaranteed, uncapped,
+    # regardless of `budget_tokens` -- the newest owner message ("rel", turn=1, NOT
+    # decision_passed) and the newest `decision_passed` item ("dec", turn=0), which here are
+    # DIFFERENT items. Both are admitted even though their combined 200 tokens alone already
+    # exceeds the 100-token budget -- "ahead of the per-item cap" means the guarantee bypasses
+    # `budget_tokens` too, exactly as the old single-guaranteed-item code already did. A
+    # THIRD, non-guaranteed owner item ("extra" -- older than both, not decision_passed, and
+    # scored HIGHLY relevant so its eviction cannot be blamed on a low score) still gets
+    # evicted: the eviction mechanism is unchanged for anything outside the 2 guaranteed slots.
     items = [
+        _item("extra:0", "user", "yet another owner message", turn=-1, tokens=100),
         _item("dec:0", "user", "policy: always use tabs", turn=0, tokens=100),
         _item("rel:0", "user", "merely relevant background", turn=1, tokens=100),
     ]
     scores = {
+        "extra:0": jc.Scores(relevance=0.95, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False),
         "dec:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
                             decision_passed=True),
         "rel:0": jc.Scores(relevance=0.95, decision=0.0, oversized=False, kept=True,
@@ -214,17 +220,20 @@ def test_budget_eviction_protects_decision_passing_items_last() -> None:
     doc = jc.compose(items, scores, budget_tokens=100,
                       header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
     assert "-- user dec:0 --" in doc
-    assert "-- user rel:0 --" not in doc
-    assert "id=rel:0" in doc
+    assert "-- user rel:0 --" in doc
+    assert "-- user extra:0 --" not in doc
+    assert "id=extra:0" in doc
 
 
 def test_decision_passed_owner_item_wins_second_slot_when_not_newest() -> None:
-    # TRDD-RAEGS1D5: beyond the guaranteed-newest slot, owner items still compete by
-    # (decision_passed, turn) -- an OLDER decision_passed item ("dec_old") outranks a newer,
-    # merely-relevant one ("rel_old", higher raw relevance 0.9 vs dec_old's 0.6) for the
-    # second slot the 100-token owner share (int(250 * 0.40)) can't hold outright, so both
-    # overflow to the leftover-budget pass together -- where decision_passed is still the
-    # tie-break that decides which one of them actually fits.
+    # TRDD-RAEGS1D5, updated for the coordinator's dual-guarantee ruling (compose()'s
+    # `guaranteed_owner_ids`): "newest:0" and "dec_old:0" are now BOTH independently
+    # guaranteed (the newest owner message, and the newest `decision_passed` item -- two
+    # different items here), not "one guaranteed plus one winning the leftover share" as
+    # before -- the assertions below are unchanged because the outcome coincides, but the
+    # mechanism producing it does not: "rel_old:0" (merely relevant, higher raw relevance 0.9
+    # than dec_old's 0.6, but neither newest nor decision_passed) is outside both guaranteed
+    # slots and loses the owner-share competition to fit at all.
     items = [
         _item("newest:0", "user", "hi", turn=2, tokens=100),
         _item("rel_old:0", "user", "merely relevant background", turn=1, tokens=100),
@@ -274,30 +283,44 @@ def test_owner_share_ceiling_admits_non_owner_relevant_items() -> None:
     assert "-- user u2:0 --" in doc, "the newest owner message is still guaranteed"
 
 
-def test_guaranteed_owner_slot_prefers_newest_decision_passed_over_newest_plain() -> None:
-    # TRDD-RAEGS1D5 (adversarial-review fix): pins the fix made in response to the review's
-    # Q1 finding -- an earlier version of this fix guaranteed the tier-1 owner slot to the
-    # NEWEST owner item unconditionally, which let a merely-recent, non-decision message
-    # ("thanks") outrank an OLDER decision_passed one (a stated constraint) for that one
-    # guaranteed slot -- silently reintroducing the "budget undoes the decision question"
-    # bug for the narrow case where they are not the same item. The guaranteed slot must go
-    # to the newest `decision_passed` owner item when one exists, even if a plainer,
-    # genuinely more recent owner message exists.
+def test_newest_owner_message_and_newest_decision_item_are_both_guaranteed() -> None:
+    # Coordinator ruling, fixing commit d4fa7685's over-narrowing (which made the ONE
+    # guaranteed slot "newest decision-passing, else newest plain" -- silently DROPPING the
+    # genuinely newest owner message whenever an older decision-passing one existed; measured
+    # on the 258 MB transcript, the chronologically newest owner item was absent from BOTH the
+    # full and the injected copy). The newest owner message ("ok", not decision_passed) and an
+    # OLDER decision-passing item ("policy: always use tabs") must BOTH be present -- neither
+    # displaces the other. Supersedes this test's own earlier "prefers decision over plain"
+    # assertion (the pre-fix single-guaranteed-slot behavior this ruling replaces); the
+    # pre-fix failure mode this test originally pinned (an "always newest" rule dropping an
+    # OLDER decision item entirely) is now covered structurally -- the newest-decision slot
+    # never disappears regardless of recency.
     items = [
-        _item("plain_newest:0", "user", "thanks", turn=1, tokens=100),
         _item("dec_older:0", "user", "policy: always use tabs", turn=0, tokens=100),
+        _item("plain_newest:0", "user", "ok", turn=1, tokens=100),
     ]
     scores = {
-        "plain_newest:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
-                                     decision_passed=False),
         "dec_older:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
                                   decision_passed=True),
+        "plain_newest:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                                     decision_passed=False),
     }
     doc = jc.compose(items, scores, budget_tokens=100,
                       header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
     assert "-- user dec_older:0 --" in doc
-    assert "-- user plain_newest:0 --" not in doc
-    assert "id=plain_newest:0" in doc
+    assert "-- user plain_newest:0 --" in doc
+
+
+def test_guaranteed_slots_collapse_to_one_when_newest_is_also_decision_passing() -> None:
+    # `guaranteed_owner_items`'s own dedup (compose()): when the newest owner message IS the
+    # newest decision-passing item, there is only ONE guaranteed item, not two -- must not
+    # render (or budget for) it twice.
+    items = [_item("only:0", "user", "policy: always use tabs", turn=0, tokens=100)]
+    scores = {"only:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                                   decision_passed=True)}
+    doc = jc.compose(items, scores, budget_tokens=100,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert doc.count("-- user only:0 --") == 1
 
 
 def test_owner_item_over_the_per_item_cap_renders_as_a_truncated_prefix_plus_pointer() -> None:
@@ -362,6 +385,62 @@ def test_per_item_cap_lets_an_older_large_decision_item_and_a_relevant_tool_item
     assert "-- user older_decision:0 --" in doc  # the cap is what lets it fit too -- truncated
     assert older_decision_text not in doc  # ...never in full
     assert "id=older_decision:0" in doc  # ...alongside a pointer to the rest
+
+
+def test_truncated_but_kept_owner_item_never_also_gets_an_elided_decision_pointer() -> None:
+    """Coordinator check (adversarial review of commit 0cf40380 could not verify this from
+    reading alone): an owner item beyond `_OWNER_ITEM_TOKEN_CAP` (500) that still gets
+    ADMITTED renders inline as a verbatim prefix plus its OWN `_format_pointer` line (see
+    `test_owner_item_over_the_per_item_cap_renders_as_a_truncated_prefix_plus_pointer`) --
+    the worry was that the SAME item, being `decision_passed`, might ALSO be counted among
+    `compose()`'s full-copy `decision_elided` list (commit 0cf40380) and get a SECOND,
+    `_format_decision_pointer` line in "## Elided". It cannot: `elided_items` is built as
+    `[it for it in items if it.id not in kept_ids]` (`kept_ids` = the FINAL admitted set,
+    reassigned from `admitted` once the owner-share/token-cap admission runs), so an item
+    that was admitted -- truncated or not -- is by construction excluded from
+    `elided_items`, hence from `decision_elided` too; there is no separate "was this
+    truncated" flag that could disagree with `kept_ids`. This test forces BOTH outcomes to
+    occur side by side in one document (some 686-token decision items admitted-truncated,
+    others genuinely elided once the owner share is spent) and asserts no id ever carries
+    both an in-place pointer AND a separate elided decision-pointer line.
+    """
+    decision_items = [
+        _item(f"dec{i}:0", "user", f"policy number {i}: always do the thing {i}. " * 60, turn=i)
+        for i in range(8)  # each ~686 est. tokens, comfortably over the 500-token cap
+    ]
+    tool_item = _item("tool:0", "tool", "relevant work output", turn=100, tokens=20)
+    items = [*decision_items, tool_item]
+    scores = {
+        **{it.id: jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                             decision_passed=True) for it in decision_items},
+        "tool:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                             decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=3500,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+
+    doc_lines = doc.splitlines()
+    truncated_but_kept = [it.id for it in decision_items if f"-- user {it.id} --" in doc]
+    genuinely_elided = [
+        it.id for it in decision_items
+        if any(line.startswith(f"{it.id}: ") for line in doc_lines)
+        and f"-- user {it.id} --" not in doc
+    ]
+    # Sanity: the scenario actually exercises both branches, or this test proves nothing.
+    assert truncated_but_kept, "no item landed in the admitted-but-truncated branch"
+    assert genuinely_elided, "no item landed in the genuinely-elided-decision branch"
+    assert set(truncated_but_kept).isdisjoint(genuinely_elided)
+
+    for it_id in truncated_but_kept:
+        assert doc.count(f"-- user {it_id} --") == 1
+        assert not any(line.startswith(f"{it_id}: ") for line in doc.splitlines()), (
+            f"{it_id} is kept (truncated + own pointer) but ALSO has an elided decision "
+            "pointer -- double-pointered"
+        )
+    for it_id in genuinely_elided:
+        elided_lines = [line for line in doc.splitlines() if line.startswith(f"{it_id}: ")]
+        assert len(elided_lines) == 1
+        assert f"-- user {it_id} --" not in doc
 
 
 def test_non_owner_admission_skips_a_too_big_item_rather_than_stopping() -> None:
@@ -491,6 +570,257 @@ def test_tool_result_without_matching_tool_use_falls_back(tmp_path: Path) -> Non
     assert len(items) == 1
     assert items[0].kind == "tool"
     assert items[0].text == "<unknown tool>()\norphaned result"
+
+
+# --- TRDD-88DOI824 (card 6): jevctx.segments.segment() on large tool results ---
+
+
+def _read_style_numbered_code(n_funcs: int = 80) -> str:
+    """A synthetic `cat -n`-style Read tool output -- every line prefixed
+    "<spaces><digits>\\t", the shape that misdetects as `kind="table"` without
+    `jc._detection_view` (see that function's own docstring)."""
+    lines = []
+    n = 1
+    for i in range(n_funcs):
+        for body in (f"def func_{i}():", f"    return {i}", ""):
+            lines.append(f"{n:6d}\t{body}")
+            n += 1
+    return "\n".join(lines) + "\n"
+
+
+def test_small_tool_result_stays_one_item_unsegmented(tmp_path: Path) -> None:
+    # Sanity/regression: `_SEGMENT_THRESHOLD_TOKENS` (1000) gates segmentation -- a small
+    # result (the overwhelming majority of real tool results) must render EXACTLY the
+    # pre-card-6 shape: one Item, id "<uuid>:<n>" with no "@", text "name(input)\nresult".
+    line = {
+        "type": "user", "uuid": "u1", "parentUuid": None,
+        "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "a small result"}
+        ]},
+    }
+    path = tmp_path / "small.jsonl"
+    path.write_text(json.dumps(line) + "\n")
+    items = jc.extract_items(path)
+    assert len(items) == 1
+    assert items[0].id == "u1:0"
+    assert "@" not in items[0].id
+    assert items[0].protected is False
+
+
+def test_read_style_numbered_fixture_detects_as_code_not_table() -> None:
+    # The misdetection this fixes, proven both ways: RAW numbered text misdetects as
+    # "table" (every line carries exactly one tab from the line-number prefix alone), the
+    # DETECTION VIEW (prefix stripped) correctly sees the `def `/`return` structure as code.
+    text = _read_style_numbered_code()
+    origin = jc.Origin(source="tool", ref="Read", turn=0)
+    assert detect_kind(text, origin) == "table"  # sanity: the misdetection is real
+    assert detect_kind(jc._detection_view(text), origin) == "code"
+
+
+def test_detection_view_never_vanishes_a_line_whose_content_is_only_the_prefix() -> None:
+    # Real-data regression (258 MB transcript, TRDD-88DOI824): a Read line whose SOURCE line
+    # is blank renders as just "<n>\t" with nothing after it -- when that IS the text's
+    # UNTERMINATED final line, naively stripping the prefix would leave an empty string, and
+    # `"".join(...)` then contributes zero bytes for it, so `segment()`'s own internal re-split
+    # of the joined detection view sees ONE FEWER line than this function's caller does,
+    # shifting every later `line_span` and silently dropping the tail (measured: exactly 4
+    # bytes, "311\t", missing from a real tool result). `_detection_view` must leave such a
+    # line UNSTRIPPED so line count never drifts.
+    text = "".join(f"{i:6d}\tcontent {i}\n" for i in range(1, 300)) + "   300\t"
+    view = jc._detection_view(text)
+    assert len(view.splitlines(keepends=True)) == len(text.splitlines(keepends=True))
+    assert view.endswith("   300\t")  # left unstripped -- the fallback that fixes it
+
+
+def test_segment_tool_result_handles_blank_final_read_line_losslessly() -> None:
+    # Same real-data regression, exercised through the actual production path
+    # (`_segment_tool_result`, not `_detection_view` in isolation) -- the losslessness
+    # assertion inside it is what first caught this on the 258 MB transcript. Reuses the
+    # def/return/blank shape that reliably segments (`_read_style_numbered_code`'s pattern),
+    # with the text's own FINAL line a blank source line -- numbered, no trailing newline,
+    # exactly the shape that vanished before `_detection_view`'s fix.
+    lines = []
+    n = 1
+    for i in range(80):
+        for body in (f"def func_{i}():", f"    return {i}", ""):
+            lines.append(f"{n:6d}\t{body}")
+            n += 1
+    result_text = "\n".join(lines) + "\n" + f"{n:6d}\t"
+    items = jc._segment_tool_result("u1:0", "Read", "{}", result_text, None, 0)
+    assert len(items) > 1  # sanity: this must actually exercise segmentation
+    assert "".join(it.text for it in items) == result_text
+
+
+def test_segmentation_failure_degrades_to_whole_item_instead_of_crashing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Adversarial review (TRDD-88DOI824): the first version of `_segment_tool_result` let
+    ANY failure in the segmentation path (a `jevctx.segments.segment()` bug on unusual real
+    content, or the losslessness check itself firing) propagate out of `extract_items()`,
+    aborting the WHOLE `compact` run over ONE bad tool result -- not hypothetical, the real
+    258 MB acceptance run hit exactly this before `_detection_view`'s fix. Segmentation
+    failures now degrade the same way `_score_batch_resilient`'s failures already do
+    elsewhere in this file: a stderr finding line, then the pre-card-6 whole-item shape,
+    never a crash. Forces the failure via `monkeypatch` (a real `segment()` bug is not
+    reproducible on demand) rather than asserting anything about `jevctx.segments` itself.
+    """
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("simulated jevctx.segments.segment() failure")
+
+    monkeypatch.setattr(jc, "segment", _boom)
+    result_text = "one two three four five six seven eight nine ten. " * 400  # over threshold
+
+    items = jc._segment_tool_result("u1:0", "Read", "{}", result_text, None, 0)
+
+    assert len(items) == 1
+    assert items[0].id == "u1:0"  # no "@" -- the pre-card-6 whole-item shape
+    assert result_text in items[0].text  # kept whole, verbatim -- never lost, never split
+    err = capsys.readouterr().err
+    assert "u1:0" in err
+    assert "RuntimeError" in err
+
+
+def test_large_read_result_segments_losslessly_into_multiple_code_items(tmp_path: Path) -> None:
+    # End to end: extract_items on ONE large Read-shaped tool_result must (1) split into
+    # SEVERAL Items (not stay one all-or-nothing blob), (2) give each a "<uuid>:<n>@<a>-<b>"
+    # id, (3) join back to the exact original result text (losslessness), and (4) keep the
+    # numbered-line prefixes IN the stored text -- only the DETECTION view strips them, per
+    # `_detection_view`'s own docstring; a stored segment is an exact slice of the original.
+    result_text = _read_style_numbered_code()
+    line = {
+        "type": "assistant", "uuid": "a1", "parentUuid": None,
+        "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/x.py"}},
+        ]},
+    }
+    line2 = {
+        "type": "user", "uuid": "u1", "parentUuid": "a1",
+        "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": result_text},
+        ]},
+    }
+    path = tmp_path / "read.jsonl"
+    path.write_text(json.dumps(line) + "\n" + json.dumps(line2) + "\n")
+
+    items = jc.extract_items(path)
+    tool_items = [it for it in items if it.kind == "tool"]
+    assert len(tool_items) > 1, "a large Read result must split into several Items"
+    for it in tool_items:
+        assert it.id.startswith("u1:0@"), it.id
+    assert "".join(it.text for it in tool_items) == result_text
+    # The stored text is a verbatim slice -- the numbered prefix is still there.
+    assert tool_items[0].text.split("\n", 1)[0].endswith("def func_0():")
+
+
+def test_segment_ids_are_positional_never_content_hash(tmp_path: Path) -> None:
+    # Card spec: "never the upstream content-hash id, which collides for identical
+    # outputs". Build a result with two IDENTICAL function bodies far enough apart to land
+    # in different segments and assert their ids still differ (positional, not content-based).
+    result_text = _read_style_numbered_code()
+    line = {
+        "type": "user", "uuid": "u1", "parentUuid": None,
+        "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "missing", "content": result_text},
+        ]},
+    }
+    path = tmp_path / "dup.jsonl"
+    path.write_text(json.dumps(line) + "\n")
+    items = [it for it in jc.extract_items(path) if it.kind == "tool"]
+    ids = [it.id for it in items]
+    assert len(ids) == len(set(ids)), "segment ids must be unique even with repeated content"
+
+
+def test_embedded_stacktrace_is_never_split_and_marked_protected(tmp_path: Path) -> None:
+    # Card spec: "a trace is never split" + "Protected kinds stacktrace and diff ...".
+    # Pad the result well past the segmentation threshold, embed one whole Python traceback,
+    # and assert exactly one produced Item carries the ENTIRE trace verbatim (never split
+    # across pieces) and is marked `protected=True`.
+    trace = (
+        'Traceback (most recent call last):\n'
+        '  File "/app/server.py", line 118, in handle_request\n'
+        "    payload = self._decode(body)\n"
+        '  File "/app/codec.py", line 44, in _decode\n'
+        "    return json.loads(raw)\n"
+        "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n"
+    )
+    padding = "irrelevant filler log line number {}\n"
+    before = "".join(padding.format(i) for i in range(150))
+    after = "".join(padding.format(i) for i in range(150, 300))
+    result_text = before + trace + after
+
+    line = {
+        "type": "user", "uuid": "u1", "parentUuid": None,
+        "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "missing", "content": result_text},
+        ]},
+    }
+    path = tmp_path / "trace.jsonl"
+    path.write_text(json.dumps(line) + "\n")
+    items = [it for it in jc.extract_items(path) if it.kind == "tool"]
+    assert len(items) > 1, "the padded result must actually segment"
+    assert "".join(it.text for it in items) == result_text  # losslessness holds regardless
+
+    trace_items = [it for it in items if trace in it.text]
+    assert len(trace_items) == 1, "the trace must land whole in exactly one segment"
+    assert trace_items[0].text.count(trace) == 1
+    assert trace_items[0].protected is True
+    non_trace_protected = [it for it in items if it is not trace_items[0] and it.protected]
+    assert non_trace_protected == []
+
+
+def test_protected_segment_outranks_higher_scoring_plain_item_under_budget() -> None:
+    # `evict_key`/the non-owner admission sort: a `protected` (stacktrace/diff) segment must
+    # survive a tight budget ahead of a plain item that Jev scored MORE relevant -- "ranks
+    # above relevance-only items ... below decision_passed" (card 6 spec, verified here for
+    # the ADMISSION path; `evict_key` itself is exercised via the max_bytes backstop test).
+    items = [
+        _item("trace:0", "tool", "a protected stack trace segment", turn=0, tokens=40),
+        _item("plain:0", "tool", "a plain, more relevant segment", turn=1, tokens=40),
+    ]
+    items = [
+        jc.Item(items[0].id, items[0].kind, items[0].text, items[0].tokens, items[0].ts,
+                items[0].turn, protected=True),
+        items[1],
+    ]
+    scores = {
+        "trace:0": jc.Scores(relevance=0.55, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False),
+        "plain:0": jc.Scores(relevance=0.95, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=40,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- tool trace:0 --" in doc
+    assert "-- tool plain:0 --" not in doc
+
+
+def test_compose_with_many_segmented_items_stays_under_max_bytes(tmp_path: Path) -> None:
+    # Card spec: "compose stays under max_bytes" -- exercised with REAL segmented items (not
+    # hand-built ones), the injected-copy shape (`max_item_bytes` set) that the byte backstop
+    # actually has to hold to.
+    result_text = _read_style_numbered_code(n_funcs=300)  # several hundred segments
+    line = {
+        "type": "user", "uuid": "u1", "parentUuid": None,
+        "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "missing", "content": result_text},
+        ]},
+    }
+    path = tmp_path / "big.jsonl"
+    path.write_text(json.dumps(line) + "\n")
+    items = jc.extract_items(path)
+    assert len(items) > 5
+    scores = {
+        it.id: jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in items
+    }
+    max_bytes = 5000
+    doc = jc.compose(
+        items, scores, budget_tokens=8000,
+        header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+        max_bytes=max_bytes, max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
+    )
+    assert len(doc.encode("utf-8")) <= max_bytes
 
 
 def test_digest_shrinks_single_oversized_head() -> None:
@@ -1121,6 +1451,30 @@ def test_pointer_summary_escapes_quotes_and_backslashes_and_round_trips() -> Non
     parsed = parse_pointer(pointer_lines[0])
     assert parsed is not None
     assert parsed.summary == first_line
+
+
+def test_segment_pointer_is_unparseable_by_pipeline_find_pointers() -> None:
+    """Adversarial-review disclosure (TRDD-88DOI824, `_format_pointer`'s own docstring): a
+    segment id embeds its line span as `<uuid>:<n>@<a>-<b>` -- necessary so `expand <id>` is
+    one copy-pasteable token (see that docstring) -- but `pipeline._POINTER_RE`'s id character
+    class (`[A-Za-z0-9:_.-]+`) does not include `@`, so `find_pointers`/`parse_pointer` fail to
+    match a segment's pointer line at all. Pinned here as KNOWN, CURRENT behavior (not a bug
+    this test is asserting should be fixed) -- nothing in production reads `compose()` output
+    back through `find_pointers` today, so this only guards against the gap being silently
+    "fixed" by an unrelated future change to `_format_pointer`/`Pointer` without the same
+    disclosure, or silently made worse."""
+    seg_id = "550e8400-e29b-41d4-a716-446655440000:0@5-9"
+    items = [_item(seg_id, "tool", "segment body text\nmore", turn=0)]
+    scores = {seg_id: jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                                 decision_passed=False)}
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+
+    pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=")]
+    assert len(pointer_lines) == 1
+    assert seg_id in pointer_lines[0]  # the id IS rendered, verbatim, in the bracket text...
+    assert parse_pointer(pointer_lines[0]) is None  # ...but the regex cannot parse it back
+    assert find_pointers(doc) == []  # ...and find_pointers silently finds nothing at all
 
 
 def test_pointer_summary_skips_a_leading_blank_line() -> None:
