@@ -120,6 +120,7 @@ def test_question_instructions_name_the_ref() -> None:
     for key, question in client.calls[0].questions.items():
         assert key in question.instructions
         assert QUESTION.instructions in question.instructions
+        assert isinstance(question, Noul)
         assert question.true == QUESTION.true
 
 

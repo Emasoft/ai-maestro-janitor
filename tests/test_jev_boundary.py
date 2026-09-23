@@ -49,12 +49,14 @@ _LLM_EXT_SUMMARY_ALLOWED = (
 # The test-file scan below (test_no_test_file_imports_llm_ext_summary_except_allowed) is
 # broader than _LLM_EXT_SUMMARY_ALLOWED above -- it also allows the one remaining manual-lane
 # test file that legitimately imports `llm_ext_summary` directly (external_handoff_clear's,
-# exercising the function that moved there in TRDD-RAEGS1D5 card 3 C2), pending card 4's
-# cleanup of its now-unused import. Only `tests/test_llm_ext_summary.py` is that module's own
-# dedicated test; the other is an additional real importer this scan must not flag.
+# exercising the function that moved there in TRDD-RAEGS1D5 card 3 C2). Only
+# `tests/test_llm_ext_summary.py` is that module's own dedicated test; the other is an
+# additional real importer this scan must not flag.
 _LLM_EXT_SUMMARY_TEST_ALLOWED = (
     "tests/test_llm_ext_summary.py",
-    "tests/test_external_handoff_clear.py",  # TODO(card 4): drop once its unused import is removed
+    # Imports `llm_ext_summary` only to back a regression tripwire (monkeypatches
+    # `summarize_with_retry` to fail the test if it is ever called), not a real caller.
+    "tests/test_external_handoff_clear.py",
 )
 
 

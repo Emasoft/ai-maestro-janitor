@@ -120,6 +120,7 @@ def test_request_shape_matches_spec():
     assert captured["url"] == "https://example.invalid/v1/systemone"
     assert captured["auth"] == "Bearer secret"
     body = captured["body"]
+    assert isinstance(body, dict)
     assert body["model"] == "jev-test"
     assert body["state"] == {"task": "t"}
     assert body["questions"]["q"] == {
@@ -167,9 +168,9 @@ def test_429_then_200_succeeds_request_sent_twice():
     def handler(request: httpx.Request) -> httpx.Response:
         return responses[len(calls) - 1]
 
-    handler, calls = _counting(handler)
+    counting_handler, calls = _counting(handler)
     sleeps: list[float] = []
-    client = HttpJevClient(api_key="k", transport=httpx.MockTransport(handler), sleep=sleeps.append)
+    client = HttpJevClient(api_key="k", transport=httpx.MockTransport(counting_handler), sleep=sleeps.append)
 
     result = client.ask("s", {"q": _noul()})
 
@@ -185,9 +186,9 @@ def test_retry_after_seconds_is_honoured():
             return httpx.Response(429, headers={"Retry-After": "2"})
         return _ok({"q": _noul_ans(1.0)})
 
-    handler, calls = _counting(handler)
+    counting_handler, calls = _counting(handler)
     sleeps: list[float] = []
-    client = HttpJevClient(api_key="k", transport=httpx.MockTransport(handler), sleep=sleeps.append)
+    client = HttpJevClient(api_key="k", transport=httpx.MockTransport(counting_handler), sleep=sleeps.append)
 
     client.ask("s", {"q": _noul()})
 
@@ -201,10 +202,10 @@ def test_retry_after_is_capped_at_the_timeout_budget():
             return httpx.Response(429, headers={"Retry-After": "999"})
         return _ok({"q": _noul_ans(1.0)})
 
-    handler, calls = _counting(handler)
+    counting_handler, calls = _counting(handler)
     sleeps: list[float] = []
     client = HttpJevClient(
-        api_key="k", transport=httpx.MockTransport(handler), timeout=5.0, sleep=sleeps.append
+        api_key="k", transport=httpx.MockTransport(counting_handler), timeout=5.0, sleep=sleeps.append
     )
 
     client.ask("s", {"q": _noul()})
@@ -256,8 +257,8 @@ def test_529_is_retried_like_429():
     def handler(request: httpx.Request) -> httpx.Response:
         return responses[len(calls) - 1]
 
-    handler, calls = _counting(handler)
-    client = HttpJevClient(api_key="k", transport=httpx.MockTransport(handler), sleep=lambda s: None)
+    counting_handler, calls = _counting(handler)
+    client = HttpJevClient(api_key="k", transport=httpx.MockTransport(counting_handler), sleep=lambda s: None)
 
     client.ask("s", {"q": _noul()})
     assert len(calls) == 2

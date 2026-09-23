@@ -73,12 +73,15 @@ def test_request_body_shape_matches_the_openrouter_contract() -> None:
 
 
 def test_response_with_cost_and_extra_fields_parses() -> None:
+    from jevctx.types import NoulAnswer
+
     captured: dict = {}
     client = OpenRouterJevClient(api_key="or-key", transport=_fixed_response_transport(captured))
     try:
         answers = client.ask(STATE, QUESTIONS)
     finally:
         pass
+    assert isinstance(answers["a"], NoulAnswer)
     assert answers["a"].noul == pytest.approx(0.19)
     # `model`/`id`/`provider` (the extra fields §M1's live probe carries) are simply never
     # read — proving "tolerate the extra fields" needs no special-casing.

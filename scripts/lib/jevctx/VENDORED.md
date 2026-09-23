@@ -157,3 +157,40 @@ loop — not shared with `jev.py`, so it needed the same treatment twice). Not
 reported upstream — this is a local-only addition, not a divergence from
 upstream's `JevUnavailableError` semantics, and does not change any upstream
 byte.
+
+## Local changes to vendored tests (2026-09-23, pyright-gate fix)
+
+`tests/jevctx/test_jev.py` and `tests/jevctx/test_scorer.py` needed
+typing-only fixes to pass this project's `uvx --with pyright pyright` gate;
+none change what any test asserts or its ability to fail. Re-applying these
+after a future re-vendor: grep each file for the symbol named below.
+
+- `test_jev.py::test_request_shape_matches_spec` — pyright
+  `reportIndexIssue` (`"__getitem__" method not defined on type "object"`) on
+  `body["model"]`/`body["state"]`/`body["questions"]`: `body` came from a
+  `dict[str, object]`-typed `captured` dict, so its value type was `object`.
+  Added `assert isinstance(body, dict)` right after `body =
+  captured["body"]`, before the three subscripts — same assertions, same
+  three equality checks, now type-narrowed first.
+- `test_jev.py::test_429_then_200_succeeds_request_sent_twice`,
+  `test_retry_after_seconds_is_honoured`,
+  `test_retry_after_is_capped_at_the_timeout_budget`,
+  `test_529_is_retried_like_429` — pyright `reportAssignmentType` (`Type
+  "Handler" is not assignable to declared type "(request: Request) ->
+  Response"`) on `handler, calls = _counting(handler)`: pyright infers the
+  local `handler`'s declared type from its own `def handler(request: ...)
+  -> ...` statement (named, non-positional-only parameter), and rejects
+  reassigning it to `_counting`'s `Handler = Callable[[Request], Response]`
+  return value (positional-only parameters). Renamed the reassignment
+  target to `counting_handler` in each of the four tests and used that name
+  in the following `httpx.MockTransport(...)` call instead of reusing
+  `handler` — same object, same call, no assertion changed.
+- `test_scorer.py::test_question_instructions_name_the_ref` — pyright
+  `reportAttributeAccessIssue` (`Cannot access attribute "true"` on
+  `Choice`/`Score`) on `question.true`: `question` comes from
+  `client.calls[0].questions.items()`, typed as the `Question = Noul |
+  Choice | Score` union, but the test's `QUESTION` fixture is always a
+  `Noul` in this Question, so the assertion was always true; pyright just
+  couldn't see that from the union type. Added `assert isinstance(question,
+  Noul)` immediately before `assert question.true == QUESTION.true` — the
+  equality check itself is unchanged.

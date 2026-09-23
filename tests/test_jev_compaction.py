@@ -16,7 +16,7 @@ from jevctx.types import JevUnavailableError  # noqa: E402
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_small.jsonl"
 
 
-def _item(id_: str, kind: str, text: str, turn: int, tokens: int | None = None) -> jc.Item:
+def _item(id_: str, kind: jc.ItemKind, text: str, turn: int, tokens: int | None = None) -> jc.Item:
     from jevctx.tokens import estimate_tokens
 
     return jc.Item(id=id_, kind=kind, text=text,

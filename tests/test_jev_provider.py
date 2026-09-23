@@ -69,6 +69,7 @@ def test_built_client_uses_the_passed_env_key_not_the_real_process_environment(m
     """
     monkeypatch.setenv("OPENROUTER_API_KEY", "real-process-env-key-must-not-be-used")
     client = make_client(env={"OPENROUTER_API_KEY": "explicit-test-key"})
+    assert isinstance(client, OpenRouterJevClient)
     try:
         assert client._client.headers["authorization"] == "Bearer explicit-test-key"
     finally:
