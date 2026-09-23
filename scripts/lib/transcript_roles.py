@@ -17,6 +17,7 @@ files (`jev_compaction.py` today; `external_clear.recent_messages` and
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any, Literal
 
@@ -46,6 +47,30 @@ _SYSTEM_PREFIXES = (
     "[Request interrupted",
 )
 _COMMAND_NAME_PREFIX = "<command-name>"
+_COMMAND_NAME_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
+_COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+
+#: TRDD-RAEGS1D5, coordinator correction (2): the janitor itself TYPES these into the pane
+#: with real keystrokes -- Claude Code records that identically to an owner-typed command
+#: (same `<command-message>`/`<command-name>` shape, same `origin.kind: "human"`/absent), so
+#: without this list they'd count as "human" and fill an unattended session's digest "last
+#: three human messages" with the janitor's own automation. Exact bare names (no plugin
+#: qualifier possible for these three).
+_AUTOMATION_COMMAND_NAMES_EXACT = ("clear", "compact", "reload-plugins")
+#: Prefix match for the `/janitor-*` family and its plugin-qualified `/ai-maestro-janitor:*`
+#: form (resume, arm, and so on) -- both forms are checked with the leading "/" stripped.
+_AUTOMATION_COMMAND_NAME_PREFIXES = ("janitor-", "ai-maestro-janitor:")
+
+
+def _is_automation_command_name(name: str) -> bool:
+    """True iff `name` (a `<command-name>` tag's text) is one of the janitor's own typed
+    commands, bare or plugin-qualified, with or without a leading slash."""
+    normalized = name.strip()
+    if normalized.startswith("/"):
+        normalized = normalized[1:]
+    if normalized in _AUTOMATION_COMMAND_NAMES_EXACT:
+        return True
+    return normalized.startswith(_AUTOMATION_COMMAND_NAME_PREFIXES)
 
 #: TRDD-RAEGS1D5, coordinator correction: measured 7,190 records with `origin.kind ==
 #: "unclassified"` -- mostly list/tool_result carriers, not an oddity. It means "origin gives
@@ -107,9 +132,15 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
        defect 1: measured on real transcripts, every `<command-message>` record with a
        `<command-name>` tag has `origin.kind: "human"` or no `origin` field at all -- the
        generic wrapper-prefix rule below was matching it first and dropping owner instructions
-       like `/task ...`/`/loop 5m ...` as "system"); otherwise `<local-command-stdout>`,
-       `<local-command-caveat>`, `<command-message>`, `[janitor-heartbeat]` or
-       `[Request interrupted` -> "system".
+       like `/task ...`/`/loop 5m ...` as "system"), EXCEPT a `<command-name>` naming the
+       janitor's own typed automation (`/clear`, `/compact`, `/reload-plugins`, `/janitor-*`,
+       `/ai-maestro-janitor:*`, bare or plugin-qualified, with or without the leading slash)
+       WITHOUT a non-empty `<command-args>` -> "system" (coordinator correction: the janitor
+       types these into the pane with real keystrokes, recorded identically to an owner-typed
+       command -- unrecognised as automation, they'd fill an unattended session's digest "last
+       three human messages" with the janitor's own housekeeping instead of the owner's
+       words); otherwise `<local-command-stdout>`, `<local-command-caveat>`,
+       `<command-message>`, `[janitor-heartbeat]` or `[Request interrupted` -> "system".
     5. `origin.kind` (Claude Code's own newer, most specific signal, so it outranks
        `turnOrigin`/`promptSource` below): `human` -> "human"; `task-notification` ->
        "notification"; `peer`/`coordinator` -> "peer"; `auto-continuation` -> "system"; any
@@ -156,6 +187,18 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
         and _COMMAND_NAME_PREFIX in text
         and origin_kind in (None, "human")
     ):
+        name_match = _COMMAND_NAME_RE.search(text)
+        command_name = name_match.group(1).strip() if name_match else ""
+        if _is_automation_command_name(command_name):
+            # Coordinator correction (2): the janitor's own typed automation is "system"
+            # UNLESS real args rode along -- a bare `/janitor-resume` is the automation
+            # firing itself, but `/task ...`/`/loop 5m <prompt>` (not in the automation list)
+            # or an automation command someone genuinely typed WITH args is still the
+            # owner's own words, so args presence is the tie-breaker, not the name alone.
+            args_match = _COMMAND_ARGS_RE.search(text)
+            args_text = args_match.group(1).strip() if args_match else ""
+            if not args_text:
+                return "system"
         return "human"
     if text.startswith(_SYSTEM_PREFIXES):
         return "system"

@@ -10,9 +10,21 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import transcript_roles as tr  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_warned_unknown_origin_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Coordinator correction (3): `_warned_unknown_origin_kinds` is module-level, process-
+    # lifetime state -- without a reset, whichever test runs first "claims" a given
+    # origin.kind value and every later test using the same literal silently stops seeing a
+    # stderr line, making pass/fail depend on test execution order. Reset it fresh per test.
+    monkeypatch.setattr(tr, "_warned_unknown_origin_kinds", set())
+
 
 # --- classify_record: one test per measured class, in the report's own rule order ---
 
@@ -101,12 +113,93 @@ def test_typed_slash_command_with_args_and_human_origin_is_human() -> None:
 
 def test_command_message_without_command_name_stays_system() -> None:
     # Same wrapper text, but no <command-name> tag at all -- not a typed slash command, so
-    # the generic system-prefix rule still applies (unlike the test above).
+    # the generic system-prefix rule still applies (unlike the test above). Coordinator
+    # correction (4): this exact shape (`<command-message>` with no `<command-name>` at all)
+    # was NOT observed in either real transcript inspected for this fix -- every measured
+    # `<command-message>` record carried a `<command-name>`. This test is defensive, pinning
+    # the fallback behaviour for a shape that might exist in an older/different transcript
+    # rather than one confirmed in the corpus.
     entry = {
         "origin": {"kind": "human"},
         "message": {"content": "<command-message>some-command</command-message>"},
     }
     assert tr.classify_record(entry) == "system"
+
+
+def test_automation_command_without_args_is_system() -> None:
+    # Coordinator correction (2): the janitor types `/janitor-resume` (plugin-qualified:
+    # `/ai-maestro-janitor:janitor-resume`) into the pane itself -- recorded identically to an
+    # owner-typed command, with no `<command-args>` -- so it must be "system", not "human", or
+    # it fills an unattended session's digest with the janitor's own automation.
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-message>resuming…</command-message>\n"
+                "<command-name>/ai-maestro-janitor:janitor-resume</command-name>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "system"
+
+
+def test_automation_command_bare_name_no_args_is_system() -> None:
+    # Same as above, bare (non-plugin-qualified) form.
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-message>resuming…</command-message>\n"
+                "<command-name>/janitor-resume</command-name>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "system"
+
+
+def test_clear_with_no_args_is_system() -> None:
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-message>clearing…</command-message>\n<command-name>/clear</command-name>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "system"
+
+
+def test_task_command_with_args_is_human() -> None:
+    # `/task` is not in the automation list at all, so args presence doesn't even matter --
+    # it is "human" the same way `/loop` is in the test above.
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-message>running…</command-message>\n"
+                "<command-name>/task</command-name>\n"
+                "<command-args>fix the failing test</command-args>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "human"
+
+
+def test_automation_command_with_real_args_is_human() -> None:
+    # An automation-named command IS still "human" when real args rode along -- the args
+    # tie-breaker means a genuinely owner-typed `/janitor-arm --scope project` is not
+    # mistaken for the janitor's own bare automation firing.
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-message>arming…</command-message>\n"
+                "<command-name>/janitor-arm</command-name>\n"
+                "<command-args>--scope project</command-args>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "human"
 
 
 def test_interrupt_marker_is_system() -> None:
