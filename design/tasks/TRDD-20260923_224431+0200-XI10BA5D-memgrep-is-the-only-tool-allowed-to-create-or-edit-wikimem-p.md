@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: todo
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-23T22:58:42+0200
+updated: 2026-09-23T23:01:43+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -31,9 +31,21 @@ Owner directive 2026-09-23 (verbatim): "what? delete the part about the edit too
 - Owner: "memgrep is a writing gate ensuring that no malformed memory file is ever written."
 - Owner: "atom over size : yes, warn only. but only up to a certain size. over a certain treshold that i let you decide, it should warn but also open a ticket with the janitor to lazily refactor the atom into 2 atoms."
 - Threshold chosen by us under that delegation: over the existing budget (MEMGREP_ATOM_MAX_CHARS, default 1,500 chars) memgrep warns and writes (unchanged); over 2x the budget (3,000 chars by default, derived from the same env value so they cannot drift) it warns, writes, and opens ONE janitor support ticket per atom (deduplicated on the atom id) asking the janitor to lazily split that atom into two atoms. Corpus distribution for reference: median 559, p90 1,241, p95 1,624 chars.
-- Owner: "why are you limiting the tickets per memgrep call? if a memgrep linting found 50 issues that cannot be autofixed with a wikipage, you open 50 tickets. simple." — So: NO per-call cap; every lint issue memgrep cannot auto-fix opens its own janitor ticket (not only oversized atoms). Kept, as ours: an issue that already has an OPEN ticket does not open a duplicate on the next run.
+- Owner: "why are you limiting the tickets per memgrep call? if a memgrep linting found 50 issues that cannot be autofixed with a wikipage, you open 50 tickets. simple."
 
 ## Review of d20574f0 (2026-09-23)
 
-- CONFIRMED contradiction: 5 skills still tell the agent to hand-edit the transaction staged copy while the rules now say memgrep only: janitor-memory-repair/SKILL.md:125+137, janitor-memory-atomize/SKILL.md:143, janitor-memory-harvest/SKILL.md:141, janitor-memory-retro-lesson/SKILL.md:103, janitor-memory-conflict/SKILL.md:132 (+ consolidate references/merge-protocol.md:311). Fix in the migration: the txn core stages the copy, the agent runs memgrep verbs ON the staged copy, commit verifies and swaps; a step with no verb ABSTAINS. janitor-memory-bootstrap Edit-tool steps target .gitignore, not a wikimem page: correct as is.
+- CONFIRMED contradiction, AT LEAST 5 skills (a lower bound: the sweep grepped only skills/, agents/, rules/ for Edit/staged-copy wording; commands/, Write-tool, heredoc and Python writers are not yet swept, and harvest CREATE writes by some other path) still tell the agent to hand-edit the transaction staged copy while the rules say memgrep only: janitor-memory-repair (step "Edit ONLY the staged copy", SKILL.md:125+137), janitor-memory-atomize (SKILL.md:143), janitor-memory-harvest (SKILL.md:141), janitor-memory-retro-lesson (SKILL.md:103), janitor-memory-conflict (SKILL.md:132), consolidate references/merge-protocol.md:311. janitor-memory-bootstrap Edit-tool steps at :46 and :76 target .gitignore, not a wikimem page (only those two steps verified).
 - Release condition: no publish until memgrep has the whole-page replace verb, harvest CREATE and the staged-copy migration; until then a published build would make every page-editing chore abstain. Already covered by the owner release scope ("wait to complete all before publishing").
+
+## Derived by us, PENDING OWNER CONFIRMATION (2026-09-23)
+
+- Our reading of the no-cap quote: every lint issue memgrep cannot auto-fix opens its own janitor ticket, not only oversized atoms.
+- Gate vs tickets (the two owner rules collide on a page already carrying defects): a write is refused only for defects the write itself introduces; defects already on disk do not block, each gets a ticket. A write the gate refuses opens NO ticket (the content never landed).
+- Our addition, owner may drop it: no duplicate ticket while one is open for the same issue. Key = page + rule code + stable anchor (atom id, lesson id, frontmatter field; never a line number). A ticket closed as "needs a new memgrep verb" suppresses re-filing and stays visible in the findings, so an abstain cannot loop.
+
+## Open design questions for the migration (from the review, 2026-09-23)
+
+- Proposed, not settled: the txn core stages the copy and the agent runs memgrep verbs ON it. Open: link and backlink checks would resolve against the staging dir; id uniqueness must see the live corpus without seeing the staged twin; indexing the staged path leaves a phantom index row; memgrep lint and the txn verify_* gate disagree by design (janitor#227); the commit step is itself a non-memgrep writer the PreToolUse guard must exempt. Alternative: single-page chores (repair, atomize, retro-lesson) write through memgrep directly, which is already atomic; staging only for multi-page ops (consolidate, split, conflict), or begin/commit become memgrep verbs.
+- Ticket plumbing: the [janitor-ticket] marker spawns one agent per ticket, so a store scan can open hundreds; dispatch must be rate-limited per fire (the owner removed the OPENING cap, not a dispatch limit). A wikimem lint ticket goes to the memory curator with the named verb it needs, or sits in a visible needs-verb state. Ticket bodies carry page id, rule code and anchor, never page text (LOCAL pages hold private paths). A USER-scope page linted from two projects must not get one ticket per project. The owner hold on the AgentlensPro and ghbook pages must be respected by the ticket path, or the owner told before publish.
+- Split-chore defect seen in the index: macos-keychain and macos-keychain-incidents share the description "macOS keychain dialog opened hundreds of times" (same for janitor-compaction-floor-gate and -triggers), so recall ties on them. The gate should lint a child page that copies its parent description. The four keychain pages (split in 8e5c898f) have no control bytes and lint only WARN (atoms missing ocd/lmd).
