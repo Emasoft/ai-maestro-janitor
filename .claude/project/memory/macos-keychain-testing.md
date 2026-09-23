@@ -6,7 +6,7 @@ lmd: 2026-09-23
 metadata:
   node_type: memory
   type: reference
-  tier: aspect
+  tier: component
   functionality: keychain-safety
 publish-globally: false
 split-lineage: 633457257a6c4a5882f1ed46b06af84a
