@@ -314,8 +314,10 @@ def _main() -> int:
         # capped ~4.3 KB rendering. Only the PRINTED stdout injection is the capped one (or,
         # per the fallback above, the full one when the capped companion is missing).
         tail = ec.recent_messages(transcript_path)
+        # This hook only ever runs `jcl.run_compact` (a real Jev compose) -- no llm-ext fallback
+        # path here (TRDD-RAEGS1D5, `compose_handoff`'s `source` is now required).
         text = ec.compose_handoff(
-            inputs, now_iso=now_iso, summary=inject_text, tail=tail,
+            inputs, now_iso=now_iso, summary=inject_text, source=jcl.SOURCE_JEV, tail=tail,
             max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
         )
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, full_text, now=now)

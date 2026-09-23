@@ -95,6 +95,7 @@ _RATE_LIMIT_MAX_TTL_S)`` — a server-STATED ``Retry-After`` is honoured up to 1
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -596,9 +597,27 @@ def cmd_compact(args: argparse.Namespace) -> int:
                        kind="ok")
 
     kept = sum(1 for s in scores.values() if s.kept and not s.oversized)
+    # TRDD-1ETALGDG followup: `blocked` counts items `jc.score_items` could never get scored
+    # at all (a provider firewall block or an oversized batch that survived every split
+    # retry) -- invisible before this, since a partially-blocked compaction still exits 0
+    # like a fully clean one. `blocked_digest` is a hash of the blocked items' own TEXT
+    # (never the text itself), sorted before hashing so split/retry ORDER never changes it
+    # for identical content -- `jev_compaction_lane.py` uses it as a cross-SESSION dedupe
+    # key (item ids embed the transcript's own uuids, which differ every session; the
+    # blocked CONTENT is what actually recurs).
+    blocked_items = [it for it in items if scores[it.id].blocked]
+    blocked_digest = ""
+    if blocked_items:
+        item_hashes = sorted(
+            hashlib.sha256(it.text.encode("utf-8")).hexdigest() for it in blocked_items
+        )
+        blocked_digest = hashlib.sha256("".join(item_hashes).encode("utf-8")).hexdigest()
     elapsed_ms = int((time.monotonic() - start) * 1000)
     out_tokens = estimate_tokens(full_doc)
-    print(f"compacted items={kept}/{len(items)} tokens={out_tokens} cost={usage_cost} ms={elapsed_ms}")
+    print(
+        f"compacted items={kept}/{len(items)} tokens={out_tokens} cost={usage_cost} "
+        f"ms={elapsed_ms} blocked={len(blocked_items)} blocked_digest={blocked_digest}"
+    )
     return 0
 
 

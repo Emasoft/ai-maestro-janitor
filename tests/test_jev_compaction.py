@@ -763,6 +763,95 @@ def test_score_items_retry_cap_bounds_total_split_requests() -> None:
     assert client.calls <= 4, f"expected the retry cap to bound the requests, got {client.calls}"
 
 
+# --- TRDD-1ETALGDG followup: budget exhaustion pointers instead of raising, and the raise
+# gate is "more than half of ALL items blocked", not "literally nothing was scored" -------
+
+
+def test_score_items_retry_budget_exhaustion_pointers_the_rest_instead_of_raising() -> None:
+    """Followup item 1: the OLD behaviour re-raised the moment `retry_budget.take()` failed,
+    which `score_items`'s fail-closed `ThreadPoolExecutor` handling turned into a total
+    compaction failure over ONE poison item exhausting a budget shared across every batch.
+    With `max_retried_requests=1`, the batch containing item i4 can take only ONE more split
+    (isolating i0-i3 into their own half, which scores cleanly) before the budget is spent --
+    the SECOND half (i4-i7, still containing the poison marker) must become pointers
+    directly, not raise. Exactly half (4/8) of all items end up blocked, which must NOT
+    raise either (the gate is "more than half")."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(8)]
+
+    class _BlocksBatchesContainingMarker:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            texts = [entry["text"] for entry in state["items"]]
+            if any("text 4" in t for t in texts):
+                raise JevBlockedError(
+                    "simulated cloudflare block", cf_ray="test-ray", body_sha256="cd" * 32
+                )
+            return {key: NoulAnswer(noul=0.9) for key in questions}
+
+    scores = jc.score_items(
+        items, "digest", _BlocksBatchesContainingMarker(), max_workers=1,
+        max_retried_requests=1,
+    )
+
+    assert set(scores) == {it.id for it in items}  # nothing dropped -- every item scored
+    for i in range(4):  # isolated into the half that never contained the poison marker
+        item_id = f"i{i}:0"
+        assert scores[item_id].kept is True, item_id
+        assert scores[item_id].blocked is False, item_id
+    for i in range(4, 8):  # the retry-budget-exhausted half -- pointers, not a raise
+        item_id = f"i{i}:0"
+        assert scores[item_id].kept is False, item_id
+        assert scores[item_id].blocked is True, item_id
+
+
+def test_score_items_raises_when_more_than_half_the_items_end_up_blocked() -> None:
+    """Followup item 1: the raise gate is now "more than half of ALL items ended up
+    unscored", not just "literally nothing was scored" (the pre-followup gate, which let an
+    almost-all-pointers result through as a "success"). 5 of 8 items carry a poison marker
+    and get isolated down to single-item leaves (well inside the default retry budget, no
+    budget exhaustion involved here); the 3 clean items DO get scored normally, but
+    `score_items` must still raise because 5/8 is more than half."""
+    items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(8)]
+    poison_markers = {"text 3", "text 4", "text 5", "text 6", "text 7"}
+
+    class _BlocksBatchesContainingAnyPoisonMarker:
+        def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+            texts = [entry["text"] for entry in state["items"]]
+            if any(any(marker in t for marker in poison_markers) for t in texts):
+                raise JevBlockedError("simulated block", cf_ray="r", body_sha256="ab" * 32)
+            return {key: NoulAnswer(noul=0.9) for key in questions}
+
+    with pytest.raises(JevBlockedError):
+        jc.score_items(
+            items, "digest", _BlocksBatchesContainingAnyPoisonMarker(), max_workers=1,
+        )
+
+
+def test_blocked_item_pointer_is_marked_unscored_provider_firewall() -> None:
+    """Followup item 2(c): an item `score_items` never got to send to Jev at all (a provider
+    firewall block or an oversized batch that survived every split retry, `Scores.blocked`)
+    must render distinguishably in `compose()`'s pointer list from an ORDINARY below-
+    threshold item -- otherwise the model cannot tell "Jev never saw this" (worth an
+    `expand`) apart from "Jev saw it and it wasn't relevant" (not worth one)."""
+    items = [
+        _item("blocked:0", "assistant", "poisoned content", turn=0, tokens=10),
+        _item("skipped:0", "assistant", "ordinary low-relevance content", turn=1, tokens=10),
+    ]
+    scores = {
+        "blocked:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                                decision_passed=False, blocked=True),
+        "skipped:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                                decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    lines = doc.splitlines()
+    blocked_idx = next(i for i, ln in enumerate(lines) if "id=blocked:0" in ln)
+    skipped_idx = next(i for i, ln in enumerate(lines) if "id=skipped:0" in ln)
+    assert lines[blocked_idx + 1] == "unscored (provider firewall)"
+    # An ordinary below-threshold item gets no such note right after its pointer line.
+    assert lines[skipped_idx + 1] != "unscored (provider firewall)"
+
+
 def test_score_items_parallel_is_faster_than_serial() -> None:
     """Card 3 (TRDD-CC0CZLMO): jevctx's own `scorer.py` fans batches out on a
     `ThreadPoolExecutor` (`scorer.py:149-154`); ours must too, or a large transcript's serial

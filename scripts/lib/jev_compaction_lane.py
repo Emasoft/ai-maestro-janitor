@@ -549,6 +549,94 @@ SOURCE_FAILED = "failed"
 _NON_RETRYABLE_KINDS = frozenset({"auth", "budget", "invalid"})
 
 
+# --------------------------------------------------------------------------------------- #
+# `blocked=N` visibility (TRDD-1ETALGDG followup): a compaction that succeeds (exit 0) but
+# had to pointer some items -- a provider firewall block or an oversized batch that
+# survived every split retry `jev_compaction.py::score_items` tried -- is otherwise
+# invisible to this lane's own findings: `handle_nonzero_exit` above only ever fires on a
+# NON-zero exit. `jev_compact.py`'s own `compacted items=...` success line now carries
+# `blocked=N blocked_digest=<hex>` (jev_compact.py::cmd_compact); this parses it and records
+# ONE LOW `JEV-COMPACT-BLOCKED` finding, reusing `record_finding` the same way every other
+# finding in this module does.
+# --------------------------------------------------------------------------------------- #
+
+_BLOCKED_LINE_RE = re.compile(r"\bblocked=(\d+)\s+blocked_digest=([0-9a-f]*)")
+
+# Dedup is CONTENT-based, not session-based (coordinator amendment, 2026-09-23): the SAME
+# poisoning content (e.g. one recurring transcript entry a provider firewall always blocks)
+# recurs in EVERY new session of this repo, each with a DIFFERENT set of item ids (ids embed
+# the transcript's own uuids, which differ per session) -- a session-keyed dedupe would never
+# suppress the repeat. `blocked_digest` is a hash of the blocked items' own TEXT (never the
+# text itself, matching the codebase's existing cf_ray/body_sha256 pattern -- see
+# jevctx.openrouter.JevBlockedError), sorted before hashing so batch-split ORDER (which
+# varies run to run) never changes the digest for identical content. `emit_once` against a
+# seen-file under the PROJECT state dir (`sd`, never per-session) then suppresses the exact
+# same content forever -- the same mechanism `record_once_per_reason` already uses for
+# `kind=auth`.
+#
+# On top of the content dedupe, a separate one-per-day cap on the CODE itself (regardless of
+# digest) bounds how often this fires even when the blocked content keeps changing -- a LOW-
+# severity visibility finding is not worth repeating more than once a day no matter how many
+# distinct poison items a flaky firewall produces on a given day.
+BLOCKED_SEEN_FILE = "jev-blocked-finding-seen"
+_BLOCKED_LAST_EMIT_FILE = "jev-blocked-finding-last-emit.ts"
+_BLOCKED_DAY_CAP_S = 86400.0
+
+
+def parse_blocked_summary(stdout: str) -> tuple[int, str]:
+    """`(blocked_count, blocked_digest)` off `jev_compact.py compact`'s own `compacted
+    items=...` stdout summary line, or `(0, "")` when the line is missing/malformed (an
+    older `jev_compact.py` without this field, or stdout captured mid-write) -- a best-
+    effort visibility signal, never a correctness input, so a parse miss just means "nothing
+    to report", not an error."""
+    m = _BLOCKED_LINE_RE.search(stdout)
+    if not m:
+        return 0, ""
+    return int(m.group(1)), m.group(2)
+
+
+def _blocked_day_cap_spent(sd: Path, *, now_fn: Callable[[], float] = time.time) -> bool:
+    """True iff a `JEV-COMPACT-BLOCKED` finding already fired within the last
+    `_BLOCKED_DAY_CAP_S` -- read-only, never mutates (the caller stamps
+    `_mark_blocked_day_spent` only right after it actually emits one)."""
+    try:
+        last = float((sd / _BLOCKED_LAST_EMIT_FILE).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    return now_fn() - last < _BLOCKED_DAY_CAP_S
+
+
+def _mark_blocked_day_spent(sd: Path, *, now_fn: Callable[[], float] = time.time) -> None:
+    try:
+        sd.mkdir(parents=True, exist_ok=True)
+        state.atomic_write(sd / _BLOCKED_LAST_EMIT_FILE, str(now_fn()))
+    except OSError:
+        pass  # best-effort -- see record_finding's own guard rationale
+
+
+def record_blocked_finding(
+    sd: Path, *, blocked: int, blocked_digest: str, now_fn: Callable[[], float] = time.time,
+) -> None:
+    """Record ONE LOW `JEV-COMPACT-BLOCKED` finding for a compaction that succeeded (exit 0)
+    but had to pointer some items -- see the module-level comment above for the two dedupe
+    layers this applies (content digest, forever; the code itself, once a day). A no-op when
+    `blocked <= 0` -- nothing to report."""
+    if blocked <= 0:
+        return
+    if _blocked_day_cap_spent(sd, now_fn=now_fn):
+        return
+    key = f"JEV-COMPACT-BLOCKED:{blocked_digest}"
+    msg = (
+        f"[jev-compaction] {blocked} item(s) could not be scored (provider firewall or "
+        "oversize) and were rendered as pointers instead -- verbatim guarantee held, "
+        "nothing was inlined or altered"
+    )
+    emitted = dedupe.emit_once(sd / BLOCKED_SEEN_FILE, key, msg)
+    if emitted:
+        record_finding(sev="LOW", code="JEV-COMPACT-BLOCKED", msg=emitted)
+        _mark_blocked_day_spent(sd, now_fn=now_fn)
+
+
 def _sleep_for_kind_or_break(
     stamp: dict, *, deadline: float, now_fn: Callable[[], float], sleep_fn: Callable[[float], None],
 ) -> bool:
@@ -689,9 +777,18 @@ def run_compact_with_fallback(
 
         if not timed_out and proc is not None and proc.returncode == EXIT_OK:
             try:
-                return SOURCE_JEV, out_path.read_text(encoding="utf-8"), ""
+                text = out_path.read_text(encoding="utf-8")
             except OSError:
                 pass  # written but unreadable -- treat exactly like any other failed attempt
+            else:
+                # TRDD-1ETALGDG followup: a successful (exit 0) compact can still have had
+                # to pointer some items -- surface that here, the one place this retry
+                # loop's own Jev success returns through. (`run_compact`'s OTHER caller,
+                # on-session-start-post-clear-compact.py, does not go through this loop and
+                # is unaffected -- out of this followup's file set.)
+                blocked, blocked_digest = parse_blocked_summary(proc.stdout or "")
+                record_blocked_finding(sd, blocked=blocked, blocked_digest=blocked_digest)
+                return SOURCE_JEV, text, ""
 
         if timed_out or proc is None:
             # Orchestrator correction 2026-09-23: NEVER retried. The attempt just spent (up

@@ -279,6 +279,63 @@ def test_compact_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert doc.count(str(transcript)) == 2  # header line + the one fixed trailing line
 
 
+def test_compact_reports_blocked_zero_when_nothing_was_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-1ETALGDG followup item 2(a): the common case (nothing blocked) must still carry
+    `blocked=0` and an EMPTY `blocked_digest` -- never omit the fields outright, or a caller
+    parsing this line (jev_compaction_lane.py::parse_blocked_summary) would have to handle
+    two different line shapes."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert "blocked=0 blocked_digest=" in output
+    assert output.strip().endswith("blocked_digest=")
+
+
+def test_compact_reports_blocked_count_and_a_content_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-1ETALGDG followup item 2(a): a compaction that still exits 0 but had to pointer
+    some items (a provider firewall block or an oversized batch that survived every split
+    retry, `jc.score_items`'s own `Scores.blocked`) must say so in the summary line --
+    otherwise it is indistinguishable from a fully clean compaction to every caller that
+    only checks the exit code. `blocked_digest` is a real sha256 hex digest of the blocked
+    items' own TEXT (jev_compaction_lane.py uses it as a cross-session dedupe key), never
+    the text itself."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    real_score_items = jev_compact.jc.score_items
+
+    def _score_items_with_one_blocked(items: Any, digest: Any, client_: Any, **kwargs: Any) -> Any:
+        scores = real_score_items(items, digest, client_, **kwargs)
+        # As if this item had survived every split retry still unscored -- score_items's own
+        # real contract for a blocked item (see its docstring): kept=False, oversized=False.
+        first_id = items[0].id
+        scores[first_id] = jev_compact.jc.Scores(
+            relevance=0.0, decision=0.0, oversized=False, kept=False, decision_passed=False,
+            blocked=True,
+        )
+        return scores
+
+    monkeypatch.setattr(jev_compact.jc, "score_items", _score_items_with_one_blocked)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert "blocked=1" in output
+    digest_field = next(p for p in output.split() if p.startswith("blocked_digest="))
+    assert len(digest_field.split("=", 1)[1]) == 64  # a real sha256 hex digest, never empty
+
+
 def test_compact_declines_on_recent_probe_failure(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

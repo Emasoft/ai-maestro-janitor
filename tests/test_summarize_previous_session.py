@@ -81,23 +81,28 @@ Path({argv_log!r}).write_text(json.dumps(argv), encoding="utf-8")
 out_text = {out_text!r}
 if out_text and "--out" in argv:
     Path(argv[argv.index("--out") + 1]).write_text(out_text, encoding="utf-8")
+sys.stdout.write({stdout!r})
 sys.stderr.write({stderr!r})
 sys.exit({exit_code})
 """
 
 
 def _stub_jev_compact(plugin_root: Path, argv_log: Path, *, exit_code: int, out_text: str = "",
-                       stderr: str = "") -> None:
+                       stderr: str = "", stdout: str = "") -> None:
     """A fake `scripts/jev_compact.py` — records its own argv to `argv_log` and exits with a
     fixed code, standing in for the real (httpx/jevctx-dependent, network-touching) CLI. Runs
     as a REAL subprocess (git-tracked 100755 in production; chmod'd here the same way) so the
     exec-by-path invocation form itself is exercised, not just the Python call that builds it.
+
+    `stdout` (TRDD-1ETALGDG followup): the real CLI's own `compacted items=...` success line
+    (carrying `blocked=N blocked_digest=<hex>`) -- unset (the default) reproduces the OLD
+    stub behaviour (no stdout at all), so every existing caller is unaffected.
     """
     script = plugin_root / "scripts" / "jev_compact.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(
         _STUB_JEV_COMPACT.format(argv_log=str(argv_log), out_text=out_text, exit_code=exit_code,
-                                  stderr=stderr),
+                                  stderr=stderr, stdout=stdout),
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
@@ -456,6 +461,74 @@ def test_auth_finding_deduped_on_the_same_reason(tmp_path, monkeypatch, _isolate
     entries = _ledger_entries()
     auth_hits = [e for e in entries if e["code"] == "JEV-AUTH-REJECTED"]
     assert len(auth_hits) == 1, f"expected exactly one dedup'd auth finding, got {auth_hits}"
+
+
+# --- TRDD-1ETALGDG followup item 2(b): blocked=N visibility on an exit-0 compaction -------
+
+
+def test_parse_blocked_summary_extracts_count_and_digest() -> None:
+    """`jcl.parse_blocked_summary` pulls `(count, digest)` off `jev_compact.py`'s own
+    `compacted items=...` stdout line, and degrades to `(0, "")` -- never an exception --
+    when the line is missing (an older `jev_compact.py`, or stdout captured mid-write)."""
+    line = "compacted items=5/8 tokens=100 cost=0.01 ms=50 blocked=3 blocked_digest=" + "ab" * 32
+    assert jcl.parse_blocked_summary(line) == (3, "ab" * 32)
+    assert jcl.parse_blocked_summary(
+        "compacted items=8/8 tokens=100 cost=0.01 ms=50 blocked=0 blocked_digest="
+    ) == (0, "")
+    assert jcl.parse_blocked_summary("") == (0, "")
+    assert jcl.parse_blocked_summary("compacted items=8/8 tokens=100\n") == (0, "")
+
+
+def test_blocked_finding_deduped_by_content_across_two_sessions(tmp_path, monkeypatch, _isolated_env):
+    """Coordinator amendment (2026-09-23): the `blocked=N` finding must NOT be deduped only
+    per session key -- the SAME poisoning content recurs in EVERY new session of this repo,
+    each against a DIFFERENT transcript (so a session-keyed dedupe would never suppress the
+    repeat). Two separate `sps.main()` runs, each against its OWN transcript (so neither hits
+    the "already summarized" early-skip) but reporting the SAME `blocked_digest` on their
+    exit-0 summary line, must still produce exactly ONE `JEV-COMPACT-BLOCKED` finding."""
+    project_dir = _isolated_env
+    plugin_root = tmp_path / "plugin"
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    same_digest = "cd" * 32
+    _stub_jev_compact(
+        plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC,
+        stdout=f"compacted items=5/8 tokens=100 cost=0.01 ms=50 blocked=3 "
+               f"blocked_digest={same_digest}\n",
+    )
+
+    from external_handoff_clear import _release_summary_hold  # noqa: PLC0415
+
+    sd = state.state_dir()
+
+    prev1 = _make_prev_transcript(project_dir, name="prevsess1.jsonl")
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev1)
+    assert sps.main() == 0
+    _release_summary_hold(sd, key=handoff_files.session_key(str(prev1)))
+
+    # A DIFFERENT transcript (a different session_key, so run 2 is a genuine new attempt, not
+    # the "already summarized" early-skip) reporting the IDENTICAL content digest.
+    prev2 = _make_prev_transcript(project_dir, name="prevsess2.jsonl")
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev2)
+    assert sps.main() == 0
+    _release_summary_hold(sd, key=handoff_files.session_key(str(prev2)))
+
+    entries = _ledger_entries()
+    blocked_hits = [e for e in entries if e["code"] == "JEV-COMPACT-BLOCKED"]
+    assert len(blocked_hits) == 1, f"expected exactly one dedup'd finding, got {blocked_hits}"
+    assert blocked_hits[0]["sev"] == "LOW"
+
+
+def test_blocked_finding_day_cap_suppresses_a_second_distinct_digest_same_day(tmp_path):
+    """The content-digest dedupe alone would let a DIFFERENT poison digest fire a second
+    finding the same day -- the separate one-per-day cap on the CODE itself must suppress
+    that too, regardless of digest."""
+    sd = tmp_path / "state"
+    jcl.record_blocked_finding(sd, blocked=2, blocked_digest="aa" * 32)
+    jcl.record_blocked_finding(sd, blocked=5, blocked_digest="bb" * 32)  # a different digest!
+    entries = _ledger_entries()
+    blocked_hits = [e for e in entries if e["code"] == "JEV-COMPACT-BLOCKED"]
+    assert len(blocked_hits) == 1, f"expected the day cap to suppress the second one, got {blocked_hits}"
 
 
 def test_timeout_expired_is_a_high_bug_finding(tmp_path, monkeypatch, _isolated_env):
@@ -1065,7 +1138,13 @@ def test_llm_ext_fallback_handoff_declares_itself_not_verbatim_jev_output(
     before the model reads it as fact, that this is LLM-EXTERNALIZER-GENERATED PROSE -- not
     the real Jev-selected verbatim transcript items `ec.compose_handoff`'s own fixed header
     ("Jev compaction" / "chosen by Jev scoring") otherwise implies for every summary it
-    renders, real Jev compose or not."""
+    renders, real Jev compose or not.
+
+    TRDD-1ETALGDG followup: `summarize_previous_session.py` no longer prepends its OWN
+    disclaimer text -- `ec.compose_handoff` now takes `source` and renders the TRUE header
+    itself from `external_clear._COMPACTED_CONTEXT_HEADS` (owner review finding #3, fixed at
+    the source instead of at every caller). This asserts THAT header's own wording survives
+    into the written handoff, not the removed prepend."""
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
@@ -1080,11 +1159,11 @@ def test_llm_ext_fallback_handoff_declares_itself_not_verbatim_jev_output(
     assert sps.main() == 0
     sd = state.state_dir()
     text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
-    assert "llm-ext generated prose" in text
-    assert "not verbatim jev-selected transcript text" in text.lower()
-    # The disclaimer must land BEFORE the real llm-ext text, not after -- it is meant to be
+    assert "llm-ext fallback: generated prose summary" in text
+    assert "not jev-selected verbatim text" in text.lower()
+    # The TRUE header must land BEFORE the real llm-ext text, not after -- it is meant to be
     # read first, functionally the block's header.
-    assert text.index("llm-ext generated prose") < text.index("the fallback prose")
+    assert text.index("llm-ext fallback: generated prose summary") < text.index("the fallback prose")
 
 
 def test_lane_actually_retries_through_a_decline_gate_mimicking_stub(
@@ -1236,3 +1315,56 @@ def test_llm_ext_fallback_outer_timeout_reaps_the_group_leader(tmp_path, monkeyp
     # only sets as a SIDE EFFECT of an internal `wait()`, so this only proves true when
     # `_run_llm_ext_fallback` reaped the child itself before returning.
     assert proc.returncode is not None, "group leader left a zombie: not reaped inside the fn"
+
+
+def test_llm_ext_fallback_outer_timeout_on_windows_calls_proc_kill_not_killpg(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """TRDD-1ETALGDG followup item 3: commit b0e94f43's `sys.platform == "win32"` branch in
+    `_run_llm_ext_fallback` has never actually run on this project's (macOS/Linux) test/CI
+    machines -- `os.killpg`/SIGKILL don't exist on Windows (no POSIX process groups), so that
+    branch calls `proc.kill()` (`TerminateProcess`) on the direct child instead. Forces the
+    branch by monkeypatching `sys.platform`, stubs `subprocess.Popen` so no real process is
+    involved, and proves `proc.kill()` -- not `os.killpg` -- is what gets called."""
+    monkeypatch.setattr(jcl.sys, "platform", "win32")
+
+    calls = {"kill": 0, "killpg": 0}
+
+    class _FakeProc:
+        pid = 4242
+
+        def __init__(self) -> None:
+            self._communicate_calls = 0
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            self._communicate_calls += 1
+            if self._communicate_calls == 1:
+                # The OUTER `communicate(timeout=timeout_s + _LLM_EXT_OUTER_SLACK_S)` call --
+                # simulates the subprocess never finishing in time. `timeout` is always given
+                # a real float by the code under test; the `or 0.0` only satisfies mypy's
+                # `TimeoutExpired(timeout: float)` signature for the `| None` default above.
+                raise subprocess.TimeoutExpired(cmd="llm_ext_compact.py", timeout=timeout or 0.0)
+            # The REAP call after the kill -- the (now-dead, in a real run) process returns
+            # cleanly the second time.
+            return "", ""
+
+        def kill(self) -> None:
+            calls["kill"] += 1
+
+    def _fake_popen(*args, **kwargs):
+        return _FakeProc()
+
+    def _fake_killpg(pid, sig):
+        calls["killpg"] += 1
+
+    monkeypatch.setattr(jcl.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(jcl.os, "killpg", _fake_killpg)
+
+    ok, detail = jcl._run_llm_ext_fallback(
+        tmp_path, transcript="/tmp/x.jsonl", timeout_s=60.0,
+    )
+
+    assert calls["kill"] == 1, "expected proc.kill() (TerminateProcess) on the win32 branch"
+    assert calls["killpg"] == 0, "os.killpg must never be reached on the win32 branch"
+    assert ok is False
+    assert "timed out" in detail

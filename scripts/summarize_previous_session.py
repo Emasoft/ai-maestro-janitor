@@ -294,22 +294,12 @@ def _main(
     trigger = "jev-compaction" if source == jcl.SOURCE_JEV else "jev-compaction-llm-ext-fallback"
     inputs = ec.HandoffInputs(trigger=trigger, findings=findings, cards=in_flight_cards)
     tail = ec.recent_messages(str(prev))
-    summary_text = compacted_text
-    if source == jcl.SOURCE_LLM_EXT and summary_text:
-        # Owner review finding #3 (TRDD-RAEGS1D5): `ec.compose_handoff`'s own fixed header for
-        # this block ("Compacted context (Jev compaction)" / "chosen by Jev scoring") is
-        # written for a REAL Jev compose and is now false for this text -- llm-ext GENERATED
-        # PROSE (a paraphrase from a different model), never verbatim Jev-selected transcript
-        # items. That composer lives in `scripts/lib/external_clear.py`, owned by a different
-        # worker on this card and out of this file's edit scope, so the disclaimer is
-        # prepended to the summary text itself instead -- it becomes the first line the reader
-        # sees inside the block, functionally its header, without touching the shared composer.
-        summary_text = (
-            "_llm-ext generated prose summary (Jev was unavailable) — NOT verbatim "
-            "Jev-selected transcript text._\n\n" + summary_text
-        )
+    # Owner review finding #3 (TRDD-RAEGS1D5), fixed at the source: `ec.compose_handoff` now
+    # takes `source` and renders the TRUE header itself (see
+    # `external_clear._COMPACTED_CONTEXT_HEADS`) -- `source` is already exactly `jcl.SOURCE_JEV`
+    # / `jcl.SOURCE_LLM_EXT` ("jev" / "llm-ext"), so no prepended disclaimer is needed here.
     text = ec.compose_handoff(
-        inputs, now_iso=now_iso, summary=summary_text, tail=tail,
+        inputs, now_iso=now_iso, summary=compacted_text, source=source, tail=tail,
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
     )
 

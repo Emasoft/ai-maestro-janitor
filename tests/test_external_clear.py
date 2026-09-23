@@ -760,7 +760,8 @@ def test_compose_handoff_survives_a_missing_compacted_context():
     """`summary=None` (jev_compact never produced a file) must still yield facts + tail --
     unchanged from the llm-ext-era contract this composer already had."""
     text = ec.compose_handoff(
-        _inputs(), now_iso=NOW_ISO, summary=None, tail=["USER: do the thing", "ASSISTANT: done"],
+        _inputs(), now_iso=NOW_ISO, summary=None, source="jev",
+        tail=["USER: do the thing", "ASSISTANT: done"],
     )
     assert "PXP08ZQC" in text
     assert "do the thing" in text
@@ -771,7 +772,9 @@ def test_compose_handoff_pointer_expand_line_survives_truncation():
     still end with its `pointers expand with:` line intact -- it is the model's only way back
     to every elided item. A naive byte-slice (the old behaviour) could and did drop it."""
     doc = _compacted_doc(400)  # long enough that max_bytes=2500 forces a cut well before EOF
-    text = ec.compose_handoff(_inputs(), now_iso=NOW_ISO, summary=doc, tail=[], max_bytes=2500)
+    text = ec.compose_handoff(
+        _inputs(), now_iso=NOW_ISO, summary=doc, source="jev", tail=[], max_bytes=2500,
+    )
     assert len(text.encode("utf-8")) <= 2500
     assert "pointers expand with:" in text
     assert text.rstrip().splitlines()[-1].startswith("pointers expand with:")
@@ -784,7 +787,7 @@ def test_compose_handoff_pointer_line_survives_even_under_extreme_pressure():
         findings=[f"HIGH finding number {i} with a reasonably long descriptive message" for i in range(40)],
     )
     doc = _compacted_doc(50)
-    text = ec.compose_handoff(big_inputs, now_iso=NOW_ISO, summary=doc, max_bytes=1400)
+    text = ec.compose_handoff(big_inputs, now_iso=NOW_ISO, summary=doc, source="jev", max_bytes=1400)
     assert len(text.encode("utf-8")) <= 1400
     if "## Compacted context" in text:
         assert "pointers expand with:" in text
@@ -793,7 +796,9 @@ def test_compose_handoff_pointer_line_survives_even_under_extreme_pressure():
 def test_compose_handoff_leaves_a_plain_summary_untouched_when_short():
     """A short, old-style (no trailing pointer line) summary is unaffected by the pointer-
     preservation logic -- `_split_trailing_pointer_line` degrades to a no-op for it."""
-    text = ec.compose_handoff(_inputs(), now_iso=NOW_ISO, summary="a short plain summary", tail=[])
+    text = ec.compose_handoff(
+        _inputs(), now_iso=NOW_ISO, summary="a short plain summary", source="jev", tail=[],
+    )
     assert "a short plain summary" in text
     assert "pointers expand with:" not in text
 
@@ -819,7 +824,7 @@ def test_split_trailing_pointer_line_extracts_the_fixed_line():
 def test_handoff_survives_a_failed_summary():
     """summary=None must still yield the scriptable facts + tail, never an empty handoff."""
     text = ec.compose_handoff(
-        _inputs(), now_iso=NOW_ISO, summary=None,
+        _inputs(), now_iso=NOW_ISO, summary=None, source="jev",
         tail=["USER: do the thing", "ASSISTANT: done"],
     )
     assert "PXP08ZQC" in text
@@ -865,6 +870,7 @@ def test_a_REALISTIC_handoff_passes_the_contract_with_defaults():
         inputs,
         now_iso="2026-08-16T00:50:00+0200",
         summary="S" * 40_000,
+        source="jev",
         tail=[f"USER: a message of some length, number {i}" for i in range(300)],
     )
 
@@ -877,6 +883,7 @@ def test_whole_payload_respects_one_budget():
     text = ec.compose_handoff(
         _inputs(), now_iso=NOW_ISO,
         summary="S" * 40_000,
+        source="jev",
         tail=[f"USER: message number {i}" for i in range(400)],
         max_bytes=6000,
     )
@@ -887,7 +894,7 @@ def test_tail_is_trimmed_from_the_OLDEST_end_and_says_so():
     """A resuming session needs the most recent exchanges; a silent clip reads as complete."""
     tail = [f"USER: m{i}" for i in range(200)]
     text = ec.compose_handoff(
-        _inputs(), now_iso=NOW_ISO, summary=None, tail=tail, max_bytes=3000,
+        _inputs(), now_iso=NOW_ISO, summary=None, source="jev", tail=tail, max_bytes=3000,
     )
     # EXACT-LINE membership, not substring: "m0" occurs inside "m100".."m199", so a substring
     # check can never fail and would assert nothing.
@@ -1071,6 +1078,41 @@ def test_recent_messages_no_human_record_anywhere_yields_the_explicit_line(tmp_p
     got = ec.recent_messages(str(t))
     assert got[0] == ec._NO_HUMAN_IN_WINDOW
     assert not any(ln.startswith("USER: ") for ln in got)
+
+
+def _typed_command_record(uuid: str, command_name: str, args: str = "") -> dict:
+    """A `<command-message>`-wrapped `user` record, the shape `transcript_roles.classify_record`
+    inspects (rule 4: `<command-name>` decides "human" vs. the janitor's own typed automation --
+    see its docstring and `tests/test_transcript_roles.py`)."""
+    args_tag = f"\n<command-args>{args}</command-args>" if args else ""
+    content = f"<command-message>running…</command-message>\n<command-name>{command_name}</command-name>{args_tag}"
+    return {"type": "user", "uuid": uuid, "message": {"role": "user", "content": content}}
+
+
+def test_recent_messages_janitor_typed_commands_never_occupy_owner_slots(tmp_path):
+    """`recent_messages` feeds `compose_handoff`'s "## Recent turns" section, which the next
+    session reads as its OWN prior exchange -- a `/janitor-resume`, `/clear` or
+    `/reload-plugins --force` the JANITOR itself typed (`transcript_roles`'s own automation
+    list) must never occupy an owner-message slot there, while the owner's own typed
+    `/loop 5m <prompt>` must (TRDD-RAEGS1D5 correction 4)."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        _typed_command_record("r1", "/janitor-resume"),
+        _typed_command_record("r2", "/clear"),
+        _typed_command_record("r3", "/reload-plugins", args="--force"),
+        _typed_command_record("r4", "/loop", args="5m fix the failing test"),
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    got = ec.recent_messages(str(t))
+    joined = "\n".join(got)
+    assert "/loop" in joined and "fix the failing test" in joined, (
+        "the owner's own typed command must occupy an owner-message slot"
+    )
+    for automation in ("/janitor-resume", "/clear", "/reload-plugins"):
+        assert automation not in joined, (
+            f"the janitor's own typed {automation!r} must never occupy an owner-message slot"
+        )
 
 
 # ---------- the fleet lane (moved from tests/test_external_clear_retry.py, ------------------

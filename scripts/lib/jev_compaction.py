@@ -134,6 +134,15 @@ class Scores:
     # protect a user-stated decision/constraint/correction from being dropped for space
     # before a merely-relevant item is (see `compose`'s eviction-order comment).
     decision_passed: bool
+    # TRDD-1ETALGDG followup: True iff this item was NEVER sent to Jev at all -- a provider
+    # firewall block or an oversized batch survived every split retry `score_items` tried
+    # (see `_score_batch_resilient`). Distinct from an ordinary below-threshold item (which
+    # WAS judged and found not relevant): `compose()` renders a blocked item's pointer with
+    # its own "unscored (provider firewall)" note so the model can tell "Jev never saw this"
+    # apart from "Jev saw it and it wasn't worth keeping". Defaults to `False` so every
+    # existing `Scores(...)` call site (including every test that builds one by hand) needs
+    # no change.
+    blocked: bool = False
 
 
 class NoDigest(Exception):
@@ -635,10 +644,17 @@ def _score_batch_resilient(
     requests against whatever tripped it ("no fan-out of blocked siblings", the card's own
     wording). Each half's retry costs one unit of `retry_budget` (the ORIGINAL per-batch
     attempt from `score_items`'s own work list is never charged, only a split-triggered
-    retry is); if the budget is spent, this re-raises the triggering error immediately,
-    which `score_items`'s existing fail-closed handling turns into a whole-call failure --
-    deliberate: a backend blocking/oversizing enough to exhaust the cap needs the caller
-    to fall back, not to keep grinding through more splits.
+    retry is).
+
+    TRDD-1ETALGDG followup: when the budget is spent, that HALF's items become pointers
+    directly -- terminal, exactly like hitting `max_split_depth` -- instead of raising. The
+    ORIGINAL behaviour (re-raise immediately) propagated out through `score_items`'s
+    `ThreadPoolExecutor` fail-closed handling and aborted every OTHER batch's scoring too,
+    just because ONE batch happened to exhaust a budget shared across the whole call --
+    turning a single poison batch into a total compaction failure, exactly what splitting
+    was supposed to prevent. `score_items`'s own post-loop check (more than half of ALL
+    items ended up unscored) is what still turns a sufficiently broken backend into a
+    whole-call failure.
 
     Returns `(scores, blocked_ids)`: `blocked_ids` names every item that was still
     unscoreable even alone, once `max_split_depth` (or a single-item batch) was reached --
@@ -682,9 +698,24 @@ def _score_batch_resilient(
         left, right = _halve(batch)
         merged: dict[str, Scores] = {}
         blocked: list[str] = []
+        detail = ""
+        if isinstance(exc, JevBlockedError):
+            detail = f" cf_ray={exc.cf_ray} body_sha256={exc.body_sha256[:16]}"
         for half in (left, right):
             if not retry_budget.take():
-                raise  # cap exhausted -- see docstring: bail the whole call, don't degrade
+                # TRDD-1ETALGDG followup: cap exhausted -- terminal for this half (see the
+                # docstring: this must NOT raise, or one batch's exhausted budget aborts
+                # every other batch too). Same finding-line shape as the max-depth terminal
+                # case above, "retry_budget_exhausted" in place of the depth/leaf reason.
+                for it in half.items:
+                    print(
+                        f"jev: item {it.id} never scored (origin_batch={origin_index} "
+                        f"depth={depth + 1} retry_budget_exhausted {type(exc).__name__}"
+                        f"{detail}) -- inlined as a pointer",
+                        file=sys.stderr,
+                    )
+                blocked.extend(it.id for it in half.items)
+                continue
             half_scores, half_blocked = _score_batch_resilient(
                 half, asks_decision=asks_decision, items_by_id=items_by_id, digest=digest,
                 client=client, relevance_threshold=relevance_threshold,
@@ -747,14 +778,17 @@ def score_items(
     `jevctx.openrouter`) or a `max_tokens_exceeded` `JevValidationError` splits that ONE
     batch and retries the halves (bounded by `max_split_depth`/`max_retried_requests`)
     rather than aborting the whole call the way every other `JevError` still does. An item
-    that is still unscoreable once split all the way down becomes a pointer-only `Scores`
-    entry (`kept=False, oversized=False` -- rendered by `compose()` exactly like any other
-    below-threshold item, no inlined text: the verbatim guarantee holds because a
-    never-scored item's text is never sent again, let alone altered) instead of failing the
-    whole compaction -- UNLESS literally every batch ends up blocked, which raises
-    `JevBlockedError` (nothing was actually compacted, so this must count as a Jev failure
-    and let the caller fall back, not silently emit an all-pointers document as if it
-    succeeded).
+    that is still unscoreable once split all the way down, OR that lost the race for the
+    shared `max_retried_requests` budget, becomes a pointer-only `Scores` entry (`kept=False,
+    oversized=False, blocked=True` -- rendered by `compose()` with its own "unscored
+    (provider firewall)" note, see that function's docstring; the verbatim guarantee still
+    holds because a never-scored item's text is never sent again, let alone altered) instead
+    of failing the whole compaction -- UNLESS MORE THAN HALF of all items end up unscored
+    this way (followup fix: the original "unless literally everything is blocked" gate let
+    an almost-all-pointers result through as a "success"), which raises `JevBlockedError`
+    (not enough was actually compacted for the result to be useful, so this must count as a
+    Jev failure and let the caller fall back, not silently emit a mostly-pointers document
+    as if it succeeded).
     """
     if not items:
         return {}
@@ -813,17 +847,22 @@ def score_items(
                 f.cancel()
             raise
 
-    if blocked_ids and not scores:
-        # Every batch ended up blocked -- nothing was actually compacted (see docstring):
-        # this is a Jev failure, not a (useless) all-pointers success.
+    # TRDD-1ETALGDG followup: raise iff MORE THAN HALF of all items ended up unscored, not
+    # only when literally nothing was scored (see the docstring) -- a document that is
+    # almost all "expand this yourself" pointers has effectively lost the compaction even
+    # though `scores` is technically non-empty.
+    if blocked_ids and len(blocked_ids) * 2 > len(items):
         raise JevBlockedError(
-            f"every batch was blocked or oversized ({len(blocked_ids)} item(s)); "
-            "nothing could be scored"
+            f"too many items blocked or oversized ({len(blocked_ids)}/{len(items)}); "
+            "not enough could be scored to be useful"
         )
     for item_id in blocked_ids:
-        # Never scored, never inlined -- see docstring's verbatim-guarantee note.
+        # Never scored, never inlined -- see docstring's verbatim-guarantee note. `blocked`
+        # marks these apart from an ordinary below-threshold item so `jev_compact.py` can
+        # count them for its own `blocked=N` visibility line and `compose()` can render a
+        # distinct pointer note (see their own docstrings).
         scores[item_id] = Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
-                                  decision_passed=False)
+                                  decision_passed=False, blocked=True)
     return scores
 
 
@@ -996,6 +1035,14 @@ def compose(
                 lines.append(_format_pointer(it))
                 if scores[it.id].oversized:
                     lines.append(_oversized_preview(it))
+                elif scores[it.id].blocked:
+                    # TRDD-1ETALGDG followup: this item was never sent to Jev at all (a
+                    # provider firewall block or an oversized batch survived every split
+                    # retry, see score_items) -- distinct from an ordinary below-threshold
+                    # item, which WAS judged and found not relevant. Without this the model
+                    # cannot tell "Jev never got to see this" apart from "Jev saw it and it
+                    # wasn't worth keeping", and only the former is worth a manual `expand`.
+                    lines.append("unscored (provider firewall)")
         if hidden:
             # Card 5 content-fit (TRDD-RAEGS1D5, item 3): a bare "N more items not listed" was
             # a dead end -- `expand` needs an id, and an id not shown here could never be
