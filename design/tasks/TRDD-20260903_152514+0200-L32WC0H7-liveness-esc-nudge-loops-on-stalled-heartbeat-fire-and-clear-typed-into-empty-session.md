@@ -21,14 +21,14 @@ created-by: ai-maestro-janitor main session
 
 # session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-22
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-23
 
 - 2026-09-23 — card 1 of docs_dev/jev-compaction-spec.md (trigger + loop guards, recovery guard, iTerm timeout targeting) landed on 2026-09-22. The commits TAGGED L32WC0H7 are 5ae6b9b0, 09c33156, e74ead11, 02f13540, bc9f62b8, 7784344b; related recovery-flag work was tagged RAEGS1D5 (2f463d3b, 1b5ceec8, 6eba6f58, 9dfc409b), so that list is not proven complete against the spec's card-1 items. Back at testing; remaining: (1) the buildable row-count test of Acceptance box 1, (2) F5 observed live after the next release.
 - When card 1 lands, return this card to `testing` until F5 (one real stalled fire recovering with a single nudge) is observed in the field — that acceptance is unchanged.
 - **Prior thread (2026-09-17), still open:** F0–F6 are implemented; the card was HELD AT `testing` — NOT `complete` — because
   F5 and the six live acceptance criteria below need a real stalled fire on this host, which
   cannot be manufactured. **Unblock condition:** publish, then observe one stalled fire recover
-  with a SINGLE nudge; then move to `complete`. This matches the ten other cards left at
+  with a SINGLE nudge, AND land the row-count test named on the 2026-09-23 line above; then move to `complete`. This matches the ten other cards left at
   `testing` on 2026-09-03 for the same reason (see `janitor-publish-pipeline` ATOM-VA75-PD8K:
   the release is what makes a live box observable, so publish is mid-pipeline, not the finish
   line). A `complete` column over an unchecked acceptance box is the "board is lying" failure
@@ -66,8 +66,8 @@ created-by: ai-maestro-janitor main session
   answered by code: `retry_wedged` needs the attempt number to ADVANCE across polls
   (`fleet_scan.py:1141-1146`); a window wall reads `attempt 1/5` for hours, so `frozen`
   wins by construction (`daemon.py:2077-2080` records zero `retry_wedged` diagnoses ever).
-- NEXT ACTION (2026-09-23): F1-F6 are done. Write the row-count test of Acceptance box 1 (N simulated stalled fires through the beat seam, assert at most one ESC plan), then observe F5 after the next release. Historical note, superseded:
-  the pane capture is corroboration, not a gate.
+- NEXT ACTION (2026-09-23): F1-F6 are done. Write the row-count test of Acceptance box 1 (N simulated stalled fires through the beat seam, assert at most one ESC plan), then observe F5 after the next release.
+  (F0's pane capture was only ever corroboration, never a gate.)
 
 ## Symptom (owner report, 2026-09-03)
 
