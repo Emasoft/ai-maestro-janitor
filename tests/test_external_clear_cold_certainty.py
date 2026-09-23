@@ -1,16 +1,13 @@
-"""Cold-resume certainty + llm-ext resolution (TRDD-CEWVQ8DG).
+"""Cold-resume certainty (TRDD-CEWVQ8DG).
 
-Both defects these pin were MEASURED in this project's own logs, not imagined:
+The defect this pins was MEASURED in this project's own logs, not imagined:
 
   * `source=resume fire=False why=cache state unknown — not clearing` — the shrink refused
     because the OPTIONAL agentlensPro probe could not answer, so a fleet of cold sessions each
     paid a full cache-creation write on its first turn.
-  * `summary: permanent — llm-ext is not on PATH; not retrying` — the binary lives in a
-    plugin-cache bin dir that an interactive shell has on PATH and a hook-spawned child does not,
-    so every handoff degraded to the template.
 
-The property that matters in both cases is the SAME one: a lever must not be reachable only when
-some third party happens to be installed.
+The llm-ext-resolution half of this file (D2) moved to `tests/test_llm_ext_summary.py`
+(`TestResolveLlmExt`) — it belongs with the module it tests, not here.
 """
 
 from __future__ import annotations
@@ -21,17 +18,9 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "scripts" / "lib"))
 
-# D2 (below): TRDD-RAEGS1D5 card 3 C2 moved resolve_llm_ext/attempt_llm_ext_summary/OUTCOME_*
-# out of external_clear.py and into llm_ext_summary.py.
 import external_clear as ec  # noqa: E402
-import llm_ext_summary as les  # noqa: E402
 
 _HOUR = 3600
-
-
-class _Proc:
-    def __init__(self, rc: int, out: str = "", err: str = "") -> None:
-        self.returncode, self.stdout, self.stderr = rc, out, err
 
 
 # --- D1: certainty from elapsed time alone ----------------------------------------
@@ -106,89 +95,3 @@ def test_the_resume_gate_fires_on_an_age_derived_verdict() -> None:
     assert verdict.fire is True
     assert verdict.trigger == ec.TRIGGER_RESUMED_COLD
 
-
-# --- D2: resolving the CLI without an interactive PATH ------------------------------
-
-
-def _install(home: Path, version: str, marketplace: str = "emasoft-plugins") -> Path:
-    binary = home / ".claude" / "plugins" / "cache" / marketplace / "llm-externalizer" / version / "bin" / "llm-ext"
-    binary.parent.mkdir(parents=True, exist_ok=True)
-    binary.write_text("#!/bin/sh\n", encoding="utf-8")
-    binary.chmod(0o755)
-    return binary
-
-
-def test_the_cli_is_found_with_an_empty_path(tmp_path, monkeypatch) -> None:
-    """The measured failure: a hook-spawned child has no profile PATH, but the binary is there."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", "")
-    binary = _install(tmp_path, "13.5.1")
-    assert les.resolve_llm_ext() == str(binary)
-
-
-def test_the_newest_version_wins_numerically_not_lexicographically(tmp_path, monkeypatch) -> None:
-    """As strings '9.0.0' > '13.5.1', which would pin the OLDEST install forever."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", "")
-    _install(tmp_path, "9.0.0")
-    newest = _install(tmp_path, "13.5.1")
-    assert les.resolve_llm_ext() == str(newest)
-
-
-def test_a_genuinely_absent_cli_resolves_to_empty(tmp_path, monkeypatch) -> None:
-    """No install anywhere must degrade to the template, not raise or invent a path."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", "")
-    assert les.resolve_llm_ext() == ""
-
-
-def test_a_real_path_entry_still_wins(tmp_path, monkeypatch) -> None:
-    """An operator who put llm-ext on PATH keeps control — `which` is consulted first."""
-    onpath = tmp_path / "bin"
-    onpath.mkdir()
-    shim = onpath / "llm-ext"
-    shim.write_text("#!/bin/sh\n", encoding="utf-8")
-    shim.chmod(0o755)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", str(onpath))
-    _install(tmp_path, "13.5.1")
-    assert les.resolve_llm_ext() == str(shim)
-
-
-def test_an_absent_cli_reports_the_exact_permanent_detail(tmp_path, monkeypatch) -> None:
-    """The guardrail for the CI break this file's own rename caused (TRDD-CEWVQ8DG).
-
-    `tests/test_llm_ext_summary.py` asserts this detail against a SET of three, because WHICH
-    precondition fires depends on the host — so on a machine where llm-ext IS installed it reaches
-    the transcript branch and a renamed string sails through review. CI, with no llm-ext, caught it.
-
-    This pins the string DETERMINISTICALLY by making absence the fixture, so the next rename fails
-    on the machine that made it rather than twenty minutes later in CI.
-    """
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", "")
-    transcript = tmp_path / "session.jsonl"
-    transcript.write_text("{}\n", encoding="utf-8")
-
-    got = les.attempt_llm_ext_summary(str(transcript))
-    assert got.outcome == les.OUTCOME_PERMANENT
-    assert got.detail == "llm-ext is not installed"
-
-
-def test_the_summary_attempt_no_longer_reports_not_on_path(tmp_path, monkeypatch) -> None:
-    """The regression pin for D2: a plugin-cache-only install must produce a SUMMARY, not a
-    permanent 'not on PATH' that skips every retry and degrades the handoff."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", "")
-    _install(tmp_path, "13.5.1")
-    (tmp_path / ".claude" / "plugins" / "data" / "llm-externalizer-emasoft-plugins").mkdir(
-        parents=True, exist_ok=True
-    )
-    transcript = tmp_path / "session.jsonl"
-    transcript.write_text("{}\n", encoding="utf-8")
-
-    attempt = les.attempt_llm_ext_summary(
-        str(transcript), runner=lambda *a, **k: _Proc(0, "a real summary")
-    )
-    assert attempt.outcome == les.OUTCOME_OK
-    assert attempt.text == "a real summary"

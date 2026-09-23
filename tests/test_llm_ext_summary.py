@@ -432,6 +432,104 @@ def test_an_empty_transcript_path_is_permanent() -> None:
     assert got.outcome == les.OUTCOME_PERMANENT
 
 
+# ---------- resolving the CLI without an interactive PATH (TRDD-CEWVQ8DG) -------------------
+#
+# Moved from `tests/test_external_clear_cold_certainty.py` (D2): those functions exercised
+# `les.resolve_llm_ext`/`les.attempt_llm_ext_summary` directly, so they belong here, not in a
+# file about the automatic lane's cold-resume certainty math.
+
+
+class TestResolveLlmExt:
+    """Overrides the module's autouse `_pretend_llm_ext_is_installed` stub with a no-op: these
+    tests exercise the REAL binary-discovery logic against HOME/PATH, so stubbing
+    `resolve_llm_ext` away would test nothing."""
+
+    @pytest.fixture(autouse=True)
+    def _pretend_llm_ext_is_installed(self) -> None:
+        return None
+
+    @staticmethod
+    def _install(home: Path, version: str, marketplace: str = "emasoft-plugins") -> Path:
+        binary = (
+            home / ".claude" / "plugins" / "cache" / marketplace / "llm-externalizer"
+            / version / "bin" / "llm-ext"
+        )
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o755)
+        return binary
+
+    def test_the_cli_is_found_with_an_empty_path(self, tmp_path, monkeypatch) -> None:
+        """The measured failure: a hook-spawned child has no profile PATH, but the binary is there."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", "")
+        binary = self._install(tmp_path, "13.5.1")
+        assert les.resolve_llm_ext() == str(binary)
+
+    def test_the_newest_version_wins_numerically_not_lexicographically(self, tmp_path, monkeypatch) -> None:
+        """As strings '9.0.0' > '13.5.1', which would pin the OLDEST install forever."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", "")
+        self._install(tmp_path, "9.0.0")
+        newest = self._install(tmp_path, "13.5.1")
+        assert les.resolve_llm_ext() == str(newest)
+
+    def test_a_genuinely_absent_cli_resolves_to_empty(self, tmp_path, monkeypatch) -> None:
+        """No install anywhere must degrade to the template, not raise or invent a path."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", "")
+        assert les.resolve_llm_ext() == ""
+
+    def test_a_real_path_entry_still_wins(self, tmp_path, monkeypatch) -> None:
+        """An operator who put llm-ext on PATH keeps control — `which` is consulted first."""
+        onpath = tmp_path / "bin"
+        onpath.mkdir()
+        shim = onpath / "llm-ext"
+        shim.write_text("#!/bin/sh\n", encoding="utf-8")
+        shim.chmod(0o755)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(onpath))
+        self._install(tmp_path, "13.5.1")
+        assert les.resolve_llm_ext() == str(shim)
+
+    def test_an_absent_cli_reports_the_exact_permanent_detail(self, tmp_path, monkeypatch) -> None:
+        """The guardrail for the CI break this file's own rename caused (TRDD-CEWVQ8DG).
+
+        Pins the string DETERMINISTICALLY by making absence the fixture, so the next rename
+        fails on the machine that made it rather than twenty minutes later in CI.
+        """
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", "")
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text("{}\n", encoding="utf-8")
+
+        got = les.attempt_llm_ext_summary(str(transcript))
+        assert got.outcome == les.OUTCOME_PERMANENT
+        assert got.detail == "llm-ext is not installed"
+
+    def test_the_summary_attempt_no_longer_reports_not_on_path(self, tmp_path, monkeypatch) -> None:
+        """The regression pin for D2: a plugin-cache-only install must produce a SUMMARY, not a
+        permanent 'not on PATH' that skips every retry and degrades the handoff."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", "")
+        self._install(tmp_path, "13.5.1")
+        (tmp_path / ".claude" / "plugins" / "data" / "llm-externalizer-emasoft-plugins").mkdir(
+            parents=True, exist_ok=True
+        )
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text("{}\n", encoding="utf-8")
+
+        class _Proc:
+            def __init__(self, rc: int, out: str = "", err: str = "") -> None:
+                self.returncode, self.stdout, self.stderr = rc, out, err
+
+        attempt = les.attempt_llm_ext_summary(
+            str(transcript), runner=lambda *a, **k: _Proc(0, "a real summary")
+        )
+        assert attempt.outcome == les.OUTCOME_OK
+        assert attempt.text == "a real summary"
+
+
 # ---------- the progress-signal wiring (llm_ext_state_dir) ---------------------------------
 
 

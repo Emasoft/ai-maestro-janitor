@@ -47,15 +47,14 @@ _LLM_EXT_SUMMARY_ALLOWED = (
 )
 
 # The test-file scan below (test_no_test_file_imports_llm_ext_summary_except_allowed) is
-# broader than _LLM_EXT_SUMMARY_ALLOWED above -- it also allows the two EXISTING manual-lane
-# tests that legitimately import `llm_ext_summary` directly (external_handoff_clear's and
-# external_clear's own tests, exercising the function that moved there in TRDD-RAEGS1D5 card 3
-# C2). Only `tests/test_llm_ext_summary.py` is that module's own dedicated test; these two are
-# additional real importers this scan must not flag, or it would fail on the day it is added.
+# broader than _LLM_EXT_SUMMARY_ALLOWED above -- it also allows the one remaining manual-lane
+# test file that legitimately imports `llm_ext_summary` directly (external_handoff_clear's,
+# exercising the function that moved there in TRDD-RAEGS1D5 card 3 C2), pending card 4's
+# cleanup of its now-unused import. Only `tests/test_llm_ext_summary.py` is that module's own
+# dedicated test; the other is an additional real importer this scan must not flag.
 _LLM_EXT_SUMMARY_TEST_ALLOWED = (
     "tests/test_llm_ext_summary.py",
-    "tests/test_external_handoff_clear.py",
-    "tests/test_external_clear_cold_certainty.py",
+    "tests/test_external_handoff_clear.py",  # TODO(card 4): drop once its unused import is removed
 )
 
 
@@ -125,7 +124,7 @@ def test_no_hook_or_named_lib_script_imports_jevctx_or_httpx() -> None:
 def test_no_test_file_imports_llm_ext_summary_except_allowed() -> None:
     """Guards the test suite itself (TRDD-RAEGS1D5 card 3 C2 follow-up): a future test for the
     AUTOMATIC Jev lane must never quietly import `llm_ext_summary`, the MANUAL summarizer's own
-    module -- only `tests/test_llm_ext_summary.py` and the two existing manual-lane tests in
+    module -- only `tests/test_llm_ext_summary.py` and the one remaining manual-lane test in
     `_LLM_EXT_SUMMARY_TEST_ALLOWED` may."""
     tests_dir = _REPO_ROOT / "tests"
     candidates = sorted(tests_dir.rglob("*.py"))
