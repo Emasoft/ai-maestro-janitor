@@ -88,15 +88,41 @@ def _main() -> int:
 
     # TRDD-RAEGS1D5 card 5: `on-session-start-post-clear-compact.py` is the ONE composer for a
     # clear that named its transcript in a per-pane sidecar -- a FRESH (<=300s) sidecar means
-    # that hook is (about to be) running right now; a `.consumed-*` one means it already ran (or
-    # declined to a template) for THIS pane's clear. Either shape means this detached summarizer
-    # must not also compose the same transcript -- "one compose per transcript" (TRDD-QZVAEWQH)
-    # would otherwise become two, racing each other to write the keyed handoff.
-    pane_key = state.terminal_pane_key(os.environ)
+    # that hook is (about to be) running right now; a `.consumed-*` one WRITTEN in the last 300s
+    # means it already ran (or declined to a template) for THIS pane's clear moments ago. Either
+    # shape means this detached summarizer must not also compose the same transcript -- "one
+    # compose per transcript" (TRDD-QZVAEWQH) would otherwise become two, racing each other to
+    # write the keyed handoff. An OLDER `.consumed-*` (review finding, 2026-09-23) is NOT such a
+    # signal -- the hook renames a sidecar to `.consumed-<epoch>` the instant it starts, but a
+    # crash or a project the janitor stops watching leaves that marker on disk forever; treating
+    # ANY consumed marker (of ANY age) as "the hook owns this transcript" would then block this
+    # summarizer from EVER running a real compose again for that pane, no matter how many
+    # sessions and clears happen afterwards. The epoch is already in the filename (`consumed-
+    # <now>` -- `_consume_sidecar`'s own naming), so freshness costs one int parse, not a stat.
+    #
+    # WHY `pane_key_from_terminal(self_terminal(...))`, not `state.terminal_pane_key(os.environ)`
+    # (review finding, 2026-09-23): the WRITER (`clear_trigger._persist_resume_state`) keys the
+    # sidecar off `terminal_trigger.self_terminal()`, which STRIPS iTerm's `w0t1p0:` window/tab/
+    # pane prefix off `$ITERM_SESSION_ID` before sanitising -- `terminal_pane_key` sanitises the
+    # RAW env var instead, so on iTerm the two computed different keys and this summarizer's own
+    # sidecar check was comparing against a key nothing would ever write. Reading through the
+    # SAME `self_terminal()` call the writer uses is what makes the two sides agree.
+    import terminal_trigger  # noqa: PLC0415
+
+    pane_key = state.pane_key_from_terminal(terminal_trigger.self_terminal(os.environ))
     if pane_key:
         fresh_sidecar = sd / f"resume-after-clear.{pane_key}.transcript"
-        consumed = any(sd.glob(f"resume-after-clear.{pane_key}.transcript.consumed-*"))
         fresh = fresh_sidecar.is_file() and (now - state.file_mtime(fresh_sidecar)) <= 300
+        consumed = False
+        for consumed_path in sd.glob(f"resume-after-clear.{pane_key}.transcript.consumed-*"):
+            suffix = consumed_path.name.rsplit("-", 1)[-1]
+            try:
+                consumed_at = int(suffix)
+            except ValueError:
+                continue  # a malformed suffix is not a timestamp this summarizer can trust
+            if now - consumed_at <= 300:
+                consumed = True
+                break
         if fresh or consumed:
             state.log_line(
                 _LOG,
@@ -147,7 +173,7 @@ def _main() -> int:
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
     proc, timed_out = jcl.run_compact(
         PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
-        heads_args=heads_args,
+        heads_args=heads_args, budget_tokens=jcl.LANE_BUDGET_TOKENS,
     )
 
     if timed_out or proc is None or proc.returncode != jcl.EXIT_OK:
@@ -184,7 +210,10 @@ def _main() -> int:
     inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     tail = ec.recent_messages(str(prev))
-    text = ec.compose_handoff(inputs, now_iso=now_iso, summary=compacted_text, tail=tail)
+    text = ec.compose_handoff(
+        inputs, now_iso=now_iso, summary=compacted_text, tail=tail,
+        max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
+    )
 
     handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
     # The hold releases the moment the artifact lands, not on the 15-minute TTL -- its ABSENCE

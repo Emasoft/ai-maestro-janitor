@@ -238,6 +238,20 @@ def read_probe_stamp() -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+# TRDD-RAEGS1D5 card 5 measured facts (reports/compaction-replacement/20260923_064108+0200-
+# hook-output-experiments.md, 20260923_072806+0200-card5-core.md): the SessionStart hook can
+# only inject ~9,000 bytes of stdout before Claude Code truncates it to a 2KB preview, and the
+# manual `compose_handoff` default (`external_clear.HANDOFF_MAX_BYTES`, 4096) is deliberately
+# unchanged for the manual `/clear` paths -- the AUTOMATIC lane (this hook +
+# `summarize_previous_session.py`) instead gets its OWN, larger budget, shared here so both
+# callers pass the identical numbers instead of hand-copied magic constants.
+LANE_INJECTION_MAX_BYTES = 8192
+# ~8KB of latin text at `jevctx.tokens.LATIN_CHARS_PER_TOKEN` (3.5 chars/token) is ~2340 tokens;
+# rounded down so the KEPT-items budget alone (before the digest/header/pointers `compose_
+# handoff` also has to fit) leaves headroom inside `LANE_INJECTION_MAX_BYTES`.
+LANE_BUDGET_TOKENS = 2000
+
+
 def record_finding(*, sev: str, code: str, msg: str) -> None:
     """The choke point for every non-zero-exit finding below: record it and, if this project
     is the one it happened in, print the drift line so the heartbeat's quiet-filter can surface
@@ -386,18 +400,24 @@ def record_once_per_reason(sd: Path, key: str, reason: str) -> str | None:
 
 def run_compact(
     plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
-    heads_args: list[str], timeout: int = 120,
+    heads_args: list[str], timeout: int = 120, budget_tokens: int | None = None,
 ) -> tuple[subprocess.CompletedProcess[str] | None, bool]:
     """Exec `jev_compact.py compact` BY PATH (it is git-tracked 100755, own shebang runs it) and
     return `(proc, timed_out)`. 120s: jev's own client retries 3x with <=8s backoff on a 15s
     request timeout; six parallel batches bound the worst case near 70s; the 15-min summary hold
     is the outer bound (docs_dev/jev-card3c-brief.md C1). A `TimeoutExpired` is a bug exit here,
-    never retried in-process — retrying would risk landing past the hold's own deadline."""
+    never retried in-process — retrying would risk landing past the hold's own deadline.
+
+    `budget_tokens`, when given, is forwarded as `--budget-tokens` (the CLI's own flag; default
+    left to `jev_compact.py` otherwise) — the automatic lane passes `LANE_BUDGET_TOKENS` so its
+    kept-items text stays inside `LANE_INJECTION_MAX_BYTES` once composed."""
     cmd = [
         str(plugin_root / "scripts" / "jev_compact.py"), "compact",
         "--transcript", transcript, "--out", str(out_path),
         "--session-key", session_key, *heads_args,
     ]
+    if budget_tokens is not None:
+        cmd += ["--budget-tokens", str(budget_tokens)]
     try:
         proc = subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
     except subprocess.TimeoutExpired:

@@ -458,11 +458,36 @@ def test_fresh_pane_sidecar_skips_composing_entirely(tmp_path, monkeypatch, _iso
     assert not handoff_files.newest_group(sd)
 
 
-def test_consumed_pane_sidecar_skips_composing_regardless_of_age(tmp_path, monkeypatch,
-                                                                   _isolated_env):
-    """A `.consumed-*` sidecar means the dedicated hook already ran (or declined to a
-    template) for this pane's clear -- skip even when the consumption is old, since the
-    invariant is "one composer per transcript", not a time window."""
+def test_fresh_consumed_pane_sidecar_skips_composing(tmp_path, monkeypatch, _isolated_env):
+    """A `.consumed-*` sidecar WRITTEN in the last 300s means the dedicated hook just ran (or
+    declined to a template) for this pane's clear moments ago -- skip."""
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    pane_key = state.terminal_pane_key({"TMUX_PANE": "%9"})
+    assert pane_key
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    recent_epoch = int(time.time()) - 10
+    (sd / f"resume-after-clear.{pane_key}.transcript.consumed-{recent_epoch}").write_text(
+        f"/tmp/some-transcript.jsonl\n{recent_epoch}\n", encoding="utf-8"
+    )
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("must not run jev_compact.py when this pane's sidecar is consumed")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    monkeypatch.setattr(jcl, "previous_transcript", _boom)
+
+    assert sps.main() == 0
+
+
+def test_stale_consumed_pane_sidecar_does_not_block_composing_forever(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """Review finding, 2026-09-23: a `.consumed-*` marker OLDER than 300s must NOT skip this
+    summarizer -- the marker is written the instant the dedicated hook STARTS handling a clear
+    and is never cleaned up afterwards, so treating any age as "handled there" would block this
+    summarizer from composing a real handoff for that pane EVER AGAIN, no matter how many later
+    sessions and clears happen. Only a fresh marker is still-in-flight evidence."""
     monkeypatch.setenv("TMUX_PANE", "%9")
     pane_key = state.terminal_pane_key({"TMUX_PANE": "%9"})
     assert pane_key
@@ -473,13 +498,16 @@ def test_consumed_pane_sidecar_skips_composing_regardless_of_age(tmp_path, monke
         f"/tmp/some-transcript.jsonl\n{old_epoch}\n", encoding="utf-8"
     )
 
-    def _boom(*_a, **_kw):
-        raise AssertionError("must not run jev_compact.py when this pane's sidecar is consumed")
-
-    monkeypatch.setattr(subprocess, "run", _boom)
-    monkeypatch.setattr(jcl, "previous_transcript", _boom)
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
 
     assert sps.main() == 0
+    assert handoff_files.newest_group(sd), "a stale consumed marker must not block a real compose"
 
 
 def test_a_stale_pane_sidecar_for_a_DIFFERENT_pane_does_not_block_composing(

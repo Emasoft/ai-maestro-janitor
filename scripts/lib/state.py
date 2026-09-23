@@ -332,6 +332,17 @@ def pane_key_from_terminal(terminal: Mapping[str, str] | None) -> str | None:
     same pane, so this applies the identical `<source>-<sanitized>` sanitisation keyed off the
     same source names ("tmux"/"iterm") `self_terminal()` already uses. Returns None for an
     unresolvable/unknown terminal, mirroring `terminal_pane_key`s own contract.
+
+    Review finding, 2026-09-23: `session_id` is normalised the SAME WAY `terminal_trigger.
+    self_terminal` normalises it -- keep only the text after the LAST `":"`, before sanitising
+    -- REGARDLESS of whether the caller already stripped it. Every writer this codebase ships
+    today already passes a stripped UUID (`self_terminal()`'s own output, and `external_clear.
+    terminal_from_record`'s `iterm.split(":")[-1]`), but a `"kind": "iterm"` dict can also be
+    hand-built elsewhere from a raw `$ITERM_SESSION_ID`-shaped string (`"w0t1p0:<UUID>"`) --
+    stripping HERE, once, means every caller lands on the same key whether or not it remembered
+    to strip first, instead of that invariant being re-implemented (or forgotten) at each call
+    site. A stripped UUID has no `":"` left, so re-applying `split(":")[-1]` to it is a no-op --
+    safe either way.
     """
     if not terminal:
         return None
@@ -339,7 +350,7 @@ def pane_key_from_terminal(terminal: Mapping[str, str] | None) -> str | None:
     if kind == "tmux":
         raw = (terminal.get("pane") or "").strip()
     elif kind == "iterm":
-        raw = (terminal.get("session_id") or "").strip()
+        raw = (terminal.get("session_id") or "").strip().split(":")[-1].strip()
     else:
         return None
     sanitized = re.sub(r"[^A-Za-z0-9._]+", "-", raw).strip("-")[:128]

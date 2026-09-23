@@ -306,7 +306,7 @@ def _emit_manual_clear_pointer(  # noqa: ANN001 - local module type
         return
 
 
-def _inject_post_clear_handoff(state, session_id: str = "") -> None:  # noqa: ANN001 - local module type
+def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module type
     """Put the handoff INTO the fresh context at `/clear`, instead of pointing at it.
 
     The pointer path needs three links to all hold — the cron fires, dispatch emits
@@ -324,7 +324,11 @@ def _inject_post_clear_handoff(state, session_id: str = "") -> None:  # noqa: AN
 
     GATED ON THE FLAG because a MANUAL `/clear` leaves none — the user meant that as a
     discard, and injecting a stale handoff into it would resurrect work they threw away. Same
-    age bound as `dispatch._phase_clear_resume`, for the same reason.
+    age bound as `dispatch._phase_clear_resume`. Review finding, 2026-09-23: this used to take
+    a `session_id` parameter to resolve `jcl.previous_transcript(root, session_id)` -- removed
+    along with that lookup (see the review-finding note below: matching against it proved
+    nothing in a multi-session project), so `session_id` is no longer accepted at all, not just
+    unused.
     """
     sd = state.state_dir()
     flag = sd / "resume-after-clear.flag"
@@ -350,7 +354,18 @@ def _inject_post_clear_handoff(state, session_id: str = "") -> None:  # noqa: AN
     # clear — printing the handoff body here too would double it. Glob, not an exact name: the
     # two hooks race, so the dedicated hook may have already renamed the sidecar to
     # `.consumed-<epoch>` by the time this runs, or not yet — either shape means "handled there".
-    pane_key = state.terminal_pane_key(os.environ)
+    #
+    # WHY `pane_key_from_terminal(self_terminal(...))`, not `state.terminal_pane_key(os.environ)`
+    # (review finding, 2026-09-23): the WRITER (`clear_trigger._persist_resume_state`) keys the
+    # sidecar off `terminal_trigger.self_terminal()`, which STRIPS iTerm's `w0t1p0:` window/tab/
+    # pane prefix off `$ITERM_SESSION_ID` before sanitising -- `terminal_pane_key` sanitises the
+    # RAW env var instead, so on iTerm the two computed different keys and this glob would never
+    # find the sidecar the dedicated hook is (or already did) handle, double-injecting the body.
+    # Reading through the SAME `self_terminal()` call the writer uses is what makes the two sides
+    # agree.
+    import terminal_trigger  # noqa: PLC0415
+
+    pane_key = state.pane_key_from_terminal(terminal_trigger.self_terminal(os.environ))
     if pane_key and any(sd.glob(f"resume-after-clear.{pane_key}.transcript*")):
         return
 
@@ -368,44 +383,37 @@ def _inject_post_clear_handoff(state, session_id: str = "") -> None:  # noqa: AN
     # compaction, so `spawn_shrink_chain`'s `transcript_path` stays None there). With no sidecar
     # to pin the source, `newest_group` is only a GUESS ("whichever handoff is newest anywhere
     # in this state dir") — and injecting a stale or FOREIGN handoff as if it were this
-    # session's own account is the exact defect this card exists to remove. So: only inject
-    # when the group's key matches THIS session's own previous transcript — the same "newest
-    # transcript that is not mine" `jcl.previous_transcript` already computes for the detached
-    # summarizer. Any mismatch (including a probe fault) degrades to the honest pointer instead
-    # of a wrong body.
-    prev_key = ""
-    group_key = ""
-    # LEGACY (pre-D) handoffs carry no per-write key at all -- `group_key` reads as the
-    # fixed sentinel below for every one of them, so they can never "match" a real transcript
-    # key and would otherwise be silently downgraded to a pointer forever. The matching regime
-    # only protects the NEW per-key naming this card is about; a legacy file predates it
-    # entirely, so it is exempt (handoff_files.py's own docstring: "still READ"). Computed
-    # and compared INSIDE the try (never referencing the lazily-imported module outside it,
-    # where a failed import would leave the name unbound).
+    # session's own account is the exact defect this card exists to remove.
+    #
+    # Review finding, 2026-09-23: this USED to "verify" the guess by comparing `newest_group`'s
+    # key against `jcl.previous_transcript(state.project_root(), session_id)` — but that helper
+    # itself only means "the newest OTHER transcript in this project directory", which in a
+    # MULTI-SESSION project is exactly as much of a guess as `newest_group` is. Two concurrent
+    # sessions A and B in the same project can each resolve `jcl.previous_transcript` to the
+    # SAME foreign session (say, B's), and if B's clear is also the newest handoff on disk, the
+    # "match" against A's own transcript never actually happens -- it happens to agree with the
+    # WRONG session's key, and A's context would silently be handed B's handoff. A key computed
+    # this way cannot prove "mine", so it must not be used to decide injection: any keyed
+    # (non-legacy) handoff here degrades straight to the honest pointer. LEGACY handoffs carry no
+    # per-write key at all and predate this whole card (`handoff_files.py`'s own docstring:
+    # "still READ") -- that exemption is an owner decision still pending review and is left
+    # exactly as it behaved before this fix: injected without a match check.
+    is_legacy = False
     try:
         import handoff_files  # noqa: PLC0415 - scripts/lib is on sys.path only inside main()
-        import jev_compaction_lane as jcl  # noqa: PLC0415
 
-        prev = jcl.previous_transcript(state.project_root(), session_id)
-        prev_key = handoff_files.session_key(str(prev)) if prev else ""
         newest_paths = handoff_files.newest_group(sd)
-        group_key = ""
         if newest_paths:
             parsed = handoff_files.parse(newest_paths[0].name)
-            if parsed:
-                group_key = parsed[0]
-            elif newest_paths[0].name == handoff_files.LEGACY_NAME:
-                group_key = handoff_files.LEGACY_KEY
-        if group_key == handoff_files.LEGACY_KEY:
-            prev_key = group_key = "legacy-exempt"
+            if not parsed and newest_paths[0].name == handoff_files.LEGACY_NAME:
+                is_legacy = True
     except Exception:  # noqa: BLE001 -- a probe fault degrades to the honest pointer, never a guess
-        prev_key = ""
-        group_key = ""
-    if not (prev_key and group_key and prev_key == group_key):
+        is_legacy = False
+    if not is_legacy:
         _emit_manual_clear_pointer(
             state, sd,
-            reason="the newest handoff does not match this session's own prior transcript "
-            "(reload-shrink, or another session's clear)",
+            reason="no per-pane sidecar named this session's own transcript, and a keyed "
+            "handoff cannot be safely verified as this session's own in a multi-session project",
         )
         return
 
@@ -828,7 +836,7 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001 -- never break session start
                 _slog(state, "session-start", f"clear session-id stamp failed: {exc!r}")
         try:
-            _inject_post_clear_handoff(state, session_id)
+            _inject_post_clear_handoff(state)
         except Exception as exc:  # noqa: BLE001 -- never break session start
             _slog(state, "session-start", f"post-clear handoff injection failed: {exc!r}")
 

@@ -57,10 +57,13 @@ _INJECTION_HEADER = (
 )
 
 # TRDD-RAEGS1D5 card 5 measured fact: the SessionStart hook injection budget is ~9,000 bytes
-# (10,500+ arrives as a 2KB preview only); `compose_handoff` itself still caps at
-# `external_clear.HANDOFF_MAX_BYTES` (4096) per the brief's binding "keep that for this commit".
+# (10,500+ arrives as a 2KB preview only); `compose_handoff` is called with `jev_compaction_lane.
+# LANE_INJECTION_MAX_BYTES` (8192) for this automatic lane, not the manual paths' 4096 default.
 _SIDECAR_FRESH_MAX_AGE_S = 300
 _RUN_COMPACT_TIMEOUT_S = 60
+# A "unreachable" jev-probe stamp no older than this declines a fresh `run_compact` attempt
+# outright (see `_main`) instead of paying its full retry/backoff wall on every `/clear`.
+_PROBE_UNREACHABLE_TTL_S = 300
 
 
 def _payload() -> dict:
@@ -134,7 +137,17 @@ def _main() -> int:
     state.set_project_dir_override(str(root))
     sd = state.state_dir()
 
-    pane_key = state.terminal_pane_key(os.environ)
+    # WHY `pane_key_from_terminal(self_terminal(...))`, not `state.terminal_pane_key(os.environ)`
+    # (review finding, 2026-09-23): the WRITER (`clear_trigger._persist_resume_state`) keys the
+    # sidecar off `terminal_trigger.self_terminal()`, which STRIPS iTerm's `w0t1p0:` window/tab/
+    # pane prefix off `$ITERM_SESSION_ID` before sanitising -- `terminal_pane_key` sanitises the
+    # RAW env var instead, so on iTerm the two computed different keys (`iterm-04F9A16F-...` vs
+    # `iterm-w0t1p0-04F9A16F-...`) and this hook's sidecar consume was a silent no-op. tmux only
+    # ever matched by luck (`$TMUX_PANE` has no such prefix to strip). Reading through the SAME
+    # `self_terminal()` call the writer uses is what makes the two sides agree.
+    import terminal_trigger  # noqa: PLC0415
+
+    pane_key = state.pane_key_from_terminal(terminal_trigger.self_terminal(os.environ))
     if not pane_key:
         # No per-pane id (Apple Terminal, plain xterm, or the legacy blind-send fallback):
         # `_persist_resume_state` never writes a sidecar for an unresolvable pane, so there is
@@ -163,37 +176,67 @@ def _main() -> int:
     heads_args = ["--state-heads", *head_paths] if head_paths else []
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
 
-    # `run_compact` execs `jev_compact.py compact` BY PATH -- it owns the jev-probe stamp
-    # fast-decline (exit 5, EXIT_DECLINED_UNAVAILABLE) internally; this hook does not special-
-    # case it, it flows through the same non-zero-exit branch as every other failure below.
-    proc, timed_out = jcl.run_compact(
-        plugin_root, transcript=transcript_path, out_path=out_path, session_key=key,
-        heads_args=heads_args, timeout=_RUN_COMPACT_TIMEOUT_S,
-    )
-
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
     inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
 
+    # Review finding: `jev_compact.py compact`'s own in-process fast-decline (EXIT_DECLINED_
+    # UNAVAILABLE) only short-circuits `kind="unavailable"`/`"rate_limited"` -- a `"unreachable"`
+    # stamp (DNS/TLS/offline, no HTTP response at all) still runs the full subprocess, which then
+    # pays the client's own retry/backoff wall (~70s worst case) before failing. A network outage
+    # would otherwise make every `/clear` on this machine wait that out. Declining HERE, before
+    # `run_compact`, on a stamp no older than `_PROBE_UNREACHABLE_TTL_S`, skips straight to the
+    # same fact-only template path a bug exit takes below.
+    stamp = jcl.read_probe_stamp() or {}
+    declined_unreachable = (
+        stamp.get("ok") is False
+        and stamp.get("kind") == "unreachable"
+        and (time.time() - float(stamp.get("ts", 0))) < _PROBE_UNREACHABLE_TTL_S
+    )
+
     compacted_text: str | None = None
-    if not timed_out and proc is not None and proc.returncode == jcl.EXIT_OK:
-        try:
-            compacted_text = out_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            state.log_line(
-                "jev-post-clear-hook", f"compacted context unreadable ({out_path}): {exc!r}"
-            )
-            compacted_text = None
+    proc = None
+    timed_out = False
+    if declined_unreachable:
+        age_s = time.time() - float(stamp.get("ts", time.time()))
+        jcl.record_finding(
+            sev="LOW", code="JEV-COMPACT-DECLINED",
+            msg=f"[jev-compaction] declined: scorer unreachable {jcl.fmt_age(age_s)} ago "
+            f"({stamp.get('reason') or 'unknown'}) — fact-only context injected",
+        )
+    else:
+        # `run_compact` execs `jev_compact.py compact` BY PATH -- it owns the jev-probe stamp
+        # fast-decline (exit 5, EXIT_DECLINED_UNAVAILABLE) internally; this hook does not
+        # special-case it, it flows through the same non-zero-exit branch as every other
+        # failure below.
+        proc, timed_out = jcl.run_compact(
+            plugin_root, transcript=transcript_path, out_path=out_path, session_key=key,
+            heads_args=heads_args, timeout=_RUN_COMPACT_TIMEOUT_S,
+            budget_tokens=jcl.LANE_BUDGET_TOKENS,
+        )
+        if not timed_out and proc is not None and proc.returncode == jcl.EXIT_OK:
+            try:
+                compacted_text = out_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                state.log_line(
+                    "jev-post-clear-hook", f"compacted context unreadable ({out_path}): {exc!r}"
+                )
+                compacted_text = None
 
     if compacted_text is not None:
         tail = ec.recent_messages(transcript_path)
-        text = ec.compose_handoff(inputs, now_iso=now_iso, summary=compacted_text, tail=tail)
+        text = ec.compose_handoff(
+            inputs, now_iso=now_iso, summary=compacted_text, tail=tail,
+            max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
+        )
     else:
-        # Non-zero exit, timeout, or an unreadable output file -- the exit-code -> findings-
-        # ledger mapper this lane already owns (never duplicated here), then a fact-only
-        # template STAMPED so `summarize_previous_session.py`s "already summarized" skip
-        # ignores it and retries a real Jev compose on the NEXT SessionStart.
-        jcl.handle_nonzero_exit(proc, timed_out=timed_out, sd=sd)
+        # Non-zero exit, timeout, an unreadable output file, or the pre-`run_compact` decline
+        # above -- the exit-code -> findings-ledger mapper this lane already owns (never
+        # duplicated here), then a fact-only template STAMPED so `summarize_previous_session.py`s
+        # "already summarized" skip ignores it and retries a real Jev compose on the NEXT
+        # SessionStart.
+        if not declined_unreachable:
+            jcl.handle_nonzero_exit(proc, timed_out=timed_out, sd=sd)
         template = ec.compose_template_handoff(inputs, now_iso=now_iso)
         text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
 

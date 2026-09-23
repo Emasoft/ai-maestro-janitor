@@ -153,11 +153,18 @@ def test_a_pane_sidecar_suppresses_this_hooks_own_injection(
     assert capsys.readouterr().out == ""
 
 
-def test_a_keyed_handoff_matching_the_previous_transcript_is_injected(
+def test_a_keyed_handoff_with_no_sidecar_downgrades_to_a_pointer_even_when_it_matches(
     sd: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No sidecar, but the newest handoffs key matches THIS sessions own previous
-    transcript (`jcl.previous_transcript`) -- inject the full body, same as the legacy path."""
+    """Review finding, 2026-09-23: this USED to inject the full body when the newest handoff's
+    key matched `jcl.previous_transcript(...)` -- but that "match" proves nothing in a
+    MULTI-SESSION project. `jcl.previous_transcript` only means "the newest OTHER transcript in
+    this project directory": two concurrent sessions A and B can both resolve it to the SAME
+    foreign session B, and if B's clear is also the newest handoff on disk, the "match" against
+    A's own key never really happens -- it happens to agree with the WRONG session's key. So a
+    keyed (non-legacy) handoff with no per-pane sidecar must ALWAYS downgrade to a pointer now,
+    matching or not -- this test pins that even a coincidental match (what the old contract
+    would have injected) still only prints a pointer."""
     import handoff_files  # noqa: PLC0415
     import jev_compaction_lane as jcl  # noqa: PLC0415
 
@@ -166,31 +173,35 @@ def test_a_keyed_handoff_matching_the_previous_transcript_is_injected(
     _arm_keyed(sd, key=key, handoff="# Handoff\n\nNEXT ACTION: resume the real work.")
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, session_id: prev)
 
-    _load_hook()._inject_post_clear_handoff(real_state, "new-session-id")
+    _load_hook()._inject_post_clear_handoff(real_state)
     out = capsys.readouterr().out
-    assert "NEXT ACTION: resume the real work." in out
+    assert "NEXT ACTION: resume the real work." not in out, (
+        "a keyed handoff must never be injected on a match against jcl.previous_transcript "
+        "alone -- that match is unsound in a multi-session project"
+    )
+    assert "cannot be safely verified as this session's own" in out
 
 
-def test_a_keyed_handoff_NOT_matching_the_previous_transcript_downgrades_to_a_pointer(
+def test_a_newer_foreign_sessions_keyed_handoff_is_not_injected(
     sd: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reload-shrink shape: the flag is armed but there is no sidecar, and the newest handoff
-    on disk belongs to a DIFFERENT transcript than this sessions own previous one -- inject a
-    POINTER, never the wrong body (TRDD-RAEGS1D5 card 5)."""
+    on disk belongs to a DIFFERENT, NEWER session's clear -- inject a POINTER, never the wrong
+    body (TRDD-RAEGS1D5 card 5)."""
     import handoff_files  # noqa: PLC0415
     import jev_compaction_lane as jcl  # noqa: PLC0415
 
     foreign_key = handoff_files.session_key("/tmp/some-other-session-11112222.jsonl")
     _arm_keyed(sd, key=foreign_key, handoff="# Handoff\n\nUNRELATED work from another session.")
-    # This sessions own previous transcript resolves to something ELSE entirely.
+    # This session's own previous transcript resolves to something ELSE entirely.
     monkeypatch.setattr(
         jcl, "previous_transcript",
         lambda root, session_id: Path("/tmp/this-sessions-own-99998888.jsonl"),
     )
 
-    _load_hook()._inject_post_clear_handoff(real_state, "new-session-id")
+    _load_hook()._inject_post_clear_handoff(real_state)
     out = capsys.readouterr().out
     assert "UNRELATED work from another session." not in out, (
         "the wrong sessions handoff BODY must never be injected"
     )
-    assert "does not match this session" in out
+    assert "cannot be safely verified as this session's own" in out
