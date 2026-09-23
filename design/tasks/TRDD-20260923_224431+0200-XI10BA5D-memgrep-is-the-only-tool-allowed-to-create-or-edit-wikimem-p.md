@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-23T23:09:43+0200
+updated: 2026-09-23T23:29:14+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -63,3 +63,23 @@ Owner directive 2026-09-23 (verbatim): "what? delete the part about the edit too
 - Proposed, not settled: the txn core stages the copy and the agent runs memgrep verbs ON it. Open: link and backlink checks would resolve against the staging dir; id uniqueness must see the live corpus without seeing the staged twin; indexing the staged path leaves a phantom index row; memgrep lint may disagree with the txn verify_* gate (unverified; janitor#227 is about lint versus the chore candidate precheck, not verify_*); the commit step is itself a non-memgrep writer the PreToolUse guard must exempt. Alternative: single-page chores (repair, atomize, retro-lesson) write through memgrep directly, which is claimed atomic (unverified in this session); staging only for multi-page ops (consolidate, split, conflict), or begin/commit become memgrep verbs.
 - Ticket plumbing: the [janitor-ticket] marker spawns one agent per ticket, so a store scan can open hundreds; dispatch must be rate-limited per fire (the owner removed the OPENING cap, not a dispatch limit). A wikimem lint ticket goes to the memory curator with the named verb it needs, or sits in a visible needs-verb state. Ticket bodies carry page id, rule code and anchor, never page text (LOCAL pages hold private paths). A USER-scope page linted from two projects must not get one ticket per project. The owner hold on the AgentlensPro and ghbook pages must be respected by the ticket path, or the owner told before publish.
 - Split-chore defect seen in the index: macos-keychain and macos-keychain-incidents share the description "macOS keychain dialog opened hundreds of times" (janitor-compaction-floor-gate and -triggers also share one; cause not traced), so recall ties on them. The gate should lint a child page that copies its parent description. The four keychain pages (split in 8e5c898f) have no control bytes and lint only WARN under the current linter, which has no control-byte rule, no duplicate-description rule and no confirmed key-phrase-count rule (atoms missing ocd/lmd; verified those dates were already missing before the split 8e5c898f, not lost by it). Control-byte scan covered 0x01-0x1F except tab/LF/CR, 0x7F and U+0080-U+009F: none.
+
+## Implementation plan (reviewed in two rounds, 2026-09-23)
+
+- Evidence: capability audit reports/memgrep-sole-writer/20260923_225740+0200-capability-audit-final.md; advisor verdict 20260923_231527+0200-advisor-verdict.md; measurements 20260923_235959+0200-measure-and-verify.md and 20260923_233800+0200-measure2.md (all gitignored; the decisions are recorded here).
+- Order, one reviewed commit each: 0 repair-skill steps that already have a verb; A1 control-byte guard + control-byte-in-page ERROR lint rule; A2 shared gate; A3 whole-page replace + create-with-content; A4 rename, unlink/retarget, delete --force repairs referrers; C skills move to verbs; B ticket consumer; D PreToolUse tripwire.
+- A2 gate: new module pre_write.rs; atomic_write_page = commit(prepare); atomic_write_pages prepares every page before committing any (a refusal writes nothing anywhere); normalize in memory, validate the final bytes, write once; prepare resolves symlinks to the real page (measured: tmp+rename replaces a USER-side symlink with a regular file) and locks the real scope; symlink creation and SQLite reindex only in commit.
+- A2 rules: refuse when the result has any ERROR; refuse an introduced one-sided link (no auto-wire, the error names reference-mem-topic); id-set rule over the whole prepared batch (an atom or lesson id that disappears from every page is refused unless superseded, migrated, merged or deleted by its own verb; lessons keyed on id:, never the [^N] label); an existing id keeps its ocd, and lmd never goes backwards; ocd is never invented for a legacy atom (missing ocd stays a warning and a ticket); lmd is set on atoms the write changed, disclosed on stderr; every auto-fix disclosed on stderr and in --dry-run; write verbs print the new sha256. No --drop flag.
+- A3: set-mem-topic requires --base-sha256 on an existing page.
+- B: lint output gains a trailing anchor field (measured: the three lint-output regexes tolerate trailing fields); tickets.py dispatch is already bounded by min(per_fire, budget, inflight); INFO never ticketed; the held AgentlensPro/ghbook pages excluded.
+- Version skew: the memgrep on PATH is stale (152e7ce vs source 96c353a6) and there is no prebuilt-binary installer for other hosts; skills check each verb exists and abstain if not; every step tests the freshly built binary first on PATH; the release installs the new binary here. How other hosts get memgrep is an open item.
+- D tripwire exempts memgrep itself, git restores (checkout, stash, reset, revert, merge, rebase, pull), safe-delete moves and the USER-memory mirror restore; its deny message names the memgrep verb to use.
+- Later, separate proposal and the owner call: delete memory_txn.py page-writing path once the id-set rule covers its knowledge-loss checks.
+
+## Owner questions asked 2026-09-23 23:4x, unanswered after 300 s; proceeding with the recommended default, owner may override
+
+- Old atoms: an edit must reach 10 key-phrases only when it changes keywords or the description, or adds the atom; a body-only fix keeps the old floor. (Alternative offered: any change forces 10.)
+- Gate rule: strict, refuse any write whose result has an error-level finding; warning-level problems on disk each get a ticket. (Alternative: block only defects the write introduces.)
+- Lint writes: bare memgrep lint becomes read-only; fixes happen through the write gate or an explicit --fix. Five janitor callers rely on the silent fix today and get updated. (Alternative: keep fixing, one brief lock per page.)
+- Prose-only pages: a whole-page rewrite that removes non-atom prose is refused until the page is atomized; removed facts move under Superseded. (Alternative: allow, printing every removed paragraph.)
+- Still open from earlier: keep or drop the duplicate-ticket dedupe (tickets.py already dedupes natively).
