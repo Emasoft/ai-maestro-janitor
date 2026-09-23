@@ -12,6 +12,8 @@ scope: project
 project-id: ai-maestro-janitor
 min-approval-requirement: none
 parent-trdd: 7NSRD8OV
+derived: true
+derived-kind: eht
 npt: []
 eht: []
 implementation-commits: [0f2edc79]

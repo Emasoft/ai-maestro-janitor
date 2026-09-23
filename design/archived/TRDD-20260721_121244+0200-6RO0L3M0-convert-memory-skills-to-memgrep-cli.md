@@ -8,6 +8,8 @@ current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
 parent-trdd: R02HTRUD
+derived: true
+derived-kind: eht
 implementation-commits: [bc43f1b]
 ---
 

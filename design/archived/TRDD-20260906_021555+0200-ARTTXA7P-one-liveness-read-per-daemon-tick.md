@@ -10,6 +10,8 @@ task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
 parent-trdd: HXZ8B0IS
+derived: true
+derived-kind: eht
 min-approval-requirement: none
 npt: []
 eht: []

@@ -13,6 +13,8 @@ effort: S
 min-approval-requirement: none
 task-type: refactor
 parent-trdd: TRDD-ULEGRT01
+derived: true
+derived-kind: eht
 labels: [daemon, state-migration, cleanup]
 release-via: publish
 test-requirements: [unit]

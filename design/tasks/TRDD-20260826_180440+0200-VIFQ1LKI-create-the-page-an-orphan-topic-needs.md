@@ -1,9 +1,9 @@
 ---
 trdd-id: VIFQ1LKI
 title: Create the topic page an off-topic atom needs when none exists
-column: backburner
+column: blocked
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T18:04:40+0200
+updated: 2026-09-23T09:04:06+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -17,6 +17,7 @@ npt: []
 eht: []
 implementation-commits: []
 relevant-rules: []
+pre-block-column: backburner
 ---
 
 # Duty 15 — if an off-topic atom's topic has NO page yet, CREATE that page

@@ -8,6 +8,8 @@ current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 parent-trdd: 8IZ8COQ8
+derived: true
+derived-kind: eht
 severity: low
 ---
 

@@ -10,6 +10,8 @@ task-type: bugfix
 scope: project
 severity: high
 parent-trdd: 5ZVS1DDP
+derived: true
+derived-kind: eht
 blocked-by: []
 relevant-rules: []
 implementation-commits: [ac419694]

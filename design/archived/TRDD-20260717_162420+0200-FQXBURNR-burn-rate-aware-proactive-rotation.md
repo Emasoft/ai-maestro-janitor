@@ -10,6 +10,8 @@ task-type: feature
 scope: project
 severity: high
 parent-trdd: H7NVKSAX
+derived: true
+derived-kind: eht
 created-by: H7NVKSAX
 related-trdd: [32ACD15F, EDSFEQ5C]
 ---
