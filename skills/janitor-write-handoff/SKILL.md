@@ -79,11 +79,11 @@ compaction rarely needs the semantic layer, not that asking for it is expensive.
    the working tree, the in-flight TRDD `## STATE` blocks, and verbatim recent turns.
 
 3. **This skill NEVER chains to anything on its own** (TRDD-RAEGS1D5 card 4: the automatic
-   `--then-compact` chain to `scripts/compact_trigger.py` is retired along with that script —
-   the janitor never types `/compact` again, and this manual skill does not reintroduce a
-   compact path). Report that the handoff was written and stop. If you separately want to
-   clear or compact after writing it, invoke `/janitor-compact-context` or `/clear` yourself,
-   as its own explicit step.
+   `--then-compact` chain to the old compact-trigger script was retired when every automatic
+   shrink became a Jev compaction — the janitor never types `/compact` on its own, and this
+   manual skill does not reintroduce a compact path). Report that the handoff was written and
+   stop. If you separately want to clear or compact after writing it, invoke
+   `/janitor-compact-context` or `/clear` yourself, as its own explicit step.
 
 ## Output
 
