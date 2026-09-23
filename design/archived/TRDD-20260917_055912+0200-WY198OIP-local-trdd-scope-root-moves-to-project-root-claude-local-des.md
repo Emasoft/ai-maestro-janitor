@@ -5,14 +5,14 @@ column: complete
 created: 2026-09-17T05:59:12+0200
 updated: 2026-09-23T06:08:23+0200
 current-owner: janitor-main-session
-created-by: emanuelesabetta
+created-by: Emasoft
 task-type: refactor
 min-approval-requirement: none
 assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-17T05:59:12+0200
 review-after: 2026-09-24
 implementation-commits: [9c5c8fb2]
@@ -45,7 +45,7 @@ directive explicitly says must stay separate.
 
 ## Approval log
 
-- 2026-09-17T05:59:12+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T05:59:12+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T06:05:46+0200 — column → testing by implementer. code + migration + tests landed, ruff/mypy/pyright clean, 134 targeted tests pass; remaining boxes (USER scope, bulk migration script) are explicit orchestrator-decided out-of-scope observations
 - 2026-09-23T06:08:23+0200 — COMPLETE by claude-main. LOCAL TRDD scope root migration shipped: commits 9b2ae804 + 9c5c8fb2, GH #303 closed; part of v3.5.6/v3.5.7.
 

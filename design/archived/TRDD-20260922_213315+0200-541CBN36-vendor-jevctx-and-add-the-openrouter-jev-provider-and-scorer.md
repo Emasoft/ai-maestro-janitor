@@ -4,15 +4,15 @@ title: Vendor jevctx and add the OpenRouter Jev provider and scorer CLI
 column: complete
 created: 2026-09-22T21:33:15+0200
 updated: 2026-09-23T11:22:08+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: feature
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-22T21:33:15+0200
 parent-trdd: RAEGS1D5
 derived: true
@@ -65,14 +65,14 @@ before card 3 implements the compacted-context builder.
 
 ## Approval log
 
-- 2026-09-22T21:33:15+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-22T21:33:15+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-22T21:44:04+0200 — column → dev. card 2 worker running 2026-09-22
 - 2026-09-23T06:08:54+0200 — column → testing by claude-main. vendored jevctx + OpenRouter Jev provider + scorer CLI landed: commits 4b8ba762, 0930d394, 54cebc4a; tests pyright-clean per orchestrator
 - 2026-09-23T06:09:11+0200 — column → dev by claude-main. revert: orchestrator correction — openrouter.py 402/403 mis-classification defect still open, not done
 - 2026-09-23T11:20:57+0200 — column → testing. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green
 - 2026-09-23T11:21:02+0200 — column → ai_review. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green
 - 2026-09-23T11:21:06+0200 — column → human_review. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green
-- 2026-09-23T11:22:08+0200 — COMPLETE by emanuelesabetta. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green; card-2 gates verified in tests/.
+- 2026-09-23T11:22:08+0200 — COMPLETE by Emasoft. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green; card-2 gates verified in tests/.
 
 ## Acceptance criteria
 

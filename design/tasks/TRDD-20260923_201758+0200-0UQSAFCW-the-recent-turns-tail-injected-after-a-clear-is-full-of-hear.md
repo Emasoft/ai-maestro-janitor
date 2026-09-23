@@ -3,16 +3,16 @@ trdd-id: 0UQSAFCW
 title: The recent-turns tail injected after a clear is full of heartbeat and notification records
 column: testing
 created: 2026-09-23T20:17:58+0200
-updated: 2026-09-23T21:11:47+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+updated: 2026-09-23T23:23:38+0200
+current-owner: janitor-main-session
+created-by: janitor-main-session
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T20:17:58+0200
 derived: true
 parent-trdd: RAEGS1D5
@@ -24,5 +24,5 @@ Card 2a of the Jev reference gap analysis (2026-09-23, reports/compaction-replac
 
 ## Approval log
 
-- 2026-09-23T20:17:58+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T20:17:58+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-23T21:10:49+0200 — column → testing. code landed and committed 2026-09-23 with tests; awaiting the real-transcript compaction on the final tree and the release

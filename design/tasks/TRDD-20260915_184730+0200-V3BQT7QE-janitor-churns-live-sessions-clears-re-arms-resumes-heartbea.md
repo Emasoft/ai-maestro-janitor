@@ -5,14 +5,14 @@ column: testing
 created: 2026-09-15T18:47:30+0200
 updated: 2026-09-17T14:45:21+0200
 current-owner: janitor-main-session
-created-by: emanuelesabetta
+created-by: Emasoft
 task-type: audit
 min-approval-requirement: none
 assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-15T18:47:30+0200
 priority: high
 scope: project
@@ -63,8 +63,8 @@ Child ids: R=2MLFZ7DL, C-b=11GAS4LC, E-2=6P0KUSO9.
 
 ## Approval log
 
-- 2026-09-15T18:47:30+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
-- 2026-09-15T20:15:01+0200 — column → dev by emanuelesabetta. starting audit work
+- 2026-09-15T18:47:30+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-15T20:15:01+0200 — column → dev by Emasoft. starting audit work
 - 2026-09-16T10:10:09+0200 — LIVE TEST of the claim rewrite (e24aaf08, shipped 3.5.1/3.5.2): heartbeat emitted [janitor-memory-consolidate]; the curator claimed dispatch 1789491146-5957aca4 (LOCAL), ran the pass (abstained, report written), and returned DONE without ever running set-report/complete — the claim sat CLAIMED. The orchestrator closed it by hand with the 3.5.2 CLI (complete --state-dir … --report …): exit 0, done record written, so the CLI side of e24aaf08 works. Root cause of the two-week orphan streak is therefore the AGENT side: atomize/enrich/repair/retro-lesson SKILL.md carry no close-claim step, and conflict/consolidate/harvest/split carry it only as a link to references/close-claim.md that the Sonnet curator did not follow; the agent.md MANDATORY step was skipped too. Fix dispatched: inline the two close commands as the explicit final numbered step in all 8 skills, and make the claim CLI print the exact complete command as its last line so the curator sees it in its own transcript.
 - 2026-09-16T10:13:41+0200 — CORRECTION of the live-test entry above (SUPERSEDES its root-cause sentence). Discriminating evidence read afterwards: the curator's transcript contains 25 references to memory_dispatch_claim.py and ZERO set-report or complete invocations — it never attempted to close, so 'ran complete and failed silently' and 'version skew refused it' are both ruled out for this run (its transcript references 3.5.0, 3.5.1 and 3.5.2 plugin paths, mixed). And the claim 'four skills have no close step' was FALSE: atomize, enrich, retro-lesson and repair carry an inline complete --state-dir block (multi-line, which the single-line grep missed); conflict, consolidate, harvest and split are the four that only link references/close-claim.md — cf3a949a (2026-09-15) replaced their inline command with that link. The consolidate curator skipped the link. The by-hand close exercised only the explicit --report path of complete, not the set-report + bare complete pair the recipe promises; that pair is still untested live. The structural guard still missing: the SPAWNER (heartbeat protocol) closing the claim from the agent's returned report path, or the orphan sweep auto-completing a claim whose report exists — filed as a follow-up, not done here.
 - 2026-09-16T10:31:45+0200 — column dev → testing. Shipped: 3.5.1 (60bedabc) and 3.5.2 (191678a2, CI green, installed locally). Landed this session on this card: F-4 nudge key, dead TTL-regime removal, claim resolution from the CLAIMED record, CI exec-bit fix + gate test, claim CLI prints its close block (2bb6c99a), inline close-claim step in all 8 memory skills (42404659, TRDD-0KOIJ3SK complete). Remaining work is in the EHT children PA9E2GJ1 / 7ZMQSXO6 / NEVQOHGS (todo) and one open structural item: a spawner- or sweep-side auto-close of a claim whose report exists — to be filed as its own card. Testing means: the next heartbeat-dispatched memory chore must leave a done record without a hand close; that is the acceptance for this card's memory half.

@@ -5,14 +5,14 @@ column: testing
 created: 2026-09-17T07:08:04+0200
 updated: 2026-09-17T19:20:35+0200
 current-owner: janitor-main-session
-created-by: emanuelesabetta
+created-by: Emasoft
 task-type: feature
 min-approval-requirement: none
 assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-17T07:08:04+0200
 priority: high
 ---
@@ -38,7 +38,7 @@ Origin: TRDD-PA9E2GJ1 follow-up 2026-09-17 (reports/board-drain/20260917_impl-PA
 
 ## Approval log
 
-- 2026-09-17T07:08:04+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T07:08:04+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T07:33:12+0200 — column → todo by worker-board-drain. PA9E2GJ1's cooldown-bypass candidate — not a deferral by design, moves off backburner into the drain
 - 2026-09-17T08:44:13+0200 — Acceptance reworded to the outcome (ESC withheld inside the target's cooldown), mechanism left to the implementer. Puller: the next board drain — no session is currently assigned; the card waits in todo.
 - 2026-09-17T18:43:26+0200 — dev → testing: scripts/lib/user_intent.py (record_pane_transcript, pane_transcript_path, _pane_key, heartbeat-marker skip), scripts/lib/pane_actuate.py (act's cooldown gate, keyed on Event.STOP_FLAG not fail_open), scripts/hooks/on-prompt-submit-user-mem.py + scripts/hooks/on-stop-token-meter.py (publish sites); 8 new tests in tests/test_pane_actuate.py + 8 new tests in tests/test_user_intent_interrupt.py, all real fixtures/tmp files, no mocks of the gate; ruff/mypy/pyright all 0 findings, tldr impact act confirmed no positional-arg caller shift. Review findings applied: event-keyed (not fail_open-keyed) STOP_FLAG exemption, iTerm prefix round-trip test, heartbeat-marker root-cause fix in recently_interrupted with 2 tests, ceilings documented at the act() site. (janitor-main-session via lean-worker)

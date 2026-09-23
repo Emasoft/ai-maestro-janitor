@@ -4,15 +4,15 @@ title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
 updated: 2026-09-23T22:53:46+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: feature
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-22T21:32:55+0200
 npt: [541CBN36]
 relevant-rules: []
@@ -94,7 +94,7 @@ commits per card with the WHY in the message.
 
 ## Approval log
 
-- 2026-09-22T21:32:55+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-22T21:32:55+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-23T06:08:54+0200 — column → dev by claude-main. Jev compaction work in progress: cards 1-4 landed (54ea73bc); post-clear injection fix and lease rename pending
 - 2026-09-23T06:09:10+0200 — column → todo by claude-main. revert: orchestrator correction — 541CBN36 still owns an open defect, do not unblock RAEGS1D5 yet
 - 2026-09-23T11:22:14+0200 — column → dev. NPT 541CBN36 closed; remaining scope: compaction-lane concurrency guard

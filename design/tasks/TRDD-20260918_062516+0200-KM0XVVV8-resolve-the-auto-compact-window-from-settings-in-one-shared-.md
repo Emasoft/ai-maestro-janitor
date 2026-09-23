@@ -22,5 +22,5 @@ The settings.json env merge exists only inside harness_will_autocompact; min_con
 
 ## Approval log
 
-- 2026-09-18T06:25:16+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-18T06:25:16+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-18T06:36:21+0200 — correction: minted by a janitor-main-session worker under the user's general go-ahead, not a mandate for this specific card; the 06:25:16 MANDATE line was the tool's default attribution.

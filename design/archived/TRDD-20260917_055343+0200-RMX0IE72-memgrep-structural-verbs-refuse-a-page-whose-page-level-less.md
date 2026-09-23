@@ -5,14 +5,14 @@ column: complete
 created: 2026-09-17T05:53:43+0200
 updated: 2026-09-23T06:08:08+0200
 current-owner: janitor-main-session
-created-by: emanuelesabetta
+created-by: Emasoft
 task-type: bugfix
 min-approval-requirement: none
 assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-17T05:53:43+0200
 review-after: 2026-09-24
 implementation-commits: [152e7ce3]
@@ -24,7 +24,7 @@ Symptom: memgrep split/merge/migrate/delete refuse any page carrying an uncited 
 
 ## Approval log
 
-- 2026-09-17T05:53:43+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T05:53:43+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T05:53:46+0200 — column → dev by board-drain-worker. starting implementation of #304 fix
 - 2026-09-17T05:54:06+0200 — column → testing by board-drain-worker. code + tests landed and green; remaining boxes are observations only
 - 2026-09-23T06:08:08+0200 — COMPLETE by claude-main. memgrep structural-verb fix shipped: commit 152e7ce3, spec WM-MIG-04 amended, GH #304 closed, 413 tests passing; part of v3.5.6/v3.5.7.

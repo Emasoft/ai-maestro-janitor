@@ -4,15 +4,15 @@ title: A heartbeat during in-flight background work prints only janitor heartbea
 column: todo
 created: 2026-09-23T22:35:38+0200
 updated: 2026-09-23T22:36:06+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-23T22:35:38+0200
 ---
 
@@ -22,7 +22,7 @@ Owner, 2026-09-23 22:35 (verbatim): "you stopped again? and the janitor is the o
 
 ## Approval log
 
-- 2026-09-23T22:35:38+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T22:35:38+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 
 ## Cause and threshold (review 2026-09-23)
 

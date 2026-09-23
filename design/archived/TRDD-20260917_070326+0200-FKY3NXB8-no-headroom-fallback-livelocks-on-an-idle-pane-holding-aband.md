@@ -4,15 +4,15 @@ title: No-headroom fallback livelocks on an idle pane holding abandoned unsubmit
 column: complete
 created: 2026-09-17T07:03:26+0200
 updated: 2026-09-17T20:31:10+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-17T07:03:26+0200
 priority: critical
 implementation-commits: [9803ee14]
@@ -24,7 +24,7 @@ Symptom: pane_policy._at_idle's NO_HEADROOM row (scripts/lib/pane_policy.py:323-
 
 ## Approval log
 
-- 2026-09-17T07:03:26+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T07:03:26+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T07:21:35+0200 — column → todo by main session (owner standing permission 2026-09-03). regression introduced by 0e8b97c9: no-headroom fallback no longer fires on an idle pane holding the janitor's own leftover text
 - 2026-09-17T07:31:42+0200 — column → testing by IMPLEMENTER. code+tests landed; no acceptance checklist exists to leave open (0 boxes); age-store extension explicitly out of scope, noted in STATE
 - 2026-09-17T14:56:37+0200 — COMPLETE by session. all deliverables landed, acceptance boxes ticked, gate green on d09fe94b.

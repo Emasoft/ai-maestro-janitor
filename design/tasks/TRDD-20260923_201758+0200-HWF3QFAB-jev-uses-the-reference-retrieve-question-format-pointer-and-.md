@@ -3,16 +3,16 @@ trdd-id: HWF3QFAB
 title: Jev uses the reference RETRIEVE_QUESTION, format_pointer and asks the decision question only of the user's own messages
 column: testing
 created: 2026-09-23T20:17:58+0200
-updated: 2026-09-23T21:11:47+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+updated: 2026-09-23T23:23:37+0200
+current-owner: janitor-main-session
+created-by: janitor-main-session
 task-type: refactor
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T20:17:58+0200
 derived: true
 parent-trdd: RAEGS1D5
@@ -24,5 +24,5 @@ Card 5 of the Jev reference gap analysis (2026-09-23, owner: most reference func
 
 ## Approval log
 
-- 2026-09-23T20:17:58+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T20:17:58+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-23T21:10:50+0200 — column → testing. code landed and committed 2026-09-23 with tests; awaiting the real-transcript compaction on the final tree and the release

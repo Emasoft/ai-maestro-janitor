@@ -4,15 +4,15 @@ title: memgrep new-mem-atom truncates a long description mid-word instead of ref
 column: backburner
 created: 2026-09-22T21:33:27+0200
 updated: 2026-09-22T21:33:27+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-22T21:33:27+0200
 ---
 
@@ -31,4 +31,4 @@ corrupts the recall ranking surface (description is the only field memgrep ranks
 
 ## Approval log
 
-- 2026-09-22T21:33:27+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-22T21:33:27+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.

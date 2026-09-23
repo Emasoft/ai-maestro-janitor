@@ -5,14 +5,14 @@ column: testing
 created: 2026-09-17T12:12:46+0200
 updated: 2026-09-23T06:03:47+0200
 current-owner: janitor-main-session
-created-by: emanuelesabetta
+created-by: Emasoft
 task-type: refactor
 min-approval-requirement: none
 assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-17T12:12:46+0200
 implementation-commits: [6ddc0308, fb987e96, 58b7ae19, ea4bc509]
 review-after: 2026-09-18
@@ -30,7 +30,7 @@ RELATED: TRDD-5EHBPH6G (the 262-marketplace serial sweep), TRDD-H7NVKSAX (bulk c
 
 ## Approval log
 
-- 2026-09-17T12:12:46+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-17T12:12:46+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T12:54:19+0200 — column → testing. code landed on both sides; live fseventsd observation pending
 - 2026-09-17T18:27:55+0200 — ea4bc509 recorded: a MIXED commit; only janitor-daemon-process-identity.md and janitor-skills-and-agents-roster.md belong to this card, the other three files are atomize/repair chore output (review finding, janitor-main-session)
 

@@ -4,15 +4,15 @@ title: Janitor maintainers and indexers must run in project folders whose git re
 column: todo
 created: 2026-09-23T13:13:10+0200
 updated: 2026-09-23T13:13:10+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-23T13:13:10+0200
 ---
 
@@ -32,4 +32,4 @@ ac39cf13 (memory-marker STATE_DIR recipe falls back to the cwd when there is no 
 
 ## Approval log
 
-- 2026-09-23T13:13:10+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T13:13:10+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.

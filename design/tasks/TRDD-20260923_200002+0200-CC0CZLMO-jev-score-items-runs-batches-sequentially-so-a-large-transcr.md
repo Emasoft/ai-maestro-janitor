@@ -3,16 +3,16 @@ trdd-id: CC0CZLMO
 title: Jev score_items runs batches sequentially so a large transcript exceeds both compaction lane timeouts
 column: blocked
 created: 2026-09-23T20:00:02+0200
-updated: 2026-09-23T21:11:37+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+updated: 2026-09-23T23:23:35+0200
+current-owner: janitor-main-session
+created-by: janitor-main-session
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T20:00:02+0200
 parent-trdd: RAEGS1D5
 blocked-by: [1ETALGDG]
@@ -26,6 +26,6 @@ A 49 MB real transcript (7075 items) took 168 s in jev_compact.py compact on 202
 
 ## Approval log
 
-- 2026-09-23T20:00:02+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T20:00:02+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-23T21:10:50+0200 — column → testing. code landed and committed 2026-09-23 with tests; awaiting the real-transcript compaction on the final tree and the release
 - 2026-09-23T21:11:23+0200 — column → blocked. its required acceptance (49 MB under 240 s) cannot pass until TRDD-1ETALGDG (Cloudflare block / oversized batch split) lands

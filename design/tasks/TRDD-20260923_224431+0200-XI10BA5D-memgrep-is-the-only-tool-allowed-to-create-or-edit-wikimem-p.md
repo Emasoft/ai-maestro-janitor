@@ -4,15 +4,15 @@ title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
 updated: 2026-09-23T23:09:43+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: feature
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-23T22:44:31+0200
 eht: [FVYV6RSG]
 ---
@@ -23,17 +23,17 @@ eht: [FVYV6RSG]
 
 - Settled by the owner: memgrep is the only writer of wikimem pages; every write is linted, auto-fixed where possible, formatted, checked against all specs (10 key-phrases per atom minimum) or blocked with an error; no per-call ticket cap; an over-size atom warns and, past a threshold, opens a ticket to split it.
 - Ours, not the owner's: the threshold is 2x the size budget (the owner delegated it); which defects block a write is PENDING the owner (gate-versus-tickets reading); "no publish until this card is done" is our reading of the owner's "wait to complete all before publishing".
-- Done: d20574f0 removed the Edit-tool allowance from the rules, 11 skills (14 files) and the agent. NOT done: at least 5 skills still instruct a hand-edit of the staged copy (review section below). Capability audit landed 2026-09-23: reports/memgrep-sole-writer/20260923_225740+0200-capability-audit-final.md (gitignored; commands/ swept clean, verb-mapping for every staged-copy citation in its section 10.10).
+- Done: d20574f0 removed the Edit-tool allowance from the rules, 11 skills (14 files) and the agent. NOT done: 6 locations still instruct a hand-edit of the staged copy (5 SKILL.md files plus consolidate's merge-protocol reference; the audit's section 12 swept commands/, heredoc and Python writers) (review section below). Capability audit landed 2026-09-23: reports/memgrep-sole-writer/20260923_225740+0200-capability-audit-final.md (gitignored; commands/ swept clean, verb-mapping for every staged-copy citation in its section 10.10).
 - Pending the owner (asked 2026-09-23): the gate-versus-tickets reading and the dedupe (section "Derived by us, PENDING OWNER CONFIRMATION").
 - Open: the staged-copy shape (section "Open design questions for the migration"); the staged-copy skill list is a lower bound.
-- Derived: FVYV6RSG (ticket dispatch bound) is eht. Standalone, not on the release path: 6V7ZCKXF (duplicate-description lint, not asked for by the owner, backburner) and YSFQNR8Y (split chore copies the parent description; blocked on this card, since the migration rewrites the split skill).
+- Derived: FVYV6RSG (ticket dispatch bound) is eht. Off the release path: 6V7ZCKXF (duplicate-description lint, not asked for by the owner, backburner). YSFQNR8Y (split chore copies the parent description) is blocked on this card because the migration rewrites the split skill; it unblocks when this card closes and is done right before release.
 - NEXT ACTION: consult the advisor on the audit's section 10 plan, then a reviewed implementation proposal: C0 guard, shared pre-write pipeline, whole-page replace verb, the missing verbs, ticket consumer, skills moved to verbs, then the PreToolUse guard.
 
 Owner directive 2026-09-23 (verbatim): "what? delete the part about the edit tool. memgrep must be able to handle creation, editing, metadata/frontmatter, sections, toc, wiki links, references, atoms, notes, see also.., and all that by itself. no other tool must be allowed to edit except memgrep." Earlier the same evening (verbatim): "since there is my rule: only memgrep can write/edit wikimem pages. amd since there are malformed wikimem pages. then it is clear that the memgrep tool is broken. unless the premises are wrong." Context: two wikimem pages on this machine (AgentlensPro, ghbook) hold raw 0x08 bytes where a regex \\b was meant, and memgrep validate/lint pass them; the shipped rule markdown-memory-recall.md says 'edit ONLY via memgrep verbs or the Edit tool', so the rule itself allowed a non-memgrep writer. Scope: (1) delete every Edit/Write/shell allowance for wikimem pages from the plugin's rules, rules-reference, skills and agents; (2) audit memgrep's verbs against the owner's list (create, edit, frontmatter/metadata, sections, TOC, wiki links, references, atoms, notes/lessons, see-also) and build every missing capability in memgrep; (3) memgrep validate/lint flag control bytes as ERROR and every memgrep write verb refuses them (investigation running: reports/memory-control-bytes/); (4) a PreToolUse guard that denies Edit, Write, MultiEdit, NotebookEdit and shell writes to any wikimem memory path, so memgrep is the only writer in practice. Order: 1 now; 2 and 3 before 4, so agents are never left with no allowed way to make a needed edit.
 
 ## Approval log
 
-- 2026-09-23T22:44:31+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T22:44:31+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 
 ## Owner directive 2026-09-23 (verbatim), the write contract
 

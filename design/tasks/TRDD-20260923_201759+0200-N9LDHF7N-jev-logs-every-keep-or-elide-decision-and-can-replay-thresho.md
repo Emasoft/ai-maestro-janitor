@@ -3,16 +3,16 @@ trdd-id: N9LDHF7N
 title: Jev logs every keep or elide decision and can replay thresholds to tune them
 column: todo
 created: 2026-09-23T20:17:59+0200
-updated: 2026-09-23T20:17:59+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+updated: 2026-09-23T23:23:36+0200
+current-owner: janitor-main-session
+created-by: janitor-main-session
 task-type: feature
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T20:17:59+0200
 ---
 
@@ -22,4 +22,4 @@ Card 7 of the Jev reference gap analysis (2026-09-23). The relevance and decisio
 
 ## Approval log
 
-- 2026-09-23T20:17:59+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T20:17:59+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.

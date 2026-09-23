@@ -252,4 +252,4 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
   installed), the resolution note is posted on GH#92 (now closed) and appended to
   TRDD-VQ4LX7ND's approval log. Terminal release state reached → `published`.
 2026-09-17 — GH#92 verified CLOSED (gh issue view); TRDD-VQ4LX7ND verified column: complete. Box 7 (publish + resolution note) ticked. Approved by main session (owner standing permission 2026-09-03).
-- 2026-09-23T09:04:07+0200 — PUBLISHED by emanuelesabetta. archived → published.
+- 2026-09-23T09:04:07+0200 — PUBLISHED by Emasoft. archived → published.

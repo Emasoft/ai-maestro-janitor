@@ -24,7 +24,7 @@ Symptom: four times today a worker rewrite recreated a tracked script without it
 
 - 2026-09-16T11:11:33+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-16T12:07:00+0200 — COMPLETE by session: hook 0092aa0a, refined ac09241a; negative case demonstrated by hand (see box 1). Docstring nit left as a note, not a blocker.
-- 2026-09-16T12:07:35+0200 — COMPLETE by emanuelesabetta. archived → complete.
+- 2026-09-16T12:07:35+0200 — COMPLETE by Emasoft. archived → complete.
 - 2026-09-16T12:15:00+0200 — post-close review notes (card frozen, boxes unchanged): box (4) cites pytest's own timer; wall-clock including uv startup was not measured. Box (2) count is 11 commits since 0092aa0a, not 10. The runnable-script list in the test is hardcoded (six scripts), so a NEW runnable script outside scripts/detectors and hooks is unguarded until listed; and core.hooksPath is local config, so a fresh clone has the hook only after publish.py --install-hook.
 
 ## Acceptance

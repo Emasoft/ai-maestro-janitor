@@ -3,16 +3,16 @@ trdd-id: FVYV6RSG
 title: memgrep lint tickets reach the janitor queue without flooding it
 column: todo
 created: 2026-09-23T23:05:42+0200
-updated: 2026-09-23T23:05:42+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+updated: 2026-09-23T23:23:39+0200
+current-owner: janitor-main-session
+created-by: janitor-main-session
 task-type: feature
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T23:05:42+0200
 ---
 
@@ -22,4 +22,4 @@ the owner removed the per-call cap on OPENING tickets (TRDD-XI10BA5D), so dispat
 
 ## Approval log
 
-- 2026-09-23T23:05:42+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T23:05:42+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.

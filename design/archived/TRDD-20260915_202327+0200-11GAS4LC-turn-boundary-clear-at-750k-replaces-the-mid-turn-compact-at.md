@@ -4,15 +4,15 @@ title: Turn-boundary clear at ~750k replaces the mid-turn compact at 85 percent 
 column: complete
 created: 2026-09-15T20:23:27+0200
 updated: 2026-09-17T20:31:11+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+current-owner: janitor-main-session
+created-by: Emasoft
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: Emasoft
 approval-datetime: 2026-09-15T20:23:27+0200
 parent-trdd: V3BQT7QE
 priority: high
@@ -38,7 +38,7 @@ scripts/hooks/pre-tool-context-usage.py, scripts/hooks/on-stop-token-meter.py, a
 
 ## Approval log
 
-- 2026-09-15T20:23:27+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-15T20:23:27+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T05:43:36+0200 — COMPLETE by main session (owner standing permission 2026-09-03). Turn-boundary clear at CLEAR_AT_PCT/CLEAR_CEILING_PCT landed (dde5acff) plus review addendum on _still_wanted gate; test_dispatch_phases.py 185 passed.
 - 2026-09-17T20:31:04+0200 — YONEH3XC: assignee/current-owner still carry the owner's username; left as-is because the card is terminal (frozen) (janitor-main-session)
 
