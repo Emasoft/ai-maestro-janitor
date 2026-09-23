@@ -171,11 +171,15 @@ def _main() -> int:
     heads_args = ["--state-heads", *head_paths] if head_paths else []
 
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
+    # Card 5 two-renderings (TRDD-RAEGS1D5): this detached lane uses the full card-3 budgets
+    # only -- no `--inject-out` capped companion. `compose_handoff`'s own `max_bytes` below
+    # already bounds the FINAL assembled handoff (facts + this + the tail), so a second, jev-
+    # side rendering buys nothing here; `on-session-start-post-clear-compact.py` is the ONE
+    # caller that needs a size-bounded companion, because it prints straight to stdout under
+    # the hook-output ceiling instead of going through a later SessionStart read.
     proc, timed_out = jcl.run_compact(
         PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
-        heads_args=heads_args, budget_tokens=jcl.LANE_BUDGET_TOKENS,
-        digest_tokens=jcl.LANE_DIGEST_TOKENS, max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS,
-        max_bytes=jcl.LANE_COMPACTED_MAX_BYTES,
+        heads_args=heads_args,
     )
 
     if timed_out or proc is None or proc.returncode != jcl.EXIT_OK:

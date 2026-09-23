@@ -181,6 +181,10 @@ def _main() -> int:
     head_paths, heads_unavailable, in_flight_cards = jcl.state_head_paths(root, sd)
     heads_args = ["--state-heads", *head_paths] if head_paths else []
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
+    # Card 5 two-renderings (TRDD-RAEGS1D5): the SEPARATE capped companion `jev_compact.py
+    # compact` renders (`--inject-out`) alongside the full `--out` document -- see `run_compact`'s
+    # own docstring ("score once, render twice").
+    inject_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.inject.md"
 
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
@@ -193,29 +197,56 @@ def _main() -> int:
     # (Card 5 content-fit, TRDD-RAEGS1D5: a duplicate "unreachable" pre-check used to live HERE
     # ONLY, so `summarize_previous_session.py`'s detached lane paid the full retry/backoff wall
     # on the same outage this hook already declined fast -- one policy now, in `jev_compact.py`
-    # itself, honoured by every caller.)
+    # itself, honoured by every caller.) `budget_tokens`/`digest_tokens` are left unset -- the
+    # automatic lane no longer shrinks them (card 5 two-renderings: that used to shrink `--out`
+    # too, which is now always the full document).
     proc, timed_out = jcl.run_compact(
         plugin_root, transcript=transcript_path, out_path=out_path, session_key=key,
         heads_args=heads_args, timeout=_RUN_COMPACT_TIMEOUT_S,
-        budget_tokens=jcl.LANE_BUDGET_TOKENS, digest_tokens=jcl.LANE_DIGEST_TOKENS,
-        max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS, max_bytes=jcl.LANE_COMPACTED_MAX_BYTES,
+        inject_out_path=inject_path, max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS,
+        inject_max_bytes=jcl.LANE_COMPACTED_MAX_BYTES,
     )
-    compacted_text: str | None = None
+    full_text: str | None = None
+    inject_text: str | None = None
     if not timed_out and proc is not None and proc.returncode == jcl.EXIT_OK:
         try:
-            compacted_text = out_path.read_text(encoding="utf-8")
+            full_text = out_path.read_text(encoding="utf-8")
         except OSError as exc:
             state.log_line(
                 "jev-post-clear-hook", f"compacted context unreadable ({out_path}): {exc!r}"
             )
-            compacted_text = None
+            full_text = None
+        if full_text is not None:
+            try:
+                inject_text = inject_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                # Review finding, card 5 two-renderings: `--out` and `--inject-out` are TWO
+                # separately `atomic_write`-n files, not one atomic pair -- a crash between the
+                # two (OOM, hitting this hook's own `_RUN_COMPACT_TIMEOUT_S` boundary) can leave
+                # the full document on disk with no capped companion. Discarding BOTH in that
+                # case would orphan a full compose that already paid its Jev cost, in favour of
+                # the weaker template fallback -- falling back to the full document as the
+                # injection SUMMARY instead (`compose_handoff`'s own `max_bytes` backstop below
+                # still bounds it) means a genuinely missing companion costs only its own
+                # "Full compacted context" pointer line, never the whole compose.
+                state.log_line(
+                    "jev-post-clear-hook",
+                    f"capped companion unreadable ({inject_path}), falling back to the full "
+                    f"document for injection: {exc!r}",
+                )
+                inject_text = full_text
 
-    if compacted_text is not None:
+    if full_text is not None:
+        # Card 5 two-renderings (TRDD-RAEGS1D5): the keyed handoff FILE on disk is the FULL
+        # document (`full_text`) -- the defect this card fixes was that it used to be the
+        # capped ~4.3 KB rendering. Only the PRINTED stdout injection is the capped one (or,
+        # per the fallback above, the full one when the capped companion is missing).
         tail = ec.recent_messages(transcript_path)
         text = ec.compose_handoff(
-            inputs, now_iso=now_iso, summary=compacted_text, tail=tail,
+            inputs, now_iso=now_iso, summary=inject_text, tail=tail,
             max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
         )
+        handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, full_text, now=now)
     else:
         # Non-zero exit, timeout, or an unreadable output file -- the exit-code ->
         # findings-ledger mapper this lane already owns (never duplicated here), then a
@@ -224,8 +255,8 @@ def _main() -> int:
         jcl.handle_nonzero_exit(proc, timed_out=timed_out, sd=sd)
         template = ec.compose_template_handoff(inputs, now_iso=now_iso)
         text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
+        handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
 
-    handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
     # Defang against marker-mimicry (the tail is raw prior-session messages, and a `[janitor-…]`
     # -shaped line inside one would otherwise arrive at session start as marker mimicry) --
     # same treatment `on-session-start.py::_handoff_body` applies to its own injected body.

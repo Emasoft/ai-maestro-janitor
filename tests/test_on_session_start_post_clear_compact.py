@@ -43,6 +43,11 @@ Path({argv_log!r}).write_text(repr(argv), encoding="utf-8")
 out_text = {out_text!r}
 if out_text and "--out" in argv:
     Path(argv[argv.index("--out") + 1]).write_text(out_text, encoding="utf-8")
+# Card 5 two-renderings (TRDD-RAEGS1D5): the real CLI writes a SECOND, capped rendering to
+# `--inject-out` when given -- the stub mirrors that shape (same text is fine for these tests,
+# which only assert on presence/size/content markers, never on the two documents differing).
+if out_text and "--inject-out" in argv:
+    Path(argv[argv.index("--inject-out") + 1]).write_text(out_text, encoding="utf-8")
 sys.exit({exit_code})
 """
 
@@ -119,6 +124,136 @@ def test_consumes_fresh_sidecar_and_injects_real_compacted_context(tmp_path, mon
     assert consumed, "expected a .consumed-<epoch> sidecar after this run"
     group = handoff_files.newest_group(sd)
     assert group and "pointers expand with:" in group[0].read_text(encoding="utf-8")
+
+
+_STUB_JEV_COMPACT_TWO_DOCS = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+argv = sys.argv
+if "--out" in argv:
+    Path(argv[argv.index("--out") + 1]).write_text({full_text!r}, encoding="utf-8")
+if "--inject-out" in argv:
+    Path(argv[argv.index("--inject-out") + 1]).write_text({inject_text!r}, encoding="utf-8")
+sys.exit(0)
+"""
+
+
+def test_keyed_handoff_gets_the_full_document_injection_gets_the_capped_one(tmp_path, monkeypatch):
+    """Card 5 two-renderings (TRDD-RAEGS1D5): the defect this card fixes was that the keyed
+    handoff FILE on disk (what a later manual read, or the next SessionStart's fallback
+    injection, sees) was the SAME capped ~4.3 KB rendering as the printed stdout injection --
+    discarding the full document for no reason. This test uses a stub that writes two
+    DELIBERATELY DIFFERENT documents to `--out` and `--inject-out` and asserts each lands where
+    it belongs: the FULL one in the keyed handoff file, the CAPPED one in stdout."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%11")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%11"}, transcript=str(transcript))
+
+    full_doc = (
+        "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Digest\nTHE-FULL-DIGEST"
+        '-MARKER\n\n## Kept items\nsome text\n\npointers expand with: uv run --script '
+        '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /tmp/x <id>'
+    )
+    inject_doc = (
+        "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Digest\n\n\n"
+        "## Kept items\nsome text\n\nFull compacted context: /tmp/full.md -- Read it for "
+        'everything not shown here.\n\npointers expand with: uv run --script '
+        '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /tmp/x <id>'
+    )
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_TWO_DOCS.format(full_text=full_doc, inject_text=inject_doc),
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    assert rc == 0
+    # The printed injection carries the CAPPED document's own marker, not the full one's.
+    assert "Full compacted context:" in out
+    assert "THE-FULL-DIGEST-MARKER" not in out
+    # The keyed handoff FILE on disk carries the FULL document verbatim -- never the capped one.
+    group = handoff_files.newest_group(sd)
+    assert group, "expected a keyed handoff to have been written"
+    on_disk = group[0].read_text(encoding="utf-8")
+    assert "THE-FULL-DIGEST-MARKER" in on_disk
+    assert "Full compacted context:" not in on_disk
+
+
+_STUB_JEV_COMPACT_OUT_ONLY = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+argv = sys.argv
+if "--out" in argv:
+    Path(argv[argv.index("--out") + 1]).write_text({full_text!r}, encoding="utf-8")
+# Deliberately never writes --inject-out, even though it is present in argv -- simulates a
+# crash/kill between the two atomic_write calls in the real jev_compact.py.
+sys.exit(0)
+"""
+
+
+def test_missing_inject_out_falls_back_to_the_full_document_not_the_template(tmp_path, monkeypatch):
+    """Review finding, card 5 two-renderings (TRDD-RAEGS1D5): `--out` and `--inject-out` are two
+    separately `atomic_write`-n files, not one atomic pair -- a process killed between the two
+    (OOM, hitting the timeout boundary) leaves `--out` complete and `--inject-out` missing. The
+    hook must not discard the perfectly good full document in that case and degrade all the way
+    to the TEMPLATE_MARKER fallback; it must inject/keep the full document instead."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%12")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%12"}, transcript=str(transcript))
+
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_OUT_ONLY.format(full_text=_COMPACTED_DOC), encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    assert rc == 0
+    assert handoff_files.TEMPLATE_MARKER not in out, "must not degrade to the template fallback"
+    assert "pointers expand with:" in out, "the full document must still be injected"
+    group = handoff_files.newest_group(sd)
+    assert group and not group[0].read_text(encoding="utf-8").lstrip().startswith(
+        handoff_files.TEMPLATE_MARKER
+    )
 
 
 def test_a_stale_sidecar_is_ignored_and_never_composed(tmp_path, monkeypatch):
@@ -526,6 +661,36 @@ def test_unresolvable_pane_key_is_logged_not_silent(tmp_path, monkeypatch):
     log_text = log_path.read_text(encoding="utf-8")
     assert "no pane key" in log_text
     assert "kind='unknown'" in log_text
+
+
+def test_unreachable_decline_finding_says_unreachable_not_unavailable(tmp_path, monkeypatch):
+    """Card 5 two-renderings (TRDD-RAEGS1D5, item 5): `handle_nonzero_exit`'s `EXIT_DECLINED_
+    UNAVAILABLE` branch used to say "endpoint unavailable" for EVERY decline reason, including a
+    `kind="unreachable"` stamp (no HTTP response ever came back -- offline, DNS, TLS) -- a
+    different fact than a real `kind="unavailable"` outage (a 5xx response). The finding text
+    must now distinguish them."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=tmp_path / "plugin")
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(jcl, "read_probe_stamp", lambda: {
+        "kind": "unreachable", "reason": "DNS failure", "ts": time.time(),
+    })
+
+    import subprocess as _sp
+
+    proc = _sp.CompletedProcess(args=[], returncode=jcl.EXIT_DECLINED_UNAVAILABLE, stdout="", stderr="")
+
+    captured: list[str] = []
+    monkeypatch.setattr(jcl, "record_finding", lambda **kw: captured.append(kw["msg"]))
+
+    jcl.handle_nonzero_exit(proc, timed_out=False, sd=sd)
+
+    assert captured, "expected one finding"
+    assert "endpoint unreachable" in captured[0]
+    assert "endpoint unavailable" not in captured[0]
 
 
 def test_hooks_json_registers_the_new_hook_with_timeout_90():

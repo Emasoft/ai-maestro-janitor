@@ -367,10 +367,16 @@ def cmd_expand(args: argparse.Namespace) -> int:
             print(f"expand --list failed: {exc}", file=sys.stderr)
             return 3
         needle = args.grep.lower() if args.grep else None
+        # Card 5 two-renderings (TRDD-RAEGS1D5, item 6): name the transcript this listing is
+        # against -- a bare id/kind/preview table gives no way to tell which transcript it came
+        # from once printed on its own (e.g. copy-pasted into a chat).
+        print(f"transcript: {transcript}")
         shown = 0
         for it in items:
             if needle is not None and needle not in it.text.lower():
                 continue
+            if shown >= args.limit:
+                break
             first_line = it.text.splitlines()[0] if it.text else ""
             print(f"{it.id}\t{it.kind}\t{first_line[:80]}")
             shown += 1
@@ -410,6 +416,15 @@ def cmd_compact(args: argparse.Namespace) -> int:
     stamp is checked BEFORE reading the transcript or building anything, so a known-down Jev
     declines in microseconds rather than after paying the cost of walking a
     (possibly 24-258 MB, per the spec) transcript file first.
+
+    Card 5 two-renderings (TRDD-RAEGS1D5): score ONCE, render up to TWICE. `--out` always gets
+    the FULL, uncapped-by-default document (card-3 sizing: `--budget-tokens`'s own default,
+    up to `_MAX_ELIDED_POINTERS` pointers, the full digest) -- a caller's `--max-elided-
+    pointers`/`--inject-max-bytes` no longer shrink it. When `--inject-out` is also given, a SECOND
+    `jc.compose()` call over the SAME `items`/`scores` (no second scoring pass) renders a
+    capped companion there: the digest omitted (it dominated the old single-document size --
+    the full digest is still in `--out`), `--max-elided-pointers`/`--inject-max-bytes` applied,
+    and a trailing pointer back at `--out`'s absolute path.
     """
     provider = _current_provider()
 
@@ -422,7 +437,14 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # machine-wide the way these two do (see write_probe_stamp's docstring). Those
     # stamps still exist for a caller to surface as a finding; they just don't gate the
     # NEXT attempt.
-    if stamp is not None and stamp.get("ok") is False:
+    #
+    # `--no-decline` (card 5 two-renderings, item 5): the AUTOMATIC lane (the SessionStart
+    # hook, the detached summarizer) always honours this gate -- a repeated outage should not
+    # retry on every SessionStart. An EXPLICIT compact-now request (`/janitor-compact-context`)
+    # is a deliberate ask for a real attempt right now; bypassing the whole gate for it is what
+    # "explicit request bypasses it" means -- a stale stamp from an earlier, unrelated failure
+    # must not silently swallow a request the user just made on purpose.
+    if not args.no_decline and stamp is not None and stamp.get("ok") is False:
         kind = stamp.get("kind")
         age_s = time.time() - float(stamp.get("ts", 0))
         ttl: float | None = None
@@ -491,33 +513,44 @@ def cmd_compact(args: argparse.Namespace) -> int:
     usage_tokens = getattr(usage, "input_tokens", 0) + getattr(usage, "output_tokens", 0)
     usage_cost = getattr(usage, "cost", 0.0)
 
+    compose_header: dict[str, Any] = {
+        "transcript_path": str(args.transcript),
+        "session_key": args.session_key or "",
+        "digest": digest,
+        "usage": {"tokens": usage_tokens, "cost": usage_cost},
+    }
 
-    # Card 5 content-fit (TRDD-RAEGS1D5): only override jc.compose's own defaults when the
-    # caller (the automatic lane) actually passed a value -- a bare `compact` invocation keeps
-    # the full pointer cap and no byte backstop, unchanged from before this flag existed.
-    compose_kwargs: dict[str, Any] = {}
-    if args.max_elided_pointers is not None:
-        compose_kwargs["max_elided_pointers"] = args.max_elided_pointers
-    if args.max_bytes is not None:
-        compose_kwargs["max_bytes"] = args.max_bytes
+    # The FULL document -- card-3 sizing throughout (`--budget-tokens`'s own default, the
+    # default pointer cap, no byte backstop). Never shrunk by `--max-elided-pointers`/
+    # `--inject-max-bytes`, which apply ONLY to the `--inject-out` rendering below.
+    out_path = Path(args.out)
+    full_doc = jc.compose(items, scores, budget_tokens=args.budget_tokens, header=compose_header)
+    state.atomic_write(out_path, full_doc)
 
-    doc = jc.compose(
-        items, scores, budget_tokens=args.budget_tokens,
-        header={
-            "transcript_path": str(args.transcript),
-            "session_key": args.session_key or "",
-            "digest": digest,
-            "usage": {"tokens": usage_tokens, "cost": usage_cost},
-        },
-        **compose_kwargs,
-    )
-    state.atomic_write(Path(args.out), doc)
+    if args.inject_out:
+        inject_kwargs: dict[str, Any] = {}
+        if args.max_elided_pointers is not None:
+            inject_kwargs["max_elided_pointers"] = args.max_elided_pointers
+        if args.inject_max_bytes is not None:
+            inject_kwargs["max_bytes"] = args.inject_max_bytes
+        # The digest dominated the old single-document size (measured ~11KB, reports/
+        # compaction-replacement/) -- omitted here on purpose; the full digest still lives in
+        # `--out`, and the "Full compacted context" trailer below points there.
+        inject_header = dict(compose_header)
+        inject_header["digest"] = ""
+        inject_doc = jc.compose(
+            items, scores, budget_tokens=args.budget_tokens, header=inject_header,
+            full_context_path=str(out_path.resolve()),
+            **inject_kwargs,
+        )
+        state.atomic_write(Path(args.inject_out), inject_doc)
+
     write_probe_stamp(ok=True, reason=None, cost=usage_cost, model=None, provider=provider,
                        kind="ok")
 
     kept = sum(1 for s in scores.values() if s.kept and not s.oversized)
     elapsed_ms = int((time.monotonic() - start) * 1000)
-    out_tokens = estimate_tokens(doc)
+    out_tokens = estimate_tokens(full_doc)
     print(f"compacted items={kept}/{len(items)} tokens={out_tokens} cost={usage_cost} ms={elapsed_ms}")
     return 0
 
@@ -535,6 +568,10 @@ def main(argv: list[str] | None = None) -> int:
     # expanding one -- the way back to an id the capped pointer list didn't name.
     p_expand.add_argument("--list", action="store_true")
     p_expand.add_argument("--grep", default=None)
+    # Card 5 two-renderings (TRDD-RAEGS1D5, item 6): a real transcript can hold thousands of
+    # items -- an unbounded `--list` is its own dead end, just a bigger one. 50 is a screenful;
+    # `--grep` narrows further, `--limit` widens when 50 genuinely is not enough.
+    p_expand.add_argument("--limit", type=int, default=50)
 
     p_compact = sub.add_parser("compact", help="compose the compacted context (card 3)")
     p_compact.add_argument("--transcript", required=True)
@@ -554,13 +591,20 @@ def main(argv: list[str] | None = None) -> int:
         "--decision-threshold", type=float,
         default=_coerce_float(state.plugin_option(_DECISION_ENV), jc.DEFAULT_DECISION_THRESHOLD),
     )
-    # Card 5 content-fit (TRDD-RAEGS1D5): both default to None -- unset means "let jc.compose
-    # use its own defaults" (the full pointer cap, no byte backstop), so a manual `compact`
-    # invocation with neither flag behaves EXACTLY as before this change. Only a caller that
-    # knows its own injection budget (jev_compaction_lane.py, for the automatic lane) passes
-    # them.
+    # Card 5 two-renderings (TRDD-RAEGS1D5): `--out` is now ALWAYS the full, card-3-sized
+    # document -- these two apply ONLY to the optional `--inject-out` rendering below, never to
+    # `--out` itself (see `cmd_compact`'s own docstring: "score once, render twice").
     p_compact.add_argument("--max-elided-pointers", type=int, default=None)
-    p_compact.add_argument("--max-bytes", type=int, default=None)
+    # `--inject-out`/`--inject-max-bytes`: when given, a SECOND `jc.compose()` call over the
+    # SAME scored items renders a capped companion document at this path, sized to fit
+    # `--inject-max-bytes` (the digest omitted, a trailer pointing back at `--out`). Unset
+    # means "no second rendering" -- a bare manual `compact` invocation is unchanged.
+    p_compact.add_argument("--inject-out", default=None)
+    p_compact.add_argument("--inject-max-bytes", type=int, default=None)
+    # Card 5 two-renderings (TRDD-RAEGS1D5, item 5): the AUTOMATIC lane (SessionStart hook,
+    # detached summarizer) always honours the early decline gate below; an explicit compact-now
+    # request bypasses it entirely instead of silently declining on a stale, unrelated stamp.
+    p_compact.add_argument("--no-decline", action="store_true")
 
     args = parser.parse_args(argv)
     if args.command == "probe":

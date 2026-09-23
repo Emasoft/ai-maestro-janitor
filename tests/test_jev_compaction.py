@@ -391,3 +391,34 @@ def test_extraction_skips_sidechain_entries(tmp_path: Path) -> None:
     assert len(items) == 1
     assert items[0].id == "main1:0"
     assert items[0].text == "the real, main-conversation message"
+
+
+def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
+    """Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
+    uncapped document `jev_compact.py compact` composes from the SAME items/scores -- one line,
+    right before the fixed "pointers expand with" trailer, never after it (the trailer is the
+    model's own fixed anchor, always last)."""
+    items = [_item("k:0", "user", "kept text", turn=0)]
+    scores = {"k:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                decision_passed=False)}
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header,
+                      full_context_path="/tmp/full-compacted.md")
+
+    lines = doc.splitlines()
+    assert "Full compacted context: /tmp/full-compacted.md -- Read it for everything not shown here." in lines
+    pointer_idx = next(i for i, line in enumerate(lines) if line.startswith("Full compacted context:"))
+    trailer_idx = next(i for i, line in enumerate(lines) if line.startswith("pointers expand with:"))
+    assert pointer_idx < trailer_idx, "the pointer must precede the fixed trailer, not follow it"
+
+
+def test_no_full_context_path_omits_the_pointer_line() -> None:
+    """The default (`full_context_path=None`, what `--out`'s own uncapped compose call uses)
+    must never grow this line -- it exists only for a SEPARATE capped rendering."""
+    items = [_item("k:0", "user", "kept text", turn=0)]
+    scores = {"k:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                decision_passed=False)}
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header)
+
+    assert "Full compacted context:" not in doc

@@ -121,6 +121,12 @@ config, does not disarm the heartbeat, does not compact other sessions.
   `--dry-run`, `--force`, `--on-resume`). It composes the fire-time TEMPLATE only; the
   Jev-compacted upgrade happens later, at the fresh session's own SessionStart
   (`scripts/summarize_previous_session.py` + `scripts/lib/jev_compaction_lane.py`), not here.
+  The upgrade's own `jev_compact.py compact` call honours a recent probe-failure decline
+  (`kind="unavailable"`/`"unreachable"`/`"rate_limited"`) the same as every other caller — if
+  you need a GUARANTEED real attempt regardless of a stale decline stamp (e.g. testing after
+  fixing a provider outage), run `jev_compact.py compact` directly with `--no-decline`; this
+  skill's own chain never passes it, on purpose (an automatic upgrade should not hammer a
+  known-down endpoint on every `/clear`).
 - `scripts/lib/external_clear.py` — the PURE decision half (`should_clear_externally`).
 - `/janitor-handoff-and-clear` — a SEPARATE, manual-only, in-session sibling (model-authored
   handoff, never called automatically). Reach for it by name when you want the model to write

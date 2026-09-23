@@ -709,3 +709,102 @@ def test_expand_round_trips_a_composed_pointer_id() -> None:
     code, out = _run(["expand", "--transcript", str(_FIXTURE), target_id])
     assert code == 0
     assert out.rstrip("\n") == by_id[target_id].text
+
+
+# --- Card 5 two-renderings (TRDD-RAEGS1D5) -----------------------------------------------------
+
+
+def test_compact_inject_out_writes_a_capped_companion_pointing_at_the_full_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--out` stays the FULL, card-3-sized document (digest included); `--inject-out` is a
+    SEPARATE, capped rendering over the SAME scored items (no second scoring call) -- digest
+    omitted, ending with a trailer pointing back at `--out`'s absolute path."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    inject_out = tmp_path / "compacted.inject.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out),
+        "--inject-out", str(inject_out), "--max-elided-pointers", "1", "--inject-max-bytes", "2000",
+    ])
+
+    assert code == 0
+    assert out.exists() and inject_out.exists()
+    full_doc = out.read_text(encoding="utf-8")
+    inject_doc = inject_out.read_text(encoding="utf-8")
+    assert "## Digest" in full_doc
+    # The digest text itself (the build_digest output, always non-empty here since the
+    # transcript carries human messages) must be present in the full doc.
+    assert full_doc.split("## Digest\n", 1)[1].split("\n\n", 1)[0].strip() != ""
+    # ... but omitted from the capped rendering.
+    assert inject_doc.split("## Digest\n", 1)[1].split("\n\n", 1)[0].strip() == ""
+    assert f"Full compacted context: {out.resolve()}" in inject_doc
+    assert "Full compacted context:" not in full_doc
+
+
+def test_compact_without_inject_out_writes_only_the_full_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare `compact` invocation (no `--inject-out`) behaves exactly as before this card --
+    one document, at `--out`, no companion file."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert out.exists()
+    assert not (tmp_path / "compacted.inject.md").exists()
+
+
+def test_compact_no_decline_bypasses_a_recent_unavailable_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Card 5 two-renderings (TRDD-RAEGS1D5, item 5): the AUTOMATIC lane still declines on a
+    fresh `kind="unavailable"` stamp (the default, no `--no-decline`) -- an EXPLICIT
+    `--no-decline` request bypasses that gate entirely and attempts a real compose."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated outage", "ts": time.time(),
+              "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out), "--no-decline",
+    ])
+
+    assert code == 0, output
+    assert out.exists()
+
+
+def test_expand_list_default_limit_and_transcript_header(tmp_path: Path) -> None:
+    """Card 5 two-renderings (TRDD-RAEGS1D5, item 6): `--list` prints a `transcript: <path>`
+    header line first, then caps at 50 results by default, narrowable with `--limit`."""
+    entries = [
+        {"type": "user", "uuid": f"u-{i}", "parentUuid": None,
+         "message": {"role": "user", "content": f"message number {i}"}}
+        for i in range(60)
+    ]
+    transcript = tmp_path / "many.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+
+    code, out = _run(["expand", "--transcript", str(transcript), "--list"])
+    assert code == 0
+    lines = out.strip("\n").splitlines()
+    assert lines[0] == f"transcript: {transcript}"
+    item_lines = lines[1:]
+    assert len(item_lines) == 50, "default --list limit must be 50"
+
+    code, out = _run(["expand", "--transcript", str(transcript), "--list", "--limit", "5"])
+    assert code == 0
+    item_lines = out.strip("\n").splitlines()[1:]
+    assert len(item_lines) == 5

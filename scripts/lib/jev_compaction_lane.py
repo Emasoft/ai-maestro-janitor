@@ -246,29 +246,24 @@ def read_probe_stamp() -> dict | None:
 # `summarize_previous_session.py`) instead gets its OWN, larger budget, shared here so both
 # callers pass the identical numbers instead of hand-copied magic constants.
 LANE_INJECTION_MAX_BYTES = 8192
-# Card 5 content-fit MEASURED FACT (reports/compaction-replacement/, TRDD-RAEGS1D5): a real
-# 118-item transcript compacted at the OLD LANE_BUDGET_TOKENS (2000) plus the default 4000-token
-# digest and the 40-pointer cap produced a 19,731-byte document -- the DIGEST (11,038 bytes, not
-# the kept-items budget) dominated, and the pointer list was the second-largest contributor
-# (5,879 bytes / 40 pointers). Retuned so the WHOLE document fits its share of
-# `LANE_INJECTION_MAX_BYTES` in the common case, not just the kept-items text. The same
-# transcript at the three numbers below (`LANE_BUDGET_TOKENS`, `LANE_DIGEST_TOKENS`,
-# `LANE_MAX_ELIDED_POINTERS`) produced ~4,216 bytes total -- `LANE_COMPACTED_MAX_BYTES` is the
-# backstop for a DIFFERENT transcript that still overflows this budget.
-LANE_BUDGET_TOKENS = 400
-# The default `--digest-tokens` (4000, jev_compact.py) alone produced an 11 KB digest -- larger
-# than the WHOLE injection budget. 500 tokens measured at ~1,314 bytes (header + digest).
-LANE_DIGEST_TOKENS = 500
+# Card 5 two-renderings (TRDD-RAEGS1D5): `LANE_BUDGET_TOKENS`/`LANE_DIGEST_TOKENS` are RETIRED
+# -- score once, render twice (`jev_compact.py compact`'s own docstring). `--out` (the keyed
+# handoff file on disk) now always gets the FULL card-3 budget and the FULL digest; shrinking
+# them here used to shrink `--out` too (the card 5 content-fit defect: "the keyed handoff FILE
+# on disk is the capped ~4.3 KB document"). Only the SEPARATE `--inject-out` rendering below is
+# capped, and its own kept-item budget "aims at the ceiling" -- the byte backstop
+# (`LANE_COMPACTED_MAX_BYTES`) is the guarantee, so no separate small token budget is needed for
+# it either.
 # `jev_compaction.py::compose`'s `max_elided_pointers` (default 40) was the single largest
 # line-count contributor once the digest was capped. 12 pointers measured at ~1,732 bytes --
-# still enough to name the highest-scoring elided items, far short of showing all 40.
+# still enough to name the highest-scoring elided items, far short of showing all 40. Applies
+# ONLY to the `--inject-out` rendering, never to `--out`.
 LANE_MAX_ELIDED_POINTERS = 12
-# The backstop forwarded to `jev_compaction.py compact --max-bytes` (via `run_compact`) -- see
-# `jev_compaction.py::compose`'s own docstring for the drop-oldest-kept-first / drop-lowest-
-# score-pointer-first / truncate-digest-last degrade order it applies once this is exceeded. Set
-# above the ~4,216-byte measured common case for headroom, but well under
-# `LANE_INJECTION_MAX_BYTES` so `external_clear.compose_handoff` (facts + this + the recent-turns
-# tail) still has room for the other two parts of its own single budget.
+# The backstop forwarded to `jev_compact.py compact --inject-max-bytes` (via `run_compact`) --
+# see `jev_compaction.py::compose`'s own docstring for the drop-oldest-kept-first / drop-lowest-
+# score-pointer-first / truncate-digest-last degrade order it applies once this is exceeded.
+# Well under `LANE_INJECTION_MAX_BYTES` so `external_clear.compose_handoff` (facts + this + the
+# recent-turns tail) still has room for the other two parts of its own single budget.
 LANE_COMPACTED_MAX_BYTES = 5000
 
 
@@ -330,7 +325,8 @@ def handle_nonzero_exit(
         stamp = read_probe_stamp() or {}
         reason = stamp.get("reason") or "unknown"
         age_s = time.time() - float(stamp.get("ts", time.time()))
-        retry_after = stamp.get("retry_after_s") if stamp.get("kind") == "rate_limited" else None
+        stamp_kind = stamp.get("kind")
+        retry_after = stamp.get("retry_after_s") if stamp_kind == "rate_limited" else None
         if retry_after is not None:
             record_finding(
                 sev="MEDIUM", code="JEV-RATE-LIMITED",
@@ -338,9 +334,15 @@ def handle_nonzero_exit(
                 f"{retry_after}s — fact-only context injected",
             )
             return
+        # Card 5 two-renderings (TRDD-RAEGS1D5, item 5): a `kind="unreachable"` decline (no HTTP
+        # response ever came back -- offline, DNS, TLS) is a DIFFERENT fact than a real
+        # `kind="unavailable"` outage (a 5xx response) -- saying "unavailable" for both erased
+        # that distinction right where a reader would look for it. Any other/missing kind still
+        # reads as the generic "unavailable" wording (defensive, per the stamp docstring above).
+        word = "unreachable" if stamp_kind == "unreachable" else "unavailable"
         record_finding(
             sev="LOW", code="JEV-COMPACT-DECLINED",
-            msg=f"[jev-compaction] declined: endpoint unavailable {fmt_age(age_s)} ago "
+            msg=f"[jev-compaction] declined: endpoint {word} {fmt_age(age_s)} ago "
             f"({reason}) — fact-only context injected",
         )
         return
@@ -422,7 +424,8 @@ def run_compact(
     plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
     heads_args: list[str], timeout: int = 120, budget_tokens: int | None = None,
     digest_tokens: int | None = None, max_elided_pointers: int | None = None,
-    max_bytes: int | None = None,
+    inject_out_path: Path | None = None, inject_max_bytes: int | None = None,
+    no_decline: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str] | None, bool]:
     """Exec `jev_compact.py compact` BY PATH (it is git-tracked 100755, own shebang runs it) and
     return `(proc, timed_out)`. 120s: jev's own client retries 3x with <=8s backoff on a 15s
@@ -430,11 +433,19 @@ def run_compact(
     is the outer bound (docs_dev/jev-card3c-brief.md C1). A `TimeoutExpired` is a bug exit here,
     never retried in-process -- retrying would risk landing past the hold's own deadline.
 
-    `budget_tokens`, `digest_tokens`, `max_elided_pointers`, `max_bytes`, each when given, are
-    forwarded as the matching `jev_compact.py compact` CLI flag (all optional there too --
-    unset keeps that CLI's own defaults). The automatic lane passes its own `LANE_*` constants
-    (card 5 content-fit, TRDD-RAEGS1D5) so the composed document fits `LANE_INJECTION_MAX_BYTES`
-    once assembled by `external_clear.compose_handoff`."""
+    `budget_tokens`/`digest_tokens`, when given, are forwarded as `--budget-tokens`/`--digest-
+    tokens` -- unset (the automatic lane's own default now, card 5 two-renderings) keeps
+    `jev_compact.py`'s own card-3 defaults, so `--out` (the keyed handoff file) always gets the
+    FULL document and digest, never shrunk by an injection budget.
+
+    `inject_out_path`/`max_elided_pointers`/`inject_max_bytes`, when given, are forwarded as
+    `--inject-out`/`--max-elided-pointers`/`--inject-max-bytes` -- a SECOND, capped rendering of
+    the SAME scored items, written alongside `--out` for a caller that needs to inject a
+    size-bounded companion document (the SessionStart hook) rather than the full one.
+
+    `no_decline`, when true, forwards `--no-decline` -- bypasses `jev_compact.py compact`'s own
+    early decline gate entirely (card 5 two-renderings, item 5). The automatic lane never sets
+    this; only an explicit compact-now request should."""
     cmd = [
         str(plugin_root / "scripts" / "jev_compact.py"), "compact",
         "--transcript", transcript, "--out", str(out_path),
@@ -446,8 +457,12 @@ def run_compact(
         cmd += ["--digest-tokens", str(digest_tokens)]
     if max_elided_pointers is not None:
         cmd += ["--max-elided-pointers", str(max_elided_pointers)]
-    if max_bytes is not None:
-        cmd += ["--max-bytes", str(max_bytes)]
+    if inject_out_path is not None:
+        cmd += ["--inject-out", str(inject_out_path)]
+    if inject_max_bytes is not None:
+        cmd += ["--inject-max-bytes", str(inject_max_bytes)]
+    if no_decline:
+        cmd += ["--no-decline"]
     try:
         proc = subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
     except subprocess.TimeoutExpired:

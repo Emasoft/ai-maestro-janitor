@@ -445,6 +445,7 @@ def compose(
     header: dict[str, Any],
     max_elided_pointers: int = _MAX_ELIDED_POINTERS,
     max_bytes: int | None = None,
+    full_context_path: str | None = None,
 ) -> str:
     """Assemble the final injected document: header, kept items verbatim, then pointers.
 
@@ -452,6 +453,13 @@ def compose(
     dict (`{"tokens": int, "cost": float}` from the Jev response). The transcript path is
     written out exactly twice by design -- once in the header, once in the fixed trailing
     "expand with" line -- never inside an individual pointer.
+
+    `full_context_path`, when given (card 5 two-renderings, TRDD-RAEGS1D5): this render is a
+    CAPPED companion to a separate, uncapped `compose()` call over the SAME `items`/`scores`
+    ("score once, render twice" -- the caller never re-scores). One extra line is appended,
+    right before the fixed "pointers expand with" trailer: "Full compacted context: <path> --
+    Read it for everything not shown here." -- the capped rendering's own way back to
+    everything the byte backstop below had to drop.
 
     `max_bytes`, when given, is a BACKSTOP (card 5 content-fit, TRDD-RAEGS1D5): the caller is
     expected to size `budget_tokens` / the digest / `max_elided_pointers` so the document
@@ -556,6 +564,15 @@ def compose(
                 f"[[elided: {hidden} more items not listed -- list/search them with: uv run "
                 '--script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript '
                 f'{transcript_path} --list --grep TEXT]]'
+            )
+
+        if full_context_path:
+            # Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
+            # uncapped document composed from the SAME items/scores -- see the docstring.
+            lines.append("")
+            lines.append(
+                f"Full compacted context: {full_context_path} -- Read it for everything not "
+                "shown here."
             )
 
         lines.append("")
