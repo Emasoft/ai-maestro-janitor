@@ -144,8 +144,13 @@ fixes, that stale sha makes the second call refuse every time.
    and a live write to the TARGET page could stale another chore's open transaction on
    it. Check before writing:
 
+   Compute `sha` FIRST, from the page's current bytes, THEN read the page (the dry-run
+   itself reads it live) and decide from that read — never decide first and checksum
+   after, or a concurrent write between the two lands unnoticed:
+
    ```bash
    sha=$({ sha256sum <this page> 2>/dev/null || shasum -a 256 <this page>; } | cut -d' ' -f1)
+   [ -n "$sha" ] || { echo "unreadable: <this page> — report and skip its verb fixes"; }
    memgrep reference-mem-topic --page <this page> --to <target page> --dry-run
    #   → "would link <this page> <-> <target page> (page {gains a link|unchanged}, to {gains a link|unchanged})"
    ```
@@ -162,9 +167,15 @@ fixes, that stale sha makes the second call refuse every time.
      expect most of them to end up reported, not auto-fixed, here. That is IRON RULE 3
      (single-page) working as intended, not a malfunction.
 
-2. **The atom `desc:` backfill:**
-   `sha=$({ sha256sum <page> 2>/dev/null || shasum -a 256 <page>; } | cut -d' ' -f1); memgrep update-mem-atom --page <page>
-   --atom <id> --desc "<text>" --base-sha256 "$sha"`.
+2. **The atom `desc:` backfill.** Repeat the same pair — sha first, then re-read the
+   page to confirm the atom still needs it — even if verb 1 just ran; its write changed
+   the page's bytes, so step 1's `sha` is now stale for this call:
+
+   ```bash
+   sha=$({ sha256sum <page> 2>/dev/null || shasum -a 256 <page>; } | cut -d' ' -f1)
+   [ -n "$sha" ] || { echo "unreadable: <page> — report and skip its verb fixes"; }
+   memgrep update-mem-atom --page <page> --atom <id> --desc "<text>" --base-sha256 "$sha"
+   ```
 
 **On refusal** (stale sha, or any other error) from either verb: report the refusal and
 continue with whatever other fixes the page still needs — a refused pre-transaction fix
