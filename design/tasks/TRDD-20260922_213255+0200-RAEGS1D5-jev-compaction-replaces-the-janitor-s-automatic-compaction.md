@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-23T22:53:46+0200
+updated: 2026-09-23T23:59:11+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -118,3 +118,9 @@ No PRRD rule applies here (relevant-rules field left empty): checked prrdgrep's 
 - Owner: "llm-ext is the fallback in case jev fails" — confirms decision 3.
 - Owner: "open an issue on the llm-externalizer repo (it should be Emasoft/llm-externalizer or Emasoft/llm-externalizer-plugin) and report all issues. but then focus on jev compacting and make it work" — filed Emasoft/llm-externalizer-plugin#15 (llm-ext session-summary spent 941 s on permanent 403s from harness-restricted free models and produced nothing, so the fallback cannot work on this machine until that is fixed).
 - Owner: "wait to complete all before publishing." — Release scope decided: no publish until the Jev rework cards (incl. 6 segmentation, 7 decision log), the memgrep sole-writer card XI10BA5D and the heartbeat-progress card I63GQJTK are all done, then the final gate and the three real-session compactions pass on the final tree.
+
+## Publish acceptance criteria (reviews of d4fa7685 and 23713d53, 2026-09-23)
+
+- Measured on the FINAL tree, in the FINAL SessionStart hook stdout (not X.inject.md), on the 4.7 / 49 / 258 MB transcripts: hook stdout under 10,000 bytes and not cut by the compose_handoff byte slice; at least 3 non-owner items inline; the newest owner message present; wall time under 60 s (sync lane).
+- In the FULL copy: at least 5 non-owner items; every decision-passing owner item inline or pointed to (0 absent).
+- Corrections: the d4fa7685 message says its numbers were measured, but they came from the pre-review version; the 23713d53 message says LANE_COMPACTED_MAX_BYTES 6500 came "from the measured room", but 6500 is ABOVE the measured room (5,250 / 6,442 / 5,286 B), so the summary was always sliced (being fixed: the room is computed first and passed as --inject-max-bytes). _OWNER_ITEM_TOKEN_CAP = 500 is unmeasured.
