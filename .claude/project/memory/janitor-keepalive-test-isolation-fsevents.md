@@ -167,7 +167,7 @@ date before concluding anything.
 ## See also
 
 - [[janitor-architecture]] — the L0–L3 immortality layers this component lives in.
-- [[macos-keychain]] — the 2026-07-09 keychain-flood RECURRENCE: this keepalive had STAGED the
+- [[macos-keychain-incidents]] — the 2026-07-09 keychain-flood RECURRENCE: this keepalive had STAGED the
   pre-fix 0.31.0 flooder into DATA and kept relaunching it, so a published+cached fix never
   reached the running daemon until the staged closure was force-restaged + byte-verified (that
   page's root-cause #5 / lesson `[^2]`).

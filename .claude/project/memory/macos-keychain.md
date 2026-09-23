@@ -1,14 +1,15 @@
 ---
 name: macos-keychain
-description: "macOS keychain dialog opened hundreds of times / 'Security wants to use the login keychain' with no Always Allow button / cannot type — a keychain prompt FLOOD, often right after rotating/re-logging a Claude account. Prompts KEEP coming even after I paused the rotator / iCloudNotificationAgent is ALSO asking for the login keychain / I typed my password (or ran `security unlock-keychain`) and it is NOT sticking / how do I stop the keychain popups and keep them from coming back. The safe `security` protocol every keychain interaction MUST follow so this is structurally impossible: single choke-point, hard timeout, headless fail-fast, one-shot denied-latch, opt-in gate on EVERY keychain-reading path (detectors included), temp-keychain test isolation; plus the user-side fix for a LOCKED login keychain: `security unlock-keychain` + `set-keychain-settings` no-auto-lock (in a real terminal — the Claude lean-ctx wrapper blocks `security`). / all Claude agents on the machine suddenly report Not logged in / security list-keychains says parameters not valid / does /login fix a dead security session / what is a dangling keychain entry from dotenclave unlock / why does the search list get replaced in my shell rc / SecKeychainItemSetAccess prompts on every write / add-generic-password -U with -A or -T on an existing item hangs / why did rotation die overnight after one transient keychain error / what is the denied-latch TTL half-open circuit breaker / does pausing the rotator opt-in stop every detector from reading the keychain / why did the flood come back days after I published the fix / what is a staged launchd keepalive closure and why does it revive the old flooder / keychain-health detector reachability check every heartbeat"
+description: "macOS keychain dialog opened hundreds of times / 'Security wants to use the login keychain' with no Always Allow button / cannot type — a keychain prompt FLOOD, often right after rotating/re-logging a Claude account. Prompts KEEP coming even after I paused the rotator / iCloudNotificationAgent is ALSO asking for the login keychain / I typed my password (or ran `security unlock-keychain`) and it is NOT sticking / how do I stop the keychain popups and keep them from coming back. The safe `security` protocol every keychain interaction MUST follow so this is structurally impossible: single choke-point, hard timeout, headless fail-fast, one-shot denied-latch, opt-in gate on EVERY keychain-reading path (detectors included), temp-keychain test isolation; plus the user-side fix for a LOCKED login keychain: `security unlock-keychain` + `set-keychain-settings` no-auto-lock (in a real terminal — the Claude lean-ctx wrapper blocks `security`). / all Claude agents on the machine suddenly report Not logged in / security list-keychains says parameters not valid / does /login fix a dead security session / what is a dangling keychain entry from dotenclave unlock / why does the search list get replaced in my shell rc / SecKeychainItemSetAccess prompts on every write / add-generic-password -U with -A or -T on an existing item hangs / why did rotation die overnight after one transient keychain error / what is the denied-latch TTL half-open circuit breaker / does pausing the rotator opt-in stop every detector from reading the keychain / why did the flood come back days after I published the fix / what is a staged launchd keepalive closure and why does it revive the old flooder / keychain-health detector reachability check every heartbeat / where is the write-side ACL prompt fix / where is the dead security session gotcha / where is the keychain testing discipline"
 ocd: 2026-07-09
-lmd: 2026-09-22
+lmd: 2026-09-23
 metadata:
   node_type: memory
   type: reference
   tier: aspect
   functionality: keychain-safety
 publish-globally: false
+split-lineage: 633457257a6c4a5882f1ed46b06af84a
 ---
 
 ^1TJAEIDZ [desc:"The macOS keychain is a shared ACL-guarded GUI-prompting store; items keyed by service/account, ACLs gate secret reads, and why a uv-cached python path never earns a durable Always-Allow.", keywords:"keychain_model login_keychain_default search_list generic_password_item service_account_label acl_gates_secret_read always_allow_never_sticks uv_cached_python_path_changes_every_version claude_code_credentials_label rotator_slot_label security_wants_to_use_login_keychain"]
@@ -34,183 +35,17 @@ touches the keychain (see `## Applies to`).
   uv-cached python (`~/.cache/uv/builds-*/bin/python`, path changes every version) NEVER gets
   a durable Always-Allow, so it **re-prompts forever**.
 
-## Gotcha 3 — the ACL-PROMPT FLOOD (severity: locks the user out; 2026-07-09 incident)
+This page is a MAP — the safe protocol at a glance plus where the detail lives:
 
-## Gotcha 3b — the WRITE-side ACL prompt (severity: kills rotation; 2026-07-15 incident)
-
-^3KMR5QAX [desc: "security add-generic-password -U with -A/-T on an EXISTING item forces SecKeychainItemSetAccess, which prompts every time and hangs unattended rotation (TRDD-EQJPPZ2L).", keywords: write_side_acl_prompt add_generic_password_dash_U seckeychainitemsetaccess_prompts_every_time user_canceled_the_operation rotation_death_hang any_acl_flag_on_existing_item data_update_still_succeeds unattended_prompt_hangs_denied_latch distinct_from_gotcha_3_read_prompt trdd_eqjppz2l, lmd: 2026-09-22]
-Gotcha 3 is about a READ (`-w`) prompting. There is a DISTINCT write-side prompt that was the real
-recurring rotation-death, nailed 2026-07-15 (TRDD-EQJPPZ2L): `security add-generic-password -U` with
-**ANY ACL flag (`-A` OR `-T`) on an item that ALREADY EXISTS** forces `SecKeychainItemSetAccess`
-(re-applying the item's ACL), a **privileged op that PROMPTS every single time** (error signature:
-`SecKeychainItemSetAccess: User canceled the operation`). The item's DATA update still succeeds — only
-the ACL re-set prompts. Unattended, that prompt hangs → the 5s timeout trips the denied-latch →
-rotation dark. [^6]
-
-
-^ATOM-UE0X-XYJF [desc: "Proven fix: set the ACL only at CREATE; write data-only (no -A/-T) on an existing item, probing existence first. Superseded fix (fa46a49, pinning -A) hit the identical SetAccess prompt.", keywords: proven_fix_set_acl_only_at_create data_only_update_no_acl_flag probe_existence_first_find_generic_password set_acl_equals_not_exists throwaway_keychain_timing_proof fa46a49_wrong_fix dash_A_on_existing_item_same_prompt dash_T_on_update_not_harmless superseded_wrong_fix only_no_acl_flag_on_update_is_silent, ocd: 2026-09-22, lmd: 2026-09-22]
-
-**The proven fix:** set the ACL **only at CREATE**; on an EXISTING item write **data-only — NO
-`-A`/`-T`**. The write path probes existence first with a silent attribute-only
-`find-generic-password` (no `-w`, never touches the secret, never prompts) and sets `set_acl = not
-exists`. New items are born with their ACL; every later update is a silent data-only `-U`. Proven on a
-throwaway keychain with `time` (create-with-ACL=silent · update-with-`-A`/`-T`=HANGS on the SetAccess
-prompt · update-no-flag=silent) AND end-to-end on the real login keychain.[^6]
-
-**Superseded wrong fix:** commit `fa46a49` pinned `-A` on EVERY write believing `-A`-on-`-U` was a
-harmless no-op that would stop the `-T` re-prompt. It was the IDENTICAL failure mode — `-A` on an
-existing item triggers the same SetAccess prompt. The earlier belief that `-T`-on-`-U` "keeps the old
-ACL harmlessly" was also wrong. Only NO-ACL-flag-on-update is silent.
-
-## The SAFE KEYCHAIN PROTOCOL (mandatory for every `security` interaction)
-
-^14S62JV6 [desc: "safe_storage.py protocol items 1-2: the denied-latch is a self-healing TTL circuit breaker (CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S); a hard subprocess timeout on every security call so it never hangs.", keywords: safe_storage_choke_point denied_latch_ttl_circuit_breaker hard_timeout_on_subprocess claude_keychain_latch_cooldown_s half_open_probe_recovery self_perpetuating_latch_bug clear_keychain_latch_command cli_timeout_s_setting cooldown_le_0_restores_old_behaviour trdd_eqjppz2l, lmd: 2026-09-22]
-Route EVERY keychain read/write/delete through the ONE choke-point
-(`scripts/oauth_rotator/safe_storage.py`) — no ad-hoc `subprocess.run(["security", …])`
-anywhere else. The choke-point enforces, in order:
-
-1. **Denied-latch check FIRST — now a self-healing TTL circuit breaker.** A persistent
-   `keychain-denied` flag (global-state dir): if set AND younger than
-   `CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S` (default 600s), return "denied" WITHOUT spawning
-   `security`. Guarantees **≤1 prompt** per cooldown, machine-wide. Once older than the cooldown,
-   ONE call is let through as a **half-open probe** (the latch is re-stamped first so concurrent
-   callers stay closed — ≤1 probe per cooldown); a silent success CLEARS the latch (recovered), a
-   re-denial re-stamps and backs off another cooldown. WHY the change (2026-07-15, TRDD-EQJPPZ2L):
-   the old latch was **self-perpetuating** — a latched `run_security` short-circuits every op, so
-   nothing could ever succeed to clear it, and ONE transient (a momentary lock, a hung read during
-   a user `/login`) killed rotation **forever** until a human ran `clear-keychain-latch`. The
-   breaker turns "dark forever" into "dark ≤ one cooldown". `cooldown<=0` restores the old
-   permanent-latch behaviour.[^7]
-2. **Hard timeout** on the subprocess (`_CLI_TIMEOUT_S`). A `security` call blocked on a
-   prompt must time out, never hang.
-
-^ATOM-HVTS-0SPZ [desc: "safe_storage.py protocol items 3-7: headless fail-fast, set-latch-and-stop on denial, temp-keychain test scope, prefer -T-accessible mirrors, never poll the keychain in a tight loop.", keywords: headless_fail_fast_never_prompt janitor_rotator_headless_env_var livebak_mirror_fallback acl_denied_set_latch_and_log_once do_not_retry_on_denial temp_keychain_test_isolation janitor_rotator_keychain_env_var prefer_T_accessible_mirrors never_poll_keychain_in_tight_loop read_once_cache_backoff security_dash_w_read_on_routine_path never_w_read_liveness_check, ocd: 2026-09-22, lmd: 2026-09-22]
-3. **Headless / fail-fast — NEVER prompt on a routine path.** A liveness/presence check must
-   not `-w`-read an ACL-restricted item. Use the headless primitive
-   (`JANITOR_ROTATOR_HEADLESS` → `_primary_secret_read_permitted` / `_read_primary_macos_keychain`):
-   skip the `-w` primary read, degrade to the `-T`-accessible **`-livebak` mirror** or `None`.
-   Headless is the DEFAULT for daemon / detector / tick paths.
-4. **On ACL-denied / timeout / `errSecAuthFailed`:** SET the denied-latch + log ONE
-   actionable line ("re-grant keychain ACL, then clear the latch"). Do not retry.
-5. **Scope lever** (`keychain_scope_args()` / `JANITOR_ROTATOR_KEYCHAIN`): tests hit a REAL
-   **temp** keychain (`security create-keychain`), never the login keychain. UNSET in
-   production → argv byte-identical → login keychain exactly as before.
-6. **Prefer `-T`-accessible mirrors over ACL-restricted primaries.** Create items with
-   `-T /usr/bin/security` (or the reader binary) so routine reads don't prompt; read the
-   rotator's own mirror, not Claude's Claude-only primary.
-7. **Never poll a keychain item in a tight loop.** Read once, cache, re-read only on a real
-   auth failure with backoff.
-
-## Gotcha 4 — the DEAD SECURITY SESSION (severity: fleet-down; 2026-07-12 incident)
-
-^45YMC3RE [desc: "Symptom: EVERY Claude agent reports Not logged in, /login fixes nothing. Cause: the per-session search list dies when securityd recycles a session; dotenclave unlock leaves a dangling entry.", keywords: not_logged_in_fleet_wide dead_security_session parameters_not_valid_error securityd_session_dies_and_is_inherited per_security_session_search_list dotenclave_unlock_replaces_search_list dangling_keychain_entry_empty_string login_does_not_fix_this_class_of_failure credential_was_never_the_problem seckeychaincopysearchlist_error, lmd: 2026-09-22]
-**Symptom:** EVERY Claude agent on the machine reports `Not logged in`, all at once. New
-`claude` processes fail; ones started earlier keep working (they hold a token in memory).
-`/login` succeeds and **changes nothing**. The keychain item is present, unmodified, and
-readable *from a normal shell*.
-
-**Root cause:** the keychain search list is **per-security-session**, and a security session
-can DIE. A **long-lived terminal/tmux server** (`ppid 1`, started hours ago) holds a securityd
-connection; a **securityd recycle** kills it. Every pane that server forks inherits the dead
-session, and in it the Keychain Services API fails **outright** — not with a clean "denied",
-but with a *parameter* error:
-
-```
-security list-keychains   →  SecKeychainCopySearchList: parameters not valid
-security show-keychain-info →  SecKeychainCopySettings: parameters not valid
-```
-
-So Claude Code in those panes cannot read its OAuth item at all. **The credential was never
-the problem — REACHABILITY was.** The trigger here: an unguarded `dotenclave unlock` in
-`~/.zshrc` runs in every interactive shell and registers its custom keychain via
-`security list-keychains -s`, which **REPLACES** the search list — leaving a **dangling entry**
-(a registered keychain whose file is gone, seen as a bare `""`). One dead entry poisons EVERY
-lookup in that session. [^5]
-
-
-^ATOM-MW3U-I6J7 [desc: "Fix: recreate the terminal/tmux server, verify with security list-keychains in a new pane. keychain-health runs every heartbeat INSIDE the agent's security session, so it sees the dead session.", keywords: recreate_terminal_tmux_server verify_with_security_list_keychains guard_shell_rc_hook keychain_health_detector_every_heartbeat per_session_heartbeat_sees_what_agent_sees dangling_entry_high_severity unfindable_credential_critical dead_session_critical_login_wont_help the_fruit_janitor_guardian_of_fleet panes_inherit_dead_session_cannot_repair, ocd: 2026-09-22, lmd: 2026-09-22]
-**Fix:** recreate the terminal/tmux server (its panes inherit the dead session; nothing inside
-it can be repaired). Verify by running `security list-keychains` inside a NEW pane. Guard the
-shell-rc hook so it cannot leave a dangling entry.
-
-**THE FRUIT (this is why the gotcha is here):** the janitor is the guardian of the fleet, so
-this must never again go undetected — the **`keychain-health` detector** now runs every
-heartbeat. It is uniquely able to catch it: the per-session heartbeat executes INSIDE the same
-security session as the agent, so it sees exactly what the agent will see. It reports the dead
-session (CRITICAL, *stating that `/login` will not help*), the dangling entry (HIGH — the
-cause, before anything visibly breaks), and an unfindable credential (CRITICAL).
-
-## Gotcha 1 & 2 — storage corruption (see the sibling note)
-
-^C2VJQR0E [desc:"Gotcha 1 (stdin 128-byte getpass truncation) and Gotcha 2 (hex-dump of non-printable values) live on the sibling reference_macos_security_keychain_gotchas page, invisible to a mocked keychain.", keywords:"stdin_128_byte_getpass_truncation hex_dump_of_non_printable_values pass_value_on_argv_not_stdin base64_wrap_at_store_retrieve_boundary sibling_gotchas_page_reference mocked_keychain_hides_this_bug real_round_trip_test_only_catches_it"]
-`[[reference_macos_security_keychain_gotchas]]` — the stdin **128-byte getpass truncation**
-(pass the value on argv, not stdin) and the **hex-dump of non-printable values**
-(base64-wrap at the store/retrieve boundary). Both invisible to a mocked keychain; caught
-only by REAL round-trip tests.
-
-## Testing keychain code (no-mocks, no-prompt)
-
-^AGP6F3R9 [desc:"Test keychain code against a REAL but ISOLATED throwaway keychain, never a mock or the login keychain; autouse fixture creates/deletes it, real_state tests opt out and skip on prompt.", keywords:"real_isolated_keychain_no_mocks throwaway_keychain_autouse_fixture janitor_rotator_keychain_env_var teardown_deletes_throwaway_keychain real_state_marked_tests_opt_out skip_when_keychain_is_prompting prove_timeout_is_honored prove_latch_trips_after_one_denial prove_headless_skips_primary_read zero_login_keychain_access_assert"]
-Use a REAL but ISOLATED keychain — never a mock, never the login keychain. The
-session-default autouse fixture `create-keychain`s a throwaway, points
-`JANITOR_ROTATOR_KEYCHAIN` at it, and deletes it on teardown; `real_state`-marked tests opt
-out AND are skipped when the real keychain is prompting. Prove: timeout honored, latch trips
-after one denial, headless skips the `-w` primary, zero login-keychain access (assert no
-`security … login.keychain` proc via a `ps` before/after guard).
-
-
-^ATOM-HDUR-IWRS [desc: "Keychain dialog floods after rotating a Claude account: security -w reads the secret, the fresh ACL excludes the caller (GUI prompt), and the pre-fix unbounded read hangs the daemon loop forever.", keywords: keychain_dialog_hundreds_of_times acl_prompt_flood cannot_type_modal_steals_focus rotate_account_recreates_credentials_acl unbounded_read_hangs_forever daemon_never_rechecks_stop_flag security_find_generic_password_dash_w_reads_secret rotating_account_invalidates_slot_acl one_prompt_per_tick_times_n_accounts fresh_acl_excludes_rotator_reader_binary, ocd: 2026-09-22, lmd: 2026-09-22]
-
-**Symptom:** the keychain dialog opens hundreds of times, no Always-Allow sticks, the user
-cannot even type (a modal steals focus each time). Frequently triggered **right after the
-user rotates / re-logs a Claude account**.
-
-**Root cause chain:**
-1. `security find-generic-password -s "Claude Code-rotator-slot" -a <acct> -w` reads the
-   SECRET (`-w`) of an item whose ACL does not include the caller → **GUI prompt**.
-2. Rotating the account **re-creates** `Claude Code-credentials` (and can invalidate the slot
-   ACLs) with a fresh ACL that excludes the rotator's reader binary → every read now prompts.
-3. Pre-fix the read was **unbounded** → it HANGS on the modal; the daemon loop that fires it
-   never re-checks its stop flag → it **spins forever**, one prompt per tick × N accounts ×
-   every heartbeat × N sessions = a flood.
-
-
-^ATOM-SWCN-6GGC [desc: "A crash-looping daemon falls back to a stale cached flooder; the L0 OS-keepalive stages its own old closure into DATA/scripts, independent of the cache — why the flood recurred for days.", keywords: crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon staged_closure_revives_old_flooder l0_launchd_keepalive_stages_closure byte_verify_staged_closure_against_new_version cleared_kill_switch_revives_staged_closure daemon_crashloop_stale_cached_version fix_not_deployed_until_restaged pre_fix_0310_flooder_staged data_scripts_directory flood_recurred_after_fix_published fix_published_but_bug_persists, ocd: 2026-09-22, lmd: 2026-09-22]
-4. Compounded by the **crash-loop → quarantine → old-version fallback**: when the current
-   version crash-loops (see the daemon-crashloop TRDD) the heartbeat runs a **stale cached**
-   **version** that lacks the timeout/headless fixes, so even a "fixed" tree keeps flooding from
-   the fallback.
-5. **The OS-keepalive STAGES a stale daemon** — the deepest variant, why the flood RECURRED for
-   days after the fix was published: the L0 launchd keepalive copies a daemon closure into
-   `${DATA}/scripts/` and runs THAT, not the cache. It had staged the pre-fix **0.31.0** flooder
-   and kept relaunching it. Publishing + caching + clearing the kill-switch does NOT help — a
-   cleared kill-switch **revives whatever is STAGED**. The fix is not "deployed" until the STAGED
-   closure is force-restaged and byte-verified against the new version.[^2] [^3]
-
-^ATOM-8FBK-T0XY [desc: "3 heartbeat detectors (window-burn-rate, oauth-login-needed, oauth-cookie-reminder) read the keychain regardless of the rotator opt-in flag — fixed v0.35.1 by gating on supervisor.opt_in_present.", keywords: detectors_read_independent_of_rotator_opt_in three_heartbeat_detectors_bypass_opt_in window_burn_rate_reads_keychain oauth_login_needed_reads_keychain oauth_cookie_reminder_reads_keychain opt_in_flag_not_honored_by_detectors supervisor_opt_in_present_gate keychain_opt_in_ok_short_circuits pausing_rotator_did_not_stop_keychain_access fixed_v0351, ocd: 2026-09-22, lmd: 2026-09-22]
-
-6. **Detectors read the keychain INDEPENDENT of the rotator opt-in** — why the flood came back
-   even with the rotator "paused". THREE heartbeat detectors read account tokens from the
-   keychain but gated on rotator-home PRESENCE / their own ENABLED flag, NOT the `opt-in.flag`:
-   `window-burn-rate` (`rotator_usage.accounts_usage`) and `oauth-login-needed` +
-   `oauth-cookie-reminder` (`supervisor._slot_facts`). So pausing the rotator opt-in did NOT stop
-   keychain access. Fix (v0.35.1): gate at the two shared read entry points on
-   `supervisor.opt_in_present(root)` — `_slot_facts` returns `()` and `window-burn-rate`'s
-   `_keychain_opt_in_ok()` short-circuits — so "opt-in OFF" now truly means zero keychain access
-   for automatic detectors (the user-invoked `/janitor-token-report --live` is deliberately
-   exempt).
-
-
-^ATOM-HG7R-GOOU [desc: "Stopping the 2026-07-09 flood: kill hung readers by PID, set the kill-switch in both state dirs, boot the launchd keepalive, killall SecurityAgent — a second flooder (AgentLens) also existed.", keywords: kill_hung_reader_by_pid killall_securityagent kill_switch_both_canonical_and_legacy_dirs sigstop_does_not_stop_flood dismiss_queued_dialog_backlog two_independent_flooders_same_night boot_out_launchd_keepalive trace_security_parent_process diagnose_actual_reader second_flooder_agentlens_tool, ocd: 2026-09-22, lmd: 2026-09-22]
-
-**How it was stopped (2026-07-09):** kill the hung reader daemons **by PID** (they never
-honor the kill-switch mid-hang), set the machine-wide **kill-switch** (both canonical +
-legacy global-state dirs — `ensure_daemon_running` checks it in every version, so no
-respawn), boot out the launchd keepalive, and `killall SecurityAgent` to dismiss the queued
-dialog backlog (freezing a process does NOT dismiss dialogs already handed to SecurityAgent).
-Note a **second, independent** flooder existed the same night — the user's *AgentLens* tool
-polling `Claude Code-credentials`; diagnose the ACTUAL reader by tracing
-`security → parent → …` before blaming any one component. [^1]
+- [[macos-keychain-write-protocol]] — the WRITE-side ACL prompt gotcha (3b) and the mandatory
+  SAFE KEYCHAIN PROTOCOL every `security` interaction must follow (denied-latch circuit
+  breaker, hard timeout, headless fail-fast, scope lever, `-T`-accessible mirrors).
+- [[macos-keychain-incidents]] — the two fleet-down incidents this page's protocol was built
+  from: Gotcha 3 (the ACL-PROMPT FLOOD after rotating an account) and Gotcha 4 (the DEAD
+  SECURITY SESSION, `Not logged in` fleet-wide), the full `## Governed by` / `## Applies to`
+  edge list, and the superseded pre-consolidation write-up.
+- [[macos-keychain-testing]] — the sibling storage-corruption gotchas (1 & 2) and the no-mocks,
+  no-prompt discipline for testing keychain code.
 
 ## Governed by
 
@@ -222,168 +57,19 @@ polling `Claude Code-credentials`; diagnose the ACTUAL reader by tracing
 ## Applies to
 
 - The rotator's slot/mirror keychain layout is covered by a LOCAL-scope note, deliberately NOT
-  linked from here: this page is pushed, so naming a machine-private page would publish that name.
-  The relationship belongs on that note's own `## Governed by`, which may legally point UP.
-- `[[oauth-rotation-renew-reauth-keychain]]` — the ROTATE→RENEW→REAUTH component that reads these items.
-- `[[reference_macos_security_keychain_gotchas]]` — the storage-corruption sibling (gotchas 1 & 2).
-- [[janitor-keepalive-test-isolation-fsevents]] — the OS-keepalive staging mechanism whose STALE
-  staged closure kept the pre-fix flooder alive (root-cause #5 above / lesson `[^2]`). [^8]
-
+  linked from here: this page is pushed, so naming a machine-private page would publish that
+  name. The relationship belongs on that note's own `## Governed by`, which may legally point UP.
+- `[[oauth-rotation-renew-reauth-keychain]]` — the ROTATE→RENEW→REAUTH component that reads
+  these items.
+- `[[reference_macos_security_keychain_gotchas]]` — the storage-corruption sibling (gotchas 1
+  & 2); see also [[macos-keychain-testing]].
+- `[[janitor-keepalive-test-isolation-fsevents]]` — the OS-keepalive staging mechanism; see
+  [[macos-keychain-incidents]] for the root-cause detail of the STALE staged closure that kept
+  the pre-fix flooder alive, and the full byte-for-byte `## Applies to` edge list.
 
 ## Superseded
 
 
-^K6DGL5HD [desc:"Keychain dialog opens hundreds of times after rotating a Claude account: an unbounded -w read hangs on the ACL prompt; the daemon never re-checks its stop flag, so the flood continues.", keywords:"keychain_dialog_hundreds_of_times acl_prompt_flood cannot_type_modal_steals_focus rotate_account_recreates_credentials_acl unbounded_read_hangs_forever crash_loop_stale_version_fallback os_keepalive_stages_stale_daemon detectors_read_independent_of_rotator_opt_in kill_hung_reader_by_pid killall_securityagent two_independent_flooders_same_night", status: superseded, superseded-by: ATOM-HDUR-IWRS]
-**Symptom:** the keychain dialog opens hundreds of times, no Always-Allow sticks, the user
-cannot even type (a modal steals focus each time). Frequently triggered **right after the
-user rotates / re-logs a Claude account**.
-
-**Root cause chain:**
-1. `security find-generic-password -s "Claude Code-rotator-slot" -a <acct> -w` reads the
-   SECRET (`-w`) of an item whose ACL does not include the caller → **GUI prompt**.
-2. Rotating the account **re-creates** `Claude Code-credentials` (and can invalidate the slot
-   ACLs) with a fresh ACL that excludes the rotator's reader binary → every read now prompts.
-3. Pre-fix the read was **unbounded** → it HANGS on the modal; the daemon loop that fires it
-   never re-checks its stop flag → it **spins forever**, one prompt per tick × N accounts ×
-   every heartbeat × N sessions = a flood.
-4. Compounded by the **crash-loop → quarantine → old-version fallback**: when the current
-   version crash-loops (see the daemon-crashloop TRDD) the heartbeat runs a **stale cached
-   version** that lacks the timeout/headless fixes, so even a "fixed" tree keeps flooding from
-   the fallback.
-5. **The OS-keepalive STAGES a stale daemon** — the deepest variant, why the flood RECURRED for
-   days after the fix was published: the L0 launchd keepalive copies a daemon closure into
-   `${DATA}/scripts/` and runs THAT, not the cache. It had staged the pre-fix **0.31.0** flooder
-   and kept relaunching it. Publishing + caching + clearing the kill-switch does NOT help — a
-   cleared kill-switch **revives whatever is STAGED**. The fix is not "deployed" until the STAGED
-   closure is force-restaged and byte-verified against the new version.[^2]
-6. **Detectors read the keychain INDEPENDENT of the rotator opt-in** — why the flood came back
-   even with the rotator "paused". THREE heartbeat detectors read account tokens from the
-   keychain but gated on rotator-home PRESENCE / their own ENABLED flag, NOT the `opt-in.flag`:
-   `window-burn-rate` (`rotator_usage.accounts_usage`) and `oauth-login-needed` +
-   `oauth-cookie-reminder` (`supervisor._slot_facts`). So pausing the rotator opt-in did NOT stop
-   keychain access. Fix (v0.35.1): gate at the two shared read entry points on
-   `supervisor.opt_in_present(root)` — `_slot_facts` returns `()` and `window-burn-rate`'s
-   `_keychain_opt_in_ok()` short-circuits — so "opt-in OFF" now truly means zero keychain access
-   for automatic detectors (the user-invoked `/janitor-token-report --live` is deliberately
-   exempt).[^3]
-
-**How it was stopped (2026-07-09):** kill the hung reader daemons **by PID** (they never
-honor the kill-switch mid-hang), set the machine-wide **kill-switch** (both canonical +
-legacy global-state dirs — `ensure_daemon_running` checks it in every version, so no
-respawn), boot out the launchd keepalive, and `killall SecurityAgent` to dismiss the queued
-dialog backlog (freezing a process does NOT dismiss dialogs already handed to SecurityAgent).
-Note a **second, independent** flooder existed the same night — the user's *AgentLens* tool
-polling `Claude Code-credentials`; diagnose the ACTUAL reader by tracing
-`security → parent → …` before blaming any one component. [^1]
 ## Notes and lessons learned
 
-[^1]: [id:ATOM-MG06-0007, status:valid, keywords:"sigstop_does_not_stop_keychain_flood kill_by_pid_and_neutralize_respawner two_independent_flooders", ocd:2026-07-09, lmd:2026-07-09] 2026-07-09 flood incident. Lessons: (a) SIGSTOP a hung
-  reader does NOT stop the flood — freezing a process leaves the SecurityAgent dialog backlog
-  on screen AND a process manager (PM2/nodemon/heartbeat) respawns it; kill BY PID + neutralize
-  the respawner + `killall SecurityAgent`. (b) The kill-switch stops the daemon SPAWN
-  (`ensure_daemon_running` honors it in every version) but NOT a reader already **hung** on the
-  prompt (it never re-checks between hung reads) — kill those by PID. (c) Diagnose the ACTUAL
-  reader by tracing `security → parent` from a `ps` snapshot; do NOT assume it's one component
-  (that night there were TWO independent flooders — the janitor rotator AND the user's AgentLens).
-  (d) The real path was `plugins/cache/ai-maestro-**plugins**/ai-maestro-janitor/…`; a kill
-  pattern of `cache/ai-maestro-janitor` missed the looping parents and killed only the leaves.
-  (e) Fixing the daemon crash-loop UNMASKS the rotator prompt — a healthy daemon reaches the
-  tick that a crashing one never did; so the headless read-path fix must ship together with the
-  crash-loop fix, never after.
 
-[^2]: [id:ATOM-MG06-0008, status:valid, keywords:"keepalive_staged_prefix_flooder restage_and_byte_verify_closure clearing_killswitch_revives_staged", ocd:2026-07-09, lmd:2026-07-09] 2026-07-09, the RECURRENCE. Symptom-to-remember: "I
-  PUBLISHED the fix, updated the cache, cleared the kill-switch — and the flood STILL kept
-  coming back over the next days." Root cause: the L0 OS-keepalive (launchd) runs a daemon
-  closure it STAGES into `${DATA}/scripts/`, independent of the heartbeat and the cache. It had
-  staged the pre-fix **0.31.0** flooder (`staged_is_current` was False vs the current version —
-  the closure was staged before the fix existed) and relaunched it every time. Lessons: (a) A
-  cached/published fix is NOT deployed to the keepalive until the STAGED closure is force-restaged
-  AND byte-verified (`launchd_keepalive.restage(latest_cache_scripts_dir())`, then sha-compare
-  staged `daemon.py`/`rotator.py`/`safe_storage.py` == the new version). (b) Clearing the
-  kill-switch REVIVES whatever is STAGED — so verify the staged closure BEFORE clearing it, or you
-  revive the flooder. (c) The subprocess the daemon spawns (`_HERE/oauth_rotator/rotator.py`,
-  `_HERE` = the daemon's own dir) is the STAGED rotator, so the whole closure — not just daemon.py
-  — must be current. (d) The durable, uncertainty-proof stop for a keychain-touching sub-feature
-  is to PAUSE its opt-in flag (`opt-in.flag` → `opt-in.flag.PAUSED-…`), which makes the tick +
-  supervisor no-op → zero keychain access, independent of whether the launchd context can prompt;
-  the `run_security` denied-latch is the belt, the opt-in-pause is the suspenders. See
-  `[[janitor-keepalive-test-isolation-fsevents]]` for the staging internals.
-
-[^3]: [id:ATOM-MG06-0009, status:valid, keywords:"locked_login_keychain_prompts_everything gate_all_callers_not_just_obvious system_agent_prompt_means_keychain_locked", ocd:2026-07-09, lmd:2026-07-09] 2026-07-09, the THIRD flood — the one that finally
-  taught the real lesson. Symptoms-to-remember: "I PAUSED the rotator and the keychain prompts
-  STILL come back"; "this time it's `security` AND `iCloudNotificationAgent` prompting"; "I typed
-  my password / ran `security unlock-keychain` and it's NOT STICKING, it keeps asking." Two
-  distinct causes, both true at once: (a) THREE janitor DETECTORS read the keychain independent
-  of the rotator opt-in flag (root-cause #6 above) — pausing the rotator never stopped them;
-  fixed in v0.35.1 by gating `supervisor._slot_facts` + `window-burn-rate` on `opt_in_present`.
-  (b) The macOS **login keychain was LOCKED** (auto-lock on sleep/idle) — and a locked keychain
-  makes EVERYTHING that needs it prompt, the janitor AND macOS's own agents. The tell that the
-  keychain (not one app's ACL) is the problem: a SYSTEM agent like `iCloudNotificationAgent`
-  prompting, and an unlock-style dialog with NO "Always Allow" button (an ACL prompt has one; a
-  keychain-UNLOCK prompt does not). Lessons: (a) "pause the feature" only helps if EVERY code
-  path that touches the resource is gated on the same flag — audit ALL callers, not just the
-  obvious one (here the rotator tick was gated but three detectors were not). (b) When prompts
-  persist AFTER halting the janitor and there is NO live `security`/janitor process in a `ps`
-  snapshot, suspect a LOCKED keychain hit by macOS/iCloud, not the janitor — the durable fix is
-  the USER unlocking it + disabling auto-lock: `security unlock-keychain` then
-  `security set-keychain-settings ~/Library/Keychains/login.keychain-db` (no flags →
-  `no-timeout`, no lock-on-sleep; verify with `show-keychain-info`). (c) GOTCHA: this Claude
-  terminal's lean-ctx shell wrapper BLOCKS the `security` binary, so `! security unlock-keychain`
-  in the Claude prompt silently never runs — the user must unlock in a REAL terminal or via the
-  Keychain Access GUI. That is why an unlock "didn't stick": it never executed.
-
-[^5]: [id:ATOM-MG06-0010, status:valid, keywords:"dead_securityd_session_inherited keychain_search_list_per_security_session not_logged_in_below_every_hypothesis", ocd:2026-07-12, lmd:2026-07-12] 2026-07-12, the DEAD SECURITY SESSION (gotcha 4) — a
-  fleet-wide `Not logged in` whose cause sat one layer below every hypothesis. KEYCHAIN FACTS
-  this cost a day to learn: (a) The keychain search list is **PER-SECURITY-SESSION**. A
-  long-lived process (here a 22h-old tmux server, ppid 1) can hold a securityd connection that
-  DIES, and every pane it forks inherits that dead session — inside them the Keychain Services
-  API fails outright (`SecKeychainCopySearchList: parameters not valid`), so the credential is
-  unreachable even though it is perfectly intact. (b) Therefore `/login` CANNOT fix this class
-  of failure: the credential was never the problem, REACHABILITY was — a credential that is
-  present and readable from YOUR shell can still be unreachable from another process's security
-  session. (c) The trigger was an unguarded `dotenclave unlock` in `~/.zshrc` running
-  `security list-keychains -s`, which REPLACES the search list and left a dangling `""` entry.
-  (d) `mdat` on the credential item moves on every ORDINARY Claude Code token refresh, so a
-  changed `mdat` is not evidence of tampering (the general trap:
-  `[[debugging-methodology]]#debug-a-timestamp-says-when-never-who`). (e) THE FRUIT: the
-  `keychain-health` detector now probes REACHABILITY every heartbeat from inside the agent's own
-  security session — the one vantage point from which this failure is visible at all.
-  The transferable lessons this incident taught (test in the failing context; a story that fits
-  is not a cause; absence of an error is not a PASS; clear a suspect by its gate and its state)
-  are NOT restated here — they are owned by `[[debugging-methodology]]`, which this page is
-  governed by. A case page holds case facts; methodology lives in one place or it lives nowhere.
-
-[^6]: [id:ATOM-FEAH-NCJV, status:valid, keywords:"SecKeychainItemSetAccess write prompt add-generic-password -U -A -T ACL update create rotation-death fa46a49", desc:"ACL flag (-A/-T) on `add-generic-password -U` of an EXISTING item forces SecKeychainItemSetAccess → prompts every time; set ACL only at CREATE, data-only UPDATE after.", ocd:2026-07-15, lmd:2026-07-15]
-  DO NOT pass ANY ACL flag (`-A` or `-T`) on a `security add-generic-password -U` write when the item
-  may already exist, BECAUSE on an existing item `-U`+ACL re-applies the ACL via the privileged
-  `SecKeychainItemSetAccess`, which PROMPTS every time ("User canceled the operation") and hangs the
-  unattended daemon — the recurring rotation-death, and the identical failure mode that `-T` (original)
-  and `-A` (fa46a49, the WRONG fix) both hit. DO probe existence first with a silent attribute-only
-  `find-generic-password` (no `-w`) and set the ACL flag ONLY on CREATE; on an existing item write
-  data-only (no ACL flag) → silent. Verify write-path silence on a THROWAWAY keychain with `time`
-  (silent 0.0xs vs hung timeout), never the login keychain. Cross-ref Gotcha 3b above.
-
-[^7]: [id:ATOM-OM90-QVUI, status:valid, keywords:"denied-latch self-perpetuating half-open circuit breaker TTL cooldown auto-recovery dark-forever CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S", desc:"A latch that blocks the very op that could clear it = permanent outage on one transient; make it a TTL half-open breaker (one probe per cooldown; silent success clears).", ocd:2026-07-15, lmd:2026-07-15]
-  DO NOT build a denied-latch that short-circuits EVERY op while set, BECAUSE it is self-perpetuating —
-  no write can ever succeed to clear it, so ONE transient (a momentary lock, a hung read during a user
-  `/login`) kills the feature FOREVER until a human intervenes (this is why rotation kept dying
-  overnight). DO make it a TTL half-open circuit breaker: after a cooldown, let exactly ONE call
-  through as a probe (re-stamp the latch first so concurrent callers stay closed — ≤1 probe/cooldown);
-  a silent success CLEARS it (recovered), a re-denial backs off another cooldown. Turns "dark forever"
-  into "dark ≤ one cooldown". See SAFE PROTOCOL point 1.
-
-[^8]: [id:ATOM-MX20-QO8S, status:valid, keywords:"recall before acting re-hit documented trap cache-vs-repo staged closure publish deploy opt-in go-live sequence /login broke", desc:"The daemon/heartbeat run the CACHE + DATA-staged closure, NOT the repo; a repo-only fix is inert until published+cache-updated+restaged. I re-hit this DOCUMENTED trap by not recalling first.", ocd:2026-07-15, lmd:2026-07-15]
-  DO NOT restore a keychain-writing feature's opt-in (or clear the kill-switch) after a REPO-only fix,
-  BECAUSE the daemon + heartbeat execute the INSTALLED CACHE and the L0 daemon runs a closure STAGED
-  into `${DATA}/scripts/` — a repo-only fix is INERT there, so the OLD code re-floods (on 2026-07-15
-  this broke the user's own Claude Code `/login`, exactly the trap `[^2]` documented on 2026-07-09).
-  DO follow the full go-live chain, in order: publish → `claude plugin update <name>@<marketplace>`
-  (the qualified id; bare name → "not found") → `keepalive_boot.verify_or_restage(<DATA>/scripts)` +
-  byte-verify the staged rotator/safe_storage has the fix → prove the DEPLOYED code silent with a
-  manual `tick` (latch stays clean) → ONLY THEN restore opt-in. META-LESSON (the biggest of the
-  session): this trap was ALREADY in this page; I re-hit it because I did not RECALL before acting.
-  RECALL `macos-keychain.md` before ANY rotator/keychain go-live. (This failure is the motivating case
-  for the prompt-submit memgrep-recall invite — TRDD-AP2X9A0H.) Also: third-party keychain CLIs
-  (`kc`, `mxkey`) do NOT solve the unattended case — their Touch-ID/prompt-on-read is the opposite of
-  headless, `mxkey` uses the exact `-T`-on-`-U` pattern that regresses this bug, and `kc`'s protection
-  is app-layer + bypassable (`--no-touch-id`); good standalone secret CLIs, not a rotator backend.
