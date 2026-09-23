@@ -3,7 +3,7 @@ trdd-id: 5A4SGMD6
 title: retire the marketplace-refresh chore from the janitor daemon and the ai-maestro server
 column: testing
 created: 2026-09-17T12:12:46+0200
-updated: 2026-09-17T18:27:55+0200
+updated: 2026-09-23T06:03:47+0200
 current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: refactor
@@ -42,3 +42,4 @@ RELATED: TRDD-5EHBPH6G (the 262-marketplace serial sweep), TRDD-H7NVKSAX (bulk c
 
 [2026-09-17T14:35:00+0200] Memory-page supersession DONE: 58b7ae19 commits the six project pages (control-flow, detectors-and-resilience, beat-tasks, core-files, bulk-lane, roster-list) marking marketplace-refresh RETIRED with two new atoms; validate NONE, lint no ERROR. Full gate (ruff/mypy/pyright/pytest) running on HEAD by a lean-worker; card stays in testing until it reports green. Still open: fseventsd 24 h observation, the ~250 orphan marketplace registrations (owner's call), server PR base.
 [2026-09-17T14:49:44+0200] Gate GREEN on d09fe94b (ruff 0, mypy 0 in 504 files, pyright 0/0/0, pytest 16793 passed / 2 skipped / 0 failed, 674 s); commits since are docs/design only. Card stays in testing for the fseventsd 24 h observation and the owner's call on the ~250 orphan marketplace registrations; review-after 2026-09-18.
+2026-09-23: GH #297 closed — the chore's retirement (6ddc0308) makes both halves of the report moot.
