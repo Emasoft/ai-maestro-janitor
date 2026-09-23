@@ -122,11 +122,14 @@ config, does not disarm the heartbeat, does not compact other sessions.
   Jev-compacted upgrade happens later, at the fresh session's own SessionStart
   (`scripts/summarize_previous_session.py` + `scripts/lib/jev_compaction_lane.py`), not here.
   The upgrade's own `jev_compact.py compact` call honours a recent probe-failure decline
-  (`kind="unavailable"`/`"unreachable"`/`"rate_limited"`) the same as every other caller — if
-  you need a GUARANTEED real attempt regardless of a stale decline stamp (e.g. testing after
-  fixing a provider outage), run `jev_compact.py compact` directly with `--no-decline`; this
-  skill's own chain never passes it, on purpose (an automatic upgrade should not hammer a
-  known-down endpoint on every `/clear`).
+  (`kind="unavailable"`/`"unreachable"`/`"rate_limited"`) the same as every other caller.
+  `--no-decline` bypasses ONLY a stale `kind="unreachable"` stamp (DNS/TLS/transport failure —
+  the kind of local, possibly-since-fixed condition a manual request is meant to re-probe
+  past); a genuinely down endpoint (`"unavailable"`) or a rate-limited key (`"rate_limited"`)
+  still declines fast even with `--no-decline` — a manual request must not be allowed to hammer
+  either. Run `jev_compact.py compact` directly with `--no-decline` after fixing a LOCAL
+  networking issue to force that one re-probe; this skill's own chain never passes it, on
+  purpose (an automatic upgrade should not hammer a known-down endpoint on every `/clear`).
 - `scripts/lib/external_clear.py` — the PURE decision half (`should_clear_externally`).
 - `/janitor-handoff-and-clear` — a SEPARATE, manual-only, in-session sibling (model-authored
   handoff, never called automatically). Reach for it by name when you want the model to write

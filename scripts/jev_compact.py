@@ -438,19 +438,20 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # stamps still exist for a caller to surface as a finding; they just don't gate the
     # NEXT attempt.
     #
-    # `--no-decline` (card 5 two-renderings, item 5): the AUTOMATIC lane (the SessionStart
-    # hook, the detached summarizer) always honours this gate -- a repeated outage should not
-    # retry on every SessionStart. An EXPLICIT compact-now request (`/janitor-compact-context`)
-    # is a deliberate ask for a real attempt right now; bypassing the whole gate for it is what
-    # "explicit request bypasses it" means -- a stale stamp from an earlier, unrelated failure
-    # must not silently swallow a request the user just made on purpose.
-    if not args.no_decline and stamp is not None and stamp.get("ok") is False:
+    # `--no-decline` (card 5 injection-caps review, TRDD-RAEGS1D5): bypasses ONLY the
+    # `kind="unreachable"` branch -- NEVER `unavailable` or `rate_limited`. An explicit
+    # compact-now request (`/janitor-compact-context`) is a deliberate ask for a real attempt
+    # right now, but it must not be allowed to hammer a genuinely DOWN endpoint (`unavailable`)
+    # or a rate-limited key (`rate_limited`) -- only a transport-level "cannot even reach it"
+    # stamp is worth one guaranteed real attempt, since that is exactly the kind of stale,
+    # possibly-since-fixed condition a manual request is meant to re-probe past.
+    if stamp is not None and stamp.get("ok") is False:
         kind = stamp.get("kind")
         age_s = time.time() - float(stamp.get("ts", 0))
         ttl: float | None = None
         if kind == "unavailable":
             ttl = PROBE_FAIL_TTL_S
-        elif kind == "unreachable":
+        elif kind == "unreachable" and not args.no_decline:
             ttl = PROBE_UNREACHABLE_TTL_S
         elif kind == "rate_limited":
             retry_after_s = stamp.get("retry_after_s")

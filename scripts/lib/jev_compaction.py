@@ -458,8 +458,11 @@ def compose(
     CAPPED companion to a separate, uncapped `compose()` call over the SAME `items`/`scores`
     ("score once, render twice" -- the caller never re-scores). One extra line is appended,
     right before the fixed "pointers expand with" trailer: "Full compacted context: <path> --
-    Read it for everything not shown here." -- the capped rendering's own way back to
-    everything the byte backstop below had to drop.
+    read it ONLY if what you need is not shown above; try `expand --list` first." (reworded in
+    the card 5 injection-caps review, TRDD-RAEGS1D5 -- the old "Read it for everything not
+    shown here" phrasing invited an ~11k-token read of the whole full document on every capped
+    render) -- the capped rendering's own way back to everything the byte backstop below had to
+    drop, once the cheap targeted `expand --list --grep` path genuinely is not enough.
 
     `max_bytes`, when given, is a BACKSTOP (card 5 content-fit, TRDD-RAEGS1D5): the caller is
     expected to size `budget_tokens` / the digest / `max_elided_pointers` so the document
@@ -568,11 +571,17 @@ def compose(
 
         if full_context_path:
             # Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
-            # uncapped document composed from the SAME items/scores -- see the docstring.
+            # uncapped document composed from the SAME items/scores -- see the docstring. Card
+            # 5 injection-caps review (TRDD-RAEGS1D5): "Read it for everything not shown here"
+            # invited an ~11k-token read of the whole full document on every capped render --
+            # reworded to try `expand --list` first, the cheap targeted path, and read the full
+            # document only when that genuinely is not enough.
             lines.append("")
             lines.append(
-                f"Full compacted context: {full_context_path} -- Read it for everything not "
-                "shown here."
+                f"Full compacted context: {full_context_path} -- read it ONLY if what you "
+                "need is not shown above; try list/search first: uv run --script "
+                '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript '
+                f"{transcript_path} --list --grep TEXT."
             )
 
         lines.append("")

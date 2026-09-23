@@ -744,6 +744,70 @@ def test_compact_inject_out_writes_a_capped_companion_pointing_at_the_full_out(
     assert f"Full compacted context: {out.resolve()}" in inject_doc
     assert "Full compacted context:" not in full_doc
 
+def test_compact_inject_out_scores_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Card 5 injection-caps review (TRDD-RAEGS1D5) verification item (a): "score once, render
+    twice" means exactly that -- `--inject-out` must never trigger a SECOND `jc.score_items`
+    call. Counts calls to the wrapping function itself (never the Jev endpoint's own per-item
+    `ask()` calls, which scale with item count and would not distinguish one scoring pass from
+    two smaller ones)."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    inject_out = tmp_path / "compacted.inject.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    calls: list[int] = []
+    real_score_items = jc.score_items
+
+    def _counting_score_items(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        return real_score_items(*args, **kwargs)
+
+    monkeypatch.setattr(jc, "score_items", _counting_score_items)
+
+    code, output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out),
+        "--inject-out", str(inject_out),
+    ])
+
+    assert code == 0, output
+    assert len(calls) == 1, f"expected exactly one score_items() call, got {len(calls)}"
+
+def test_compact_state_heads_reach_the_digest_at_full_card3_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Card 5 injection-caps review (TRDD-RAEGS1D5) verification item (d): the AUTOMATIC lane's
+    now-retired `LANE_DIGEST_TOKENS` used to shrink the digest `cmd_compact` builds from
+    `--state-heads` down to a small cap; `--digest-tokens` now defaults to the full card-3
+    ~4000 whatever the caller (the two owned callers pass nothing, per `run_compact`'s own
+    docstring). A 30-line STATE head sized well past a plausible small shrink cap (~1,200
+    tokens) but comfortably under 4000 must survive WHOLE into `--out`'s digest, including its
+    last line -- a marker there would be the first thing a re-introduced small cap cuts."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    head_lines = [f"STATE line {i}: " + ("filler word " * 25) for i in range(29)]
+    head_lines.append("STATE line 29 (LAST): MARKER_END_OF_STATE_HEAD")
+    head_text = "\n".join(head_lines)
+    assert jc.estimate_tokens(head_text) > 1200, "fixture must exceed a plausible small cap"
+    assert jc.estimate_tokens(head_text) < 4000, "fixture must still fit the full card-3 default"
+    head_path = tmp_path / "state-head.md"
+    head_path.write_text(head_text, encoding="utf-8")
+
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out),
+        "--state-heads", str(head_path),
+    ])
+
+    assert code == 0, output
+    full_doc = out.read_text(encoding="utf-8")
+    digest_section = full_doc.split("## Digest\n", 1)[1].split("\n\nusage:", 1)[0]
+    assert "MARKER_END_OF_STATE_HEAD" in digest_section
+
 
 def test_compact_without_inject_out_writes_only_the_full_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -762,15 +826,69 @@ def test_compact_without_inject_out_writes_only_the_full_document(
     assert not (tmp_path / "compacted.inject.md").exists()
 
 
-def test_compact_no_decline_bypasses_a_recent_unavailable_stamp(
+def test_compact_no_decline_still_honours_a_recent_unavailable_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Card 5 two-renderings (TRDD-RAEGS1D5, item 5): the AUTOMATIC lane still declines on a
-    fresh `kind="unavailable"` stamp (the default, no `--no-decline`) -- an EXPLICIT
-    `--no-decline` request bypasses that gate entirely and attempts a real compose."""
+    """Card 5 injection-caps review (TRDD-RAEGS1D5): `--no-decline` bypasses ONLY the
+    `kind="unreachable"` branch -- a genuinely DOWN endpoint (`kind="unavailable"`) must still
+    decline fast even on an explicit `/janitor-compact-context` request; the whole point of the
+    gate for THIS kind is that a manual request must not be allowed to hammer a down endpoint."""
     _isolated_control_dir.mkdir(parents=True, exist_ok=True)
     stamp = {"ok": False, "reason": "simulated outage", "ts": time.time(),
               "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    def _must_not_be_called() -> Any:
+        raise AssertionError("make_client must not be called on a fast decline")
+
+    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out), "--no-decline",
+    ])
+
+    assert code == 5, output
+    assert not out.exists()
+
+def test_compact_no_decline_still_honours_a_recent_rate_limited_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same as the `unavailable` case: a per-key 429 (`kind="rate_limited"`) is not a
+    transport-level "cannot reach it" -- `--no-decline` must not bypass it either."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated 429", "ts": time.time(),
+              "cost": None, "model": None, "provider": "openrouter", "kind": "rate_limited",
+              "retry_after_s": 60}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    def _must_not_be_called() -> Any:
+        raise AssertionError("make_client must not be called on a fast decline")
+
+    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out), "--no-decline",
+    ])
+
+    assert code == 5, output
+    assert not out.exists()
+
+
+def test_compact_no_decline_bypasses_a_recent_unreachable_stamp(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Card 5 injection-caps review (TRDD-RAEGS1D5, item 5): the AUTOMATIC lane still declines
+    on a fresh `kind="unreachable"` stamp (the default, no `--no-decline`) -- an EXPLICIT
+    `--no-decline` request bypasses THIS ONE kind, since a transport-level "cannot even reach
+    it" condition (DNS, a VPN) is exactly the kind of stale, possibly-since-fixed state a manual
+    request is meant to re-probe past."""
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated local networking failure", "ts": time.time(),
+              "cost": None, "model": None, "provider": "openrouter", "kind": "unreachable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
     client = FakeJevClient(_keep_only("bug"))

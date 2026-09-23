@@ -706,6 +706,80 @@ def test_hooks_json_registers_the_new_hook_with_timeout_90():
     assert matches[0]["timeout"] == 90
 
 
+def test_a_model_authored_handoff_before_the_clear_is_named_in_the_injection(tmp_path, monkeypatch):
+    """Card 5 injection-caps review (TRDD-RAEGS1D5, chain-hardening §7): a handoff the MODEL
+    itself wrote just before a reload-shrink clear (the skill prompts it to, at high context)
+    must not go silently unreferenced -- one line names its path, within the same stdout budget
+    the Jev summary is already sized to."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%20")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%20"}, transcript=str(transcript))
+
+    key = handoff_files.session_key(str(transcript))
+    now = int(time.time())
+    model_handoff = handoff_files.write(
+        sd, key, "# Handoff\n\nNEXT ACTION: finish the migration before the reload.", now=now,
+    )
+
+    argv_log = tmp_path / "argv.txt"
+    _stub_jev_compact(plugin_root, argv_log, exit_code=0, out_text=_COMPACTED_DOC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    assert rc == 0
+    assert f"Handoff you wrote before the clear: {model_handoff}" in out
+    assert len(out.encode("utf-8")) <= 9000, "must stay within the measured stdout ceiling"
+
+
+def test_no_recent_model_handoff_omits_the_line(tmp_path, monkeypatch):
+    """No model-authored handoff on disk for this key -- the pointer line must not appear."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%21")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%21"}, transcript=str(transcript))
+
+    argv_log = tmp_path / "argv.txt"
+    _stub_jev_compact(plugin_root, argv_log, exit_code=0, out_text=_COMPACTED_DOC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    assert rc == 0
+    assert "Handoff you wrote before the clear:" not in out
+
+
 if __name__ == "__main__":
     import pytest
 

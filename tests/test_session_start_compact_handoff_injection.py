@@ -414,3 +414,33 @@ def test_auto_trigger_with_missing_continuity_record_gets_minimal_nudge(tmp_path
     assert BANNER in proc.stdout, "positive control failed — nothing was injected"
     assert BODY_MARKER not in proc.stdout, "the prose body must never be injected on an auto stamp"
     assert "resume your previous tasks" in proc.stdout
+
+
+def test_a_huge_compact_handoff_is_capped_within_the_stdout_ceiling(tmp_path: Path) -> None:
+    """Card 5 injection-caps review (TRDD-RAEGS1D5): the keyed handoff file on disk can now be
+    the FULL uncapped Jev document (tens of KB, since d3364c01). This hook's TOTAL stdout must
+    still stay under the measured ~9,000-byte SessionStart ceiling -- an excerpt, not the whole
+    file."""
+    project, env = _project(tmp_path)
+    sd = _arm(project)
+    huge = f"# STATE\n{BODY_MARKER}\n" + ("some kept text line\n" * 3000)
+    assert len(huge.encode("utf-8")) > 40_000, "fixture must actually exceed the cap"
+    (sd / "agent-handoff-abcd1234-20260904_190000+0200-4242.md").write_text(
+        huge, encoding="utf-8"
+    )
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOK)],
+        input=json.dumps({"source": "compact", "session_id": "sid-1", "transcript_path": ""}),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(project),
+    )
+    assert "Traceback" not in proc.stderr, f"hook crashed:\n{proc.stderr[:2000]}"
+    assert BANNER in proc.stdout, "positive control failed — nothing was injected"
+    assert len(proc.stdout.encode("utf-8")) <= 9000, (
+        f"stdout was {len(proc.stdout.encode('utf-8'))} bytes"
+    )
+    assert BODY_MARKER in proc.stdout, "the leading excerpt must still carry the marker"
+    assert "truncated" in proc.stdout

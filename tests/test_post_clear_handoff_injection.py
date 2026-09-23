@@ -205,3 +205,37 @@ def test_a_newer_foreign_sessions_keyed_handoff_is_not_injected(
         "the wrong sessions handoff BODY must never be injected"
     )
     assert "cannot be safely verified as this session's own" in out
+
+
+# --- TRDD-RAEGS1D5 card 5 injection-caps review: the keyed handoff file on disk can now be the
+# FULL uncapped Jev document (tens of KB, since d3364c01), but this hook's stdout only reaches
+# the model in full up to the measured ~9,000-byte ceiling ----------------------------------
+
+
+def test_a_huge_keyed_handoff_is_capped_and_names_the_file(
+    sd: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A ~60 KB on-disk handoff (the shape a full Jev document now takes) must never be printed
+    whole -- the leading excerpt is shown, cut before the byte ceiling, and one line names the
+    file the rest lives in so the model can read more only if it genuinely needs to."""
+    huge = "# Compacted context (Jev compaction)\nMARKER-HEAD\n" + ("some kept text line\n" * 3000)
+    assert len(huge.encode("utf-8")) > 40_000, "fixture must actually exceed the cap"
+    _arm(sd, handoff=huge)
+    _load_hook()._inject_post_clear_handoff(real_state)
+    out = capsys.readouterr().out
+    assert len(out.encode("utf-8")) <= 9000, f"stdout was {len(out.encode('utf-8'))} bytes"
+    assert "MARKER-HEAD" in out, "the leading excerpt must still be shown"
+    assert "agent-handoff.md" in out, "the excerpt must name the file the rest lives in"
+    assert "truncated" in out
+
+
+def test_a_small_keyed_handoff_is_not_truncated(
+    sd: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The common case (well under the cap) must be byte-identical to before -- no excerpt
+    marker, no truncation note."""
+    _arm(sd, handoff="# Handoff\n\nNEXT ACTION: finish TRDD-IFZQ98BA.")
+    _load_hook()._inject_post_clear_handoff(real_state)
+    out = capsys.readouterr().out
+    assert "NEXT ACTION: finish TRDD-IFZQ98BA." in out
+    assert "truncated" not in out

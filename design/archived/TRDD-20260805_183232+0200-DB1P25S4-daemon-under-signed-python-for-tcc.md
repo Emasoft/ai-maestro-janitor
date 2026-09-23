@@ -4,7 +4,7 @@ title: Run the daemon under the signed python.org 3.12 so the existing iTerm Aut
 column: published
 pre-block-column: todo
 created: 2026-08-05T18:32:32+0200
-updated: 2026-09-17T05:52:27+0200
+updated: 2026-09-23T09:04:07+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -252,3 +252,4 @@ REMAINING (the durable half — code, so a restage/reinstall does not revert the
   installed), the resolution note is posted on GH#92 (now closed) and appended to
   TRDD-VQ4LX7ND's approval log. Terminal release state reached → `published`.
 2026-09-17 — GH#92 verified CLOSED (gh issue view); TRDD-VQ4LX7ND verified column: complete. Box 7 (publish + resolution note) ticked. Approved by main session (owner standing permission 2026-09-03).
+- 2026-09-23T09:04:07+0200 — PUBLISHED by emanuelesabetta. archived → published.

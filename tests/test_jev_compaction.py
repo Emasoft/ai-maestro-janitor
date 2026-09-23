@@ -397,7 +397,9 @@ def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
     """Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
     uncapped document `jev_compact.py compact` composes from the SAME items/scores -- one line,
     right before the fixed "pointers expand with" trailer, never after it (the trailer is the
-    model's own fixed anchor, always last)."""
+    model's own fixed anchor, always last). Card 5 injection-caps review: the pointer line's
+    wording was reworded away from "Read it for everything not shown here" (an ~11k-token read
+    invitation), so this pins the NEW wording instead."""
     items = [_item("k:0", "user", "kept text", turn=0)]
     scores = {"k:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
                                 decision_passed=False)}
@@ -406,7 +408,12 @@ def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
                       full_context_path="/tmp/full-compacted.md")
 
     lines = doc.splitlines()
-    assert "Full compacted context: /tmp/full-compacted.md -- Read it for everything not shown here." in lines
+    assert (
+        "Full compacted context: /tmp/full-compacted.md -- read it ONLY if what you need is "
+        'not shown above; try list/search first: uv run --script '
+        '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /tmp/t.jsonl --list '
+        '--grep TEXT.'
+    ) in lines
     pointer_idx = next(i for i, line in enumerate(lines) if line.startswith("Full compacted context:"))
     trailer_idx = next(i for i, line in enumerate(lines) if line.startswith("pointers expand with:"))
     assert pointer_idx < trailer_idx, "the pointer must precede the fixed trailer, not follow it"
