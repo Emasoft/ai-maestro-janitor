@@ -1,9 +1,9 @@
 ---
 trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
-column: todo
+column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-23T06:09:10+0200
+updated: 2026-09-23T11:22:42+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -16,16 +16,22 @@ approval-judge: emanuelesabetta
 approval-datetime: 2026-09-22T21:32:55+0200
 npt: [541CBN36]
 relevant-rules: []
+implementation-commits: [051625a4, 0b883373]
 ---
 
 # Jev compaction replaces the janitor's automatic compaction
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-22
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-23
 
-- Approved 2026-09-22, owner's "go a". NEXT ACTION: card 2 (NPT, vendor jevctx + OpenRouter
-  provider + scorer CLI) must land before card 3 can implement the compacted-context builder;
-  card 1 (trigger/loop guards) continues under TRDD-L32WC0H7, not this card. Spec:
-  docs_dev/jev-compaction-spec.md. Reports land under reports/compaction-replacement/.
+- Cards 1-4 and card 5 (post-clear Jev injection, cooldown/recovery vetoes, hook-output caps) landed. NPT TRDD-541CBN36 closed 2026-09-23 after its last defect (OpenRouter 402/403 -> JevAuthError, 0b883373). The stale pane-key test was fixed in 051625a4; it had failed since the 2026-09-23 reader switch, and eba1f1ff landed on that red suite (process gap).
+- Scope audit 2026-09-23 (reports/compaction-replacement/20260923_105904+0200-raegs1d5-scope-audit.md): 16 of 17 card-3/4 items done. NOT done per the audit (claim not yet verified against the code): item 8, the fleet-lease rename to compaction-lane; the audit reports the automatic Jev lane has no cross-session concurrency guard.
+- NEXT ACTION: verify the audit's item-8 evidence, then propose the compaction-lane guard design before writing code.
+- Open owner decisions: (a) unify state.terminal_pane_key with pane_key_from_terminal (strip the iTerm prefix everywhere); (b) change jev_compact._stamp_kind_for_error's default for unrecognised JevErrors from "unavailable" (30-min decline) to a non-declining failure kind, covering 400/404/413/422 and the typesafe client's catch-all.
+- Follow-ups from the 402/403 fix, not yet carded: the JEV-AUTH-REJECTED headline says "key rejected" even for a 402 credits problem; the per-reason dedupe can re-fire if the 402 body text varies.
+- OpenRouter's openapi.json documents these statuses for the decisions endpoint: 400, 401, 402, 403, 404, 413, 429, 500, 502, 503, 524, 529 (422 is not documented). Today 400, 404 and 413 fall into the client's catch-all and are stamped kind "unavailable" (a 30-min decline) — decision (b) above would fix all of them.
+
+
+
 
 ## Owner's directive (verbatim)
 
@@ -89,6 +95,7 @@ commits per card with the WHY in the message.
 - 2026-09-22T21:32:55+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-23T06:08:54+0200 — column → dev by claude-main. Jev compaction work in progress: cards 1-4 landed (54ea73bc); post-clear injection fix and lease rename pending
 - 2026-09-23T06:09:10+0200 — column → todo by claude-main. revert: orchestrator correction — 541CBN36 still owns an open defect, do not unblock RAEGS1D5 yet
+- 2026-09-23T11:22:14+0200 — column → dev. NPT 541CBN36 closed; remaining scope: compaction-lane concurrency guard
 
 ## Design
 

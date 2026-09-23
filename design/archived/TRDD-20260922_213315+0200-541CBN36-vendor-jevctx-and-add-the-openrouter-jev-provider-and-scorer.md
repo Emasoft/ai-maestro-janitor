@@ -1,9 +1,9 @@
 ---
 trdd-id: 541CBN36
 title: Vendor jevctx and add the OpenRouter Jev provider and scorer CLI
-column: dev
+column: complete
 created: 2026-09-22T21:33:15+0200
-updated: 2026-09-23T06:09:11+0200
+updated: 2026-09-23T11:22:08+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -16,6 +16,7 @@ approval-judge: emanuelesabetta
 approval-datetime: 2026-09-22T21:33:15+0200
 parent-trdd: RAEGS1D5
 derived: true
+implementation-commits: [4b8ba762, 0930d394, 54cebc4a, 0b883373]
 ---
 
 # Vendor jevctx and add the OpenRouter Jev provider and scorer CLI
@@ -68,3 +69,16 @@ before card 3 implements the compacted-context builder.
 - 2026-09-22T21:44:04+0200 — column → dev. card 2 worker running 2026-09-22
 - 2026-09-23T06:08:54+0200 — column → testing by claude-main. vendored jevctx + OpenRouter Jev provider + scorer CLI landed: commits 4b8ba762, 0930d394, 54cebc4a; tests pyright-clean per orchestrator
 - 2026-09-23T06:09:11+0200 — column → dev by claude-main. revert: orchestrator correction — openrouter.py 402/403 mis-classification defect still open, not done
+- 2026-09-23T11:20:57+0200 — column → testing. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green
+- 2026-09-23T11:21:02+0200 — column → ai_review. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green
+- 2026-09-23T11:21:06+0200 — column → human_review. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green
+- 2026-09-23T11:22:08+0200 — COMPLETE by emanuelesabetta. last defect (402/403 misclassification) fixed in 0b883373; adversarially reviewed; full suite green; card-2 gates verified in tests/.
+
+## Acceptance criteria
+
+- [x] Vendor jevctx, add OpenRouter Jev provider, and scorer CLI implemented and tested
+- [x] Provider selection covered (tests/test_jev_provider.py: test_default_provider_is_openrouter, test_explicit_openrouter_override, test_explicit_typesafe_override, test_unknown_provider_is_an_error)
+- [x] Missing-key error covered (tests/test_jev_provider.py: test_missing_key_for_default_provider_names_the_env_var, test_missing_key_for_explicit_typesafe_names_the_env_var; tests/test_jev_openrouter.py: test_missing_key_raises_jev_auth_error_naming_the_env_var)
+- [x] Request-body shape against static fixture covered (tests/test_jev_openrouter.py: test_request_body_shape_matches_the_openrouter_contract)
+- [x] expand round-trip covered (tests/test_jev_compact_cli.py: test_expand_round_trips_a_composed_pointer_id)
+- [x] OpenRouter 402/403 raise JevAuthError, not a malformed-request error (tests/test_jev_openrouter.py: test_402_403_raise_jev_auth_error_not_validation_error; commit 0b883373)
