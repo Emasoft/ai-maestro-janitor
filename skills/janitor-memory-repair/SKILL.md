@@ -156,9 +156,12 @@ fixes, that stale sha makes the second call refuse every time.
 
    - `to unchanged` (only THIS page would change, or neither would — `page unchanged, to
      unchanged` means the link is already bidirectional, nothing to do) → safe, run it
-     for real: `memgrep reference-mem-topic --page <this page> --to <target page>
-     --base-sha256 "$sha"` (a no-change run is harmless, but skip it outright if you can
-     tell from the dry-run text that nothing would change).
+     for real (a no-change run is harmless, but skip it outright if you can tell from
+     the dry-run text that nothing would change):
+
+     ```bash
+     if [ -n "$sha" ]; then memgrep reference-mem-topic --page <this page> --to <target page> --base-sha256 "$sha"; else echo "unreadable: <this page> — report and skip its verb fixes"; fi
+     ```
    - `to gains a link` (the TARGET would also change) → do NOT run it live. Skip this
      verb and report the one-sided link as a finding instead (the librarian/another
      pass owns the target-side write). **This is the common outcome, not an edge case**
