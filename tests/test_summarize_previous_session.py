@@ -1190,3 +1190,49 @@ def test_llm_ext_fallback_outer_timeout_kills_the_whole_process_group(tmp_path, 
         time.sleep(0.1)
     else:
         pytest.fail(f"child pid {child_pid} still alive after the outer timeout's killpg")
+
+
+def test_llm_ext_fallback_outer_timeout_reaps_the_group_leader(tmp_path, monkeypatch):
+    """After the outer-timeout `os.killpg` + `proc.communicate(timeout=5)` path, the group
+    leader `Popen` itself (the `llm_ext_compact.py` process, not the grandchild the previous
+    test checks) must be REAPED, not left a zombie -- `killpg` only signals, it doesn't wait,
+    so a fix that kills but never calls `.wait()`/`.communicate()` on the dead process leaves
+    `poll()`/`returncode` unset. Wraps `subprocess.Popen` to capture the real instance
+    `_run_llm_ext_fallback` creates, then asserts on it after the call returns."""
+    plugin_root = tmp_path / "plugin"
+    script = plugin_root / "scripts" / "llm_ext_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        "#!/usr/bin/env python3\nimport time\ntime.sleep(120)\n", encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    monkeypatch.setattr(jcl, "_MIN_JEV_ATTEMPT_S", 0.1)
+    monkeypatch.setattr(jcl, "_LLM_EXT_OUTER_SLACK_S", 0.5)
+
+    captured: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
+
+    def _capturing_popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        captured.append(proc)
+        return proc
+
+    monkeypatch.setattr(jcl.subprocess, "Popen", _capturing_popen)
+
+    ok, detail = jcl._run_llm_ext_fallback(
+        plugin_root, transcript="/tmp/x.jsonl", timeout_s=1.0,
+    )
+    assert ok is False
+    assert "timed out" in detail
+
+    assert captured, "the stub Popen was never captured -- the test setup itself is broken"
+    proc = captured[0]
+    # Read `.returncode` directly -- NEVER call `.poll()`/`.wait()` here. Both would reap the
+    # child THEMSELVES via their own `waitpid(WNOHANG)`, which would make the assertion pass
+    # even if `_run_llm_ext_fallback`'s own reap were deleted entirely (review finding: a
+    # `proc.poll()` call in the test is not a read, it's a second reap attempt that masks a
+    # missing one inside the function under test). `.returncode` is a plain attribute Popen
+    # only sets as a SIDE EFFECT of an internal `wait()`, so this only proves true when
+    # `_run_llm_ext_fallback` reaped the child itself before returning.
+    assert proc.returncode is not None, "group leader left a zombie: not reaped inside the fn"

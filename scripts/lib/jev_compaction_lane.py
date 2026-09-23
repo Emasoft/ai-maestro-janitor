@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Callable
 
 _SCRIPTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_SCRIPTS))
@@ -546,7 +546,7 @@ _NON_RETRYABLE_KINDS = frozenset({"auth", "budget", "invalid"})
 
 
 def _sleep_for_kind_or_break(
-    stamp: dict, *, deadline: float, now_fn: Any, sleep_fn: Any,
+    stamp: dict, *, deadline: float, now_fn: Callable[[], float], sleep_fn: Callable[[float], None],
 ) -> bool:
     """For a `kind="rate_limited"` stamp: sleep out the server's own `Retry-After` (floor 5s)
     when it fits inside the remaining budget, or signal "stop, fall back now" when it does not
@@ -605,7 +605,15 @@ def _run_llm_ext_fallback(
         stdout, stderr = proc.communicate(timeout=timeout_s + _LLM_EXT_OUTER_SLACK_S)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            if sys.platform == "win32":
+                # os.killpg/SIGKILL don't exist on Windows (no POSIX process groups) --
+                # start_new_session=True above is a no-op there too, so there is no group to
+                # reach anyway; Popen.kill() (TerminateProcess) at least stops the direct
+                # child. Grandchildren (uv's own children) going unreaped on this platform is
+                # a pre-existing gap this fix does not attempt to close.
+                proc.kill()
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             pass  # already gone, or this platform/sandbox denies killpg -- nothing more to do
         try:
@@ -626,7 +634,7 @@ def run_compact_with_fallback(
     plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
     heads_args: list[str], sd: Path, deadline: float, llm_ext_timeout_s: float,
     budget_tokens: int | None = None, digest_tokens: int | None = None,
-    now_fn: Any = time.time, sleep_fn: Any = time.sleep,
+    now_fn: Callable[[], float] = time.time, sleep_fn: Callable[[float], None] = time.sleep,
 ) -> tuple[str, str | None, str]:
     """Retry `jev_compact.py compact` (with `--no-decline`) until `deadline`, then fall back to
     `llm_ext_compact.py` once. Returns `(source, text, detail)`:

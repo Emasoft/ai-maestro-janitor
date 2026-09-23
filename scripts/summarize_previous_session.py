@@ -43,9 +43,8 @@ import argparse
 import os
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
 
 _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
@@ -97,7 +96,8 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def main(
-    argv: Sequence[str] = (), *, now_fn: Any = time.time, sleep_fn: Any = time.sleep,
+    argv: Sequence[str] = (), *, now_fn: Callable[[], float] = time.time,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> int:
     """Entry point — wraps `_main` so a crash is LOGGED, not silent (TRDD-QZVAEWQH).
 
@@ -130,7 +130,8 @@ def main(
 
 
 def _main(
-    argv: Sequence[str] = (), *, now_fn: Any = time.time, sleep_fn: Any = time.sleep,
+    argv: Sequence[str] = (), *, now_fn: Callable[[], float] = time.time,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> int:
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or ".").resolve()
     sd = state.state_dir()
