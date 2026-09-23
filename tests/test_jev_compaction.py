@@ -453,11 +453,26 @@ def test_is_human_record_trusts_origin_kind_when_present() -> None:
 
 
 def test_heartbeat_detection_via_scheduled_turn_origin_marker() -> None:
-    # `turnOrigin == "scheduled"` alone (no `_HEARTBEAT_PREFIX` text) must still be detected --
-    # a real heartbeat entry carries this field but NO `origin` key at all (measured,
-    # TRDD-RAEGS1D5), so `is_human_record`'s `origin` branch never fires for it either.
+    # Defect 2 (review of 2353a88a): `turnOrigin == "scheduled"` ALONE must NOT be treated as
+    # a heartbeat fire any more -- the owner's own CronCreate/`/loop` jobs are scheduled too,
+    # and their turns are requested work, not a machine-only fire. Only the fire's own fixed
+    # prefix still counts.
     entry = {"turnOrigin": "scheduled", "message": {"content": "no prefix in this body"}}
-    assert jc._is_heartbeat_entry(entry) is True
+    assert jc._is_heartbeat_entry(entry) is False
+    # The prefix alone (no `turnOrigin` at all) is still sufficient -- unchanged.
+    prefixed = {"message": {"content": "[janitor-heartbeat]\nfire body"}}
+    assert jc._is_heartbeat_entry(prefixed) is True
+
+
+def test_scheduled_prompt_without_janitor_prefix_becomes_event() -> None:
+    # Defect 2's own consequence: a scheduled-but-not-heartbeat prompt is neither dropped
+    # (it is real requested work) nor counted as "user" (`transcript_roles.classify_record`
+    # has no way to know it came from the owner rather than a `/loop` job) -- it becomes
+    # kind "event", kept, but excluded from `build_digest`'s "last three human messages".
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    by_id = {it.id: it for it in items}
+    assert by_id["sched1:0"].kind == "event"
+    assert by_id["sched1:0"].text == "Check nightly build status"
 
 
 def test_task_notification_becomes_event_and_is_excluded_from_the_digest() -> None:
@@ -503,3 +518,90 @@ def test_human_turn_after_heartbeat_resumes_extraction() -> None:
     assert by_id["u4:0"].text == "Also update the changelog"
     assert by_id["a4:0"].kind == "assistant"
     assert by_id["a4:0"].text == "Sure, updating the changelog."
+
+
+# --- TRDD-RAEGS1D5 (2026-09-23): adversarial review of 2353a88a, five more defects ---
+
+
+def test_heartbeat_turn_keeps_real_work_after_the_quiet_stub_call() -> None:
+    """Defect 1: a `[janitor-resume]` heartbeat turn in keep-going mode does real work --
+    reads cards, dispatches agents, edits. The fixture's second heartbeat turn (hb2) mirrors
+    that: the dispatcher-stub call (a5) and its result (u5, containing "[janitor-resume]") are
+    still dropped, but the real assistant prose (a6, a7), the real tool call it makes (the Read
+    remembered on a6) and that tool's result (u6) all survive -- the OLD whole-turn skip window
+    would have dropped every one of these too."""
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    ids = [it.id for it in items]
+    by_id = {it.id: it for it in items}
+
+    # Still dropped: the heartbeat's own prompt, the quiet dispatcher-stub call and its result.
+    assert not any(id_.startswith("hb2:") for id_ in ids)
+    assert not any(id_.startswith("a5:") for id_ in ids)
+    assert not any(id_.startswith("u5:") for id_ in ids)
+
+    # NEW behaviour: real work in the same turn is kept.
+    assert by_id["a6:0"].kind == "assistant"
+    assert by_id["a6:0"].text == "Reading the TRDD card and dispatching the fix agent."
+    assert by_id["u6:0"].kind == "tool"
+    assert "Read(" in by_id["u6:0"].text
+    assert by_id["a7:0"].kind == "assistant"
+    assert by_id["a7:0"].text == "Committed the fix (051625a4)."
+
+
+def test_decision_question_never_asked_for_a_non_user_item() -> None:
+    """Defect 3: `score_items` must ask the DECISION question ("a decision the user stated")
+    for `kind == "user"` items only -- an event/assistant/tool item has no author signal in
+    Jev's own `state`, so asking it there let that item's text alone earn `decision_passed`
+    (and with it `compose`'s eviction protection) no matter how the relevance question answers.
+    A permissive client (answers 0.9 to everything it IS asked) must still leave the event
+    item's decision at 0.0/False, because the question was never sent for it."""
+    items = [
+        _item("u:0", "user", "policy: always use tabs", turn=0),
+        _item("e:0", "event", "a task notification's report text", turn=1),
+    ]
+    client = FakeJevClient.constant(0.9)
+    scores = jc.score_items(items, "digest", client)
+
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    dec_keys = {k for k in call.questions if k.endswith(":dec")}
+    # Exactly one ref got a :dec question -- the user item's, whichever ref string it got.
+    assert len(dec_keys) == 1
+    rel_keys = {k for k in call.questions if k.endswith(":rel")}
+    assert len(rel_keys) == 2  # both items still get scored for relevance
+
+    assert scores["u:0"].decision == 0.9
+    assert scores["e:0"].decision == 0.0
+    assert scores["e:0"].decision_passed is False
+
+
+def test_mid_turn_attachment_becomes_user_and_queued_notification_becomes_event() -> None:
+    """Defect 4: Claude Code writes a mid-turn queued owner message (typed while a turn was
+    running) or a queued task-notification delivery as `type: "attachment"`,
+    `attachment.type == "queued_command"` -- a shape `_WALKED_ENTRY_TYPES` used to drop
+    entirely (measured on a real 2026-09-23 session transcript, field shapes mirrored in the
+    fixture's att1/att2/att3). `commandMode: "prompt"` is the owner's own words (kind "user");
+    `commandMode: "task-notification"` is an agent report (kind "event", same as any other
+    notification); any other `attachment.type` (att3: `hook_success`) contributes nothing."""
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    ids = [it.id for it in items]
+    by_id = {it.id: it for it in items}
+
+    assert by_id["att1:0"].kind == "user"
+    assert by_id["att1:0"].text == "you are slow"
+    assert by_id["att2:0"].kind == "event"
+    assert "Nightly benchmark finished" in by_id["att2:0"].text
+    assert not any(id_.startswith("att3:") for id_ in ids)
+
+
+def test_mid_turn_attachment_from_a_peer_agent_is_event_not_user() -> None:
+    """Defect-5 real-data re-derivation caught this: `commandMode == "prompt"` alone is NOT
+    "the owner typed it" -- measured on a real 49 MB transcript, 19 of 23 `commandMode:
+    "prompt"` attachments carried `origin.kind: "peer"` (a cross-session SendMessage from
+    ANOTHER agent, delivered through the SAME mid-turn queue a genuine keystroke uses). Only
+    `origin.kind == "human"` is the owner's own words; a peer message is real content (kept)
+    but must never be counted as the human in `build_digest`/`score_items`'s decision question."""
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    by_id = {it.id: it for it in items}
+    assert by_id["att4:0"].kind == "event"
+    assert by_id["att4:0"].text == "Consultation request from a peer agent, not the owner."

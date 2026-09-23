@@ -27,7 +27,8 @@ _LIB_DIR = Path(__file__).resolve().parent
 if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
-from jevctx import scorer as _scorer  # noqa: E402  -- needs the sys.path line above
+import transcript_roles  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared classifier
+from jevctx import scorer as _scorer  # noqa: E402
 from jevctx.budget import BudgetPlanner  # noqa: E402
 from jevctx.tokens import estimate_tokens  # noqa: E402
 from jevctx.types import (  # noqa: E402
@@ -63,24 +64,29 @@ __all__ = [
 ItemKind = Literal["user", "assistant", "tool", "event"]
 
 # Entry `type`s that ever carry a extractable item (spec: skip `system` entries and the
-# auxiliary types -- mode, file-history-snapshot, last-prompt, queue-operation, attachment
-# -- outright; only `user`/`assistant` entries are walked at all).
-_WALKED_ENTRY_TYPES = {"user", "assistant"}
-
-_HEARTBEAT_PREFIX = "[janitor-heartbeat]"
-
-# Claude Code also writes a task-notification body (a subagent's finished-task report) as a
-# `type: "user"` entry, with `message.role == "user"` -- structurally identical to a human
-# message. A transcript old enough to carry no `origin` field at all (see `is_human_record`)
-# has no other way to tell the two apart, so the body's own fixed wrapper tag is the fallback
-# signal (TRDD-RAEGS1D5, 2026-09-23: on a real 4.7 MB transcript, 26 of 36 items classified
-# "user" by the pre-fix code were task notifications, not the human).
-_TASK_NOTIFICATION_PREFIX = "<task-notification>"
+# auxiliary types -- mode, file-history-snapshot, last-prompt, queue-operation -- outright).
+# "attachment" (TRDD-RAEGS1D5 defect 4, orchestrator scope extension 2026-09-23): Claude Code
+# also writes a MID-TURN queued owner message (typed while a turn was running) or a queued
+# task-notification delivery as `type: "attachment"`, `attachment.type == "queued_command"` --
+# a real 2026-09-23 session transcript measured these carrying the owner's own words ("you are
+# slow") that `_WALKED_ENTRY_TYPES` used to drop entirely. Most other `attachment` entries
+# (`hook_success`, `hook_additional_context`, ...) are hook noise, filtered inside
+# `extract_items` itself by `attachment.type`, not here.
+_WALKED_ENTRY_TYPES = {"user", "assistant", "attachment"}
 
 # Truncation cap for a remembered tool_use `input` (spec: "name+input truncated to 300
 # chars") -- long enough to identify the call, short enough that a page of `Bash` args
 # doesn't dominate the digest/score request.
 _TOOL_INPUT_TRUNCATE = 300
+
+# TRDD-RAEGS1D5 defect 1 (adversarial review of commit 2353a88a): the ORIGINAL fix opened a
+# whole-turn skip window on any heartbeat fire, which silently dropped REAL work a
+# `[janitor-resume]` turn does (reads cards, dispatches agents, edits, commits) -- outnumbering
+# the noise it meant to cut. Narrowed to pattern-match exactly the two quiet items a heartbeat
+# turn always produces: the dispatcher-stub call (this marker, checked against the tool_use's
+# raw JSON `input` before truncation) and its paired result; everything else in the turn --
+# other tool calls, other tool results, real assistant prose -- is now kept like any other item.
+_DISPATCHER_STUB_MARKER = "dispatcher-stub.py"
 
 # Pointer first-line preview cap (spec: `"<first line ≤80 chars>"`).
 _POINTER_PREVIEW_CHARS = 80
@@ -187,8 +193,10 @@ def _entry_primary_text(entry: dict[str, Any]) -> str:
 
     The plain string `message.content`, or the first `text`-type block's text when content is
     a list of blocks. A `tool_result`-only entry (no `text` block at all) yields `""` --
-    deliberately: it must never be mistaken for a heartbeat/task-notification body, or match
-    neither and fall through to "human" by accident (see `is_human_record`'s fallback).
+    deliberately: it must never be mistaken for a heartbeat body (see `_is_heartbeat_entry`).
+    Mirrors `transcript_roles._primary_text` (private there, so duplicated rather than reached
+    into across the module boundary) -- only `_is_heartbeat_entry` still needs it directly;
+    `is_human_record` now delegates entirely to `transcript_roles.classify_record`.
     """
     content = entry.get("message", {}).get("content")
     if isinstance(content, str):
@@ -201,51 +209,35 @@ def _entry_primary_text(entry: dict[str, Any]) -> str:
 
 
 def is_human_record(entry: dict[str, Any]) -> bool:
-    """True iff this `type: "user"` JSONL entry is genuine human input.
+    """True iff this transcript JSONL entry is genuine human input.
 
-    TRDD-RAEGS1D5 (2026-09-23) bug fix: `extract_items` used to classify EVERY non-`isMeta`
-    user-role text as human -- but Claude Code writes several kinds of machine-generated
-    record with `message.role == "user"` too, most commonly a task notification (a subagent's
-    finished-task report). On a real 4.7 MB transcript, 26 of 36 items the old code classified
-    "user" were task notifications, so `build_digest`'s "last three human messages" and the
-    DECISION question ("a decision the user stated") were fed agent reports, never the human's
-    own words.
-
-    Since ~2.1.28x Claude Code stamps every user entry's provenance in `origin.kind`
-    (`"human"` | `"task-notification"` | `"peer"` | ...) -- trust it when present, checked
-    against a real transcript (TRDD-RAEGS1D5). An older transcript (measured: an August 2026
-    session) carries no `origin` field on most entries at all; fall back to the pre-existing
-    heuristic (not `isMeta`, not the heartbeat prefix) plus rejecting a `<task-notification>`-
-    prefixed body directly -- a legacy transcript's task notifications have no `origin` to
-    check, only their own fixed wrapper tag.
+    TRDD-RAEGS1D5 (2026-09-23): originally a bespoke two-way heuristic here; the orchestrator's
+    same-day scope extension replaced it with `transcript_roles.classify_record`'s nine-rule,
+    real-transcript-measured classifier (task notifications, compact summaries, local-command
+    wrappers, peer/coordinator messages, ... -- a two-way test cannot tell these apart). Kept as
+    a thin wrapper -- `extract_items` now calls `classify_record` directly and no longer needs
+    the plain boolean -- purely so a caller (and this module's own tests) that only cares "was
+    this the human" doesn't have to know the wider role vocabulary exists.
     """
-    origin = entry.get("origin")
-    if isinstance(origin, dict):
-        return origin.get("kind") == "human"
-    if entry.get("isMeta"):
-        return False
-    text = _entry_primary_text(entry)
-    if text.startswith(_HEARTBEAT_PREFIX) or text.startswith(_TASK_NOTIFICATION_PREFIX):
-        return False
-    return True
+    return transcript_roles.classify_record(entry) == "human"
 
 
 def _is_heartbeat_entry(entry: dict[str, Any]) -> bool:
-    """True iff this `type: "user"` entry is a janitor heartbeat fire.
+    """True iff this `type: "user"` entry is the janitor heartbeat fire's OWN initiating prompt.
 
-    Two independent, either-sufficient signals: the prompt's own fixed prefix (works on any
-    transcript, including one with no `origin`/`turnOrigin` fields at all), or
-    `turnOrigin == "scheduled"` -- the field Claude Code stamps on a cron-fired turn since
-    ~2.1.28x. Checked against a real transcript (TRDD-RAEGS1D5, 2026-09-23): a heartbeat entry
-    there carries `turnOrigin: "scheduled"` but NO `origin` key at all, so `is_human_record`'s
-    `origin.kind` check never fires for it -- every one of that transcript's 59
-    `turnOrigin == "scheduled"` entries also carried the prefix, so the two signals agreed in
-    practice, but a transcript keeping only one of them (an older prefix-only one, or a
-    hypothetical future prefix-less one) still needs both checked.
+    TRDD-RAEGS1D5 defect 2 (adversarial review of commit 2353a88a): detect ONLY by the fire's
+    own fixed prefix, never by `turnOrigin == "scheduled"` -- the owner's own CronCreate/`/loop`
+    jobs are scheduled too, and a scheduled prompt is requested work, not a machine-only fire.
+    Folding it into "heartbeat" would have DROPPED it outright; a scheduled prompt that lacks
+    the prefix now instead reaches `transcript_roles.classify_record`, which downgrades it to
+    role "system" -> kind "event" (kept, just never counted as the human -- see `extract_items`).
+    This function's OWN job stays narrower than "system": even a `[janitor-heartbeat]`-prefixed
+    prompt classifies as role "system" too, but its own prompt text carries zero information (it
+    is always the same fixed dispatcher-stub instruction) -- unlike `<local-command-stdout>` or
+    an interrupt marker, which ARE kept as "event" -- so `extract_items` calls this FIRST and
+    drops the match entirely, before `classify_record` ever runs on it.
     """
-    if entry.get("turnOrigin") == "scheduled":
-        return True
-    return _entry_primary_text(entry).startswith(_HEARTBEAT_PREFIX)
+    return _entry_primary_text(entry).startswith(transcript_roles.HEARTBEAT_PREFIX)
 
 
 def extract_items(transcript_path: str | Path) -> list[Item]:
@@ -255,27 +247,41 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
     it's seen, so the `tool_result` block that answers it (which always appears in a LATER
     line -- the transcript is append-only) can be paired with it by the time we reach it.
 
-    Two TRDD-RAEGS1D5 (2026-09-23) fixes, both real-transcript-verified:
+    TRDD-RAEGS1D5 (2026-09-23), commit 2353a88a plus the orchestrator's same-day scope
+    extension after an adversarial review of it:
 
-    1. A `user`-role text record is classified "user" (genuinely human) only when
-       `is_human_record` says so; otherwise it becomes kind "event" -- still extracted,
-       still scorable/inlinable, just never counted as a human message (see `build_digest`).
+    1. A `user`-role record's kind comes from `transcript_roles.classify_record`: role
+       "human" -> kind "user"; role "notification"/"peer"/"system" -> kind "event" (still
+       extracted, still scorable/inlinable, just never counted as a human message -- see
+       `build_digest`); role "skip" (sidechain/compact-summary/meta) -> no item at all.
 
-    2. A heartbeat fire (`_is_heartbeat_entry`) opens a skip window: every assistant
-       text/tool_use block and every tool_result block UNTIL the next "user"/"event" record
-       is machine noise from that one cron turn (a Bash call to the dispatcher stub, its
-       result, the "janitor heartbeat" reply) -- never extracted. On a real transcript this
-       fires every ~5 minutes and would otherwise dominate a long unattended session's items.
+    2. The heartbeat fire's OWN initiating prompt (`_is_heartbeat_entry`) is still dropped
+       outright, as before -- it carries no information, it's always the same fixed text.
+       Defect 1 fix (review of 2353a88a): everything ELSE the turn it triggers does is now
+       KEPT. Only two patterns are still dropped, matched directly rather than via a
+       whole-turn skip window: the dispatcher-stub `tool_use`/`tool_result` pair
+       (`_DISPATCHER_STUB_MARKER`), and an assistant text block that is nothing but the bare
+       heartbeat-protocol reply (`transcript_roles.is_heartbeat_reply`). Real work a
+       `[janitor-resume]` turn does -- other tool calls, other results, real prose -- survives.
+
+    3. `type: "attachment"` entries (defect 4): a mid-turn queued owner message or queued
+       task-notification (`attachment.type == "queued_command"`) is extracted like a `user`
+       entry -- `commandMode: "prompt"` -> kind "user", `commandMode: "task-notification"` ->
+       kind "event". Every other `attachment` (`hook_success`, `hook_additional_context`, ...)
+       is hook noise and contributes nothing, matching the pre-fix (accidental) behaviour.
+
+    4. An assistant entry with `isApiErrorMessage` is skipped entirely (report §4 glue item
+       1) -- a transport-error placeholder, not real assistant output.
     """
     path = Path(transcript_path)
     items: list[Item] = []
     turn = 0
     # tool_use id -> (name, truncated-input-json) remembered for pairing with its result.
     pending_tool_uses: dict[str, tuple[str, str]] = {}
-    # Set by a heartbeat entry, cleared by the next "user"/"event" record -- see the
-    # docstring's point 2. Never touched by an isMeta entry (still noise either way, but not
-    # the record that ends the window) or by anything outside `_WALKED_ENTRY_TYPES`.
-    in_heartbeat_turn = False
+    # tool_use ids identified as the heartbeat's own dispatcher-stub call -- see point 2 above.
+    # Membership, not a window: only THIS call and the one tool_result that answers it are
+    # dropped, whatever else surrounds them in the same turn.
+    quiet_tool_use_ids: set[str] = set()
 
     with path.open(encoding="utf-8") as fh:
         for line in fh:
@@ -298,19 +304,14 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
 
             if entry_type == "user":
                 if _is_heartbeat_entry(entry):
-                    # The fire's own prompt is never an item (unchanged from before this
-                    # fix) -- it now ALSO opens the skip window for the turn it triggers.
-                    in_heartbeat_turn = True
-                    continue
-                if entry.get("isMeta"):
-                    continue  # hook-injected hidden context -- unchanged from before this fix
+                    continue  # the fire's OWN prompt -- always dropped, see point 2 above
 
-                kind: ItemKind = "user" if is_human_record(entry) else "event"
+                role = transcript_roles.classify_record(entry)
+                if role == "skip":
+                    continue  # sidechain (already caught above)/compact-summary/meta
+                kind: ItemKind = "user" if role == "human" else "event"
+
                 if isinstance(content, str):
-                    # A text record ends any open heartbeat window -- it IS the "next
-                    # user/event record" the docstring's point 2 skips forward to, and is
-                    # itself kept (never itself skipped).
-                    in_heartbeat_turn = False
                     items.append(Item(f"{uuid}:0", kind, content,
                                        estimate_tokens(content), ts, turn))
                     turn += 1
@@ -321,19 +322,18 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
                         btype = block.get("type")
                         if btype == "text":
                             text = block.get("text", "")
-                            in_heartbeat_turn = False  # see the str-content branch above
                             items.append(Item(f"{uuid}:{idx}", kind, text,
                                                estimate_tokens(text), ts, turn))
                             turn += 1
                         elif btype == "tool_result":
-                            if in_heartbeat_turn:
+                            tool_use_id = str(block.get("tool_use_id"))
+                            if tool_use_id in quiet_tool_use_ids:
                                 # The heartbeat's own dispatcher-stub call answering itself --
-                                # part of the skipped turn, not a "next record" that ends it.
+                                # never an item, see point 2 above.
                                 continue
                             # WHY no isMeta guard here: isMeta marks a human-facing pseudo
                             # user message (hook-injected context), never a tool result --
                             # the spec's isMeta clause is scoped to str/list[text] content.
-                            tool_use_id = str(block.get("tool_use_id"))
                             name, tool_input = pending_tool_uses.get(
                                 tool_use_id, ("<unknown tool>", "")
                             )
@@ -344,9 +344,37 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
                             turn += 1
                 # else: no content (or an unrecognised shape) -- nothing to extract.
 
+            elif entry_type == "attachment":
+                # Defect 4 (orchestrator scope extension): a mid-turn queued record -- the
+                # owner typed while a turn was running, or a task-notification was delivered
+                # mid-turn. Every other attachment kind (hook output, ...) is noise.
+                attachment = entry.get("attachment")
+                if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+                    continue
+                text = attachment.get("prompt", "")
+                if not text:
+                    continue
+                command_mode = attachment.get("commandMode")
+                att_origin = attachment.get("origin")
+                att_origin_kind = att_origin.get("kind") if isinstance(att_origin, dict) else None
+                # Defect-5 real-data re-derivation caught a bug here: `commandMode ==
+                # "prompt"` alone is NOT sufficient for "human" -- measured on the 49 MB
+                # transcript, 19 of 23 `commandMode: "prompt"` attachments carry
+                # `origin.kind: "peer"` (a cross-session SendMessage from ANOTHER agent,
+                # delivered through the SAME mid-turn queue a genuine owner keystroke uses),
+                # only 4 carry `origin.kind: "human"`. Only the latter is the owner's own words.
+                if command_mode == "prompt" and att_origin_kind == "human":
+                    att_kind: ItemKind = "user"
+                elif command_mode in ("prompt", "task-notification"):
+                    att_kind = "event"  # a peer/cross-session message, or a queued notification
+                else:
+                    continue  # an attachment.commandMode never measured -- skip, don't guess
+                items.append(Item(f"{uuid}:0", att_kind, text, estimate_tokens(text), ts, turn))
+                turn += 1
+
             else:  # entry_type == "assistant"
-                if in_heartbeat_turn:
-                    continue  # the fire's own reply/tool call -- see the docstring's point 2
+                if entry.get("isApiErrorMessage"):
+                    continue  # a transport-error placeholder, not real assistant output
                 if not isinstance(content, list):
                     continue
                 for idx, block in enumerate(content):
@@ -357,17 +385,20 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
                         continue  # never an item, never remembered
                     if btype == "text":
                         text = block.get("text", "")
+                        if transcript_roles.is_heartbeat_reply(text):
+                            continue  # bare heartbeat-protocol reply -- see point 2 above
                         items.append(Item(f"{uuid}:{idx}", "assistant", text,
                                            estimate_tokens(text), ts, turn))
                         turn += 1
                     elif btype == "tool_use":
-                        tool_input = _truncate(
-                            json.dumps(block.get("input", {}), sort_keys=True),
-                            _TOOL_INPUT_TRUNCATE,
+                        raw_input = json.dumps(block.get("input", {}), sort_keys=True)
+                        tool_id = str(block.get("id"))
+                        pending_tool_uses[tool_id] = (
+                            block.get("name", "<unnamed tool>"),
+                            _truncate(raw_input, _TOOL_INPUT_TRUNCATE),
                         )
-                        pending_tool_uses[str(block.get("id"))] = (
-                            block.get("name", "<unnamed tool>"), tool_input
-                        )
+                        if _DISPATCHER_STUB_MARKER in raw_input:
+                            quiet_tool_use_ids.add(tool_id)
                     # any other block type: skip, not remembered
 
     return items
@@ -391,8 +422,10 @@ def build_digest(
     notification (a subagent's report, re-classified kind "event" now) could crowd out the
     real "last three human messages" this function's own name promises -- measured on a real
     transcript, 26 of 36 "user" items were task notifications. `it.kind == "user"` needs no
-    change here; `extract_items` now only ever hands out that kind for `is_human_record`-true
-    text, so this filter is correct by construction.
+    change here after the orchestrator's scope-extension rework either: `extract_items` now
+    only ever hands out that kind for a `transcript_roles.classify_record` role of "human"
+    (a `type: "user"` entry) or an `attachment.commandMode == "prompt"` mid-turn queued owner
+    message (defect 4) -- both are genuinely human, so this filter stays correct by construction.
     """
     user_items = [it for it in items if it.kind == "user"]
     assistant_items = [it for it in items if it.kind == "assistant"]
@@ -461,6 +494,14 @@ def score_items(
     Always raises on a scorer failure -- never fails open like the library's own default.
     The one caller (`scripts/jev_compact.py compact`) must fall back to the fact-only
     template on any Jev error, never silently keep everything.
+
+    TRDD-RAEGS1D5 defect 3 (adversarial review of 2353a88a): the DECISION question ("a
+    decision, constraint, correction or instruction the user stated") is only ever meaningful
+    for a genuinely human item -- Jev's `state` carries only `{ref, text}` (no author), so
+    asking it of an assistant/tool/event item let THAT item's text alone earn `decision_passed`
+    and gain `compose`'s eviction protection, defeating the question's own point. Only
+    `kind == "user"` items get a `:dec` question below; every other kind gets `decision=0.0`,
+    `decision_passed=False` without ever asking.
     """
     if not items:
         return {}
@@ -477,6 +518,13 @@ def score_items(
     # longest single question is only ~half of `question_tokens`), which is conservative in
     # the safe direction (packs batches a bit smaller / more round trips, never overflows a
     # real Jev limit) rather than under-estimating and risking a 422.
+    #
+    # Still planned as if EVERY item costs both questions, even after defect 3 below (a
+    # non-`user` item only ever gets the relevance one) -- an over-estimate for those items,
+    # never an under-estimate, so a batch still never exceeds Jev's real per-request limit.
+    # Sizing batches by kind (human items 2 questions, others 1) is the reference's own Card 5
+    # batching rework and out of scope for this fix (reports/compaction-replacement/
+    # 20260923_200805+0200-jev-reference-gap-analysis.md, card 5).
     question_tokens = rel_tokens + dec_tokens
     envelope_tokens = estimate_tokens(_scorer.build_state(digest, [], []))
 
@@ -497,24 +545,35 @@ def score_items(
         refs = batch.question_keys
         state = _scorer.build_state(digest, batch.items, refs)
         questions: dict[str, Question] = {}
-        for ref in refs:
+        for ref, lib_item in zip(refs, batch.items, strict=True):
             questions[f"{ref}:rel"] = _ref_question(RELEVANCE_QUESTION, ref)
-            questions[f"{ref}:dec"] = _ref_question(DECISION_QUESTION, ref)
+            # Defect 3: only a genuinely human item gets asked "is this a decision the user
+            # stated" -- see this function's own docstring.
+            if items_by_id[lib_item.id].kind == "user":
+                questions[f"{ref}:dec"] = _ref_question(DECISION_QUESTION, ref)
 
         answers = client.ask(state, questions)  # a JevError here propagates -- see docstring
 
         for ref, lib_item in zip(refs, batch.items, strict=True):
-            rel_answer = answers.get(f"{ref}:rel")
-            dec_answer = answers.get(f"{ref}:dec")
-            if not isinstance(rel_answer, NoulAnswer) or not isinstance(dec_answer, NoulAnswer):
-                raise JevValidationError(
-                    f"expected NoulAnswers for ref {ref!r}, got "
-                    f"{type(rel_answer).__name__}/{type(dec_answer).__name__}"
-                )
             it = items_by_id[lib_item.id]
+            rel_answer = answers.get(f"{ref}:rel")
+            if not isinstance(rel_answer, NoulAnswer):
+                raise JevValidationError(
+                    f"expected a NoulAnswer for ref {ref!r}, got {type(rel_answer).__name__}"
+                )
             rel = rel_answer.value
-            dec = dec_answer.value
-            decision_passed = dec >= decision_threshold
+            if it.kind == "user":
+                dec_answer = answers.get(f"{ref}:dec")
+                if not isinstance(dec_answer, NoulAnswer):
+                    raise JevValidationError(
+                        f"expected a NoulAnswer for ref {ref!r}, got {type(dec_answer).__name__}"
+                    )
+                dec = dec_answer.value
+                decision_passed = dec >= decision_threshold
+            else:
+                # Never asked -- see this function's docstring (defect 3).
+                dec = 0.0
+                decision_passed = False
             kept = rel >= relevance_threshold or decision_passed
             scores[it.id] = Scores(relevance=rel, decision=dec, oversized=False,
                                     kept=kept, decision_passed=decision_passed)
