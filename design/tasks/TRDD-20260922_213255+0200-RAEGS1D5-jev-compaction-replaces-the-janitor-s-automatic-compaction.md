@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-23T20:00:09+0200
+updated: 2026-09-23T21:10:49+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -14,9 +14,10 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-22T21:32:55+0200
-npt: [541CBN36, CC0CZLMO]
+npt: [541CBN36]
 relevant-rules: []
 implementation-commits: [051625a4, 0b883373]
+eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG]
 ---
 
 # Jev compaction replaces the janitor's automatic compaction

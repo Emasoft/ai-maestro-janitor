@@ -1,9 +1,9 @@
 ---
 trdd-id: CC0CZLMO
 title: Jev score_items runs batches sequentially so a large transcript exceeds both compaction lane timeouts
-column: todo
+column: testing
 created: 2026-09-23T20:00:02+0200
-updated: 2026-09-23T20:00:02+0200
+updated: 2026-09-23T21:10:50+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -24,3 +24,4 @@ A 49 MB real transcript (7075 items) took 168 s in jev_compact.py compact on 202
 ## Approval log
 
 - 2026-09-23T20:00:02+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T21:10:50+0200 — column → testing. code landed and committed 2026-09-23 with tests; awaiting the real-transcript compaction on the final tree and the release
