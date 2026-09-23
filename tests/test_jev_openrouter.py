@@ -160,6 +160,50 @@ def test_retries_exhausted_on_transport_error_carries_no_status(monkeypatch: pyt
 
 
 
+def test_408_is_retried_like_5xx_and_carries_http_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-RAEGS1D5, owner decision 2026-09-23: "retry accordingly for 5 minutes before
+    falling back to llm-ext" -- 408 ("Your request timed out", OpenRouter's own error
+    reference) must join the retried set (429/5xx), not raise `JevValidationError` on the
+    first attempt the way it did before this fix (the measure report's §9 live defect)."""
+    monkeypatch.setenv(API_KEY_ENV, "or-key")
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["n"] += 1
+        return httpx.Response(408)
+
+    client = OpenRouterJevClient(
+        transport=httpx.MockTransport(handler), max_retries=2, sleep=lambda s: None
+    )
+    with pytest.raises(JevUnavailableError) as excinfo:
+        client.ask(STATE, QUESTIONS)
+    client.close()
+    assert call_count["n"] == 3, "expected max_retries+1 attempts, i.e. a real retry happened"
+    assert getattr(excinfo.value, "status") == 408
+
+
+def test_413_is_not_retried_and_raises_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """413 (payload_too_large) stays in the non-retryable bucket -- re-sending the SAME
+    oversized batch is pure waste (deterministic for the same request), unlike 408's
+    genuinely-transient "your request timed out"."""
+    from jevctx.types import JevValidationError
+
+    monkeypatch.setenv(API_KEY_ENV, "or-key")
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["n"] += 1
+        return httpx.Response(413)
+
+    client = OpenRouterJevClient(
+        transport=httpx.MockTransport(handler), max_retries=2, sleep=lambda s: None
+    )
+    with pytest.raises(JevValidationError):
+        client.ask(STATE, QUESTIONS)
+    client.close()
+    assert call_count["n"] == 1, "413 must NOT be retried"
+
+
 @pytest.mark.parametrize("status_code", [402, 403])
 def test_402_403_raise_jev_auth_error_not_validation_error(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
     """402 (insufficient credits) / 403 (forbidden -- bad key permissions, a guardrail

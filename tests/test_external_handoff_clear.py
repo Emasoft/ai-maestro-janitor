@@ -69,6 +69,65 @@ def test_pending_summary_key_empty_when_neither_source_names_one(tmp_path):
     assert ehc.pending_summary_key(sd) == ""
 
 
+# --- _release_summary_hold key guard (TRDD-RAEGS1D5 advisor R4) --------------
+
+
+def test_release_summary_hold_with_a_foreign_key_leaves_the_pending_record_intact(tmp_path):
+    """R4: lane A's own release must NEVER drop lane B's still-active hold. The retry-then-
+    llm-ext fallback lane can now hold for up to ~15 minutes instead of the old <=2-minute
+    single `run_compact` call, so two overlapping `/clear`s in the same state dir (a second
+    manual clear while the owner iterates, or two panes of one project) collide far more
+    often than before this card — without this guard, lane A finishing (successfully or not)
+    would unlink `summary-pending.json` out from under lane B, and B's session would then
+    resume EARLY, before its own compaction landed."""
+    import json
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    # Lane B's hold: written LAST, so it is the CURRENT pending record on disk.
+    (sd / ehc._PENDING_FILE).write_text(
+        json.dumps({"key": "lane-b-key", "expires": int(time.time()) + 900}), encoding="utf-8"
+    )
+
+    ehc._release_summary_hold(sd, key="lane-a-key")  # a DIFFERENT lane's own key
+
+    assert (sd / ehc._PENDING_FILE).is_file(), "a foreign key's release must be a no-op"
+    assert ehc.summary_hold_active(sd, int(time.time())), "lane B's hold must survive intact"
+    assert ehc.pending_summary_key(sd) == "lane-b-key"
+
+
+def test_release_summary_hold_with_the_matching_key_releases_it(tmp_path):
+    """The mirror case: a lane releasing ITS OWN hold (the key it captured with) must still
+    work exactly as the unconditional (no-`key`) call always has."""
+    import json
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    (sd / ehc._PENDING_FILE).write_text(
+        json.dumps({"key": "lane-a-key", "expires": int(time.time()) + 900}), encoding="utf-8"
+    )
+
+    ehc._release_summary_hold(sd, key="lane-a-key")
+
+    assert not (sd / ehc._PENDING_FILE).is_file()
+    assert not ehc.summary_hold_active(sd, int(time.time()))
+
+
+def test_release_summary_hold_with_no_key_stays_unconditional(tmp_path):
+    """Backward compatibility: a caller that passes no `key` at all (`key=None`, the default)
+    releases regardless of whose record it is -- the pre-R4 behaviour, unchanged for callers
+    that have no key of their own to guard with."""
+    import json
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    (sd / ehc._PENDING_FILE).write_text(
+        json.dumps({"key": "someone-elses-key", "expires": int(time.time()) + 900}),
+        encoding="utf-8",
+    )
+
+    ehc._release_summary_hold(sd)
+
+    assert not (sd / ehc._PENDING_FILE).is_file()
+
+
 # --- _run: NEITHER lane composes (TRDD-QZVAEWQH) ------------------------------
 
 

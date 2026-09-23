@@ -325,6 +325,78 @@ def test_compose_failure_writes_the_template_marker(tmp_path, monkeypatch):
     )
 
 
+def test_compose_failure_spawns_the_detached_retry_fallback_lane_with_transcript(
+    tmp_path, monkeypatch,
+):
+    """R2 (TRDD-RAEGS1D5, owner decision 2026-09-23): this hook only ever gets ONE bounded
+    attempt (its own `hooks.json` timeout) -- on failure it must ALSO spawn
+    `summarize_previous_session.py --transcript <this transcript>` (never a guess) detached,
+    with the SAME Popen shape `on-session-start.py`'s own unconditional spawn uses
+    (`start_new_session=True`, `env=state.detached_uv_env()`), so the owner's 5-minute
+    retry-then-llm-ext budget gets spent by a process that can afford it."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%13")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%13"}, transcript=str(transcript))
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=7)  # EXIT_JEV_ERROR
+    # The hook only spawns the detached lane when it finds the script on disk (the same
+    # `.is_file()` guard `on-session-start.py`'s own unconditional spawn uses) -- a placeholder
+    # is enough here since the spawn itself is faked below, never actually run.
+    (plugin_root / "scripts" / "summarize_previous_session.py").write_text("", encoding="utf-8")
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import subprocess as _subprocess
+
+    captured: dict = {}
+    real_popen = _subprocess.Popen
+
+    def _fake_popen(argv, **kwargs):
+        # `subprocess.run` (used by `jcl.run_compact` for the REAL jev_compact.py stub call
+        # above) is ITSELF implemented on top of `Popen` -- a blanket patch would also
+        # intercept (and break) that call. Only the detached spawn this test targets is
+        # faked; every other Popen construction (the jev_compact.py stub) runs for real.
+        if isinstance(argv, (list, tuple)) and argv and "summarize_previous_session.py" in str(argv[0]):
+            captured["argv"] = list(argv)
+            captured["kwargs"] = kwargs
+
+            class _Dummy:
+                pass
+
+            return _Dummy()
+        return real_popen(argv, **kwargs)
+
+    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+
+    assert rc == 0
+    assert "argv" in captured, "expected the hook to spawn the detached retry-fallback lane"
+    argv = captured["argv"]
+    assert argv[0] == str(plugin_root / "scripts" / "summarize_previous_session.py")
+    assert argv[1:] == ["--transcript", str(transcript)]
+    kwargs = captured["kwargs"]
+    assert kwargs.get("start_new_session") is True
+    assert kwargs.get("stdout") is _subprocess.DEVNULL
+    # `env=state.detached_uv_env()` -- proven by shape (every real env var + no VIRTUAL_ENV),
+    # not by identity, since `detached_uv_env()` builds a fresh dict each call.
+    assert "VIRTUAL_ENV" not in kwargs.get("env", {"VIRTUAL_ENV": "should not be here"})
+    assert kwargs.get("env", {}).get("HOME") == str(tmp_path / "fake-home")
+
+
 def test_large_compacted_context_still_injects_under_9000_bytes(tmp_path, monkeypatch):
     """Card 5 measured fact (reports/compaction-replacement/20260923_064108+0200-hook-output-
     experiments.md): the SessionStart hook's stdout is only injected in full up to ~9,000

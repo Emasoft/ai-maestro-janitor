@@ -301,13 +301,16 @@ def test_compact_declines_on_recent_probe_failure(
     assert not out.exists()
 
 
-@pytest.mark.parametrize("kind", ["auth", "budget"])
+@pytest.mark.parametrize("kind", ["auth", "budget", "invalid", "unknown"])
 def test_compact_does_not_decline_on_non_outage_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
-    """An `auth`/`budget` stamp is scoped to one key/request, not the endpoint -- the fast
-    decline (exit 5) must key on `kind == "unavailable"` alone, so a fresh attempt still
-    tries the network instead of being blacked out by a config bug from a different shell."""
+    """An `auth`/`budget`/`invalid`/`unknown` stamp is scoped to one key/request/attempt, not
+    the endpoint -- the fast decline (exit 5) must key on `kind` in
+    `{"unavailable", "unreachable", "rate_limited"}` only, so a fresh attempt still tries the
+    network instead of being blacked out by a problem scoped to a different caller or request
+    (TRDD-RAEGS1D5 owner decision 2026-09-23: `"invalid"`/`"unknown"` are the two NEW kinds
+    `_stamp_kind_for_error` can now produce, and neither may decline a later attempt either)."""
     _isolated_control_dir.mkdir(parents=True, exist_ok=True)
     stamp = {"ok": False, "reason": "simulated non-outage failure", "ts": time.time(),
               "cost": None, "model": None, "provider": "openrouter", "kind": kind}
@@ -453,6 +456,31 @@ def test_probe_ask_raises_unreachable_when_status_is_none(
     assert code == 2
     stamp = json.loads((_isolated_control_dir / "jev-probe.json").read_text())
     assert stamp["kind"] == "unreachable"
+
+
+def test_stamp_kind_for_validation_error_is_invalid() -> None:
+    """TRDD-RAEGS1D5 owner decision 2026-09-23: `JevValidationError` (400/404/413/422, or a
+    malformed response -- 408 is now retried in openrouter.py, so exhausted 408s never reach
+    this class) must classify as `kind="invalid"`, never fall through to the old
+    `"unavailable"` default -- a bad REQUEST is not evidence the endpoint itself is down, and
+    the old fallthrough was a live defect: it declined every OTHER caller's compaction on the
+    (then 30-minute) outage TTL for a problem scoped to one request."""
+    from jevctx.types import JevValidationError
+
+    assert jev_compact._stamp_kind_for_error(JevValidationError("bad request")) == "invalid"
+
+
+def test_stamp_kind_for_unrecognized_jev_error_is_unknown() -> None:
+    """A `JevError` subclass this CLI does not special-case at all must classify as
+    `kind="unknown"` -- non-declining, like `"invalid"`, rather than the old `"unavailable"`
+    default that would have blacked out every other caller's compaction on an error this file
+    cannot even name."""
+    from jevctx.types import JevError
+
+    class _SomeFutureJevError(JevError):
+        pass
+
+    assert jev_compact._stamp_kind_for_error(_SomeFutureJevError("mystery")) == "unknown"
 
 
 def test_compact_declines_on_recent_unreachable_stamp(
@@ -826,22 +854,24 @@ def test_compact_without_inject_out_writes_only_the_full_document(
     assert not (tmp_path / "compacted.inject.md").exists()
 
 
-def test_compact_no_decline_still_honours_a_recent_unavailable_stamp(
+def test_compact_no_decline_bypasses_a_recent_unavailable_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Card 5 injection-caps review (TRDD-RAEGS1D5): `--no-decline` bypasses ONLY the
-    `kind="unreachable"` branch -- a genuinely DOWN endpoint (`kind="unavailable"`) must still
-    decline fast even on an explicit `/janitor-compact-context` request; the whole point of the
-    gate for THIS kind is that a manual request must not be allowed to hammer a down endpoint."""
+    """TRDD-RAEGS1D5, owner decision 2026-09-23 (R1): `--no-decline` now bypasses the
+    `kind="unavailable"` branch too, not just `"unreachable"` -- without this, the AUTOMATIC
+    retry lane (`jev_compaction_lane.run_compact_with_fallback`, which passes `--no-decline`
+    on every retry inside its 5-minute budget) would stamp `kind="unavailable"` on its first
+    real failure and every later retry would exit 5 in microseconds for the rest of the
+    window -- "retry for 5 minutes" would mean one real attempt plus a 5-minute sleep. See
+    `test_compact_no_decline_still_honours_a_recent_rate_limited_stamp` below: `rate_limited`
+    is the one kind `--no-decline` must NEVER bypass."""
     _isolated_control_dir.mkdir(parents=True, exist_ok=True)
     stamp = {"ok": False, "reason": "simulated outage", "ts": time.time(),
               "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
     (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
 
-    def _must_not_be_called() -> Any:
-        raise AssertionError("make_client must not be called on a fast decline")
-
-    monkeypatch.setattr(jev_compact, "make_client", _must_not_be_called)
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
 
@@ -849,8 +879,33 @@ def test_compact_no_decline_still_honours_a_recent_unavailable_stamp(
         "compact", "--transcript", str(transcript), "--out", str(out), "--no-decline",
     ])
 
-    assert code == 5, output
-    assert not out.exists()
+    assert code == 0, output
+    assert out.exists()
+
+
+def test_compact_unavailable_stamp_ttl_is_5_minutes_not_30(
+    tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-RAEGS1D5, owner decision 2026-09-23 (R1): `PROBE_FAIL_TTL_S` dropped from 30min to
+    5min -- a stamp just past the NEW 5-minute TTL (but still well inside the OLD 30-minute
+    one) must NOT decline, proving the shorter window actually took effect."""
+    assert jev_compact.PROBE_FAIL_TTL_S == 5 * 60
+    _isolated_control_dir.mkdir(parents=True, exist_ok=True)
+    stamp = {"ok": False, "reason": "simulated outage",
+              "ts": time.time() - (jev_compact.PROBE_FAIL_TTL_S + 5),
+              "cost": None, "model": None, "provider": "openrouter", "kind": "unavailable"}
+    (_isolated_control_dir / "jev-probe.json").write_text(json.dumps(stamp))
+
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0, output
+    assert out.exists()
+
 
 def test_compact_no_decline_still_honours_a_recent_rate_limited_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,

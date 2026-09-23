@@ -34,16 +34,24 @@ _FORBIDDEN_MODULE_FILES = (
 # (see module docstring) and is the only thing that imports jevctx/jev_compaction in-process.
 _ALLOWED_EXCEPTION = "scripts/jev_compact.py"
 
-# The two allowed importers of llm_ext_summary (TRDD-RAEGS1D5 card 3 C2): the manual lane's
-# own composer -- the ONE entry that actually matters today, since compose_agent_handoff.py
-# has a shebang and lives directly under scripts/, so the _SHEBANG_DIRS glob below scans it
-# and would flag `import llm_ext_summary as les` without this exemption (verified) -- and the
-# module itself, listed for defense-in-depth even though scripts/lib/ is not currently a scan
-# root (neither _SHEBANG_DIRS nor _FORBIDDEN_MODULE_FILES reaches it), so this second entry is
-# a no-op guard against a future rescoping, not something exercised by this test today.
+# The three allowed importers of llm_ext_summary: the manual lane's own composer
+# (compose_agent_handoff.py -- has a shebang and lives directly under scripts/, so the
+# _SHEBANG_DIRS glob below scans it and would flag `import llm_ext_summary as les` without
+# this exemption, verified); the module itself, listed for defense-in-depth even though
+# scripts/lib/ is not currently a scan root (neither _SHEBANG_DIRS nor _FORBIDDEN_MODULE_FILES
+# reaches it), so this entry is a no-op guard against a future rescoping, not something
+# exercised by this test today; and `llm_ext_compact.py` (TRDD-RAEGS1D5, owner decision
+# 2026-09-23: "if jev is not working after 5 minutes retries, the llm-ext compaction function
+# must be called as a fallback") -- the AUTOMATIC lane's own thin llm-ext entry point. The
+# automatic lane (`jev_compaction_lane.py`, `summarize_previous_session.py`) itself stays
+# FORBIDDEN from importing llm_ext_summary (see `_FORBIDDEN_MODULE_FILES` above) -- it may only
+# EXEC `llm_ext_compact.py` as a subprocess, never import it; `llm_ext_compact.py` is that
+# script's OWN separate PEP-723 process boundary, exactly like `jev_compact.py` is for
+# `jevctx`/`httpx`.
 _LLM_EXT_SUMMARY_ALLOWED = (
     "scripts/compose_agent_handoff.py",
     "scripts/lib/llm_ext_summary.py",
+    "scripts/llm_ext_compact.py",
 )
 
 # The test-file scan below (test_no_test_file_imports_llm_ext_summary_except_allowed) is
@@ -92,9 +100,13 @@ def test_no_hook_or_named_lib_script_imports_jevctx_or_httpx() -> None:
     `jev_compact.py` is the sole, deliberate exception (its own separate process boundary).
 
     Also bans `llm_ext_summary` from the same automatic-lane file set (TRDD-RAEGS1D5 card 3
-    C2): that module is the MANUAL summarizer's own copy, and the automatic lane must never
-    import it -- `scripts/compose_agent_handoff.py` (the manual lane's composer) and
-    `scripts/lib/llm_ext_summary.py` itself are the only allowed importers.
+    C2): the automatic lane must never IMPORT it in-process -- `_LLM_EXT_SUMMARY_ALLOWED`
+    names the only files that may (`scripts/compose_agent_handoff.py`, the manual lane's own
+    composer; `scripts/lib/llm_ext_summary.py` itself; and `scripts/llm_ext_compact.py`, the
+    automatic lane's thin EXEC-only fallback entry point, owner decision 2026-09-23). The
+    automatic lane may EXEC `llm_ext_compact.py` as a subprocess -- that boundary is what this
+    test does NOT and cannot check (a subprocess call is not an import); it only forbids the
+    in-process `import` this docstring is about.
     """
     candidates: list[Path] = []
     for d in _SHEBANG_DIRS:

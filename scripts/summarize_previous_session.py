@@ -39,10 +39,13 @@ there's anything to summarize, orchestrate the hold/invoke/compose/release seque
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
@@ -63,8 +66,47 @@ _LOG = "session-summary"
 # siblings).
 PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_SCRIPTS.parent))
 
+# TRDD-RAEGS1D5 owner decision 2026-09-23: "retry accordingly for 5 minutes before falling
+# back to llm-ext". A raw env var (not a `CLAUDE_PLUGIN_OPTION_*` plugin option) because it is
+# a TEST-ONLY lever (advisor §5) to shrink the budget in a test rather than a real tunable an
+# operator is meant to configure.
+_JEV_RETRY_BUDGET_ENV = "JANITOR_JEV_RETRY_BUDGET_S"
+_DEFAULT_JEV_RETRY_BUDGET_S = 300
+# T's own ceiling (advisor §4 arithmetic): `ec.LLM_EXT_TIMEOUT_S` (600) is the module's own
+# per-attempt ceiling llm-ext's retry machinery was designed around -- `T` never needs to
+# exceed it even when most of the 15-minute hold is still free (Jev failed fast).
+_LLM_EXT_T_MAX_S = 600.0
+# The seconds subtracted off the raw hold-remaining figure before handing the rest to llm-ext,
+# so this script's own post-fallback bookkeeping (reading stdout, composing/writing the
+# handoff, releasing the hold) has room to run before the hold's own TTL could expire under it.
+_LLM_EXT_T_SAFETY_MARGIN_S = 30.0
 
-def main() -> int:
+# Module-level so a test can monkeypatch them (e.g. `monkeypatch.setattr(sps, "_sleep_fn",
+# fake.sleep)`) and make the retry loop's real sleeps instant without touching production
+# behaviour, which always sees the real `time.time`/`time.sleep`. `jev_deadline` below is
+# derived from `_now_fn()`, not a bare `time.time()` call, so a faked clock and the loop's own
+# `now_fn` (passed straight through to `run_compact_with_fallback`) always agree on "now" --
+# a mismatch there (deadline computed from real time, loop measured against a fake one) would
+# make the loop's own budget check meaningless.
+_now_fn: Any = time.time
+_sleep_fn: Any = time.sleep
+
+
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    # R2 (advisor review, replacing the design's own `--after-sync-failure`): the SYNC hook
+    # (`on-session-start-post-clear-compact.py`) already resolved and verified the transcript
+    # it wants summarized -- naming it here lets this lane skip BOTH the pane-claim check
+    # (the sidecar the hook consumed is exactly what would otherwise make this run defer to
+    # "the hook owns this transcript") and the `previous_transcript()` guess ("newest .jsonl
+    # that isn't mine"), which is wrong for a multi-pane project (the exact defect card 5
+    # closed). A caller that names its own source is presumed to already own the claim.
+    parser.add_argument("--transcript", default="", help="summarize THIS transcript; skips "
+                         "the pane-claim check and the previous_transcript() guess")
+    return parser.parse_args(list(argv))
+
+
+def main(argv: Sequence[str] = ()) -> int:
     """Entry point — wraps `_main` so a crash is LOGGED, not silent (TRDD-QZVAEWQH).
 
     Measured incident: AgentlensPro 2026-09-02 04:24 took the summary hold and never logged
@@ -72,69 +114,86 @@ def main() -> int:
     on-session-start.py), so nothing on disk said WHY. Re-raising after logging keeps the
     fail-fast contract: the caller's stderr file still gets the traceback, and this line names
     the exception before it propagates.
+
+    `argv` defaults to `()`, NEVER `sys.argv` — this function is called BOTH as the real CLI
+    entry point (`__main__` below passes `sys.argv[1:]` explicitly) AND in-process by
+    `tests/test_summarize_previous_session.py` (`sps.main()`, bare). Defaulting to `sys.argv`
+    (argparse's own default when no argv is given) would make every in-process test call parse
+    PYTEST'S OWN command line instead of this script's -- `-x`, a test node id, etc. would hit
+    `--transcript`'s parser as unrecognized arguments and raise `SystemExit(2)` out of every
+    single test in that file.
     """
     try:
-        return _main()
+        return _main(list(argv))
     except Exception as exc:  # noqa: BLE001 - log then re-raise, never swallow
         state.log_line(_LOG, f"crashed: {exc!r}")
         raise
 
 
-def _main() -> int:
+def _main(argv: Sequence[str] = ()) -> int:
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or ".").resolve()
     sd = state.state_dir()
     now = int(time.time())
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    args = _parse_args(argv)
 
-    # TRDD-RAEGS1D5 card 5: `on-session-start-post-clear-compact.py` is the ONE composer for a
-    # clear that named its transcript in a per-pane sidecar -- a FRESH (<=300s) sidecar means
-    # that hook is (about to be) running right now; a `.consumed-*` one WRITTEN in the last 300s
-    # means it already ran (or declined to a template) for THIS pane's clear moments ago. Either
-    # shape means this detached summarizer must not also compose the same transcript -- "one
-    # compose per transcript" (TRDD-QZVAEWQH) would otherwise become two, racing each other to
-    # write the keyed handoff. An OLDER `.consumed-*` (review finding, 2026-09-23) is NOT such a
-    # signal -- the hook renames a sidecar to `.consumed-<epoch>` the instant it starts, but a
-    # crash or a project the janitor stops watching leaves that marker on disk forever; treating
-    # ANY consumed marker (of ANY age) as "the hook owns this transcript" would then block this
-    # summarizer from EVER running a real compose again for that pane, no matter how many
-    # sessions and clears happen afterwards. The epoch is already in the filename (`consumed-
-    # <now>` -- `_consume_sidecar`'s own naming), so freshness costs one int parse, not a stat.
-    #
-    # WHY `pane_key_from_terminal(self_terminal(...))`, not `state.terminal_pane_key(os.environ)`
-    # (review finding, 2026-09-23): the WRITER (`clear_trigger._persist_resume_state`) keys the
-    # sidecar off `terminal_trigger.self_terminal()`, which STRIPS iTerm's `w0t1p0:` window/tab/
-    # pane prefix off `$ITERM_SESSION_ID` before sanitising -- `terminal_pane_key` sanitises the
-    # RAW env var instead, so on iTerm the two computed different keys and this summarizer's own
-    # sidecar check was comparing against a key nothing would ever write. Reading through the
-    # SAME `self_terminal()` call the writer uses is what makes the two sides agree.
-    import terminal_trigger  # noqa: PLC0415
-
-    pane_key = state.pane_key_from_terminal(terminal_trigger.self_terminal(os.environ))
-    if pane_key:
-        fresh_sidecar = sd / f"resume-after-clear.{pane_key}.transcript"
-        fresh = fresh_sidecar.is_file() and (now - state.file_mtime(fresh_sidecar)) <= 300
-        consumed = False
-        for consumed_path in sd.glob(f"resume-after-clear.{pane_key}.transcript.consumed-*"):
-            suffix = consumed_path.name.rsplit("-", 1)[-1]
-            try:
-                consumed_at = int(suffix)
-            except ValueError:
-                continue  # a malformed suffix is not a timestamp this summarizer can trust
-            if now - consumed_at <= 300:
-                consumed = True
-                break
-        if fresh or consumed:
-            state.log_line(
-                _LOG,
-                f"pane {pane_key} sidecar is {'fresh' if fresh else 'consumed'} — the "
-                "post-clear-compact hook owns this transcript, not this summarizer",
-            )
+    if args.transcript:
+        # R2: an explicit source skips the pane-claim check AND the previous_transcript()
+        # guess entirely -- see `_parse_args`'s own comment for why.
+        prev = Path(args.transcript)
+        if not prev.is_file():
+            state.log_line(_LOG, f"--transcript {prev} not found — nothing to do")
             return 0
+    else:
+        # TRDD-RAEGS1D5 card 5: `on-session-start-post-clear-compact.py` is the ONE composer for a
+        # clear that named its transcript in a per-pane sidecar -- a FRESH (<=300s) sidecar means
+        # that hook is (about to be) running right now; a `.consumed-*` one WRITTEN in the last 300s
+        # means it already ran (or declined to a template) for THIS pane's clear moments ago. Either
+        # shape means this detached summarizer must not also compose the same transcript -- "one
+        # compose per transcript" (TRDD-QZVAEWQH) would otherwise become two, racing each other to
+        # write the keyed handoff. An OLDER `.consumed-*` (review finding, 2026-09-23) is NOT such a
+        # signal -- the hook renames a sidecar to `.consumed-<epoch>` the instant it starts, but a
+        # crash or a project the janitor stops watching leaves that marker on disk forever; treating
+        # ANY consumed marker (of ANY age) as "the hook owns this transcript" would then block this
+        # summarizer from EVER running a real compose again for that pane, no matter how many
+        # sessions and clears happen afterwards. The epoch is already in the filename (`consumed-
+        # <now>` -- `_consume_sidecar`'s own naming), so freshness costs one int parse, not a stat.
+        #
+        # WHY `pane_key_from_terminal(self_terminal(...))`, not `state.terminal_pane_key(os.environ)`
+        # (review finding, 2026-09-23): the WRITER (`clear_trigger._persist_resume_state`) keys the
+        # sidecar off `terminal_trigger.self_terminal()`, which STRIPS iTerm's `w0t1p0:` window/tab/
+        # pane prefix off `$ITERM_SESSION_ID` before sanitising -- `terminal_pane_key` sanitises the
+        # RAW env var instead, so on iTerm the two computed different keys and this summarizer's own
+        # sidecar check was comparing against a key nothing would ever write. Reading through the
+        # SAME `self_terminal()` call the writer uses is what makes the two sides agree.
+        import terminal_trigger  # noqa: PLC0415
 
-    prev = jcl.previous_transcript(root, session_id)
-    if prev is None:
-        state.log_line(_LOG, "no previous transcript to summarize — nothing to do")
-        return 0
+        pane_key = state.pane_key_from_terminal(terminal_trigger.self_terminal(os.environ))
+        if pane_key:
+            fresh_sidecar = sd / f"resume-after-clear.{pane_key}.transcript"
+            fresh = fresh_sidecar.is_file() and (now - state.file_mtime(fresh_sidecar)) <= 300
+            consumed = False
+            for consumed_path in sd.glob(f"resume-after-clear.{pane_key}.transcript.consumed-*"):
+                suffix = consumed_path.name.rsplit("-", 1)[-1]
+                try:
+                    consumed_at = int(suffix)
+                except ValueError:
+                    continue  # a malformed suffix is not a timestamp this summarizer can trust
+                if now - consumed_at <= 300:
+                    consumed = True
+                    break
+            if fresh or consumed:
+                state.log_line(
+                    _LOG,
+                    f"pane {pane_key} sidecar is {'fresh' if fresh else 'consumed'} — the "
+                    "post-clear-compact hook owns this transcript, not this summarizer",
+                )
+                return 0
+
+        prev = jcl.previous_transcript(root, session_id)
+        if prev is None:
+            state.log_line(_LOG, "no previous transcript to summarize — nothing to do")
+            return 0
 
     key = handoff_files.session_key(str(prev))
     # ALREADY SUMMARIZED? Do not pay for it twice. A session that restarts several times in a row
@@ -177,44 +236,61 @@ def _main() -> int:
     # side rendering buys nothing here; `on-session-start-post-clear-compact.py` is the ONE
     # caller that needs a size-bounded companion, because it prints straight to stdout under
     # the hook-output ceiling instead of going through a later SessionStart read.
-    proc, timed_out = jcl.run_compact(
-        PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
-        heads_args=heads_args,
+
+    # Owner decision 2026-09-23 (TRDD-RAEGS1D5): retry Jev for up to `_JEV_RETRY_BUDGET_S`
+    # (5min), THEN fall back to llm-ext -- both bounded within this run's own 15-minute hold.
+    jev_deadline = _now_fn() + state.coerce_int(
+        os.environ.get(_JEV_RETRY_BUDGET_ENV), _DEFAULT_JEV_RETRY_BUDGET_S
+    )
+    # T = hold_expiry - now - safety_margin, capped at `_LLM_EXT_T_MAX_S` (advisor §4
+    # arithmetic: 570s worst case when Jev used its whole budget, capped at 600 when Jev
+    # failed fast and most of the 15-minute hold is still free).
+    llm_ext_timeout_s = max(
+        0.0, min(float(pending["expires"]) - _now_fn() - _LLM_EXT_T_SAFETY_MARGIN_S,
+                  _LLM_EXT_T_MAX_S),
     )
 
-    if timed_out or proc is None or proc.returncode != jcl.EXIT_OK:
-        jcl.handle_nonzero_exit(proc, timed_out=timed_out, sd=sd)
-        # The hold's TTL releases the session onto the mechanical handoff (compose_template_
-        # handoff). Do NOT clear the hold early here: an immediate release would hand the
-        # session a blank context with no explanation, whereas letting the TTL expire produces
-        # the documented degrade path — unchanged from the llm-ext-era behaviour.
-        state.log_line(
-            _LOG,
-            "jev_compact produced no compacted context — leaving the hold to expire onto the "
-            "mechanical precompact handoff",
-        )
-        print("SUMMARY_FAILED degrading to the mechanical handoff on TTL")
-        return 0
-
-    try:
-        compacted_text = out_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        # jev_compact.py exited 0 (it wrote the file itself, atomically) but this process
-        # somehow can't read it back — treat exactly like any other bug exit rather than
-        # crash the SessionStart lane over a filesystem race.
-        state.log_line(_LOG, f"compacted context written but unreadable ({out_path}): {exc!r}")
-        print("SUMMARY_FAILED degrading to the mechanical handoff on TTL")
-        return 0
+    source, compacted_text, detail = jcl.run_compact_with_fallback(
+        PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
+        heads_args=heads_args, sd=sd, deadline=jev_deadline,
+        llm_ext_timeout_s=llm_ext_timeout_s, now_fn=_now_fn, sleep_fn=_sleep_fn,
+    )
 
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+    if source == jcl.SOURCE_FAILED:
+        # Jev exhausted AND the llm-ext fallback also failed (advisor recommendation, §3 item
+        # 4): unlike the old single-attempt lane, this run may have spent up to ~5 minutes
+        # (Jev) plus most of the hold (llm-ext) proving neither works -- leaving the hold to
+        # expire on its own 15-minute TTL at this point would pause the resume for no further
+        # reason, since both sources are ALREADY known to have failed. Ensure a template
+        # handoff exists for this key (the same fact-only degrade the sync hook writes on its
+        # own failure) and release the hold immediately instead of waiting out a TTL whose
+        # only original purpose was bounding a `jev_compact` that never returns.
+        inputs = ec.HandoffInputs(trigger="jev-compaction-failed", findings=findings, cards=in_flight_cards)
+        template = ec.compose_template_handoff(inputs, now_iso=now_iso)
+        text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
+        handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
+        ehc._release_summary_hold(sd, key=key)
+        state.log_line(
+            _LOG, f"jev and the llm-ext fallback both failed ({detail}) — template handoff "
+            "written, hold released",
+        )
+        print(f"SUMMARY_FAILED jev and llm-ext fallback both failed: {detail}")
+        return 0
+
     # `cards` comes from the SAME board dump `jcl.state_head_paths` already made for the STATE
     # heads, not a fresh fetch -- so composing the facts section costs nothing extra here.
     # WHY this matters (review finding, TRDD-RAEGS1D5 C1): `compose_template_handoff`'s
     # boilerplate NEXT ACTION always reads "read the STATE block of the first in-flight card
     # below" -- an empty `cards=[]` would leave that sentence pointing at nothing every time
     # compaction succeeds, which is worse than the boilerplate being absent.
-    inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
-    now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    #
+    # `trigger` names WHICH source produced this text (cheap diagnostic, advisor §5): a reader
+    # of the handoff can tell a Jev compose from an llm-ext fallback summary at a glance.
+    trigger = "jev-compaction" if source == jcl.SOURCE_JEV else "jev-compaction-llm-ext-fallback"
+    inputs = ec.HandoffInputs(trigger=trigger, findings=findings, cards=in_flight_cards)
     tail = ec.recent_messages(str(prev))
     text = ec.compose_handoff(
         inputs, now_iso=now_iso, summary=compacted_text, tail=tail,
@@ -226,11 +302,13 @@ def _main() -> int:
     # is the release signal (external_handoff_clear._release_summary_hold), so a resumed
     # session sees the fresh handoff within the same second rather than waiting out the ceiling
     # that exists only to bound a jev_compact that never returns (TRDD-RAEGS1D5 card 3 C2).
-    ehc._release_summary_hold(sd)
-    print(f"SUMMARY_READY {len(text.encode('utf-8'))}B for {prev.name}")
-    state.log_line(_LOG, f"compacted context ready ({len(text)} chars) — hold released")
+    # `key=key` (R4): only release THIS lane's own hold record -- a second, still-in-flight
+    # lane's hold (a different transcript, a different key) must survive this release.
+    ehc._release_summary_hold(sd, key=key)
+    print(f"SUMMARY_READY {len(text.encode('utf-8'))}B for {prev.name} (source={source})")
+    state.log_line(_LOG, f"compacted context ready ({len(text)} chars, source={source}) — hold released")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

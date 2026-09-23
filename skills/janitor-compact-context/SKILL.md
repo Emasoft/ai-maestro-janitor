@@ -123,13 +123,17 @@ config, does not disarm the heartbeat, does not compact other sessions.
   (`scripts/summarize_previous_session.py` + `scripts/lib/jev_compaction_lane.py`), not here.
   The upgrade's own `jev_compact.py compact` call honours a recent probe-failure decline
   (`kind="unavailable"`/`"unreachable"`/`"rate_limited"`) the same as every other caller.
-  `--no-decline` bypasses ONLY a stale `kind="unreachable"` stamp (DNS/TLS/transport failure —
-  the kind of local, possibly-since-fixed condition a manual request is meant to re-probe
-  past); a genuinely down endpoint (`"unavailable"`) or a rate-limited key (`"rate_limited"`)
-  still declines fast even with `--no-decline` — a manual request must not be allowed to hammer
-  either. Run `jev_compact.py compact` directly with `--no-decline` after fixing a LOCAL
-  networking issue to force that one re-probe; this skill's own chain never passes it, on
-  purpose (an automatic upgrade should not hammer a known-down endpoint on every `/clear`).
+  `--no-decline` bypasses the `kind="unavailable"` AND `kind="unreachable"` branches (TRDD-
+  RAEGS1D5, owner decision 2026-09-23 — was `"unreachable"` only); a rate-limited key
+  (`"rate_limited"`) still declines fast even with `--no-decline` — the server's own
+  `Retry-After` must never be raced past, manually or automatically. Run `jev_compact.py
+  compact` directly with `--no-decline` after fixing a known outage to force one re-probe.
+  The AUTOMATIC upgrade itself now also retries for up to 5 minutes with `--no-decline` set on
+  every attempt (the owner's "retry for 5 minutes, then fall back to llm-ext" ruling) before
+  falling back once to `scripts/llm_ext_compact.py` — see `jev_compaction_lane.
+  run_compact_with_fallback`'s own docstring for the retry/backoff shape; this skill's own
+  manual chain still never passes `--no-decline` itself (a `/clear` fired this way is not the
+  retry lane), so a single manual compact-now request stays bounded to one attempt.
 - `scripts/lib/external_clear.py` — the PURE decision half (`should_clear_externally`).
 - `/janitor-handoff-and-clear` — a SEPARATE, manual-only, in-session sibling (model-authored
   handoff, never called automatically). Reach for it by name when you want the model to write

@@ -25,37 +25,45 @@ Sub-commands:
                                       F atomically. Exit code contract (a part C caller
                                       branches on these, so each is deliberate and stable):
                                         0 — wrote F; one summary line on stdout.
-                                        5 — declined: a probe-stamp failure younger than
-                                            PROBE_FAIL_TTL_S says Jev is down right now — no
+                                        5 — declined: a probe-stamp failure younger than its
+                                            kind's own TTL says Jev is down right now — no
                                             network fan-out into a known outage. Gated on
-                                            stamp `kind == "unavailable"` ONLY: an `auth` or
-                                            `budget` stamp never declines a later attempt —
-                                            those are scoped to one key/request, not the
+                                            stamp `kind` in {"unavailable", "unreachable",
+                                            "rate_limited"} ONLY: `auth`/`budget`/`invalid`/
+                                            `unknown` never decline a later attempt — those
+                                            are scoped to one key/request/attempt, not the
                                             endpoint, so the caller surfaces them as a
                                             finding instead of the whole machine going dark.
+                                            `--no-decline` bypasses the `unavailable` and
+                                            `unreachable` branches (never `rate_limited` —
+                                            see `cmd_compact`).
                                         6 — declined: `jev_compaction.NoDigest` — neither a
                                             human message nor a TRDD STATE head exists, so
                                             there is nothing to judge relevance against.
                                         7 — a Jev error (missing/bad key, budget violation,
-                                            scorer failure) during THIS attempt; the probe
-                                            stamp is written ok=false with the reason and a
-                                            `kind` (below) so the NEXT attempt can decide
-                                            whether to decline fast via exit 5. `kind="auth"`/
-                                            `"budget"` never decline a later attempt -- those
-                                            are scoped to one key/request, not the endpoint. A
-                                            real `kind="unavailable"` (a 5xx response, Jev
-                                            itself degraded) declines for the full
-                                            `PROBE_FAIL_TTL_S`; `kind="unreachable"` (a
-                                            transport failure -- no response ever came back,
-                                            may be local to this machine/lane) declines for
-                                            the shorter `PROBE_UNREACHABLE_TTL_S` (5min) --
+                                            scorer failure, malformed request/response)
+                                            during THIS attempt; the probe stamp is written
+                                            ok=false with the reason and a `kind` (below) so
+                                            the NEXT attempt can decide whether to decline
+                                            fast via exit 5. `kind="auth"`/`"budget"`/
+                                            `"invalid"`/`"unknown"` never decline a later
+                                            attempt -- those are scoped to one key/request/
+                                            attempt, not the endpoint. A real
+                                            `kind="unavailable"` (a 5xx response, Jev itself
+                                            degraded) declines for `PROBE_FAIL_TTL_S` (5min,
+                                            TRDD-RAEGS1D5 owner decision 2026-09-23 -- was
+                                            30min); `kind="unreachable"` (a transport
+                                            failure -- no response ever came back, may be
+                                            local to this machine/lane) declines for the
+                                            same-length `PROBE_UNREACHABLE_TTL_S` (5min) --
                                             long enough to skip the retry/backoff wall on a
                                             flapping network, short enough that a fixed local
                                             issue (DNS, a VPN) is retried again soon;
                                             `kind="rate_limited"` (a 429, a per-key limit
                                             rather than an outage) declines too, but only for
                                             the much shorter window `cmd_compact` derives from
-                                            the server's own `Retry-After` value.
+                                            the server's own `Retry-After` value, and is NEVER
+                                            bypassed by `--no-decline`.
                                       (2..4 are `probe`/`expand`'s own codes, listed above —
                                       one flat exit-code space across all three sub-commands
                                       so a caller never confuses e.g. `expand`'s 3 with
@@ -69,16 +77,17 @@ where ``armed.flag`` and the daemon's other control-plane files already live), s
 "model": None, "provider": str, "kind": str, "retry_after_s": float|None}``. ``model`` is
 always ``None`` — nothing in this CLI's probe response carries a model name to put there.
 ``kind`` is one of ``"unavailable"``, ``"unreachable"``, ``"rate_limited"``, ``"auth"``,
-``"budget"``, ``"ok"`` (see ``write_probe_stamp``) — it is
+``"budget"``, ``"invalid"``, ``"unknown"``, ``"ok"`` (see ``write_probe_stamp``) — it is
 what `compact`'s decline gate keys on, not ``ok`` alone. ``retry_after_s`` is only ever
 non-``None`` for ``kind="rate_limited"`` (the server's own ``Retry-After`` header value, in
 seconds). Two TTLs, read by different callers: ``PROBE_OK_TTL_S`` (6h) documents how long an
 ``ok=true`` stamp should be considered current by an external reader; ``PROBE_FAIL_TTL_S``
-(30min) is the one this file itself enforces for a ``kind="unavailable"`` stamp —
-``kind="rate_limited"`` instead uses ``min(retry_after_s or _RATE_LIMIT_FALLBACK_TTL_S, 1800
-if retry_after_s else _RATE_LIMIT_MAX_TTL_S)`` — a server-STATED ``Retry-After`` is honoured
-up to 1800s, the 300s ``_RATE_LIMIT_MAX_TTL_S`` ceiling applies only to the no-header fallback
-guess (see `cmd_compact`).
+(5min — TRDD-RAEGS1D5 owner decision 2026-09-23, was 30min) is the one this file itself
+enforces for a ``kind="unavailable"`` stamp — ``kind="rate_limited"`` instead uses
+``min(retry_after_s or _RATE_LIMIT_FALLBACK_TTL_S, 1800 if retry_after_s else
+_RATE_LIMIT_MAX_TTL_S)`` — a server-STATED ``Retry-After`` is honoured up to 1800s, the 300s
+``_RATE_LIMIT_MAX_TTL_S`` ceiling applies only to the no-header fallback guess (see
+`cmd_compact`).
 """
 
 from __future__ import annotations
@@ -104,6 +113,7 @@ from jevctx.types import (  # noqa: E402
     JevBudgetError,
     JevError,
     JevUnavailableError,
+    JevValidationError,
     Noul,
 )
 
@@ -113,7 +123,11 @@ from jevctx.types import (  # noqa: E402
 
 PROBE_STAMP_NAME = "jev-probe.json"
 PROBE_OK_TTL_S = 6 * 3600
-PROBE_FAIL_TTL_S = 30 * 60
+# 30min -> 5min (TRDD-RAEGS1D5, owner decision 2026-09-23 R1): the owner's retry budget for
+# a genuine Jev outage is 5 minutes total, not 30 -- a 30-minute decline window would have
+# outlived that whole budget by 6x and made "retry for 5 minutes then fall back to llm-ext"
+# unreachable in practice (every retry after the first would fast-decline instead of trying).
+PROBE_FAIL_TTL_S = 5 * 60
 # `kind="unreachable"` (DNS/TLS/offline -- no HTTP response ever came back) decline window.
 # Card 5 content-fit (TRDD-RAEGS1D5): this used to live ONLY in `on-session-start-post-clear-
 # compact.py`'s own `_PROBE_UNREACHABLE_TTL_S`, so `summarize_previous_session.py`'s detached
@@ -180,18 +194,20 @@ def write_probe_stamp(
     """Atomically write the probe stamp — see module docstring for the shape/TTLs.
 
     ``kind`` classifies WHY (one of ``"unavailable"``, ``"unreachable"``,
-    ``"rate_limited"``, ``"auth"``, ``"budget"``, ``"ok"``) — `compact`'s fast-decline
-    gate keys on it, not on ``ok`` alone: an ``auth``/``budget`` failure is a
-    config/planner bug specific to THIS caller's key or request shape, not evidence the
-    Jev endpoint itself is down, so it must not black out compaction for every other
-    shell on the machine the way an ``unavailable`` stamp correctly does. ``unreachable``
-    is the same non-decline treatment for a different reason: a transport failure means
-    no response ever came back at all, which can be local to THIS machine/lane (e.g. the
-    daemon's Python missing a CA bundle, TRDD-X6I04SAO) rather than Jev being down
-    machine-wide. ``rate_limited`` (a 429, retries exhausted) DOES decline a later
-    attempt, but only briefly (see `cmd_compact`) — a per-key rate limit, not an outage.
-    ``retry_after_s`` carries the server's own ``Retry-After`` value in seconds for a
-    ``rate_limited`` stamp; ``None`` for every other ``kind``.
+    ``"rate_limited"``, ``"auth"``, ``"budget"``, ``"invalid"``, ``"unknown"``, ``"ok"``)
+    — `compact`'s fast-decline gate keys on it, not on ``ok`` alone: an
+    ``auth``/``budget``/``invalid``/``unknown`` failure is scoped to THIS caller's
+    key/request/attempt, not evidence the Jev endpoint itself is down, so none of them
+    black out compaction for every other shell on the machine the way an ``unavailable``
+    stamp correctly does. ``unreachable`` is the same non-decline-by-default treatment for
+    a different reason: a transport failure means no response ever came back at all, which
+    can be local to THIS machine/lane (e.g. the daemon's Python missing a CA bundle,
+    TRDD-X6I04SAO) rather than Jev being down machine-wide — but it still gets its OWN
+    (shorter) decline TTL, same as ``unavailable``, since a caller with no evidence either
+    way should not hammer it either. ``rate_limited`` (a 429, retries exhausted) DOES
+    decline a later attempt, but only briefly (see `cmd_compact`) — a per-key rate limit,
+    not an outage. ``retry_after_s`` carries the server's own ``Retry-After`` value in
+    seconds for a ``rate_limited`` stamp; ``None`` for every other ``kind``.
     """
     stamp = {"ok": ok, "reason": reason, "ts": time.time(), "cost": cost,
               "model": model, "provider": provider, "kind": kind,
@@ -208,18 +224,31 @@ def _stamp_kind_for_error(exc: JevError) -> str:
     fallback and no private-subclass check needed. `status == 429` is its own `kind`
     (`"rate_limited"`) rather than folded into `"unavailable"`: it is a per-key rate
     limit, not evidence the whole endpoint is down (see `cmd_compact`'s decline gate).
-    Any OTHER `JevError` subclass this CLI itself might raise maps to `"unavailable"`,
-    the conservative default.
+
+    `JevValidationError` (TRDD-RAEGS1D5, owner decision 2026-09-23) maps to `"invalid"` --
+    a 400/404/413/422/malformed-response is a bug in THIS one request, never evidence the
+    endpoint itself is down, so (like `"auth"`/`"budget"`) it must NOT decline a later
+    attempt. Before this fix `JevValidationError` fell through to the `"unavailable"`
+    default below and declined every other caller on this machine for the (then 30-minute,
+    now 5-minute) outage TTL -- a live, presently-reachable defect the owner's fallback
+    review found (a 408/422/malformed-200-body response reaches this branch through
+    ordinary HTTP traffic, not just a hypothetical future exception type).
+
+    Any OTHER, genuinely unrecognized `JevError` subclass maps to `"unknown"` -- also
+    non-declining (retrying/falling back on an unclassified error is safe; blacking out
+    every other caller's compaction on one is not).
     """
     if isinstance(exc, JevAuthError):
         return "auth"
     if isinstance(exc, JevBudgetError):
         return "budget"
+    if isinstance(exc, JevValidationError):
+        return "invalid"
     if isinstance(exc, JevUnavailableError):
         if exc.status == 429:
             return "rate_limited"
         return "unavailable" if exc.status is not None else "unreachable"
-    return "unavailable"
+    return "unknown"
 
 
 def _retry_after_for_stamp(exc: JevError) -> float | None:
@@ -438,18 +467,21 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # stamps still exist for a caller to surface as a finding; they just don't gate the
     # NEXT attempt.
     #
-    # `--no-decline` (card 5 injection-caps review, TRDD-RAEGS1D5): bypasses ONLY the
-    # `kind="unreachable"` branch -- NEVER `unavailable` or `rate_limited`. An explicit
-    # compact-now request (`/janitor-compact-context`) is a deliberate ask for a real attempt
-    # right now, but it must not be allowed to hammer a genuinely DOWN endpoint (`unavailable`)
-    # or a rate-limited key (`rate_limited`) -- only a transport-level "cannot even reach it"
-    # stamp is worth one guaranteed real attempt, since that is exactly the kind of stale,
-    # possibly-since-fixed condition a manual request is meant to re-probe past.
+    # `--no-decline` (TRDD-RAEGS1D5, owner decision 2026-09-23 R1): bypasses the
+    # `kind="unavailable"` AND `kind="unreachable"` branches -- NEVER `rate_limited`. This
+    # widened the original card-5 behaviour (which bypassed `unreachable` only): the
+    # AUTOMATIC retry lane (`jev_compaction_lane.run_compact_with_fallback`) now also passes
+    # `--no-decline` on every retry inside its owner-mandated 5-minute budget, and with the
+    # OLD narrower bypass a real outage would stamp `kind="unavailable"` on attempt 1 and
+    # every later retry would exit 5 in microseconds for the rest of the window -- "retry for
+    # 5 minutes" would have meant one real attempt plus a 5-minute sleep. `rate_limited` stays
+    # gated even with `--no-decline`: a 429 is the SERVER explicitly asking for a wait, and a
+    # manual or automatic caller must not be allowed to hammer straight through that.
     if stamp is not None and stamp.get("ok") is False:
         kind = stamp.get("kind")
         age_s = time.time() - float(stamp.get("ts", 0))
         ttl: float | None = None
-        if kind == "unavailable":
+        if kind == "unavailable" and not args.no_decline:
             ttl = PROBE_FAIL_TTL_S
         elif kind == "unreachable" and not args.no_decline:
             ttl = PROBE_UNREACHABLE_TTL_S
@@ -602,9 +634,12 @@ def main(argv: list[str] | None = None) -> int:
     # means "no second rendering" -- a bare manual `compact` invocation is unchanged.
     p_compact.add_argument("--inject-out", default=None)
     p_compact.add_argument("--inject-max-bytes", type=int, default=None)
-    # Card 5 two-renderings (TRDD-RAEGS1D5, item 5): the AUTOMATIC lane (SessionStart hook,
-    # detached summarizer) always honours the early decline gate below; an explicit compact-now
-    # request bypasses it entirely instead of silently declining on a stale, unrelated stamp.
+    # Card 5 two-renderings (TRDD-RAEGS1D5, item 5) + owner decision 2026-09-23 R1: the
+    # SYNCHRONOUS SessionStart hook always honours the early decline gate below (one bounded
+    # attempt, must not hammer a known outage); an explicit compact-now request, AND the
+    # AUTOMATIC retry lane's own bounded 5-minute budget (`jev_compaction_lane.
+    # run_compact_with_fallback`), both pass `--no-decline` to bypass the `unavailable`/
+    # `unreachable` branches -- `rate_limited` is never bypassed (see `cmd_compact`).
     p_compact.add_argument("--no-decline", action="store_true")
 
     args = parser.parse_args(argv)

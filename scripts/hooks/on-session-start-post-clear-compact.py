@@ -32,6 +32,14 @@ racing the heartbeat's `[janitor-resume]` cue the way the detached lane must.
 NEVER RAISES. A SessionStart hook that throws takes the whole session start down with it — every
 branch below is wrapped so a fault degrades to "print nothing, log why" rather than blocking the
 fresh session's first turn.
+
+ON FAILURE (TRDD-RAEGS1D5, owner decision 2026-09-23 R2): this hook's own single, bounded
+`run_compact` attempt is never the whole story any more. It still injects the fact-only
+template synchronously, exactly as before, but it ALSO spawns a DETACHED
+`summarize_previous_session.py --transcript <this transcript>` (same Popen shape as
+`on-session-start.py`'s own unconditional spawn) so the owner's "retry for 5 minutes, then
+llm-ext" budget — which this synchronous hook has no time left to spend — gets spent by a
+process that can afford to.
 """
 
 from __future__ import annotations
@@ -320,6 +328,39 @@ def _main() -> int:
         template = ec.compose_template_handoff(inputs, now_iso=now_iso)
         text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
+
+        # R2 (TRDD-RAEGS1D5, owner decision 2026-09-23): "if jev is not working after 5
+        # minutes retries ... llm-ext must be used if jev is unavailable after 5 minutes".
+        # This hook is SYNCHRONOUS and gets only ONE bounded attempt (`_RUN_COMPACT_TIMEOUT_S`
+        # inside `hooks.json`'s own 90s budget) -- the owner's 5-minute retry-then-fallback
+        # budget can only be spent by a DETACHED process. Spawn `summarize_previous_session.py
+        # --transcript <this same transcript>` with the SAME Popen shape/env
+        # `on-session-start.py` uses for its own unconditional spawn (`start_new_session=True`
+        # + `state.detached_uv_env()`, so the child outlives this hook's process group once
+        # Claude Code reaps it) -- `--transcript` (never a guess) is what lets the detached
+        # lane skip the pane-claim check that would otherwise defer right back to THIS hook,
+        # which has already failed. The late result reaches the session through the existing
+        # hold + `[janitor-resume]` "Read <file> FIRST" cue (dispatch.py), same delivery path
+        # the unconditional spawn already uses.
+        try:
+            import subprocess  # noqa: PLC0415
+
+            summarizer = plugin_root / "scripts" / "summarize_previous_session.py"
+            if summarizer.is_file():
+                log_dir = state.log_dir()
+                log_dir.mkdir(parents=True, exist_ok=True)
+                with (log_dir / "session-summary.stderr.log").open(
+                    "a", encoding="utf-8"
+                ) as errsink:
+                    subprocess.Popen(  # noqa: S603 - explicit args, no shell
+                        [str(summarizer), "--transcript", transcript_path],
+                        stdout=subprocess.DEVNULL, stderr=errsink,
+                        start_new_session=True, env=state.detached_uv_env(),
+                    )
+        except Exception as exc:  # noqa: BLE001 -- never break session start
+            state.log_line(
+                "jev-post-clear-hook", f"detached retry-then-fallback spawn failed: {exc!r}"
+            )
 
     # Card 5 injection-caps review (TRDD-RAEGS1D5, chain-hardening §7): a model-authored handoff
     # written just before this clear is otherwise INVISIBLE to the fresh session -- this line is

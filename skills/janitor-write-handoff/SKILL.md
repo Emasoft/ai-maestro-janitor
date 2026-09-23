@@ -18,11 +18,15 @@ This skill adds the **semantic** layer on top, and it is **also zero model cost*
 `llm-ext` CLI, out of process, and writes
 `.janitor/state/agent-handoff-<session>-<ts>-<pid>.md`.
 
-**MANUAL-ONLY** (TRDD-RAEGS1D5 card 3 C2): this is the sole remaining place in this plugin
-that still calls `llm-ext` — the automatic SessionStart summarizer
+**MANUAL** (TRDD-RAEGS1D5 card 3 C2, updated by owner decision 2026-09-23): this skill's own
+`llm-ext` call is UNCONDITIONAL — the automatic SessionStart summarizer
 (`scripts/summarize_previous_session.py`) was rewired onto the janitor's own `jev_compact.py`
-scorer and no longer touches `llm-ext` at all. Invoking THIS skill is what still spends an
-`llm-ext` call; nothing automatic does.
+scorer and reaches for `llm-ext` only as a bounded FALLBACK: it retries Jev for up to 5
+minutes, and only if that whole window fails does it fall back once to
+`scripts/llm_ext_compact.py` before degrading to the mechanical template. So an `llm-ext` call
+can now also happen automatically, but only after a real Jev outage — invoking THIS skill is
+still the only way to spend one ON DEMAND, for the SEMANTIC layer, regardless of whether Jev
+is healthy.
 
 **It used to make the MODEL author that prose, and that was the whole cost** — tokens
 spent inside the very window about to be shrunk, which is the worst possible place to

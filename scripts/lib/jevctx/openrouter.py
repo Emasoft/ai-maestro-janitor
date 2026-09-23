@@ -182,13 +182,20 @@ class OpenRouterJevClient:
                 # permissions/guardrail config) or are specific to this request's
                 # content. JevAuthError is the one error kind jev_compact stamps
                 # human-facing and non-declining ("auth"); the catch-all
-                # JevValidationError below instead becomes kind="unavailable" --
-                # a 30-min compaction-decline outage stamp (TRDD-541CBN36).
+                # JevValidationError below instead becomes kind="invalid" -- also
+                # non-declining, scoped to this one request (TRDD-RAEGS1D5 corrected the
+                # stale claim here that it became a declining "unavailable" stamp).
                 if response.status_code in (402, 403):
                     raise JevAuthError(f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}")
                 if response.status_code == 422:
                     raise JevValidationError(_error_detail(response))
-                if response.status_code == 429 or response.status_code >= 500:
+                # 408 = "Your request timed out" (OpenRouter's own error reference) -- retryable
+                # the same as a 429/5xx, NOT the generic "bad request" bucket below (TRDD-RAEGS1D5,
+                # owner decision 2026-09-23: "retry accordingly for 5 minutes before falling back
+                # to llm-ext"). Before this fix a 408 raised JevValidationError on the FIRST
+                # attempt, with no retry at all -- exactly the outage shape the owner's 5-minute
+                # retry budget is supposed to ride out.
+                if response.status_code == 408 or response.status_code == 429 or response.status_code >= 500:
                     retry_after = self._retry_after_seconds(response)
                     last_error = JevUnavailableError(
                         f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}",
@@ -199,7 +206,11 @@ class OpenRouterJevClient:
                         break
                     self._sleep(self._retry_policy.delay(attempt, retry_after=retry_after))
                     continue
-                # Any other 4xx: the request is bad in some way we do not special-case.
+                # Any other 4xx (400/404/413/422/...): the request is bad in some way retrying
+                # cannot fix -- raises JevValidationError, which jev_compact.py's
+                # `_stamp_kind_for_error` stamps `kind="invalid"` (TRDD-RAEGS1D5): scoped to THIS
+                # request, never a machine-wide outage, so it must not decline a later attempt the
+                # way the exhausted-retries JevUnavailableError above correctly does.
                 raise JevValidationError(f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}")
 
         status, cause, retry_after = _detail_from_last_error(last_error)

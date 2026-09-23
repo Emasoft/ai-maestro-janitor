@@ -25,6 +25,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 _SCRIPTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_SCRIPTS))
@@ -38,8 +39,10 @@ import state  # noqa: E402
 _LOG = "session-summary"
 
 # `jev_compact.py compact`'s exit-code contract (its own module docstring is the source of
-# truth; TRDD-RAEGS1D5 card 3 part B). Never retried in-process -- a `TimeoutExpired` is a bug
-# exit, same as any other non-zero/non-{5,6} code.
+# truth; TRDD-RAEGS1D5 card 3 part B). `run_compact` ITSELF never retries -- one call, one
+# subprocess, a `TimeoutExpired` is a bug exit here, same as any other non-zero/non-{5,6}
+# code. `run_compact_with_fallback` (below), added by owner decision 2026-09-23, is the one
+# place that calls `run_compact` more than once for the SAME compaction, on a bounded budget.
 EXIT_OK = 0
 EXIT_DECLINED_UNAVAILABLE = 5
 EXIT_DECLINED_NO_DIGEST = 6
@@ -300,10 +303,14 @@ def handle_nonzero_exit(
     text is always a safe fallback, never a more alarming one.
     """
     if timed_out or proc is None:
+        # TRDD-RAEGS1D5 R5: this used to hardcode "within 120s" -- true only for the old
+        # single fixed-timeout callers. `run_compact_with_fallback`'s retry loop calls
+        # `run_compact` with a VARIABLE `timeout=min(120, remaining)` on each attempt, so a
+        # fixed number here would misreport the actual bound of the attempt that timed out.
         record_finding(
             sev="HIGH", code="JEV-COMPACT-FAILED",
-            msg="[jev-compaction] jev_compact failed (timeout): no response within 120s "
-            "— fact-only context injected",
+            msg="[jev-compaction] jev_compact failed (timeout): no response within the "
+            "attempt's own timeout — fact-only context injected",
         )
         return
 
@@ -373,10 +380,13 @@ def handle_nonzero_exit(
             kind = "unavailable"  # no retry_after_s -- fall back to unavailable's own text
 
         if kind == "unavailable":
+            # TRDD-RAEGS1D5 R5: "30 min" was the pre-owner-decision TTL; PROBE_FAIL_TTL_S is
+            # now 5 min (jev_compact.py), so this wording would otherwise mislead a reader
+            # about how long the next automatic attempt is actually held back.
             record_finding(
                 sev="MEDIUM", code="JEV-SCORER-UNAVAILABLE",
                 msg=f"[jev-compaction] scorer unavailable: {reason} — fact-only context "
-                "injected; compactions decline for 30 min",
+                "injected; compactions decline for 5 min",
             )
             return
         if kind == "auth":
@@ -428,10 +438,18 @@ def run_compact(
     no_decline: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str] | None, bool]:
     """Exec `jev_compact.py compact` BY PATH (it is git-tracked 100755, own shebang runs it) and
-    return `(proc, timed_out)`. 120s: jev's own client retries 3x with <=8s backoff on a 15s
-    request timeout; six parallel batches bound the worst case near 70s; the 15-min summary hold
-    is the outer bound (docs_dev/jev-card3c-brief.md C1). A `TimeoutExpired` is a bug exit here,
-    never retried in-process -- retrying would risk landing past the hold's own deadline.
+    return `(proc, timed_out)`. `timeout` defaults to 120s (jev's own client retries 3x with
+    <=8s backoff on a 15s request timeout; six parallel batches bound the worst case near 70s)
+    for a bare caller that passes none -- the sync hook passes its own smaller
+    `_RUN_COMPACT_TIMEOUT_S` (60s) explicitly, and `run_compact_with_fallback` (below) passes
+    the WHOLE remaining retry budget explicitly (orchestrator correction 2026-09-23, measured:
+    a 49MB transcript took 168s for one real run, well past this 120s default), so neither of
+    the two real production callers actually relies on this default. A `TimeoutExpired` is a
+    bug exit here -- THIS FUNCTION itself never retries on it, so a caller that wants to (only
+    `run_compact_with_fallback`, per owner decision 2026-09-23 -- and it deliberately never
+    retries a timeout either, only the FAST transient failure kinds) makes the SAME bounded-
+    budget decision explicitly, one call at a time, rather than this function silently looping
+    and risking landing past the hold's own deadline on its own.
 
     `budget_tokens`/`digest_tokens`, when given, are forwarded as `--budget-tokens`/`--digest-
     tokens` -- unset (the automatic lane's own default now, card 5 two-renderings) keeps
@@ -444,8 +462,11 @@ def run_compact(
     size-bounded companion document (the SessionStart hook) rather than the full one.
 
     `no_decline`, when true, forwards `--no-decline` -- bypasses `jev_compact.py compact`'s own
-    early decline gate entirely (card 5 two-renderings, item 5). The automatic lane never sets
-    this; only an explicit compact-now request should."""
+    early decline gate for `kind="unavailable"`/`"unreachable"`, NEVER `"rate_limited"` (owner
+    decision 2026-09-23 R1; card 5 two-renderings, item 5, originally bypassed `"unreachable"`
+    only). Set by an explicit compact-now request, AND by `run_compact_with_fallback` (below)
+    on every retry inside its own bounded 5-minute budget -- without it, the first real
+    failure would stamp a decline that fast-declines every later retry in this same window."""
     cmd = [
         str(plugin_root / "scripts" / "jev_compact.py"), "compact",
         "--transcript", transcript, "--out", str(out_path),
@@ -468,3 +489,217 @@ def run_compact(
     except subprocess.TimeoutExpired:
         return None, True
     return proc, False
+
+
+# --------------------------------------------------------------------------------------- #
+# Retry-then-llm-ext fallback (TRDD-RAEGS1D5, owner decision 3 of 2026-09-23 + advisor
+# review 20260923_191616+0200-jev-fallback-advisor.md, R1-R5 + recommendations).
+#
+# Owner's own words: "if jev is not working after 5 minutes retries, the llm-ext compaction
+# function must be called as a fallback ... but llm-ext must be used if jev is unavailable
+# after 5 minutes." Also: no failure may pause compaction for 30 minutes.
+#
+# LIVES HERE, NOT IN summarize_previous_session.py, so the entry point stays a thin
+# orchestrator (its own docstring: "THIN ON PURPOSE") and BOTH callers of `run_compact` --
+# the pane-keyed detached lane AND the no-pane-key path -- get the identical retry+fallback
+# behaviour by calling this one function instead of duplicating the loop.
+# --------------------------------------------------------------------------------------- #
+
+# Skip a Jev attempt entirely once less than this remains of the retry budget: a real compact
+# is ~13s on a 4.6MB transcript, up to ~70s worst case (measure report) -- a 5-30s remainder
+# cannot possibly complete one, so spend it on the llm-ext fallback instead (advisor §4).
+_MIN_JEV_ATTEMPT_S = 30.0
+# Sleep between retries after a FAST transient (non-rate-limited) failure -- kind unavailable/
+# unreachable/unknown, which `jev_compact.py` returns in seconds, never a `run_compact`
+# subprocess TIMEOUT (that one never retries at all -- see `run_compact_with_fallback`'s own
+# docstring, orchestrator correction 2026-09-23: measured 168s for a 49MB transcript, so a
+# single attempt can legitimately span the WHOLE remaining budget, and re-running identical
+# deterministic work after it times out would only burn what budget is left proving the same
+# thing again). Arbitrary but harmless (advisor §5).
+_TRANSIENT_RETRY_SLEEP_S = 15.0
+# The outer bound added around the llm-ext fallback subprocess (advisor §4 "minor"): its own
+# internal timeout is `llm_ext_timeout_s`, but a `uv`/launcher hang BEFORE that timer even
+# starts could otherwise outlive the 15-minute hold entirely.
+_LLM_EXT_OUTER_SLACK_S = 15.0
+
+# Sources `run_compact_with_fallback` can report success from.
+SOURCE_JEV = "jev"
+SOURCE_LLM_EXT = "llm-ext"
+SOURCE_FAILED = "failed"
+
+# `kind`s (from the probe stamp) that mean "retrying THIS attempt again cannot help" --
+# stop the loop and fall back at once rather than spending more of the 5-minute budget.
+_NON_RETRYABLE_KINDS = frozenset({"auth", "budget", "invalid"})
+
+
+def _sleep_for_kind_or_break(
+    stamp: dict, *, deadline: float, now_fn: Any, sleep_fn: Any,
+) -> bool:
+    """For a `kind="rate_limited"` stamp: sleep out the server's own `Retry-After` (floor 5s)
+    when it fits inside the remaining budget, or signal "stop, fall back now" when it does not
+    (R3: falling back immediately is strictly better than sleeping to the deadline only to
+    learn what the stamp's own `retry_after_s` already told us). Returns True to keep
+    retrying, False to break out of the loop."""
+    remaining = deadline - float(now_fn())
+    if remaining <= 0:
+        return False
+    retry_after = stamp.get("retry_after_s")
+    wait = max(float(retry_after), 5.0) if isinstance(retry_after, (int, float)) else 5.0
+    if wait > remaining:
+        return False  # R3: the decline window outlasts the retry budget -- fall back now
+    sleep_fn(min(wait, remaining))
+    return True
+
+
+def _run_llm_ext_fallback(
+    plugin_root: Path, *, transcript: str, timeout_s: float,
+) -> tuple[bool, str]:
+    """EXEC (never import) `scripts/llm_ext_compact.py` -- the llm-ext equivalent of how this
+    lane execs `jev_compact.py` BY PATH, for the same reason: `tests/test_jev_boundary.py`
+    forbids this stdlib-only module from importing `llm_ext_summary` in-process (owner
+    decision 2026-09-23: the automatic lane may EXEC llm-ext, never import it).
+
+    `timeout_s + _LLM_EXT_OUTER_SLACK_S` bounds the whole subprocess -- `llm_ext_compact.py`
+    already bounds its OWN internal attempt at `timeout_s`; the slack only guards against a
+    `uv`/launcher hang before that internal timer starts (advisor §4).
+    """
+    if timeout_s < _MIN_JEV_ATTEMPT_S:
+        # Not enough of the hold left to plausibly get a real llm-ext summary back --
+        # degrade straight to the mechanical template rather than spend the remainder on a
+        # call almost certain to be killed mid-flight.
+        return False, f"llm-ext fallback skipped: only {timeout_s:.0f}s left in the hold"
+    script = plugin_root / "scripts" / "llm_ext_compact.py"
+    cmd = [str(script), "--transcript", transcript, "--timeout-s", str(int(timeout_s))]
+    try:
+        proc = subprocess.run(
+            cmd, timeout=timeout_s + _LLM_EXT_OUTER_SLACK_S, capture_output=True, text=True,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "llm-ext fallback timed out (outer bound)"
+    except OSError as exc:
+        return False, f"llm-ext fallback spawn failed: {exc!r}"
+    if proc.returncode == 0:
+        text = (proc.stdout or "").strip()
+        if text:
+            return True, text
+        return False, "llm-ext fallback produced no output"
+    return False, (proc.stderr or "").strip()[-400:] or f"llm-ext fallback exited {proc.returncode}"
+
+
+def run_compact_with_fallback(
+    plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
+    heads_args: list[str], sd: Path, deadline: float, llm_ext_timeout_s: float,
+    budget_tokens: int | None = None, digest_tokens: int | None = None,
+    now_fn: Any = time.time, sleep_fn: Any = time.sleep,
+) -> tuple[str, str | None, str]:
+    """Retry `jev_compact.py compact` (with `--no-decline`) until `deadline`, then fall back to
+    `llm_ext_compact.py` once. Returns `(source, text, detail)`:
+      * `(SOURCE_JEV, <compacted text>, "")` — a real Jev compose succeeded; `out_path` is
+        already written (by `run_compact`/`jev_compact.py` itself).
+      * `(SOURCE_LLM_EXT, <summary text>, "")` — Jev was exhausted, the llm-ext fallback
+        produced a real summary.
+      * `(SOURCE_FAILED, None, <why>)` — both Jev and the llm-ext fallback failed; the
+        caller degrades to the mechanical template (per the owner's recommendation: ensure a
+        template handoff exists for the key, then RELEASE the hold rather than leave it to
+        expire — see `summarize_previous_session.py`).
+
+    THIS RETRY LOOP LIVES INSIDE ONE COMPACTION (TRDD-RAEGS1D5, advisor §1): it never stamps
+    the clear cooldown, never types `/clear`, and never re-enters the trigger path -- it only
+    calls `jev_compact.py compact` and (on exhaustion) `llm_ext_compact.py`, both read-only
+    with respect to the clear machinery. That is what keeps it compatible with card 1's loop
+    guard ("a failed attempt records evaluated, not fired; no hot retry").
+
+    `--no-decline` is passed on every Jev attempt (R1): without it, the FIRST real failure
+    stamps `kind="unavailable"`/`"unreachable"` and every later iteration inside this same
+    5-minute budget would fast-decline in microseconds instead of actually retrying.
+    `kind="rate_limited"` is deliberately never bypassed (the server's own `Retry-After` is
+    honoured via `_sleep_for_kind_or_break`, not raced past).
+
+    ONE ATTEMPT MAY SPAN THE WHOLE REMAINING BUDGET (orchestrator correction, 2026-09-23,
+    from a real measurement: a 49MB transcript took 168s for ONE `jev_compact.py compact` run,
+    4.7MB took 10s). So `timeout=remaining` here, not a fixed sub-budget -- and a TIMEOUT is
+    NEVER retried: it is deterministic work (same transcript, same digest, same items), so a
+    re-run would reproduce the identical slowness and just spend more of an already-exhausted
+    budget learning nothing new. On timeout the loop goes straight to the llm-ext fallback.
+    Retries stay reserved for the FAST transient failures (`kind` unavailable/unreachable/
+    unknown/rate_limited), which `jev_compact.py` returns in seconds, not minutes.
+    """
+    last_proc: subprocess.CompletedProcess[str] | None = None
+    last_timed_out = False
+
+    while True:
+        remaining = deadline - float(now_fn())
+        if remaining < _MIN_JEV_ATTEMPT_S:
+            break  # not enough budget left for one more attempt to plausibly finish
+
+        proc, timed_out = run_compact(
+            plugin_root, transcript=transcript, out_path=out_path, session_key=session_key,
+            heads_args=heads_args, timeout=int(remaining), budget_tokens=budget_tokens,
+            digest_tokens=digest_tokens, no_decline=True,
+        )
+        last_proc, last_timed_out = proc, timed_out
+
+        if not timed_out and proc is not None and proc.returncode == EXIT_OK:
+            try:
+                return SOURCE_JEV, out_path.read_text(encoding="utf-8"), ""
+            except OSError:
+                pass  # written but unreadable -- treat exactly like any other failed attempt
+
+        if timed_out or proc is None:
+            # Orchestrator correction 2026-09-23: NEVER retried. The attempt just spent (up
+            # to) the WHOLE remaining budget on deterministic work that did not finish in
+            # time -- a re-run of the SAME transcript/digest/items would time out again,
+            # identically, for the same reason. Go straight to the llm-ext fallback.
+            break
+
+        if proc.returncode == EXIT_DECLINED_UNAVAILABLE:
+            # With `--no-decline` set, `unavailable`/`unreachable` are bypassed by
+            # jev_compact.py itself (R1) -- this exit is reachable, with a REAL binary, ONLY
+            # for a `kind="rate_limited"` decline (never bypassed). Defensively still guard
+            # on the actual stamp kind (never assume) -- an unexpected kind here (a stub in a
+            # test, a future stamp shape) stops the loop rather than sleeping on a guess.
+            stamp = read_probe_stamp() or {}
+            if stamp.get("kind") == "rate_limited" and _sleep_for_kind_or_break(
+                stamp, deadline=deadline, now_fn=now_fn, sleep_fn=sleep_fn
+            ):
+                continue
+            break
+
+        if proc.returncode == EXIT_JEV_ERROR:
+            stamp = read_probe_stamp() or {}
+            kind = stamp.get("kind")
+            if kind in _NON_RETRYABLE_KINDS:
+                break  # auth/budget/invalid -- retrying cannot help, fall back now
+            if kind == "rate_limited":
+                if _sleep_for_kind_or_break(
+                    stamp, deadline=deadline, now_fn=now_fn, sleep_fn=sleep_fn
+                ):
+                    continue
+                break
+            # unavailable / unreachable / unknown / a missing kind -- transient, short sleep
+            remaining = deadline - float(now_fn())
+            if remaining <= 0:
+                break
+            sleep_fn(min(_TRANSIENT_RETRY_SLEEP_S, remaining))
+            continue
+
+        # EXIT_DECLINED_NO_DIGEST, EXIT_COMMAND_NOT_FOUND, or any other code -- deterministic
+        # for this same transcript/environment; retrying cannot change the outcome.
+        break
+
+    # Jev exhausted (deadline reached, or a non-retryable stop). Record WHY, per the existing
+    # exit-code -> findings-ledger mapping, then try the fallback exactly once.
+    handle_nonzero_exit(last_proc, timed_out=last_timed_out, sd=sd)
+
+    ok, payload = _run_llm_ext_fallback(
+        plugin_root, transcript=transcript, timeout_s=llm_ext_timeout_s,
+    )
+    if ok:
+        return SOURCE_LLM_EXT, payload, ""
+
+    record_finding(
+        sev="HIGH", code="JEV-COMPACT-FAILED",
+        msg=f"[jev-compaction] llm-ext fallback also failed: {payload} — degrading to the "
+        "mechanical handoff",
+    )
+    return SOURCE_FAILED, None, payload
