@@ -914,6 +914,69 @@ _DIGEST_TRUNCATED_NOTE = "\n\n[[digest truncated to fit the handoff budget]]"
 # model just is not told about them by name.
 _MAX_ELIDED_POINTERS = 40
 
+# TRDD-RAEGS1D5 (injected-copy content fix): measured on three real transcripts (reports/
+# compaction-replacement/), the injected copy `jev_compact.py compact --inject-out` writes came
+# out with 3, 0 and 0 kept items respectively at `--inject-max-bytes 5000` -- the byte backstop
+# below used to evict whole kept items until the doc fit, and a real item is routinely bigger
+# than the whole injected budget. `compose()`'s caller passes this as `max_item_bytes` ONLY for
+# the injected render (never for `--out`, which stays unbounded per item); a kept item over this
+# cap is shown as a verbatim prefix (never paraphrased) plus a pointer to the rest, so a handful
+# of large items can no longer starve the injected copy down to zero. This is the GENERAL
+# per-item cap -- the one exception is the single newest owner message, see
+# `NEWEST_OWNER_ITEM_BYTES` below.
+DEFAULT_INJECT_ITEM_BYTES = 700
+
+# TRDD-RAEGS1D5 (orchestrator rebalance, 2026-09-23): the single NEWEST owner (human) message
+# is worth more verbatim room than any other item -- it is what the resumed session is most
+# likely to need untruncated -- so it gets its OWN, larger cap instead of `max_item_bytes`,
+# shown in full when it fits, a verbatim prefix when it doesn't. Every other kept item,
+# including every OTHER owner message, still uses `max_item_bytes`.
+NEWEST_OWNER_ITEM_BYTES = 1500
+
+# TRDD-RAEGS1D5 (orchestrator rebalance): a real run on this repo's own 49 MB and 258 MB
+# transcripts showed the injected copy 100% kept="user" (15/15 and 11/11) -- the owner's own
+# messages crowded out everything the session actually DID (its assistant replies, tool calls,
+# task-notification events). This caps the OWNER group's total byte share -- the newest message
+# plus any further owner messages, newest-first with `decision_passed` ones preferred -- at
+# `_OWNER_SHARE` of the kept-item budget, so non-user work always gets a real chance at the
+# rest. It is a CEILING enforced by a running byte total during selection, never a pre-reserved
+# block: a handful of short owner one-liners that do not use the whole share leave the
+# remainder to flow to the other tiers, not sit unused (see the selection code below).
+_OWNER_SHARE = 0.40
+
+# TRDD-RAEGS1D5: pointers are breadcrumbs (an id + an 80-char preview), not the content the
+# resumed session actually needs -- capping their share of the injected byte budget keeps them
+# from crowding out kept items the way the old whole-item eviction let them. 0.15, under the
+# "at most 20-25%" ceiling from the card 5 content-fit review: real-data measurement showed the
+# FIXED trailer lines this function always emits (header, the "N more items" line, the "Full
+# compacted context" trailer -- the transcript path repeated up to 4x) already consume 1.3-1.6
+# KB of a 5000-byte budget before a single pointer or kept item is rendered, so reserving the
+# full 20-25% for pointers on TOP of that left too little for kept items; 0.15 is still a real
+# ceiling on pointers (never zero -- at least one pointer always survives, see the pre-trim
+# below), just sized to what real data showed was actually left once the fixed cost is measured
+# (the pre-trim measures that cost directly, never guesses it).
+_INJECT_POINTER_SHARE = 0.15
+
+
+def _truncate_prefix_bytes(text: str, limit: int) -> str:
+    """A VERBATIM prefix of `text`, at most `limit` UTF-8 bytes -- never paraphrased.
+
+    Cuts at the last newline within the limit when one exists, so a truncated item still
+    reads as whole lines; falls back to a raw UTF-8-safe byte cut (via `errors="ignore"`,
+    which drops only a codepoint split in half at the boundary, never a whole line) when the
+    first line alone exceeds `limit`. TRDD-RAEGS1D5: this is what lets a kept item LARGER than
+    the entire injected budget still appear as real transcript bytes instead of being evicted
+    whole (see `DEFAULT_INJECT_ITEM_BYTES`'s docstring above).
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    cut = encoded[:limit]
+    nl = cut.rfind(b"\n")
+    if nl > 0:
+        return cut[:nl].decode("utf-8")
+    return cut.decode("utf-8", "ignore")
+
 
 def compose(
     items: list[Item],
@@ -924,6 +987,7 @@ def compose(
     max_elided_pointers: int = _MAX_ELIDED_POINTERS,
     max_bytes: int | None = None,
     full_context_path: str | None = None,
+    max_item_bytes: int | None = None,
 ) -> str:
     """Assemble the final injected document: header, kept items verbatim, then pointers.
 
@@ -958,6 +1022,26 @@ def compose(
     everything elided, and a blind `raw[:room]` slice downstream (`external_clear.compose_
     handoff`, before this fix) used to cut it off along with the newest kept items because both
     sit at the tail of the joined string.
+
+    `max_item_bytes`, when given (TRDD-RAEGS1D5 injected-copy content fix -- see
+    `DEFAULT_INJECT_ITEM_BYTES`): the render itself changes, not just the backstop. `--out`
+    never passes this (stays exactly as documented above); the injected caller always does,
+    which activates three things together, because all three exist to solve the SAME measured
+    failure (three real transcripts rendered 3, 0 and 0 kept items into the injected copy):
+    (1) kept items are shown in priority order -- the owner's own messages (`kind == "user"`)
+    first, then `decision_passed` items, then by relevance/recency -- instead of `--out`'s
+    chronological order, so what the resumed session sees FIRST is what a tight budget keeps;
+    (2) any kept item over `max_item_bytes` renders as a verbatim prefix (cut at a line or
+    UTF-8 boundary, never paraphrased) plus a pointer to the rest, so oversized-relative-to-
+    budget items no longer have to be evicted whole; (3) elided pointers are capped to
+    `_INJECT_POINTER_SHARE` of whatever `max_bytes` leaves after the fixed lines this function
+    always emits (measured directly, not estimated -- see the pre-trim's own comment) BEFORE
+    the render competes for space, so they can no longer crowd out kept items the way the old
+    single byte backstop did. The final byte
+    backstop below still runs afterward as a hard guarantee (`max_bytes` is never exceeded),
+    but with items already small it now only has to drop a handful of truncated items, not the
+    whole kept set -- and it evicts by the SAME `kind == "user"` priority, never `evict_key`
+    (which stays `--out`-only so its behaviour is provably unchanged).
     """
     # Oversized is re-checked here, not just trusted from `scores[...].kept`, because
     # "never inlined" is the compose-time invariant the spec actually cares about -- this
@@ -979,6 +1063,12 @@ def compose(
         # merely-relevant background). Within each group, lowest score first, oldest
         # (smallest `turn`) among equal scores -- unchanged from before.
         return (scores[it.id].decision_passed, max_score(it), it.turn)
+
+    # TRDD-RAEGS1D5 (orchestrator rebalance): the single newest owner-message id, if any --
+    # set below, once the owner tier is built, but declared here (before `render` closes over
+    # it) so `render`'s per-item cap check always has a name to look up, even on the throwaway
+    # empty baseline render that runs before the owner tier is computed.
+    newest_owner_id: str | None = None
 
     total_tokens = sum(it.tokens for it in kept_items)
     kept_ids = {it.id for it in kept_items}
@@ -1009,7 +1099,7 @@ def compose(
     transcript_path = header.get("transcript_path", "")
     usage = header.get("usage") or {}
 
-    def render(kept: set[str], elided: list[Item], hidden: int, digest_text: str) -> str:
+    def render(kept_order: list[Item], elided: list[Item], hidden: int, digest_text: str) -> str:
         lines: list[str] = [
             "# Compacted context (Jev compaction)",
             f"transcript: {transcript_path}",
@@ -1022,9 +1112,25 @@ def compose(
             "",
             "## Kept items",
         ]
-        for it in items:  # `items` is already chronological -- preserve it verbatim
-            if it.id in kept:
-                lines.append(f"-- {it.kind} {it.id} --")
+        for it in kept_order:
+            lines.append(f"-- {it.kind} {it.id} --")
+            # TRDD-RAEGS1D5 (orchestrator rebalance): the newest owner message gets its own,
+            # larger cap (`NEWEST_OWNER_ITEM_BYTES`) instead of the general `max_item_bytes` --
+            # see that constant's own docstring for why.
+            cap = (
+                NEWEST_OWNER_ITEM_BYTES
+                if max_item_bytes is not None and it.id == newest_owner_id
+                else max_item_bytes
+            )
+            text_bytes = it.text.encode("utf-8")
+            if cap is not None and len(text_bytes) > cap:
+                # TRDD-RAEGS1D5 requirement 2: a verbatim prefix, never a paraphrase, plus a
+                # pointer back to the rest -- see `_truncate_prefix_bytes`'s own docstring for
+                # why this is what stops one oversized-relative-to-budget item from being
+                # evicted whole the way the old byte backstop did.
+                lines.append(_truncate_prefix_bytes(it.text, cap))
+                lines.append(_format_pointer(it))
+            else:
                 lines.append(it.text)
 
         lines.append("")
@@ -1034,7 +1140,12 @@ def compose(
             if it.id in elided_ids:
                 lines.append(_format_pointer(it))
                 if scores[it.id].oversized:
-                    lines.append(_oversized_preview(it))
+                    # TRDD-RAEGS1D5 requirement 4: the 20-line oversized preview is fine in
+                    # the full `--out` document (max_item_bytes is None there) but must NEVER
+                    # reach the byte-capped injected copy -- it is exactly the kind of large,
+                    # low-value block the cap exists to keep out of a resumed session.
+                    if max_item_bytes is None:
+                        lines.append(_oversized_preview(it))
                 elif scores[it.id].blocked:
                     # TRDD-1ETALGDG followup: this item was never sent to Jev at all (a
                     # provider firewall block or an oversized batch survived every split
@@ -1078,27 +1189,134 @@ def compose(
         return "\n".join(lines)
 
     digest_text = header.get("digest", "")
-    doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+
+    kept_budget: int | None = None
+    if max_item_bytes is not None and max_bytes is not None:
+        # TRDD-RAEGS1D5 requirement 3 / orchestrator rebalance: both the pointer share and the
+        # owner share below are measured against an EMPTY render (no kept items, no pointers)
+        # rather than a flat fraction of `max_bytes` -- the fixed lines this function always
+        # emits (header, the "N more items" line, the "Full compacted context" trailer) embed
+        # the transcript path up to FOUR times and measured 1.3-1.6 KB on a real run, which a
+        # flat `max_bytes * SHARE` never sees, so it starved the very kept items this fix
+        # exists to protect (real-data regression while developing this fix).
+        baseline = len(render([], [], hidden_count, digest_text).encode("utf-8"))
+        available = max(0, max_bytes - baseline)
+        pointer_budget = int(available * _INJECT_POINTER_SHARE)
+        used_pointer_bytes = 0
+        if shown_elided:
+            ranked = sorted(shown_elided, key=max_score, reverse=True)
+            affordable: list[Item] = []
+            for it in ranked:
+                cost = len(_format_pointer(it).encode("utf-8")) + 1
+                if scores[it.id].blocked:
+                    cost += len("unscored (provider firewall)") + 1
+                if affordable and used_pointer_bytes + cost > pointer_budget:
+                    break  # always keep at least one pointer, even if it alone is over budget
+                affordable.append(it)
+                used_pointer_bytes += cost
+            if len(affordable) < len(shown_elided):
+                hidden_count += len(shown_elided) - len(affordable)
+                keep_ids = {it.id for it in affordable}
+                shown_elided = [it for it in shown_elided if it.id in keep_ids]
+        # Whatever the pointer tier did NOT use rolls over to kept items -- a ceiling, never a
+        # pre-reserved block (the same "must not waste the share" rule the owner tier below
+        # follows).
+        kept_budget = max(0, available - used_pointer_bytes)
+
+    if max_item_bytes is not None:
+        # TRDD-RAEGS1D5 (orchestrator rebalance, 2026-09-23): an EXPLICIT, byte-budgeted tier
+        # order -- not a single sort key, because the owner-share ceiling is a running byte
+        # total across items, not a property any one item carries on its own. Real runs on
+        # this repo's own 49 MB/258 MB transcripts had measured 15/15 and 11/11 kept items, ALL
+        # kind "user" -- the owner's own messages crowding out every bit of what the session
+        # actually DID (its assistant replies, tool calls, task-notification events) -- so:
+        #   1. the single NEWEST owner (`kind == "user"`) message, always -- capped at
+        #      `NEWEST_OWNER_ITEM_BYTES` in `render()`, not `max_item_bytes`.
+        #   2. further owner messages, newest first with `decision_passed` preferred, while
+        #      the running OWNER total stays under `_OWNER_SHARE` of `kept_budget` -- a
+        #      ceiling: short owner messages that do not use up the whole share leave the
+        #      remainder to flow into tiers 3-5, never sitting unused.
+        #   3. `decision_passed` items of any OTHER kind (an instruction/correction is worth
+        #      protecting regardless of who said it).
+        #   4. the highest-relevance assistant/tool/event items, newest first -- the work the
+        #      session actually did.
+        #   5. catch-all: owner messages that did not fit the share, in the same order as (2).
+        owner_all = sorted(
+            (it for it in items if it.id in kept_ids and it.kind == "user"),
+            key=lambda it: it.turn, reverse=True,
+        )
+        newest_owner = owner_all[0] if owner_all else None
+        newest_owner_id = newest_owner.id if newest_owner is not None else None
+
+        def _item_cost(it: Item, cap: int) -> int:
+            over = len(it.text.encode("utf-8")) > cap
+            body = _truncate_prefix_bytes(it.text, cap) if over else it.text
+            cost = len(f"-- {it.kind} {it.id} --\n{body}\n".encode("utf-8"))
+            if over:
+                cost += len(_format_pointer(it).encode("utf-8")) + 1
+            return cost
+
+        kept_order_list: list[Item] = []
+        owner_overflow: list[Item] = []
+        owner_bytes_used = 0
+        if newest_owner is not None:
+            kept_order_list.append(newest_owner)
+            owner_bytes_used += _item_cost(newest_owner, NEWEST_OWNER_ITEM_BYTES)
+
+        owner_budget = int(kept_budget * _OWNER_SHARE) if kept_budget is not None else None
+        rest_owner = sorted(
+            owner_all[1:], key=lambda it: (scores[it.id].decision_passed, it.turn), reverse=True,
+        )
+        for it in rest_owner:
+            cost = _item_cost(it, max_item_bytes)
+            if owner_budget is not None and owner_bytes_used + cost > owner_budget:
+                owner_overflow.append(it)
+                continue
+            kept_order_list.append(it)
+            owner_bytes_used += cost
+
+        non_owner = [it for it in items if it.id in kept_ids and it.kind != "user"]
+        decision_non_owner = sorted(
+            (it for it in non_owner if scores[it.id].decision_passed),
+            key=lambda it: (max_score(it), it.turn), reverse=True,
+        )
+        relevance_non_owner = sorted(
+            (it for it in non_owner if not scores[it.id].decision_passed),
+            key=lambda it: (max_score(it), it.turn), reverse=True,
+        )
+        kept_order_list.extend(decision_non_owner)
+        kept_order_list.extend(relevance_non_owner)
+        kept_order_list.extend(owner_overflow)
+    else:
+        kept_order_list = [it for it in items if it.id in kept_ids]  # `items` is chronological
+
+    doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
     if max_bytes is None or len(doc.encode("utf-8")) <= max_bytes:
         return doc
 
     # Backstop degrade, in priority order -- see the docstring. Each step only runs if the
-    # previous one was not enough; `kept_order`/`ranked` are popped from one end so this is
+    # previous one was not enough; `evict_order`/`ranked` are popped from one end so this is
     # bounded (at most `len(items)` iterations total) and never loops forever.
     #
-    # `kept_order` is sorted by `evict_key` -- the SAME (decision_passed, max_score, turn)
+    # In injected mode `evict_order` is simply the REVERSE of the explicit tier order built
+    # above (`kept_order_list` is already priority-ordered highest-first, so its tail is
+    # always the lowest tier -- catch-all owner overflow -- and its head, the newest owner
+    # message, is evicted only as an absolute last resort). Every other caller (`--out` never
+    # passes `max_item_bytes`) keeps `evict_key` -- the SAME (decision_passed, max_score, turn)
     # priority the budget_tokens eviction above already uses -- not by bare chronological
     # position (review finding, card 5 content-fit): a plain "oldest first" pop would drop a
     # decision-passed item (a user instruction/correction the budget eviction deliberately
     # protects) ahead of a newer, lower-priority relevance-only item just because it happens
-    # to be older, reintroducing at this second checkpoint exactly the loss `evict_key` exists
-    # to prevent at the first one. Oldest-among-equal-priority is still the tiebreaker
-    # (`evict_key`'s third field), matching the "oldest kept items first" instruction wherever
-    # priority does not already decide it.
-    kept_order = sorted((it for it in items if it.id in kept_ids), key=evict_key)
-    while kept_order and len(doc.encode("utf-8")) > max_bytes:
-        kept_ids.discard(kept_order.pop(0).id)
-        doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+    # to be older. Oldest-among-equal-priority is still the tiebreaker in both, matching the
+    # "oldest kept items first" instruction wherever priority does not already decide it.
+    if max_item_bytes is not None:
+        evict_order = list(reversed(kept_order_list))
+    else:
+        evict_order = sorted(kept_order_list, key=evict_key)
+    while evict_order and len(doc.encode("utf-8")) > max_bytes:
+        dropped_id = evict_order.pop(0).id
+        kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     if len(doc.encode("utf-8")) > max_bytes and shown_elided:
         ranked = sorted(shown_elided, key=max_score)  # lowest score first == first to drop
@@ -1106,7 +1324,7 @@ def compose(
             dropped = ranked.pop(0)
             shown_elided = [it for it in shown_elided if it.id != dropped.id]
             hidden_count += 1
-            doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+            doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     if len(doc.encode("utf-8")) > max_bytes and digest_text:
         overflow = len(doc.encode("utf-8")) - max_bytes
@@ -1114,6 +1332,6 @@ def compose(
         note_bytes = len(_DIGEST_TRUNCATED_NOTE.encode("utf-8"))
         keep = max(0, len(digest_bytes) - overflow - note_bytes)
         digest_text = digest_bytes[:keep].decode("utf-8", "ignore").rstrip() + _DIGEST_TRUNCATED_NOTE
-        doc = render(kept_ids, shown_elided, hidden_count, digest_text)
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     return doc

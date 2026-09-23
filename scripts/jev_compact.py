@@ -586,9 +586,15 @@ def cmd_compact(args: argparse.Namespace) -> int:
         # `--out`, and the "Full compacted context" trailer below points there.
         inject_header = dict(compose_header)
         inject_header["digest"] = ""
+        # TRDD-RAEGS1D5 (injected-copy content fix): `max_item_bytes` is ALWAYS passed for the
+        # injected render, unconditionally on `--inject-max-bytes` -- it is what makes a kept
+        # item show up as a verbatim prefix instead of being evicted whole (see `compose()`'s
+        # own docstring); measured on three real transcripts, the old whole-item-only eviction
+        # rendered 3, 0 and 0 kept items into the injected copy.
         inject_doc = jc.compose(
             items, scores, budget_tokens=args.budget_tokens, header=inject_header,
             full_context_path=str(out_path.resolve()),
+            max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
             **inject_kwargs,
         )
         state.atomic_write(Path(args.inject_out), inject_doc)

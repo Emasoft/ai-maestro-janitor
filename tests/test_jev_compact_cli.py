@@ -911,6 +911,42 @@ def test_compact_without_inject_out_writes_only_the_full_document(
     assert not (tmp_path / "compacted.inject.md").exists()
 
 
+def test_compact_inject_out_truncates_a_kept_item_over_the_per_item_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-RAEGS1D5 (injected-copy content fix): `cmd_compact` always passes
+    `max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES` to the `--inject-out` compose call,
+    independent of whether `--inject-max-bytes` is given -- a kept item bigger than that cap
+    must show up as a verbatim prefix + pointer in the injected copy, but FULL (never
+    truncated) in `--out`, which never receives `max_item_bytes` at all."""
+    big_text = "bug " + ("z" * 2000)
+    entries = [
+        {"type": "user", "uuid": "u-1", "parentUuid": None,
+         "message": {"role": "user", "content": big_text}},
+    ]
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    out = tmp_path / "compacted.md"
+    inject_out = tmp_path / "compacted.inject.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out),
+        "--inject-out", str(inject_out),
+    ])
+
+    assert code == 0, output
+    full_doc = out.read_text(encoding="utf-8")
+    inject_doc = inject_out.read_text(encoding="utf-8")
+    assert big_text in full_doc  # `--out`: never capped per-item
+    assert big_text not in inject_doc  # `--inject-out`: capped
+
+    expected_prefix = jc._truncate_prefix_bytes(big_text, jc.DEFAULT_INJECT_ITEM_BYTES)
+    assert expected_prefix in inject_doc  # a verbatim prefix, never paraphrased
+    assert "[[elided id=u-1:0" in inject_doc  # ...plus a pointer back to the rest
+
+
 def test_compact_no_decline_bypasses_a_recent_unavailable_stamp(
     tmp_path: Path, _isolated_control_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

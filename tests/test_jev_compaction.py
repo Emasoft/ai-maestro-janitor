@@ -956,3 +956,201 @@ def test_pointer_summary_skips_a_leading_blank_line() -> None:
     doc = jc.compose(items, scores, budget_tokens=8000,
                       header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
     assert 'id=b:0 tokens=%d "real first content"' % items[0].tokens in doc
+
+
+# --- TRDD-RAEGS1D5 (injected-copy content fix, 2026-09-23) -------------------------------------
+# Real-data measurement (reports/compaction-replacement/): three real transcripts rendered 3, 0
+# and 0 kept items into the injected copy at `--inject-max-bytes 5000` -- the old byte backstop
+# evicted whole kept items until the doc fit, and a real item is routinely bigger than the whole
+# injected budget. These four tests exercise `max_item_bytes` (the injected-mode signal) in
+# isolation, on synthetic data, without a network call.
+
+
+def test_inject_mode_shows_at_least_five_kept_items_as_truncated_prefixes() -> None:
+    """Requirement 1+2: ten kept ASSISTANT items (deliberately not "user" -- the owner-share
+    tests below cover that axis separately), each 2000 bytes -- far bigger than both
+    `max_item_bytes` (700) and the whole `max_bytes` budget (5000) -- reproduce the real-data
+    failure directly: every kept item individually exceeds the injected budget. Before this
+    fix, the byte backstop's whole-item eviction would have dropped ALL of them (the measured
+    0-kept-item real-data failure). With `max_item_bytes` set, several must survive as
+    verbatim-prefix + pointer instead."""
+    items = [
+        _item(f"k{i}:0", "assistant", ("x" * 2000) + f" tail-{i}", turn=i, tokens=10)
+        for i in range(10)
+    ]
+    scores = {
+        it.id: jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in items
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      max_bytes=5000, max_item_bytes=700)
+
+    assert len(doc.encode("utf-8")) <= 5000
+    kept_headers = [line for line in doc.splitlines() if line.startswith("-- assistant k")]
+    assert len(kept_headers) >= 5, f"expected >=5 kept items, got {len(kept_headers)}: {kept_headers}"
+    # Each shown item is a genuine VERBATIM prefix (never paraphrased, never a shorter
+    # summary) capped at exactly `max_item_bytes`, immediately followed by a pointer back to
+    # the rest -- the `x` * 700 prefix is the item's own transcript bytes, not a description.
+    assert doc.count("x" * 700) == len(kept_headers)
+    assert doc.count("[[elided id=k") == len(kept_headers)
+
+
+def test_inject_mode_caps_pointer_bytes_to_their_share_of_the_budget() -> None:
+    """Requirement 3: thirty elided items, each pointer-worthy, against a 3000-byte budget --
+    unrestrained, their pointer lines alone would run to ~3.3 KB, more than the WHOLE budget,
+    starving the one kept item the way pointers used to. Verified directly against the
+    rendered pointer lines' own byte total (not just the whole-document cap the final backstop
+    would also enforce) so this proves the EARLIER, dedicated pointer-share trim actually ran."""
+    kept = [_item("kept:0", "user", "short kept text", turn=0, tokens=5)]
+    kept_scores = {kept[0].id: jc.Scores(relevance=0.9, decision=0.0, oversized=False,
+                                          kept=True, decision_passed=False)}
+    elided = [
+        _item(f"e{i}:0", "assistant", f"elided background text number {i} " * 3, turn=i + 1,
+              tokens=5)
+        for i in range(30)
+    ]
+    elided_scores = {
+        it.id: jc.Scores(relevance=(i / 30), decision=0.0, oversized=False, kept=False,
+                          decision_passed=False)
+        for i, it in enumerate(elided)
+    }
+    items = kept + elided
+    scores = {**kept_scores, **elided_scores}
+    max_bytes = 3000
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      max_bytes=max_bytes, max_item_bytes=700, max_elided_pointers=30)
+
+    assert len(doc.encode("utf-8")) <= max_bytes
+    pointer_lines = [line for line in doc.splitlines() if line.startswith("[[elided id=e")]
+    pointer_bytes = sum(len(line.encode("utf-8")) + 1 for line in pointer_lines)
+    assert pointer_bytes <= int(max_bytes * jc._INJECT_POINTER_SHARE)
+    assert "-- user kept:0 --" in doc  # the kept item survives, not starved by pointers
+
+
+def test_inject_mode_never_shows_the_oversized_preview() -> None:
+    """Requirement 4: `test_oversized_pointer_includes_first_20_lines` above already proves
+    `--out` (`max_item_bytes=None`) keeps the 20-line oversized preview; the injected render
+    (`max_item_bytes` given) must never receive that block -- only the ordinary single-line
+    pointer every elided item gets (whose own 80-char summary legitimately echoes line 0)."""
+    body_lines = [f"line {i}" for i in range(30)]
+    items = [_item("o:0", "assistant", "\n".join(body_lines), turn=0, tokens=999999)]
+    scores = {"o:0": jc.Scores(relevance=1.0, decision=1.0, oversized=True, kept=True,
+                                decision_passed=False)}
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      max_item_bytes=700)
+    assert "id=o:0" in doc  # still pointed at -- just never previewed
+    for line in body_lines[1:]:  # line 0 legitimately survives as the pointer's own summary
+        assert line not in doc
+
+
+def test_inject_mode_byte_cap_holds_through_the_full_degrade_chain() -> None:
+    """Requirement 5: the `max_bytes` cap is a hard guarantee in injected mode too, down to a
+    budget tight enough to force every degrade step in turn (per-item truncation already
+    applied at render time, then whole-item eviction, then pointer eviction, then digest
+    truncation) -- and the fixed "pointers expand with" trailer, the model's only way back to
+    everything elided, must still survive even this squeeze."""
+    items = [_item(f"k{i}:0", "user", "y" * 3000, turn=i, tokens=5) for i in range(5)] + [
+        _item(f"e{i}:0", "assistant", f"elided {i}", turn=100 + i, tokens=5) for i in range(10)
+    ]
+    scores = {
+        f"k{i}:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False)
+        for i in range(5)
+    }
+    scores.update({
+        f"e{i}:0": jc.Scores(relevance=0.1, decision=0.0, oversized=False, kept=False,
+                              decision_passed=False)
+        for i in range(10)
+    })
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s", "digest": "z" * 500}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header,
+                      max_bytes=600, max_item_bytes=700)
+
+    assert len(doc.encode("utf-8")) <= 600
+    assert "pointers expand with:" in doc
+
+
+def test_inject_mode_owner_share_capped_and_nonuser_items_survive() -> None:
+    """Orchestrator rebalance (2026-09-23): a real run on this repo's own 49 MB/258 MB
+    transcripts showed the injected copy 100% kind "user" -- the owner's own messages crowded
+    out every bit of what the session actually did. 20 owner (user) messages + 20 high-
+    relevance tool items reproduces that shape directly. Four things must hold:
+
+    1. the single NEWEST owner message survives in FULL when it fits `NEWEST_OWNER_ITEM_BYTES`
+       (1500) -- here it does not (it is ~1900 bytes), so it must survive as exactly a
+       1500-byte verbatim prefix, never the 700-byte `max_item_bytes` every OTHER item gets;
+    2. every OTHER kept item -- owner or not -- is still capped at the general 700-byte
+       `max_item_bytes`, proven here by an owner item whose 700-byte-prefix marker never
+       exceeds that length;
+    3. the owner group's total rendered bytes stay within `_OWNER_SHARE` of the kept-item
+       section (a generous tolerance around the ~40% ceiling, since the selection-time
+       estimate and the final render can differ by a little -- not a source of flakiness);
+    4. at least 3 non-user (tool) items appear, proving they are no longer crowded out.
+    """
+    owner_items = [
+        _item(f"u{i}:0", "user", f"short owner note number {i}", turn=i, tokens=5)
+        for i in range(19)
+    ]
+    # The NEWEST owner message (turn=19, highest) -- deliberately over NEWEST_OWNER_ITEM_BYTES
+    # (1500) so its truncation-to-1500 (not 700) is what this test actually proves.
+    newest_owner_text = "owner instruction " * 100  # ~1900 bytes, no internal newline
+    owner_items.append(_item("u19:0", "user", newest_owner_text, turn=19, tokens=5))
+    tool_items = [
+        _item(f"t{i}:0", "tool", ("tool output line " * 150) + f" id{i}", turn=100 + i, tokens=5)
+        for i in range(20)
+    ]
+    items = owner_items + tool_items
+    scores = {
+        it.id: jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in owner_items
+    }
+    scores.update({
+        it.id: jc.Scores(relevance=0.95, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in tool_items
+    })
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=80000, header=header,
+                      max_bytes=6000, max_item_bytes=700)
+
+    assert len(doc.encode("utf-8")) <= 6000
+
+    # (1) the newest owner message: present as exactly its own first 1500 bytes (cut at a
+    # line boundary or UTF-8-safe, per `_truncate_prefix_bytes`), never the full ~1900-byte
+    # text, and never truncated down to the smaller 700-byte general cap either.
+    newest_prefix = jc._truncate_prefix_bytes(newest_owner_text, jc.NEWEST_OWNER_ITEM_BYTES)
+    assert newest_prefix in doc
+    assert newest_owner_text not in doc  # too long for even the 1500-byte exception
+    smaller_prefix = jc._truncate_prefix_bytes(newest_owner_text, jc.DEFAULT_INJECT_ITEM_BYTES)
+    assert len(smaller_prefix) < len(newest_prefix)
+    assert "-- user u19:0 --" in doc
+
+    # (2) every other item -- owner or not -- still respects the general 700-byte cap: no
+    # kept item's rendered VERBATIM prefix is between 701 and 1499 bytes (that gap is only
+    # reachable by the newest-owner exception, which is excluded above).
+    kept_section = doc.split("## Kept items\n", 1)[1].split("\n\n## Elided", 1)[0]
+    import re as _re
+    for block in _re.split(r"\n(?=-- \w+ [^\n]+ --\n)", kept_section):
+        m = _re.match(r"-- (\w+) ([^\n]+) --\n", block)
+        if not m or m.group(2) == "u19:0":
+            continue
+        body = block[m.end():].split("\n[[elided", 1)[0]
+        assert len(body.encode("utf-8")) <= jc.DEFAULT_INJECT_ITEM_BYTES, (
+            f"{m.group(2)} exceeded the general per-item cap"
+        )
+
+    # (3) owner share stays close to the ~40% ceiling (generous tolerance -- see docstring).
+    owner_bytes = sum(
+        len(b.encode("utf-8")) for b in _re.split(r"\n(?=-- \w+ [^\n]+ --\n)", kept_section)
+        if b.startswith("-- user ")
+    )
+    assert owner_bytes / len(kept_section.encode("utf-8")) <= 0.5
+
+    # (4) non-user items are no longer crowded out.
+    tool_headers = [line for line in doc.splitlines() if line.startswith("-- tool t")]
+    assert len(tool_headers) >= 3, f"expected >=3 tool items, got {len(tool_headers)}"
