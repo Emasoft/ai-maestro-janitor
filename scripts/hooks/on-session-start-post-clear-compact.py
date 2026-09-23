@@ -261,6 +261,16 @@ def _main() -> int:
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
     inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
+    # Computed BEFORE `run_compact` (TRDD-RAEGS1D5 retune follow-up): `tail` only needs
+    # `transcript_path`, already known, and `compose_handoff_room` needs the SAME facts+tail
+    # `compose_handoff` itself will use once a summary exists -- see that function's own
+    # docstring for why a flat `LANE_COMPACTED_MAX_BYTES` guess is what this replaces.
+    tail = ec.recent_messages(transcript_path)
+    room = ec.compose_handoff_room(
+        inputs, now_iso=now_iso, tail=tail, max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
+        source=jcl.SOURCE_JEV,
+    )
+    inject_max_bytes = jcl.inject_max_bytes_for(room, transcript_path)
 
     # `run_compact` execs `jev_compact.py compact` BY PATH -- it owns the jev-probe stamp
     # fast-decline (exit 5, EXIT_DECLINED_UNAVAILABLE, gated on `kind in {"unavailable",
@@ -276,7 +286,7 @@ def _main() -> int:
         plugin_root, transcript=transcript_path, out_path=out_path, session_key=key,
         heads_args=heads_args, timeout=_RUN_COMPACT_TIMEOUT_S,
         inject_out_path=inject_path, max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS,
-        inject_max_bytes=jcl.LANE_COMPACTED_MAX_BYTES,
+        inject_max_bytes=inject_max_bytes,
     )
     full_text: str | None = None
     inject_text: str | None = None
@@ -312,8 +322,9 @@ def _main() -> int:
         # Card 5 two-renderings (TRDD-RAEGS1D5): the keyed handoff FILE on disk is the FULL
         # document (`full_text`) -- the defect this card fixes was that it used to be the
         # capped ~4.3 KB rendering. Only the PRINTED stdout injection is the capped one (or,
-        # per the fallback above, the full one when the capped companion is missing).
-        tail = ec.recent_messages(transcript_path)
+        # per the fallback above, the full one when the capped companion is missing). `tail`
+        # was already computed above, before `run_compact`, to size `inject_max_bytes` -- same
+        # transcript, reused rather than re-read.
         # This hook only ever runs `jcl.run_compact` (a real Jev compose) -- no llm-ext fallback
         # path here (TRDD-RAEGS1D5, `compose_handoff`'s `source` is now required).
         text = ec.compose_handoff(

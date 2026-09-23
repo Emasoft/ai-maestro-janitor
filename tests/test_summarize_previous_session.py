@@ -326,6 +326,75 @@ def test_exit_0_writes_a_composed_handoff_and_releases_the_hold(tmp_path, monkey
     )
 
 
+_STUB_JEV_COMPACT_TWO_DOCS = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+argv = sys.argv
+if "--out" in argv:
+    Path(argv[argv.index("--out") + 1]).write_text({full_text!r}, encoding="utf-8")
+if "--inject-out" in argv:
+    Path(argv[argv.index("--inject-out") + 1]).write_text({inject_text!r}, encoding="utf-8")
+sys.exit(0)
+"""
+
+
+def _stub_jev_compact_two_docs(plugin_root: Path, *, full_text: str, inject_text: str) -> None:
+    """Writes DIFFERENT text to `--out` and `--inject-out` -- lets a test prove
+    `jev_compaction_lane.run_compact_with_fallback` actually PREFERS the capped companion when
+    it exists, rather than only ever exercising the fallback-to-full-document branch every other
+    stub in this file exercises (they never create `--inject-out` at all). Mirrors the hook's
+    own `_STUB_JEV_COMPACT_TWO_DOCS` fixture in
+    tests/test_on_session_start_post_clear_compact.py."""
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_TWO_DOCS.format(full_text=full_text, inject_text=inject_text),
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+
+def test_exit_0_prefers_the_capped_inject_out_companion_over_the_full_document(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """Adversarial review finding (TRDD-RAEGS1D5 retune follow-up): `run_compact_with_fallback`'s
+    new "prefer `inject_out_path` when readable" branch -- the riskiest line in that diff, since
+    it changes what `text` MEANS for this detached lane -- had zero coverage anywhere: every
+    other stub in this file never creates `--inject-out`, so only the fallback-to-full-document
+    path was ever exercised. This proves the OTHER branch: when jev_compact.py writes a
+    DIFFERENT, smaller document to `--inject-out`, THAT is what lands in the written handoff,
+    not the full `--out` document."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    full_only = "FULL-ONLY-KEPT-ITEM-MARKER"
+    inject_only = "INJECT-ONLY-KEPT-ITEM-MARKER"
+    full_text = (
+        f"# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Kept items\n{full_only}\n\n"
+        'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
+        "expand --transcript /tmp/x <id>"
+    )
+    inject_text = (
+        f"# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Kept items\n{inject_only}\n\n"
+        'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
+        "expand --transcript /tmp/x <id>"
+    )
+    _stub_jev_compact_two_docs(plugin_root, full_text=full_text, inject_text=inject_text)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    rc = sps.main()
+    assert rc == 0
+
+    sd = state.state_dir()
+    group = handoff_files.newest_group(sd)
+    assert group, "a handoff must have been written"
+    text = group[0].read_text(encoding="utf-8")
+    assert inject_only in text, "the CAPPED companion must be what lands in the handoff"
+    assert full_only not in text, "the full document must NOT leak in when a companion exists"
+
+
 # --- exit 5/6/7 -> the findings ledger, then (TRDD-RAEGS1D5) Jev exhausts and the llm-ext
 # fallback is attempted; with no `llm_ext_compact.py` stub present it fails too (spawn error),
 # so the FINAL outcome is the advisor's "on final failure: ensure a template exists, release

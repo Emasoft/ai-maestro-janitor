@@ -288,17 +288,58 @@ LANE_MAX_ELIDED_POINTERS = 12
 # came to ~5250-6442 bytes across the three real transcripts this project keeps for
 # acceptance testing (d30bf250 49MB, 4eb7bf5d 258MB, 06f2b2be 4.7MB) -- 5000 left real,
 # measured slack unused on all three, which is exactly why the injected copy kept only 2 of
-# the ~3+ non-owner items real data showed should fit. 6500 uses more of that slack (closer to
-# the middle of the measured range) while `compose_handoff`'s own downstream byte-slice
-# backstop (unconditional, in `external_clear.py`, outside this module) still guarantees the
-# TOTAL injected hook output never exceeds `LANE_INJECTION_MAX_BYTES` -- confirmed directly:
-# with an oversized dummy summary, `compose_handoff`'s own output measured 8149-8183 bytes on
-# these same three transcripts, ~1.8-1.9 KB under the ~10,000-byte real hook-stdout ceiling
-# (docs_dev/jev-card5-post-clear-injection-proposal.md) -- comfortably past the ~1.5 KB
-# headroom target regardless of this constant's own value. Raising this constant only changes
-# how much of that already-safe budget jev_compaction.py's OWN priority-aware backstop gets to
-# fill, rather than `compose_handoff`'s cruder byte slice.
+# the ~3+ non-owner items real data showed should fit.
+#
+# TRDD-RAEGS1D5 (retune follow-up, owner per-item token cap review): a FLAT 6500 was itself the
+# wrong fix -- it is bigger than the REAL room on all three transcripts once in-flight cards
+# join the facts section, and bigger than 5250/5286 even with an EMPTY one. Any time the flat
+# constant overran the real room, `external_clear.compose_handoff`'s own raw byte-slice
+# (`raw[:room]`) cut the TAIL of the Jev summary -- the newest kept items and the trailing
+# "pointers expand with:" pointer line -- instead of Jev's own priority-aware trim ever
+# deciding what to drop. This constant is now the UPPER BOUND ONLY: the real per-call budget is
+# `external_clear.compose_handoff_room(...)`, computed BEFORE `jev_compact.py` runs from the
+# SAME facts+tail inputs `compose_handoff` itself uses (see that function's own docstring), and
+# `inject_max_bytes_for` (below) clamps to whichever of the two is smaller. Kept as a ceiling,
+# not deleted, because a session with no cards/findings and a short tail could otherwise hand
+# Jev an unbounded budget -- `LANE_INJECTION_MAX_BYTES` (8192) is the true hard cap
+# `compose_handoff` enforces regardless, but a companion render that large would be wasted work
+# for `compose_handoff` to then still have to trim.
 LANE_COMPACTED_MAX_BYTES = 6500
+
+# The FIXED portion (everything except the transcript path itself) of the bytes
+# `compose_handoff_room` cannot see yet (no summary exists at the point a lane must call it,
+# before `jev_compact.py` has run): a REAL summary's own trailing "pointers expand with: uv run
+# --script ... expand --transcript <path> <id>" line, which `jev_compaction.py::compose` always
+# emits (see its own source). Measured directly (the exact literal, minus the path): 110 bytes.
+# 150 adds a small rounding cushion -- this is what "minus a small safety margin" means, not a
+# second guess at the room itself. NOT the whole margin: `inject_max_bytes_for` below adds the
+# ACTUAL transcript path's own byte length on top -- a flat margin sized only for this project's
+# own (short) state-dir paths would silently under-cover a long one elsewhere (a deep project
+# dir, a synced/mirrored home directory) and let `compose_handoff`'s byte-slice fire again,
+# invisibly, on exactly the machines least likely to be caught by a test fixture (adversarial
+# review finding, TRDD-RAEGS1D5 retune follow-up).
+LANE_ROOM_SAFETY_MARGIN_BYTES = 150
+
+
+def inject_max_bytes_for(room: int, transcript_path: str) -> int:
+    """`--inject-max-bytes` for a `jev_compact.py compact` call, from the `room`
+    `external_clear.compose_handoff_room` computed for THIS invocation's own facts+tail, minus a
+    margin sized to THIS call's own `transcript_path` (the fixed trailer-line overhead plus the
+    path's own byte length -- see `LANE_ROOM_SAFETY_MARGIN_BYTES`'s own commentary for why a
+    flat margin is not enough). `LANE_COMPACTED_MAX_BYTES` is the upper bound only -- never
+    handed to Jev directly, because the real room can be smaller (in-flight cards, findings, a
+    long recent-turns tail) than that flat constant, and handing Jev more than `compose_handoff`
+    will actually have room for only guarantees its own byte-slice backstop cuts the summary's
+    tail again, the exact defect this exists to avoid. `room` may be negative (a facts section
+    big enough to consume the whole budget on its own) -- clamped at 0 rather than passed
+    through, since a negative `--inject-max-bytes` is not a value `jev_compact.py`'s CLI
+    contract defines.
+
+    One copy of this clamp, shared by both lanes that call it (the synchronous SessionStart hook
+    and the detached `summarize_previous_session.py`), so neither hand-rolls its own.
+    """
+    margin = LANE_ROOM_SAFETY_MARGIN_BYTES + len(transcript_path.encode("utf-8"))
+    return max(0, min(room - margin, LANE_COMPACTED_MAX_BYTES))
 
 
 def record_finding(*, sev: str, code: str, msg: str) -> None:
@@ -744,12 +785,20 @@ def run_compact_with_fallback(
     plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
     heads_args: list[str], sd: Path, deadline: float, llm_ext_timeout_s: float,
     budget_tokens: int | None = None, digest_tokens: int | None = None,
+    inject_out_path: Path | None = None, inject_max_bytes: int | None = None,
+    max_elided_pointers: int | None = None,
     now_fn: Callable[[], float] = time.time, sleep_fn: Callable[[float], None] = time.sleep,
 ) -> tuple[str, str | None, str]:
     """Retry `jev_compact.py compact` (with `--no-decline`) until `deadline`, then fall back to
     `llm_ext_compact.py` once. Returns `(source, text, detail)`:
       * `(SOURCE_JEV, <compacted text>, "")` — a real Jev compose succeeded; `out_path` is
-        already written (by `run_compact`/`jev_compact.py` itself).
+        already written (by `run_compact`/`jev_compact.py` itself). `text` is read from
+        `inject_out_path` instead, when given and readable -- the size-bounded, priority-aware
+        companion rendering (TRDD-RAEGS1D5 retune follow-up), same two-renderings shape
+        `on-session-start-post-clear-compact.py` already uses. Falls back to `out_path`'s full
+        text when `inject_out_path` is unset OR the companion is missing (the two files are
+        separate `atomic_write`s, not one atomic pair -- a crash between them must degrade to
+        the full document, never lose the compose entirely).
       * `(SOURCE_LLM_EXT, <summary text>, "")` — Jev was exhausted, the llm-ext fallback
         produced a real summary.
       * `(SOURCE_FAILED, None, <why>)` — both Jev and the llm-ext fallback failed; the
@@ -790,6 +839,8 @@ def run_compact_with_fallback(
             plugin_root, transcript=transcript, out_path=out_path, session_key=session_key,
             heads_args=heads_args, timeout=int(remaining), budget_tokens=budget_tokens,
             digest_tokens=digest_tokens, no_decline=True,
+            inject_out_path=inject_out_path, inject_max_bytes=inject_max_bytes,
+            max_elided_pointers=max_elided_pointers,
         )
         last_proc, last_timed_out = proc, timed_out
 
@@ -806,6 +857,15 @@ def run_compact_with_fallback(
                 # is unaffected -- out of this followup's file set.)
                 blocked, blocked_digest = parse_blocked_summary(proc.stdout or "")
                 record_blocked_finding(sd, blocked=blocked, blocked_digest=blocked_digest)
+                if inject_out_path is not None:
+                    # TRDD-RAEGS1D5 retune follow-up: prefer the size-bounded companion Jev's
+                    # own priority-aware trim produced over the FULL document just read above --
+                    # `out_path` stays the fallback (its `text` above), never discarded, for
+                    # exactly the crash-between-two-atomic-writes case its docstring describes.
+                    try:
+                        text = inject_out_path.read_text(encoding="utf-8")
+                    except OSError:
+                        pass
                 return SOURCE_JEV, text, ""
 
         if timed_out or proc is None:

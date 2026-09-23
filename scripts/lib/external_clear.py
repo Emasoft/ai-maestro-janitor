@@ -164,6 +164,7 @@ __all__ = [
     "cache_certainly_expired",
     "cache_expired_by_age",
     "compose_handoff",
+    "compose_handoff_room",
     "compose_template_handoff",
     "enabled",
     "recent_messages",
@@ -781,6 +782,88 @@ _COMPACTED_CONTEXT_HEADS = {
 }
 
 
+def _facts_and_tail_used(
+    inputs: HandoffInputs, *, now_iso: str, tail: Sequence[str], max_bytes: int,
+) -> tuple[str, list[str], int]:
+    """The facts section, the tail lines `compose_handoff` would KEEP, and the bytes both
+    already consume -- extracted so `compose_handoff` and `compose_handoff_room` (below) share
+    ONE copy of this arithmetic (TRDD-RAEGS1D5 retune follow-up) instead of each keeping its
+    own. Neither part depends on whether a compacted-context summary exists yet, which is
+    exactly what lets `compose_handoff_room` be called BEFORE `jev_compact.py` has produced one.
+
+    ALLOCATION ORDER IS NOT OUTPUT ORDER. The tail is allocated BEFORE the summary even though
+    it prints last, because the summary is unbounded (7 KB in practice) and would otherwise
+    consume the whole remainder, leaving a handoff with no recent turns at all — measured, after
+    the first version did exactly that. The owner asked for the latest messages explicitly, so
+    the tail gets a guaranteed slice and the summary takes what is left. Both remain elastic;
+    only the scriptable facts are unconditional.
+    """
+    facts = compose_template_handoff(inputs, now_iso=now_iso, max_bytes=max_bytes)
+    used = len(facts.encode("utf-8"))
+
+    tail_note_max = " — 9999 earlier message(s) dropped"
+    tail_header = f"\n## Recent turns{tail_note_max}\n\n"
+    tail_budget = min(max_bytes // 3, max(0, max_bytes - used - 200))
+    kept: list[str] = []
+    if tail and tail_budget > len(tail_header.encode("utf-8")):
+        spent = len(tail_header.encode("utf-8"))
+        for line in reversed(list(tail)):  # the OLDEST end is what gets dropped
+            cost = len(line.encode("utf-8")) + 1
+            if spent + cost > tail_budget:
+                break
+            kept.append(line)
+            spent += cost
+        kept.reverse()
+        used += spent
+    return facts, kept, used
+
+
+#: The fixed truncation-notice string `compose_handoff` appends to a sliced summary body, and
+#: the SAME string `compose_handoff_room` reserves bytes for -- one literal, not two copies that
+#: could drift apart (TRDD-RAEGS1D5 retune follow-up).
+_TRUNCATION_NOTICE = "\n\n_(summary truncated to fit the handoff budget)_"
+
+
+def compose_handoff_room(
+    inputs: HandoffInputs,
+    *,
+    now_iso: str,
+    tail: Sequence[str] = (),
+    max_bytes: int = HANDOFF_MAX_BYTES,
+    source: str,
+) -> int:
+    """The byte room `compose_handoff` will leave for a compacted-context summary body,
+    computed the SAME way `compose_handoff` itself computes it (both call
+    `_facts_and_tail_used` -- one copy of the arithmetic) -- callable BEFORE `jev_compact.py`
+    has produced a summary at all, so a lane can size `--inject-max-bytes` to the room that
+    actually exists instead of a fixed guess.
+
+    TRDD-RAEGS1D5 retune follow-up: `LANE_COMPACTED_MAX_BYTES` used to be a flat constant
+    forwarded to every compaction regardless of how much of `compose_handoff`'s own budget the
+    facts section (in-flight cards, findings) and the recent-turns tail had already spent.
+    Whenever that flat constant overran the REAL remaining room, `compose_handoff`'s own raw
+    byte-slice (`raw[:room]`) cut the TAIL of the injected Jev summary -- the newest kept items
+    and the trailing "pointers expand with:" pointer line -- instead of Jev's own
+    priority-aware trim ever getting a chance to decide what to drop.
+
+    Omits the bytes `compose_handoff` reserves for a REAL summary's own trailing pointer line
+    (unknown here -- no summary exists yet): measured, that line is a few hundred bytes at most
+    (see `jev_compaction_lane.LANE_ROOM_SAFETY_MARGIN_BYTES`'s own commentary), a rounding
+    error against a multi-KB room -- callers subtract a small safety margin on top of this
+    return value to cover it, rather than this function guessing at a summary that does not
+    exist yet.
+    """
+    if source not in _COMPACTED_CONTEXT_HEADS:
+        raise ValueError(
+            f"compose_handoff_room: unknown source {source!r}, expected one of "
+            f"{sorted(_COMPACTED_CONTEXT_HEADS)}"
+        )
+    _facts, _kept, used = _facts_and_tail_used(inputs, now_iso=now_iso, tail=tail, max_bytes=max_bytes)
+    head = _COMPACTED_CONTEXT_HEADS[source]
+    reserved = len(head.encode("utf-8")) + len(_TRUNCATION_NOTICE.encode("utf-8")) + 8
+    return max_bytes - used - reserved
+
+
 def compose_handoff(
     inputs: HandoffInputs,
     *,
@@ -823,29 +906,7 @@ def compose_handoff(
     # silently through the one call shape most likely to carry a typo'd value (review finding).
     if source not in _COMPACTED_CONTEXT_HEADS:
         raise ValueError(f"compose_handoff: unknown source {source!r}, expected one of {sorted(_COMPACTED_CONTEXT_HEADS)}")
-    facts = compose_template_handoff(inputs, now_iso=now_iso, max_bytes=max_bytes)
-    used = len(facts.encode("utf-8"))
-
-    # ALLOCATION ORDER IS NOT OUTPUT ORDER. The tail is allocated BEFORE the summary even
-    # though it prints last, because the summary is unbounded (7 KB in practice) and would
-    # otherwise consume the whole remainder, leaving a handoff with no recent turns at all —
-    # measured, after the first version did exactly that. The owner asked for the latest
-    # messages explicitly, so the tail gets a guaranteed slice and the summary takes what is
-    # left. Both remain elastic; only the scriptable facts are unconditional.
-    tail_note_max = " — 9999 earlier message(s) dropped"
-    tail_header = f"\n## Recent turns{tail_note_max}\n\n"
-    tail_budget = min(max_bytes // 3, max(0, max_bytes - used - 200))
-    kept: list[str] = []
-    if tail and tail_budget > len(tail_header.encode("utf-8")):
-        spent = len(tail_header.encode("utf-8"))
-        for line in reversed(list(tail)):  # the OLDEST end is what gets dropped
-            cost = len(line.encode("utf-8")) + 1
-            if spent + cost > tail_budget:
-                break
-            kept.append(line)
-            spent += cost
-        kept.reverse()
-        used += spent
+    facts, kept, used = _facts_and_tail_used(inputs, now_iso=now_iso, tail=tail, max_bytes=max_bytes)
 
     summary_part = ""
     if summary:
@@ -871,9 +932,8 @@ def compose_handoff(
         # a body already filled to `room` overran by exactly its own length every time
         # (measured: +38 at every budget — a constant offset is the signature of a fixed-size
         # string added outside the accounting).
-        notice = "\n\n_(summary truncated to fit the handoff budget)_"
         reserved = (
-            len(head.encode("utf-8")) + len(notice.encode("utf-8"))
+            len(head.encode("utf-8")) + len(_TRUNCATION_NOTICE.encode("utf-8"))
             + len(trailer_block.encode("utf-8")) + 8
         )
         room = max_bytes - used - reserved
@@ -881,7 +941,7 @@ def compose_handoff(
             raw = body_text.encode("utf-8")
             body = raw[:room].decode("utf-8", "ignore").rstrip()
             if len(raw) > room:
-                body += notice
+                body += _TRUNCATION_NOTICE
             summary_part = head + body + trailer_block
         elif trailer:
             # Even under extreme budget pressure (no room for any body), the pointer line is

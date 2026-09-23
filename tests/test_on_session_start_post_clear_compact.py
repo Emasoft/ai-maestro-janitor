@@ -9,6 +9,7 @@ ever happens in this file.
 
 from __future__ import annotations
 
+import ast
 import importlib.util as _u
 import json
 import stat
@@ -21,6 +22,7 @@ _HOOK = _PROJECT_ROOT / "scripts" / "hooks" / "on-session-start-post-clear-compa
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
+import external_clear as ec  # noqa: E402
 import handoff_files  # noqa: E402
 import jev_compaction_lane as jcl  # noqa: E402
 import state  # noqa: E402
@@ -502,6 +504,84 @@ def test_large_multibyte_compacted_context_stays_under_9000_bytes_with_no_split_
     # mean a multi-byte sequence was cut in half somewhere along the way.
     assert out_bytes.decode("utf-8", "strict") == out
     assert "�" not in out
+
+
+def test_computed_inject_max_bytes_matches_room_and_summary_is_not_sliced(tmp_path, monkeypatch):
+    """TRDD-RAEGS1D5 retune follow-up: `LANE_COMPACTED_MAX_BYTES` (a flat constant) used to be
+    passed as `--inject-max-bytes` regardless of how much of `compose_handoff`'s own budget the
+    facts section and the recent-turns tail had already spent -- whenever that flat guess
+    overran the REAL room, `compose_handoff`'s own raw byte-slice cut the TAIL of the injected
+    Jev summary (the newest kept items, the pointer line) instead of Jev's own priority-aware
+    trim ever getting a chance to decide what to drop. The hook must now pass the room
+    `external_clear.compose_handoff_room` actually computes (minus the lane's small safety
+    margin) -- and a summary that fits inside it must come out of `compose_handoff` WHOLE."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%11")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%11"}, transcript=str(transcript))
+
+    # Small on purpose -- well under any plausible room, so `compose_handoff` has no reason to
+    # slice it; this test is about the SIZING decision (is the right number even passed?), not
+    # about the slicer itself (that is `test_large_compacted_context_still_injects_under_9000_
+    # bytes`'s job). No `[`/`]` anywhere -- the hook's own `state.sanitize_for_drift_line`
+    # defangs every literal bracket (marker-mimicry defense, unconditional, unrelated to this
+    # fix), which would otherwise make a verbatim substring check like the one below fail for a
+    # reason that has nothing to do with slicing.
+    small_doc = (
+        "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Kept items\n"
+        "a modest kept item\nanother modest kept item\n\n"
+        'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py"'
+        " expand --transcript /tmp/x <id>"
+    )
+    argv_log = tmp_path / "argv.txt"
+    _stub_jev_compact(plugin_root, argv_log, exit_code=0, out_text=small_doc)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+    assert rc == 0
+
+    # Independently compute the SAME room the hook must have computed, from the SAME inputs
+    # (empty findings/cards -- `state_head_paths` was stubbed to `([], False, [])` above).
+    # `now_iso`'s exact clock reading does not matter to the byte count, only its fixed
+    # strftime length, so a fresh call here reproduces the same byte total the hook's own
+    # (differently-timed) call produced.
+    room = ec.compose_handoff_room(
+        ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=[]),
+        now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        tail=ec.recent_messages(str(transcript)),
+        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
+    )
+    expected_inject_max_bytes = jcl.inject_max_bytes_for(room, str(transcript))
+
+    argv_list = ast.literal_eval(argv_log.read_text(encoding="utf-8"))
+    assert "--inject-max-bytes" in argv_list
+    passed = int(argv_list[argv_list.index("--inject-max-bytes") + 1])
+    assert passed == expected_inject_max_bytes, (passed, expected_inject_max_bytes)
+    # (Adversarial review, TRDD-RAEGS1D5 retune follow-up: a `passed <= LANE_COMPACTED_MAX_BYTES`
+    # assertion used to sit here -- dropped, it is a tautology once the equality above holds:
+    # `inject_max_bytes_for` clamps with `min(..., LANE_COMPACTED_MAX_BYTES)` unconditionally, so
+    # it can never fail once `passed == expected_inject_max_bytes` is already proven. It restated
+    # a fact this test already established, not a new one.)
+
+    # Unsliced: the WHOLE document, trailer included, appears verbatim in the final output --
+    # no "_(summary truncated to fit the handoff budget)_" marker anywhere.
+    assert small_doc in out
+    assert "summary truncated" not in out
 
 
 def test_two_panes_do_not_cross(tmp_path, monkeypatch):

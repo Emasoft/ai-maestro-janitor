@@ -230,14 +230,25 @@ def _main(
 
     head_paths, heads_unavailable, in_flight_cards = jcl.state_head_paths(root, sd)
     heads_args = ["--state-heads", *head_paths] if head_paths else []
+    findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
 
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
-    # Card 5 two-renderings (TRDD-RAEGS1D5): this detached lane uses the full card-3 budgets
-    # only -- no `--inject-out` capped companion. `compose_handoff`'s own `max_bytes` below
-    # already bounds the FINAL assembled handoff (facts + this + the tail), so a second, jev-
-    # side rendering buys nothing here; `on-session-start-post-clear-compact.py` is the ONE
-    # caller that needs a size-bounded companion, because it prints straight to stdout under
-    # the hook-output ceiling instead of going through a later SessionStart read.
+    # Card 5 two-renderings (TRDD-RAEGS1D5) + TRDD-RAEGS1D5 retune follow-up: this detached lane
+    # now gets the SAME size-bounded `--inject-out` companion `on-session-start-post-clear-
+    # compact.py` already uses, for the same reason -- `compose_handoff`'s own `max_bytes` below
+    # bounds the FINAL assembled handoff only with a raw byte-slice, which cuts the TAIL of an
+    # oversized summary (the newest kept items, the pointer line) instead of Jev's own
+    # priority-aware trim ever getting to decide what to drop. `tail`/`room` are computed BEFORE
+    # `run_compact_with_fallback` so `--inject-max-bytes` can be sized to what `compose_handoff`
+    # will actually have room for -- see `external_clear.compose_handoff_room`'s own docstring.
+    inject_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.inject.md"
+    tail = ec.recent_messages(str(prev))
+    room_inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
+    room = ec.compose_handoff_room(
+        room_inputs, now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"), tail=tail,
+        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
+    )
+    inject_max_bytes = jcl.inject_max_bytes_for(room, str(prev))
 
     # Owner decision 2026-09-23 (TRDD-RAEGS1D5): retry Jev for up to `_JEV_RETRY_BUDGET_S`
     # (5min), THEN fall back to llm-ext -- both bounded within this run's own 15-minute hold.
@@ -256,9 +267,10 @@ def _main(
         PLUGIN_ROOT, transcript=str(prev), out_path=out_path, session_key=key,
         heads_args=heads_args, sd=sd, deadline=jev_deadline,
         llm_ext_timeout_s=llm_ext_timeout_s, now_fn=now_fn, sleep_fn=sleep_fn,
+        inject_out_path=inject_path, inject_max_bytes=inject_max_bytes,
+        max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS,
     )
 
-    findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
     if source == jcl.SOURCE_FAILED:
@@ -293,7 +305,9 @@ def _main(
     # of the handoff can tell a Jev compose from an llm-ext fallback summary at a glance.
     trigger = "jev-compaction" if source == jcl.SOURCE_JEV else "jev-compaction-llm-ext-fallback"
     inputs = ec.HandoffInputs(trigger=trigger, findings=findings, cards=in_flight_cards)
-    tail = ec.recent_messages(str(prev))
+    # `tail` was already computed above, before `run_compact_with_fallback`, to size
+    # `inject_max_bytes` -- same transcript (`prev` never changes mid-call), reused rather than
+    # re-read.
     # Owner review finding #3 (TRDD-RAEGS1D5), fixed at the source: `ec.compose_handoff` now
     # takes `source` and renders the TRUE header itself (see
     # `external_clear._COMPACTED_CONTEXT_HEADS`) -- `source` is already exactly `jcl.SOURCE_JEV`
