@@ -1768,6 +1768,17 @@ def _phase_clear_resume() -> bool:
                     stale.unlink()
                 except FileNotFoundError:
                     pass
+                    pass
+            # TRDD-RAEGS1D5 card 5: sweep this abandoned flag's per-pane sidecar(s) too — a
+            # PATTERN unlink, not a fixed path, because the pane id is baked into the filename
+            # (`resume-after-clear.<pane-key>.transcript[.consumed-<epoch>]`) and this branch
+            # has no pane to name; an abandoned flag with an unresolvable pane still leaves the
+            # sidecar it wrote orphaned on disk forever otherwise.
+            for stale in sd.glob("resume-after-clear.*.transcript*"):
+                try:
+                    stale.unlink()
+                except FileNotFoundError:
+                    pass
             state.log_line("dispatch", f"swept an abandoned pre-/clear resume flag ({age}s old)")
         return False
 
@@ -1778,6 +1789,14 @@ def _phase_clear_resume() -> bool:
     )
     if expired:
         for stale in (flag, since_file):
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                pass
+                pass
+        # Same pattern-based sweep as the NOT-armed branch above — an armed-but-expired flag's
+        # per-pane sidecar(s) are equally orphaned once this cue is discarded unresumed.
+        for stale in sd.glob("resume-after-clear.*.transcript*"):
             try:
                 stale.unlink()
             except FileNotFoundError:
@@ -2815,7 +2834,13 @@ def _phase_idle_clear_nudge() -> bool:
                 "wikimem/TRDD links via memgrep recall on demand), then resume your prior "
                 "in-flight task."
             ),
-            transcript_path=str(transcript) if transcript else None,
+            # TRDD-RAEGS1D5 card 5: THIS SESSION'S OWN transcript (from its own
+            # CLAUDE_CODE_SESSION_ID), never "the project's newest" -- `transcript` above is
+            # still measured off `cold_cache_compact.newest_transcript` for the context-size
+            # print line, which is a fine proxy in the common single-pane case, but the chain
+            # payload must name THIS fire's own session or a second pane's clear could sidecar
+            # the wrong transcript.
+            transcript_path=str(_session_transcript_path() or "") or None,
         )
         # STAMP ONLY ON A SPAWN — the cooldown exists so a CLEARED session does not re-clear; a
         # stamp on a refused/unspawned chain would instead silently suppress the next

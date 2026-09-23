@@ -410,7 +410,9 @@ def _snapshot_before(env: dict[str, str]) -> None:
         )
 
 
-def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str = "") -> None:
+def _fire(
+    root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str = "", transcript: str = "",
+) -> None:
     """Spawn `clear_trigger`'s verified chain against the RECORDED pane.
 
     `CLAUDE_PROJECT_DIR` is set for the child because `clear_trigger._project_root()` reads it,
@@ -495,6 +497,11 @@ def _fire(root: Path, sd: Path, terminal: dict[str, str], now: int, trigger: str
         # substantive turn newer than this retires the clear. `now` is the same clock the
         # verdict was computed against, so the two can never drift apart.
         "verdict_ts": int(now),
+        # TRDD-RAEGS1D5 card 5: the transcript this fire ALREADY resolved and verified
+        # readable (`_capture_summary_source`) -- so `_persist_resume_state` can write the
+        # per-pane sidecar the fresh session's post-clear-compact hook consumes, instead of
+        # that hook guessing "whichever handoff is newest" off the state dir.
+        "transcript_path": transcript,
     }, env=child_env)
     # STAMP AT SPAWN, unlike the in-model lever which stamps only on a confirmed send.
     # The difference is real, not a relaxation: there, a refused send meant the USER WAS
@@ -648,7 +655,10 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     # only work done above is naming the transcript on disk. That is the entire point of
     # TRDD-2F3I2P18 — every second spent here was a second the full context could still be
     # re-cached at full price.
-    _fire(root, sd, terminal, now, trigger=verdict.trigger or "")
+    # TRDD-RAEGS1D5 card 5: `pending["transcript"]` is the SAME transcript `_capture_
+    # summary_source` just verified readable -- passed through so `_fire` can name it in the
+    # chain payload for `_persist_resume_state` to sidecar.
+    _fire(root, sd, terminal, now, trigger=verdict.trigger or "", transcript=pending["transcript"])
     # Consume any pending reload event ONLY now that the chain is actually spawned. The probe in
     # `_decide` deliberately does not consume (review-fork finding, 2026-09-01): a dry-run, a
     # gate veto, or the NO_RECORDED_PANE decline above must leave the event pending so the next

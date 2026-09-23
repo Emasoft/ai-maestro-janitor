@@ -319,6 +319,33 @@ def terminal_pane_key(env: Mapping[str, str] | None = None) -> str | None:
     return None
 
 
+def pane_key_from_terminal(terminal: Mapping[str, str] | None) -> str | None:
+    """The SAME sanitised id as `terminal_pane_key`, computed from a `terminal_trigger.
+    self_terminal()`-shaped dict instead of the environment.
+
+    TRDD-RAEGS1D5 card 5: the clear chain child persists a per-pane sidecar naming the
+    transcript being cleared, keyed off the PANE THE CHAIN TYPES INTO — the `terminal` dict
+    already carried in its payload (`{"kind": "tmux", "pane": ...}` or `{"kind": "iterm",
+    "session_id": ...}`), not necessarily the childs own env (`_spawn_chain`s `env=`
+    override can differ from the parent). The fresh sessions SessionStart hook resolves the
+    SAME id from its own env via `terminal_pane_key` — the two MUST agree on one id for the
+    same pane, so this applies the identical `<source>-<sanitized>` sanitisation keyed off the
+    same source names ("tmux"/"iterm") `self_terminal()` already uses. Returns None for an
+    unresolvable/unknown terminal, mirroring `terminal_pane_key`s own contract.
+    """
+    if not terminal:
+        return None
+    kind = (terminal.get("kind") or "").strip()
+    if kind == "tmux":
+        raw = (terminal.get("pane") or "").strip()
+    elif kind == "iterm":
+        raw = (terminal.get("session_id") or "").strip()
+    else:
+        return None
+    sanitized = re.sub(r"[^A-Za-z0-9._]+", "-", raw).strip("-")[:128]
+    return f"{kind}-{sanitized}" if sanitized else None
+
+
 def per_pane_presence_path(pane_key: str, home: Path | None = None) -> Path:
     """Path of THIS pane's presence breadcrumb (sibling of the machine-global one).
 

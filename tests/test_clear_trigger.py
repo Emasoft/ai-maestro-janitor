@@ -403,6 +403,26 @@ def _chain_payload(tmp_path: Path, *, directive: str = "resume") -> str:
     return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
 
 
+def _chain_payload_with_transcript(tmp_path: Path, *, transcript: str, terminal: dict,
+                                    directive: str = "resume") -> str:
+    """`_chain_payload` plus a `transcript_path` and a caller-chosen `terminal` dict -- the two
+    fields TRDD-RAEGS1D5 card 5 added to the chain payload for the per-pane sidecar."""
+    import base64
+    import json as _json
+
+    payload = {
+        "delay": 0.0,
+        "terminal": terminal,
+        "first": "/clear",
+        "then": ["/janitor-arm", "/janitor-resume"],
+        "state_dir": str(tmp_path / ".janitor" / "state"),
+        "gate_baseline": 0,
+        "directive": directive,
+        "transcript_path": transcript,
+    }
+    return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
+
+
 def _capture_still_wanted(mod, monkeypatch) -> dict:
     """Replace `terminal_trigger.run_chained_inject` with a capture of the callbacks
     `_run_chain_payload` builds, instead of running any real pane I/O."""
@@ -502,3 +522,127 @@ def test_persist_resume_state_logs_context_size_at_land(tmp_path: Path, monkeypa
     captured["pre_submit_first"]()
 
     assert any("clear landing at 760000 tokens (84% of window)" in ln for ln in logs), logs
+
+
+
+# --- TRDD-RAEGS1D5 card 5: the per-pane sidecar `_persist_resume_state` writes when the
+# chain payload names a transcript -----------------------------------------------------------
+
+
+def test_persist_resume_state_writes_a_per_pane_sidecar_when_a_transcript_is_named(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """When the payload carries `transcript_path`, `_persist_resume_state` writes
+    `resume-after-clear.<pane-key>.transcript` -- the ONE thing the fresh session's dedicated
+    hook consumes to know WHICH transcript this clear was for."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    captured = _capture_still_wanted(mod, monkeypatch)
+
+    payload = _chain_payload_with_transcript(tmp_path, transcript="/tmp/real-transcript.jsonl",
+                                              terminal={"kind": "tmux", "pane": "%3"})
+    mod._run_chain_payload(payload)
+    captured["pre_submit_first"]()
+
+    pane_key = state.terminal_pane_key({"TMUX_PANE": "%3"})
+    sidecar = tmp_path / ".janitor" / "state" / f"resume-after-clear.{pane_key}.transcript"
+    assert sidecar.is_file(), "expected a per-pane sidecar naming the cleared transcript"
+    lines = sidecar.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "/tmp/real-transcript.jsonl"
+    assert int(lines[1]) > 0
+
+
+def test_persist_resume_state_writes_no_sidecar_without_a_transcript(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """`reload_trigger.py --shrink` (and any caller that names no transcript) must write NO
+    sidecar -- a reload is not a compaction, so nothing should later Jev-compact it."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    captured = _capture_still_wanted(mod, monkeypatch)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+    captured["pre_submit_first"]()
+
+    sd = tmp_path / ".janitor" / "state"
+    assert not list(sd.glob("resume-after-clear.*.transcript")), (
+        "no transcript in the payload must mean no sidecar on disk"
+    )
+
+
+def test_two_panes_sidecars_do_not_cross(tmp_path: Path, monkeypatch) -> None:
+    """Two chains firing for two different panes of the same project must each write their
+    OWN sidecar, keyed by pane -- never overwrite or merge into one file."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+
+    captured_a = _capture_still_wanted(mod, monkeypatch)
+    payload_a = _chain_payload_with_transcript(
+        tmp_path, transcript="/tmp/pane-a.jsonl", terminal={"kind": "tmux", "pane": "%1"},
+    )
+    mod._run_chain_payload(payload_a)
+    captured_a["pre_submit_first"]()
+
+    captured_b = _capture_still_wanted(mod, monkeypatch)
+    payload_b = _chain_payload_with_transcript(
+        tmp_path, transcript="/tmp/pane-b.jsonl", terminal={"kind": "tmux", "pane": "%2"},
+    )
+    mod._run_chain_payload(payload_b)
+    captured_b["pre_submit_first"]()
+
+    sd = tmp_path / ".janitor" / "state"
+    key_a = state.terminal_pane_key({"TMUX_PANE": "%1"})
+    key_b = state.terminal_pane_key({"TMUX_PANE": "%2"})
+    text_a = (sd / f"resume-after-clear.{key_a}.transcript").read_text(encoding="utf-8")
+    text_b = (sd / f"resume-after-clear.{key_b}.transcript").read_text(encoding="utf-8")
+    assert "/tmp/pane-a.jsonl" in text_a
+    assert "/tmp/pane-b.jsonl" in text_b
+    assert text_a != text_b
+
+
+def test_spawn_shrink_chain_carries_transcript_path_into_the_payload(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """`spawn_shrink_chain`'s own `transcript_path` argument must reach `_spawn_chain`'s
+    payload dict (not just the `JANITOR_TRANSCRIPT_PATH` env var) -- that dict key is what
+    `_persist_resume_state` reads to decide whether to write a sidecar at all."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    (tmp_path / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%5"})
+    monkeypatch.setattr(mod.terminal_trigger, "channel_is_readable", lambda t: True)
+
+    captured: dict = {}
+
+    def _fake_spawn(payload, *, env=None):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(mod, "_spawn_chain", _fake_spawn)
+
+    spawned, why = mod.spawn_shrink_chain(
+        then=["/janitor-arm", "/janitor-resume"], directive="resume",
+        transcript_path="/tmp/shrink-me.jsonl",
+    )
+    assert spawned, why
+    assert captured["payload"]["transcript_path"] == "/tmp/shrink-me.jsonl"
+
+
+def test_spawn_shrink_chain_transcript_path_defaults_to_none(tmp_path: Path, monkeypatch) -> None:
+    """`reload_trigger.py --shrink` never passes `transcript_path` -- the payload key must
+    default to `None`, not be silently omitted (which would read the same to a `.get()`
+    caller, but this pins the CONTRACT explicitly)."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    (tmp_path / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%6"})
+    monkeypatch.setattr(mod.terminal_trigger, "channel_is_readable", lambda t: True)
+
+    captured: dict = {}
+
+    def _fake_spawn(payload, *, env=None):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(mod, "_spawn_chain", _fake_spawn)
+
+    mod.spawn_shrink_chain(then=["/janitor-arm", "/janitor-resume"], directive="resume")
+    assert captured["payload"]["transcript_path"] is None

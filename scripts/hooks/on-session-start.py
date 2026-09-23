@@ -255,14 +255,19 @@ def _seed_overview_if_absent(state, memory_bridge, scope_name: str, scope_root: 
         _slog(state, "session-start", f"{scope_name} overview seed skipped: {exc}")
 
 
-def _emit_manual_clear_pointer(state, sd: Path) -> None:  # noqa: ANN001 - local module type
-    """After a MANUAL `/clear`, name the most recent handoff instead of injecting it.
+def _emit_manual_clear_pointer(  # noqa: ANN001 - local module type
+    state, sd: Path, *, reason: str = "this looks like a manual /clear",
+) -> None:
+    """After a MANUAL `/clear` (or an orchestrated one this hook cannot pin to a transcript),
+    name the most recent handoff instead of injecting it.
 
-    A pointer, deliberately — not the body. The body belongs to the orchestrated path, which
-    knows the clear was the janitor's own doing. Here the user may genuinely have discarded the
-    work, so this must not resurrect it; it must only make its EXISTENCE impossible to miss.
-    Silence was the failure mode (2026-08-28): a mid-migration session woke blank beside an
-    11-hour-old handoff nobody was told about.
+    A pointer, deliberately — not the body. The body belongs to the path that KNOWS which
+    transcript this clear was for; here it may genuinely be a discard, or the newest handoff on
+    disk may belong to a DIFFERENT session's clear, so this must not resurrect either — it must
+    only make the handoff's EXISTENCE impossible to miss. Silence was the failure mode
+    (2026-08-28): a mid-migration session woke blank beside an 11-hour-old handoff nobody was
+    told about. `reason` lets `_inject_post_clear_handoff` name WHY it declined to inject
+    (manual clear vs. an unresolved transcript) without duplicating this whole function.
 
     Bounded at 7 days: past that the handoff is far more likely to describe finished work than
     an interrupted task, and a pointer to something irrelevant trains the reader to ignore the
@@ -291,7 +296,7 @@ def _emit_manual_clear_pointer(state, sd: Path) -> None:  # noqa: ANN001 - local
             f"{hrs:.1f} h" if hrs < 48 else f"{age_s / 86400:.1f} d")
         print(
             f"[janitor-handoff] A handoff from a prior session exists — written {age_txt} ago, "
-            f"NOT injected because this looks like a manual /clear.\n"
+            f"NOT injected because {reason}.\n"
             f"  {newest}\n"
             f"  opens: {head}\n"
             "  If you cleared to reclaim context mid-task, READ IT before starting. If you "
@@ -301,7 +306,7 @@ def _emit_manual_clear_pointer(state, sd: Path) -> None:  # noqa: ANN001 - local
         return
 
 
-def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module type
+def _inject_post_clear_handoff(state, session_id: str = "") -> None:  # noqa: ANN001 - local module type
     """Put the handoff INTO the fresh context at `/clear`, instead of pointing at it.
 
     The pointer path needs three links to all hold — the cron fires, dispatch emits
@@ -339,6 +344,16 @@ def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module ty
         # discard) while making continuity loss impossible to suffer WITHOUT NOTICING.
         _emit_manual_clear_pointer(state, sd)
         return
+
+    # TRDD-RAEGS1D5 card 5: when THIS PANE's sidecar exists (fresh, or already consumed by the
+    # dedicated hook), `on-session-start-post-clear-compact.py` owns the injection for this
+    # clear — printing the handoff body here too would double it. Glob, not an exact name: the
+    # two hooks race, so the dedicated hook may have already renamed the sidecar to
+    # `.consumed-<epoch>` by the time this runs, or not yet — either shape means "handled there".
+    pane_key = state.terminal_pane_key(os.environ)
+    if pane_key and any(sd.glob(f"resume-after-clear.{pane_key}.transcript*")):
+        return
+
     max_age = state.coerce_int(
         os.environ.get("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S"), 86400
     )
@@ -347,6 +362,53 @@ def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module ty
     age = int(time.time()) - (written_at or state.file_mtime(flag))
     if max_age > 0 and age > max_age:
         return  # dispatch will sweep it; injecting a day-old handoff is worse than silence
+
+    # TRDD-RAEGS1D5 card 5: reached by `reload_trigger.py --shrink` — the flag is written
+    # (every `_persist_resume_state` run writes it), but NO sidecar (a reload is not a
+    # compaction, so `spawn_shrink_chain`'s `transcript_path` stays None there). With no sidecar
+    # to pin the source, `newest_group` is only a GUESS ("whichever handoff is newest anywhere
+    # in this state dir") — and injecting a stale or FOREIGN handoff as if it were this
+    # session's own account is the exact defect this card exists to remove. So: only inject
+    # when the group's key matches THIS session's own previous transcript — the same "newest
+    # transcript that is not mine" `jcl.previous_transcript` already computes for the detached
+    # summarizer. Any mismatch (including a probe fault) degrades to the honest pointer instead
+    # of a wrong body.
+    prev_key = ""
+    group_key = ""
+    # LEGACY (pre-D) handoffs carry no per-write key at all -- `group_key` reads as the
+    # fixed sentinel below for every one of them, so they can never "match" a real transcript
+    # key and would otherwise be silently downgraded to a pointer forever. The matching regime
+    # only protects the NEW per-key naming this card is about; a legacy file predates it
+    # entirely, so it is exempt (handoff_files.py's own docstring: "still READ"). Computed
+    # and compared INSIDE the try (never referencing the lazily-imported module outside it,
+    # where a failed import would leave the name unbound).
+    try:
+        import handoff_files  # noqa: PLC0415 - scripts/lib is on sys.path only inside main()
+        import jev_compaction_lane as jcl  # noqa: PLC0415
+
+        prev = jcl.previous_transcript(state.project_root(), session_id)
+        prev_key = handoff_files.session_key(str(prev)) if prev else ""
+        newest_paths = handoff_files.newest_group(sd)
+        group_key = ""
+        if newest_paths:
+            parsed = handoff_files.parse(newest_paths[0].name)
+            if parsed:
+                group_key = parsed[0]
+            elif newest_paths[0].name == handoff_files.LEGACY_NAME:
+                group_key = handoff_files.LEGACY_KEY
+        if group_key == handoff_files.LEGACY_KEY:
+            prev_key = group_key = "legacy-exempt"
+    except Exception:  # noqa: BLE001 -- a probe fault degrades to the honest pointer, never a guess
+        prev_key = ""
+        group_key = ""
+    if not (prev_key and group_key and prev_key == group_key):
+        _emit_manual_clear_pointer(
+            state, sd,
+            reason="the newest handoff does not match this session's own prior transcript "
+            "(reload-shrink, or another session's clear)",
+        )
+        return
+
     body = _handoff_body(state, sd)
     if body is None:
         return
@@ -766,7 +828,7 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001 -- never break session start
                 _slog(state, "session-start", f"clear session-id stamp failed: {exc!r}")
         try:
-            _inject_post_clear_handoff(state)
+            _inject_post_clear_handoff(state, session_id)
         except Exception as exc:  # noqa: BLE001 -- never break session start
             _slog(state, "session-start", f"post-clear handoff injection failed: {exc!r}")
 

@@ -329,7 +329,8 @@ def test_force_never_overrides_a_safety_veto():
 # --- _fire: the warm-cancel gate is trigger-scoped ----------------------------
 
 
-def _captured_payload(monkeypatch, tmp_path: Path, trigger: str) -> dict:
+
+def _captured_payload(monkeypatch, tmp_path: Path, trigger: str, *, transcript: str = "") -> dict:
     """Run `_fire` with the chain spawn and the fired-stamp both replaced, and return the
     payload it built. Real function, real payload — only the two side effects are stubbed."""
     import clear_trigger
@@ -340,7 +341,7 @@ def _captured_payload(monkeypatch, tmp_path: Path, trigger: str) -> dict:
                         lambda payload, env=None: seen.update(payload))
     monkeypatch.setattr(cold_cache_compact, "mark_clear_fired", lambda sd, now=0: None)
     sd = tmp_path / ".janitor" / "state"
-    ehc._fire(tmp_path, sd, {"kind": "tmux", "pane": "%1"}, 0, trigger=trigger)
+    ehc._fire(tmp_path, sd, {"kind": "tmux", "pane": "%1"}, 0, trigger=trigger, transcript=transcript)
     return seen
 
 
@@ -360,6 +361,18 @@ def test_idle_and_predictive_triggers_do_not_arm_the_warm_cancel_probe(tmp_path,
     _project(tmp_path)
     for trigger in (ec.TRIGGER_LONG_IDLE, ec.TRIGGER_NEXT_FIRE_MISSES, ""):
         assert _captured_payload(monkeypatch, tmp_path, trigger)["cache_gated"] is False, trigger
+
+
+def test_fire_carries_the_transcript_into_the_chain_payload(tmp_path, monkeypatch):
+    """TRDD-RAEGS1D5 card 5: the daemon already resolved+verified the transcript before
+    firing (`_capture_summary_source`) -- `_fire` must name it in the chain payload so
+    `_persist_resume_state` can write the per-pane sidecar the fresh sessions dedicated
+    post-clear-compact hook consumes, instead of that hook guessing at the newest handoff."""
+    _project(tmp_path)
+    payload = _captured_payload(
+        monkeypatch, tmp_path, ec.TRIGGER_LONG_IDLE, transcript="/tmp/daemon-cleared.jsonl",
+    )
+    assert payload["transcript_path"] == "/tmp/daemon-cleared.jsonl"
 
 
 # --- _fire: the verify harness's before-snapshot lands ahead of the keystroke (TRDD-BDZG8Y8A) --

@@ -36,6 +36,15 @@
             "timeout": 2800
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-post-clear-compact.py",
+            "timeout": 90
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

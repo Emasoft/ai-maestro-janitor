@@ -370,6 +370,33 @@ def _run_chain_payload(payload_b64: str) -> int:
         _write_directive(directive)
         _write_clear_marker(directive)
         persisted["done"] = True
+        # TRDD-RAEGS1D5 card 5: when this chain payload NAMES a transcript (every automatic
+        # trigger now threads one through — external_handoff_clear, the idle-clear nudge,
+        # spawn_shrink_chain), persist a PER-PANE sidecar the fresh session's dedicated hook
+        # (on-session-start-post-clear-compact.py) consumes to Jev-compact THAT transcript,
+        # never "whichever handoff happens to be newest" (a stale foreign handoff getting
+        # injected as if it were this clear's own account, the TRDD-5RXBI65T failure shape).
+        # Keyed by PANE, not session or project: two panes of the same project can each have
+        # their own clear pending at once and must not cross-contaminate each other's sidecar
+        # — the pane is "the one the chain types into" (`data["terminal"]`), and the fresh
+        # session's hook resolves the SAME id from its own env via `state.terminal_pane_key`
+        # (both sides share the sanitisation via `state.pane_key_from_terminal`). No pane id
+        # (an unresolvable terminal) writes no sidecar — that chain never reaches this
+        # verified child anyway (the legacy blind-send fallback in main() never calls this).
+        transcript_path = str(data.get("transcript_path") or "").strip()
+        if transcript_path:
+            try:
+                pane_key = state.pane_key_from_terminal(data.get("terminal"))
+                if pane_key:
+                    sidecar = sd / f"resume-after-clear.{pane_key}.transcript"
+                    _atomic_write(sidecar, f"{transcript_path}\n{int(time.time())}\n")
+            except Exception as exc:  # noqa: BLE001 — the sidecar is a nice-to-have; never block /clear
+                # Review finding (TRDD-RAEGS1D5 card 5): a bare `pass` here would make a
+                # SYSTEMATIC failure (e.g. a future `pane_key_from_terminal` regression, a full
+                # disk) indistinguishable from "no pane id" — silent forever, with nothing to
+                # diagnose why the feature stopped firing. Logging costs nothing and never
+                # risks the /clear itself (still never re-raised).
+                state.log_line("clear-trigger", f"per-pane sidecar write failed: {exc!r}")
         # TRDD-11GAS4LC addendum: log the context size at the exact moment /clear lands
         # (not at the Stop hook's earlier decision) — the two can be minutes apart while
         # this chain defers on a busy pane, and without this the miss between "decided"
@@ -622,6 +649,12 @@ def spawn_shrink_chain(
     `JANITOR_TRANSCRIPT_PATH`, the same seam `main()`'s `--transcript-path` uses. Without it
     the child's interrupt-cooldown check (`_agents_and_interrupt_ok`) has no session to scope
     to and skips itself — a caller that knows its own transcript (a Stop hook) should pass it.
+
+    TRDD-RAEGS1D5 card 5: ALSO carried into the chain payload's `"transcript_path"` (not just
+    the env var above) — that is what `_persist_resume_state` reads to write the per-pane
+    sidecar the fresh session's post-clear-compact hook consumes. `reload_trigger.py --shrink`
+    is the one caller that still passes None here: a reload is not a compaction, so it must
+    write no sidecar and trigger no compose (its own module docstring's contract).
     """
     terminal = terminal_trigger.self_terminal(os.environ)
     if not terminal_trigger.channel_is_readable(terminal):
@@ -655,6 +688,7 @@ def spawn_shrink_chain(
         "gate_baseline": _gate_baseline(),
         "directive": directive,
         "settle_between_s": settle_between_s,
+        "transcript_path": transcript_path,
     }, env=chain_env)
     return True, "chain spawned"
 
@@ -873,6 +907,11 @@ def main() -> int:
             "state_dir": str(_project_root() / ".janitor" / "state"),
             "gate_baseline": _gate_baseline(),
             "directive": directive,
+            # TRDD-RAEGS1D5 card 5: named here (the foreground /janitor-handoff-and-clear
+            # invocation) exactly as spawn_shrink_chain already does for its callers, so
+            # `_persist_resume_state` can write the per-pane sidecar the fresh session's
+            # post-clear-compact hook consumes.
+            "transcript_path": args.transcript_path,
         }, env=chain_env)
         print("CLEAR_CHAIN_SPAWNED")
         return 0

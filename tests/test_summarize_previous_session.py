@@ -428,3 +428,124 @@ def test_in_flight_cards_land_in_the_written_handoff(tmp_path, monkeypatch, _iso
     assert "ABCDEF12" in text
     assert "A fake in-flight card" in text
     assert "heads: none (trddgrep unavailable)" not in text
+
+
+
+# --- TRDD-RAEGS1D5 card 5: pane-sidecar deference (the dedicated post-clear-compact hook
+# owns a transcript this summarizer would otherwise race it to compose) ---------------------
+
+
+def test_fresh_pane_sidecar_skips_composing_entirely(tmp_path, monkeypatch, _isolated_env):
+    """A fresh (<=300s) sidecar for THIS pane means the dedicated hook is (about to be)
+    handling this exact clear -- the summarizer must exit before even looking for a
+    previous transcript, let alone spend a subprocess call on it."""
+    monkeypatch.setenv("TMUX_PANE", "%7")
+    pane_key = state.terminal_pane_key({"TMUX_PANE": "%7"})
+    assert pane_key
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / f"resume-after-clear.{pane_key}.transcript").write_text(
+        f"/tmp/some-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
+    )
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("must not run jev_compact.py when this pane's sidecar is fresh")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    monkeypatch.setattr(jcl, "previous_transcript", _boom)
+
+    assert sps.main() == 0
+    assert not handoff_files.newest_group(sd)
+
+
+def test_consumed_pane_sidecar_skips_composing_regardless_of_age(tmp_path, monkeypatch,
+                                                                   _isolated_env):
+    """A `.consumed-*` sidecar means the dedicated hook already ran (or declined to a
+    template) for this pane's clear -- skip even when the consumption is old, since the
+    invariant is "one composer per transcript", not a time window."""
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    pane_key = state.terminal_pane_key({"TMUX_PANE": "%9"})
+    assert pane_key
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    old_epoch = int(time.time()) - 10_000
+    (sd / f"resume-after-clear.{pane_key}.transcript.consumed-{old_epoch}").write_text(
+        f"/tmp/some-transcript.jsonl\n{old_epoch}\n", encoding="utf-8"
+    )
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("must not run jev_compact.py when this pane's sidecar is consumed")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    monkeypatch.setattr(jcl, "previous_transcript", _boom)
+
+    assert sps.main() == 0
+
+
+def test_a_stale_pane_sidecar_for_a_DIFFERENT_pane_does_not_block_composing(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """Two panes' sidecars do not cross: a sidecar belonging to another pane must never make
+    THIS pane's summarizer skip its own, unrelated previous transcript."""
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    other_key = state.terminal_pane_key({"TMUX_PANE": "%2"})
+    assert other_key
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / f"resume-after-clear.{other_key}.transcript").write_text(
+        f"/tmp/other-pane-transcript.jsonl\n{int(time.time())}\n", encoding="utf-8"
+    )
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    assert sps.main() == 0
+    assert handoff_files.newest_group(sd), "this pane's own transcript must still compose"
+
+
+def test_template_marked_handoff_does_not_count_as_already_summarized(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """A handoff whose first line is `handoff_files.TEMPLATE_MARKER` is the dedicated hook's
+    OWN failure fallback, never a real Jev compose -- the "already summarized" skip must
+    ignore it so a real compose is retried on the next SessionStart (TRDD-RAEGS1D5 card 5)."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    key = handoff_files.session_key(str(prev))
+    sd = state.state_dir()
+    handoff_files.write(
+        sd, key, f"{handoff_files.TEMPLATE_MARKER}\nfact-only, no real compaction\n",
+    )
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    assert sps.main() == 0
+    texts = [p.read_text(encoding="utf-8") for p in handoff_files.newest_group(sd)]
+    assert any("pointers expand with:" in t for t in texts), (
+        "a real Jev compose must have been retried, not skipped as already-summarized"
+    )
+
+
+def test_a_real_non_template_handoff_still_skips(tmp_path, monkeypatch, _isolated_env):
+    """Regression: the template-marker carve-out must not un-skip a GENUINE prior compose --
+    only a template-marked one is retried."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    key = handoff_files.session_key(str(prev))
+    sd = state.state_dir()
+    handoff_files.write(sd, key, "# Compacted context (Jev compaction)\nreal content\n")
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("a real prior compose must still be skipped, not re-run")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+
+    assert sps.main() == 0

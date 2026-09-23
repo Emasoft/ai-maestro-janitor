@@ -368,6 +368,29 @@ def test_terminal_pane_key_namespaces_by_source_and_sanitizes():
     assert state.terminal_pane_key({"TMUX_PANE": "%3"}) != state.terminal_pane_key({"KITTY_WINDOW_ID": "3"})
 
 
+def test_pane_key_from_terminal_agrees_with_terminal_pane_key_for_the_same_pane():
+    """TRDD-RAEGS1D5 card 5: the clear chains detached child computes the sidecar key from the
+    `self_terminal()`-shaped payload dict (`pane_key_from_terminal`), and the fresh sessions
+    SessionStart hook computes it from the env (`terminal_pane_key`) -- for the SAME pane both
+    MUST produce the identical id, or the writer and the reader never meet."""
+    assert (
+        state.pane_key_from_terminal({"kind": "tmux", "pane": "%3"})
+        == state.terminal_pane_key({"TMUX_PANE": "%3"})
+        == "tmux-3"
+    )
+    assert (
+        state.pane_key_from_terminal({"kind": "iterm", "session_id": "w0t1p0:ABC-DEF"})
+        == state.terminal_pane_key({"ITERM_SESSION_ID": "w0t1p0:ABC-DEF"})
+        == "iterm-w0t1p0-ABC-DEF"
+    )
+    # Unknown/unresolvable terminal, or a missing/empty dict, -> None (matches
+    # `terminal_pane_key`s own "no per-pane id" contract) — never a half-built key.
+    assert state.pane_key_from_terminal({"kind": "unknown"}) is None
+    assert state.pane_key_from_terminal(None) is None
+    assert state.pane_key_from_terminal({}) is None
+    assert state.pane_key_from_terminal({"kind": "tmux", "pane": ""}) is None
+
+
 def test_genuine_prompt_writes_per_pane_breadcrumb(tmp_path):
     """A genuine prompt with a pane id stamps BOTH the global breadcrumb AND this pane's own file."""
     home = tmp_path / "home"

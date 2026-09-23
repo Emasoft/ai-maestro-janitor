@@ -86,6 +86,25 @@ def _main() -> int:
     now = int(time.time())
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
 
+    # TRDD-RAEGS1D5 card 5: `on-session-start-post-clear-compact.py` is the ONE composer for a
+    # clear that named its transcript in a per-pane sidecar -- a FRESH (<=300s) sidecar means
+    # that hook is (about to be) running right now; a `.consumed-*` one means it already ran (or
+    # declined to a template) for THIS pane's clear. Either shape means this detached summarizer
+    # must not also compose the same transcript -- "one compose per transcript" (TRDD-QZVAEWQH)
+    # would otherwise become two, racing each other to write the keyed handoff.
+    pane_key = state.terminal_pane_key(os.environ)
+    if pane_key:
+        fresh_sidecar = sd / f"resume-after-clear.{pane_key}.transcript"
+        consumed = any(sd.glob(f"resume-after-clear.{pane_key}.transcript.consumed-*"))
+        fresh = fresh_sidecar.is_file() and (now - state.file_mtime(fresh_sidecar)) <= 300
+        if fresh or consumed:
+            state.log_line(
+                _LOG,
+                f"pane {pane_key} sidecar is {'fresh' if fresh else 'consumed'} — the "
+                "post-clear-compact hook owns this transcript, not this summarizer",
+            )
+            return 0
+
     prev = jcl.previous_transcript(root, session_id)
     if prev is None:
         state.log_line(_LOG, "no previous transcript to summarize — nothing to do")
@@ -94,8 +113,23 @@ def _main() -> int:
     key = handoff_files.session_key(str(prev))
     # ALREADY SUMMARIZED? Do not pay for it twice. A session that restarts several times in a row
     # would otherwise re-summarize the same transcript on every start, which is exactly the kind
-    # of repeated external work this whole card exists to stop paying for.
-    if any(p.is_file() for p in handoff_files.newest_group(sd) if key and key in p.name):
+    # of repeated external work this whole card exists to stop paying for. A TEMPLATE-marked
+    # handoff (TRDD-RAEGS1D5 card 5: `on-session-start-post-clear-compact.py`'s own failure
+    # fallback) does NOT count as "already summarized" -- it is a fact-only degrade, never a
+    # real Jev compose, so this summarizer must still retry a real one on the next SessionStart.
+    already_summarized = False
+    for p in handoff_files.newest_group(sd):
+        if not (key and key in p.name and p.is_file()):
+            continue
+        try:
+            content = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if content.lstrip().startswith(handoff_files.TEMPLATE_MARKER):
+            continue
+        already_summarized = True
+        break
+    if already_summarized:
         state.log_line(_LOG, f"a handoff already exists for {key} — skipping")
         return 0
 

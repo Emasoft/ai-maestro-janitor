@@ -3260,6 +3260,23 @@ def test_idle_clear_FIRES_the_command_it_used_to_only_print(env_isolation: dict,
     assert list(sent[0]["then"]) == list(clear_trigger.BOOTSTRAP_CMDS)
 
 
+def test_idle_clear_names_THIS_sessions_own_transcript_not_the_project_newest(
+    env_isolation: dict, monkeypatch,
+) -> None:
+    """TRDD-RAEGS1D5 card 5: the chain payloads `transcript_path` must come from THIS fires
+    own session (`_session_transcript_path`, keyed on `CLAUDE_CODE_SESSION_ID`), never
+    `cold_cache_compact.newest_transcript` (a second pane of the same project can be newer)."""
+    dispatch = _import_dispatch()
+    sent = _arm_idle_clear(dispatch, monkeypatch, idle_s=7200)
+    monkeypatch.setattr(
+        dispatch, "_session_transcript_path", lambda: Path("/tmp/this-sessions-own.jsonl")
+    )
+
+    assert dispatch._phase_idle_clear_nudge() is True
+    assert len(sent) == 1
+    assert sent[0]["transcript_path"] == "/tmp/this-sessions-own.jsonl"
+
+
 def test_idle_clear_holds_off_a_tiny_context_card1_item3(env_isolation: dict, monkeypatch) -> None:
     """SUPERSEDED 2026-09-22 (TRDD-L32WC0H7 card 1 item 3): size USED TO NOT be a gate ("a 40k
     idle session clears just like a 500k one"). It is again, reusing the `*_MIN_CONTEXT_TOKENS`
@@ -3818,6 +3835,52 @@ def test_phase_clear_resume_armed_but_ancient_flag_is_swept(env_isolation: dict)
     sd = state.state_dir()
     assert not (sd / "resume-after-clear.flag").exists(), "flag must be swept"
     assert not (sd / "resume-after-clear.ts").exists(), "sidecar must be swept too"
+
+
+def test_phase_clear_resume_sweeps_are_pattern_based_over_pane_sidecars(
+    env_isolation: dict,
+) -> None:
+    """TRDD-RAEGS1D5 card 5: both staleness sweeps (NOT-armed, and ARMED-but-ancient) must
+    also unlink the per-pane sidecar(s) `_persist_resume_state` may have left behind — a
+    PATTERN unlink, since the pane id in the filename is not known to this phase."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    state.init_state()
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "resume-after-clear.tmux-%3.transcript").write_text(
+        "/tmp/x.jsonl\n0\n", encoding="utf-8",
+    )
+    (sd / "resume-after-clear.iterm-abc.transcript.consumed-123").write_text(
+        "/tmp/y.jsonl\n0\n", encoding="utf-8",
+    )
+    _write_clear_flag(state, "abandoned handoff", age_s=86400 + 60)
+
+    assert dispatch._phase_clear_resume() is False
+    assert not list(sd.glob("resume-after-clear.*.transcript*")), (
+        "an abandoned pre-/clear flags sidecar(s) must be swept alongside the flag itself"
+    )
+
+
+def test_phase_clear_resume_armed_ancient_sweep_also_clears_sidecars(env_isolation: dict) -> None:
+    """Same sweep, ARMED-but-expired branch."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    state.init_state()
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "resume-after-clear.tmux-%9.transcript").write_text(
+        "/tmp/z.jsonl\n0\n", encoding="utf-8",
+    )
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR", age_s=86400 + 60)
+
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert out == "", out
+    assert not list(sd.glob("resume-after-clear.*.transcript*")), (
+        "an armed-but-ancient flags sidecar(s) must be swept alongside the flag itself"
+    )
 
 
 def test_phase_clear_resume_armed_and_fresh_still_resumes(env_isolation: dict) -> None:

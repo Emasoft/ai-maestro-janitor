@@ -121,7 +121,7 @@ def test_the_summary_SOURCE_is_on_disk_before_the_clear_chain_is_spawned(
     root, sd = _firing_project(tmp_path, monkeypatch)
     seen: dict = {}
 
-    def _spy_fire(_root, _sd, _terminal, _now, trigger=""):
+    def _spy_fire(_root, _sd, _terminal, _now, trigger="", transcript=""):
         del trigger  # not part of this test's claim; named so the call shape is exact
         pending = sd / "summary-pending.json"
         seen["pending_at_fire"] = pending.is_file()

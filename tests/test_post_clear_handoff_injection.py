@@ -46,6 +46,17 @@ def _arm(sd: Path, *, handoff: str, age_s: int = 0) -> None:
     (sd / "agent-handoff.md").write_text(handoff, encoding="utf-8")
 
 
+def _arm_keyed(sd: Path, *, key: str, handoff: str, age_s: int = 0) -> None:
+    """Like `_arm`, but writes a real PER-WRITE (post-D) handoff under `key` via
+    `handoff_files.write`, instead of the legacy fixed `agent-handoff.md` path — the shape
+    `jcl.previous_transcript`-matching actually governs (TRDD-RAEGS1D5 card 5)."""
+    import handoff_files  # noqa: PLC0415 - already on sys.path (module-level insert above)
+
+    (sd / "resume-after-clear.flag").write_text("resume your prior task", encoding="utf-8")
+    (sd / "resume-after-clear.ts").write_text(str(int(time.time()) - age_s), encoding="utf-8")
+    handoff_files.write(sd, key, handoff)
+
+
 def test_handoff_is_injected_when_a_clear_was_queued(sd: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The whole point: the fresh context CONTAINS the handoff, with no tool call."""
     _arm(sd, handoff="# Handoff\n\nNEXT ACTION: finish TRDD-IFZQ98BA.")
@@ -119,3 +130,67 @@ def test_a_missing_handoff_injects_nothing(sd: Path, capsys: pytest.CaptureFixtu
     (sd / "resume-after-clear.ts").write_text(str(int(time.time())), encoding="utf-8")
     _load_hook()._inject_post_clear_handoff(real_state)
     assert capsys.readouterr().out == ""
+
+
+# --- TRDD-RAEGS1D5 card 5: the pane-sidecar handoff (dedicated hook owns it) and the
+# previous-transcript key match (a flag with no sidecar, e.g. reload-shrink) ------------------
+
+
+def test_a_pane_sidecar_suppresses_this_hooks_own_injection(
+    sd: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When THIS panes sidecar exists, `on-session-start-post-clear-compact.py` owns the
+    injection for this clear -- this hook must print nothing, even though the flag is armed
+    and a handoff is on disk."""
+    _arm(sd, handoff="# Handoff\n\nsomething to resume")
+    monkeypatch.setenv("TMUX_PANE", "%3")
+    pane_key = real_state.terminal_pane_key({"TMUX_PANE": "%3"})
+    assert pane_key
+    (sd / f"resume-after-clear.{pane_key}.transcript").write_text(
+        "/tmp/cleared.jsonl\n0\n", encoding="utf-8",
+    )
+    _load_hook()._inject_post_clear_handoff(real_state)
+    assert capsys.readouterr().out == ""
+
+
+def test_a_keyed_handoff_matching_the_previous_transcript_is_injected(
+    sd: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No sidecar, but the newest handoffs key matches THIS sessions own previous
+    transcript (`jcl.previous_transcript`) -- inject the full body, same as the legacy path."""
+    import handoff_files  # noqa: PLC0415
+    import jev_compaction_lane as jcl  # noqa: PLC0415
+
+    prev = Path("/tmp/prev-session-abcdef01.jsonl")
+    key = handoff_files.session_key(str(prev))
+    _arm_keyed(sd, key=key, handoff="# Handoff\n\nNEXT ACTION: resume the real work.")
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, session_id: prev)
+
+    _load_hook()._inject_post_clear_handoff(real_state, "new-session-id")
+    out = capsys.readouterr().out
+    assert "NEXT ACTION: resume the real work." in out
+
+
+def test_a_keyed_handoff_NOT_matching_the_previous_transcript_downgrades_to_a_pointer(
+    sd: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reload-shrink shape: the flag is armed but there is no sidecar, and the newest handoff
+    on disk belongs to a DIFFERENT transcript than this sessions own previous one -- inject a
+    POINTER, never the wrong body (TRDD-RAEGS1D5 card 5)."""
+    import handoff_files  # noqa: PLC0415
+    import jev_compaction_lane as jcl  # noqa: PLC0415
+
+    foreign_key = handoff_files.session_key("/tmp/some-other-session-11112222.jsonl")
+    _arm_keyed(sd, key=foreign_key, handoff="# Handoff\n\nUNRELATED work from another session.")
+    # This sessions own previous transcript resolves to something ELSE entirely.
+    monkeypatch.setattr(
+        jcl, "previous_transcript",
+        lambda root, session_id: Path("/tmp/this-sessions-own-99998888.jsonl"),
+    )
+
+    _load_hook()._inject_post_clear_handoff(real_state, "new-session-id")
+    out = capsys.readouterr().out
+    assert "UNRELATED work from another session." not in out, (
+        "the wrong sessions handoff BODY must never be injected"
+    )
+    assert "does not match this session" in out

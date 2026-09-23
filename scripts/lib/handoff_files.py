@@ -98,6 +98,15 @@ def session_key(target: str | Path | None) -> str:
     return key
 
 
+# First line of a handoff written when a `jev_compact.py compact` run FAILED -- the fact-only
+# `compose_template_handoff` fallback, not a real compaction. TRDD-RAEGS1D5 card 5:
+# `on-session-start-post-clear-compact.py` stamps this so `summarize_previous_session.py`s own
+# "already summarized" skip (keyed on `session_key`) does not treat a failed hook compose as
+# done -- a template-marked handoff is retried by the DETACHED summarizer, since the invariant
+# this card protects ("one REAL compose per transcript") never applied to a template.
+TEMPLATE_MARKER = "<!-- jev:template -->"
+
+
 def handoff_name(key: str, *, now: int | None = None, pid: int | None = None) -> str:
     when = datetime.fromtimestamp(now).astimezone() if now else datetime.now().astimezone()
     return f"agent-handoff-{key}-{when.strftime(_TS_FMT)}-{pid or os.getpid()}.md"
