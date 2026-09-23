@@ -280,7 +280,25 @@ LANE_MAX_ELIDED_POINTERS = 12
 # score-pointer-first / truncate-digest-last degrade order it applies once this is exceeded.
 # Well under `LANE_INJECTION_MAX_BYTES` so `external_clear.compose_handoff` (facts + this + the
 # recent-turns tail) still has room for the other two parts of its own single budget.
-LANE_COMPACTED_MAX_BYTES = 5000
+#
+# TRDD-RAEGS1D5 (retune, owner per-item token cap follow-up): raised from 5000 -- measured
+# directly (reports/compaction-replacement/): with an empty facts/cards section (the common
+# case), `external_clear.compose_handoff`'s OWN room for this summary (its `max_bytes`
+# LANE_INJECTION_MAX_BYTES=8192, minus the facts+recent-turns-tail it always reserves first)
+# came to ~5250-6442 bytes across the three real transcripts this project keeps for
+# acceptance testing (d30bf250 49MB, 4eb7bf5d 258MB, 06f2b2be 4.7MB) -- 5000 left real,
+# measured slack unused on all three, which is exactly why the injected copy kept only 2 of
+# the ~3+ non-owner items real data showed should fit. 6500 uses more of that slack (closer to
+# the middle of the measured range) while `compose_handoff`'s own downstream byte-slice
+# backstop (unconditional, in `external_clear.py`, outside this module) still guarantees the
+# TOTAL injected hook output never exceeds `LANE_INJECTION_MAX_BYTES` -- confirmed directly:
+# with an oversized dummy summary, `compose_handoff`'s own output measured 8149-8183 bytes on
+# these same three transcripts, ~1.8-1.9 KB under the ~10,000-byte real hook-stdout ceiling
+# (docs_dev/jev-card5-post-clear-injection-proposal.md) -- comfortably past the ~1.5 KB
+# headroom target regardless of this constant's own value. Raising this constant only changes
+# how much of that already-safe budget jev_compaction.py's OWN priority-aware backstop gets to
+# fill, rather than `compose_handoff`'s cruder byte slice.
+LANE_COMPACTED_MAX_BYTES = 6500
 
 
 def record_finding(*, sev: str, code: str, msg: str) -> None:

@@ -193,20 +193,17 @@ def test_oversized_pointer_includes_first_20_lines() -> None:
 
 
 def test_budget_eviction_protects_decision_passing_items_last() -> None:
-    # "dec" scores LOWER on max(relevance, decision) than "rel" does (0.9 vs 0.95), so the
-    # OLD ordering (lowest max_score dropped first) would have evicted "dec" first -- exactly
-    # the "budget undoes the decision question" bug the review flagged. "dec" is also now the
-    # NEWEST owner message (turn=1 vs "rel"'s turn=0) -- TRDD-RAEGS1D5's owner-share ceiling
-    # (see `test_owner_share_ceiling_...` below) guarantees the newest owner message a slot
-    # REGARDLESS of decision_passed, so a decision_passed item that is not also the newest can
-    # lose a slot to it under a tight-enough budget (see
-    # `test_decision_passed_owner_item_wins_second_slot_when_not_newest` for that case) -- this
-    # test keeps dec/newest aligned, the common real-world case (the user's latest message is
-    # usually where a decision/instruction was just stated), so it still proves the ordering
-    # is not a blind "lowest max_score first" sort.
+    # "dec" scores LOWER on max(relevance, decision) than "rel" does (0.9 vs 0.95), AND is the
+    # OLDER of the two (turn=0 vs "rel"'s turn=1) -- neither raw score nor recency favors it.
+    # It still survives: compose()'s guaranteed owner slot always picks the newest
+    # `decision_passed` item over every other owner item, REGARDLESS of recency (see the
+    # guaranteed-slot comment in compose()) -- a decision survives the budget on its own merit,
+    # not because it also happened to be the newest message (see
+    # `test_decision_passed_owner_item_wins_second_slot_when_not_newest` for the case where an
+    # older decision_passed item competes for the SECOND slot instead of the guaranteed one).
     items = [
-        _item("dec:0", "user", "policy: always use tabs", turn=1, tokens=100),
-        _item("rel:0", "user", "merely relevant background", turn=0, tokens=100),
+        _item("dec:0", "user", "policy: always use tabs", turn=0, tokens=100),
+        _item("rel:0", "user", "merely relevant background", turn=1, tokens=100),
     ]
     scores = {
         "dec:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
@@ -301,6 +298,93 @@ def test_guaranteed_owner_slot_prefers_newest_decision_passed_over_newest_plain(
     assert "-- user dec_older:0 --" in doc
     assert "-- user plain_newest:0 --" not in doc
     assert "id=plain_newest:0" in doc
+
+
+def test_owner_item_over_the_per_item_cap_renders_as_a_truncated_prefix_plus_pointer() -> None:
+    # TRDD-RAEGS1D5 (owner per-item token cap, requirement 1): the core new mechanic. An owner
+    # item beyond the guaranteed slot that is bigger than `_OWNER_ITEM_TOKEN_CAP` now renders as
+    # a VERBATIM prefix plus a pointer to the rest -- the same shape the byte-capped injected
+    # copy already uses (`max_item_bytes`) -- instead of the old all-or-nothing admit/evict
+    # decision on its full size. `newest:0` (tiny, no decision_passed anywhere) claims the
+    # guaranteed slot; `big:0` (huge, real text so its own `.tokens` is genuinely > the cap)
+    # competes in the capped tier and fits truncated.
+    big_text = "one two three four five six seven eight nine ten. " * 400  # ~5900 est. tokens
+    items = [
+        _item("big:0", "user", big_text, turn=0),
+        _item("newest:0", "user", "hi", turn=1),
+    ]
+    scores = {
+        "big:0": jc.Scores(relevance=0.6, decision=0.0, oversized=False, kept=True,
+                            decision_passed=False),
+        "newest:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                               decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=2000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- user newest:0 --" in doc
+    assert "-- user big:0 --" in doc  # admitted -- truncated, never evicted whole
+    assert "id=big:0" in doc  # ...and carries a pointer back to the rest
+    # The rendered excerpt is a real PREFIX of the original text, never the whole thing.
+    assert big_text[:50] in doc
+    assert big_text not in doc
+
+
+def test_per_item_cap_lets_an_older_large_decision_item_and_a_relevant_tool_item_both_fit() -> None:
+    # TRDD-RAEGS1D5 (owner per-item token cap, requirement 1): the named trade-off between an
+    # older decision-passing owner item and a relevant non-owner item under a tight budget --
+    # made genuinely DISCRIMINATING per the adversarial review's finding on the first version of
+    # this test (its numbers made older_decision too big to fit either WITH or WITHOUT the cap,
+    # so it passed identically under the pre-fix whole-item-cost code too, proving nothing about
+    # the cap specifically). `older_decision`'s real text is 781 est. tokens -- comfortably over
+    # `_OWNER_ITEM_TOKEN_CAP` (500), so its CAPPED admission cost (~536, cap + the pointer
+    # line's own cost) is set here to fit the budget that remains once the guaranteed slot and
+    # the tool item are placed, while its FULL 781-token cost would NOT have fit that same
+    # remainder -- i.e. under the OLD whole-item-cost admission this item would have been
+    # evicted outright; the cap is what lets it survive (truncated + pointer) instead.
+    older_decision_text = "policy: always use tabs, never spaces. " * 70  # 781 est. tokens
+    items = [
+        _item("older_decision:0", "user", older_decision_text, turn=0),
+        _item("tool_item:0", "tool", "highly relevant tool output", turn=1, tokens=30),
+        _item("newest_decision:0", "user", "also: never commit secrets", turn=3, tokens=20),
+    ]
+    scores = {
+        "older_decision:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                                       decision_passed=True),
+        "tool_item:0": jc.Scores(relevance=0.95, decision=0.0, oversized=False, kept=True,
+                                  decision_passed=False),
+        "newest_decision:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                                        decision_passed=True),
+    }
+    doc = jc.compose(items, scores, budget_tokens=700,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- user newest_decision:0 --" in doc  # the guaranteed slot
+    assert "-- tool tool_item:0 --" in doc  # relevant work still fits
+    assert "-- user older_decision:0 --" in doc  # the cap is what lets it fit too -- truncated
+    assert older_decision_text not in doc  # ...never in full
+    assert "id=older_decision:0" in doc  # ...alongside a pointer to the rest
+
+
+def test_non_owner_admission_skips_a_too_big_item_rather_than_stopping() -> None:
+    # TRDD-RAEGS1D5 (owner per-item token cap, requirement 2): pins the SKIP semantics
+    # (`continue`, never `break`) of the non-owner fill loop -- a higher-priority item that
+    # does not fit is passed OVER, not treated as "the budget is full, stop trying". A smaller,
+    # lower-priority item further down the (relevance-ordered) list can still be admitted. No
+    # owner items here, so the owner tier is a no-op and the whole budget is available to this
+    # loop.
+    items = [
+        _item("big:0", "tool", "a large highly relevant block", turn=0, tokens=90),
+        _item("small:0", "tool", "a small less relevant block", turn=1, tokens=20),
+    ]
+    scores = {
+        "big:0": jc.Scores(relevance=0.95, decision=0.0, oversized=False, kept=True,
+                            decision_passed=False),
+        "small:0": jc.Scores(relevance=0.6, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=50,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- tool small:0 --" in doc
+    assert "-- tool big:0 --" not in doc
 
 
 def test_pointer_format_has_no_path() -> None:

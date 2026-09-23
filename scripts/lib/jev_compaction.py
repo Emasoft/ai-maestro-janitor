@@ -944,6 +944,44 @@ NEWEST_OWNER_ITEM_BYTES = 1500
 # remainder to flow to the other tiers, not sit unused (see the selection code below).
 _OWNER_SHARE = 0.40
 
+# TRDD-RAEGS1D5 (owner per-item token cap, review of the admission-order fix): the token-level
+# counterpart of `DEFAULT_INJECT_ITEM_BYTES`/`NEWEST_OWNER_ITEM_BYTES`, closing a gap those two
+# never covered -- `--out` never sets `max_item_bytes`, so its render had NO per-item
+# truncation lever at all, and the `budget_tokens` admission below used to admit or evict a
+# whole owner item by its FULL token count. Measured on the 258 MB real transcript: owner items
+# in the full copy fell from 58 to 45 kept, with only 12 elided pointers surviving the cap --
+# a handful of huge owner messages alone consumed the ENTIRE `_OWNER_SHARE` of the budget
+# (whole-or-nothing), evicting every OTHER owner item outright -- including decision-passing
+# ones -- well before the share was actually spent item-by-item. Every owner item beyond the
+# guaranteed newest slot (which stays whole -- see that slot's own comment below) now competes
+# for the share as a verbatim-prefix-plus-pointer excerpt capped at this many tokens, the same
+# shape `render()` already uses for the byte-capped injected copy, so one big message can no
+# longer starve several smaller ones out entirely.
+_OWNER_ITEM_TOKEN_CAP = 500
+
+
+def _owner_item_admission_cost(it: Item) -> tuple[int, bool]:
+    """The effective TOKEN cost of admitting `it` beyond compose()'s guaranteed owner slot --
+    itself when it already fits `_OWNER_ITEM_TOKEN_CAP`, else the cap PLUS the pointer line's
+    own cost (it will render as a verbatim prefix + pointer instead of being admitted or
+    evicted whole -- see `_truncate_prefix_tokens` and `_OWNER_ITEM_TOKEN_CAP`'s own docstring
+    for why this replaced a plain admit-or-evict decision on the item's full token count).
+    Returns `(cost, truncated)`.
+
+    Adversarial review (TRDD-RAEGS1D5): the first version of this function returned exactly
+    `_OWNER_ITEM_TOKEN_CAP` for a truncated item, undercounting what `render()` actually prints
+    by one `_format_pointer` line -- the byte-tier's own `_item_cost` (used by the injected
+    copy's tier construction below) already folds that pointer cost into ITS truncated-item
+    cost, so this token-level twin must too, or `admitted_tokens`/`total_tokens` silently drift
+    away from what `budget_tokens` is supposed to bound (harmless for `--out` today, since it
+    never sets `max_bytes`, but a real inconsistency the "same shape" rationale claims not to
+    have).
+    """
+    if it.tokens <= _OWNER_ITEM_TOKEN_CAP:
+        return it.tokens, False
+    return _OWNER_ITEM_TOKEN_CAP + estimate_tokens(_format_pointer(it)), True
+
+
 # TRDD-RAEGS1D5: pointers are breadcrumbs (an id + an 80-char preview), not the content the
 # resumed session actually needs -- capping their share of the injected byte budget keeps them
 # from crowding out kept items the way the old whole-item eviction let them. 0.15, under the
@@ -976,6 +1014,32 @@ def _truncate_prefix_bytes(text: str, limit: int) -> str:
     if nl > 0:
         return cut[:nl].decode("utf-8")
     return cut.decode("utf-8", "ignore")
+
+
+def _truncate_prefix_tokens(text: str, max_tokens: int) -> str:
+    """A VERBATIM prefix of `text` estimated at <= `max_tokens` -- never paraphrased.
+
+    Token-level counterpart of `_truncate_prefix_bytes` (the owner per-item token cap's own
+    truncation lever -- see `_OWNER_ITEM_TOKEN_CAP`): `estimate_tokens` has no byte-oriented
+    shortcut the way UTF-8 truncation does (a CJK character costs a different token rate than
+    a latin one, `jevctx.tokens._estimate_str`), so this binary-searches the CHARACTER cut
+    point instead -- the same halving idea `build_digest`'s own single-oversized-part fallback
+    already uses, converging in O(log n) calls to `estimate_tokens`. Cuts back to the last
+    whole line within that point, same as the byte version, so a truncated item still reads as
+    complete lines.
+    """
+    if estimate_tokens(text) <= max_tokens:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if estimate_tokens(text[:mid]) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    prefix = text[:lo]
+    nl = prefix.rfind("\n")
+    return prefix[:nl] if nl > 0 else prefix
 
 
 def compose(
@@ -1024,6 +1088,17 @@ def compose(
     everything elided, and a blind `raw[:room]` slice downstream (`external_clear.compose_
     handoff`, before this fix) used to cut it off along with the newest kept items because both
     sit at the tail of the joined string.
+
+    Within the `budget_tokens` admission itself (TRDD-RAEGS1D5, owner per-item token cap): an
+    owner item beyond the one guaranteed slot is admitted at its capped cost
+    (`_OWNER_ITEM_TOKEN_CAP`, `_owner_item_admission_cost`), rendering as a verbatim prefix plus
+    a pointer when it is over that cap, rather than an all-or-nothing admit/evict decision on
+    its full size -- see that constant's own docstring for the real-transcript defect this
+    fixes. An owner item that still does not fit at all, even capped, becomes an ordinary
+    elided pointer, but `decision_passed` ones get first claim on the limited pointer slots
+    over any merely-relevant item (`_pointer_priority`, used everywhere this function ranks or
+    trims the elided-pointer list) -- a stated decision the user gave is never silently
+    unreachable just because the item that carried it did not fit inline.
 
     `max_item_bytes`, when given (TRDD-RAEGS1D5 injected-copy content fix -- see
     `DEFAULT_INJECT_ITEM_BYTES`): the render itself changes, not just the backstop. `--out`
@@ -1074,6 +1149,14 @@ def compose(
     # it) so `render`'s per-item cap check always has a name to look up, even on the throwaway
     # empty baseline render that runs before the owner tier is computed.
     newest_owner_id: str | None = None
+    # TRDD-RAEGS1D5 (owner per-item token cap): item id -> the `_OWNER_ITEM_TOKEN_CAP` it was
+    # truncated to during the `budget_tokens` admission below -- declared here for the same
+    # reason `newest_owner_id` is (`render` closes over it and needs a name regardless of
+    # whether that admission branch ever runs). Empty means every kept item renders in full;
+    # only `--out` (which never sets `max_item_bytes`) actually reaches this in `render` --
+    # the injected copy's own byte cap is always tighter and fires first, see `render`'s
+    # per-item cap check.
+    token_truncated: dict[str, int] = {}
 
     total_tokens = sum(it.tokens for it in kept_items)
     kept_ids = {it.id for it in kept_items}
@@ -1092,6 +1175,16 @@ def compose(
         # owner-share ceiling (`_OWNER_SHARE`) below at the TOKEN level, so the FULL
         # (`--out`) rendering -- which never sets `max_item_bytes` and so never reaches that
         # byte tier -- gets the same guarantee as the injected copy, not a narrower one.
+        #
+        # TRDD-RAEGS1D5 (owner per-item token cap, review of this admission order): beyond the
+        # guaranteed slot, each owner item competes for the SHARE at its capped cost
+        # (`_owner_item_admission_cost`), not its full size -- an admit-whole-or-evict-whole
+        # decision on the full token count let a HANDFUL of huge owner messages consume the
+        # entire share themselves (measured on the 258 MB transcript: 58 owner items kept fell
+        # to 45), evicting every other owner item outright, decision-passing ones included,
+        # long before the share was actually spent. A capped item still costs its slot in the
+        # share and renders as a verbatim prefix + pointer (`token_truncated` below) instead of
+        # disappearing whole.
         owner_kept = sorted(
             (it for it in kept_items if it.kind == "user"),
             key=lambda it: it.turn, reverse=True,
@@ -1124,11 +1217,14 @@ def compose(
             rest_of_owner_kept,
             key=lambda it: (scores[it.id].decision_passed, it.turn), reverse=True,
         ):
-            if admitted_tokens + it.tokens > owner_token_budget:
+            cost, truncated = _owner_item_admission_cost(it)
+            if admitted_tokens + cost > owner_token_budget:
                 token_owner_overflow.append(it)  # may still fit once non-owner items are placed
                 continue
             admitted.append(it)
-            admitted_tokens += it.tokens
+            admitted_tokens += cost
+            if truncated:
+                token_truncated[it.id] = _OWNER_ITEM_TOKEN_CAP
         for it in sorted(
             (it for it in kept_items if it.kind != "user"),
             key=lambda it: (scores[it.id].decision_passed, max_score(it), it.turn),
@@ -1139,10 +1235,16 @@ def compose(
             admitted.append(it)
             admitted_tokens += it.tokens
         for it in token_owner_overflow:
-            if admitted_tokens + it.tokens > budget_tokens:
+            # TRDD-RAEGS1D5: still capped, not restored to full size -- an item that did not
+            # fit the owner share even truncated gets the SAME capped shot at the leftover
+            # general budget, never a second chance to be admitted whole.
+            cost, truncated = _owner_item_admission_cost(it)
+            if admitted_tokens + cost > budget_tokens:
                 continue
             admitted.append(it)
-            admitted_tokens += it.tokens
+            admitted_tokens += cost
+            if truncated:
+                token_truncated[it.id] = _OWNER_ITEM_TOKEN_CAP
         kept_ids = {it.id for it in admitted}
         total_tokens = admitted_tokens
 
@@ -1151,12 +1253,23 @@ def compose(
     # WHICH ids survive, not reorder anything.
     elided_items = [it for it in items if it.id not in kept_ids]
     hidden_count = 0
+
+    def _pointer_priority(it: Item) -> tuple[bool, float]:
+        # TRDD-RAEGS1D5 (owner per-item token cap, requirement 1): "evicted decision-passing
+        # items get first claim on the pointer slots" -- an owner item the budget admission
+        # above could not fit even truncated (see `token_truncated`) still names a decision,
+        # constraint or correction the user gave; it must not lose its one remaining pointer
+        # slot to a merely-relevant item just because the latter scores marginally higher.
+        return (scores[it.id].decision_passed, max_score(it))
+
     if len(elided_items) > max_elided_pointers:
-        # Highest max(relevance, decision) first -- the items most worth a pointer are the
-        # ones the model was closest to keeping, not an arbitrary chronological head/tail.
+        # Highest priority first -- decision_passed items before any non-decision one,
+        # highest max(relevance, decision) as the tiebreak -- the items most worth a pointer
+        # are the ones the model was closest to keeping, not an arbitrary chronological
+        # head/tail.
         top_ids = {
             it.id
-            for it in sorted(elided_items, key=max_score, reverse=True)[:max_elided_pointers]
+            for it in sorted(elided_items, key=_pointer_priority, reverse=True)[:max_elided_pointers]
         }
         shown_elided = [it for it in elided_items if it.id in top_ids]
         hidden_count = len(elided_items) - len(shown_elided)
@@ -1190,12 +1303,23 @@ def compose(
                 else max_item_bytes
             )
             text_bytes = it.text.encode("utf-8")
+            token_cap = token_truncated.get(it.id)
             if cap is not None and len(text_bytes) > cap:
                 # TRDD-RAEGS1D5 requirement 2: a verbatim prefix, never a paraphrase, plus a
                 # pointer back to the rest -- see `_truncate_prefix_bytes`'s own docstring for
                 # why this is what stops one oversized-relative-to-budget item from being
                 # evicted whole the way the old byte backstop did.
                 lines.append(_truncate_prefix_bytes(it.text, cap))
+                lines.append(_format_pointer(it))
+            elif token_cap is not None:
+                # TRDD-RAEGS1D5 (owner per-item token cap): the `--out` rendering never sets
+                # `max_item_bytes`, so the branch above never fires for it -- this is its own
+                # verbatim-prefix-plus-pointer lever, populated only for an owner item the
+                # `budget_tokens` admission above capped rather than admitted whole (see
+                # `_OWNER_ITEM_TOKEN_CAP`). For the injected copy the byte cap is always
+                # tighter (700-1500 B, well under this cap's ~1750-char worth), so the branch
+                # above fires first there and this one is effectively `--out`-only.
+                lines.append(_truncate_prefix_tokens(it.text, token_cap))
                 lines.append(_format_pointer(it))
             else:
                 lines.append(it.text)
@@ -1271,7 +1395,10 @@ def compose(
         pointer_budget = int(available * _INJECT_POINTER_SHARE)
         used_pointer_bytes = 0
         if shown_elided:
-            ranked = sorted(shown_elided, key=max_score, reverse=True)
+            # Same "decision_passed gets first claim" priority as the top-level pointer-cap
+            # selection above -- this is the SECOND place pointer slots get rationed (by
+            # byte budget instead of count), so it must not undo that claim.
+            ranked = sorted(shown_elided, key=_pointer_priority, reverse=True)
             affordable: list[Item] = []
             for it in ranked:
                 cost = len(_format_pointer(it).encode("utf-8")) + 1
@@ -1386,7 +1513,10 @@ def compose(
         doc = render(kept_order_list, shown_elided, hidden_count, digest_text)
 
     if len(doc.encode("utf-8")) > max_bytes and shown_elided:
-        ranked = sorted(shown_elided, key=max_score)  # lowest score first == first to drop
+        # Ascending `_pointer_priority` -- ties broken by lowest score, but a decision_passed
+        # pointer is never dropped ahead of a non-decision one (same "first claim" rule as the
+        # two selections above; this is the THIRD and last place pointer slots get rationed).
+        ranked = sorted(shown_elided, key=_pointer_priority)
         while ranked and len(doc.encode("utf-8")) > max_bytes:
             dropped = ranked.pop(0)
             shown_elided = [it for it in shown_elided if it.id != dropped.id]
