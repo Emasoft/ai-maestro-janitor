@@ -266,12 +266,13 @@ def _main() -> int:
     # `compose_handoff` itself will use once a summary exists -- see that function's own
     # docstring for why a flat `LANE_COMPACTED_MAX_BYTES` guess is what this replaces.
     #
-    # `inject_inputs` (TRDD-RAEGS1D5 room-floor follow-up) may carry FEWER cards than `inputs` --
-    # `jcl.trim_cards_for_room` drops cards from the facts section when they would otherwise
-    # starve the summary's own room below the floor (see that function's own docstring for why
-    # this is the chosen fix). Only the SUCCESS path below (which actually injects a summary)
-    # uses `inject_inputs`; the failure/template branch keeps the original, untrimmed `inputs`
-    # -- trimming cards buys it nothing there, since no summary is being sized.
+    # `inject_inputs` (TRDD-RAEGS1D5 room-floor follow-up, round 2) may carry SHORTER card titles
+    # than `inputs` -- `jcl.trim_cards_for_room` shrinks titles toward "" (every id kept, never
+    # dropped) when they would otherwise starve the summary's own room (see that function's own
+    # docstring for why this, and never inflating the returned budget, is the chosen fix). Only
+    # the SUCCESS path below (which actually injects a summary) uses `inject_inputs`; the
+    # failure/template branch keeps the original, untouched `inputs` -- shortening titles buys it
+    # nothing there, since no summary is being sized.
     tail = ec.recent_messages(transcript_path)
     inject_inputs, inject_max_bytes = jcl.trim_cards_for_room(
         inputs, now_iso=now_iso, tail=tail, transcript_path=transcript_path,
@@ -334,8 +335,8 @@ def _main() -> int:
         # This hook only ever runs `jcl.run_compact` (a real Jev compose) -- no llm-ext fallback
         # path here (TRDD-RAEGS1D5, `compose_handoff`'s `source` is now required).
         # `inject_inputs` (room-floor follow-up), not `inputs` -- keeps this call's own room
-        # computation faithful to the (possibly card-trimmed) facts `inject_max_bytes` was sized
-        # against above.
+        # computation faithful to the (possibly title-shortened) facts `inject_max_bytes` was
+        # sized against above.
         text = ec.compose_handoff(
             inject_inputs, now_iso=now_iso, summary=inject_text, source=jcl.SOURCE_JEV, tail=tail,
             max_bytes=jcl.LANE_INJECTION_MAX_BYTES,

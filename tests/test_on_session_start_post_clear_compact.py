@@ -584,18 +584,15 @@ def test_computed_inject_max_bytes_matches_room_and_summary_is_not_sliced(tmp_pa
     assert "summary truncated" not in out
 
 
-def test_card_heavy_facts_section_still_injects_a_whole_unsliced_summary(tmp_path, monkeypatch):
-    """TRDD-RAEGS1D5 room-floor follow-up: `compose_handoff_room`'s prior test above (the one
-    directly above) only ever measured room against EMPTY findings/cards. With several in-flight
-    TRDD cards (long titles), the facts section alone can eat most of `LANE_INJECTION_MAX_BYTES`,
-    driving `room` to zero or negative -- before this fix, `inject_max_bytes_for`'s own
-    `max(0, ...)` would silently hand `jev_compact.py` `--inject-max-bytes 0`, spending a real API
-    call on a companion document `compose_handoff`'s own `room > 400` gate then discards whole,
-    silently (see `jcl.LANE_MIN_INJECT_BYTES`'s own comment in `jev_compaction_lane.py` for the
-    full trace through `jev_compaction.py::compose`'s `max_bytes=0` degrade). `jcl.
-    trim_cards_for_room` must instead trim cards from the facts section until real room exists, so
-    the summary below still comes out of `compose_handoff` WHOLE, `--inject-max-bytes` is never
-    0/negative, and the newest ("owner") item line in the stub summary survives verbatim."""
+def test_card_heavy_facts_section_keeps_every_id_and_shortens_titles_first(tmp_path, monkeypatch):
+    """TRDD-RAEGS1D5 room-floor follow-up, round 2 (coordinator review of commit 44fdec8c, gap 1):
+    round 1 dropped whole CARDS to reclaim room -- but the card list is how a resumed session
+    finds its in-flight TRDDs, and a card-heavy facts section is exactly the situation a BUSY
+    session is in. `jcl.trim_cards_for_room` must never drop a card's id; it shortens TITLES
+    (toward "") instead, so every id -- and the STATE block it points at -- survives no matter how
+    much trimming this fixture needs. 10 cards with long titles is enough for this fixture to
+    still get a summary out (titles shrink, not to empty -- see the companion fixture below for
+    the "even empty titles aren't enough" case)."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     plugin_root = tmp_path / "plugin"
@@ -608,9 +605,9 @@ def test_card_heavy_facts_section_still_injects_a_whole_unsliced_summary(tmp_pat
     _write_sidecar(sd, {"TMUX_PANE": "%20"}, transcript=str(transcript))
 
     # 10 in-flight cards, (id, column, title) -- `HandoffInputs.cards`'s own shape -- each title
-    # long enough (measured directly, not guessed: 750 chars x 10 cards) that the RAW,
-    # pre-trim room this fixture produces is proven negative/zero below, before asserting
-    # anything about the fix's own behaviour on it.
+    # long enough (measured directly, not guessed: 750 chars x 10 cards) that the RAW, pre-trim
+    # room this fixture produces is proven below the floor below, before asserting anything about
+    # the fix's own behaviour on it.
     long_title = ("a very long TRDD title describing exactly what this card is about " * 20)[:750]
     cards = [(f"CARD{i:04d}", "dev", long_title) for i in range(10)]
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, cards))
@@ -625,21 +622,35 @@ def test_card_heavy_facts_section_still_injects_a_whole_unsliced_summary(tmp_pat
     argv_log = tmp_path / "argv.txt"
     _stub_jev_compact(plugin_root, argv_log, exit_code=0, out_text=small_doc)
 
-    # Adversarial-review tightening (TRDD-RAEGS1D5 room-floor follow-up, self-review round 2):
-    # independently compute the EXACT (trimmed-inputs, inject_max_bytes) `jcl.trim_cards_for_room`
+    # Independently compute the EXACT (trimmed-inputs, inject_max_bytes) `jcl.trim_cards_for_room`
     # must produce for this fixture -- same rigor as `test_computed_inject_max_bytes_matches_
     # room_and_summary_is_not_sliced` above (exact equality against an independently-computed
-    # value, not just a bound). This doubles as the fixture-adversarial check: if trimming did not
-    # actually drop any cards below 10, this fixture proves nothing new.
+    # value, not just a bound). Doubles as the fixture-adversarial check: if the RAW, full-title
+    # room already met the target, this fixture would prove nothing new.
     now_iso_probe = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     tail_probe = ec.recent_messages(str(transcript))
+    raw_room = ec.compose_handoff_room(
+        ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards),
+        now_iso=now_iso_probe, tail=tail_probe,
+        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
+    )
+    assert jcl.inject_max_bytes_for(raw_room, str(transcript)) < jcl.LANE_MIN_INJECT_BYTES, (
+        "fixture must starve the RAW, full-title room below the target, or it proves nothing new"
+    )
     expected_inputs, expected_inject_max_bytes = jcl.trim_cards_for_room(
         ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards),
         now_iso=now_iso_probe, tail=tail_probe, transcript_path=str(transcript),
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
-    assert len(expected_inputs.cards) < 10, (
-        "fixture must actually get trimmed, or this test proves nothing new"
+    # Every id AND column present, unchanged, none dropped -- only titles may have shrunk
+    # (adversarial review, round 2 self-review: id-only checks would miss a mutation that
+    # corrupted `col` while leaving `cid` intact).
+    assert len(expected_inputs.cards) == 10
+    assert [(cid, col) for cid, col, _title in expected_inputs.cards] == [
+        (f"CARD{i:04d}", "dev") for i in range(10)
+    ]
+    assert any(len(title) < len(long_title) for _cid, _col, title in expected_inputs.cards), (
+        "fixture must actually shorten at least one title, or this test proves nothing new"
     )
 
     mod = _import()
@@ -657,37 +668,38 @@ def test_card_heavy_facts_section_still_injects_a_whole_unsliced_summary(tmp_pat
     argv_list = ast.literal_eval(argv_log.read_text(encoding="utf-8"))
     assert "--inject-max-bytes" in argv_list
     passed = int(argv_list[argv_list.index("--inject-max-bytes") + 1])
-    # Exact equality (never just "never 0/negative") -- the floor this fix exists to enforce,
-    # sized exactly as `jcl.trim_cards_for_room` computed above.
+    # Exact equality (never just "never 0/negative") -- sized exactly as `jcl.trim_cards_for_room`
+    # computed above, never inflated above it (round 2's own correction -- see its module comment).
     assert passed == expected_inject_max_bytes, (passed, expected_inject_max_bytes)
-    assert passed >= jcl.LANE_MIN_INJECT_BYTES, (passed, jcl.LANE_MIN_INJECT_BYTES)
+    assert passed > 0
 
     # Unsliced: the whole stub summary -- including its "newest owner" line -- survives verbatim.
     assert small_doc in out
     assert "THE NEWEST OWNER MESSAGE survives verbatim" in out
     assert "summary truncated" not in out
 
-    # The mechanism actually engaged, to the EXACT card count computed above -- not just "fewer
-    # than 10" -- proving room was reclaimed by exactly the trimming this fix's own logic
-    # predicts, not by coincidence or a different amount.
-    assert out.count("TRDD-CARD") == len(expected_inputs.cards), (
-        out.count("TRDD-CARD"), len(expected_inputs.cards),
-    )
+    # Every one of the 10 ids is still present in the printed facts section -- the round-2
+    # invariant this test exists to pin.
+    for i in range(10):
+        assert f"TRDD-CARD{i:04d}" in out, f"card {i} lost its id"
 
 
 def test_floor_backstop_holds_even_when_trimming_every_card_is_not_enough(monkeypatch):
     """Adversarial review finding (TRDD-RAEGS1D5 room-floor follow-up, self-review round 2):
-    `jcl.trim_cards_for_room`'s loop can only reclaim room by dropping CARDS -- once `inputs.
-    cards` is empty (or started empty) the loop body never runs again, so the function's own
-    `max(LANE_MIN_INJECT_BYTES, ...)` backstop is the ONLY thing left standing between a starved
-    room and a 0/negative `--inject-max-bytes`. `external_clear.compose_handoff_room` is
-    monkeypatched to always report a deeply negative room regardless of input -- this isolates the
-    BACKSTOP branch itself from whether today's real facts/tail formulas can actually drive room
-    that low with zero cards (structurally, mostly they cannot: `compose_template_handoff` can
-    always shrink findings/commits to zero, and the tail budget is capped at `max_bytes // 3` --
-    see `LANE_MIN_INJECT_BYTES`'s own comment in `jev_compaction_lane.py`), so this proves the
-    defensive code path is correct on its own terms rather than leaving it untested as
-    "unreachable in practice"."""
+    `jcl.trim_cards_for_room`'s title-shortening loop can only reclaim room by shrinking titles --
+    with zero cards to begin with there is nothing to shrink, so the function's `max(1, ...)`
+    correction is the ONLY thing left standing between a starved room and a 0/negative
+    `--inject-max-bytes`. `external_clear.compose_handoff_room` is monkeypatched to always report
+    a deeply negative room regardless of input -- this isolates that branch itself from whether
+    today's real facts/tail formulas can actually drive room that low with zero cards
+    (structurally, mostly they cannot -- see `LANE_MIN_INJECT_BYTES`'s own comment in
+    `jev_compaction_lane.py`), so this proves the defensive code path is correct on its own terms
+    rather than leaving it untested as "unreachable in practice". Round 2 lowered the bump from
+    round 1's flat `LANE_MIN_INJECT_BYTES` (800, provably unsafe -- see the companion fixture
+    below) to `1`: the smallest positive int, which changes nothing about what `jev_compact.py`
+    actually renders at that budget either way (both are below any real skeleton's own baseline),
+    so it satisfies "never 0/negative" without ever handing out a budget bigger than
+    `compose_handoff`'s real room can use."""
     monkeypatch.setattr(jcl.external_clear, "compose_handoff_room", lambda *a, **k: -99999)
     inputs = ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=[])
 
@@ -696,12 +708,89 @@ def test_floor_backstop_holds_even_when_trimming_every_card_is_not_enough(monkey
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
 
-    assert list(trimmed_inputs.cards) == [], "there was nothing to trim -- the loop never ran"
-    # The unconditional floor, not 0 and not the monkeypatched -99999 propagating through.
-    assert inject_max_bytes == jcl.LANE_MIN_INJECT_BYTES, (
-        inject_max_bytes, jcl.LANE_MIN_INJECT_BYTES,
+    assert list(trimmed_inputs.cards) == [], "there was nothing to shrink -- the loop never ran"
+    # `1`, not round 1's `LANE_MIN_INJECT_BYTES` (800) -- the never-inflating correction.
+    assert inject_max_bytes == 1, inject_max_bytes
+
+
+def test_natural_value_never_inflated_past_real_room_even_when_titles_are_fully_emptied(
+    monkeypatch,
+):
+    """Coordinator review of commit 44fdec8c, gap 2: round 1's `max(LANE_MIN_INJECT_BYTES,
+    inject_max_bytes)` could hand `jev_compact.py` a bigger budget than `compose_handoff`'s own
+    room actually has -- if a well-behaved Jev render fills close to that budget,
+    `compose_handoff`'s own `room > 400` slice (external_clear.py:941-944) cuts it, the exact
+    defect this whole TRDD chain exists to remove, one level down. This fixture (231 in-flight
+    cards, long titles) lands the NATURAL, fully-title-emptied room at 656 bytes -- above
+    `compose_handoff`'s no-slice threshold (400) but below round 1's flat 800-byte floor -- so it
+    reproduces the danger precisely: a companion sized to round 1's flat floor DOES get sliced
+    against this room; one sized to what this fix actually returns does not. No hook/subprocess
+    plumbing needed -- this exercises `jcl.trim_cards_for_room` and `ec.compose_handoff` directly,
+    the same real functions the hook and the detached lane both call."""
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    transcript_path = "/private/tmp/some/fairly/typical/test/path/cleared.jsonl"
+    long_title = ("a very long TRDD title describing exactly what this card is about " * 20)[:750]
+    cards = [(f"CARD{i:04d}", "dev", long_title) for i in range(231)]
+    inputs = ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards)
+
+    trimmed_inputs, inject_max_bytes = jcl.trim_cards_for_room(
+        inputs, now_iso=now_iso, tail=[], transcript_path=transcript_path,
+        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
-    assert inject_max_bytes > 0
+
+    # Every id AND column survived unchanged (round-2 invariant); titles were emptied because
+    # even that wasn't enough to reach the `LANE_MIN_INJECT_BYTES` target.
+    assert len(trimmed_inputs.cards) == 231
+    assert all(title == "" for _cid, _col, title in trimmed_inputs.cards)
+    assert [(cid, col) for cid, col, _title in trimmed_inputs.cards] == [
+        (f"CARD{i:04d}", "dev") for i in range(231)
+    ]
+
+    # The natural value is positive but below round 1's flat floor -- proves title-shortening
+    # alone wasn't enough AND that the returned value was NOT bumped up to 800 anyway.
+    assert 0 < inject_max_bytes < jcl.LANE_MIN_INJECT_BYTES, inject_max_bytes
+
+    # The REAL room `compose_handoff` will compute for this exact (trimmed_inputs, tail, max_bytes)
+    # -- what a real summary must fit inside to avoid slicing.
+    real_room = ec.compose_handoff_room(
+        trimmed_inputs, now_iso=now_iso, tail=[], max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
+        source=jcl.SOURCE_JEV,
+    )
+    assert 400 < real_room < jcl.LANE_MIN_INJECT_BYTES, (
+        "fixture must land in the exact danger band -- above the no-slice threshold (400) but "
+        "below round 1's flat floor (800) -- or it does not reproduce what the coordinator flagged"
+    )
+
+    def _summary_of_size(n: int) -> str:
+        marker = "/tmp/x"
+        head = f"# Compacted context (Jev compaction)\ntranscript: {marker}\n\n## Kept items\n"
+        trailer = (
+            f'\n\npointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/'
+            f'jev_compact.py" expand --transcript {marker} <id>'
+        )
+        fixed = len(head.encode("utf-8")) + len(trailer.encode("utf-8"))
+        return head + ("x" * max(0, n - fixed)) + trailer
+
+    # (a) A companion sized to round 1's flat 800-byte floor -- proves the danger was real: this
+    # is EXACTLY what round 1's code would have requested from `jev_compact.py` for this fixture.
+    old_round1_summary = _summary_of_size(jcl.LANE_MIN_INJECT_BYTES)
+    old_text = ec.compose_handoff(
+        trimmed_inputs, now_iso=now_iso, summary=old_round1_summary, source=jcl.SOURCE_JEV,
+        tail=[], max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
+    )
+    assert "_(summary truncated to fit the handoff budget)_" in old_text, (
+        "a companion sized to round 1's flat floor must actually get sliced against this real "
+        "room, or this fixture does not reproduce the danger the coordinator flagged"
+    )
+
+    # (b) A companion sized to what THIS fix actually returns -- must NOT be sliced.
+    new_summary = _summary_of_size(inject_max_bytes)
+    new_text = ec.compose_handoff(
+        trimmed_inputs, now_iso=now_iso, summary=new_summary, source=jcl.SOURCE_JEV,
+        tail=[], max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
+    )
+    assert "_(summary truncated to fit the handoff budget)_" not in new_text
+    assert new_summary in new_text
 
 
 def test_two_panes_do_not_cross(tmp_path, monkeypatch):

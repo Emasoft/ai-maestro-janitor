@@ -368,42 +368,98 @@ def inject_max_bytes_for(room: int, transcript_path: str) -> int:
 # nothing left to evict (`kept_order_list`/`shown_elided` are already empty), so it exits
 # immediately -- `compose()` returns its bare fixed skeleton (header + "N more items" line +
 # trailer) UNBOUNDED by `max_bytes` (there is no assertion or further slice enforcing the 0-byte
-# request), typically a few hundred bytes. A tiny positive value (1-399) degrades the same way:
-# `available`/`kept_budget`/`pointer_budget` are still ~0 once the baseline skeleton is
-# subtracted, so the injected companion is still just that same skeleton -- a REAL Jev API call
-# was paid for a document containing no actual summary content. A negative value is never
-# possible from `inject_max_bytes_for` itself (its own `max(0, ...)` already floors it) -- there
-# is no separate handling for it in `jev_compaction.py::compose` either (`available = max(0,
-# max_bytes - baseline)` at line 1619 already floors ANY sub-baseline value, negative included, to
-# the same 0), so a negative would degrade identically to 0 -- this module never sends one either
-# way.
+# request). NOT a fixed "few hundred bytes" (round-1 wording, corrected here -- round-2 adversarial
+# review): the skeleton embeds `transcript_path` up to FOUR times (jev_compaction.py:1691, 1682/
+# 1791 via `expand_list_cmd`, 1805/1812, 1818 -- read directly, not assumed) plus `full_context_
+# path` (the `--out` file's own path) once more (jev_compaction.py:1793/1809) for an inject-mode
+# render, which always sets it -- so the skeleton SCALES with how long these paths are (measured
+# 1.3-1.6KB on this project's own ~148-char real paths; a deeply nested project dir or a synced/
+# mirrored home directory elsewhere could push it into multiple KB). A tiny positive value (1-399)
+# degrades the same way: `available`/`kept_budget`/`pointer_budget` are still ~0 once the baseline
+# skeleton is subtracted, so the injected companion is still just that same (path-scaled) skeleton
+# -- a REAL Jev API call was paid for a document containing no actual summary content. A negative
+# value is never possible from `inject_max_bytes_for` itself (its own `max(0, ...)` already floors
+# it) -- there is no separate handling for it in `jev_compaction.py::compose` either (`available =
+# max(0, max_bytes - baseline)` at line 1619 already floors ANY sub-baseline value, negative
+# included, to the same 0), so a negative would degrade identically to 0 -- this module never
+# sends one either way.
 #
 # Downstream, `external_clear.compose_handoff` (scripts/lib/external_clear.py:939-959) computes
 # ITS OWN room independently from the same facts+tail and, whenever that room is <=400, drops the
 # whole compacted-context section rather than slicing it (the `elif trailer:` branch, `external_
 # clear.py:946-959) -- so a 0-byte-skeleton companion never gets SLICED, it gets discarded
 # whole, silently: the reader sees no summary and no notice that one was ever computed, and the
-# API spend that produced it was wasted.
+# API spend that produced it was wasted. RESIDUAL, DISCLOSED, NOT FIXED HERE (round-2 adversarial
+# review): the path-scaled skeleton above is `jev_compaction.py::compose`'s own behaviour, a file
+# out of this task's scope -- on an unusually long transcript/out-file path, a skeleton bigger than
+# `compose_handoff`'s real room (rather than smaller than it) could in principle get SLICED instead
+# of discarded whole. This module's own margin (`LANE_ROOM_SAFETY_MARGIN_BYTES`, scaled 1x by
+# `transcript_path`'s length) cannot fix this: it bounds what THIS module REQUESTS, not what
+# `jev_compaction.py::compose` actually RENDERS when the request is too small to admit real
+# content. Flagged for whichever worker owns `jev_compaction.py` next; not reproduced in this
+# module's own tests, which use short, fixed-literal paths throughout.
 #
-# Chosen fix: (a) trim the FACTS section first, not (b) inject-at-a-bare-floor-and-cut-facts --
-# the summary is what a resuming session actually reads; the in-flight card LIST it would lose is
-# already fully recoverable from the board (`trddgrep next`) that the STATE block of the first
-# surviving card itself points at, so trimming it costs less than trimming the one thing the
-# reader cannot regenerate for free. Cards are dropped from the TAIL of the list one at a time --
-# the same direction `compose_template_handoff` already trims in, so this never fights that
-# function's own logic, only extends it past the one-card floor that function alone won't cross.
-# `LANE_MIN_INJECT_BYTES` is comfortably above `compose_handoff`'s own `room > 400` gate (with
-# slack for the real summary's own trailing pointer line, the same reason `inject_max_bytes_for`
-# above subtracts a margin) so a real body -- not just the bare trailer -- always has a chance to
-# survive once room exists at all.
+# ROUND 2 (coordinator review of commit 44fdec8c -- two corrections to round 1's design above):
 #
-# The floor below is still enforced UNCONDITIONALLY even after every card is gone (findings/tail
-# alone can starve room just as well) -- this is where (b) becomes the backstop (a) alone cannot
-# always satisfy: `--inject-max-bytes` is never allowed to go below this floor, full stop. A
-# companion rendered slightly larger than `compose_handoff`'s own actual room is not a problem --
-# `compose_handoff`'s `room > 400` gate (never touched by this fix) still decides, safely, what of
-# it (if anything) survives; only the never-0-or-negative contract belongs to this module.
+# (1) THE CARD LIST IS NEVER DROPPED, ONLY THE TITLES. Round 1 dropped whole cards
+# (`inputs.cards[:-1]`, one at a time) to reclaim room -- but the card LIST is how a resumed
+# session finds its in-flight TRDDs, and a card-heavy facts section is exactly the situation a
+# BUSY session is in: dropping ids to save space is throwing away the one thing a resuming session
+# cannot cheaply regenerate, to save a few dozen bytes a bare id line barely needs (`TRDD-
+# XXXXXXXX` is ~14 bytes on its own; the id+column together render in well under 40). `_cards_
+# with_title_cap` below truncates every card's TITLE (never its id or column) toward "" instead --
+# the least load-bearing part of the line -- so every id survives no matter how much trimming is
+# needed.
+#
+# (2) THE RETURNED VALUE IS NEVER FORCED ABOVE THE NATURALLY-COMPUTED ONE. Round 1's final
+# `return inputs, max(LANE_MIN_INJECT_BYTES, inject_max_bytes)` was itself unsafe: `inject_max_
+# bytes_for`'s own margin subtraction is what makes its return value provably <= `external_clear.
+# compose_handoff`'s REAL room for this exact `inputs`/`tail`/`max_bytes` (that margin is the
+# whole point of `LANE_ROOM_SAFETY_MARGIN_BYTES` -- see `inject_max_bytes_for`'s own docstring).
+# Forcing that value UP to a flat 800 whenever it fell short -- even when the natural value was
+# already a SAFE, smaller positive number -- handed `jev_compact.py` a budget bigger than
+# `compose_handoff` actually has room for. A well-behaved Jev render fills close to whatever
+# budget it is given; a companion sized toward 800 bytes arriving at a `compose_handoff` call
+# whose real room is smaller (say, 656) is EXACTLY what `compose_handoff`'s own `raw[:room]` slice
+# (external_clear.py:941-944, gated on `room > 400`) exists to cut -- the identical defect this
+# whole TRDD chain exists to eliminate, just moved one level down. There is no flat floor that is
+# always safe, because safety depends on how far below `LANE_MIN_INJECT_BYTES` the natural value
+# already is -- proven below by a fixture (225 cards, empty titles after trimming) whose natural
+# room lands at 656 bytes: a companion sized to round 1's flat 800 DOES get sliced against it; one
+# sized to the natural, unforced value does not.
+#
+# THE CORRECTED CONTRACT: `LANE_MIN_INJECT_BYTES` is a TARGET the title-shortening loop tries to
+# reach, never a value the return is forced UP to. The only value ever added on top of the
+# naturally-computed (and therefore margin-safe) `inject_max_bytes_for` result is `max(1, ...)` --
+# bumping an exact `0` up to `1` changes NOTHING about what `jev_compact.py` actually renders
+# (both are below any real transcript's own skeleton `baseline`, so `compose()` renders the
+# identical bare skeleton either way -- see the round-1 trace above), it only satisfies "never
+# pass 0 or negative" literally, without inflating the requested budget past what `compose_handoff`
+# can actually use. Whenever every title is already empty (every id kept) and the natural value is
+# STILL below `LANE_MIN_INJECT_BYTES`, that smaller value is returned AS-IS, not overridden -- the
+# residual "summary may come out short or empty" outcome from round 1's disclosed finding #1 still
+# applies in that case -- MORE OFTEN than round 1's own code would have hit it, in fact (round 1's
+# inflated-but-unsafe 800 sometimes accidentally produced a usable body where the true room was,
+# say, 750; round 2 requests the true, smaller room instead, which degrades to the empty skeleton
+# more readily -- adversarial review, round 2 self-review) -- but the summary is never sliced by
+# this module handing out a number bigger than `compose_handoff` can actually use, which is the
+# one guarantee this module owns.
 LANE_MIN_INJECT_BYTES = 800
+
+
+def _cards_with_title_cap(
+    cards: Sequence[tuple[str, str, str]], cap: int,
+) -> tuple[tuple[str, str, str], ...]:
+    """Every card's id/column kept verbatim; its title truncated to at most `cap` characters
+    (`cap=0` empties it, never removes the card). The title is decoration; the id (and the STATE
+    block it points at, via `trddgrep show <id>`) is the one thing a resuming session cannot
+    regenerate for free -- see the round-2 module comment above `LANE_MIN_INJECT_BYTES`.
+
+    A `cap=0` line renders (via `external_clear.compose_template_handoff`, untouched by this fix)
+    as `"- TRDD-<id> (`<col>`) -- "` -- a dangling em dash with nothing after it. Cosmetically odd
+    (adversarial review, round 2 self-review), but harmless: the id is fully intact and resolvable
+    (`trddgrep show <id>`), which is the only thing this function promises to preserve."""
+    return tuple((cid, col, title[:cap]) for cid, col, title in cards)
 
 
 def trim_cards_for_room(
@@ -415,29 +471,57 @@ def trim_cards_for_room(
     max_bytes: int = LANE_INJECTION_MAX_BYTES,
     source: str,
 ) -> tuple[external_clear.HandoffInputs, int]:
-    """(possibly card-trimmed `inputs`, the `--inject-max-bytes` to pass) for THIS call's own
+    """(possibly title-shortened `inputs`, the `--inject-max-bytes` to pass) for THIS call's own
     facts+tail -- the one place both lanes enforce the room floor, so neither hand-rolls its own
     (same reason `inject_max_bytes_for` above is shared). See `LANE_MIN_INJECT_BYTES`'s own
-    comment for why trimming cards, floored as a backstop, is the chosen fix.
+    (round 2) comment for why title-shortening -- never card-dropping -- and a never-inflating
+    return are the chosen fix.
+
+    Every card's id SURVIVES, always: only titles shrink, by halving a shared length cap (applied
+    to every card at once) until room reaches the `LANE_MIN_INJECT_BYTES` target or every title is
+    empty. The returned `inject_max_bytes` is never forced above the naturally-computed, margin-
+    safe value from `inject_max_bytes_for` -- only an exact `0` is bumped to `1` (see the module
+    comment above for why that specific, and only that, substitution cannot enlarge what
+    `jev_compact.py` actually renders).
 
     The caller composes its OWN final `HandoffInputs` (a different `trigger` per branch) for the
     template/failure path -- pass this call's returned `inputs` (not the original) to whatever
     `compose_handoff` call actually injects the summary, so the room this function measured stays
     the room `compose_handoff` itself later computes; a template-only failure path that never
-    calls `compose_handoff` should keep using the ORIGINAL, untrimmed inputs instead -- trimming
-    cards buys it nothing (no summary is being sized) and would only hide cards for no reason.
+    calls `compose_handoff` should keep using the ORIGINAL, untouched inputs instead -- shortening
+    titles buys it nothing there (no summary is being sized) and would only degrade the template's
+    own card list for no reason.
     """
-    room = external_clear.compose_handoff_room(
-        inputs, now_iso=now_iso, tail=tail, max_bytes=max_bytes, source=source,
-    )
-    inject_max_bytes = inject_max_bytes_for(room, transcript_path)
-    while inject_max_bytes < LANE_MIN_INJECT_BYTES and inputs.cards:
-        inputs = dataclasses.replace(inputs, cards=list(inputs.cards[:-1]))
+    def _room_and_inject(candidate: external_clear.HandoffInputs) -> int:
         room = external_clear.compose_handoff_room(
-            inputs, now_iso=now_iso, tail=tail, max_bytes=max_bytes, source=source,
+            candidate, now_iso=now_iso, tail=tail, max_bytes=max_bytes, source=source,
         )
-        inject_max_bytes = inject_max_bytes_for(room, transcript_path)
-    return inputs, max(LANE_MIN_INJECT_BYTES, inject_max_bytes)
+        return inject_max_bytes_for(room, transcript_path)
+
+    inject_max_bytes = _room_and_inject(inputs)
+    if inject_max_bytes < LANE_MIN_INJECT_BYTES and inputs.cards:
+        # `original_cards` -- NEVER `inputs.cards` once the loop has run once -- is what every
+        # iteration re-caps. `cap` only ever decreases (`cap //= 2`), so re-slicing the ORIGINAL
+        # titles each time is not merely equivalent to re-slicing the PREVIOUS iteration's
+        # already-capped titles (`s[:a][:b] == s[:b]` whenever `b <= a`, which a monotonically
+        # shrinking `cap` guarantees) -- it makes that guarantee true BY CONSTRUCTION rather than
+        # by an invariant a future edit could break without this function visibly changing shape
+        # (adversarial review finding, round 2 self-review).
+        original_cards = inputs.cards
+        cap = max((len(title) for _cid, _col, title in original_cards), default=0)
+        while inject_max_bytes < LANE_MIN_INJECT_BYTES and cap > 0:
+            cap //= 2
+            candidate = dataclasses.replace(
+                inputs, cards=_cards_with_title_cap(original_cards, cap),
+            )
+            candidate_inject = _room_and_inject(candidate)
+            inputs, inject_max_bytes = candidate, candidate_inject
+
+    # Never inflated above the naturally-computed value -- see the round-2 module comment above
+    # for why doing so would hand `jev_compact.py` a budget `compose_handoff`'s own room cannot
+    # actually fit, re-enabling the exact slicing this fix exists to prevent. `0` alone is bumped
+    # to `1`, which changes nothing about what `jev_compact.py` renders either way.
+    return inputs, max(1, inject_max_bytes)
 
 
 def record_finding(*, sev: str, code: str, msg: str) -> None:
