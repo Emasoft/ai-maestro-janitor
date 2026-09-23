@@ -1,9 +1,9 @@
 ---
 trdd-id: 6V7ZCKXF
 title: memgrep lint flags a child page that copies its parent description
-column: todo
+column: backburner
 created: 2026-09-23T23:05:46+0200
-updated: 2026-09-23T23:05:46+0200
+updated: 2026-09-23T23:09:44+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature

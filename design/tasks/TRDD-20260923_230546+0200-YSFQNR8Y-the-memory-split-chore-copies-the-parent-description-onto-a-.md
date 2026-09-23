@@ -1,9 +1,9 @@
 ---
 trdd-id: YSFQNR8Y
 title: the memory split chore copies the parent description onto a child page
-column: todo
+column: blocked
 created: 2026-09-23T23:05:46+0200
-updated: 2026-09-23T23:05:46+0200
+updated: 2026-09-23T23:09:44+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -14,6 +14,8 @@ mandated-by: none
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-23T23:05:46+0200
+blocked-by: [XI10BA5D]
+pre-block-column: todo
 ---
 
 # the memory split chore copies the parent description onto a child page
