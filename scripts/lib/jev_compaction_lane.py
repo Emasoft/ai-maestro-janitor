@@ -16,6 +16,7 @@ into the same forbidden-import list as `scripts/lib/external_clear.py` and
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Callable
 
@@ -32,7 +34,13 @@ _SCRIPTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
+# `external_clear` (TRDD-RAEGS1D5 room-floor follow-up): the floor helper below composes
+# `external_clear.HandoffInputs`/`compose_handoff_room` directly -- no cycle (external_clear never
+# imports this module, grep-verified), and `test_jev_boundary.py` only forbids
+# jevctx/httpx/jev_compaction/llm_ext_summary here, not `external_clear` (both are already treated
+# as peer "import-light" modules there).
 import dedupe  # noqa: E402
+import external_clear  # noqa: E402
 import findings_ledger  # noqa: E402
 import global_state  # noqa: E402
 import state  # noqa: E402
@@ -340,6 +348,96 @@ def inject_max_bytes_for(room: int, transcript_path: str) -> int:
     """
     margin = LANE_ROOM_SAFETY_MARGIN_BYTES + len(transcript_path.encode("utf-8"))
     return max(0, min(room - margin, LANE_COMPACTED_MAX_BYTES))
+
+
+# TRDD-RAEGS1D5 room-floor follow-up. `inject_max_bytes_for` above was measured against an
+# EMPTY facts section -- with in-flight TRDD cards (long titles), `external_clear.
+# compose_template_handoff` can spend nearly the whole `max_bytes` budget on the facts section
+# alone (it only ever stops trimming at ONE remaining card, never zero -- see its own docstring),
+# so `room` can reach zero or go negative and `inject_max_bytes_for`'s own `max(0, ...)` silently
+# hands `jev_compact.py` `--inject-max-bytes 0`.
+#
+# That is NOT harmless. Read `jev_compact.py::cmd_compact` (scripts/jev_compact.py:616-638) and
+# `jev_compaction.py::compose`'s `max_item_bytes`+`max_bytes` branch (scripts/lib/
+# jev_compaction.py:1610-1761): with `max_bytes=0`, `available = max(0, 0 - baseline)` is 0
+# (jev_compaction.py:1619), so `kept_budget`/`pointer_budget` are both 0 -- no kept items, no
+# pointers survive admission at all (jev_compaction.py:1643, 1620). The digest is already forced
+# to `""` for every `--inject-out` render regardless of `--inject-max-bytes` (jev_compact.py:626,
+# unconditional), so the digest-truncation backstop (jev_compaction.py:1753-1759) never has
+# material to trim either. The eviction loop that follows (jev_compaction.py:1737) then has
+# nothing left to evict (`kept_order_list`/`shown_elided` are already empty), so it exits
+# immediately -- `compose()` returns its bare fixed skeleton (header + "N more items" line +
+# trailer) UNBOUNDED by `max_bytes` (there is no assertion or further slice enforcing the 0-byte
+# request), typically a few hundred bytes. A tiny positive value (1-399) degrades the same way:
+# `available`/`kept_budget`/`pointer_budget` are still ~0 once the baseline skeleton is
+# subtracted, so the injected companion is still just that same skeleton -- a REAL Jev API call
+# was paid for a document containing no actual summary content. A negative value is never
+# possible from `inject_max_bytes_for` itself (its own `max(0, ...)` already floors it) -- there
+# is no separate handling for it in `jev_compaction.py::compose` either (`available = max(0,
+# max_bytes - baseline)` at line 1619 already floors ANY sub-baseline value, negative included, to
+# the same 0), so a negative would degrade identically to 0 -- this module never sends one either
+# way.
+#
+# Downstream, `external_clear.compose_handoff` (scripts/lib/external_clear.py:939-959) computes
+# ITS OWN room independently from the same facts+tail and, whenever that room is <=400, drops the
+# whole compacted-context section rather than slicing it (the `elif trailer:` branch, `external_
+# clear.py:946-959) -- so a 0-byte-skeleton companion never gets SLICED, it gets discarded
+# whole, silently: the reader sees no summary and no notice that one was ever computed, and the
+# API spend that produced it was wasted.
+#
+# Chosen fix: (a) trim the FACTS section first, not (b) inject-at-a-bare-floor-and-cut-facts --
+# the summary is what a resuming session actually reads; the in-flight card LIST it would lose is
+# already fully recoverable from the board (`trddgrep next`) that the STATE block of the first
+# surviving card itself points at, so trimming it costs less than trimming the one thing the
+# reader cannot regenerate for free. Cards are dropped from the TAIL of the list one at a time --
+# the same direction `compose_template_handoff` already trims in, so this never fights that
+# function's own logic, only extends it past the one-card floor that function alone won't cross.
+# `LANE_MIN_INJECT_BYTES` is comfortably above `compose_handoff`'s own `room > 400` gate (with
+# slack for the real summary's own trailing pointer line, the same reason `inject_max_bytes_for`
+# above subtracts a margin) so a real body -- not just the bare trailer -- always has a chance to
+# survive once room exists at all.
+#
+# The floor below is still enforced UNCONDITIONALLY even after every card is gone (findings/tail
+# alone can starve room just as well) -- this is where (b) becomes the backstop (a) alone cannot
+# always satisfy: `--inject-max-bytes` is never allowed to go below this floor, full stop. A
+# companion rendered slightly larger than `compose_handoff`'s own actual room is not a problem --
+# `compose_handoff`'s `room > 400` gate (never touched by this fix) still decides, safely, what of
+# it (if anything) survives; only the never-0-or-negative contract belongs to this module.
+LANE_MIN_INJECT_BYTES = 800
+
+
+def trim_cards_for_room(
+    inputs: external_clear.HandoffInputs,
+    *,
+    now_iso: str,
+    tail: Sequence[str],
+    transcript_path: str,
+    max_bytes: int = LANE_INJECTION_MAX_BYTES,
+    source: str,
+) -> tuple[external_clear.HandoffInputs, int]:
+    """(possibly card-trimmed `inputs`, the `--inject-max-bytes` to pass) for THIS call's own
+    facts+tail -- the one place both lanes enforce the room floor, so neither hand-rolls its own
+    (same reason `inject_max_bytes_for` above is shared). See `LANE_MIN_INJECT_BYTES`'s own
+    comment for why trimming cards, floored as a backstop, is the chosen fix.
+
+    The caller composes its OWN final `HandoffInputs` (a different `trigger` per branch) for the
+    template/failure path -- pass this call's returned `inputs` (not the original) to whatever
+    `compose_handoff` call actually injects the summary, so the room this function measured stays
+    the room `compose_handoff` itself later computes; a template-only failure path that never
+    calls `compose_handoff` should keep using the ORIGINAL, untrimmed inputs instead -- trimming
+    cards buys it nothing (no summary is being sized) and would only hide cards for no reason.
+    """
+    room = external_clear.compose_handoff_room(
+        inputs, now_iso=now_iso, tail=tail, max_bytes=max_bytes, source=source,
+    )
+    inject_max_bytes = inject_max_bytes_for(room, transcript_path)
+    while inject_max_bytes < LANE_MIN_INJECT_BYTES and inputs.cards:
+        inputs = dataclasses.replace(inputs, cards=list(inputs.cards[:-1]))
+        room = external_clear.compose_handoff_room(
+            inputs, now_iso=now_iso, tail=tail, max_bytes=max_bytes, source=source,
+        )
+        inject_max_bytes = inject_max_bytes_for(room, transcript_path)
+    return inputs, max(LANE_MIN_INJECT_BYTES, inject_max_bytes)
 
 
 def record_finding(*, sev: str, code: str, msg: str) -> None:

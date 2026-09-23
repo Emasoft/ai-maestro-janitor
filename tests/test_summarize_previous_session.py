@@ -26,6 +26,7 @@ _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_SCRIPTS / "lib"))
 
+import external_clear as ec  # noqa: E402
 import external_handoff_clear as ehc  # noqa: E402
 import findings_ledger  # noqa: E402
 import global_state  # noqa: E402
@@ -393,6 +394,119 @@ def test_exit_0_prefers_the_capped_inject_out_companion_over_the_full_document(
     text = group[0].read_text(encoding="utf-8")
     assert inject_only in text, "the CAPPED companion must be what lands in the handoff"
     assert full_only not in text, "the full document must NOT leak in when a companion exists"
+
+
+_STUB_JEV_COMPACT_CAPTURE_ARGV_TWO_DOCS = """#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+argv = sys.argv
+Path({argv_log!r}).write_text(json.dumps(argv), encoding="utf-8")
+out_text = {out_text!r}
+if out_text and "--out" in argv:
+    Path(argv[argv.index("--out") + 1]).write_text(out_text, encoding="utf-8")
+if out_text and "--inject-out" in argv:
+    Path(argv[argv.index("--inject-out") + 1]).write_text(out_text, encoding="utf-8")
+sys.exit(0)
+"""
+
+
+def _stub_jev_compact_capture_argv_and_inject_out(
+    plugin_root: Path, argv_log: Path, *, out_text: str,
+) -> None:
+    """Like `_stub_jev_compact` above (records its own argv) but ALSO writes `out_text` to
+    `--inject-out` when given -- needed to both assert on the EXACT `--inject-max-bytes` argv
+    (TRDD-RAEGS1D5 room-floor follow-up) and exercise `run_compact_with_fallback`'s "prefer the
+    capped companion" branch (`_stub_jev_compact` above never creates `--inject-out` at all)."""
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_CAPTURE_ARGV_TWO_DOCS.format(argv_log=str(argv_log), out_text=out_text),
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+
+def test_card_heavy_facts_section_still_injects_a_whole_unsliced_summary(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """TRDD-RAEGS1D5 room-floor follow-up (detached lane). Same defect and fix as the
+    SessionStart hook's own test of the same name in
+    tests/test_on_session_start_post_clear_compact.py: `compose_handoff_room` was measured
+    against EMPTY findings/cards elsewhere in this file (`state_head_paths` stubbed to
+    `([], False, [])` throughout) -- with several in-flight TRDD cards (long titles), the facts
+    section alone can eat most of `LANE_INJECTION_MAX_BYTES`, driving room to zero or negative and
+    (before this fix) handing `jev_compact.py` `--inject-max-bytes 0` -- a real API call spent on
+    a companion document `compose_handoff`'s own `room > 400` gate then discards whole, silently
+    (see `jcl.LANE_MIN_INJECT_BYTES`'s own comment in `jev_compaction_lane.py`). `jcl.
+    trim_cards_for_room` must instead trim cards from the facts section until real room exists, so
+    the summary below still lands in the WRITTEN HANDOFF whole, `--inject-max-bytes` is never
+    0/negative, and the "newest owner" line in the stub summary survives verbatim."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+
+    # 10 in-flight cards, (id, column, title) -- same fixture shape and title length as the
+    # hook's own test of this name, measured directly (not guessed) to starve room below the
+    # floor -- see the assertion right below that proves it for THIS file's own inputs (a
+    # different `prev` transcript/tail than the hook's fixture uses).
+    long_title = ("a very long TRDD title describing exactly what this card is about " * 20)[:750]
+    cards = [(f"CARD{i:04d}", "dev", long_title) for i in range(10)]
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, cards))
+
+    small_doc = (
+        "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Kept items\n"
+        "-- user newest-owner-item --\nTHE NEWEST OWNER MESSAGE survives verbatim\n\n"
+        "another modest kept item\n\n"
+        'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py"'
+        " expand --transcript /tmp/x <id>"
+    )
+    argv_log = tmp_path / "argv.json"
+    _stub_jev_compact_capture_argv_and_inject_out(plugin_root, argv_log, out_text=small_doc)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+
+    # Adversarial-review tightening (TRDD-RAEGS1D5 room-floor follow-up, self-review round 2):
+    # independently compute the EXACT (trimmed-inputs, inject_max_bytes) `jcl.trim_cards_for_room`
+    # must produce for this fixture -- exact equality against an independently-computed value, not
+    # just a bound. Doubles as the fixture-adversarial check: if trimming did not actually drop
+    # any cards below 10, this fixture proves nothing new.
+    now_iso_probe = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    tail_probe = ec.recent_messages(str(prev))
+    expected_inputs, expected_inject_max_bytes = jcl.trim_cards_for_room(
+        ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards),
+        now_iso=now_iso_probe, tail=tail_probe, transcript_path=str(prev),
+        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
+    )
+    assert len(expected_inputs.cards) < 10, (
+        "fixture must actually get trimmed, or this test proves nothing new"
+    )
+
+    rc = sps.main()
+    assert rc == 0
+
+    argv = json.loads(argv_log.read_text(encoding="utf-8"))
+    assert "--inject-max-bytes" in argv
+    passed = int(argv[argv.index("--inject-max-bytes") + 1])
+    # Exact equality (never just "never 0/negative") -- the floor this fix exists to enforce,
+    # sized exactly as `jcl.trim_cards_for_room` computed above.
+    assert passed == expected_inject_max_bytes, (passed, expected_inject_max_bytes)
+    assert passed >= jcl.LANE_MIN_INJECT_BYTES, (passed, jcl.LANE_MIN_INJECT_BYTES)
+
+    sd = state.state_dir()
+    group = handoff_files.newest_group(sd)
+    assert group, "a handoff must have been written"
+    text = group[0].read_text(encoding="utf-8")
+    # Unsliced: the whole stub summary -- including its "newest owner" line -- survives verbatim.
+    assert small_doc in text
+    assert "THE NEWEST OWNER MESSAGE survives verbatim" in text
+    assert "summary truncated" not in text
+    # The mechanism actually engaged, to the EXACT card count computed above -- not just "fewer
+    # than 10" -- proving room was reclaimed by exactly the trimming this fix's own logic
+    # predicts, not by coincidence or a different amount.
+    assert text.count("TRDD-CARD") == len(expected_inputs.cards), (
+        text.count("TRDD-CARD"), len(expected_inputs.cards),
+    )
 
 
 # --- exit 5/6/7 -> the findings ledger, then (TRDD-RAEGS1D5) Jev exhausts and the llm-ext

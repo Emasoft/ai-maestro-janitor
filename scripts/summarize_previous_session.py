@@ -244,11 +244,16 @@ def _main(
     inject_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.inject.md"
     tail = ec.recent_messages(str(prev))
     room_inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
-    room = ec.compose_handoff_room(
+    # `room_inputs` may come back with FEWER cards than `in_flight_cards` (TRDD-RAEGS1D5
+    # room-floor follow-up): `jcl.trim_cards_for_room` drops cards from the facts section when
+    # they would otherwise starve the summary's own room below the floor -- see that function's
+    # own docstring. Only the SUCCESS path below (which actually injects a summary) reuses
+    # `room_inputs.cards`; the `jev-compaction-failed` branch keeps the original, untrimmed
+    # `in_flight_cards` -- trimming buys it nothing there, since no summary is being sized.
+    room_inputs, inject_max_bytes = jcl.trim_cards_for_room(
         room_inputs, now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"), tail=tail,
-        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
+        transcript_path=str(prev), max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
-    inject_max_bytes = jcl.inject_max_bytes_for(room, str(prev))
 
     # Owner decision 2026-09-23 (TRDD-RAEGS1D5): retry Jev for up to `_JEV_RETRY_BUDGET_S`
     # (5min), THEN fall back to llm-ext -- both bounded within this run's own 15-minute hold.
@@ -304,7 +309,10 @@ def _main(
     # `trigger` names WHICH source produced this text (cheap diagnostic, advisor §5): a reader
     # of the handoff can tell a Jev compose from an llm-ext fallback summary at a glance.
     trigger = "jev-compaction" if source == jcl.SOURCE_JEV else "jev-compaction-llm-ext-fallback"
-    inputs = ec.HandoffInputs(trigger=trigger, findings=findings, cards=in_flight_cards)
+    # `cards=room_inputs.cards` (room-floor follow-up), not `in_flight_cards` -- keeps this call's
+    # own room faithful to the (possibly card-trimmed) facts `inject_max_bytes` was sized against
+    # above; see `jcl.trim_cards_for_room`'s own docstring.
+    inputs = ec.HandoffInputs(trigger=trigger, findings=findings, cards=room_inputs.cards)
     # `tail` was already computed above, before `run_compact_with_fallback`, to size
     # `inject_max_bytes` -- same transcript (`prev` never changes mid-call), reused rather than
     # re-read.

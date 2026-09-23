@@ -265,12 +265,18 @@ def _main() -> int:
     # `transcript_path`, already known, and `compose_handoff_room` needs the SAME facts+tail
     # `compose_handoff` itself will use once a summary exists -- see that function's own
     # docstring for why a flat `LANE_COMPACTED_MAX_BYTES` guess is what this replaces.
+    #
+    # `inject_inputs` (TRDD-RAEGS1D5 room-floor follow-up) may carry FEWER cards than `inputs` --
+    # `jcl.trim_cards_for_room` drops cards from the facts section when they would otherwise
+    # starve the summary's own room below the floor (see that function's own docstring for why
+    # this is the chosen fix). Only the SUCCESS path below (which actually injects a summary)
+    # uses `inject_inputs`; the failure/template branch keeps the original, untrimmed `inputs`
+    # -- trimming cards buys it nothing there, since no summary is being sized.
     tail = ec.recent_messages(transcript_path)
-    room = ec.compose_handoff_room(
-        inputs, now_iso=now_iso, tail=tail, max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
-        source=jcl.SOURCE_JEV,
+    inject_inputs, inject_max_bytes = jcl.trim_cards_for_room(
+        inputs, now_iso=now_iso, tail=tail, transcript_path=transcript_path,
+        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
-    inject_max_bytes = jcl.inject_max_bytes_for(room, transcript_path)
 
     # `run_compact` execs `jev_compact.py compact` BY PATH -- it owns the jev-probe stamp
     # fast-decline (exit 5, EXIT_DECLINED_UNAVAILABLE, gated on `kind in {"unavailable",
@@ -327,8 +333,11 @@ def _main() -> int:
         # transcript, reused rather than re-read.
         # This hook only ever runs `jcl.run_compact` (a real Jev compose) -- no llm-ext fallback
         # path here (TRDD-RAEGS1D5, `compose_handoff`'s `source` is now required).
+        # `inject_inputs` (room-floor follow-up), not `inputs` -- keeps this call's own room
+        # computation faithful to the (possibly card-trimmed) facts `inject_max_bytes` was sized
+        # against above.
         text = ec.compose_handoff(
-            inputs, now_iso=now_iso, summary=inject_text, source=jcl.SOURCE_JEV, tail=tail,
+            inject_inputs, now_iso=now_iso, summary=inject_text, source=jcl.SOURCE_JEV, tail=tail,
             max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
         )
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, full_text, now=now)
