@@ -3,7 +3,7 @@ trdd-id: YONEH3XC
 title: TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
 column: testing
 created: 2026-09-17T20:12:13+0200
-updated: 2026-09-23T23:23:40+0200
+updated: 2026-09-23T23:31:56+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: docs
@@ -45,3 +45,4 @@ retro-fitted from commit subjects; original criteria unreadable (no STATE block)
 - Owner directive 2026-09-23 (verbatim): "can you stop using my name in the TRDDs? USE \"user\" or \"Emasoft\"."
 - This supersedes the Description's "Do NOT touch created-by or approval-judge" and "Do NOT touch the prose Approval log lines": the name is relabelled to Emasoft (same person, public identity), so no provenance is falsified. Root cause is in ai-maestro scripts/trddgrep.mjs:1096 and :1278 (author/approver default to process.env.USER); until fixed there, every trddgrep new passes --author Emasoft and every move passes --approver Emasoft.
 - Historical "by Emasoft" approval-log lines include moves made by Claude sessions under the old $USER default; they are not individually attributable.
+- The relabel bumped updated: on cards whose Approval-log lines were edited (trddgrep edit has no --no-bump); those bumps carry no change of fact. The blocker-probe "never run through a shell" claim was checked against trddgrep's source only, not the janitor detectors.

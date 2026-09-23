@@ -3,7 +3,7 @@ trdd-id: FVYV6RSG
 title: memgrep lint tickets reach the janitor queue without flooding it
 column: todo
 created: 2026-09-23T23:05:42+0200
-updated: 2026-09-23T23:23:39+0200
+updated: 2026-09-23T23:32:11+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -23,3 +23,7 @@ the owner removed the per-call cap on OPENING tickets (TRDD-XI10BA5D), so dispat
 ## Approval log
 
 - 2026-09-23T23:05:42+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Re-scope 2026-09-23
+
+- Measured: tickets.py already bounds dispatch by min(per_fire, budget, inflight). This card narrows to: confirm that bound holds for memory-corpus tickets, route wikimem lint tickets to the memory curator naming the needed verb, ticket bodies carry page id, rule code and anchor only, and exclude the held AgentlensPro/ghbook pages.
