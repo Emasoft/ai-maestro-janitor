@@ -999,6 +999,80 @@ def test_recent_messages_a_mid_turn_human_attachment_appears(tmp_path):
     assert got == ["USER: you are slow, hurry up"]
 
 
+# TRDD-0UQSAFCW follow-up (review finding): after a long unattended stretch the owner's last
+# message can sit further back than the 512 KiB primary window, so the tail silently contained
+# NO human line at all even though one existed a bit further back. These two tests are the
+# follow-up's own acceptance list.
+
+
+def test_recent_messages_human_message_past_the_primary_window_still_appears(tmp_path):
+    """The owner's last message can sit further back than the primary 512 KiB tail window
+    after a long stretch of heartbeat-only turns -- the extended human-only search must still
+    surface it, LEADING the returned lines."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {
+            "type": "user", "uuid": "human-1",
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "deploy the release once CI is green"},
+            ]},
+        },
+        {
+            "type": "assistant", "uuid": "human-1-reply",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "Will do -- watching CI now."}]},
+        },
+    ]
+    # Pad with heartbeat pairs until the file's last 512 KiB (the primary window) is entirely
+    # PAST the human exchange above -- each pair carries a filler string so a moderate pair
+    # count clears the window comfortably without an oversized fixture.
+    filler = "x" * 2000
+    for i in range(400):
+        records.append({
+            "type": "user", "uuid": f"hb-{i}",
+            "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\n{filler}"},
+        })
+        records.append({
+            "type": "assistant", "uuid": f"hb-reply-{i}",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "janitor heartbeat"}]},
+        })
+    text = "\n".join(json.dumps(r) for r in records) + "\n"
+    t.write_text(text, encoding="utf-8")
+    assert len(text.encode("utf-8")) > ec._RECENT_MESSAGES_TAIL_BYTES + 200_000, (
+        "fixture must clear the primary window by a real margin, or this test proves nothing"
+    )
+
+    got = ec.recent_messages(str(t))
+    assert got[0] == "USER: deploy the release once CI is green", (
+        f"the guaranteed human line must lead the output: {got[:3]}"
+    )
+
+
+def test_recent_messages_no_human_record_anywhere_yields_the_explicit_line(tmp_path):
+    """A transcript with no human record within the search cap must emit an explicit
+    placeholder line, never a silent gap -- never a `USER:` line either."""
+    t = tmp_path / "s.jsonl"
+    filler = "x" * 2000
+    records = []
+    for i in range(1400):  # ~3 MB of heartbeat-only noise -- forces several doubling retries
+        records.append({
+            "type": "user", "uuid": f"hb-{i}",
+            "message": {"role": "user", "content": f"{ec.transcript_roles.HEARTBEAT_PREFIX}\n{filler}"},
+        })
+        records.append({
+            "type": "assistant", "uuid": f"hb-reply-{i}",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "janitor heartbeat"}]},
+        })
+    text = "\n".join(json.dumps(r) for r in records) + "\n"
+    t.write_text(text, encoding="utf-8")
+    assert len(text.encode("utf-8")) > 2 * ec._HUMAN_SEARCH_START_BYTES, (
+        "fixture must force at least one doubling retry, or this test proves nothing"
+    )
+
+    got = ec.recent_messages(str(t))
+    assert got[0] == ec._NO_HUMAN_IN_WINDOW
+    assert not any(ln.startswith("USER: ") for ln in got)
+
+
 # ---------- the fleet lane (moved from tests/test_external_clear_retry.py, ------------------
 # TRDD-RAEGS1D5 card 3 C2: `acquire_fleet_lease` & co. STAYED in external_clear.py — card 3 C3
 # renames them — while the retry-loop tests that also lived in that file moved to

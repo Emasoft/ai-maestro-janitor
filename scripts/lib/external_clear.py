@@ -569,31 +569,54 @@ def _record_text(content: Any, *, drop_heartbeat_reply: bool = False) -> str:
     return ""
 
 
-def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
-    """The last `limit` conversation turns as `ROLE: text` lines. ZERO model tokens.
+def _classify_line(rec: dict[str, Any]) -> tuple[str, str] | None:
+    """`(role_label, text)` for one already-parsed transcript record, or `None` to drop it.
 
-    Read straight off the JSONL TAIL, so this part of the payload costs nothing and cannot be
-    paraphrased — which matters because it is the part a resuming session checks its own
-    understanding against. Tool payloads and thinking blocks are skipped: they are the bulk of
-    a transcript and the least useful thing to restore into a context we are trying to empty.
-
-    TRDD-0UQSAFCW (card 2a, Jev reference gap analysis §2.1): this used to keep EVERY
-    `user`/`assistant` record verbatim and read the whole file. In a heartbeat-driven session
-    the tail was almost entirely `[janitor-heartbeat]` prompts, bare "janitor heartbeat"
-    replies and `<task-notification>` deliveries, crowding out the human's own words out of a
-    small `limit`. Fixed by sharing `transcript_roles.classify_record` (card 1, TRDD-RAEGS1D5)
-    with `jev_compaction.py` -- the SAME entry is never classified two different ways in two
-    different files: a `user` record is kept only when it classifies "human" (so sidechain,
-    compact-summary, meta, system, notification and peer records are all dropped); a mid-turn
-    queued attachment (`type: "attachment"`, `attachment.type == "queued_command"`) is kept
-    only when it is the owner's own words (`commandMode == "prompt"` AND
-    `origin.kind == "human"` -- a real transcript measured most `commandMode: "prompt"`
-    attachments as `origin.kind: "peer"`, a cross-session message, not the owner typing); and
-    an assistant text block is dropped only when it is nothing but the bare heartbeat-protocol
-    reply (`transcript_roles.is_heartbeat_reply`), never a whole assistant turn.
+    TRDD-0UQSAFCW follow-up: factored out of the original inline `recent_messages` body so
+    the primary-window scan and the extended human-only search (`_recent_human_lines` below)
+    can never disagree about what counts as a kept human/assistant line -- the SAME decision,
+    made in ONE place. Logic unchanged from the original fix: a `user` record is kept only
+    when `transcript_roles.classify_record` says "human"; a mid-turn queued attachment only
+    when it is the owner's own words (`commandMode == "prompt"` AND `origin.kind == "human"`);
+    an `assistant` record is dropped only for `isApiErrorMessage`, with a bare
+    heartbeat-protocol reply block dropped inside `_record_text`.
     """
+    if rec.get("isSidechain"):
+        return None  # a subagent's own turn, never the main conversation's tail
+
+    msg = rec.get("message") or {}
+    entry_type = rec.get("type") or msg.get("role") or ""
+    if entry_type == "user":
+        if transcript_roles.classify_record(rec) != "human":
+            return None
+        role_label, text = "USER", _record_text(msg.get("content"))
+    elif entry_type == "attachment":
+        attachment = rec.get("attachment")
+        if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+            return None
+        origin = attachment.get("origin")
+        origin_kind = origin.get("kind") if isinstance(origin, dict) else None
+        if attachment.get("commandMode") != "prompt" or origin_kind != "human":
+            return None  # queued task-notification, or a peer/cross-session attachment
+        role_label, text = "USER", str(attachment.get("prompt") or "")
+    elif entry_type == "assistant":
+        if rec.get("isApiErrorMessage"):
+            return None  # a transport-error placeholder, not real assistant output
+        role_label = "ASSISTANT"
+        text = _record_text(msg.get("content"), drop_heartbeat_reply=True)
+    else:
+        return None
+
+    text = " ".join(text.split())
+    return (role_label, text) if text else None
+
+
+def _classified_tail_lines(path: Path, max_bytes: int) -> list[str]:
+    """`f"{role}: {text}"` for every kept record in the last `max_bytes` of `path`, oldest to
+    newest. The one shared parse+classify loop both `recent_messages` and
+    `_recent_human_lines` build on."""
     out: list[str] = []
-    for raw in _tail_text_lines(Path(transcript), _RECENT_MESSAGES_TAIL_BYTES):
+    for raw in _tail_text_lines(path, max_bytes):
         line = raw.strip()
         if not line:
             continue
@@ -601,36 +624,122 @@ def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if rec.get("isSidechain"):
-            continue  # a subagent's own turn, never the main conversation's tail
+        classified = _classify_line(rec)
+        if classified is not None:
+            out.append(f"{classified[0]}: {classified[1]}")
+    return out
 
-        msg = rec.get("message") or {}
-        entry_type = rec.get("type") or msg.get("role") or ""
-        if entry_type == "user":
-            if transcript_roles.classify_record(rec) != "human":
-                continue
-            role_label, text = "USER", _record_text(msg.get("content"))
-        elif entry_type == "attachment":
-            attachment = rec.get("attachment")
-            if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
-                continue
-            origin = attachment.get("origin")
-            origin_kind = origin.get("kind") if isinstance(origin, dict) else None
-            if attachment.get("commandMode") != "prompt" or origin_kind != "human":
-                continue  # queued task-notification, or a peer/cross-session attachment
-            role_label, text = "USER", str(attachment.get("prompt") or "")
-        elif entry_type == "assistant":
-            if rec.get("isApiErrorMessage"):
-                continue  # a transport-error placeholder, not real assistant output
-            role_label = "ASSISTANT"
-            text = _record_text(msg.get("content"), drop_heartbeat_reply=True)
-        else:
-            continue
 
-        text = " ".join(text.split())
-        if text:
-            out.append(f"{role_label}: {text}")
-    return out[-limit:]
+# Follow-up review finding on TRDD-0UQSAFCW's original fix (card 2a): after a long unattended
+# stretch the owner's last message can sit further back than the 512 KiB primary window --
+# a busy heartbeat-driven session's own turns routinely exceed that on their own, leaving the
+# window with NO human line at all even though one exists a bit further back. These three
+# constants implement the reviewer's own numbers: widen the search in doubling steps starting
+# at 1 MiB, capped at 16 MiB (or the file start, whichever is smaller), aiming to surface the
+# last 2-3 owner messages (rounded up to 3 -- never wrong to keep one extra).
+_HUMAN_SEARCH_START_BYTES = 1_048_576
+_HUMAN_SEARCH_MAX_BYTES = 16 * 1024 * 1024
+_HUMAN_TARGET_COUNT = 3
+
+# Shown instead of a silent gap when NO human/owner record exists anywhere within
+# `_HUMAN_SEARCH_MAX_BYTES` (or the whole file) -- a resuming session must be able to tell
+# "no instruction found" apart from "the extraction silently missed it" (review finding).
+_NO_HUMAN_IN_WINDOW = "(last owner message is older than the recent window)"
+
+# Point 4 of the follow-up fix: a BYTE cap on `recent_messages`'s own total output, not just a
+# record-count cap. `limit` (record count) does not bound payload SIZE -- one long pasted
+# human message, now unconditionally included by the guarantee above, could otherwise make
+# this function's own return value unbounded regardless of `limit`. Deliberately looser than
+# `compose_handoff`'s own downstream tail budget (~1365 bytes for the shipped 4096-byte
+# `HANDOFF_MAX_BYTES`): that budget is per-handoff and already enforced where it matters: this
+# is `recent_messages`'s OWN contract, independent of any particular caller.
+_RECENT_MESSAGES_MAX_TOTAL_BYTES = 16_384
+
+
+def _recent_human_lines(path: Path, *, target: int) -> list[str]:
+    """The last `target` human/owner lines (oldest to newest), widening the search radius when
+    the primary recent window does not hold enough of them.
+
+    TRDD-0UQSAFCW follow-up. Doubles the radius (`_HUMAN_SEARCH_START_BYTES` up) to
+    `_HUMAN_SEARCH_MAX_BYTES` or the whole file, whichever is smaller; each retry re-reads
+    from EOF rather than threading a delta through, which re-scans the primary window every
+    time (ponytail: re-reading up to ~16 MiB once, only on the rare session where the owner
+    has been silent for hours, is cheaper than the code a delta-tracking version would need).
+    Only HUMAN lines are extracted on these retries -- assistant/system noise in the older
+    region is parsed and discarded, never returned (point 1 of the fix: assistant lines stay
+    confined to the primary recent window; only owner lines get the extended guarantee).
+    `[]` when no human line exists anywhere within the cap.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+
+    radius = _RECENT_MESSAGES_TAIL_BYTES
+    while True:
+        found = [ln for ln in _classified_tail_lines(path, radius) if ln.startswith("USER: ")]
+        if len(found) >= target or radius >= size or radius >= _HUMAN_SEARCH_MAX_BYTES:
+            return found[-target:]
+        radius = _HUMAN_SEARCH_START_BYTES if radius < _HUMAN_SEARCH_START_BYTES else radius * 2
+
+
+def _keep_newest_by_bytes(lines: list[str], max_bytes: int) -> list[str]:
+    """As many of the NEWEST `lines` as fit in `max_bytes` (drop the oldest first -- the same
+    direction `compose_handoff` trims its own tail in, TRDD-PXP08ZQC), but always at least one
+    line when `lines` is non-empty (a single oversized line must not vanish outright)."""
+    kept_rev: list[str] = []
+    spent = 0
+    for line in reversed(lines):
+        cost = len(line.encode("utf-8")) + 1
+        if spent + cost > max_bytes and kept_rev:
+            break
+        kept_rev.append(line)
+        spent += cost
+    kept_rev.reverse()
+    return kept_rev
+
+
+def recent_messages(transcript: str, *, limit: int = 12) -> list[str]:
+    """Up to `limit` recent conversation-turn `ROLE: text` lines, LED by the last
+    `_HUMAN_TARGET_COUNT` owner messages even when they fall outside that window. ZERO model
+    tokens.
+
+    Read straight off the JSONL TAIL, so this part of the payload costs nothing and cannot be
+    paraphrased — which matters because it is the part a resuming session checks its own
+    understanding against. Tool payloads and thinking blocks are skipped: they are the bulk of
+    a transcript and the least useful thing to restore into a context we are trying to empty.
+
+    TRDD-0UQSAFCW (card 2a, Jev reference gap analysis §2.1, plus the follow-up review): this
+    used to keep EVERY `user`/`assistant` record verbatim and read the whole file. In a
+    heartbeat-driven session the tail was almost entirely `[janitor-heartbeat]` prompts, bare
+    "janitor heartbeat" replies and `<task-notification>` deliveries, crowding out the human's
+    own words out of a small `limit`. First fixed by sharing `transcript_roles.classify_record`
+    (card 1, TRDD-RAEGS1D5) with `jev_compaction.py` (see `_classify_line`). The follow-up
+    review then found that filtering alone is not enough: after a long unattended stretch the
+    owner's last message can sit further back than the primary window ENTIRELY, leaving no
+    human line at all. So the owner's last `_HUMAN_TARGET_COUNT` lines are now searched for
+    separately (`_recent_human_lines`, widening up to 16 MiB back) and placed FIRST in the
+    return value -- so the model reads the instruction before the work it produced -- with an
+    explicit placeholder line when none exist at all, never a silent gap. The recent-window
+    slice (assistant turns, plus any human turns already inside it) still obeys `limit`;
+    duplicates already covered by the guaranteed lines are dropped. The whole return value is
+    additionally capped by TOTAL bytes (`_RECENT_MESSAGES_MAX_TOTAL_BYTES`), not just `limit`'s
+    record count, protecting against one oversized message alone (point 4 of the fix).
+    """
+    path = Path(transcript)
+    window_lines = _classified_tail_lines(path, _RECENT_MESSAGES_TAIL_BYTES)
+    guaranteed_human = _recent_human_lines(path, target=_HUMAN_TARGET_COUNT)
+    window_part = [ln for ln in window_lines[-limit:] if ln not in guaranteed_human]
+    protected = guaranteed_human if guaranteed_human else [_NO_HUMAN_IN_WINDOW]
+
+    protected_bytes = sum(len(ln.encode("utf-8")) + 1 for ln in protected)
+    if protected_bytes >= _RECENT_MESSAGES_MAX_TOTAL_BYTES:
+        # Pathological: even the guaranteed human lines alone blow the cap (one huge pasted
+        # blob) -- keep the newest of THOSE, same "protect the latest" bias as everywhere else
+        # in this function, and drop the recent-window part entirely rather than overrun.
+        return _keep_newest_by_bytes(protected, _RECENT_MESSAGES_MAX_TOTAL_BYTES)
+    kept_window = _keep_newest_by_bytes(window_part, _RECENT_MESSAGES_MAX_TOTAL_BYTES - protected_bytes)
+    return [*protected, *kept_window]
 
 _POINTER_EXPAND_PREFIX = "pointers expand with:"
 
