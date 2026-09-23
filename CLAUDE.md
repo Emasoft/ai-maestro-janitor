@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=96cce327b40a generated=2026-09-17T20:10:30+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=fa319deef4c4 generated=2026-09-23T22:56:47+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -208,6 +208,9 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [janitor-per-project-channeling](.claude/project/memory/janitor-per-project-channeling.md) — can a session/agent see or be told about another project's findings — fleet summary line leaked other repos'…
 - [janitor-self-update-bootstrap-gap](.claude/project/memory/janitor-self-update-bootstrap-gap.md) — I shipped the release-triggered fast-update feature but the release that added it did NOT fast-update
 - [macos-keychain](.claude/project/memory/macos-keychain.md) — macOS keychain dialog opened hundreds of times
+- [macos-keychain-incidents](.claude/project/memory/macos-keychain-incidents.md) — macOS keychain dialog opened hundreds of times
+- [macos-keychain-testing](.claude/project/memory/macos-keychain-testing.md) — how do I test keychain code without mocks or a real prompt
+- [macos-keychain-write-protocol](.claude/project/memory/macos-keychain-write-protocol.md) — SecKeychainItemSetAccess prompts on every write
 - [memgrep-index-corrupt-fts-desync](.claude/project/memory/memgrep-index-corrupt-fts-desync.md) — memgrep reindex fails with 'database disk image is malformed'
 - [memory-chore-candidate-gating](.claude/project/memory/memory-chore-candidate-gating.md) — the consolidate chore spawned an agent that abstained
 - [oauth-rotator-keychain-latch-false-positive-under-load](.claude/project/memory/oauth-rotator-keychain-latch-false-positive-under-load.md) — the janitor failed again to rotate
