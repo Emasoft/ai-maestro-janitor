@@ -312,6 +312,23 @@ def _read_handoff() -> str | None:
 
 _GATE_STAMP = "clear-observed.ts"
 
+# Item 1 fix (card 5 orchestrator review): the post-Enter gate `run_chained_inject`
+# (scripts/lib/terminal_trigger.py) waits on before this chain persists
+# `resume-after-clear.flag` -- duplicated here (not imported; nothing else in this file
+# imports terminal_trigger at module scope) because the call below never passes
+# `gate_timeout_s`, so this IS the value actually in effect.
+_POST_ENTER_GATE_TIMEOUT_S = 180.0  # == terminal_trigger.run_chained_inject gate_timeout_s default, same pin
+_POST_ENTER_GATE_MARGIN_S = 600.0  # 10 min slack for a merely-slow (not stuck) gate
+
+# Refinement (c), orchestrator review: same pin as `detectors/model-fallback.py`'s
+# `_SCOPED_HIGH` / `_ACCOUNT_HEADROOM` -- duplicated here (module-level, not imported)
+# because that detector module is not on the chain child's `sys.path` (only `scripts/lib`
+# is) -- so `_pane_policy_conflict_ok`'s no-headroom veto agrees with the daemon's own
+# model-fallback decision instead of drifting from it. Module-level (not local to
+# `_run_chain_payload`) so a test can assert equality against the originals directly.
+_NO_HEADROOM_SCOPED_HIGH = 90.0
+_NO_HEADROOM_ACCOUNT_HEADROOM = 90.0
+
 # The chain's /clear injection ceiling. NOT the default 30 s inject give-up: the chain now
 # carries a `still_wanted` cache probe (owner directive 2026-08-16) that cancels the moment
 # agentlensPro reports the cache WARM, so the CONDITION is the terminator and this clock is
@@ -407,15 +424,6 @@ def _run_chain_payload(payload_b64: str) -> int:
         if now_m - last >= _VETO_LOG_INTERVAL_S:
             _last_veto_log[reason] = now_m
             state.log_line("clear-trigger", detail)
-
-    # Refinement (c), orchestrator review: same pin as `detectors/model-fallback.py`'s
-    # `_SCOPED_HIGH` / `_ACCOUNT_HEADROOM` -- duplicated here (local to this function, not
-    # module-level) rather than imported, because that detector module is not on the chain
-    # child's `sys.path` (only `scripts/lib` is) -- so `_pane_policy_conflict_ok`'s
-    # no-headroom veto agrees with the daemon's own model-fallback decision instead of
-    # drifting from it.
-    _NO_HEADROOM_SCOPED_HIGH = 90.0
-    _NO_HEADROOM_ACCOUNT_HEADROOM = 90.0
 
     def _persist_resume_state() -> None:
         # Called by inject_until_sent IMMEDIATELY before Enter on /clear, and nowhere else.
@@ -630,6 +638,14 @@ def _run_chain_payload(payload_b64: str) -> int:
         # vetoing here exactly when it stops mattering to dispatch.py too.
         now_ts = int(time.time())
 
+        def _clear_resume_armed(sd: Path) -> bool:
+            # Mirrors dispatch.py:_phase_clear_resume's own ARMED check exactly (same `>=`
+            # tie-break, same two files) so this veto's short bound and that phase's actual
+            # consumption never disagree about which case they're in.
+            written_at = state.read_int_state(sd / "resume-after-clear.ts", 0)
+            observed_at = state.read_int_state(sd / _GATE_STAMP, 0)
+            return observed_at > 0 and observed_at >= written_at
+
         def _flag_fresh(
             flag: Path, since: Path, max_age_s: float, *, recovered_after: int | None = None
         ) -> bool:
@@ -688,7 +704,33 @@ def _run_chain_payload(payload_b64: str) -> int:
             )
             or _flag_fresh(
                 sd / "resume-after-clear.flag", sd / "resume-after-clear.ts",
-                _env_seconds("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S", 86400),
+                # Item 1 fix (card 5 orchestrator review, round 2 after a self-review found
+                # the flat bound below unsafe on its own): dispatch.py's own 24h expiry
+                # (CLEAR_RESUME_MAX_AGE_S, read independently at scripts/dispatch.py:1762/1788
+                # and on-session-start.py:373 -- both LEFT UNCHANGED) assumes something
+                # eventually consumes the flag on its own clock; an UNARMED session (no
+                # heartbeat) never does, so a chain whose post-Enter gate merely TIMED OUT
+                # with the clear never observed by ANY fresh session would otherwise veto
+                # every automatic clear in the project for a full day.
+                #
+                # The short bound must NOT apply once dispatch.py's `_phase_clear_resume`
+                # (scripts/dispatch.py:1681) has ARMED -- i.e. a fresh session already
+                # stamped `clear-observed.ts` at/after this flag was written, exactly the
+                # signal that phase itself gates on (same `>=` tie-break, same comment there:
+                # "the tie means the clear landed in the same second the flag was written").
+                # Once armed, dispatch's own phase will consume the flag on its NEXT
+                # heartbeat -- a matter of minutes, not hours -- so keeping the full 24h
+                # backstop here costs nothing and avoids a race: an ARMED-but-not-yet-
+                # consumed flag (heartbeat merely hasn't fired since the observation) must
+                # keep vetoing, or a second /clear from THIS chain could overwrite the
+                # pending resume directive before dispatch.py ever surfaces it. The short
+                # bound (gate_timeout_s + a margin) applies only to the genuinely orphaned
+                # case: never armed at all.
+                (
+                    _POST_ENTER_GATE_TIMEOUT_S + _POST_ENTER_GATE_MARGIN_S
+                    if not _clear_resume_armed(sd)
+                    else _env_seconds("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S", 86400)
+                ),
             )
         )
         if not any_fresh:

@@ -1087,23 +1087,6 @@ def test_spawn_shrink_chain_carries_count_toward_cooldown_into_the_payload(tmp_p
     assert captured["payload"]["count_toward_cooldown"] is True
 
 
-def _payload_with_cooldown_flag(tmp_path: Path, *, count_toward_cooldown: bool) -> str:
-    import base64
-    import json as _json
-
-    payload = {
-        "delay": 0.0,
-        "terminal": {"kind": "tmux"},
-        "first": "/clear",
-        "then": ["/janitor-arm", "/janitor-resume"],
-        "state_dir": str(tmp_path / ".janitor" / "state"),
-        "gate_baseline": 0,
-        "directive": "resume",
-        "count_toward_cooldown": count_toward_cooldown,
-    }
-    return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
-
-
 def test_completed_chain_with_cooldown_flag_stamps_at_verified_enter(tmp_path: Path, monkeypatch) -> None:
     """The regression case, positive side, driven through the REAL
     `terminal_trigger.run_chained_inject` (TRDD-RAEGS1D5 card 5 item 4 -- replaces the
@@ -1391,3 +1374,121 @@ def test_still_wanted_is_stable_across_repeated_checks_until_the_flag_is_gone(
 
     ok, why = captured["still_wanted"]()
     assert ok is True, why
+
+
+def test_a_stale_resume_after_clear_flag_past_the_gate_bound_does_not_veto(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Item 1 (card 5 orchestrator review): `resume-after-clear.flag` used to keep vetoing for
+    the full 24h `CLEAR_RESUME_MAX_AGE_S` default -- but nothing consumes it in an UNARMED
+    session (no heartbeat), so a chain whose post-Enter gate merely timed out could block every
+    automatic /clear in the project for a day. Bounded to the chain's own post-Enter gate
+    timeout (180s) plus a 10 min margin: a flag older than that (here: 20 minutes, well past the
+    ~13 min bound, still far short of the old 24h one) must no longer veto. `persisted["done"]`
+    is False here (this chain instance never wrote the flag itself), matching the real scenario
+    of a DIFFERENT, earlier chain's leftover flag."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / "resume-after-clear.flag").write_text("1", encoding="utf-8")
+    old = int(_time.time()) - (20 * 60)  # 20 min -- past the (180s + 600s) bound
+    (sd / "resume-after-clear.ts").write_text(str(old), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+
+def test_a_fresh_resume_after_clear_flag_within_the_gate_bound_still_vetoes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The other side of item 1's bound: a `resume-after-clear.flag` still within the (180s +
+    600s) window -- a gate that is merely slow, not stuck -- must keep vetoing, same as before
+    the fix."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / "resume-after-clear.flag").write_text("1", encoding="utf-8")
+    fresh = int(_time.time()) - 300  # 5 min -- well inside the ~13 min bound
+    (sd / "resume-after-clear.ts").write_text(str(fresh), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "recovery pending" in why
+
+
+def test_an_armed_resume_after_clear_flag_past_the_short_bound_still_vetoes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Round-2 fix after self-review: the short (gate_timeout + margin) bound must NOT apply
+    once dispatch.py's `_phase_clear_resume` has ARMED -- a fresh session already stamped
+    `clear-observed.ts` at/after the flag was written -- because that phase will consume the
+    flag on its own NEXT heartbeat (minutes, not hours); letting a second /clear fire in that
+    narrow window could overwrite the pending resume directive before dispatch.py ever
+    surfaces it. An armed flag 20 minutes old (past the ~13 min short bound, but well inside
+    the original 24h one) must still veto -- the short bound is for the NEVER-armed case
+    only."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / "resume-after-clear.flag").write_text("1", encoding="utf-8")
+    written_at = int(_time.time()) - (20 * 60)  # 20 min -- past the short bound
+    (sd / "resume-after-clear.ts").write_text(str(written_at), encoding="utf-8")
+    # ARMED: a fresh session observed the clear at the same moment the flag was written
+    # (the `>=` tie-break dispatch.py's own phase uses) -- dispatch just hasn't had its next
+    # heartbeat fire yet to consume it.
+    (sd / mod._GATE_STAMP).write_text(str(written_at), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "recovery pending" in why
+
+
+def test_no_headroom_constants_match_the_real_model_fallback_detector(tmp_path: Path) -> None:
+    """Item 3: `_NO_HEADROOM_SCOPED_HIGH` / `_NO_HEADROOM_ACCOUNT_HEADROOM` are duplicated in
+    this file (not imported -- `scripts/detectors/` is not on the chain child's `sys.path`,
+    only `scripts/lib` is), so nothing catches the two drifting apart except a test that reads
+    BOTH originals and asserts equality directly."""
+    import importlib.util
+
+    mod = _import()
+
+    det_spec = importlib.util.spec_from_file_location(
+        "model_fallback_det_under_test",
+        str(_PROJECT_ROOT / "scripts" / "detectors" / "model-fallback.py"),
+    )
+    assert det_spec is not None and det_spec.loader is not None
+    det = importlib.util.module_from_spec(det_spec)
+    det_spec.loader.exec_module(det)
+
+    assert mod._NO_HEADROOM_SCOPED_HIGH == det._SCOPED_HIGH
+    assert mod._NO_HEADROOM_ACCOUNT_HEADROOM == det._ACCOUNT_HEADROOM
