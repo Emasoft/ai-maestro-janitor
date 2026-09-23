@@ -133,8 +133,14 @@ def test_keep_if_relevance_or_decision_passes() -> None:
 
 
 def test_budget_ordering_drops_lowest_first_oldest_among_equals() -> None:
-    # Three kept items, same max_score (0.6) -> the oldest (smallest turn) drops first;
-    # a fourth item scores lower (0.4) and must drop before any of the tied trio.
+    # TRDD-RAEGS1D5 (release blocker): all four items are "user"/owner kind, so this now
+    # exercises the owner-share admission -- not the plain evict_key sort the old assertions
+    # described. `low:0` is the NEWEST owner message (turn=3) and is guaranteed a slot
+    # regardless of its score (0.4, the lowest of the four) -- the whole point of the
+    # guarantee is that recency can outrank a pessimistic relevance score. `low:0` alone
+    # (100 tok) already exceeds the owner share (int(200 * 0.40) == 80), so `c:0`/`b:0`/`a:0`
+    # all overflow the share and compete for what's left of the 200-token budget (100 tok):
+    # `c:0` (turn=2, the next-newest) fits exactly and is admitted; `b:0`/`a:0` do not fit.
     items = [
         _item("a:0", "user", "aaaa", turn=0, tokens=100),
         _item("b:0", "user", "bbbb", turn=1, tokens=100),
@@ -147,16 +153,14 @@ def test_budget_ordering_drops_lowest_first_oldest_among_equals() -> None:
         "c:0": jc.Scores(relevance=0.6, decision=0.0, oversized=False, kept=True, decision_passed=False),
         "low:0": jc.Scores(relevance=0.4, decision=0.0, oversized=False, kept=True, decision_passed=False),
     }
-    # Budget for exactly 2 of the 4 (200 tokens): drop order must be low, then a (oldest
-    # of the tied 0.6 trio), leaving b and c inlined.
     doc = jc.compose(items, scores, budget_tokens=200,
                       header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
-    assert "-- user b:0 --" in doc
+    assert "-- user low:0 --" in doc
     assert "-- user c:0 --" in doc
     assert "-- user a:0 --" not in doc
-    assert "-- user low:0 --" not in doc
+    assert "-- user b:0 --" not in doc
     assert "id=a:0" in doc
-    assert "id=low:0" in doc
+    assert "id=b:0" in doc
 
 
 def test_oversized_never_inlined() -> None:
@@ -191,12 +195,18 @@ def test_oversized_pointer_includes_first_20_lines() -> None:
 def test_budget_eviction_protects_decision_passing_items_last() -> None:
     # "dec" scores LOWER on max(relevance, decision) than "rel" does (0.9 vs 0.95), so the
     # OLD ordering (lowest max_score dropped first) would have evicted "dec" first -- exactly
-    # the "budget undoes the decision question" bug the review flagged. The new ordering
-    # protects any decision_passed=True item until every decision_passed=False item is gone,
-    # regardless of raw score, so "rel" (relevance-only) is dropped instead.
+    # the "budget undoes the decision question" bug the review flagged. "dec" is also now the
+    # NEWEST owner message (turn=1 vs "rel"'s turn=0) -- TRDD-RAEGS1D5's owner-share ceiling
+    # (see `test_owner_share_ceiling_...` below) guarantees the newest owner message a slot
+    # REGARDLESS of decision_passed, so a decision_passed item that is not also the newest can
+    # lose a slot to it under a tight-enough budget (see
+    # `test_decision_passed_owner_item_wins_second_slot_when_not_newest` for that case) -- this
+    # test keeps dec/newest aligned, the common real-world case (the user's latest message is
+    # usually where a decision/instruction was just stated), so it still proves the ordering
+    # is not a blind "lowest max_score first" sort.
     items = [
-        _item("dec:0", "user", "policy: always use tabs", turn=0, tokens=100),
-        _item("rel:0", "user", "merely relevant background", turn=1, tokens=100),
+        _item("dec:0", "user", "policy: always use tabs", turn=1, tokens=100),
+        _item("rel:0", "user", "merely relevant background", turn=0, tokens=100),
     ]
     scores = {
         "dec:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
@@ -209,6 +219,88 @@ def test_budget_eviction_protects_decision_passing_items_last() -> None:
     assert "-- user dec:0 --" in doc
     assert "-- user rel:0 --" not in doc
     assert "id=rel:0" in doc
+
+
+def test_decision_passed_owner_item_wins_second_slot_when_not_newest() -> None:
+    # TRDD-RAEGS1D5: beyond the guaranteed-newest slot, owner items still compete by
+    # (decision_passed, turn) -- an OLDER decision_passed item ("dec_old") outranks a newer,
+    # merely-relevant one ("rel_old", higher raw relevance 0.9 vs dec_old's 0.6) for the
+    # second slot the 100-token owner share (int(250 * 0.40)) can't hold outright, so both
+    # overflow to the leftover-budget pass together -- where decision_passed is still the
+    # tie-break that decides which one of them actually fits.
+    items = [
+        _item("newest:0", "user", "hi", turn=2, tokens=100),
+        _item("rel_old:0", "user", "merely relevant background", turn=1, tokens=100),
+        _item("dec_old:0", "user", "policy: always use tabs", turn=0, tokens=100),
+    ]
+    scores = {
+        "newest:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                               decision_passed=False),
+        "rel_old:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                decision_passed=False),
+        "dec_old:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                                decision_passed=True),
+    }
+    doc = jc.compose(items, scores, budget_tokens=250,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- user newest:0 --" in doc
+    assert "-- user dec_old:0 --" in doc
+    assert "-- user rel_old:0 --" not in doc
+    assert "id=rel_old:0" in doc
+
+
+def test_owner_share_ceiling_admits_non_owner_relevant_items() -> None:
+    # TRDD-RAEGS1D5 (release blocker): the real bug this fix targets. Measured on this repo's
+    # own 49 MB transcript, `decision_passed` "user" items ALONE totaled more tokens than the
+    # 8000-token default budget, so the plain evict_key sort (decision_passed always ranked
+    # above ANY non-decision_passed item, of ANY kind) evicted every single tool/assistant/
+    # event item before ever touching a user item -- 0 of 158 relevance-passing non-user items
+    # survived. Reproduced in miniature: three decision_passed "user" items alone cost more
+    # than the whole budget, plus one highly relevant "tool" item. Post-fix, the owner share
+    # (int(120 * 0.40) == 48 tokens) caps how much of the budget owner items can take, so the
+    # tool item is no longer starved out entirely.
+    items = [
+        _item("u0:0", "user", "decision zero", turn=0, tokens=50),
+        _item("u1:0", "user", "decision one", turn=1, tokens=50),
+        _item("u2:0", "user", "decision two", turn=2, tokens=50),
+        _item("t0:0", "tool", "highly relevant tool output", turn=3, tokens=40),
+    ]
+    scores = {
+        "u0:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True, decision_passed=True),
+        "u1:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True, decision_passed=True),
+        "u2:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True, decision_passed=True),
+        "t0:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True, decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=120,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- tool t0:0 --" in doc, "a highly relevant non-owner item must survive a budget owner items alone exceed"
+    assert "-- user u2:0 --" in doc, "the newest owner message is still guaranteed"
+
+
+def test_guaranteed_owner_slot_prefers_newest_decision_passed_over_newest_plain() -> None:
+    # TRDD-RAEGS1D5 (adversarial-review fix): pins the fix made in response to the review's
+    # Q1 finding -- an earlier version of this fix guaranteed the tier-1 owner slot to the
+    # NEWEST owner item unconditionally, which let a merely-recent, non-decision message
+    # ("thanks") outrank an OLDER decision_passed one (a stated constraint) for that one
+    # guaranteed slot -- silently reintroducing the "budget undoes the decision question"
+    # bug for the narrow case where they are not the same item. The guaranteed slot must go
+    # to the newest `decision_passed` owner item when one exists, even if a plainer,
+    # genuinely more recent owner message exists.
+    items = [
+        _item("plain_newest:0", "user", "thanks", turn=1, tokens=100),
+        _item("dec_older:0", "user", "policy: always use tabs", turn=0, tokens=100),
+    ]
+    scores = {
+        "plain_newest:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                                     decision_passed=False),
+        "dec_older:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                                  decision_passed=True),
+    }
+    doc = jc.compose(items, scores, budget_tokens=100,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- user dec_older:0 --" in doc
+    assert "-- user plain_newest:0 --" not in doc
+    assert "id=plain_newest:0" in doc
 
 
 def test_pointer_format_has_no_path() -> None:

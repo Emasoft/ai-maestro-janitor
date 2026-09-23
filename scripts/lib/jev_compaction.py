@@ -1012,8 +1012,10 @@ def compose(
     list, not the kept-items budget, dominated the old default). This only degrades further
     when a PARTICULAR transcript still overflows -- e.g. an unusually verbose digest or long
     pointer previews -- and it degrades in priority order, never a blind byte slice: (1) drop
-    kept items by the SAME `evict_key` priority the `budget_tokens` eviction above already
-    uses -- lowest (decision_passed, max_score) first, oldest among ties -- never bare
+    kept items by `evict_key` priority when `max_item_bytes` is unset (TRDD-RAEGS1D5: the
+    `budget_tokens` eviction above now admits by an owner-share-capped order instead, but this
+    narrower byte-only fallback keeps `evict_key`'s plain (decision_passed, max_score) rule,
+    unchanged) -- lowest first, oldest among ties -- never bare
     chronological order, so a decision-passed item (a user instruction/correction) is not
     sacrificed ahead of a newer, lower-priority one just for being older, (2) drop pointers
     LOWEST-SCORE-first (the ones already least likely to be worth expanding), (3) truncate the
@@ -1040,8 +1042,11 @@ def compose(
     single byte backstop did. The final byte
     backstop below still runs afterward as a hard guarantee (`max_bytes` is never exceeded),
     but with items already small it now only has to drop a handful of truncated items, not the
-    whole kept set -- and it evicts by the SAME `kind == "user"` priority, never `evict_key`
-    (which stays `--out`-only so its behaviour is provably unchanged).
+    whole kept set -- and it evicts by the SAME `kind == "user"` priority, never `evict_key`.
+    `evict_key` itself now only governs the narrower byte-only backstop below (when
+    `max_item_bytes` is unset but `max_bytes` still is) -- the token-budget admission above,
+    shared by BOTH renderings, no longer uses it alone (TRDD-RAEGS1D5: see the owner-share
+    comment there for why a plain `evict_key` sort starved `--out` of every non-owner item).
     """
     # Oversized is re-checked here, not just trusted from `scores[...].kept`, because
     # "never inlined" is the compose-time invariant the spec actually cares about -- this
@@ -1073,11 +1078,73 @@ def compose(
     total_tokens = sum(it.tokens for it in kept_items)
     kept_ids = {it.id for it in kept_items}
     if total_tokens > budget_tokens:
-        for it in sorted(kept_items, key=evict_key):
-            if total_tokens <= budget_tokens:
-                break
-            kept_ids.discard(it.id)
-            total_tokens -= it.tokens
+        # TRDD-RAEGS1D5 (release blocker): admit by an owner-share-capped priority order
+        # instead of the old plain `evict_key` removal loop. `evict_key`'s (decision_passed,
+        # max_score, turn) ascending sort dropped every non-`decision_passed` item BEFORE any
+        # `decision_passed` one, no matter how relevant -- and `decision_passed` can only
+        # ever be True for a "user" item (`DECISION_QUESTION` above is never sent to any
+        # other kind). Measured on this repo's own 49 MB transcript (d30bf250,
+        # reports/compaction-replacement/): its 28 `decision_passed` "user" items alone
+        # total 14298 tokens, already over the 8000-token default `budget_tokens`, so every
+        # one of the 158 relevance-passing tool/assistant/event items (of 4141/1725/171
+        # scored) was evicted first and NONE survived -- a resumed session then only ever
+        # saw what the owner asked, never what was done. This mirrors the byte-tier
+        # owner-share ceiling (`_OWNER_SHARE`) below at the TOKEN level, so the FULL
+        # (`--out`) rendering -- which never sets `max_item_bytes` and so never reaches that
+        # byte tier -- gets the same guarantee as the injected copy, not a narrower one.
+        owner_kept = sorted(
+            (it for it in kept_items if it.kind == "user"),
+            key=lambda it: it.turn, reverse=True,
+        )
+        admitted: list[Item] = []
+        admitted_tokens = 0
+        rest_of_owner_kept: list[Item] = []
+        if owner_kept:
+            # TRDD-RAEGS1D5 (adversarial-review fix): the guaranteed tier-1 slot is the
+            # newest `decision_passed` owner item when one exists, NOT unconditionally the
+            # newest owner item -- a plain "always newest" rule let a merely-recent,
+            # non-decision message ("ok", "thanks") outrank an OLDER decision_passed one (a
+            # stated constraint/correction) for the one guaranteed slot, silently
+            # reintroducing the exact "budget undoes the decision question" failure mode this
+            # module already fixed once (see `test_budget_eviction_protects_decision_passing_
+            # items_last`'s own history/docstring). `owner_kept` is sorted newest-first, so
+            # the first `decision_passed` item found IS the newest `decision_passed` one.
+            guaranteed_owner_item = next(
+                (it for it in owner_kept if scores[it.id].decision_passed), owner_kept[0],
+            )
+            admitted.append(guaranteed_owner_item)
+            admitted_tokens += guaranteed_owner_item.tokens
+            rest_of_owner_kept = [it for it in owner_kept if it.id != guaranteed_owner_item.id]
+        owner_token_budget = int(budget_tokens * _OWNER_SHARE)
+        # Named distinctly from the byte-tier's own `owner_overflow` below (line ~1311) --
+        # same function scope, so mypy's `no-redef` check treats the two as one name/type
+        # otherwise, even though they belong to separate `if` branches that never both run.
+        token_owner_overflow: list[Item] = []
+        for it in sorted(
+            rest_of_owner_kept,
+            key=lambda it: (scores[it.id].decision_passed, it.turn), reverse=True,
+        ):
+            if admitted_tokens + it.tokens > owner_token_budget:
+                token_owner_overflow.append(it)  # may still fit once non-owner items are placed
+                continue
+            admitted.append(it)
+            admitted_tokens += it.tokens
+        for it in sorted(
+            (it for it in kept_items if it.kind != "user"),
+            key=lambda it: (scores[it.id].decision_passed, max_score(it), it.turn),
+            reverse=True,
+        ):
+            if admitted_tokens + it.tokens > budget_tokens:
+                continue  # a smaller lower-priority item further down may still fit
+            admitted.append(it)
+            admitted_tokens += it.tokens
+        for it in token_owner_overflow:
+            if admitted_tokens + it.tokens > budget_tokens:
+                continue
+            admitted.append(it)
+            admitted_tokens += it.tokens
+        kept_ids = {it.id for it in admitted}
+        total_tokens = admitted_tokens
 
     # `items` is already chronological, so filtering it (rather than re-sorting) keeps the
     # elided list chronological for free -- `max_elided_pointers` below only needs to pick
