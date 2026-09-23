@@ -14,8 +14,6 @@ effort: S
 approval-tier: 0
 task-type: refactor
 parent-trdd: TRDD-2U8AH82F
-derived: true
-derived-kind: eht
 labels: [daemon, state-migration, cleanup]
 release-via: publish
 test-requirements: [unit]
