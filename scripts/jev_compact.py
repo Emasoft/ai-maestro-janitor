@@ -548,7 +548,13 @@ def cmd_compact(args: argparse.Namespace) -> int:
             return 5
 
     start = time.monotonic()
-    items = jc.extract_items(args.transcript)
+    # Coordinator follow-up (review of commit 3006e92f): a segmentation failure (degrades to
+    # the pre-card-6 whole item, see jev_compaction.py::_segment_tool_result) already prints
+    # a stderr line, but stderr alone is easy to miss -- this list is appended to in place and
+    # its length feeds the `segmentation_failed=N` summary field below, so it is never silent
+    # to a caller that only reads stdout.
+    segmentation_failures: list[str] = []
+    items = jc.extract_items(args.transcript, segmentation_failures=segmentation_failures)
 
     state_heads: list[str] = []
     for head_path in args.state_heads or []:
@@ -633,6 +639,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
             items, scores, budget_tokens=args.budget_tokens, header=inject_header,
             full_context_path=str(out_path.resolve()),
             max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
+            # TRDD-RAEGS1D5 (jev newest+3): a smaller cap for NON-owner items only, so the
+            # session's own tool calls/replies/events are not crowded out by owner messages
+            # sharing the same per-item cap in a tight injected render -- see that constant's
+            # own docstring in jev_compaction.py.
+            non_owner_item_bytes=jc.DEFAULT_INJECT_NON_OWNER_ITEM_BYTES,
             **inject_kwargs,
         )
         state.atomic_write(Path(args.inject_out), inject_doc)
@@ -660,7 +671,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
     out_tokens = estimate_tokens(full_doc)
     print(
         f"compacted items={kept}/{len(items)} tokens={out_tokens} cost={usage_cost} "
-        f"ms={elapsed_ms} blocked={len(blocked_items)} blocked_digest={blocked_digest}"
+        f"ms={elapsed_ms} blocked={len(blocked_items)} blocked_digest={blocked_digest} "
+        f"segmentation_failed={len(segmentation_failures)}"
     )
     return 0
 

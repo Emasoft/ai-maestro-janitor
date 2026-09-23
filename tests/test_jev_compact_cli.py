@@ -411,7 +411,10 @@ def test_compact_reports_blocked_zero_when_nothing_was_blocked(
 
     assert code == 0
     assert "blocked=0 blocked_digest=" in output
-    assert output.strip().endswith("blocked_digest=")
+    # TRDD-RAEGS1D5 (jev newest+3): `segmentation_failed=N` is now the LAST field on the
+    # summary line (see cmd_compact) -- `blocked_digest=` (empty, nothing blocked) is
+    # followed by a space and it, not the end of the line anymore.
+    assert output.strip().endswith("segmentation_failed=0")
 
 
 def test_compact_reports_blocked_count_and_a_content_digest(

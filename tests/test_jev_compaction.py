@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
@@ -323,6 +324,98 @@ def test_guaranteed_slots_collapse_to_one_when_newest_is_also_decision_passing()
     assert doc.count("-- user only:0 --") == 1
 
 
+def test_newest_owner_item_is_guaranteed_even_when_jev_scored_it_below_threshold() -> None:
+    # TRDD-RAEGS1D5 (jev newest+3, owner ruling fe38e095 "the owner's newest message
+    # first"): card 6's own disclosure (TRDD-88DOI824) found the guarantee below silently
+    # scoped to `kept_items`, dropping the genuinely newest owner message whenever Jev
+    # itself scored it below threshold -- measured on a real 258 MB transcript, the
+    # transcript's chronologically LAST owner message (content "resume") scored
+    # relevance=0.29/decision=0.22, both under the 0.5 default thresholds, so `kept=False`
+    # and it never reached `kept_items` at all. Reproduced directly: "newest:0" is the
+    # newest owner item by `turn`, `kept=False`, and must still appear -- force-admitted,
+    # not merely named by a pointer.
+    items = [
+        _item("older:0", "user", "an earlier owner message", turn=0, tokens=50),
+        _item("newest:0", "user", "resume", turn=5, tokens=10),
+        _item("tool:0", "tool", "some unrelated tool output", turn=6, tokens=50),
+    ]
+    scores = {
+        "older:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False),
+        "newest:0": jc.Scores(relevance=0.29, decision=0.22, oversized=False, kept=False,
+                               decision_passed=False),
+        "tool:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                             decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- user newest:0 --" in doc
+    assert "resume" in doc
+    # Force-admitted, not merely pointer-referenced -- never BOTH.
+    assert "id=newest:0" not in doc
+
+
+def test_newest_owner_item_guarantee_never_duplicates_when_it_is_also_a_decision_item() -> None:
+    # Assignment's own acceptance criterion: "never duplicated when it is also a decision
+    # item" -- the unconditional newest-owner slot and the newest-decision-passing slot must
+    # collapse to the SAME single rendering when one item satisfies both, exactly like the
+    # pre-existing `test_guaranteed_slots_collapse_to_one_when_newest_is_also_decision_
+    # passing` above already proves for two ALREADY-KEPT items; this is the same collapse,
+    # but for an item Jev did NOT keep on its own (kept=False) -- reachable only through the
+    # new unconditional force-admit path.
+    items = [_item("only:0", "user", "policy: always use tabs", turn=0, tokens=100)]
+    scores = {"only:0": jc.Scores(relevance=0.1, decision=0.9, oversized=False, kept=False,
+                                   decision_passed=True)}
+    doc = jc.compose(items, scores, budget_tokens=100,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert doc.count("-- user only:0 --") == 1
+    assert "id=only:0" not in doc
+
+
+def test_newest_owner_item_guarantee_excludes_an_oversized_item() -> None:
+    # "excluding only `oversized` items" (card 6's own disclosure, TRDD-88DOI824): an
+    # oversized item's raw text was never even sent to Jev, and this function's own "never
+    # inlined" invariant (`_oversized_preview`) must still hold for it -- the guarantee
+    # falls through to the next-newest NON-oversized owner item instead.
+    items = [
+        _item("older:0", "user", "an earlier owner message", turn=0, tokens=50),
+        _item("newest_oversized:0", "user", "huge", turn=5, tokens=999999),
+    ]
+    scores = {
+        "older:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False),
+        "newest_oversized:0": jc.Scores(relevance=1.0, decision=1.0, oversized=True,
+                                         kept=False, decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- user newest_oversized:0 --" not in doc  # never inlined -- the invariant holds
+    assert "id=newest_oversized:0" in doc  # still pointed at, with its own oversized preview
+    assert "-- user older:0 --" in doc  # the next-newest NON-oversized owner item takes the slot
+
+
+def test_unconditionally_guaranteed_newest_owner_item_still_capped_in_injected_render() -> None:
+    # Coordinator addition 1 (review of commit 3006e92f): "the unconditionally guaranteed
+    # newest owner message stays capped at the existing 1,500-byte newest-owner limit in the
+    # injected render: prefix plus pointer beyond that. One huge last message must not eat
+    # the room." The force-admitted item joins `guaranteed_owner_ids` exactly like an
+    # already-kept guaranteed item does, so `render()`'s existing `NEWEST_OWNER_ITEM_BYTES`
+    # cap check already covers it -- proven directly here rather than assumed.
+    huge_text = "x" * (jc.NEWEST_OWNER_ITEM_BYTES * 3)
+    items = [_item("newest:0", "user", huge_text, turn=0, tokens=50)]
+    scores = {"newest:0": jc.Scores(relevance=0.1, decision=0.0, oversized=False, kept=False,
+                                     decision_passed=False)}
+    doc = jc.compose(
+        items, scores, budget_tokens=8000,
+        header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+        max_bytes=6000, max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
+    )
+    assert "-- user newest:0 --" in doc
+    assert huge_text not in doc
+    assert huge_text[: jc.NEWEST_OWNER_ITEM_BYTES] in doc
+    assert "id=newest:0" in doc  # pointer back to the rest
+
+
 def test_owner_item_over_the_per_item_cap_renders_as_a_truncated_prefix_plus_pointer() -> None:
     # TRDD-RAEGS1D5 (owner per-item token cap, requirement 1): the core new mechanic. An owner
     # item beyond the guaranteed slot that is bigger than `_OWNER_ITEM_TOKEN_CAP` now renders as
@@ -467,7 +560,12 @@ def test_non_owner_admission_skips_a_too_big_item_rather_than_stopping() -> None
 
 
 def test_pointer_format_has_no_path() -> None:
-    items = [_item("p:0", "user", "some elided line\nmore", turn=0)]
+    # kind="assistant", not "user" -- TRDD-RAEGS1D5 (jev newest+3): the newest owner item is
+    # now unconditionally guaranteed a kept slot (see `test_newest_owner_item_is_guaranteed_
+    # even_when_jev_scored_it_below_threshold`), so a single "user" item here would never be
+    # elided at all; this test is about the POINTER FORMAT, not ownership, so a non-owner
+    # kind keeps it decoupled from that guarantee.
+    items = [_item("p:0", "assistant", "some elided line\nmore", turn=0)]
     scores = {"p:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
                                 decision_passed=False)}
     header = {"transcript_path": "/Users/x/project/.claude/transcript.jsonl", "session_key": "s"}
@@ -484,9 +582,15 @@ def test_elided_pointer_list_is_capped_with_an_m_more_line() -> None:
     item -- `compose()` itself must never re-grow that unboundedly. Cap at `_MAX_ELIDED_
     POINTERS`, keep the highest-scoring ones, and say how many were left out; the trailing
     'pointers expand with' line must still survive (it is what makes every DROPPED item still
-    reachable by id)."""
+    reachable by id).
+
+    kind="assistant", not "user" (TRDD-RAEGS1D5, jev newest+3): the newest owner item is now
+    unconditionally guaranteed a kept slot, which would pull the single highest-turn item out
+    of this elided pool entirely -- this test is about the pointer-CAP mechanism, independent
+    of ownership, so a non-owner kind keeps the two concerns decoupled.
+    """
     n = jc._MAX_ELIDED_POINTERS + 10
-    items = [_item(f"e{i}:0", "user", f"text {i}", turn=i, tokens=10) for i in range(n)]
+    items = [_item(f"e{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(n)]
     scores = {
         it.id: jc.Scores(relevance=(i / n), decision=0.0, oversized=False, kept=False,
                           decision_passed=False)
@@ -680,6 +784,56 @@ def test_segmentation_failure_degrades_to_whole_item_instead_of_crashing(
     assert "RuntimeError" in err
 
 
+def test_segmentation_failure_is_recorded_in_the_caller_supplied_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Coordinator follow-up (review of commit 3006e92f): "'Segmentation degrades to the
+    # whole item on any failure' is silent... count it in the summary line." The stderr line
+    # above already names the item id and exception type; this proves the OTHER half -- a
+    # caller that wants to COUNT failures (`jev_compact.py::cmd_compact`'s own
+    # `segmentation_failed=N` summary field) passes a list here and gets the failing item's
+    # id appended, on top of the stderr line, never instead of it.
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("simulated jevctx.segments.segment() failure")
+
+    monkeypatch.setattr(jc, "segment", _boom)
+    result_text = "one two three four five six seven eight nine ten. " * 400
+
+    failures: list[str] = []
+    items = jc._segment_tool_result(
+        "u1:0", "Read", "{}", result_text, None, 0, segmentation_failures=failures
+    )
+
+    assert len(items) == 1
+    assert failures == ["u1:0"]
+
+
+def test_extract_items_threads_segmentation_failures_through(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    # `extract_items` must actually forward its own `segmentation_failures` parameter to
+    # `_segment_tool_result` (not just declare it) -- exercised end to end through a real
+    # transcript file, not by calling `_segment_tool_result` directly like the test above.
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(jc, "segment", _boom)
+    result_text = _read_style_numbered_code()
+    line = {
+        "type": "user", "uuid": "u1", "parentUuid": None,
+        "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "missing", "content": result_text},
+        ]},
+    }
+    path = tmp_path / "boom.jsonl"
+    path.write_text(json.dumps(line) + "\n")
+
+    failures: list[str] = []
+    items = jc.extract_items(path, segmentation_failures=failures)
+    assert failures == ["u1:0"]
+    assert any(it.id == "u1:0" for it in items)
+
+
 def test_large_read_result_segments_losslessly_into_multiple_code_items(tmp_path: Path) -> None:
     # End to end: extract_items on ONE large Read-shaped tool_result must (1) split into
     # SEVERAL Items (not stay one all-or-nothing blob), (2) give each a "<uuid>:<n>@<a>-<b>"
@@ -792,6 +946,82 @@ def test_protected_segment_outranks_higher_scoring_plain_item_under_budget() -> 
                       header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
     assert "-- tool trace:0 --" in doc
     assert "-- tool plain:0 --" not in doc
+
+
+def test_protected_boost_admits_at_most_one_segment_per_source_item() -> None:
+    # Card 6 follow-up (coordinator review of commit 3006e92f, addition 2): "On the 258 MB
+    # transcript, 3 segments of ONE diff took the budget and added no coverage. Admit at
+    # most one protected segment per source item ahead of relevance-only items; any further
+    # segments of that same item compete by relevance like everything else." Three segments
+    # of the SAME source item ("src:0") are all `protected=True` and score identically
+    # (0.5); three OTHER, distinct-source items are NOT protected but score higher
+    # (0.6/0.65/0.7). Only ONE segment of "src:0" (the earliest by `turn`) may still use the
+    # protected-tier boost -- the other two compete purely on relevance and lose to the
+    # higher-scoring distinct items, so the budget (3 slots) ends up spread across 3
+    # DISTINCT source items instead of 3 segments of the same one.
+    def _protected_seg(a: int, turn: int) -> jc.Item:
+        it = _item(f"src:0@{a}-{a + 9}", "tool", f"segment at {a}", turn=turn, tokens=100)
+        return jc.Item(it.id, it.kind, it.text, it.tokens, it.ts, it.turn, protected=True)
+
+    items = [
+        _protected_seg(1, 0), _protected_seg(11, 1), _protected_seg(21, 2),
+        _item("o1:0", "tool", "other result one", turn=3, tokens=100),
+        _item("o2:0", "tool", "other result two", turn=4, tokens=100),
+        _item("o3:0", "tool", "other result three", turn=5, tokens=100),
+    ]
+    scores = {
+        "src:0@1-10": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                                 decision_passed=False),
+        "src:0@11-20": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                                  decision_passed=False),
+        "src:0@21-30": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                                  decision_passed=False),
+        "o1:0": jc.Scores(relevance=0.6, decision=0.0, oversized=False, kept=True,
+                           decision_passed=False),
+        "o2:0": jc.Scores(relevance=0.65, decision=0.0, oversized=False, kept=True,
+                           decision_passed=False),
+        "o3:0": jc.Scores(relevance=0.7, decision=0.0, oversized=False, kept=True,
+                           decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=300,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    kept_ids = {
+        m.group(1) for m in re.finditer(r"^-- \S+ (\S+) --$", doc, re.MULTILINE)
+    }
+    src_kept = {i for i in kept_ids if i.startswith("src:0@")}
+    assert len(src_kept) == 1, f"expected exactly one segment of one source item, got {src_kept}"
+    assert src_kept == {"src:0@1-10"}  # earliest turn among the tied-score segments
+    assert kept_ids == {"src:0@1-10", "o3:0", "o2:0"}  # 3 DISTINCT source items, not 3 segments
+
+
+def test_protected_boost_winner_is_chosen_among_kept_segments_only() -> None:
+    # Adversarial review of the per-source cap: `score_items` scores an oversized item
+    # relevance=1.0/decision=1.0 with kept=False, so picking the source's boosted segment from
+    # ALL items made the oversized segment win -- and, never being kept, it left the source's
+    # one KEPT segment unboosted, losing to a merely higher-scoring plain item. Here only one
+    # of the two fits the budget; the kept protected segment must win it.
+    def _protected_seg(a: int, turn: int, tokens: int) -> jc.Item:
+        it = _item(f"src:0@{a}-{a + 9}", "tool", f"segment at {a}", turn=turn, tokens=tokens)
+        return jc.Item(it.id, it.kind, it.text, it.tokens, it.ts, it.turn, protected=True)
+
+    items = [
+        _protected_seg(1, 0, 5000),
+        _protected_seg(11, 1, 100),
+        _item("o1:0", "tool", "other result one", turn=2, tokens=100),
+    ]
+    scores = {
+        "src:0@1-10": jc.Scores(relevance=1.0, decision=1.0, oversized=True, kept=False,
+                                 decision_passed=False),
+        "src:0@11-20": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                                  decision_passed=False),
+        "o1:0": jc.Scores(relevance=0.7, decision=0.0, oversized=False, kept=True,
+                           decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=150,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
+    assert "-- tool src:0@11-20 --" in doc
+    assert "-- tool o1:0 --" not in doc
+    assert "-- tool src:0@1-10 --" not in doc  # oversized: never inlined
 
 
 def test_compose_with_many_segmented_items_stays_under_max_bytes(tmp_path: Path) -> None:
@@ -1417,9 +1647,13 @@ def test_every_pointer_in_compose_output_parses_and_count_matches_elided_shown()
     pointer `compose()` emits must round-trip through `pipeline.find_pointers` -- proving the
     escaping is correct, not just "looks right" by eye. The parsed count must equal the
     number of elided pointer LINES actually shown (the capped list, not every elided item --
-    `compose()` caps at `_MAX_ELIDED_POINTERS`)."""
+    `compose()` caps at `_MAX_ELIDED_POINTERS`).
+
+    kind="assistant", not "user" (TRDD-RAEGS1D5, jev newest+3): decouples this from the
+    newest-owner-item guarantee, same reasoning as the pointer-cap test above.
+    """
     n = jc._MAX_ELIDED_POINTERS + 5
-    items = [_item(f"e{i}:0", "user", f"text {i}", turn=i, tokens=10) for i in range(n)]
+    items = [_item(f"e{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(n)]
     scores = {
         it.id: jc.Scores(relevance=(i / n), decision=0.0, oversized=False, kept=False,
                           decision_passed=False)
@@ -1438,9 +1672,14 @@ def test_pointer_summary_escapes_quotes_and_backslashes_and_round_trips() -> Non
     """Card 5: the local pointer literal this replaced had no escaping at all -- a `"` or
     `\\` in an item's first line produced a pointer `pipeline.parse_pointer` could not parse
     back. Prove the round trip: format, then parse, and the summary comes back byte-identical
-    to the original first line."""
+    to the original first line.
+
+    kind="assistant", not "user" (TRDD-RAEGS1D5, jev newest+3): the sole newest owner item
+    would otherwise be force-admitted as kept rather than elided -- this test is about the
+    pointer's escaping/round-trip, not ownership.
+    """
     first_line = 'said "always use \\tabs\\", never spaces'
-    items = [_item("q:0", "user", first_line + "\nmore text", turn=0)]
+    items = [_item("q:0", "assistant", first_line + "\nmore text", turn=0)]
     scores = {"q:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
                                 decision_passed=False)}
     doc = jc.compose(items, scores, budget_tokens=8000,
@@ -1479,8 +1718,13 @@ def test_segment_pointer_is_unparseable_by_pipeline_find_pointers() -> None:
 
 def test_pointer_summary_skips_a_leading_blank_line() -> None:
     """Card 5: the summary is the first NON-EMPTY line (was: the first line, blank or not --
-    a leading blank line used to produce an empty preview)."""
-    items = [_item("b:0", "user", "\n\n   \nreal first content", turn=0)]
+    a leading blank line used to produce an empty preview).
+
+    kind="assistant", not "user" (TRDD-RAEGS1D5, jev newest+3): same reasoning as the two
+    pointer-format tests above -- the sole newest owner item would otherwise be guaranteed a
+    kept slot instead of appearing as a pointer.
+    """
+    items = [_item("b:0", "assistant", "\n\n   \nreal first content", turn=0)]
     scores = {"b:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
                                 decision_passed=False)}
     doc = jc.compose(items, scores, budget_tokens=8000,
@@ -1684,6 +1928,56 @@ def test_inject_mode_owner_share_capped_and_nonuser_items_survive() -> None:
     # (4) non-user items are no longer crowded out.
     tool_headers = [line for line in doc.splitlines() if line.startswith("-- tool t")]
     assert len(tool_headers) >= 3, f"expected >=3 tool items, got {len(tool_headers)}"
+
+
+def test_non_owner_item_bytes_caps_non_owner_items_smaller_than_owner_items() -> None:
+    # TRDD-RAEGS1D5 (jev newest+3, task 2): `non_owner_item_bytes`, when given alongside
+    # `max_item_bytes`, caps ONLY items whose `kind != "user"` -- an owner item beyond the
+    # guaranteed slot still uses the general (bigger) `max_item_bytes`, unaffected by the
+    # smaller non-owner cap. "owner2:0" (an owner item, NOT the guaranteed newest) proves the
+    # former; "tool:0" proves the latter.
+    owner_text = "o" * 600
+    tool_text = "t" * 600
+    items = [
+        _item("newest:0", "user", "hi", turn=10, tokens=10),
+        _item("owner2:0", "user", owner_text, turn=1, tokens=10),
+        _item("tool:0", "tool", tool_text, turn=0, tokens=10),
+    ]
+    scores = {
+        "newest:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                               decision_passed=False),
+        "owner2:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                               decision_passed=False),
+        "tool:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                             decision_passed=False),
+    }
+    doc = jc.compose(
+        items, scores, budget_tokens=8000,
+        header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+        max_item_bytes=500, non_owner_item_bytes=100,
+    )
+    assert owner_text[:500] in doc     # owner item: the general 500-byte cap applies
+    assert tool_text[:500] not in doc  # tool item would fit whole at 500...
+    assert tool_text[:100] in doc      # ...but only gets the smaller 100-byte non-owner cap
+    assert tool_text[:101] not in doc
+
+
+def test_non_owner_item_bytes_none_falls_back_to_max_item_bytes_for_every_caller() -> None:
+    # Backward compatibility: `non_owner_item_bytes` defaults to `None` -- every existing
+    # caller/test that never passes it (including `jev_compact.py`'s own `--out` full-copy
+    # render, which never sets `max_item_bytes` either) must render a non-owner item exactly
+    # as before this parameter existed.
+    tool_text = "t" * 600
+    items = [_item("tool:0", "tool", tool_text, turn=0, tokens=10)]
+    scores = {"tool:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                   decision_passed=False)}
+    doc = jc.compose(
+        items, scores, budget_tokens=8000,
+        header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+        max_item_bytes=500,
+    )
+    assert tool_text[:500] in doc
+    assert tool_text[:501] not in doc
 
 
 def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_injected_copy_is_unchanged() -> None:
