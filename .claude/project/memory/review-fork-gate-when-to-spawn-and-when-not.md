@@ -47,7 +47,7 @@ reviewing this card's prose" is not "stop reviewing". Do the fixes it names, the
 subject regardless of what a further review would say; rescoping to a different subject is
 legitimate and is not defiance.
 
-**A commit after the review fork re-arms the gate — commit first, then spawn the fork last.** [^1] [^2]
+**A commit after the review fork re-arms the gate — commit first, then spawn the fork last.** [^1] (overstated; corrected by [^2]) [^2]
 
 
 ^ATOM-D8ML-JZ6R [desc: "The corrected rule reduces to 'fork unless the turn is MECHANICAL or purely SUBTRACTIVE' — the exemption is small by construction, and its value is a checkable reason to decline, not a large saving", keywords: does_the_criterion_exempt_anything_at_all is_clause_c_too_broad what_turn_correctly_gets_no_fork fork_unless_mechanical_or_subtractive how_much_does_the_rule_actually_suppress can_I_decline_the_gate_honestly using_the_rule_as_a_rationalisation if_you_cannot_name_which_clause_fires examples_of_turns_needing_no_review the_criterion's_real_yield, ocd: 2026-09-05, lmd: 2026-09-05]

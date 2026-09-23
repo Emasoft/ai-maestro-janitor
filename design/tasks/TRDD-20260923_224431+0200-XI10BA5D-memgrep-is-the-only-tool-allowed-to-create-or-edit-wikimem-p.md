@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-24T00:14:53+0200
+updated: 2026-09-24T00:17:23+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -84,6 +84,7 @@ SUPERSEDED 2026-09-23: the "Proposed, not settled" staged-copy bullet above is r
 - Tests the steps must add: an id reused with new content; a dropped atom or lesson refused; a lesson renumbering is not a loss; an ocd change refused; a write through the USER-side symlink keeps the symlink; an introduced one-sided link refused; lint --fix over a page with an existing ERROR; the precheck regex and candidate discovery after the anchor field; set-mem-topic without a base hash refused; a prose-only page rewrite; migrate, split, merge and delete still pass under the batch-scoped id rule.
 A3 also (found 2026-09-24): update-mem-atom treats stdin as the new atom body whenever stdin is non-empty, even when only --desc or --keywords is passed; a worker piping a placeholder heredoc silently replaced an atom body (recovered from a pre-edit read). The id-set rule cannot see it (the id survives). Fix: the body is replaced only through an explicit --body-file or --body -, never implicitly from stdin; test it.
 A4 also (found 2026-09-24): update-mem-atom --lesson --supersedes accepts only a body atom id, so a wrong LESSON cannot be retired; the overstated review-gate lesson ATOM-4YHQ-4RO2 stays status valid beside its correction ATOM-D4IP-N3SM. Needs a verb or flag that marks a lesson superseded by another lesson.
+Release note (measured 2026-09-24, reports/memgrep-sole-writer/20260924_001402+0200-A1-followups.md): test_memory_content_precheck.py and unpinned production code resolve memgrep from PATH, which here is the stale ~/.cargo/bin build; test_memory_lint_gate_coverage.py pins the tree build; CI Tests has no memgrep build step and falls back to conftest on-demand cargo build. Before publish: install the new memgrep here (cargo install --path scripts/memgrep; the machine-wide scan found only the two held pages it would lock) so the gate tests the new binary; plugin users on other hosts get it only by rebuilding.
 
 ## Owner questions asked 2026-09-23 about 23:45, unanswered after 300 s; proceeding with the recommended default, owner may override
 
