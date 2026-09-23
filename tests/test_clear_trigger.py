@@ -752,3 +752,224 @@ def test_spawn_shrink_chain_transcript_path_defaults_to_none(tmp_path: Path, mon
 
     mod.spawn_shrink_chain(then=["/janitor-arm", "/janitor-resume"], directive="resume")
     assert captured["payload"]["transcript_path"] is None
+
+def test_spawn_shrink_chain_never_stamps_the_cooldown_itself(tmp_path: Path, monkeypatch) -> None:
+    """Regression fix (post-2f463d3b review): the PARENT `spawn_shrink_chain` must never stamp
+    the cooldown at spawn time -- only the CHILD, immediately before the verified Enter, may.
+    Spawning (with the default `count_toward_cooldown=True`) must leave the cooldown untouched."""
+    import time as _time
+
+    import cold_cache_compact
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    (tmp_path / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%9"})
+    monkeypatch.setattr(mod.terminal_trigger, "channel_is_readable", lambda t: True)
+    monkeypatch.setattr(mod, "_spawn_chain", lambda payload, *, env=None: None)
+
+    spawned, why = mod.spawn_shrink_chain(then=["/janitor-arm", "/janitor-resume"], directive="resume")
+    assert spawned, why
+
+    sd = tmp_path / ".janitor" / "state"
+    assert cold_cache_compact.clear_in_cooldown(sd, now=int(_time.time())) is False
+
+
+def test_spawn_shrink_chain_carries_count_toward_cooldown_into_the_payload(tmp_path: Path, monkeypatch) -> None:
+    """The flag must reach `_spawn_chain`'s payload dict so the CHILD can act on it -- this is
+    the seam the regression fix moved the stamp to."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    (tmp_path / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setattr(mod.terminal_trigger, "self_terminal", lambda env: {"kind": "tmux", "pane": "%9"})
+    monkeypatch.setattr(mod.terminal_trigger, "channel_is_readable", lambda t: True)
+
+    captured: dict = {}
+
+    def _fake_spawn(payload, *, env=None):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(mod, "_spawn_chain", _fake_spawn)
+
+    mod.spawn_shrink_chain(
+        then=["/janitor-arm", "/janitor-resume"], directive="resume", count_toward_cooldown=False,
+    )
+    assert captured["payload"]["count_toward_cooldown"] is False
+
+    mod.spawn_shrink_chain(then=["/janitor-arm", "/janitor-resume"], directive="resume")
+    assert captured["payload"]["count_toward_cooldown"] is True
+
+
+def _payload_with_cooldown_flag(tmp_path: Path, *, count_toward_cooldown: bool) -> str:
+    import base64
+    import json as _json
+
+    payload = {
+        "delay": 0.0,
+        "terminal": {"kind": "tmux"},
+        "first": "/clear",
+        "then": ["/janitor-arm", "/janitor-resume"],
+        "state_dir": str(tmp_path / ".janitor" / "state"),
+        "gate_baseline": 0,
+        "directive": "resume",
+        "count_toward_cooldown": count_toward_cooldown,
+    }
+    return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
+
+
+def test_completed_chain_with_cooldown_flag_stamps_at_verified_enter(tmp_path: Path, monkeypatch) -> None:
+    """The regression case, positive side: a chain that reaches `pre_submit_first` (the verified
+    Enter) with `count_toward_cooldown=True` in its payload leaves `clear_in_cooldown` True."""
+    import time as _time
+
+    import cold_cache_compact
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    mod._run_chain_payload(_payload_with_cooldown_flag(tmp_path, count_toward_cooldown=True))
+    captured["pre_submit_first"]()  # simulates reaching the verified Enter
+
+    sd = tmp_path / ".janitor" / "state"
+    assert cold_cache_compact.clear_in_cooldown(sd, now=int(_time.time())) is True
+
+
+
+def test_aborted_before_enter_chain_never_stamps_the_cooldown(tmp_path: Path, monkeypatch) -> None:
+    """The regression case, negative side: a chain that self-cancels BEFORE `pre_submit_first`
+    is ever called (recovery veto, busy-pane giveup, warm cache) must leave the cooldown
+    completely untouched -- a real clear must still be able to fire for the rest of the window."""
+    import time as _time
+
+    import cold_cache_compact
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    _no_agents_no_interrupt(monkeypatch)
+
+    mod._run_chain_payload(_payload_with_cooldown_flag(tmp_path, count_toward_cooldown=True))
+    # `pre_submit_first` deliberately NEVER called -- the chain aborted before the Enter.
+
+    sd = tmp_path / ".janitor" / "state"
+    assert cold_cache_compact.clear_in_cooldown(sd, now=int(_time.time())) is False
+
+
+def test_still_wanted_ignores_a_stale_rate_limit_flag_past_its_max_age(tmp_path: Path, monkeypatch) -> None:
+    """Lockout fix (post-2f463d3b review): `rate-limited.flag` is written on EVERY turn-ending
+    API error and nothing synchronous consumes it, so an orphaned flag older than the daemon's
+    own sweep window (`CLAUDE_PLUGIN_OPTION_RATE_LIMIT_FLAG_MAX_AGE_HOURS`, default 24h) must
+    stop vetoing here -- exactly when it stops mattering to the daemon's own sweep too."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+    stale_since = int(_time.time()) - (25 * 3600)  # 25h old, past the 24h default
+    (sd / "rate-limited-since.ts").write_text(str(stale_since), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+
+def test_still_wanted_still_vetoes_on_a_fresh_rate_limit_flag(tmp_path: Path, monkeypatch) -> None:
+    """The other side of the age bound: a flag well within its max age must still veto -- the
+    bound only releases a genuinely orphaned flag, never a live one."""
+    import time as _time
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+    fresh_since = int(_time.time()) - 60  # 1 minute old
+    (sd / "rate-limited-since.ts").write_text(str(fresh_since), encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "recovery pending" in why
+
+
+def test_persisted_done_is_set_before_the_flag_write_so_a_raise_cannot_self_veto(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Self-veto ordering fix (post-2f463d3b review): `persisted["done"]` must be True BEFORE
+    `_write_clear_marker` is attempted, not after -- so a chain whose write raises AFTER landing
+    the flag on disk can never mistake its OWN flag for someone else's unconsumed recovery on a
+    later `still_wanted` re-check."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    real_write_clear_marker = mod._write_clear_marker
+
+    def _write_then_raise(directive):
+        real_write_clear_marker(directive)  # the flag DOES land on disk
+        raise OSError("simulated crash right after the write")
+
+    monkeypatch.setattr(mod, "_write_clear_marker", _write_then_raise)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+    raised = False
+    try:
+        captured["pre_submit_first"]()
+    except OSError:
+        raised = True
+    assert raised, "expected the simulated OSError to propagate"
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+
+def test_still_wanted_is_stable_across_repeated_checks_until_the_flag_is_gone(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """No-loop guarantee: as long as a fresh recovery flag is on disk, repeated `still_wanted`
+    re-checks (simulating repeated Stop-hook fires while the flag is unconsumed) keep vetoing --
+    never flip to True by themselves. The moment the flag is consumed (unlinked, the way
+    dispatch.py's own resume phase does), the SAME check flips to True."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    sd = tmp_path / ".janitor" / "state"
+    sd.mkdir(parents=True)
+    (sd / mod.state.RATE_LIMITED_FLAG).write_text("1", encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    for _ in range(3):
+        ok, why = captured["still_wanted"]()
+        assert ok is False, why
+
+    (sd / mod.state.RATE_LIMITED_FLAG).unlink()  # consumed, the way dispatch.py's own phase does
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why

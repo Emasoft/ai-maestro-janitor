@@ -231,3 +231,51 @@ def test_undeliverable_does_not_invent_an_ack_file(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert proc.stdout.strip() == "NO_ITERM"
     assert not acked.exists(), "the rollback must not CREATE an ack that never existed"
+
+def test_shrink_reload_threads_this_sessions_transcript_when_resolvable(tmp_path: Path, monkeypatch) -> None:
+    """Owner addendum (post-2f463d3b review): a reload shrink types /clear and destroys context
+    exactly like a compaction, so the chain payload must carry THIS session's own transcript so
+    the fresh session's post-clear-compact hook can Jev-compact it -- not a bare pointer."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(mod.reload_shrink, "should_shrink", lambda *a, **kw: True)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(mod.clear_trigger, "session_transcript_path", lambda: transcript)
+
+    captured: dict = {}
+
+    def _fake_spawn(*, then, directive, delay, settle_between_s, transcript_path=None, count_toward_cooldown=True):
+        captured["transcript_path"] = transcript_path
+        captured["count_toward_cooldown"] = count_toward_cooldown
+        return True, "ok"
+
+    monkeypatch.setattr(mod.clear_trigger, "spawn_shrink_chain", _fake_spawn)
+    monkeypatch.setattr(sys, "argv", ["reload_trigger.py", "--shrink", "force"])
+
+    rc = mod.main()
+    assert rc == 0
+    assert captured["transcript_path"] == str(transcript)
+    assert captured["count_toward_cooldown"] is False
+
+
+def test_shrink_reload_passes_no_transcript_when_session_id_unresolvable(tmp_path: Path, monkeypatch) -> None:
+    """No `CLAUDE_CODE_SESSION_ID` (or no matching transcript on disk) -- must pass nothing
+    rather than guess at "the project's newest transcript"."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(mod.reload_shrink, "should_shrink", lambda *a, **kw: True)
+    monkeypatch.setattr(mod.clear_trigger, "session_transcript_path", lambda: None)
+
+    captured: dict = {}
+
+    def _fake_spawn(*, then, directive, delay, settle_between_s, transcript_path=None, count_toward_cooldown=True):
+        captured["transcript_path"] = transcript_path
+        return True, "ok"
+
+    monkeypatch.setattr(mod.clear_trigger, "spawn_shrink_chain", _fake_spawn)
+    monkeypatch.setattr(sys, "argv", ["reload_trigger.py", "--shrink", "force"])
+
+    rc = mod.main()
+    assert rc == 0
+    assert captured["transcript_path"] is None

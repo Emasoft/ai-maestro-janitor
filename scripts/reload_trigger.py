@@ -150,6 +150,13 @@ def main() -> int:
             directive=directive,
             delay=args.delay,
             settle_between_s=RELOAD_SETTLE_S,
+            # a reload shrink is not an automatic compaction; must not suppress a real one
+            count_toward_cooldown=False,
+            # Owner addendum (post-2f463d3b review): a reload shrink types /clear and destroys
+            # context exactly like a compaction, so the fresh session's post-clear-compact hook
+            # needs THIS session's own transcript to Jev-compact -- None (no CLAUDE_CODE_SESSION_ID
+            # resolvable, or no matching transcript on disk) writes no sidecar rather than guess.
+            transcript_path=str(clear_trigger.session_transcript_path() or "") or None,
         )
         if spawned:
             state.log_line(

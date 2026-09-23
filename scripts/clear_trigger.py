@@ -218,6 +218,37 @@ def _project_root() -> Path:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return Path.cwd()
 
+def session_transcript_path() -> Path | None:
+    """THIS session's own transcript, or None when the session is unknown.
+
+    Owner directive (post-2f463d3b review): a `/reload-plugins` shrink types `/clear` and
+    destroys the session's context exactly like a compaction does, but `reload_trigger.py` /
+    `reload_skills_trigger.py` never named a `transcript_path`, so the fresh session's
+    `on-session-start-post-clear-compact.py` hook had only a pointer to work from instead of
+    the actual pre-clear transcript to Jev-compact. Mirrors `dispatch.py::_session_transcript_path`
+    (do not re-derive the slug rule -- `memory_scopes.project_slug` is the ONE shared rule) but
+    lives here, not there, because BOTH reload triggers already import this module and neither
+    owns a copy of the slug logic.
+
+    `CLAUDE_CODE_SESSION_ID` is set by Claude Code in the session's own process environment and
+    inherited by any subprocess a Bash-tool call spawns -- both reload triggers run exactly that
+    way (module docstrings: "backing script for /janitor-reload-plugins|-skills", invoked from
+    the session's own pane). A cron-fired dispatch run has no such variable (TRDD-6P0KUSO9), so
+    like `dispatch.py`'s own version this fails open to None rather than guessing "the project's
+    newest transcript" -- a wrong transcript threaded into the sidecar would Jev-compact the
+    WRONG session's context into this one's resume.
+    """
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
+        return None
+    import memory_scopes  # noqa: PLC0415 -- lazy; scripts/lib is on path, same pattern as the file's other lib imports
+
+    path = (
+        Path.home() / ".claude" / "projects"
+        / memory_scopes.project_slug(str(_project_root())) / f"{session_id}.jsonl"
+    )
+    return path if path.is_file() else None
+
 
 def _atomic_write(target: Path, value: str) -> None:
     """Write atomically by rename (tmp + os.replace), so a crash mid-write can never
@@ -367,9 +398,18 @@ def _run_chain_payload(payload_b64: str) -> int:
         # main() used to write these before firing; once the child can defer for minutes, that
         # ordering resurrects issue #105 — a give-up would leave resume-after-clear.flag for a
         # /clear that never happened, and the next heartbeat would consume it.
+        #
+        # Self-veto ordering fix (TRDD-RAEGS1D5 addendum, post-2f463d3b review): flipped BEFORE
+        # the writes, not after. `_recovery_ok` below trusts `persisted["done"]` to mean "this
+        # chain instance is the one that just wrote resume-after-clear.flag, so don't treat that
+        # flag as someone else's unconsumed recovery." If a write raised partway (flag landed on
+        # disk, exception before the old post-write flip), `persisted["done"]` would stay False
+        # forever and the chain could veto its OWN later re-checks over its own flag. Flipping
+        # first means a partial write still counts as "mine" — the narrower failure (treating an
+        # aborted write as done) is strictly safer than the self-veto it replaces.
+        persisted["done"] = True
         _write_directive(directive)
         _write_clear_marker(directive)
-        persisted["done"] = True
         # TRDD-RAEGS1D5 card 5: when this chain payload NAMES a transcript (every automatic
         # trigger now threads one through — external_handoff_clear, the idle-clear nudge,
         # spawn_shrink_chain), persist a PER-PANE sidecar the fresh session's dedicated hook
@@ -412,6 +452,18 @@ def _run_chain_payload(payload_b64: str) -> int:
                 state.log_line("clear-trigger", f"clear landing at {tokens} tokens ({pct}% of window)")
         except Exception:  # noqa: BLE001 — telemetry must never block the verified Enter
             pass
+        # TRDD-RAEGS1D5 card 5 regression fix (post-2f463d3b review): stamped HERE, not by the
+        # parent `spawn_shrink_chain` at spawn time — this closure runs only immediately before
+        # the verified Enter, so a chain that self-cancels earlier (recovery pending, warm
+        # cache, user came back, busy-pane giveup) never reaches this line and never spends the
+        # cooldown window on a `/clear` that didn't land.
+        if data.get("count_toward_cooldown"):
+            try:
+                import cold_cache_compact  # noqa: PLC0415 -- lazy; scripts/lib is on path
+
+                cold_cache_compact.mark_clear_fired(sd, now=int(time.time()))
+            except Exception:  # noqa: BLE001 — the stamp is best-effort; never block /clear
+                pass
 
     def _clear_still_wanted() -> tuple[bool, str]:
         # Owner directive 2026-08-16: while the pane is busy (the user is typing), do NOT give
@@ -536,6 +588,44 @@ def _run_chain_payload(payload_b64: str) -> int:
                 return True, "no recovery pending"
         except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
             return True, "recovery probe unavailable — continuing"
+        # Lockout fix (TRDD-RAEGS1D5 addendum, post-2f463d3b review): `recovery_pending` treats
+        # any of the three flags below as pending at ANY age. `rate-limited.flag` is written on
+        # EVERY turn-ending API error (`on-stop-failure.py`) and nothing synchronous consumes it
+        # -- the daemon's own sweep runs on its own 24h cadence, not on this check's clock -- so
+        # an orphaned flag could veto every automatic `/clear` in the project indefinitely. Bound
+        # each flag by the SAME max-age dispatch.py already applies to it, so a flag stops
+        # vetoing here exactly when it stops mattering to dispatch.py too.
+        now_ts = int(time.time())
+
+        def _flag_fresh(flag: Path, since: Path, max_age_s: float) -> bool:
+            if not flag.is_file():
+                return False
+            return (now_ts - state.read_int_state(since, now_ts)) < max_age_s
+
+        def _env_seconds(var: str, default: float, *, hours: bool = False) -> float:
+            raw = os.environ.get(var, "").strip()
+            try:
+                value = float(raw) if raw else default
+            except ValueError:
+                value = default
+            return value * 3600 if hours else value
+
+        any_fresh = (
+            _flag_fresh(
+                sd / state.RATE_LIMITED_FLAG, sd / "rate-limited-since.ts",
+                _env_seconds("CLAUDE_PLUGIN_OPTION_RATE_LIMIT_FLAG_MAX_AGE_HOURS", 24, hours=True),
+            )
+            or _flag_fresh(
+                sd / "resume-after-compact.flag", sd / "resume-after-compact.ts",
+                _env_seconds("CLAUDE_PLUGIN_OPTION_COMPACT_RESUME_MAX_AGE_S", 86400),
+            )
+            or _flag_fresh(
+                sd / "resume-after-clear.flag", sd / "resume-after-clear.ts",
+                _env_seconds("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S", 86400),
+            )
+        )
+        if not any_fresh:
+            return True, "recovery flags present but all past their max age — treating as stale"
         if persisted["done"]:
             other_pending = (
                 (sd / state.RATE_LIMITED_FLAG).is_file()
@@ -665,7 +755,7 @@ def spawn_shrink_chain(
     delay: float = 2.0,
     settle_between_s: float = 0.0,
     transcript_path: str | None = None,
-    count_toward_cooldown: bool = False,
+    count_toward_cooldown: bool = True,
 ) -> tuple[bool, str]:
     """Run the verified `/clear` chain with a CALLER-SUPPLIED bootstrap. Returns (spawned, why).
 
@@ -683,7 +773,10 @@ def spawn_shrink_chain(
 
     Returns (False, why) when the pane cannot be read back; the caller must then fall back to
     its own non-shrinking path rather than clear blind — an unverifiable `/clear` is the one
-    unrecoverable command in this system.
+    unrecoverable command in this system. NOTE: "spawned" here means the CHILD was launched,
+    never that `/clear` actually landed — the chain can still self-cancel (busy pane timeout,
+    warm cache, user came back, recovery pending) before the verified Enter, which is exactly
+    why the cooldown stamp below is NOT applied here (see `count_toward_cooldown`).
 
     `transcript_path` (TRDD-11GAS4LC addendum): threaded into the detached child's env as
     `JANITOR_TRANSCRIPT_PATH`, the same seam `main()`'s `--transcript-path` uses. Without it
@@ -700,13 +793,24 @@ def spawn_shrink_chain(
     shrink-chain caller (idle nudge, the Stop-boundary clear, and the two reload triggers)
     funnels through, so it is the one shared site that can stamp the `cold_cache_compact`
     cooldown for all of them without duplicating the stamp call in each caller. Defaults to
-    False — most callers of THIS function are reload triggers, and a reload-shrink is not a
-    compaction the user is waiting out; stamping it would block a REAL clear from firing for
-    the rest of the cooldown window over a `/reload-plugins` that changed nothing about context
-    size. The two AUTOMATIC clear-firing callers (the idle nudge in dispatch.py, and the
-    Stop-boundary clear in hooks/on-stop-token-meter.py) pass `count_toward_cooldown=True`
-    explicitly — never inferred from `transcript_path`, which both of those callers also pass,
-    so it cannot double as the reload/clear discriminator.
+    True — a caller that forgets this kwarg is far more likely to be a real automatic
+    compaction (idle nudge, Stop-boundary clear) than a reload shrink, so a silent omission
+    must fail toward stamping the cooldown, never toward silently bypassing it. The two
+    reload triggers (`reload_trigger.py`, `reload_skills_trigger.py`) pass
+    `count_toward_cooldown=False` explicitly — a reload-shrink is not a compaction the user
+    is waiting out, and stamping it would block a REAL clear from firing for the rest of the
+    cooldown window over a `/reload-plugins` that changed nothing about context size.
+
+    Review finding (post-2f463d3b): the stamp used to fire HERE, right after the child was
+    spawned — before anything is verified. A chain that then self-cancels (recovery pending,
+    warm cache, user came back, busy-pane giveup) still spent the cooldown window with no
+    `/clear` ever landing, locking a REAL clear out until the window expired while the
+    harness's own ~95%-context auto-compact wins instead. The flag is therefore carried in
+    the payload (below) and stamped by the CHILD, inside `_persist_resume_state` — the one
+    callback `run_chained_inject` fires IMMEDIATELY before the verified Enter and nowhere
+    else — so an aborted-before-Enter chain never stamps at all. (The daemon's own `_fire`
+    path in `external_handoff_clear.py` is untouched: it stamps at spawn deliberately, per
+    the advisor's D12 spawn-storm reasoning, and is not a caller of this function.)
     """
     terminal = terminal_trigger.self_terminal(os.environ)
     if not terminal_trigger.channel_is_readable(terminal):
@@ -742,11 +846,10 @@ def spawn_shrink_chain(
         "directive": directive,
         "settle_between_s": settle_between_s,
         "transcript_path": transcript_path,
+        # TRDD-RAEGS1D5 card 5 regression fix: carried through so the CHILD can stamp the
+        # cooldown at the verified Enter instead of the parent stamping blind at spawn.
+        "count_toward_cooldown": count_toward_cooldown,
     }, env=chain_env)
-    if count_toward_cooldown:
-        import cold_cache_compact  # noqa: PLC0415 -- lazy; scripts/lib is on path
-
-        cold_cache_compact.mark_clear_fired(sd, now=int(time.time()))
     return True, "chain spawned"
 
 
