@@ -3,7 +3,7 @@ trdd-id: 91D2VHW3
 title: pre-compact handoff recent turns still include task notifications and command wrappers
 column: testing
 created: 2026-09-23T20:17:58+0200
-updated: 2026-09-23T21:11:38+0200
+updated: 2026-09-23T21:11:48+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -15,6 +15,7 @@ approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-23T20:17:58+0200
 derived: true
+parent-trdd: RAEGS1D5
 ---
 
 # pre-compact handoff recent turns still include task notifications and command wrappers
