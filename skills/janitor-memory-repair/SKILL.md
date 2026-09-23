@@ -15,8 +15,15 @@ distinction: [repair-background § Execution context and what this is](reference
 
 1. **No knowledge lost.** Every `[^N]` lesson and every fact survives byte-for-byte
    — the verifier proves it; you never reword or drop content during a repair.
-2. **Never edit a live page.** All edits happen on the STAGED copy; `commit
-   --op repair` applies atomically under the per-scope flock + stale-snapshot guard.
+2. **Never edit a live page — except through a locked memgrep verb, pre-transaction.**
+   Every fix goes on the STAGED copy; `commit --op repair` applies it atomically under
+   the per-scope flock + stale-snapshot guard. The sole exception: the two verb-covered
+   fixes (the one-sided link via `reference-mem-topic`, the atom `desc:` via
+   `update-mem-atom`) are each already an atomic, locked write on their own — those run
+   live, on the page directly, BEFORE `begin` (see [PRE-TRANSACTION verb
+   fixes](#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page) below).
+   Every other fix still goes through the staged copy; nothing runs on the live page
+   inside or after a staged-copy pass.
 3. **Single page, in place.** One write at the page's own path, ZERO deletes —
    moving a fact between pages is merge/split/conflict work, not repair.
 4. **`ocd` is immutable; `lmd` advances.** Never rewrite a page's creation date;
@@ -88,8 +95,11 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **Missing `## Notes and lessons learned`** → append the empty section.
 - **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
   search will use (findability — the page stays found by recall).
-- **A page's OWN one-sided link** → fix only the reciprocal on THIS page (the
-  librarian backfills others; repair is single-page).
+- **A page's OWN one-sided link** → a PRE-TRANSACTION fix, run live before `begin`
+  (details + `--base-sha256` and refusal handling in the section below): `memgrep
+  reference-mem-topic --page <this page> --to <target page>`. It wires both ends of
+  the `[[wikilink]]` in one locked write; repair is single-page, so only fix the
+  reciprocal FROM this page.
 - **Superseded atom above / without the `## Superseded` delimiter** (`memgrep lint`
   WARNs it): ensure a `## Superseded` section exists (exactly that spelling), after
   the live atoms and BEFORE `## Notes and lessons learned`, and MOVE each
@@ -99,7 +109,9 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **Atom `desc:` incomplete** (`verify_repair` refuses a repair that leaves one): every
   `^id [...]` atom marker needs a `desc:` that is PRESENT, ≤200 chars, QUOTED or an
   unquoted clean legacy slug (`[a-z0-9_]+` only). **Backfill by SUMMARIZING the atom's
-  own body** (rule 5: infer, never invent). Before trimming a `desc:`, check every cut
+  own body** (rule 5: infer, never invent), then apply it as a PRE-TRANSACTION fix,
+  run live before `begin` (details below): `memgrep update-mem-atom --page <page>
+  --atom <id> --desc "<text>"`. Before trimming a `desc:`, check every cut
   symptom/cause/name is already in that atom's `keywords:` — add it if not. Full
   grammar + incident: [repair-background § desc](references/repair-background.md#desc-trim-keyword-incident-747b8bef).
 
@@ -115,6 +127,28 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
 
 It re-arms when the page's bytes change, and after 7 days — a verdict with an expiry,
 not a permanent silence. `--reason` must let the next reader re-check it.
+
+## PRE-TRANSACTION verb fixes (run BEFORE `begin`, live, per candidate page)
+
+Two checklist fixes are already atomic, locked memgrep writes and are never part of the
+staged-copy pass — run whichever apply to the candidate page BEFORE
+`memory_txn_cli.py begin`, never inside the staged copy and never after `commit`:
+
+- the one-sided link: `memgrep reference-mem-topic --page <this page> --to <target page>
+  --base-sha256 <sha256 of the page as just read>`
+- the atom `desc:` backfill: `memgrep update-mem-atom --page <page> --atom <id>
+  --desc "<text>" --base-sha256 <sha256 of the page as just read>`
+
+Compute `--base-sha256` from the page as you just read it (`sha256sum <page> | cut -d'
+' -f1`) so a stale write refuses instead of clobbering a concurrent edit. **On refusal**
+(stale sha, or any other error): report the refusal and continue with whatever other
+fixes the page still needs — a refused pre-transaction fix is not a reason to skip the
+rest of the checklist, nor to abandon the staged-copy pass for this page.
+
+A page whose ONLY defects were these two verb-covered fixes needs no `begin`/`commit`
+at all — the pre-transaction step alone completed the repair. It still prints the normal
+per-page Output line and still closes the claim (`set-report` + `complete`), exactly as
+a page that went through the transaction core (see Output and Close the claim below).
 
 ## EXECUTE the repair THROUGH the transaction core
 
@@ -133,10 +167,14 @@ uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" commit "<scope_root>" <tx
 If the fix needed has no path through the txn core or a memgrep verb, ABSTAIN and report the
 gap — never hand-edit the live page.
 
-**On verify FAIL:** `commit` exits non-zero and self-aborts (live tree untouched).
-Fix the staged copy (restore a dropped lesson, reset a changed `ocd`, add a
-missing key) and re-commit. **Retry ≤3**; then `abort "<scope_root>" <txn_id>`
-and surface a finding.
+**On verify FAIL:** `commit` exits non-zero and self-aborts — the STAGED-COPY portion
+of the repair is discarded, the live tree untouched by it. A pre-transaction verb fix
+(link/desc) already landed before `begin` and is NOT rolled back by this abort; the
+page is left with that fix applied and its remaining defects still open, exactly as
+the [PRE-TRANSACTION verb fixes](#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page)
+section describes. Fix the staged copy (restore a dropped lesson, reset a changed
+`ocd`, add a missing key) and re-commit. **Retry ≤3**; then `abort "<scope_root>"
+<txn_id>` and surface a finding.
 
 Do NOT call `memory_settings.mark_ran` — the scheduler already stamped the cadence.
 
@@ -167,7 +205,9 @@ Boundary vs. write/consolidate/split/conflict:
 ## Close the claim (MANDATORY — a pass that returns without this leaves an orphaned claim)
 
 Report ends `<!-- janitor-outcome: mutation|noop -->`. `set-report` runs in the SAME Bash call
-that just wrote `$REPORT_FILE`; `complete` runs right after:
+that just wrote `$REPORT_FILE`; `complete` runs right after. This is unconditional: a pass whose
+only work was a pre-transaction verb fix (no `begin`/`commit` ever run) still prints its normal
+Output line, writes a report, and closes the claim exactly like any other pass.
 
 ```bash
 uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" set-report --state-dir "$STATE_DIR" "$REPORT_FILE"
