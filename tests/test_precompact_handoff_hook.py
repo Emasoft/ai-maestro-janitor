@@ -307,6 +307,66 @@ def test_hook_subprocess_writes_handoff(tmp_path: Path) -> None:
         assert "precompact-handoff.md" in emitted.get("systemMessage", "")
 
 
+def test_hook_subprocess_recent_conversation_resolves_transcript_roles_import(
+    tmp_path: Path,
+) -> None:
+    """Real subprocess run, BY PATH, as Claude Code invokes the hook (TRDD-91D2VHW3 follow-up).
+
+    In-process tests (`_hook()` via `importlib.util`) already have `scripts/` and
+    `scripts/lib/` on `sys.path` from THIS test file's own setup — they cannot see whether the
+    hook's module-top `import transcript_roles` actually resolves when the file is executed
+    as its own process, the way Claude Code runs it, with only `CLAUDE_PLUGIN_ROOT` on the
+    environment. This test proves (or disproves) exactly that: a real fixture transcript with
+    a human turn, run through `[sys.executable, _HOOK_PATH]` — the same subprocess shape as
+    `test_hook_subprocess_writes_handoff` above — and the human turn plus its reply must show
+    up in the written handoff's "Recent conversation" section. If the module-top import were
+    broken (the IDE's "transcript_roles is unknown import symbol" claim), the hook would raise
+    at import time and exit non-zero, and `handoff.exists()` would be False — either failure
+    mode is directly observable here, unlike in the in-process tests.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    _init_git_repo(project)
+
+    transcript = project / "transcript.jsonl"
+    _write_jsonl(transcript, [
+        _umsg("what is the current git status"),
+        _amsg("clean working tree, HEAD at the initial commit"),
+    ])
+
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(project),
+    }
+    payload = json.dumps(
+        {
+            "session_id": "sess-transcript-roles",
+            "cwd": str(project),
+            "transcript_path": str(transcript),
+            "trigger": "manual",
+            "hook_event_name": "PreCompact",
+        }
+    )
+    proc = subprocess.run(
+        [sys.executable, str(_HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert proc.returncode == 0, (
+        f"hook exited non-zero — the module-top transcript_roles import likely failed; "
+        f"stderr={proc.stderr!r}"
+    )
+    handoff = project / ".janitor" / "state" / "precompact-handoff.md"
+    assert handoff.exists(), f"handoff not written; stderr={proc.stderr!r}"
+    text = handoff.read_text(encoding="utf-8")
+    assert "what is the current git status" in text
+    assert "clean working tree, HEAD at the initial commit" in text
+
+
 def test_inflight_trdds_found_in_subdir_repo(tmp_path: Path) -> None:
     """REGRESSION (issue #267): design/tasks/ lives under the nested repo (git_root), not
     under $CLAUDE_PROJECT_DIR (project_root) — the common layout #66 fixed for the git
@@ -505,7 +565,15 @@ def test_extract_text_shapes() -> None:
 
 
 def test_recent_turns_filters_and_order(tmp_path: Path) -> None:
-    """Returns user+assistant TEXT turns newest-last; heartbeat / meta / tool / thinking excluded."""
+    """Returns user+assistant TEXT turns newest-last; heartbeat / meta / tool / thinking excluded.
+
+    The heartbeat PROMPT itself is dropped (not "human"-classified), but the assistant's own
+    substantive reply to it ("Clean — holding.") IS kept — orchestrator revision on
+    TRDD-91D2VHW3: an unattended, heartbeat-started turn is still real agent work, dropping it
+    would lose "what was the agent doing" (same choice card 2a made for
+    `external_clear.recent_messages`). Only a BARE heartbeat-protocol reply
+    (`transcript_roles.is_heartbeat_reply`) is dropped — see the dedicated test below.
+    """
     hook = _hook()
     tx = tmp_path / "t.jsonl"
     _write_jsonl(tx, [
@@ -514,7 +582,7 @@ def test_recent_turns_filters_and_order(tmp_path: Path) -> None:
         _tool_result_turn(),
         _thinking_turn(),
         _umsg("[janitor-heartbeat]\n/path/to/stub ... long cron prompt"),  # excluded
-        _amsg("Clean — holding."),
+        _amsg("Clean — holding."),  # kept — substantive reply to the heartbeat-started turn
         _umsg("second question", isMeta=True),  # meta excluded
         _umsg("third question"),
         _amsg("third answer"),
@@ -560,7 +628,13 @@ def test_recent_turns_excludes_local_command_stdout(tmp_path: Path) -> None:
 
 
 def test_recent_turns_excludes_command_message(tmp_path: Path) -> None:
-    """TRDD-91D2VHW3: a `<command-message>` wrapper is a slash-command echo, not human text."""
+    """TRDD-91D2VHW3: a `<command-message>` with no `<command-name>` is a non-human echo.
+
+    Narrowed per transcript_roles' own defect-1 carve-out: a `<command-message>` record that
+    ALSO carries `<command-name>` is a typed slash command (origin.kind "human" or absent) and
+    classifies "human", not "system" — this fixture has no `<command-name>`, so it stays the
+    generic wrapper case this test is pinning.
+    """
     hook = _hook()
     tx = tmp_path / "t.jsonl"
     _write_jsonl(tx, [
@@ -584,6 +658,90 @@ def test_recent_turns_keeps_human_message(tmp_path: Path) -> None:
     ])
     turns = hook._recent_turns(str(tx), n=5)
     assert turns == [("user", "fix the deploy script"), ("assistant", "done — deploy script fixed")]
+
+
+def test_recent_turns_drops_bare_heartbeat_reply_but_keeps_substantive_heartbeat_work(
+    tmp_path: Path,
+) -> None:
+    """Only the BARE `is_heartbeat_reply` text is dropped — real work in the same unattended
+    session (heartbeat-started or not) is kept, per the orchestrator's revision of this card:
+    an unattended session's heartbeat-started turns ARE the real work.
+    """
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("[janitor-heartbeat]\n/path/to/stub"),
+        _amsg("janitor heartbeat"),  # bare quiet reply — dropped
+        _umsg("[janitor-heartbeat]\n/path/to/stub"),
+        _amsg("janitor heartbeat\ndrift: OAuth slot 2 at 40%"),  # <=3 lines, still bare — dropped
+        _umsg("[janitor-heartbeat]\n/path/to/stub"),
+        _amsg("Reading the TRDD card and dispatching the fix agent."),  # real work — kept
+    ])
+    turns = hook._recent_turns(str(tx), n=10)
+    assert turns is not None
+    assert ("assistant", "janitor heartbeat") not in turns
+    assert not any(t.startswith("janitor heartbeat\ndrift") for _, t in turns)
+    assert ("assistant", "Reading the TRDD card and dispatching the fix agent.") in turns
+
+
+def test_recent_turns_drops_api_error_message(tmp_path: Path) -> None:
+    """An `isApiErrorMessage` assistant record is an error surface, not conversation — dropped
+    the same way `jev_compaction` and `external_clear` already skip it.
+    """
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("run the migration"),
+        {
+            "type": "assistant",
+            "isApiErrorMessage": True,
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "API Error: 529"}]},
+        },
+        _amsg("migration complete"),
+    ])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert all("API Error" not in t for _, t in turns)
+    assert ("assistant", "migration complete") in turns
+
+
+def test_recent_turns_seeks_back_for_human_message_older_than_tail_window(tmp_path: Path) -> None:
+    """The owner's last message, once, then ~3 MiB of heartbeat-only filler pushing it out of
+    the 2 MiB tail window (`_TAIL_BYTES`) entirely — TRDD-91D2VHW3 follow-up: the handoff must
+    still surface it, doubling the read window backward rather than losing it silently.
+    """
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    filler = [_umsg("[janitor-heartbeat]\n/path/to/stub"), _amsg("x" * 300_000)] * 10
+    _write_jsonl(tx, [
+        _umsg("what is the deploy password rotation policy"),
+        _amsg("check the runbook"),
+        *filler,
+    ])
+    assert tx.stat().st_size > hook._TAIL_BYTES  # the human turn really is outside the tail
+
+    turns = hook._recent_turns(str(tx))
+    assert turns is not None
+    older = turns[0]
+    assert "older" in older[0] and "user" in older[0]
+    assert older[1] == "what is the deploy password rotation policy"
+
+
+def test_recent_turns_no_human_message_anywhere_emits_explicit_placeholder(tmp_path: Path) -> None:
+    """No human message in the transcript at all (even after the backward seek) — an explicit
+    placeholder line replaces the silent gap, per the coordinator's TRDD-91D2VHW3 follow-up.
+    """
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("[janitor-heartbeat]\n/path/to/stub"),
+        _amsg("Clean — holding."),
+        _umsg("[janitor-heartbeat]\n/path/to/stub"),
+        _amsg("Dispatched the fix agent."),
+    ])
+    turns = hook._recent_turns(str(tx))
+    assert turns is not None
+    assert turns[0] == ("note", "(last owner message is older than the recent window)")
 
 
 def test_recent_turns_prepends_last_user_on_assistant_streak(tmp_path: Path) -> None:

@@ -65,6 +65,24 @@ import sys
 import time
 from pathlib import Path
 
+# TRDD-91D2VHW3 follow-up: `_recent_turns` needs the shared transcript-role classifier.
+# This hook has no OTHER module-top lib import to match (its one existing lib import,
+# `state`, is set up lazily inside `main()`), so this uses the repo's dual sys.path form
+# instead. `CLAUDE_PLUGIN_ROOT` is a process-start env var — set before Claude Code ever
+# runs this script, unlike the PreCompact payload (which needs stdin) — so it is safe to
+# read here, at module top, before `main()` runs. Deliberately NO try/except around the
+# import itself past the dual-form fallback: a packaging failure that leaves BOTH forms
+# unresolvable must raise and crash the hook loudly, not silently degrade `_recent_turns`
+# into "(recent conversation unavailable)" forever (fail-fast; a prior revision of this
+# hook caught the ImportError and returned None here, which hid exactly that failure).
+_plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+if _plugin_root:
+    sys.path.insert(0, str(Path(_plugin_root) / "scripts"))
+try:
+    from lib import transcript_roles as tr  # hook context: scripts/ on sys.path
+except ImportError:
+    import transcript_roles as tr  # type: ignore[no-redef]  # detector/test context: scripts/lib on sys.path
+
 # The stable, in-place handoff file the post-compaction turn must read first.
 HANDOFF_FILENAME = "precompact-handoff.md"
 
@@ -92,6 +110,11 @@ _TAIL_BYTES = 2_000_000    # scan the transcript TAIL (the log can be 100s of MB
                            #   turns are sparse — dwarfed by tool_result/assistant turns — so
                            #   the tail must be generous to contain the recent real exchange)
 _MAX_TURN_CHARS = 1500     # truncate each turn so the handoff stays bounded
+_MAX_BACKWARD_SEEK_BYTES = 16 * 1024 * 1024  # 16 MiB cap on `_seek_last_human_turn`'s
+                           #   doubling search for the owner's last message when the
+                           #   normal tail has none at all
+_MAX_BACKWARD_SEEK_SECONDS = 2.0  # wall-clock cap alongside the byte cap above — a byte
+                           #   budget alone doesn't bound wall time on a slow/network disk
 _MEM_RECENT_WINDOW_S = 86_400  # a memory page counts as "recently updated" within 24h
 _MEM_MAX_FILES = 8             # cap the recent-memory section
 _MEM_ATOMS_COLLAPSE = 5        # > this many atoms in one file → list the FILE, not the atoms
@@ -373,6 +396,117 @@ def _extract_text(content: object) -> str:
     return ""
 
 
+def _tail_lines(path: Path, size: int, tail_bytes: int) -> list[str] | None:
+    """The last `tail_bytes` of `path`, decoded and split into lines. None on any OSError.
+
+    Shared by `_recent_turns`'s normal tail read and its backward-seek extension below —
+    same seek/decode/drop-partial-first-line contract either way.
+    """
+    try:
+        with path.open("rb") as fh:
+            seeked = size > tail_bytes
+            if seeked:
+                fh.seek(size - tail_bytes)
+            raw = fh.read()
+    except OSError:
+        return None
+    lines = raw.decode("utf-8", errors="replace").splitlines()
+    if seeked and lines:
+        lines = lines[1:]  # drop the probably-partial first line after the tail seek
+    return lines
+
+
+def _extract_turns(lines: list[str]) -> list[tuple[str, str]]:
+    """Parse transcript JSONL `lines` into (role, text) conversation turns, oldest-first.
+
+    TRDD-91D2VHW3 (card 2b): the old isMeta/isSidechain/isCompactSummary + heartbeat-prefix
+    filter let OTHER `type: "user"` record classes through unfiltered — a task-notification
+    or a `<local-command-stdout>`/`<command-message>` wrapper was kept and rendered into the
+    handoff as if the human had typed it. Route every record through the one shared
+    classifier instead of re-deriving the same rules here (the whole point of card 1's
+    `transcript_roles` module: one classification, reused everywhere) — `tr` is the
+    module-top import; NOT re-imported here (a function-local try/except around the same
+    import would just re-hide the same packaging failure that follow-up removed).
+
+    Orchestrator revision on this card: do NOT restrict assistant text to human-started
+    turns. In an unattended session a heartbeat-started turn IS the real work (dispatches,
+    fixes, edits) — dropping it loses "what was the agent doing", which is what card 2a
+    (`external_clear.recent_messages`) already decided too. So the USER side still keeps
+    only "human"-classified records (task-notification/command-wrapper/heartbeat noise
+    dropped), but the ASSISTANT side keeps every substantive reply regardless of what
+    preceded it — only the bare heartbeat-protocol reply (`is_heartbeat_reply`) and an
+    `isApiErrorMessage` record (an error surface, not conversation — same field jev_compaction
+    and external_clear already skip on) are dropped.
+    """
+    turns: list[tuple[str, str]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        rec_type = obj.get("type")
+        if rec_type not in ("user", "assistant"):
+            continue
+        role_class = tr.classify_record(obj)
+        if role_class == "skip":
+            continue
+        if rec_type == "user" and role_class != "human":
+            continue  # not real human conversation (notification/system/peer)
+        if rec_type == "assistant" and obj.get("isApiErrorMessage"):
+            continue  # an error surface, not conversation
+        message = obj.get("message")
+        role = str((message.get("role") if isinstance(message, dict) else None) or rec_type or "")
+        content = message.get("content") if isinstance(message, dict) else obj.get("content")
+        text = _extract_text(content).strip()
+        if not text:
+            continue  # pure tool_use / tool_result / thinking turn — no conversation
+        if rec_type == "assistant" and tr.is_heartbeat_reply(text):
+            continue  # the bare "janitor heartbeat" protocol reply — noise, not conversation
+        turns.append((role, text))
+    return turns
+
+
+def _seek_last_human_turn(path: Path, size: int, already_read_bytes: int) -> tuple[str, str] | None:
+    """The owner's most recent message OLDER than the already-read tail, or None.
+
+    Coordinator follow-up on TRDD-91D2VHW3: the handoff must always carry the owner's last
+    human message — an all-heartbeat/all-notification tail (a long unattended stretch) must
+    not silently lose it. Doubles the read window from `already_read_bytes` up to
+    `_MAX_BACKWARD_SEEK_BYTES` (or the whole file), re-parsing each larger window from
+    scratch (simplest-correct: this path only runs when the FIRST tail had zero human turns
+    at all — rare). Returns the LAST human turn found in the biggest window read, since that
+    is the one closest to (newest relative to) the already-read tail — i.e. still the most
+    recent thing the owner said.
+
+    Review finding on this card: the byte cap alone does not keep this "never break a
+    compaction" — a heartbeat-only session firing for days packs a 16 MiB window with tens
+    of thousands of tiny JSON lines, RE-PARSED from scratch on every doubling, and a slow or
+    network-mounted project dir turns that into real wall-clock risk with no ceiling. So this
+    is ALSO wall-clock bounded (`_MAX_BACKWARD_SEEK_SECONDS`), on top of the byte cap — an
+    elapsed-time check between doublings, same fail-open shape as everywhere else in this
+    hook: give up and return None (the caller falls back to the explicit placeholder line)
+    rather than risk delaying the compaction itself.
+    """
+    started = time.monotonic()
+    budget = already_read_bytes
+    while budget < min(_MAX_BACKWARD_SEEK_BYTES, size):
+        if time.monotonic() - started > _MAX_BACKWARD_SEEK_SECONDS:
+            return None
+        budget = min(budget * 2, _MAX_BACKWARD_SEEK_BYTES, size)
+        lines = _tail_lines(path, size, budget)
+        if lines is None:
+            return None
+        humans = [t for t in _extract_turns(lines) if t[0] == "user"]
+        if humans:
+            return humans[-1]
+    return None
+
+
 def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str, str]] | None:
     """The last `n` GENUINE user/assistant TEXT turns from the session transcript.
 
@@ -390,6 +524,11 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
         command wrappers, `isMeta`/`isSidechain`/`isCompactSummary` turns — are dropped via
         `lib.transcript_roles.classify_record` (TRDD-91D2VHW3); pure tool_use / tool_result /
         thinking turns are filtered out too, so the `n` slots hold real exchange.
+      * If the tail carries NO human message at all, `_seek_last_human_turn` doubles the
+        read window (up to `_MAX_BACKWARD_SEEK_BYTES` or the file start) to find the
+        owner's last one and prepends it, clearly labeled as outside the recent window; if
+        even that finds nothing, an explicit placeholder line is prepended instead of a
+        silent gap — the handoff must never let "the owner's last ask" go missing quietly.
       * Each kept turn is truncated to `_MAX_TURN_CHARS`.
     Any failure (or nothing usable) returns None → the caller renders
     "(recent conversation unavailable)". Returns (role, text) newest-LAST.
@@ -399,67 +538,12 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
     path = Path(transcript_path)
     try:
         size = path.stat().st_size
-        with path.open("rb") as fh:
-            seeked = size > _TAIL_BYTES
-            if seeked:
-                fh.seek(size - _TAIL_BYTES)
-            raw = fh.read()
     except OSError:
         return None
-    lines = raw.decode("utf-8", errors="replace").splitlines()
-    if seeked and lines:
-        lines = lines[1:]  # drop the probably-partial first line after the tail seek
-
-    # TRDD-91D2VHW3 (card 2b): the old isMeta/isSidechain/isCompactSummary + heartbeat-prefix
-    # filter let OTHER `type: "user"` record classes through unfiltered — a task-notification
-    # or a `<local-command-stdout>`/`<command-message>` wrapper was kept and rendered into the
-    # handoff as if the human had typed it. Route every record through the one shared
-    # classifier instead of re-deriving the same rules here (the whole point of card 1's
-    # `transcript_roles` module: one classification, reused everywhere). Dual-form import —
-    # detector/test context puts `scripts/lib` on sys.path (bare `import transcript_roles`),
-    # the hook's own `main()` puts `scripts/` on sys.path first (`from lib import
-    # transcript_roles`) — same guard shape as `leanctx_allowlist._autoallow_enabled`.
-    # Review finding on this card: neither convention applying (an ImportError from BOTH
-    # attempts) must degrade to this function's own documented contract ("any failure
-    # returns None"), not propagate and rely on a caller's blanket except — `_build_handoff`
-    # happens to wrap this call today, but `_recent_turns` must stay self-contained.
-    try:
-        try:
-            from lib import transcript_roles as tr  # hook context: scripts/ on sys.path
-        except ImportError:
-            import transcript_roles as tr  # type: ignore[no-redef]  # detector/test context
-    except ImportError:
+    lines = _tail_lines(path, size, _TAIL_BYTES)
+    if lines is None:
         return None
-
-    turns: list[tuple[str, str]] = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(obj, dict):
-            continue
-        if obj.get("type") not in ("user", "assistant"):
-            continue
-        role_class = tr.classify_record(obj)
-        if role_class == "skip":
-            continue
-        # Only a "human"-classified USER record is real conversation; a notification/system/
-        # peer record is dropped. The assistant's own reply is kept whenever it isn't itself
-        # skip-classified — it is the answer to whatever human turn preceded it, not a second
-        # thing needing its own human/system split.
-        if obj.get("type") == "user" and role_class != "human":
-            continue
-        message = obj.get("message")
-        role = str((message.get("role") if isinstance(message, dict) else None) or obj.get("type") or "")
-        content = message.get("content") if isinstance(message, dict) else obj.get("content")
-        text = _extract_text(content).strip()
-        if not text:
-            continue  # pure tool_use / tool_result / thinking turn — no conversation
-        turns.append((role, text))
+    turns = _extract_turns(lines)
 
     if not turns:
         return None
@@ -471,8 +555,17 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
         last_user = next(
             (i for i in range(len(turns) - 1, -1, -1) if turns[i][0] == "user"), None
         )
-        if last_user is not None and last_user < len(turns) - n:
+        if last_user is not None:
             window = [turns[last_user], *window]
+        else:
+            # No human message anywhere in the already-read tail at all (an all-heartbeat/
+            # all-notification stretch) — seek further back before giving up on it.
+            extended = _seek_last_human_turn(path, size, min(_TAIL_BYTES, size))
+            if extended is not None:
+                role, text = extended
+                window = [(f"{role} (older — outside the recent window)", text), *window]
+            else:
+                window = [("note", "(last owner message is older than the recent window)"), *window]
     out: list[tuple[str, str]] = []
     for role, text in window:
         if len(text) > _MAX_TURN_CHARS:
