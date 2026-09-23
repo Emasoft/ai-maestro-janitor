@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: todo
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-23T22:56:03+0200
+updated: 2026-09-23T22:58:42+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -32,3 +32,8 @@ Owner directive 2026-09-23 (verbatim): "what? delete the part about the edit too
 - Owner: "atom over size : yes, warn only. but only up to a certain size. over a certain treshold that i let you decide, it should warn but also open a ticket with the janitor to lazily refactor the atom into 2 atoms."
 - Threshold chosen by us under that delegation: over the existing budget (MEMGREP_ATOM_MAX_CHARS, default 1,500 chars) memgrep warns and writes (unchanged); over 2x the budget (3,000 chars by default, derived from the same env value so they cannot drift) it warns, writes, and opens ONE janitor support ticket per atom (deduplicated on the atom id) asking the janitor to lazily split that atom into two atoms. Corpus distribution for reference: median 559, p90 1,241, p95 1,624 chars.
 - Owner: "why are you limiting the tickets per memgrep call? if a memgrep linting found 50 issues that cannot be autofixed with a wikipage, you open 50 tickets. simple." — So: NO per-call cap; every lint issue memgrep cannot auto-fix opens its own janitor ticket (not only oversized atoms). Kept, as ours: an issue that already has an OPEN ticket does not open a duplicate on the next run.
+
+## Review of d20574f0 (2026-09-23)
+
+- CONFIRMED contradiction: 5 skills still tell the agent to hand-edit the transaction staged copy while the rules now say memgrep only: janitor-memory-repair/SKILL.md:125+137, janitor-memory-atomize/SKILL.md:143, janitor-memory-harvest/SKILL.md:141, janitor-memory-retro-lesson/SKILL.md:103, janitor-memory-conflict/SKILL.md:132 (+ consolidate references/merge-protocol.md:311). Fix in the migration: the txn core stages the copy, the agent runs memgrep verbs ON the staged copy, commit verifies and swaps; a step with no verb ABSTAINS. janitor-memory-bootstrap Edit-tool steps target .gitignore, not a wikimem page: correct as is.
+- Release condition: no publish until memgrep has the whole-page replace verb, harvest CREATE and the staged-copy migration; until then a published build would make every page-editing chore abstain. Already covered by the owner release scope ("wait to complete all before publishing").
