@@ -367,6 +367,64 @@ def test_hook_subprocess_recent_conversation_resolves_transcript_roles_import(
     assert "clean working tree, HEAD at the initial commit" in text
 
 
+def test_hook_subprocess_survives_broken_transcript_roles_module(tmp_path: Path) -> None:
+    """Real subprocess run against a GENUINELY BROKEN `transcript_roles.py` — not a missing
+    one. Review finding on this card: `except ImportError` alone at the module-top import
+    would NOT catch a `SyntaxError` raised from a sibling module's own body (e.g. another
+    worker's concurrent, momentarily-invalid edit) — that would still crash the whole hook
+    uncaught, reproducing the exact "lose the whole handoff" bug this fix exists to close.
+    Widened to `except Exception`; this proves it against a REAL `SyntaxError`, not a
+    monkeypatched flag (the in-process tests can only prove the fallback RENDERING once the
+    flag is already set, not that the flag reliably gets set for every fault class).
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    _init_git_repo(project)
+
+    fake_plugin_root = tmp_path / "fake_plugin"
+    (fake_plugin_root / "scripts" / "lib").mkdir(parents=True)
+    (fake_plugin_root / "scripts" / "lib" / "__init__.py").write_text("", encoding="utf-8")
+    (fake_plugin_root / "scripts" / "lib" / "transcript_roles.py").write_text(
+        "def classify_record(entry):\n    this is not valid python at all\n",
+        encoding="utf-8",
+    )
+
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "CLAUDE_PLUGIN_ROOT": str(fake_plugin_root),
+        "CLAUDE_PROJECT_DIR": str(project),
+    }
+    payload = json.dumps(
+        {
+            "session_id": "sess-broken-transcript-roles",
+            "cwd": str(project),
+            "transcript_path": str(project / "transcript.jsonl"),
+            "trigger": "manual",
+            "hook_event_name": "PreCompact",
+        }
+    )
+    proc = subprocess.run(
+        [sys.executable, str(_HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert proc.returncode == 0, (
+        f"a broken sibling module must degrade, not crash the whole hook; stderr={proc.stderr!r}"
+    )
+    handoff = project / ".janitor" / "state" / "precompact-handoff.md"
+    assert handoff.exists(), f"handoff not written; stderr={proc.stderr!r}"
+    text = handoff.read_text(encoding="utf-8")
+    assert "# PreCompact ground-truth handoff" in text  # git/TRDD sections still intact
+    assert "## Git HEAD" in text
+    assert (
+        "(recent turns unavailable: transcript_roles import failed — plugin install broken)"
+        in text
+    )
+
+
 def test_inflight_trdds_found_in_subdir_repo(tmp_path: Path) -> None:
     """REGRESSION (issue #267): design/tasks/ lives under the nested repo (git_root), not
     under $CLAUDE_PROJECT_DIR (project_root) — the common layout #66 fixed for the git
@@ -660,6 +718,40 @@ def test_recent_turns_keeps_human_message(tmp_path: Path) -> None:
     assert turns == [("user", "fix the deploy script"), ("assistant", "done — deploy script fixed")]
 
 
+def test_import_failure_still_writes_handoff_with_explicit_line_and_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulated `transcript_roles` import failure (a broken plugin install) must not lose the
+    WHOLE handoff. Coordinator finding: a PreCompact hook exiting non-2 is a NON-BLOCKING
+    error (Claude Code hooks docs, "How hooks work" — compaction proceeds regardless, and
+    only stderr's first line is shown by default), so an uncaught module-top `ImportError`
+    would silently drop the ENTIRE handoff (git/TRDD sections too) for an owner not running
+    `--debug`. The git/TRDD sections must stay intact, the recent-turns section must render
+    one explicit line, and a janitor finding must land in the affected project's ledger so
+    the owner sees it without `--debug`.
+    """
+    hook = _hook()
+    monkeypatch.setattr(
+        hook, "_TRANSCRIPT_ROLES_IMPORT_ERROR", "No module named 'transcript_roles'"
+    )
+
+    handoff = hook._build_handoff(tmp_path, str(_PROJECT_ROOT), "manual")
+    assert "# PreCompact ground-truth handoff" in handoff  # rest of the handoff intact
+    assert "## Git HEAD" in handoff
+    assert "no in-flight TRDD found" in handoff
+    assert (
+        "(recent turns unavailable: transcript_roles import failed — plugin install broken)"
+        in handoff
+    )
+
+    ledger = tmp_path / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    assert ledger.exists(), "a janitor finding must be recorded so the owner sees it without --debug"
+    entries = [
+        json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    assert any(e.get("code") == "PRECOMPACT-TR-IMPORT" for e in entries)
+
+
 def test_recent_turns_drops_bare_heartbeat_reply_but_keeps_substantive_heartbeat_work(
     tmp_path: Path,
 ) -> None:
@@ -742,6 +834,30 @@ def test_recent_turns_no_human_message_anywhere_emits_explicit_placeholder(tmp_p
     turns = hook._recent_turns(str(tx))
     assert turns is not None
     assert turns[0] == ("note", "(last owner message is older than the recent window)")
+
+
+def test_recent_turns_seek_timeout_renders_distinct_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timeout mid-seek is NOT "nothing found" — coordinator finding: that would render a
+    FALSE claim (the message may still exist, just wasn't reached in time). Forces the
+    timeout deterministically (no real 2s wait) by dropping `_MAX_BACKWARD_SEEK_SECONDS`
+    below zero so the very first elapsed-time check in the loop already trips it.
+    """
+    hook = _hook()
+    monkeypatch.setattr(hook, "_MAX_BACKWARD_SEEK_SECONDS", -1.0)
+    tx = tmp_path / "t.jsonl"
+    filler = [_umsg("[janitor-heartbeat]\n/path/to/stub"), _amsg("x" * 300_000)] * 10
+    _write_jsonl(tx, [
+        _umsg("what is the deploy password rotation policy"),
+        _amsg("check the runbook"),
+        *filler,
+    ])
+    assert tx.stat().st_size > hook._TAIL_BYTES  # the seek path really does get exercised
+
+    turns = hook._recent_turns(str(tx))
+    assert turns is not None
+    assert turns[0] == ("note", "(search for the last owner message timed out)")
 
 
 def test_recent_turns_prepends_last_user_on_assistant_streak(tmp_path: Path) -> None:

@@ -64,24 +64,50 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 # TRDD-91D2VHW3 follow-up: `_recent_turns` needs the shared transcript-role classifier.
 # This hook has no OTHER module-top lib import to match (its one existing lib import,
 # `state`, is set up lazily inside `main()`), so this uses the repo's dual sys.path form
 # instead. `CLAUDE_PLUGIN_ROOT` is a process-start env var — set before Claude Code ever
 # runs this script, unlike the PreCompact payload (which needs stdin) — so it is safe to
-# read here, at module top, before `main()` runs. Deliberately NO try/except around the
-# import itself past the dual-form fallback: a packaging failure that leaves BOTH forms
-# unresolvable must raise and crash the hook loudly, not silently degrade `_recent_turns`
-# into "(recent conversation unavailable)" forever (fail-fast; a prior revision of this
-# hook caught the ImportError and returned None here, which hid exactly that failure).
+# read here, at module top, before `main()` runs.
+#
+# Coordinator correction: PreCompact hook exit codes are NON-BLOCKING for anything other
+# than exit 2 (Claude Code hooks docs, "How hooks work" / "Read input and return output":
+# a non-2 exit is "a non-blocking error" — compaction still proceeds; only the FIRST line
+# of stderr is shown by default, full stderr needs `--debug`/`/debug`). An UNCAUGHT fault
+# here would crash the whole module before `main()` ever runs — losing the ENTIRE handoff
+# (git HEAD, working tree, TRDD STATE blocks too, not just the transcript section) with only
+# a one-line stderr hint most owners never see. So this is caught, not raised: `tr` stays
+# `None` and `_TRANSCRIPT_ROLES_IMPORT_ERROR` records why, so the rest of the handoff still
+# gets written and the recent-turns section degrades to one explicit line instead of
+# silently vanishing — `_build_handoff` also records a janitor finding for it (see the
+# `findings_ledger.record` call there) so the owner sees the broken install without needing
+# `--debug`.
+#
+# Review finding on this card: `except ImportError` alone only defends against a MISSING
+# module — the actually-more-plausible trigger (another worker's concurrent edit leaving
+# `transcript_roles.py` momentarily syntactically broken, raising `SyntaxError`, or any
+# other fault from code executing in its module body) is NOT an `ImportError` and would
+# still crash the module uncaught, reproducing the exact bug this fix exists to close. So
+# the OUTER catch is `Exception`, not `ImportError` — matching the "never break a
+# compaction" invariant the rest of this file already applies uniformly (`_run_git`,
+# `_build_handoff`'s own `except Exception` around `_recent_turns`, etc.). The INNER
+# `except ImportError` stays narrow — it is the deliberate dual-form fallback between the
+# two sys.path conventions, not a fail-open guard.
 _plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
 if _plugin_root:
     sys.path.insert(0, str(Path(_plugin_root) / "scripts"))
+tr: Any = None
+_TRANSCRIPT_ROLES_IMPORT_ERROR: str | None = None
 try:
-    from lib import transcript_roles as tr  # hook context: scripts/ on sys.path
-except ImportError:
-    import transcript_roles as tr  # type: ignore[no-redef]  # detector/test context: scripts/lib on sys.path
+    try:
+        from lib import transcript_roles as tr  # hook context: scripts/ on sys.path
+    except ImportError:
+        import transcript_roles as tr  # type: ignore[no-redef]  # detector/test context: scripts/lib on sys.path
+except Exception as _exc:  # noqa: BLE001 - a sibling module-load fault must degrade, not crash
+    _TRANSCRIPT_ROLES_IMPORT_ERROR = str(_exc)
 
 # The stable, in-place handoff file the post-compaction turn must read first.
 HANDOFF_FILENAME = "precompact-handoff.md"
@@ -471,8 +497,21 @@ def _extract_turns(lines: list[str]) -> list[tuple[str, str]]:
     return turns
 
 
+class _SeekTimedOut(Exception):
+    """`_seek_last_human_turn`'s wall-clock budget expired before it could finish looking.
+
+    A DISTINCT outcome from "genuinely searched everything and found nothing" — coordinator
+    finding: conflating the two would render "(last owner message is older than the recent
+    window)" when the message might still exist further back, simply not reached in time.
+    That's a FALSE claim, not a degraded one, so it gets its own signal and its own line.
+    """
+
+
 def _seek_last_human_turn(path: Path, size: int, already_read_bytes: int) -> tuple[str, str] | None:
     """The owner's most recent message OLDER than the already-read tail, or None.
+
+    Raises `_SeekTimedOut` if the wall-clock budget expires first — the caller must render
+    that as "search timed out", never as "nothing found" (see `_SeekTimedOut`'s docstring).
 
     Coordinator follow-up on TRDD-91D2VHW3: the handoff must always carry the owner's last
     human message — an all-heartbeat/all-notification tail (a long unattended stretch) must
@@ -488,15 +527,16 @@ def _seek_last_human_turn(path: Path, size: int, already_read_bytes: int) -> tup
     of thousands of tiny JSON lines, RE-PARSED from scratch on every doubling, and a slow or
     network-mounted project dir turns that into real wall-clock risk with no ceiling. So this
     is ALSO wall-clock bounded (`_MAX_BACKWARD_SEEK_SECONDS`), on top of the byte cap — an
-    elapsed-time check between doublings, same fail-open shape as everywhere else in this
-    hook: give up and return None (the caller falls back to the explicit placeholder line)
-    rather than risk delaying the compaction itself.
+    elapsed-time check between doublings. Timing out is a fundamentally different outcome
+    from an exhaustive search finding nothing (see `_SeekTimedOut`), so it RAISES instead of
+    quietly returning `None` — the caller still never blocks on it, it just renders a
+    different, honest line.
     """
     started = time.monotonic()
     budget = already_read_bytes
     while budget < min(_MAX_BACKWARD_SEEK_BYTES, size):
         if time.monotonic() - started > _MAX_BACKWARD_SEEK_SECONDS:
-            return None
+            raise _SeekTimedOut
         budget = min(budget * 2, _MAX_BACKWARD_SEEK_BYTES, size)
         lines = _tail_lines(path, size, budget)
         if lines is None:
@@ -530,9 +570,18 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
         even that finds nothing, an explicit placeholder line is prepended instead of a
         silent gap — the handoff must never let "the owner's last ask" go missing quietly.
       * Each kept turn is truncated to `_MAX_TURN_CHARS`.
+      * If the module-top `transcript_roles` import failed, this renders ONE explicit line
+        naming the broken install instead of silently returning "(recent conversation
+        unavailable)" (indistinguishable from "no conversation happened") — the caller
+        (`_build_handoff`) also records a janitor finding for the same condition.
     Any failure (or nothing usable) returns None → the caller renders
     "(recent conversation unavailable)". Returns (role, text) newest-LAST.
     """
+    if _TRANSCRIPT_ROLES_IMPORT_ERROR is not None:
+        return [(
+            "note",
+            "(recent turns unavailable: transcript_roles import failed — plugin install broken)",
+        )]
     if not transcript_path:
         return None
     path = Path(transcript_path)
@@ -559,13 +608,22 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
             window = [turns[last_user], *window]
         else:
             # No human message anywhere in the already-read tail at all (an all-heartbeat/
-            # all-notification stretch) — seek further back before giving up on it.
-            extended = _seek_last_human_turn(path, size, min(_TAIL_BYTES, size))
-            if extended is not None:
-                role, text = extended
-                window = [(f"{role} (older — outside the recent window)", text), *window]
+            # all-notification stretch) — seek further back before giving up on it. A timeout
+            # is NOT "found nothing" (coordinator finding: that would render a FALSE claim —
+            # the message may still exist, just not reached in time) — its own line.
+            try:
+                extended = _seek_last_human_turn(path, size, min(_TAIL_BYTES, size))
+            except _SeekTimedOut:
+                window = [("note", "(search for the last owner message timed out)"), *window]
             else:
-                window = [("note", "(last owner message is older than the recent window)"), *window]
+                if extended is not None:
+                    role, text = extended
+                    window = [(f"{role} (older — outside the recent window)", text), *window]
+                else:
+                    window = [
+                        ("note", "(last owner message is older than the recent window)"),
+                        *window,
+                    ]
     out: list[tuple[str, str]] = []
     for role, text in window:
         if len(text) > _MAX_TURN_CHARS:
@@ -1031,6 +1089,44 @@ def _debounced(sd: Path, session_id: str, now: float) -> bool:
     return isinstance(data, dict) and data.get("session_id") == session_id
 
 
+def _record_transcript_roles_import_finding(project_root: Path) -> None:
+    """Best-effort: tell the owner the recent-turns section is degraded, without `--debug`.
+
+    Coordinator finding on this card: a PreCompact hook exiting non-2 is a NON-BLOCKING
+    error (Claude Code hooks docs, "How hooks work" — compaction proceeds regardless, and
+    only the FIRST line of stderr is shown by default; full stderr needs `--debug`/`/debug`).
+    So a raised `ImportError` was never going to surface reliably — this instead follows the
+    repo's existing findings-ledger convention (e.g. `on-stop-failure.py`'s
+    `findings_ledger.record(...)` calls) so the owner sees it in the ordinary heartbeat/
+    session-start findings surface, no `--debug` needed. `project_dir` is passed explicitly
+    (this hook already resolved it) rather than relying on the ledger's own cwd-based
+    default. Never raises — a finding-write fault must not affect the handoff it is
+    reporting on (same contract `findings_ledger.record` itself already documents).
+    """
+    try:
+        from lib import findings_ledger  # hook context: scripts/ on sys.path
+    except ImportError:
+        try:
+            import findings_ledger  # type: ignore[no-redef]  # detector/test context
+        except ImportError:
+            return
+    try:
+        findings_ledger.record(
+            sev="MEDIUM",
+            code="PRECOMPACT-TR-IMPORT",  # findings_ledger caps `code` at 24 chars — verified
+            src="pre-compact-handoff",
+            msg=(
+                "recent-turns section unavailable: transcript_roles import failed "
+                f"({_TRANSCRIPT_ROLES_IMPORT_ERROR}) — plugin install broken"
+            ),
+            ref=str(project_root),
+            project_dir=str(project_root),
+            now=int(time.time()),
+        )
+    except Exception:  # noqa: BLE001 - a finding-write fault must never affect the handoff
+        pass
+
+
 def _build_handoff(
     project_root: Path, plugin_root: str, trigger: str, transcript_path: str = "", cwd: str = ""
 ) -> str:
@@ -1121,6 +1217,8 @@ def _build_handoff(
         turns = _recent_turns(transcript_path)
     except Exception:  # noqa: BLE001 - a parser bug must never break the handoff
         turns = None
+    if _TRANSCRIPT_ROLES_IMPORT_ERROR is not None:
+        _record_transcript_roles_import_finding(project_root)
     out.append("")
     out.append(
         f"## Recent conversation (last {RECENT_TURNS} turns — VERBATIM transcript, not the summary)"
