@@ -84,6 +84,18 @@ in the now-removed `pipeline.py` — it is NOT available from this trimmed
 package. Whoever implements card 3 either re-vendors `pipeline.py` or defines
 an equivalent `Noul` locally; this is a known gap, not an oversight.
 
+**Superseded 2026-09-23 (TRDD-RAEGS1D5 card 4) — see "Re-vendored `segments.py`,
+`shadow.py`, `pipeline.py`" below.** `pipeline.py` (and its two dependencies
+`segments.py`/`shadow.py`) were re-vendored, so `RETRIEVE_QUESTION` (and
+`format_pointer`) are available again from `jevctx.pipeline`. `store.py`,
+`context.py`, `ledger.py` and `check.py` remain out of scope — reasons
+unchanged from the gap-analysis report (`reports/compaction-replacement/
+20260923_200805+0200-jev-reference-gap-analysis.md` §5): `store.py` would
+duplicate the transcript into a second store the project doesn't need,
+`context.py`/`ledger.py` assume an agent loop this project doesn't own, and
+`check.py` is a TypeSafe-only live-key smoke test this project's `probe`
+subcommand already covers for OpenRouter.
+
 `__init__.py`'s import list and `__all__` were trimmed to match (kept:
 `Batch`, `BudgetPlanner`, `HttpJevClient`, `RateLimiter`, `RetryPolicy`,
 `build_state`, `score_items`, `score_map`, `FakeJevClient`, `estimate_tokens`,
@@ -194,3 +206,70 @@ after a future re-vendor: grep each file for the symbol named below.
   couldn't see that from the union type. Added `assert isinstance(question,
   Noul)` immediately before `assert question.true == QUESTION.true` — the
   equality check itself is unchanged.
+
+## Re-vendored `segments.py`, `shadow.py`, `pipeline.py` (2026-09-23, TRDD-RAEGS1D5 card 4)
+
+Restores the lossless tool-output segmentation, decision-log calibration, and
+pointer/question-wording primitives that the 2026-09-22 trim (above) removed
+for card 3's narrower scope — the gap-analysis report
+(`reports/compaction-replacement/20260923_200805+0200-jev-reference-gap-analysis.md`
+§4 "What to vendor") recommends bringing them back once cards 5-7 need them.
+Same upstream commit `6d33376a759b95dc53b2169eed2cad32842036ca`, re-fetched
+into the session scratchpad (untouched since the original 2026-09-22 clone —
+diffed byte-for-byte before use). `store.py`, `context.py`, `ledger.py`,
+`check.py`, `demo.py`, `tools/`, `docs/` remain out of scope (unchanged
+reasons, see the superseding note in the section above and gap-analysis §5).
+
+- `segments.py`, `pipeline.py`: byte-identical to upstream — no patch needed.
+  Their import blocks were already grouped the way this project's `ruff
+  check --fix` (rule I001) wants (stdlib imports, one blank line, then the
+  `jevctx.*` imports with no blank line between them), unlike `jev.py`'s
+  `httpx`-then-`jevctx` block above, so nothing to remove here.
+- `shadow.py`: one patch, the same mypy fix already recorded above for the
+  pre-trim copy, re-applied verbatim — `_summarise`'s `by_action =
+  dict.fromkeys(_ACTIONS, 0)` (line 186) becomes `by_action: dict[str, int]
+  = dict.fromkeys(_ACTIONS, 0)`, for the identical reason: without the
+  annotation mypy infers the narrow `Literal[...]` key type from `_ACTIONS`
+  and then rejects indexing it with the plain-`str` `action` variable two
+  lines below.
+- `tests/jevctx/test_segments.py`, `tests/jevctx/test_shadow.py`: both got
+  the same one-line import-sort fix as every other kept test file (`ruff
+  check --fix`, rule I001) — the blank line between `import pytest` and the
+  following `from jevctx.<module> import ...` block is removed (pytest and
+  `jevctx.*` sort into the same "third-party" group under this project's
+  ruff config, same as `httpx`/`jevctx` in `jev.py` above).
+- `tests/jevctx/test_segments.py`, one additional pyright-only patch not
+  needed by any previously-kept test file: `Segment.line_span` is typed
+  `tuple[int, int] | None` in `types.py` (a segment built without one would
+  have none), but `segment()` always sets it for non-empty input — six call
+  sites (two direct-index asserts, an unpacking assignment, one more inside
+  a `zip` loop, and one inside an `all(...)` generator expression) triggered
+  pyright's `reportOptionalSubscript` / "None is not iterable" because it
+  cannot see that invariant across the `segment()` call boundary. Added one
+  local helper, `_span(seg: Segment) -> tuple[int, int]`, that asserts
+  `line_span is not None` and returns it, and routed every one of those call
+  sites through it instead of touching `.line_span` directly — same
+  assertions, same failure mode (an `AssertionError` instead of upstream's
+  implicit `TypeError` if the invariant were ever violated), just typed.
+  `test_shadow.py` needed no equivalent fix. Not reported upstream — a
+  local-only, test-only typing patch; re-vendoring a future commit should
+  re-check whether upstream's own type annotation on `line_span` narrowed by
+  then before re-applying `_span`.
+
+Acceptance, all from the repo root: `uv run pytest tests/jevctx -q
+-p no:cacheprovider` — 208 passed (the two upstream files' 65 tests plus the
+three already-kept files' tests, all unchanged in assertion); `uv run ruff
+check scripts/lib/jevctx tests/jevctx` clean; `uv run mypy scripts/lib/jevctx
+--ignore-missing-imports` clean; `uvx --with pyright pyright scripts/lib/jevctx
+tests/jevctx` clean; `uv run pytest tests/test_jev_boundary.py -q
+-p no:cacheprovider` — 2 passed unchanged (nothing in the automatic lane
+imports the newly-vendored modules).
+
+`__init__.py`'s import list and `__all__` were extended (not replaced) to
+re-export the three modules' public surface: `segment`, `detect_kind`,
+`find_trace_regions` from `segments`; `ShadowLog`, `ShadowStats`,
+`PREVIEW_CHARS` from `shadow`; `GateConfig`, `DEFAULT_GATE_CONFIG`,
+`AdmitResult`, `admit`, `retrieve`, `expand`, `reconstruct`,
+`format_pointer`, `parse_pointer`, `find_pointers`, `ADMIT_QUESTION`,
+`RETRIEVE_QUESTION`, `EXPAND_TOOL_SCHEMA` from `pipeline`. Everything kept
+from the 2026-09-22 trim is unchanged.
