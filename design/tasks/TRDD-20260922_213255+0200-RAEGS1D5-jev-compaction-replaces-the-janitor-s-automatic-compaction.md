@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-23T13:25:58+0200
+updated: 2026-09-23T19:56:59+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -108,3 +108,9 @@ No PRRD rule applies here (relevant-rules field left empty): checked prrdgrep's 
 
 > 1. Should the automatic Jev compaction take a lock? Is it only reading the jsonl file, so if the agent is cleared and stopped, it should not write anymore in a closed session file. it should not be needed.I recommend no lock. 2. Should the janitor use one pane id everywhere? why? the janitor runs in many different terminal tabs or tmux sessions, so it should be one tab for each claude code instance. sometimes the tab will split in two panes to show the browser pane preview of the artifacts, but thats it. why using more pane? only one janitor per claude code, unless you are referring to the janitor daemon doing global chores, like rotating oauth keys or maintainance stuff? or the ai-maestro agents? 3. Should an unrecognised Jev error stop pausing compaction for 30 minutes? no, absolutely. if jev is not working after 5 minutes retries, the llm-ext compaction function must be called as a fallback.
 > be sure to correctly understand the openrouter errors meaning and to retry accordingly for 5 minutes before falling back to llm-ext. but llm-ext must be used if jev is unavailable after 5 minutes.
+
+## Owner directives 2026-09-23 evening (verbatim)
+
+- > "the jev powered compaction is still not working" — cause found: the Jev commits were never released (v3.5.7 of 2026-09-17 carries no Jev code).
+- > "don't publish until you tested the compaction of jev on a true session jsonl file from projects" — first real run (4.69 MB transcript, HEAD tree): exit 0, 9.6 s, 70/364 items, $0.0135; defect found: user-role records with origin.kind task-notification are extracted as human messages and dominate the digest.
+- > "but most of the functions of the reference repo are still not implemented! https://github.com/Waxmell114514/jev-compaction" — reference modules absent from our vendored jevctx: pipeline, segments, store, context, check, ledger, shadow; a gap analysis is in progress and will drive the rework. No publish before it lands and the real-transcript test passes on the final tree.
