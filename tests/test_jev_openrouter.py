@@ -157,3 +157,26 @@ def test_retries_exhausted_on_transport_error_carries_no_status(monkeypatch: pyt
     assert getattr(excinfo.value, "status") is None
     assert "ConnectError" in getattr(excinfo.value, "cause")
     assert isinstance(excinfo.value.__cause__, httpx.ConnectError)
+
+
+
+@pytest.mark.parametrize("status_code", [402, 403])
+def test_402_403_raise_jev_auth_error_not_validation_error(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
+    """402 (insufficient credits) / 403 (forbidden -- bad key permissions, a guardrail
+    block, or a moderation flag) are non-retryable account/request states -- must raise
+    JevAuthError (not the catch-all JevValidationError) with no retry, so jev_compact.py
+    stamps kind="auth" instead of misreporting a Jev outage (TRDD-541CBN36)."""
+    monkeypatch.setenv(API_KEY_ENV, "or-key")
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["n"] += 1
+        return httpx.Response(status_code)
+
+    client = OpenRouterJevClient(
+        transport=httpx.MockTransport(handler), max_retries=1, sleep=lambda s: None
+    )
+    with pytest.raises(JevAuthError, match=str(status_code)):
+        client.ask(STATE, QUESTIONS)
+    client.close()
+    assert call_count["n"] == 1

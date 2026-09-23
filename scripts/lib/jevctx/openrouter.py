@@ -174,6 +174,18 @@ class OpenRouterJevClient:
                     return self._parse_response(response, questions)
                 if response.status_code == 401:
                     raise JevAuthError(_error_detail(response))
+                # 402 = insufficient credits; 403 = forbidden (bad key permissions, a
+                # guardrail block, or a moderation flag) -- OpenRouter's own error
+                # reference (openrouter.ai/docs/api-reference/errors). Neither is a
+                # malformed request (the 422 branch below) nor a Jev outage: both are
+                # non-retryable and need a human to act (top up credits, fix key
+                # permissions/guardrail config) or are specific to this request's
+                # content. JevAuthError is the one error kind jev_compact stamps
+                # human-facing and non-declining ("auth"); the catch-all
+                # JevValidationError below instead becomes kind="unavailable" --
+                # a 30-min compaction-decline outage stamp (TRDD-541CBN36).
+                if response.status_code in (402, 403):
+                    raise JevAuthError(f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}")
                 if response.status_code == 422:
                     raise JevValidationError(_error_detail(response))
                 if response.status_code == 429 or response.status_code >= 500:
