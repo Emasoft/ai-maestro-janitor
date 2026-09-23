@@ -1,9 +1,9 @@
 ---
 trdd-id: WY198OIP
 title: LOCAL TRDD scope root moves to project-root .claude local design per owner directive
-column: testing
+column: complete
 created: 2026-09-17T05:59:12+0200
-updated: 2026-09-17T08:33:22+0200
+updated: 2026-09-23T06:08:23+0200
 current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: refactor
@@ -47,6 +47,7 @@ directive explicitly says must stay separate.
 
 - 2026-09-17T05:59:12+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T06:05:46+0200 — column → testing by implementer. code + migration + tests landed, ruff/mypy/pyright clean, 134 targeted tests pass; remaining boxes (USER scope, bulk migration script) are explicit orchestrator-decided out-of-scope observations
+- 2026-09-23T06:08:23+0200 — COMPLETE by claude-main. LOCAL TRDD scope root migration shipped: commits 9b2ae804 + 9c5c8fb2, GH #303 closed; part of v3.5.6/v3.5.7.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
@@ -58,3 +59,13 @@ directive explicitly says must stay separate.
 2026-09-17T09:00:00+0200 — Follow-up 3 (4 review findings): (1) LEAK GUARD added — _new_root_would_leak() in on-session-start-trdd-state.py refuses+logs DRIFT when the project's git does not ignore .claude/local/design before moving (git check-ignore probe; outside-git or already-ignored proceeds); 2 new tests (refuse/proceed, real git init). (2) COST — _main_checkout_root already carried @lru_cache(maxsize=None) from follow-up 2; added test_main_checkout_root_is_memoized_per_project_dir asserting a 2nd call for the same project_dir spawns zero new git subprocesses. (3) EDGES — measured (not assumed) that a submodule's .git-file checkout makes git worktree list --porcelain report the internal gitdir (<super>/.git/modules/<name>) as the worktree path, NOT the submodule's real root — a genuine bug the assignment predicted; fixed in _main_checkout_root: a returned path containing a literal .git segment is now recovered via rev-parse --show-toplevel, keeping the LOCAL corpus inside the submodule. New test_local_design_root_of_a_submodule_stays_in_the_submodule (real git submodule fixture) proves it. (4) DOCS — rules/janitor-footprint.md's global-path table now notes LOCAL TRDD cards moved to <project-root>/.claude/local/design/, LOCAL memory unchanged. Also grepped every existing LOCAL corpus (~/.claude/projects/*/design/tasks/*.md) for an unblock-when: predicate citing the OLD absolute path — none found, nothing to fix. Gates: ruff/mypy/pyright clean on all 4 changed files; pytest tests/test_trdd_scopes.py tests/test_trdd_local_design_migration.py tests/test_trdd_common.py -q: 127 passed, 0 failed. git diff --summary HEAD shows no mode change (chmod 755 restored on the hook after fastedit). Card stays in testing; review-after set to 2026-09-24.
 2026-09-17T09:20:00+0200 — Follow-up 3 post-review: fixed leak-guard fail-open/fail-closed asymmetry (a failed check-ignore call, once inside a known repo, now refuses rather than silently proceeding) and added a mutation-resistant leak-guard test (full gitignore un-ignore chain, real git init) that a naive .gitignore-exists heuristic would fail. Disclosed not fixed: guard is point-in-time (no re-audit after migration if .gitignore later changes); submodule .git-in-path heuristic has no regression test against a hypothetical future git mis-reporting worktrees the same way. Gates re-run clean: ruff/mypy/pyright 0 issues, pytest 128/128 (was 127).
 2026-09-17T08:33:22+0200 — implementation-commits += 9c5c8fb2 — BUNDLED commit (git-lock guard on the LOCAL-design probes, pane-test narrowing, rules trim); see its subject.
+
+## Acceptance checklist
+
+retro-fitted 2026-09-23 from STATE and commits
+- [x] LOCAL TRDD scope root moved to <project-root>/.claude/local/design/, one-time SessionStart migration from old path, LOCAL memory untouched — evidence: scripts/lib/trdd_common.py local_design_root()/_migrate_local_design (commits landed pre-9b2ae804, bundled in 9c5c8fb2)
+- [x] migration refuses (DRIFT-logged) rather than leaking cards when the new root is not gitignored — evidence: commit 9b2ae804, _new_root_would_leak in on-session-start-trdd-state.py
+- [x] worktree/submodule resolution finds the repo's own root, not the superproject's, and is memoised per root — evidence: commit 9b2ae804, trdd_common._main_checkout_root
+- [x] read-only git probes set GIT_OPTIONAL_LOCKS=0 so a stale index.lock cannot wedge session start — evidence: commit 9c5c8fb2, tests/test_git_optional_locks_guard.py
+- [x] shipped rules corpus kept under the context-floor cap after the doc updates — evidence: commit 9c5c8fb2, test_shipped_rules_stay_under_the_context_floor_cap, 53,694 B
+- [x] GitHub issue #303 closed — evidence: gh issue view 303 --repo Emasoft/ai-maestro-janitor, state CLOSED

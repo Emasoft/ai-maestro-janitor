@@ -1,9 +1,9 @@
 ---
 trdd-id: RMX0IE72
 title: memgrep structural verbs refuse a page whose page-level lesson is uncited although lint rates that shape INFO
-column: testing
+column: complete
 created: 2026-09-17T05:53:43+0200
-updated: 2026-09-17T14:56:00+0200
+updated: 2026-09-23T06:08:08+0200
 current-owner: janitor-main-session
 created-by: emanuelesabetta
 task-type: bugfix
@@ -27,6 +27,7 @@ Symptom: memgrep split/merge/migrate/delete refuse any page carrying an uncited 
 - 2026-09-17T05:53:43+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-17T05:53:46+0200 — column → dev by board-drain-worker. starting implementation of #304 fix
 - 2026-09-17T05:54:06+0200 — column → testing by board-drain-worker. code + tests landed and green; remaining boxes are observations only
+- 2026-09-23T06:08:08+0200 — COMPLETE by claude-main. memgrep structural-verb fix shipped: commit 152e7ce3, spec WM-MIG-04 amended, GH #304 closed, 413 tests passing; part of v3.5.6/v3.5.7.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
@@ -46,3 +47,12 @@ Symptom: memgrep split/merge/migrate/delete refuse any page carrying an uncited 
 2026-09-17T08:30:50+0200 — Review disclosure (accepted/rejected, not silently dropped): adversarial review of the WM-MIG-04 reword flagged two code-reading assumptions to re-verify and one scope concern. Re-verified against the already-read compute_atom_delete source (mem_delete.rs:283-378): (a) `labels` is computed from `atom_text` = the deleted atom's OWN body slice only (lines[marker_idx..seg_end]), never the whole page — confirmed correct; (b) the still-cited check runs `referenced_labels(&candidate)` where `candidate` already has the deleted atom's lines removed, so it cannot self-trigger on the atom being deleted — confirmed correct. Both review concerns REJECTED as errors in the reword. Review's third point — embedding delete's CLI-specific refusal mechanics into WM-MIG-04 (a cross-verb guard clause) risks future-fragility if a later implementation silently pre-filters instead of bailing, and the new sentence 3 doesn't cross-reference --keep-lessons as the escape hatch for a shared lesson — is a legitimate scope-conflation/discoverability concern, ACCEPTED as valid but NOT reworked further in this pass: the task assignment explicitly mandated wording sentence 3 to match what the code does today rather than a vaguer implementation-agnostic phrasing, so this is the user's own specified terms, not this worker's choice. Flagging for whoever next touches WM-MIG-04: consider adding an explicit '(see WM-CLI-19 for --keep-lessons as the shared-lesson alternative)' pointer if the future-fragility risk materializes.
 2026-09-17T08:42:45+0200 — Chronology note: the L43 entry timestamped 2026-09-17T09:00:00+0200 is a MIS-STAMP — real wall-clock time at this writing is 08:42, so a 09:00 entry cannot already have existed; content and reasoning match a ~08:00 write, not 09:00. It is superseded by the following 08:28:48 line, which itself says 'SUPERSEDES the 09:00 line (premature — code not yet read)' — so physical line order at that point in the block does NOT track chronological order; read the 08:28:48 line as authoritative over the 09:00-stamped one despite appearing after it. Unrelated, same session: WM-MIG-04's sentence 1 (spec.md:1503) now carries its own --with-lessons exception clause instead of an unqualified MUST NOT, and sentence 3 is a pointer to WM-CLI-19's semantics rather than a second copy of its refusal mechanics, removing that drift surface. spec-version stays 2.3.0: this repairs the wording of the unreleased 2.3.0 edit before it ships (per-edit means per committed normative edit that ships, and this edit has not shipped).
 2026-09-17T10:34:37+0200 — VERSION POLICY RESOLVED (supersedes the 08:42 line's 'unreleased edit, no bump'): WM-VER-01 is applied per COMMITTED normative edit; 534b3fc1 added an exception clause to a MUST NOT, so spec-version 2.3.0 -> 2.4.0 (committed as 346f5cbd). S1 now points at WM-CLI-19 directly and S3 is deleted as redundant.
+
+## Acceptance checklist
+
+retro-fitted 2026-09-23 from STATE and commits
+- [x] footnote_integrity_violations flags only a dangling [^N] reference, not an uncited [^N]: definition — evidence: scripts/memgrep/src/memory.rs (commit 152e7ce3), fn ~4123-4165
+- [x] all 4 structural-verb call sites (split/merge/migrate/delete) have a direct regression test proving an uncited page-level lesson is allowed — evidence: mem_split.rs, mem_merge.rs, mem_delete.rs, memory.rs (commit 152e7ce3)
+- [x] spec clause WM-MIG-04 amended to match the fixed behavior — evidence: wikimem-memgrep-spec.md:1498 (specgrep show WM-MIG-04, current text)
+- [x] GitHub issue #304 closed — evidence: gh issue view 304 --repo Emasoft/ai-maestro-janitor, state CLOSED
+- [x] full memgrep test suite passes 0 failed — evidence: STATE block, cargo test 413 passed 0 failed

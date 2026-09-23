@@ -3,7 +3,7 @@ trdd-id: YONEH3XC
 title: TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
 column: testing
 created: 2026-09-17T20:12:13+0200
-updated: 2026-09-17T20:32:29+0200
+updated: 2026-09-23T06:08:31+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: docs
@@ -33,3 +33,9 @@ CPV's path rules do not flag a bare name (no home-path prefix) and every release
 Fix: for each of the nine cards, trddgrep set <id> <field> janitor-main-session --no-bump (mechanical repair, no fact change) on assignee/current-owner ONLY.
 Do NOT touch created-by or approval-judge — those are provenance (who mandated the card, who judged the approval), and rewriting them falsifies history the same way the card already refuses for approval-log lines. Do NOT touch the prose Approval log lines recording who approved a MANDATE (e.g. 'MANDATE issued by emanuelesabetta') — those are historical facts about who approved, not a field to normalize; the Approval log is append-only and exempt from terminal-column freezes.
 
+
+## Acceptance checklist
+
+retro-fitted from commit subjects; original criteria unreadable (no STATE block)
+- [ ] TRDD assignee/current-owner fields carry a session/role label instead of the owner's username — evidence: commit e1b0c532 (subject only, not verified against original criteria)
+- [ ] docs updated to reflect the new field convention — evidence: commits 898f640d, b7602496, 40814ce8 (subjects only, not verified against original criteria)

@@ -3,7 +3,7 @@ trdd-id: L64C5DQ1
 title: A test writes a cargo registry under the repo root and a hook diffing it orphans the git index lock
 column: testing
 created: 2026-09-17T19:21:45+0200
-updated: 2026-09-17T21:25:28+0200
+updated: 2026-09-23T06:08:33+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -41,3 +41,10 @@ CARGO_HOME must resolve under tmp_path or the session scratchpad, never the repo
 ## Acceptance
 
 A full `uv run pytest` run creates nothing under the repo root that `git status --short` would list.
+
+## Acceptance checklist
+
+retro-fitted from commit subjects; original criteria unreadable (no STATE block)
+- [ ] test no longer writes a cargo registry under the repo root — evidence: commit 04b360a6 (subject only, not verified against original criteria)
+- [ ] related hook/guard fix landed — evidence: commit 841b5ccf (subject only, not verified against original criteria)
+- [ ] follow-up fix landed — evidence: commit 49c7c240 (subject only, not verified against original criteria)

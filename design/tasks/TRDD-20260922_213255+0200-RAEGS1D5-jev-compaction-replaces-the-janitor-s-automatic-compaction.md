@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: todo
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-22T21:53:40+0200
+updated: 2026-09-23T06:09:10+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -87,6 +87,8 @@ commits per card with the WHY in the message.
 ## Approval log
 
 - 2026-09-22T21:32:55+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-23T06:08:54+0200 — column → dev by claude-main. Jev compaction work in progress: cards 1-4 landed (54ea73bc); post-clear injection fix and lease rename pending
+- 2026-09-23T06:09:10+0200 — column → todo by claude-main. revert: orchestrator correction — 541CBN36 still owns an open defect, do not unblock RAEGS1D5 yet
 
 ## Design
 

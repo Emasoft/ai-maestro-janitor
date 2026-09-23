@@ -3,7 +3,7 @@ trdd-id: 541CBN36
 title: Vendor jevctx and add the OpenRouter Jev provider and scorer CLI
 column: dev
 created: 2026-09-22T21:33:15+0200
-updated: 2026-09-22T21:44:04+0200
+updated: 2026-09-23T06:09:11+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -66,3 +66,5 @@ before card 3 implements the compacted-context builder.
 
 - 2026-09-22T21:33:15+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-22T21:44:04+0200 — column → dev. card 2 worker running 2026-09-22
+- 2026-09-23T06:08:54+0200 — column → testing by claude-main. vendored jevctx + OpenRouter Jev provider + scorer CLI landed: commits 4b8ba762, 0930d394, 54cebc4a; tests pyright-clean per orchestrator
+- 2026-09-23T06:09:11+0200 — column → dev by claude-main. revert: orchestrator correction — openrouter.py 402/403 mis-classification defect still open, not done
