@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-24T00:13:19+0200
+updated: 2026-09-24T00:14:53+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -83,6 +83,7 @@ SUPERSEDED 2026-09-23: the "Proposed, not settled" staged-copy bullet above is r
 - A4 deferred, with the owner told: --type, --prop and Notes-section backfill go through whole-page replace for now; atomize-in-place and reposition-into-Superseded likewise. The owner listed frontmatter, sections and notes as capabilities, so these are rebuilt as verbs if the owner wants them.
 - Tests the steps must add: an id reused with new content; a dropped atom or lesson refused; a lesson renumbering is not a loss; an ocd change refused; a write through the USER-side symlink keeps the symlink; an introduced one-sided link refused; lint --fix over a page with an existing ERROR; the precheck regex and candidate discovery after the anchor field; set-mem-topic without a base hash refused; a prose-only page rewrite; migrate, split, merge and delete still pass under the batch-scoped id rule.
 A3 also (found 2026-09-24): update-mem-atom treats stdin as the new atom body whenever stdin is non-empty, even when only --desc or --keywords is passed; a worker piping a placeholder heredoc silently replaced an atom body (recovered from a pre-edit read). The id-set rule cannot see it (the id survives). Fix: the body is replaced only through an explicit --body-file or --body -, never implicitly from stdin; test it.
+A4 also (found 2026-09-24): update-mem-atom --lesson --supersedes accepts only a body atom id, so a wrong LESSON cannot be retired; the overstated review-gate lesson ATOM-4YHQ-4RO2 stays status valid beside its correction ATOM-D4IP-N3SM. Needs a verb or flag that marks a lesson superseded by another lesson.
 
 ## Owner questions asked 2026-09-23 about 23:45, unanswered after 300 s; proceeding with the recommended default, owner may override
 
