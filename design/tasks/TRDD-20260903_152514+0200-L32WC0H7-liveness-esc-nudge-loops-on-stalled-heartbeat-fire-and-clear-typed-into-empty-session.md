@@ -1,9 +1,9 @@
 ---
 trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
-column: dev
+column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-22T21:53:23+0200
+updated: 2026-09-23T19:06:42+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -14,7 +14,7 @@ relevant-rules: []
 related-trdds: [UA4FAX67, WKTD5JTC, P7WU40G9, O7UCNNN2, G043V3V0, 9ZPU69UC]
 npt: []
 eht: []
-implementation-commits: [9cc22049]
+implementation-commits: [9cc22049, 5ae6b9b0, 09c33156, e74ead11, 02f13540, bc9f62b8, 7784344b]
 assignee: ai-maestro-janitor main session
 created-by: ai-maestro-janitor main session
 ---
@@ -23,7 +23,7 @@ created-by: ai-maestro-janitor main session
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-22
 
-- 2026-09-22 — card 1 of docs_dev/jev-compaction-spec.md is being implemented under this card (trigger + loop guards, recovery guard, iTerm timeout targeting).
+- 2026-09-23 — card 1 of docs_dev/jev-compaction-spec.md (trigger + loop guards, recovery guard, iTerm timeout targeting) LANDED on 2026-09-22 in 5ae6b9b0, 09c33156, e74ead11, 02f13540, bc9f62b8, 7784344b; the card is back at testing, awaiting only F5 (a real stalled fire recovering with a single nudge).
 - When card 1 lands, return this card to `testing` until F5 (one real stalled fire recovering with a single nudge) is observed in the field — that acceptance is unchanged.
 - **Prior thread (2026-09-17), still open:** F0–F6 are implemented; the card was HELD AT `testing` — NOT `complete` — because
   F5 and the six live acceptance criteria below need a real stalled fire on this host, which
@@ -296,5 +296,6 @@ Mechanism, verified in code + transcript:
 - 2026-09-16T12:33:53+0200 — column → todo. no session working it for 7-13 days while column claimed testing; re-columned honest (triage 2026-09-16)
 - 2026-09-17T05:54:34+0200 — column → testing by main session (owner standing permission 2026-09-03). F0-F6 code-complete and shipped in v3.4.14; F5 needs one real stalled-fire observation post-publish, cannot be manufactured.
 - 2026-09-22T21:44:04+0200 — column → dev. card 1 (trigger and loop guards) in progress 2026-09-22
+- 2026-09-23T19:06:42+0200 — column → testing. card 1 of the Jev spec landed 2026-09-22; only the F5 live stalled-fire observation remains, per this card's STATE
 
 ## Notes and lessons learned
