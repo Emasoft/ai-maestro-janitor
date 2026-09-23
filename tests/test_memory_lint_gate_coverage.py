@@ -177,6 +177,14 @@ _CODE_COVERAGE: dict[str, str | None] = {
     # deliberately not body-fence-aware for the same reason (see its own comment at the
     # `_footer_heading_line` twin).
     "page-unclosed-fence": None,
+    # Orphaned BY DESIGN (TRDD-XI10BA5D A1). `control-byte-in-page` is the retroactive half of
+    # the write-time guard `reject_control_bytes` — a page already corrupted with a raw C0/C1
+    # control byte BEFORE the guard existed. No chore precheck consumes it today: the owner's
+    # rule is refuse-and-report, never guess-and-strip (a control byte gives no way to recover
+    # what was meant), so there is nothing a scheduled chore could safely auto-fix. The
+    # ticket-opening pipeline that would eventually drain it (capability audit §10.4) is future
+    # work past this step; this row only has to be honest about today.
+    "control-byte-in-page": None,
 }
 
 _ALL_INTERVENTIONS = (
@@ -212,7 +220,8 @@ def test_classification_table_matches_the_source_exactly():
     # 32 -> 36: the four metadata-gate codes from 3461ef6d (atom-keywords-too-few/-duplicated,
     # page-description-too-few-phrases/-duplicated-phrases), classified ORPHANED pending the
     # `enrich` chore (TRDD-437UHNFS, owner's drain-then-install ruling) — see their row comment.
-    assert len(_CODE_COVERAGE) == 36
+    # 36 -> 37: `control-byte-in-page` (TRDD-XI10BA5D A1), classified ORPHANED — see its row.
+    assert len(_CODE_COVERAGE) == 37
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():

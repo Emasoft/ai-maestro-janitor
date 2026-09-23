@@ -2583,6 +2583,63 @@ pub(crate) fn read_page_for_write(page: &Path) -> Result<String> {
     })
 }
 
+/// Is `cp` one of the control code points a wikimem page must never contain? C0 controls
+/// (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F), DEL (0x7F), and the C1 range (U+0080-U+009F) — tab
+/// (0x09), LF (0x0A) and CR (0x0D) are the only control characters real prose legitimately
+/// carries, so they are excluded. Shared by the write gate (`reject_control_bytes`) and the
+/// `control-byte-in-page` lint check so the two can never disagree about what counts.
+fn is_forbidden_control(cp: u32) -> bool {
+    matches!(cp, 0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | 0x80..=0x9F)
+}
+
+/// Locate the FIRST forbidden control character in `text`: `(1-based line, 1-based column, byte
+/// offset, codepoint)`. `None` when `text` is clean. Column/line are counted in `char`s (not
+/// bytes) so a page with multi-byte UTF-8 content still gets an editor-meaningful position; the
+/// byte offset is reported separately because that is what a caller piping raw stdin bytes can
+/// most easily locate without re-decoding UTF-8 itself.
+fn find_control_byte(text: &str) -> Option<(usize, usize, usize, u32)> {
+    let mut line = 1usize;
+    let mut col = 1usize;
+    for (offset, ch) in text.char_indices() {
+        let cp = ch as u32;
+        if is_forbidden_control(cp) {
+            return Some((line, col, offset, cp));
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    None
+}
+
+/// Refuse `text` if it carries a raw control byte a wikimem page must never contain — the
+/// choke-point guard behind the owner's rule that memgrep never writes a malformed memory file.
+///
+/// Root cause (TRDD-XI10BA5D capability audit §5, live-reproduced): the two already-corrupted
+/// pages this rule exists to prevent a THIRD of (AgentlensPro, ghbook) got their raw `0x08`
+/// bytes because zsh's *builtin* `echo` expands a literal `\b` (backslash-b) in a caller's
+/// argument to an actual backspace byte when that argument is piped into memgrep's stdin —
+/// memgrep itself performs zero escape-decoding anywhere on its input path, so the byte simply
+/// passes straight through and lands on disk verbatim once written. Catching it only on stdin
+/// would miss `update-mem-topic --old-file/--new-file`, which reads raw bytes from a file and
+/// splices them into the page with no atom-aware check at all — so this check must run on every
+/// surface's FINAL content, not trust any one caller to have sanitised its own input.
+fn reject_control_bytes(text: &str) -> Result<()> {
+    if let Some((line, col, offset, cp)) = find_control_byte(text) {
+        anyhow::bail!(
+            "control byte 0x{cp:02X} at line {line}, column {col} (byte offset {offset}) — not \
+             tab/newline/CR. This usually comes from a shell echo/printf expanding an escape \
+             such as \\b to a literal control byte, or a JSON encode/decode round-trip \
+             unescaping one — pipe the text through a quoted heredoc or --file instead of \
+             echo/printf."
+        );
+    }
+    Ok(())
+}
+
 /// Raw tmp-then-rename write (unique tmp in the SAME dir, then rename) — the discipline the
 /// index-markdown writer (memory.rs) and the SQLite ledger (index.rs) already use, so a concurrent
 /// `recall`/reader never observes a half-written page. The tmp name carries the pid so parallel test
@@ -2590,6 +2647,14 @@ pub(crate) fn read_page_for_write(page: &Path) -> Result<String> {
 /// go through `atomic_write_page`, which brackets it with the `publish-globally:` normalization
 /// pass.
 fn write_page_bytes(dest: &Path, content: &str) -> Result<()> {
+    // The LOWEST point every writer (`atomic_write_page`'s real write AND
+    // `normalize_page_until_clean`'s own fix-writes) funnels through, so this is the one place a
+    // refusal guarantees NOTHING reaches disk — checked before the tmp file even exists, so a
+    // refusal here writes zero bytes anywhere, including the tmp name. Named to the page so the
+    // caller knows WHICH file was refused, not just that content somewhere was bad.
+    if let Err(e) = reject_control_bytes(content) {
+        anyhow::bail!("refusing to write {}: {e}", dest.display());
+    }
     let tmp = dest.with_extension(format!("md.tmp{}", std::process::id()));
     std::fs::write(&tmp, content).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -2683,7 +2748,22 @@ fn normalize_page_until_clean(dest: &Path) -> Result<u32> {
 /// loop finds the PRIOR call's AFTER loop already left the page clean and converges on iteration 1
 /// with zero writes, exactly the "no mtime churn on an already-normal page" contract.
 pub(crate) fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
-    normalize_page_until_clean(dest)?;
+    // BEFORE is SKIPPED, not run-and-swallowed, when `dest`'s CURRENT on-disk content already
+    // carries a control byte (TRDD-XI10BA5D A1 review finding). The BEFORE loop repairs a
+    // DIFFERENT field (`publish-globally:`) by writing back a modified copy of whatever is
+    // CURRENTLY on disk — on an already-corrupted page that copy still carries the byte, so
+    // `write_page_bytes` would refuse it for a reason that has nothing to do with the caller's
+    // own `content`. Left unhandled, that refusal propagates out of `atomic_write_page` via `?`
+    // BEFORE the caller's write (step 2) is even attempted — so a page with both defects could
+    // never be repaired through ANY write verb, including `update-mem-topic`, the one an
+    // operator would use to remove the byte in the first place: the repair attempt would die
+    // on this BEFORE pass before ever reaching the corrective `content`. Skipping (rather than
+    // blanket-swallowing every BEFORE error the way `lint_paths_with`'s fix loop does) keeps a
+    // genuine non-convergence bug on a CLEAN page failing exactly as loudly as before — only
+    // the "page already malformed" case is bypassed, and only for that reason.
+    if md::read_text(dest).is_none_or(|t| find_control_byte(&t).is_none()) {
+        normalize_page_until_clean(dest)?;
+    }
     write_page_bytes(dest, content)?;
     normalize_page_until_clean(dest)?;
     // Junk-symlink sweep (TRDD-RY0IJBJI). Deliberately OUTSIDE the per-page loop above: a stray
@@ -2805,6 +2885,14 @@ pub(crate) fn read_body_from_stdin() -> Result<String> {
     let body = body.trim_end().to_string();
     if body.trim().is_empty() {
         anyhow::bail!("empty body on stdin — pipe the atom's content, e.g. `echo 'the fact' | memgrep new-mem-atom …`");
+    }
+    // Checked here, on the RAW stdin body, in addition to `write_page_bytes`'s final-content
+    // check: this is the surface the owner's two already-corrupted pages actually came in
+    // through (an `echo … \b …` piped straight in), and reporting the offset IN THE STDIN BODY
+    // — rather than however far into the assembled page the atom ends up landing — is what lets
+    // a caller find the exact byte in the text they just typed.
+    if let Err(e) = reject_control_bytes(&body) {
+        anyhow::bail!("stdin body: {e}");
     }
     Ok(body)
 }
@@ -5244,7 +5332,7 @@ struct LintArgs {
 /// `memgrep lint <memdir>` — a DETERMINISTIC, heuristic-free structural lint of every note. Unlike
 /// the async `memory-librarian` heartbeat (which carries contradiction-detection false positives),
 /// this is pure structure, so it has NO false positives and is safe as a pre-commit / write-skill
-/// gate (issue #47). It enforces exactly three things, then exits NON-ZERO if ANY note violated one:
+/// gate (issue #47). It enforces these things, then exits NON-ZERO if ANY note violated one:
 ///
 ///   1. Footnote integrity — every in-body `[^N]` reference has a matching `[^N]:` definition under
 ///      `## Notes and lessons learned`, AND every `[^N]:` definition is actually referenced. We
@@ -5257,6 +5345,10 @@ struct LintArgs {
 ///   3. Required fields — frontmatter has `ocd`, `lmd`, `description`, AND the body contains a
 ///      `## Notes and lessons learned` section. We read the RAW frontmatter (not `read_note`, whose
 ///      `lmd` has an fs-mtime fallback that would mask a genuinely missing `lmd:` field).
+///   4. `control-byte-in-page` (TRDD-XI10BA5D A1) — no raw C0/C1 control byte anywhere in the page
+///      (tab/LF/CR excepted). This is the retroactive half of `reject_control_bytes`, the write-time
+///      guard: a page corrupted BEFORE the guard existed still needs to be findable by a whole-store
+///      lint, so this check runs here too, at the same ERROR severity, with no autofix.
 ///
 /// (No "MEMORY.md index coverage" check: the per-note index has been RETIRED into memgrep's own
 /// agent-invisible SQLite index. MEMORY.md belongs to the Claude Code harness — a separate system
@@ -6027,6 +6119,29 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
             continue; // unreadable file — collect_md found it but read failed; nothing to lint.
         };
         let p = rel(&path);
+
+        // Check — a raw control byte (TRDD-XI10BA5D A1). This is the retroactive half of
+        // `reject_control_bytes`: the write gate refuses a NEW control byte, but the two
+        // already-corrupted pages the owner reported predate the guard, so a whole-store
+        // `memgrep lint` must be able to find them too. ERROR uniformly (no looser lint-time
+        // floor, unlike the phrase-count checks below) — no corpus vintage legitimately
+        // contains a raw backspace byte. Never auto-fixed: stripping it would guess at intent
+        // the byte gives no way to recover, so this is report-only even under `fix = true`.
+        // The message carries only the location and the byte's hex value, NEVER a content
+        // snippet — a wikimem page can hold private material, and a lint finding is printed to
+        // plain stdout.
+        if let Some((line, _col, _offset, cp)) = find_control_byte(&text) {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                line,
+                format!(
+                    "raw control byte 0x{cp:02X} — not tab/newline/CR; cannot be auto-fixed \
+                     without guessing intent, must be removed by hand"
+                ),
+                "control-byte-in-page",
+            ));
+        }
 
         // Check 3 — required frontmatter fields. Read RAW frontmatter so a missing `lmd:` is NOT
         // masked by read_note's fs-mtime fallback. Accept the model's documented aliases
@@ -8455,6 +8570,105 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    // ── control-byte guard (TRDD-XI10BA5D A1) — pure-function boundary tests ────────────────
+
+    #[test]
+    fn find_control_byte_accepts_tab_lf_and_cr() {
+        assert!(find_control_byte("plain prose").is_none());
+        assert!(find_control_byte("a\ttab, a\nnewline, a\rcarriage return").is_none());
+    }
+
+    #[test]
+    fn find_control_byte_rejects_every_byte_in_the_forbidden_ranges() {
+        // 0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F: every C0 control except tab/LF/CR, plus DEL.
+        let forbidden: Vec<u32> = (0x00..=0x08)
+            .chain([0x0B, 0x0C])
+            .chain(0x0E..=0x1F)
+            .chain([0x7F])
+            .collect();
+        for cp in forbidden {
+            let ch = char::from_u32(cp).unwrap();
+            let text = format!("before{ch}after");
+            let found = find_control_byte(&text);
+            assert!(found.is_some(), "0x{cp:02X} must be flagged");
+            assert_eq!(found.unwrap().3, cp, "reports the exact codepoint for 0x{cp:02X}");
+        }
+        // The excepted three must NOT trip it.
+        for ch in ['\t', '\n', '\r'] {
+            assert!(find_control_byte(&format!("before{ch}after")).is_none());
+        }
+    }
+
+    #[test]
+    fn find_control_byte_rejects_the_c1_range() {
+        // U+0080-U+009F — reachable only as a real Unicode scalar in a `&str`, never as a raw
+        // continuation byte (those never stand alone in valid UTF-8).
+        for cp in 0x80u32..=0x9F {
+            let ch = char::from_u32(cp).unwrap();
+            let found = find_control_byte(&format!("x{ch}y"));
+            assert!(found.is_some(), "U+{cp:04X} must be flagged");
+            assert_eq!(found.unwrap().3, cp);
+        }
+        // One step outside the range on each side must be clean.
+        assert!(find_control_byte("x\u{007E}y").is_none()); // U+007E '~'
+        assert!(find_control_byte("x\u{00A0}y").is_none()); // U+00A0 NBSP, just past C1
+    }
+
+    #[test]
+    fn find_control_byte_reports_line_and_column_across_newlines() {
+        let text = "line one\nline two has a bad\u{0008}byte\nline three";
+        let (line, col, _offset, cp) = find_control_byte(text).expect("the backspace is found");
+        assert_eq!(cp, 0x08);
+        assert_eq!(line, 2, "the byte is on the second line");
+        // "line two has a bad" is 18 chars before the control byte, so column 19 (1-based).
+        assert_eq!(col, 19);
+    }
+
+    #[test]
+    fn reject_control_bytes_names_the_cause_and_the_position() {
+        let err = reject_control_bytes("clean text\u{0008}with a stray backspace")
+            .expect_err("a control byte must refuse");
+        let msg = err.to_string();
+        assert!(msg.contains("0x08"), "names the byte: {msg}");
+        assert!(msg.contains("line 1"), "names the line: {msg}");
+        assert!(msg.contains("column"), "names the column: {msg}");
+        assert!(msg.contains("byte offset"), "names the byte offset: {msg}");
+        assert!(
+            msg.to_lowercase().contains("echo") || msg.to_lowercase().contains("printf"),
+            "names the likely cause: {msg}"
+        );
+        assert!(reject_control_bytes("clean text, no control bytes here").is_ok());
+        assert!(reject_control_bytes("tab\t, newline\n, and cr\r all fine").is_ok());
+    }
+
+    /// Wired at the ACTUAL write primitive, not just the pure function: `write_page_bytes` is the
+    /// lowest point both `atomic_write_page` and `normalize_page_until_clean` funnel through, so
+    /// this is what proves "a refusal writes zero bytes" end to end — the page is byte-identical
+    /// after the refused call, and no tmp file (the `.md.tmp<pid>` `write_page_bytes` creates
+    /// before the rename) is left behind either, because the check runs BEFORE that file exists.
+    #[test]
+    fn write_page_bytes_refuses_a_control_byte_and_writes_nothing() {
+        let dir = edit_test_tmpdir("write-page-bytes-ctrlbyte");
+        let page = dir.join("p.md");
+        std::fs::write(&page, "original content, untouched").unwrap();
+        let before = std::fs::read(&page).unwrap();
+
+        let res = write_page_bytes(&page, "new content with a stray\u{0008}control byte");
+        let after = std::fs::read(&page).unwrap();
+        let leftover_tmp = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".tmp"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let err = res.expect_err("a control byte must refuse the write");
+        let msg = err.to_string();
+        assert!(msg.contains("p.md"), "names the page: {msg}");
+        assert_eq!(before, after, "zero bytes written on refusal — the page is byte-identical");
+        assert!(!leftover_tmp, "no tmp file must be created on refusal");
+    }
 
     // ── the tiered, keyphrase-aware scorer (WM-SCORE-04/05/06) ──────────────────────────────
     //
@@ -12770,6 +12984,44 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
         assert!(res.is_ok(), "{res:?}");
         assert!(content.contains("publish-globally: false"), "got: {content}");
+    }
+
+    /// TRDD-XI10BA5D A1 review finding: a page carrying BOTH a stray control byte AND
+    /// `publish-globally:` drift must still be repairable through `atomic_write_page` in ONE
+    /// call. Before the fix, the BEFORE normalization pass tried to write back a
+    /// publish-globally-fixed copy of the page's CURRENT (still control-byte-laden) content,
+    /// that write was refused by the control-byte guard, and the error propagated out of
+    /// `atomic_write_page` via `?` BEFORE the caller's own corrective write (removing the byte)
+    /// ever ran — so the one write that could have fixed the page never got the chance.
+    #[test]
+    fn atomic_write_page_repairs_a_page_carrying_both_a_control_byte_and_publish_globally_drift() {
+        const DOUBLY_CORRUPT: &str = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\n\
+             description: \"d\"\n---\nbo\u{0008}dy\n\n## Notes and lessons learned\n";
+        let (scope, page) = pubglobal_project_page("atomic-doubly-corrupt", DOUBLY_CORRUPT);
+        let user_root = edit_test_tmpdir("atomic-doubly-corrupt-user");
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        // The corrective write an operator's `update-mem-topic --old-file/--new-file` would
+        // produce: the SAME page, minus the control byte. `publish-globally:` is still missing
+        // here — fixing THAT is the AFTER pass's job, in this same call.
+        let res = atomic_write_page(&page, PUBGLOBAL_PAGE_MISSING);
+        let content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert!(res.is_ok(), "the corrective write must succeed, not be trapped by the BEFORE pass: {res:?}");
+        assert!(find_control_byte(&content).is_none(), "the control byte is gone: {content}");
+        assert!(
+            content.contains("publish-globally: false"),
+            "the AFTER pass still reconciles the OTHER defect in the same call: {content}"
+        );
     }
 
     #[test]

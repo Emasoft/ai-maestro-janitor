@@ -3696,3 +3696,156 @@ fn trdd_backlink_is_stamped_queryable_backfillable_and_optional() {
         "Some fact.",
     );
 }
+
+// ─────────────── control-byte guard (TRDD-XI10BA5D A1) ───────────────
+//
+// Root cause: zsh's builtin `echo` expands a literal `\b` (backslash-b) in an argument to a real
+// backspace byte (0x08) when that argument is piped into memgrep's stdin — memgrep never decodes
+// escapes itself, so the byte lands on disk verbatim once written. These tests reproduce the byte
+// directly as a Rust string escape (`\x08` — a valid ASCII byte escape, no shell involved) so the
+// assertion is attributable to memgrep alone, on every surface the owner named: the stdin body,
+// `update-mem-topic --new-file`, and `--desc`.
+
+/// A literal ASCII backspace (0x08), the exact byte the AgentlensPro/ghbook incidents traced to.
+const CONTROL_BYTE: &str = "\x08";
+
+#[test]
+fn add_atom_refuses_a_control_byte_in_the_stdin_body_and_writes_nothing() {
+    let d = TempDir::new("ctrlbyte-stdin");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let before = std::fs::read(&page).unwrap();
+
+    let (out, err, code) = run_stdin_full(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+        ],
+        &format!("the fact has a stray control byte here [{CONTROL_BYTE}] embedded in prose"),
+    );
+    assert_ne!(code, 0, "a control byte in the stdin body must refuse: stdout={out} stderr={err}");
+    assert!(err.contains("0x08"), "names the byte: {err}");
+    assert!(err.contains("byte offset"), "reports the byte offset IN THE STDIN BODY: {err}");
+    assert!(
+        err.to_lowercase().contains("echo") || err.to_lowercase().contains("printf"),
+        "names the likely cause (shell echo/printf expanding an escape): {err}"
+    );
+
+    let after = std::fs::read(&page).unwrap();
+    assert_eq!(before, after, "a refused write must land zero bytes");
+}
+
+#[test]
+fn update_mem_topic_refuses_a_control_byte_spliced_in_via_new_file_and_writes_nothing() {
+    let d = TempDir::new("ctrlbyte-newfile");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let before = std::fs::read(&page).unwrap();
+
+    // `--old-file`/`--new-file` read raw bytes from disk with no atom-aware check at all — the
+    // widest hole per the capability audit — so this is the surface most likely to smuggle a
+    // control byte past everything except the final `write_page_bytes` choke point.
+    let old_fixture = TempFixture::new("old.txt", "node_type: memory");
+    let new_fixture = TempFixture::new("new.txt", &format!("node_type: memory{CONTROL_BYTE}"));
+    let (out, err, code) = run_full(&[
+        "update-mem-topic",
+        "--page", page.to_str().unwrap(),
+        "--old-file", old_fixture.as_str(),
+        "--new-file", new_fixture.as_str(),
+    ]);
+    assert_ne!(code, 0, "a control byte via --new-file must refuse: stdout={out} stderr={err}");
+    assert!(err.contains("0x08"), "names the byte: {err}");
+
+    let after = std::fs::read(&page).unwrap();
+    assert_eq!(before, after, "a refused write must land zero bytes");
+}
+
+#[test]
+fn add_atom_refuses_a_control_byte_via_desc_and_writes_nothing() {
+    let d = TempDir::new("ctrlbyte-desc");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let before = std::fs::read(&page).unwrap();
+
+    let desc = format!("a triage summary with a stray control byte{CONTROL_BYTE} embedded in it");
+    let (out, err, code) = run_stdin_full(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", &desc,
+        ],
+        "an ordinary body, no control byte here.",
+    );
+    assert_ne!(code, 0, "a control byte via --desc must refuse: stdout={out} stderr={err}");
+    assert!(err.contains("0x08"), "names the byte: {err}");
+
+    let after = std::fs::read(&page).unwrap();
+    assert_eq!(before, after, "a refused write must land zero bytes");
+}
+
+#[test]
+fn add_atom_still_accepts_tab_newline_and_carriage_return_in_the_body() {
+    let d = TempDir::new("ctrlbyte-allowed");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+        ],
+        "line one\tindented\nline two\r\nline three, still a normal body",
+    );
+    assert!(out.contains("ATOM-"), "a tab/LF/CR body must be accepted, not treated as corrupt: {out}");
+}
+
+#[test]
+fn lint_flags_a_raw_control_byte_at_error_and_echoes_no_page_content() {
+    let d = TempDir::new("ctrlbyte-lint");
+    d.write(
+        "corrupt.md",
+        &format!(
+            "---\ndescription: {}\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             the fact has a stray control byte here [{CONTROL_BYTE}] embedded in prose — a \
+             SECRET-CANARY-STRING that must never appear in lint output\n\n\
+             ## Notes and lessons learned\n",
+            FIXTURE_PAGE_DESC
+        ),
+    );
+    let page = d.join("corrupt.md");
+    let (out, code) = run_with_code(&["lint", "--no-fix", page.to_str().unwrap()]);
+    assert_ne!(code, 0, "a control byte must be reported at ERROR and gate the exit code: {out}");
+    assert!(out.contains("control-byte-in-page"), "the stable finding code fires: {out}");
+    assert!(out.contains("ERROR"), "severity is ERROR: {out}");
+    assert!(out.contains("0x08"), "reports the byte's hex value: {out}");
+    assert!(
+        !out.contains("SECRET-CANARY-STRING"),
+        "the finding must never echo page content: {out}"
+    );
+}
