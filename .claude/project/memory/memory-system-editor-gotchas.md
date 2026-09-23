@@ -2,7 +2,7 @@
 name: memory-system-editor-gotchas
 description: "add-atom inserts a new atom in the wrong place / atom-after-footer lint defect never converges / can I raise the atom budget knob / memgrep refused my write because the atom is too big / no memory chore runs on PROJECT scope by default / edit_project_scope / why did the repair chore skip my project page / does memgrep ever refuse a write outright / publish-globally-missing never drains / should I add publish-globally to repair_defect / scope=None suppresses a finding in a fail-open module / an argument whose failure mode has zero live instances / code implements a variant nothing exercises / memgrep binary is stale on this host / cargo install does not roll forward with a plugin update / what is the private user-memory subsystem / how does janitor-memory-user-share work / what is the retro-lesson chore and why does it exist / a superseded atom has no lesson attached"
 ocd: 2026-06-13
-lmd: 2026-09-05
+lmd: 2026-09-23
 metadata:
   node_type: memory
   type: project
@@ -173,7 +173,7 @@ RECONCILIATION is the mechanism, and that the path opens no transaction, are inf
 internals were not read.*
 
 
-^ATOM-SXV6-8JN0 [desc: "A USER page must not [[wikilink]] DOWN into a PROJECT page: migrate-mem-atom --leave-link hard-bails (anyhow::bail!, memory.rs:4460) and lint grades it ERROR — link UP only, and record the pointer som", keywords: link-downward-cross-scope_ERROR USER_page_linking_to_a_PROJECT_page one-sided_link_warning_versus_downward_link_error wiring_a_reciprocal_wikilink_broke_lint migrate-mem-atom_--leave-link_refused how_do_I_express_deliberately_not_linked is_there_an_unwire_verb_in_memgrep delete-mem-topic_never_unlinks cross-scope_wikilink_portability project_can_be_deleted_moved_or_renamed bidirectional_link_law_versus_portability, ocd: 2026-09-05, lmd: 2026-09-05]
+^ATOM-SXV6-8JN0 [desc: "A USER page must not [[wikilink]] DOWN into a PROJECT page: migrate-mem-atom --leave-link hard-bails (anyhow::bail!, memory.rs:4460) and lint grades it ERROR — link UP only, and record the pointer som", keywords: link-downward-cross-scope_ERROR USER_page_linking_to_a_PROJECT_page one-sided_link_warning_versus_downward_link_error wiring_a_reciprocal_wikilink_broke_lint migrate-mem-atom_--leave-link_refused how_do_I_express_deliberately_not_linked is_there_an_unwire_verb_in_memgrep delete-mem-topic_never_unlinks cross-scope_wikilink_portability project_can_be_deleted_moved_or_renamed bidirectional_link_law_versus_portability, ocd: 2026-09-05, lmd: 2026-09-23]
 
 **A USER page must not carry a `[[wikilink]]` DOWN into a PROJECT page** — the project can be
 deleted, moved or renamed, leaving the global page dangling. **Link UP from the project page and
@@ -186,6 +186,9 @@ prescribes the remedy: *"Migrate without --leave-link and record the pointer on 
 some other way."* `memgrep lint` separately grades the edge `link-downward-cross-scope` **ERROR**
 while a one-sided link is only **WARN**, so where the bidirectional-link law and cross-scope
 portability collide, portability wins.
+
+
+^ATOM-4H6Y-B9AI [desc: "Fixing a link-one-sided WARN by wiring the reciprocal link is exactly how you manufacture a link-downward-cross-scope ERROR; fix is update-mem-topic --old-file/--new-file on the USER side with a comme", keywords: fixing_link-one-sided_created_a_worse_error wiring_the_reciprocal_link_made_lint_fail is_there_an_unwire_verb_in_memgrep delete-mem-topic_never_unlinks_refuses_if_linked-to how_do_I_express_deliberately_not_linked no_verb_to_remove_a_wikilink update-mem-topic_--old-file_--new-file_replaces_link_with_comment chasing_one_lint_finding_produced_a_worse_one reference-mem-topic_manufactured_link-downward-cross-scope recording_deliberate_non-link_on_the_USER_page, ocd: 2026-09-23, lmd: 2026-09-23]
 
 **Beware the trap that creates it:** fixing a `link-one-sided` WARN by wiring the reciprocal link
 with `reference-mem-topic` is exactly how you manufacture the ERROR. Chasing one lint finding
