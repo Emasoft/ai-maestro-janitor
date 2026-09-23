@@ -14,6 +14,10 @@ from jevctx.testing import FakeJevClient  # noqa: E402
 from jevctx.types import JevUnavailableError  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_small.jsonl"
+# TRDD-RAEGS1D5 (2026-09-23): a SEPARATE fixture, not an edit to the shared one above --
+# `tests/test_jev_compact_cli.py` (a different worker's file) also reads FIXTURE, and its
+# item-count/index assertions must not shift under it.
+FIXTURE_ORIGIN = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_origin.jsonl"
 
 
 def _item(id_: str, kind: jc.ItemKind, text: str, turn: int, tokens: int | None = None) -> jc.Item:
@@ -429,3 +433,73 @@ def test_no_full_context_path_omits_the_pointer_line() -> None:
     doc = jc.compose(items, scores, budget_tokens=8000, header=header)
 
     assert "Full compacted context:" not in doc
+
+
+# --- TRDD-RAEGS1D5 (2026-09-23): task-notification/heartbeat-turn extraction bug fix ---
+# On a real 4.7 MB transcript, 26 of 36 items `extract_items` classified "user" were task
+# notifications (agent reports), not the human -- and a heartbeat fire's own reply/tool-call
+# items dominated a long unattended session. `FIXTURE_ORIGIN` mirrors the real field shapes
+# (`origin.kind`, `turnOrigin`) these four tests exercise.
+
+
+def test_is_human_record_trusts_origin_kind_when_present() -> None:
+    # The `origin` branch of `is_human_record` short-circuits the isMeta/prefix fallback
+    # entirely -- prove it for all three real `origin.kind` values seen on a live transcript.
+    assert jc.is_human_record({"origin": {"kind": "human"}, "message": {"content": "hi"}}) is True
+    assert jc.is_human_record(
+        {"origin": {"kind": "task-notification"}, "message": {"content": "<task-notification>x"}}
+    ) is False
+    assert jc.is_human_record({"origin": {"kind": "peer"}, "message": {"content": "hi"}}) is False
+
+
+def test_heartbeat_detection_via_scheduled_turn_origin_marker() -> None:
+    # `turnOrigin == "scheduled"` alone (no `_HEARTBEAT_PREFIX` text) must still be detected --
+    # a real heartbeat entry carries this field but NO `origin` key at all (measured,
+    # TRDD-RAEGS1D5), so `is_human_record`'s `origin` branch never fires for it either.
+    entry = {"turnOrigin": "scheduled", "message": {"content": "no prefix in this body"}}
+    assert jc._is_heartbeat_entry(entry) is True
+
+
+def test_task_notification_becomes_event_and_is_excluded_from_the_digest() -> None:
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    by_id = {it.id: it for it in items}
+
+    assert by_id["u2:0"].kind == "event"  # not "user" -- see is_human_record
+    digest = jc.build_digest(items, [], cap_tokens=4000)
+    assert "Background lint check finished" not in digest
+
+
+def test_origin_less_legacy_record_still_classified_human() -> None:
+    # A pre-`origin` transcript entry (no `origin` key at all) must still fall back to the
+    # pre-existing heuristic and come out "human" when it is plainly a real human message.
+    entry = {"type": "user", "isMeta": False, "message": {"content": "plain legacy text"}}
+    assert jc.is_human_record(entry) is True
+
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    by_id = {it.id: it for it in items}
+    assert by_id["u4:0"].kind == "user"  # u4 in the fixture carries no `origin` field
+
+
+def test_heartbeat_turn_skips_assistant_and_tool_items() -> None:
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    ids = [it.id for it in items]
+
+    # hb1 (the fire itself) was already dropped before this fix; the NEW behaviour is that
+    # its whole turn -- the Bash tool_use (a2), the tool_result (u3), and the "janitor
+    # heartbeat" reply (a3) -- contributes zero items too.
+    assert not any(id_.startswith("hb1:") for id_ in ids)
+    assert not any(id_.startswith("a2:") for id_ in ids)
+    assert not any(id_.startswith("u3:") for id_ in ids)
+    assert not any(id_.startswith("a3:") for id_ in ids)
+
+
+def test_human_turn_after_heartbeat_resumes_extraction() -> None:
+    items = jc.extract_items(FIXTURE_ORIGIN)
+    by_id = {it.id: it for it in items}
+
+    # u4 (the next human record after the heartbeat) closes the skip window and is itself
+    # kept; a4 (the assistant's reply to u4, not to the heartbeat) is extracted normally too.
+    assert by_id["u4:0"].kind == "user"
+    assert by_id["u4:0"].text == "Also update the changelog"
+    assert by_id["a4:0"].kind == "assistant"
+    assert by_id["a4:0"].text == "Sure, updating the changelog."

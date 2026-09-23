@@ -54,7 +54,13 @@ __all__ = [
     "compose",
 ]
 
-ItemKind = Literal["user", "assistant", "tool"]
+# "event" (TRDD-RAEGS1D5, 2026-09-23 real-transcript bug fix): a `type: "user"` JSONL entry
+# whose text is NOT human-authored -- a task notification, most commonly -- still carries
+# real informational content (an agent's report) worth scoring/inlining, so it is kept as an
+# item rather than dropped; it is just never counted as a human message. See
+# `is_human_record` and `build_digest`'s "last three human messages" ordering, which relies
+# on `kind == "user"` meaning genuinely human now.
+ItemKind = Literal["user", "assistant", "tool", "event"]
 
 # Entry `type`s that ever carry a extractable item (spec: skip `system` entries and the
 # auxiliary types -- mode, file-history-snapshot, last-prompt, queue-operation, attachment
@@ -62,6 +68,14 @@ ItemKind = Literal["user", "assistant", "tool"]
 _WALKED_ENTRY_TYPES = {"user", "assistant"}
 
 _HEARTBEAT_PREFIX = "[janitor-heartbeat]"
+
+# Claude Code also writes a task-notification body (a subagent's finished-task report) as a
+# `type: "user"` entry, with `message.role == "user"` -- structurally identical to a human
+# message. A transcript old enough to carry no `origin` field at all (see `is_human_record`)
+# has no other way to tell the two apart, so the body's own fixed wrapper tag is the fallback
+# signal (TRDD-RAEGS1D5, 2026-09-23: on a real 4.7 MB transcript, 26 of 36 items classified
+# "user" by the pre-fix code were task notifications, not the human).
+_TASK_NOTIFICATION_PREFIX = "<task-notification>"
 
 # Truncation cap for a remembered tool_use `input` (spec: "name+input truncated to 300
 # chars") -- long enough to identify the call, short enough that a page of `Bash` args
@@ -168,18 +182,100 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit]
 
 
+def _entry_primary_text(entry: dict[str, Any]) -> str:
+    """The one text string a `type: "user"` entry is classified by.
+
+    The plain string `message.content`, or the first `text`-type block's text when content is
+    a list of blocks. A `tool_result`-only entry (no `text` block at all) yields `""` --
+    deliberately: it must never be mistaken for a heartbeat/task-notification body, or match
+    neither and fall through to "human" by accident (see `is_human_record`'s fallback).
+    """
+    content = entry.get("message", {}).get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text", "")
+    return ""
+
+
+def is_human_record(entry: dict[str, Any]) -> bool:
+    """True iff this `type: "user"` JSONL entry is genuine human input.
+
+    TRDD-RAEGS1D5 (2026-09-23) bug fix: `extract_items` used to classify EVERY non-`isMeta`
+    user-role text as human -- but Claude Code writes several kinds of machine-generated
+    record with `message.role == "user"` too, most commonly a task notification (a subagent's
+    finished-task report). On a real 4.7 MB transcript, 26 of 36 items the old code classified
+    "user" were task notifications, so `build_digest`'s "last three human messages" and the
+    DECISION question ("a decision the user stated") were fed agent reports, never the human's
+    own words.
+
+    Since ~2.1.28x Claude Code stamps every user entry's provenance in `origin.kind`
+    (`"human"` | `"task-notification"` | `"peer"` | ...) -- trust it when present, checked
+    against a real transcript (TRDD-RAEGS1D5). An older transcript (measured: an August 2026
+    session) carries no `origin` field on most entries at all; fall back to the pre-existing
+    heuristic (not `isMeta`, not the heartbeat prefix) plus rejecting a `<task-notification>`-
+    prefixed body directly -- a legacy transcript's task notifications have no `origin` to
+    check, only their own fixed wrapper tag.
+    """
+    origin = entry.get("origin")
+    if isinstance(origin, dict):
+        return origin.get("kind") == "human"
+    if entry.get("isMeta"):
+        return False
+    text = _entry_primary_text(entry)
+    if text.startswith(_HEARTBEAT_PREFIX) or text.startswith(_TASK_NOTIFICATION_PREFIX):
+        return False
+    return True
+
+
+def _is_heartbeat_entry(entry: dict[str, Any]) -> bool:
+    """True iff this `type: "user"` entry is a janitor heartbeat fire.
+
+    Two independent, either-sufficient signals: the prompt's own fixed prefix (works on any
+    transcript, including one with no `origin`/`turnOrigin` fields at all), or
+    `turnOrigin == "scheduled"` -- the field Claude Code stamps on a cron-fired turn since
+    ~2.1.28x. Checked against a real transcript (TRDD-RAEGS1D5, 2026-09-23): a heartbeat entry
+    there carries `turnOrigin: "scheduled"` but NO `origin` key at all, so `is_human_record`'s
+    `origin.kind` check never fires for it -- every one of that transcript's 59
+    `turnOrigin == "scheduled"` entries also carried the prefix, so the two signals agreed in
+    practice, but a transcript keeping only one of them (an older prefix-only one, or a
+    hypothetical future prefix-less one) still needs both checked.
+    """
+    if entry.get("turnOrigin") == "scheduled":
+        return True
+    return _entry_primary_text(entry).startswith(_HEARTBEAT_PREFIX)
+
+
 def extract_items(transcript_path: str | Path) -> list[Item]:
     """Walk one transcript JSONL and return its extracted, chronologically ordered items.
 
     One pass, top to bottom: a `tool_use` block is remembered by its own `id` as soon as
     it's seen, so the `tool_result` block that answers it (which always appears in a LATER
     line -- the transcript is append-only) can be paired with it by the time we reach it.
+
+    Two TRDD-RAEGS1D5 (2026-09-23) fixes, both real-transcript-verified:
+
+    1. A `user`-role text record is classified "user" (genuinely human) only when
+       `is_human_record` says so; otherwise it becomes kind "event" -- still extracted,
+       still scorable/inlinable, just never counted as a human message (see `build_digest`).
+
+    2. A heartbeat fire (`_is_heartbeat_entry`) opens a skip window: every assistant
+       text/tool_use block and every tool_result block UNTIL the next "user"/"event" record
+       is machine noise from that one cron turn (a Bash call to the dispatcher stub, its
+       result, the "janitor heartbeat" reply) -- never extracted. On a real transcript this
+       fires every ~5 minutes and would otherwise dominate a long unattended session's items.
     """
     path = Path(transcript_path)
     items: list[Item] = []
     turn = 0
     # tool_use id -> (name, truncated-input-json) remembered for pairing with its result.
     pending_tool_uses: dict[str, tuple[str, str]] = {}
+    # Set by a heartbeat entry, cleared by the next "user"/"event" record -- see the
+    # docstring's point 2. Never touched by an isMeta entry (still noise either way, but not
+    # the record that ends the window) or by anything outside `_WALKED_ENTRY_TYPES`.
+    in_heartbeat_turn = False
 
     with path.open(encoding="utf-8") as fh:
         for line in fh:
@@ -201,12 +297,23 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
             content = entry.get("message", {}).get("content")
 
             if entry_type == "user":
-                is_meta = bool(entry.get("isMeta"))
+                if _is_heartbeat_entry(entry):
+                    # The fire's own prompt is never an item (unchanged from before this
+                    # fix) -- it now ALSO opens the skip window for the turn it triggers.
+                    in_heartbeat_turn = True
+                    continue
+                if entry.get("isMeta"):
+                    continue  # hook-injected hidden context -- unchanged from before this fix
+
+                kind: ItemKind = "user" if is_human_record(entry) else "event"
                 if isinstance(content, str):
-                    if not is_meta and not content.startswith(_HEARTBEAT_PREFIX):
-                        items.append(Item(f"{uuid}:0", "user", content,
-                                           estimate_tokens(content), ts, turn))
-                        turn += 1
+                    # A text record ends any open heartbeat window -- it IS the "next
+                    # user/event record" the docstring's point 2 skips forward to, and is
+                    # itself kept (never itself skipped).
+                    in_heartbeat_turn = False
+                    items.append(Item(f"{uuid}:0", kind, content,
+                                       estimate_tokens(content), ts, turn))
+                    turn += 1
                 elif isinstance(content, list):
                     for idx, block in enumerate(content):
                         if not isinstance(block, dict):
@@ -214,11 +321,15 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
                         btype = block.get("type")
                         if btype == "text":
                             text = block.get("text", "")
-                            if not is_meta and not text.startswith(_HEARTBEAT_PREFIX):
-                                items.append(Item(f"{uuid}:{idx}", "user", text,
-                                                   estimate_tokens(text), ts, turn))
-                                turn += 1
+                            in_heartbeat_turn = False  # see the str-content branch above
+                            items.append(Item(f"{uuid}:{idx}", kind, text,
+                                               estimate_tokens(text), ts, turn))
+                            turn += 1
                         elif btype == "tool_result":
+                            if in_heartbeat_turn:
+                                # The heartbeat's own dispatcher-stub call answering itself --
+                                # part of the skipped turn, not a "next record" that ends it.
+                                continue
                             # WHY no isMeta guard here: isMeta marks a human-facing pseudo
                             # user message (hook-injected context), never a tool result --
                             # the spec's isMeta clause is scoped to str/list[text] content.
@@ -234,6 +345,8 @@ def extract_items(transcript_path: str | Path) -> list[Item]:
                 # else: no content (or an unrecognised shape) -- nothing to extract.
 
             else:  # entry_type == "assistant"
+                if in_heartbeat_turn:
+                    continue  # the fire's own reply/tool call -- see the docstring's point 2
                 if not isinstance(content, list):
                     continue
                 for idx, block in enumerate(content):
@@ -272,6 +385,14 @@ def build_digest(
     included alongside the human ones (not just the human ones alone) because on an
     unattended session the last HUMAN message can be old -- what the agent last said it was
     doing anchors relevance-scoring better than a stale human prompt alone would.
+
+    `kind == "user"` here means genuinely human (TRDD-RAEGS1D5, 2026-09-23 bug fix): before
+    it, `extract_items` gave that kind to every non-`isMeta` user-role text, so a task
+    notification (a subagent's report, re-classified kind "event" now) could crowd out the
+    real "last three human messages" this function's own name promises -- measured on a real
+    transcript, 26 of 36 "user" items were task notifications. `it.kind == "user"` needs no
+    change here; `extract_items` now only ever hands out that kind for `is_human_record`-true
+    text, so this filter is correct by construction.
     """
     user_items = [it for it in items if it.kind == "user"]
     assistant_items = [it for it in items if it.kind == "assistant"]
