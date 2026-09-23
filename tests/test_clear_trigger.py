@@ -589,6 +589,84 @@ def test_still_wanted_still_vetoes_on_a_stale_resume_after_clear_flag(
     assert ok is False
     assert "recovery pending" in why
 
+def test_still_wanted_cancels_when_the_pane_shows_the_retry_wedge(tmp_path: Path, monkeypatch) -> None:
+    """FIFTH cancel (owner report §3.6): a pane showing the retry-wedge banner is a state
+    `pane_policy` will type into on its own (the rotation/no-headroom flush) -- `/clear` must
+    not race it. Reuses the real captured wedge fixture, classified with `pane_state.parse`
+    (the same classifier `pane_policy` reads), never a reimplementation."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    wedge_text = (
+        _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "real-wedged-session-limit.txt"
+    ).read_text(encoding="utf-8")
+    monkeypatch.setattr(mod.terminal_trigger, "read_pane_text", lambda terminal: wedge_text)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is False
+    assert "retry_wedge" in why
+
+
+def test_still_wanted_proceeds_over_a_normal_idle_pane(tmp_path: Path, monkeypatch) -> None:
+    """The counterpart: a pane classified as an ordinary idle prompt (not wedged) must NOT be
+    vetoed by the new check -- `/clear` still needs to be able to type into a normal idle
+    pane, which is the state it exists to type into."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    idle_text = (
+        _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
+    ).read_text(encoding="utf-8")
+    monkeypatch.setattr(mod.terminal_trigger, "read_pane_text", lambda terminal: idle_text)
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok, why = captured["still_wanted"]()
+    assert ok is True, why
+
+
+def test_still_wanted_repeats_the_wedge_veto_until_the_pane_state_changes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """`still_wanted` is re-asked on EVERY iteration (the chain can defer for minutes) -- the
+    wedge veto must keep firing, WITHOUT stamping the cooldown, for as long as the pane stays
+    wedged, and only stop once the pane text actually changes. No loop is driven here (that is
+    `inject_until_sent`'s own job); this pins that repeated calls give the same answer while
+    wedged, and a different one the moment the fixture is swapped for an idle frame."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    logs: list[str] = []
+    monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+
+    frames = _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames"
+    wedge_text = (frames / "real-wedged-session-limit.txt").read_text(encoding="utf-8")
+    idle_text = (frames / "synthetic-idle-empty-field.txt").read_text(encoding="utf-8")
+    current = {"text": wedge_text}
+    monkeypatch.setattr(mod.terminal_trigger, "read_pane_text", lambda terminal: current["text"])
+
+    mod._run_chain_payload(_chain_payload(tmp_path))
+
+    ok1, why1 = captured["still_wanted"]()
+    ok2, why2 = captured["still_wanted"]()
+    assert ok1 is False and ok2 is False, (why1, why2)
+    assert "retry_wedge" in why1 and "retry_wedge" in why2
+
+    current["text"] = idle_text
+    ok3, why3 = captured["still_wanted"]()
+    assert ok3 is True, why3
+
 
 def test_cancel_at_land_gets_its_own_distinct_log_line(tmp_path: Path, monkeypatch) -> None:
     """A `still_wanted`-cancelled chain logs `clear cancelled at land: <reason>` on top of

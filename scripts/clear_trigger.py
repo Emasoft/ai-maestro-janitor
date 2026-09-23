@@ -635,9 +635,46 @@ def _run_chain_payload(payload_b64: str) -> int:
                 return True, "only this chain's own resume-after-clear.flag is pending — continuing"
         return False, "recovery pending (rate-limit/API-error or an unconsumed compact-resume)"
 
+    def _pane_policy_conflict_ok() -> tuple[bool, str]:
+        # FIFTH cancel, this task (owner report §3.6 finding): `_CHAIN_LOCK` only serialises
+        # THIS chain's own retries -- it says nothing about, and is never taken by, the
+        # daemon's SEPARATE `pane_actuate.act()` keystroke loop (the model-fallback ladder,
+        # `scripts/detectors/model-fallback.py` -> `Event.NO_HEADROOM`; the rotation/recovery
+        # rungs, `daemon.py` -> `Event.ROTATION_LANDED` / `RECOVERY_RUNG`), so both actuators
+        # CAN type into the same pane in the same window. `NO_HEADROOM` itself is driven by
+        # `token_burn.model_fallback_verdict`'s usage PERCENTAGE (see `model_fallback.py`),
+        # invisible in the pane text -- it cannot be classified from a screen read at all. But
+        # `pane_policy`'s own module docstring names ONE state that is a conflict REGARDLESS of
+        # which event fires: `RETRY_WEDGE`. Every event branch `_at_wedge` handles -- rotation
+        # flush, no-headroom flush-then-switch, and every caller-driven rung -- starts by
+        # flushing that wedge (`pane_policy._flush_wedge`), so a wedge on screen means the
+        # daemon's next beat will press ESC into this exact field: that IS "an actuator must
+        # act here", and it is the one such state a text classifier can actually see. Every
+        # other pane_policy row either never types (`WORKING`'s NO_HEADROOM is refused
+        # outright, `AWAITING_USER` types nothing but a dismiss-only ESC) or needs off-screen
+        # state this classifier has no access to (`IDLE`'s CRON_DEAD/NO_HEADROOM rows) --
+        # widening the veto to cover those would block /clear from ever firing into a normal
+        # idle pane, which is the state it MUST be able to type into.
+        try:
+            text = terminal_trigger.read_pane_text(data["terminal"])
+        except Exception:  # noqa: BLE001 — a probe fault must never kill a pending clear
+            return True, "pane read unavailable — continuing"
+        if text is None:
+            return True, "pane unreadable — continuing"
+        try:
+            import pane_state  # noqa: PLC0415 — lazy; the chain child has scripts/lib on path
+
+            classified = pane_state.parse(text)
+        except Exception:  # noqa: BLE001 — a classification fault must never kill a pending clear
+            return True, "pane classification unavailable — continuing"
+        if classified.status.kind == pane_state.StatusKind.RETRY_WEDGE:
+            return False, "pane shows retry_wedge — pane_policy will flush/switch it, not /clear"
+        return True, "no actuator-conflict state on pane"
+
     def _still_wanted() -> tuple[bool, str]:
-        """Four cancels. The activity + agent/interrupt + recovery checks run for EVERY
-        trigger; the cache check only for a chain fired BECAUSE the cache was cold."""
+        """Five cancels. The activity + agent/interrupt + recovery + pane-policy-conflict
+        checks run for EVERY trigger; the cache check only for a chain fired BECAUSE the cache
+        was cold."""
         back_ok, back_why = _user_came_back()
         if not back_ok:
             return False, back_why
@@ -647,6 +684,9 @@ def _run_chain_payload(payload_b64: str) -> int:
         recovery_ok, recovery_why = _recovery_ok()
         if not recovery_ok:
             return False, recovery_why
+        conflict_ok, conflict_why = _pane_policy_conflict_ok()
+        if not conflict_ok:
+            return False, conflict_why
         if not data.get("cache_gated"):
             return True, back_why
         return _clear_still_wanted()
