@@ -31,14 +31,11 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 sys.path.insert(0, str(_ROOT / "scripts"))
 
 from lib import cold_cache_compact as ccc  # noqa: E402
-from lib import token_meter  # noqa: E402
 
 # Every knob that participates in the resolution, so a developer's shell can never decide a
 # test's outcome (the "test reporting on the tester" class of flake conftest.py names).
@@ -49,13 +46,6 @@ _KNOBS = (
     "CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS",
     "CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS",
 )
-
-
-@pytest.fixture(autouse=True)
-def _pristine_knobs(monkeypatch: pytest.MonkeyPatch):
-    """Clear every threshold knob so each test states its own inputs explicitly."""
-    for knob in _KNOBS:
-        monkeypatch.delenv(knob, raising=False)
 
 
 def _transcript(path: Path, total: int) -> Path:
@@ -80,59 +70,6 @@ def _transcript(path: Path, total: int) -> Path:
 
 
 # --- the harness-relative resolution --------------------------------------------------
-
-
-def test_the_documented_worked_example_resolves_to_716000(monkeypatch: pytest.MonkeyPatch):
-    """`min_context_tokens()` reproduces its own docstring: 700000 -> 666000 -> 716000.
-
-    Pinned because the docstring's worked example is the only statement of the arithmetic,
-    and an untested example is a comment that drifts.
-    """
-    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
-
-    assert ccc.min_context_tokens() == 716_000
-
-
-def test_the_threshold_sits_above_the_harness_compact_point(monkeypatch: pytest.MonkeyPatch):
-    """The janitor is a BACKSTOP: it may only fire above where the harness already compacts.
-
-    If this inverts, the two race at the boundary and the janitor compacts sessions the
-    harness was about to handle — the exact behaviour the 2026-07-18 directive removed.
-    """
-    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
-    pred = token_meter.predict_auto_compact(0)
-
-    assert pred is not None
-    assert ccc.min_context_tokens() > pred.effective_compact_point
-
-
-def test_with_no_auto_compact_window_the_threshold_exceeds_the_window():
-    """Env unset => threshold ABOVE the context window, so the janitor cannot proactively fire.
-
-    The docstring calls this "the harness owns it entirely". That is a real invariant, not a
-    side effect: a context can never exceed its own window, so the gate is unreachable by
-    construction. Nothing tested it, and it is one arithmetic slip away from a threshold that
-    fires on every large session.
-    """
-    window = ccc.DEFAULT_CONTEXT_WINDOW_TOKENS
-
-    assert ccc.min_context_tokens() > window
-
-
-def test_an_explicit_operator_override_wins_verbatim(monkeypatch: pytest.MonkeyPatch):
-    """The override is the documented escape hatch and must not be re-derived from the window."""
-    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
-    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS", "420000")
-
-    assert ccc.min_context_tokens() == 420_000
-
-
-def test_a_tiny_auto_window_is_floored(monkeypatch: pytest.MonkeyPatch):
-    """A pathologically small auto-window must not push the threshold under the post-compaction
-    floor — below it there is nothing left to reclaim, so firing would be pure loss."""
-    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "40000")
-
-    assert ccc.min_context_tokens() == ccc.DEFAULT_MIN_CONTEXT_TOKENS
 
 
 # --- a REAL transcript through the REAL gate ------------------------------------------

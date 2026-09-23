@@ -3358,21 +3358,6 @@ def _board_workable_ids() -> frozenset[str]:
     return frozenset(ids)
 
 
-def _board_has_workable_cards() -> bool:
-    """True iff at least one open TRDD sits in `dev` or `todo` — the signal the keep-going
-    gate falls back to when there are ZERO pending agents to judge stale/live. `todo`
-    counts too: the overnight queue is driven from `todo` (universal-kanban.md —
-    finishing a card means pulling the next one), so a manifest with zero pending agents
-    but an open `todo` card is still workable, not finished.
-
-    Fail-OPEN (True) on any read fault, matching every other check in the gate: an
-    unreadable board must never be the reason the night-survival pulse goes quiet."""
-    try:
-        return bool(_board_workable_ids())
-    except Exception:  # noqa: BLE001 - a board read must never silence the pulse
-        return True
-
-
 _BOARD_NUDGE_STAMP_FILE = "keep-going-board-nudge-stamp.json"
 
 

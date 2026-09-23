@@ -836,39 +836,11 @@
       "default": true,
       "sensitive": false
     },
-    "cold_cache_compact_min_context_tokens": {
-      "title": "Cold-Cache Auto-Compact - Minimum Context (tokens)",
-      "description": "The resumed-context size (input + cache_read + cache_creation of the last assistant turn) at or above which the cold-cache auto-compact fires (default 270000). Below this the context is small enough that a cold re-write is cheap and compacting it saves nothing (and is lossy), so the trigger is a no-op \u2014 a fresh/empty session therefore never trips it. Raise it to compact only very large contexts; lower it to compact more eagerly. Only consulted when cold_cache_compact_enabled is true.",
-      "type": "number",
-      "default": 270000,
-      "sensitive": false
-    },
-    "cold_cache_compact_min_idle_seconds": {
-      "title": "Cold-Cache Auto-Compact - Minimum Idle (seconds)",
-      "description": "How long an IN-SESSION gap must last before the heartbeat rate-limit path treats the prompt cache as COLD and eligible for auto-compact (default 3600 \u2014 the 1h prompt-cache TTL). Below this the cache is still warm, so compacting would just waste a write; the branch stays silent and emits the normal resume cue. This gate applies ONLY to the heartbeat rate-limit path \u2014 the SessionStart path has no idle gate (a fresh process loading a large context is cold by construction). Only consulted when cold_cache_compact_enabled is true.",
-      "type": "number",
-      "default": 3600,
-      "sensitive": false
-    },
     "cold_cache_compact_cooldown_seconds": {
       "title": "Cold-Cache Auto-Compact - Cooldown (seconds)",
       "description": "Seconds after a cold-cache compact fires during which another one is suppressed (default 600), shared by the SessionStart and heartbeat trigger points via a single stamp. This prevents a second, redundant /compact from being queued before the first one actually lands (compaction is not instantaneous). Large enough to cover the window between firing /compact and the compaction completing; a value below the real compaction latency risks a double-fire. Only consulted when cold_cache_compact_enabled is true.",
       "type": "number",
       "default": 600,
-      "sensitive": false
-    },
-    "proactive_idle_compact_enabled": {
-      "title": "Proactive Idle Auto-Compact Enabled",
-      "description": "ON by default (TRDD-D3PROACT). The cold-cache paths above are REACTIVE \u2014 they shrink a large context only AFTER a cold fire already paid the ~2\u00d7 cache-creation write, because a cron fire re-reads the whole transcript BEFORE the janitor can act (the burn is unavoidable on that fire). This is the PREVENTIVE path: on a heartbeat where the session is genuinely idle (the user has not typed in this pane for >=5 min AND there is no pending resume / keep-going / directive / in-flight agent) AND the context is large (>= cold_cache_compact_min_context_tokens), it self-fires a SOFT /compact NOW \u2014 during a cheap WARM fire \u2014 so the context is already ~50k when the next cold event (a >1h working turn, a rate limit, a restart) strikes. It is the only path that PREVENTS the cold burn rather than mitigating it after the fact. Compaction is lossy, so the idle + absent-user gates ensure it never fires out from under active work, and the resume is preserved (post-compact-resume records the directive and continues the prior task). It terminates because it also requires that a compaction could reclaim at least proactive_idle_compact_min_gain_tokens above this session's learned post-compaction floor \u2014 NOT because 'the context is small afterwards' (measured false: a real compaction here went 343,007 -> 308,644, above the threshold, which a size-only gate could never close). Fail-safe: a non-automatable terminal or any fault degrades to no compact with no regression. Requires cold_cache_compact_enabled; set this to false to keep only the reactive backstops.",
-      "type": "boolean",
-      "default": true,
-      "sensitive": false
-    },
-    "proactive_idle_compact_min_gain_tokens": {
-      "title": "Proactive Idle Auto-Compact Minimum Reclaimable Tokens",
-      "description": "How many tokens a compaction must be able to RECLAIM before the proactive idle path fires one (default 150000). A compaction can only reclaim what sits ABOVE this session's post-compaction floor \u2014 the context it leaves behind, which on a heavy install is dominated by the base that reloads every time (CLAUDE.md + plugins + rules + skills + MCP schemas + the summary) and cannot be compacted away. The janitor learns that floor by observing the context right after each compaction. This is the gate that makes the trigger TERMINATE: at the floor there is nothing left to reclaim, so it goes silent until real new work accumulates. Without it, an install whose floor sits above cold_cache_compact_min_context_tokens would compact every cooldown forever, destroying context each time (measured in the janitor's own repo 2026-07-17: 343,007 -> 308,644 against a 270,000 threshold). Raise it to compact less often, lower it to compact more eagerly; 0 disables the gate and is NOT recommended unless you have verified your floor is below the threshold.",
-      "type": "number",
-      "default": 150000,
       "sensitive": false
     },
     "memory_autorecall": {
