@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: todo
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-23T22:44:31+0200
+updated: 2026-09-23T22:48:09+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -23,3 +23,8 @@ Owner directive 2026-09-23 (verbatim): "what? delete the part about the edit too
 ## Approval log
 
 - 2026-09-23T22:44:31+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Owner directive 2026-09-23 (verbatim), the write contract
+
+- Owner: "even if the whole wikimem is going to be rewritten, and the agent passes the whole content of the wikimem as a parameter to the memgrep, the memgrep guarantees that the content will be linted, fixed if possible, formatted correctly, verified against the mandatory rule of 10 key-phrases minimum per atom, and all specs checked and verified, or it will block the edit and return error."
+- Derived by us: every memgrep write verb, including a whole-page replace, runs one pipeline before anything touches disk: parse, auto-fix what is safely fixable, format canonically, lint, validate every spec (at least 10 key-phrases per atom, frontmatter, TOC, links both ends, lessons, no control bytes), and writes atomically only on a clean result; otherwise it writes nothing and exits non-zero naming each violation.
