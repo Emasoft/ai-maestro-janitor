@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-23T23:59:11+0200
+updated: 2026-09-24T02:44:34+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -125,3 +125,4 @@ No PRRD rule applies here (relevant-rules field left empty): checked prrdgrep's 
 - Measured on the FINAL tree, in the FINAL SessionStart hook stdout (not X.inject.md), on the 4.7 / 49 / 258 MB transcripts: hook stdout under 10,000 bytes and not cut by the compose_handoff byte slice; at least 3 non-owner items inline; the newest owner message present; wall time under 60 s (sync lane).
 - In the FULL copy: at least 5 non-owner items; every decision-passing owner item inline or pointed to (0 absent), counted from the compact run's own item flags, never from a second scoring pass (the two disagree at the threshold).
 - Corrections: the d4fa7685 message says its numbers were measured, but they came from the pre-review version; the 23713d53 message says LANE_COMPACTED_MAX_BYTES 6500 came "from the measured room", but 6500 is ABOVE the measured room (5,250 / 6,442 / 5,286 B), so the summary was sliced whenever the injected render exceeded the room (render sizes not measured) (being fixed: the room is computed first and passed as --inject-max-bytes). _OWNER_ITEM_TOKEN_CAP = 500 is unmeasured.
+Measured 2026-09-24 on 862d30d4 (cached real scores): 3/3/3 non-owner items in the injected copy, down from 4/6/4 on aabd8b0c, because the byte backstop, not admission, selects the injected content on every normal run; criteria met, improvement carded as AW4XD53Q.
