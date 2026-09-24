@@ -635,6 +635,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
     jsl.log_decisions(
         items, scores,
         relevance_threshold=args.relevance_threshold, decision_threshold=args.decision_threshold,
+        # TRDD-N9LDHF7N card 7 follow-up, defect 3: the sync SessionStart lane and the
+        # detached background lane can both `compact` the same just-closed session's
+        # transcript -- `session_key` (already threaded through for the compose header) plus
+        # the transcript's own byte size lets jsl dedupe a run it already logged.
+        session_key=args.session_key, transcript_path=args.transcript,
     )
 
     usage = getattr(client, "usage", None)

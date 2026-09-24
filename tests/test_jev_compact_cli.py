@@ -1279,6 +1279,34 @@ def test_expand_records_a_shadow_outcome_for_the_expanded_id(
     assert log.stats().false_negatives == 1
 
 
+def test_compact_run_twice_for_the_same_session_and_transcript_does_not_double_the_shadow_log(
+    tmp_path: Path, _isolated_project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-N9LDHF7N card 7 follow-up, defect 3: the sync SessionStart lane and the detached
+    background lane can both `compact` the same just-closed session -- `--session-key` plus
+    the transcript's own (unchanged) byte size lets `jsl.log_decisions` dedupe the second run
+    instead of doubling every decision row."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code1, _output1 = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out),
+        "--session-key", "sess-dedup",
+    ])
+    assert code1 == 0
+    code2, _output2 = _run([  # the "other lane" -- same session, same transcript, unchanged
+        "compact", "--transcript", str(transcript), "--out", str(out),
+        "--session-key", "sess-dedup",
+    ])
+    assert code2 == 0
+
+    rows = [json.loads(line) for line in jsl.shadow_log_path().read_text(encoding="utf-8").splitlines() if line]
+    admit_rows = [r for r in rows if r["kind"] == "admit"]
+    assert len(admit_rows) == 3  # still just the FIRST run's worth, not six
+
+
 def test_replay_subcommand_prints_shadow_stats(
     tmp_path: Path, _isolated_project_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

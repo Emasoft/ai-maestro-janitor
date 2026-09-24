@@ -11,7 +11,9 @@ tests/test_state_log_dir.py's own `_clear()` helper.
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -256,6 +258,193 @@ def test_shadow_log_rotates_once_oversized(project_dir: Path, monkeypatch: pytes
     rows = _read_jsonl(path)
     assert len(rows) == 1
     assert rows[0]["item_id"] == "new-1:0"
+    # defect 1 (review): the rotated backup is locked down exactly like the live file.
+    assert (backup.stat().st_mode & 0o777) == 0o600
+
+
+# --- review follow-up defects 1-4 (TRDD-N9LDHF7N card 7 follow-up) -------------------------- #
+
+
+def test_log_decisions_redacts_a_literal_secret_in_the_preview_and_locks_file_mode(
+    project_dir: Path,
+) -> None:
+    """Defect 1: a preview containing an sk-style token or an AWS-key-shaped string must be
+    written redacted, and the log file must be created 0600 (owner-only) -- not the previous
+    default-permissions file carrying raw transcript/tool-output text verbatim."""
+    fake_openai_key = "sk-proj-" + "A1b2C3d4E5f6G7h8I9j0K1l2"
+    fake_aws_key = "AKIAIOSFODNN7EXAMPLE"
+    text = f"tool output leaked a key {fake_openai_key} and also {fake_aws_key} in the env dump"
+    items = [_item("u-1:0", kind="assistant", text=text)]
+    # relevance == threshold -> |score - threshold| == 0, well within the far-from-threshold
+    # margin, so the preview is kept (and therefore actually exercises redaction).
+    scores = {"u-1:0": _score(relevance=0.5, kept=True)}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    path = jsl.shadow_log_path()
+    rows = _read_jsonl(path)
+    preview = rows[0]["text_preview"]
+    assert fake_openai_key not in preview
+    assert fake_aws_key not in preview
+    assert "[REDACTED]" in preview
+    assert (path.stat().st_mode & 0o777) == 0o600
+
+
+def test_log_decisions_opens_the_shadow_log_exactly_once_regardless_of_item_count(
+    project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defect 2 (review): the vendored `ShadowLog.decision()` opens the file for append on
+    EVERY call when disk-backed -- ~45,000 opens scoring a full transcript. This is the
+    architectural regression test for the fix (batch through an in-memory ShadowLog, one real
+    `os.open` for the whole call): wraps the real `os.open` to count calls without faking its
+    behaviour, so the file is still genuinely written."""
+    calls: list[str] = []
+    real_open = os.open
+
+    def counting_open(path: object, flags: int, mode: int = 0o777) -> int:
+        calls.append(str(path))
+        return real_open(path, flags, mode)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", counting_open)
+
+    items = [_item(f"i-{i}:0", kind="user" if i % 2 == 0 else "assistant") for i in range(50)]
+    scores = {it.id: _score() for it in items}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    assert len(calls) == 1, "one os.open per log_decisions() call, not one per record"
+    rows = _read_jsonl(jsl.shadow_log_path())
+    assert len(rows) == 50 + 25  # 50 admit rows + 25 retrieve rows (the "user"-kind half)
+
+
+def test_log_decisions_dedupes_a_rerun_of_the_same_session_and_transcript_size(
+    project_dir: Path, tmp_path: Path,
+) -> None:
+    """Defect 3: the sync and detached lanes can both `compact` the same just-closed session's
+    transcript -- a second `log_decisions` call keyed by the same (session_key, transcript
+    size) must be a no-op, not a duplicate set of rows."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("x" * 100, encoding="utf-8")
+    items = [_item("u-1:0", kind="user")]
+    scores = {"u-1:0": _score()}
+
+    jsl.log_decisions(
+        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        session_key="sess-1", transcript_path=transcript,
+    )
+    jsl.log_decisions(  # the "other lane", same session, same transcript size
+        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        session_key="sess-1", transcript_path=transcript,
+    )
+
+    rows = _read_jsonl(jsl.shadow_log_path())
+    assert len(rows) == 2  # one admit + one retrieve -- from the FIRST call only
+
+
+def test_log_decisions_does_not_dedupe_a_genuinely_grown_transcript(
+    project_dir: Path, tmp_path: Path,
+) -> None:
+    """A session that is still open keeps calling `compact` as its transcript grows -- those
+    are genuinely different runs (different transcript byte size) and must both be logged."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("x" * 100, encoding="utf-8")
+    items = [_item("u-1:0", kind="user")]
+    scores = {"u-1:0": _score()}
+
+    jsl.log_decisions(
+        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        session_key="sess-1", transcript_path=transcript,
+    )
+    transcript.write_text("x" * 200, encoding="utf-8")  # the session grew
+    jsl.log_decisions(
+        items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+        session_key="sess-1", transcript_path=transcript,
+    )
+
+    rows = _read_jsonl(jsl.shadow_log_path())
+    assert len(rows) == 4  # both runs logged -- not the same (session_key, size) key
+
+
+def test_log_decisions_lock_prevents_a_true_concurrent_race(
+    project_dir: Path, tmp_path: Path,
+) -> None:
+    """Post-write review follow-up: a plain read-then-write on the seen-set is racy if the
+    sync and detached lanes genuinely overlap -- both could read "not seen" before either
+    marks it. Two real threads calling `log_decisions` synchronized to start at the same
+    instant (a `Barrier`) each do their own `os.open` of the lock file -- `flock` is scoped to
+    the open file description, not the process, so this exercises the same serialization a
+    second OS process racing the first would hit. The result must still be exactly ONE run's
+    rows, never two."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("x" * 100, encoding="utf-8")
+    items = [_item("u-1:0", kind="user")]
+    scores = {"u-1:0": _score()}
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            barrier.wait(timeout=5)
+            jsl.log_decisions(
+                items, scores, relevance_threshold=0.5, decision_threshold=0.5,
+                session_key="sess-race", transcript_path=transcript,
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced via the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not errors
+    rows = _read_jsonl(jsl.shadow_log_path())
+    assert len(rows) == 2  # one admit + one retrieve -- only ONE thread's run landed, not both
+
+
+def test_log_decisions_drops_preview_far_from_threshold_but_keeps_it_close(
+    project_dir: Path,
+) -> None:
+    """Defect 4's fallback: a record whose score sits more than 0.3 from the threshold it was
+    logged against can't flip under any plausible replay threshold, so its preview is dropped
+    (not just redacted) to fit the retention budget -- a record close to the threshold, the
+    one a replay could actually move, keeps its preview."""
+    items = [
+        _item("close:0", kind="assistant", text="close-to-threshold transcript text"),
+        _item("far:0", kind="assistant", text="far-from-threshold transcript text"),
+    ]
+    scores = {
+        "close:0": _score(relevance=0.55, kept=True),  # |0.55 - 0.5| = 0.05 <= 0.3
+        "far:0": _score(relevance=0.95, kept=True),  # |0.95 - 0.5| = 0.45 > 0.3
+    }
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    rows = {r["item_id"]: r for r in _read_jsonl(jsl.shadow_log_path())}
+    assert rows["close:0"]["text_preview"] != ""
+    assert rows["far:0"]["text_preview"] == ""
+    # the hash is NOT part of the drop -- only the preview (the review's literal fallback)
+    assert rows["far:0"]["text_sha256"] != ""
+
+
+def test_batched_records_round_trip_through_vendored_load_and_replay(project_dir: Path) -> None:
+    """Defect 2's schema-compatibility requirement: `log_decisions` now builds every record
+    through the vendored `ShadowLog.decision()` in memory and serializes them itself instead
+    of letting the vendored `_append` write to disk -- this proves the resulting JSONL is
+    byte-for-byte what `ShadowLog.load()`/`.replay()` expect, not just superficially similar
+    (a schema drift would silently show up as fewer parsed rows, not an exception -- see
+    `ShadowLog.load`'s own `except (ValueError, TypeError): continue`)."""
+    items = [_item(f"i-{i}:0", kind="user" if i % 3 == 0 else "assistant") for i in range(10)]
+    scores = {
+        it.id: _score(relevance=0.9, kept=True, decision=0.9, decision_passed=True)
+        for it in items
+    }
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    log = ShadowLog.load(jsl.shadow_log_path())
+    # 10 admit rows + 4 retrieve rows (i=0,3,6,9 are "user"-kind) -- every line parsed, none
+    # silently dropped as malformed.
+    assert log.stats().total == 14
+    replayed = log.replay(0.5)
+    assert replayed.total == 14
 
 
 # --- write failure never breaks the caller -------------------------------------------------- #

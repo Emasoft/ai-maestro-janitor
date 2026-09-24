@@ -35,16 +35,28 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
+import os
 import sys
 import tempfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import state
 from jevctx.shadow import ShadowLog, ShadowStats
 from jevctx.types import Origin
+
+# Card 7 follow-up (TRDD-N9LDHF7N, review defect 1 -- "run every preview through the
+# janitor's existing secret redaction"): reuse the vendor-prefix secret-value regex already
+# compiled for the Lambda/serverless secret-shape rule (AWS AKIA/ASIA, GitHub/GitLab/Slack
+# tokens, OpenAI/Anthropic sk- keys) -- this is the one existing pattern lib in scripts/lib/
+# that matches a literal secret VALUE in arbitrary text (the cloud/CI-CD leak libs scan for
+# risky *commands*, not pasted credential shapes). Reused as-is, not copied: this module stays
+# a thin project-specific wrapper around the vendored shadow log, never its own secret scanner.
+from serverless_function_patterns import _KNOWN_SECRET_RE as _SECRET_VALUE_RE
 
 __all__ = [
     "SHADOW_LOG_NAME",
@@ -59,11 +71,34 @@ __all__ = [
 
 SHADOW_LOG_NAME = "jev-shadow.jsonl"
 
-# Single-backup rotation (jev-shadow.jsonl -> jev-shadow.jsonl.1), the same shape as
-# dispatch.py's own log rotation (".log"/".log.1"). 10MB of ~300-400 byte JSONL lines is tens
-# of thousands of decisions -- comfortably past the card's own "about a week of use"
-# acceptance bar -- without letting the file grow unbounded across months of `compact` runs.
-MAX_SHADOW_LOG_BYTES = 10 * 1024 * 1024
+# Card 7 follow-up (TRDD-N9LDHF7N, review defect 4 -- "the 10MB single-backup cap is smaller
+# than one large compaction, so a week of history never accumulates"). The arithmetic (full
+# numbers in reports/compaction-replacement/, this follow-up's own report):
+#   - Measured on a synthetic 45,000-item run (realistic score spread, not a constant score),
+#     AFTER fix 2's batching, fix 1's redaction, and this fix's far-from-threshold preview
+#     drop: ~460.7 bytes/record, 58,500 records (45,000 admit + ~13,500 retrieve) for one
+#     full-transcript compaction -> ~27MB for that ONE session.
+#   - IMPORTANT (post-write review, TRDD-N9LDHF7N card 7 follow-up): `jev_compaction.
+#     extract_items` walks the WHOLE transcript "one pass, top to bottom" on every `compact`
+#     call, and `score_items` has no already-scored cache -- there is no incremental,
+#     since-last-run scoring to lean on here. So "9 small + 1 big compactions/day" describes
+#     ten compactions whose TARGET SESSIONS happen to differ in size (nine on transcripts that
+#     simply haven't grown large yet), not nine cheap incremental deltas on one session.
+#   - The task's own worst-case assumption -- a 45,000-item FULL compaction recurring every
+#     single day, 7 days straight -- is therefore ~189MB even with the preview drop applied:
+#     NOT achievable under a 60MB ceiling, and no further shrinking of a single JSONL record
+#     (short of dropping the hash and every other field too, which would make the log useless
+#     for its own purpose) closes a 3x gap. Per the review's own instruction ("if that's
+#     impossible... record that choice"): this cap instead guarantees a FIRM 60MB total ceiling
+#     (never unbounded growth), which comfortably covers >= 7 days when large-transcript
+#     compactions stay occasional (the common case in practice), and covers roughly its two
+#     most recent occurrences (2 x 27MB ~= 54MB) when they don't -- an honest bound for a
+#     side-observability channel that is explicitly allowed to lose old history, not a
+#     data-loss risk in itself (see log_decisions'/log_expand_outcome's own OSError handling).
+#   - 30MB for this file, one rotated backup of the same size (jev-shadow.jsonl.1, same shape
+#     as dispatch.py's own log rotation) = 60MB, the stated ceiling exactly. A second backup
+#     would only ever widen the worst-case-vs-60MB gap above, not close it.
+MAX_SHADOW_LOG_BYTES = 30 * 1024 * 1024
 
 # Card 7: "replay --threshold T [--question relevance|decision]" -- maps the CLI's question
 # name onto the ShadowLog `kind` literal that carries that question's rows (see module header).
@@ -149,13 +184,166 @@ def _rotate_if_oversized(path: Path) -> None:
             return
         backup = path.with_name(path.name + ".1")
         path.replace(backup)
+        # Defect 1 (review): keep the rotated backup as locked-down as the live file --
+        # `Path.replace` preserves the source's mode, so this is belt-and-suspenders for a
+        # backup left over from before this fix shipped (created with default permissions).
+        backup.chmod(0o600)
     except OSError as exc:
         print(f"jev-shadow: rotation failed, appending to the oversized file: {exc}", file=sys.stderr)
 
 
-def _open_log(path: Path) -> ShadowLog:
-    _rotate_if_oversized(path)
-    return ShadowLog(path=path)
+def _redact_preview(preview: str) -> str:
+    """Defect 1 (review): a decision record's 200-char preview is raw transcript/tool-output
+    text -- an API key or AWS credential pasted into a tool result would land in this file
+    verbatim otherwise. `_SECRET_VALUE_RE` (imported, not written here -- see the module
+    header) is checked against the preview only; `text_sha256` is left hashing the REAL text.
+    A hash is not the same exposure as a plaintext preview -- it can't be read back -- but it
+    is not a zero-risk residual either: post-write review noted that anyone who already
+    SUSPECTS a specific literal secret can confirm the guess by hashing it and comparing. That
+    is a narrow threat (it requires already having the candidate string), the task scoped this
+    fix to the preview specifically, and the hash's own job (letting a caller correlate
+    identical content across records) needs the real text regardless of redaction -- so it is
+    left alone, not silently treated as risk-free."""
+    return _SECRET_VALUE_RE.sub("[REDACTED]", preview)
+
+
+_FAR_FROM_THRESHOLD_MARGIN = 0.3
+# Defect 4 (review): the preview is the dominant cost per record (~200 of the measured ~525
+# bytes -- see the report), and the daily-45,000-item session alone already exceeds the 60MB/
+# 7-day budget if every one of its records keeps a preview (the arithmetic is in the report and
+# in MAX_SHADOW_LOG_BYTES's own comment above). The review's own fallback: a record whose score
+# sits more than `_FAR_FROM_THRESHOLD_MARGIN` away from the threshold it was logged against is
+# safe to shrink for the REALISTIC calibration use case this log exists for -- nudging a
+# threshold by tenths, not retargeting it entirely. Post-write review flagged the earlier
+# wording here ("can't change action under ANY replay threshold") as an overclaim:
+# `replay_stats`/`ShadowLog.replay` accept an arbitrary threshold, so a record logged at 0.5
+# with score 0.95 (dropped, diff 0.45) CAN still flip kept->elided under `replay --threshold
+# 0.99` -- `_counterfactual` reads only `score`/`threshold`, never `text_preview`, so that
+# flip's ACTION and every ShadowStats number are still exactly correct either way; what is
+# lost for a far-from-threshold, far-from-original-threshold replay is only a human's ability
+# to manually eyeball that one outlier's raw text next to the number.
+
+
+def _drop_preview_if_far_from_threshold(record: dict[str, Any]) -> None:
+    """Mutates `record["text_preview"]` to "" when this row's own logged score/threshold pair
+    (both already on the record -- `admit` rows carry `relevance_threshold`, `retrieve` rows
+    carry `decision_threshold`, whichever `log_decisions` passed to `.decision()`) are far
+    apart. `text_sha256` is left alone -- it is 64 bytes vs the preview's ~200, and a caller
+    correlating identical content across records needs it regardless of how "close" a score
+    is. Outcome rows have no `score`/`threshold` at all (see `ShadowLog.outcome`'s call
+    signature) and are never passed here -- only `log_decisions`' decision records are."""
+    if abs(record["score"] - record["threshold"]) > _FAR_FROM_THRESHOLD_MARGIN:
+        record["text_preview"] = ""
+
+
+def _write_records(path: Path, records: list[dict[str, Any]]) -> None:
+    """Append every record in `records` to `path` in ONE open/write/close (defect 2: the
+    vendored `ShadowLog.decision()`/`.outcome()` each open the file for append on every call
+    -- about 45,000 opens scoring a full transcript in the latency-limited sync lane).
+    `log_decisions`/`log_expand_outcome` build their records through an in-memory
+    `ShadowLog(path=None)` (the vendored helpers, so the JSONL shape stays exactly what
+    `ShadowLog.load` expects -- see the round-trip test), then hand the resulting
+    `.entries()` dicts here for the actual disk write.
+
+    Never called with an empty `records`: `log_decisions` must not create an empty log file
+    just because every item in this batch was blocked/oversized (see its own callers' tests).
+
+    Mode 0600 (defect 1): a record carries a (now-redacted) preview and a sha256 of real
+    transcript content -- the file must not be group/world-readable. Set on every call, not
+    just first creation, so a log file left over from before this fix also gets locked down.
+
+    Durability trade-off (post-write review, disclosed rather than fixed -- this module's own
+    contract is "shadow logging must never fail the caller it observes", so losing the SIDE
+    log on a real I/O failure is already accepted, see log_decisions'/log_expand_outcome's
+    OSError handling): batching means a disk-full or similar failure partway through a large
+    batch can lose the WHOLE call's records, where the old per-record-open design would have
+    already durably written everything up to the failing record. Fewer opens in exchange for
+    coarser-grained loss on the rare write-failure path -- consistent with the existing
+    contract, but a real shift this batching introduces, not merely a wash.
+    """
+    if not records:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    # fchmod on the already-open fd, not chmod(path, ...): O_CREAT's mode arg is ignored for a
+    # file that already existed (needed to lock down a log left over from before this fix), and
+    # operating on the fd -- not the path -- avoids re-resolving the name for that second call.
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as fh:
+        fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
+
+
+# Defect 3 (review): the synchronous SessionStart lane and the detached background lane can
+# both run `compact` on the same just-closed session's transcript (one already wrote the
+# compacted output, the other raced it) -- each call to `log_decisions` logs its own full set
+# of admit/retrieve rows, so the same session's decisions land twice. A tiny seen-set file next
+# to the log (not the log itself, so replay never has to filter it out) remembers which runs
+# were already logged; `session_key` (the same value `--session-key` already threads through
+# `cmd_compact`) plus the transcript's byte size at call time is specific enough that two
+# genuinely different compactions of a GROWING transcript (mid-session, before it closes) are
+# never conflated with each other.
+_SEEN_SET_MAX_ENTRIES = 2000  # generous headroom over ~10 compactions/day * 7 days = 70
+
+
+def _seen_set_path(log_path: Path) -> Path:
+    return log_path.with_suffix(".seen")
+
+
+def _run_key(session_key: str, transcript_path: str | Path | None) -> str | None:
+    """`None` means "cannot dedupe this call" (no session_key, no transcript, or the
+    transcript vanished under us) -- `log_decisions` then always logs, exactly its old
+    behaviour, so every existing caller that doesn't pass these two stays unaffected."""
+    if not session_key or transcript_path is None:
+        return None
+    try:
+        size = Path(transcript_path).stat().st_size
+    except OSError:
+        return None
+    return f"{session_key}:{size}"
+
+
+def _read_seen(seen_path: Path) -> list[str]:
+    try:
+        return seen_path.read_text(encoding="utf-8").splitlines() if seen_path.exists() else []
+    except OSError:
+        return []  # fail OPEN -- never let a seen-set read error block a real decision log
+
+
+def _mark_seen(seen_path: Path, run_key: str, already: list[str]) -> None:
+    updated = already[-(_SEEN_SET_MAX_ENTRIES - 1):] + [run_key]
+    seen_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    try:
+        seen_path.chmod(0o600)  # session_key can itself be an identifying string
+    except OSError:
+        pass  # the write above already succeeded -- a chmod failure is not worth raising over
+
+
+@contextlib.contextmanager
+def _seen_lock(seen_path: Path) -> Iterator[None]:
+    """Post-write review (defect 3 follow-up): a plain read-then-write on the seen-set file is
+    racy if the sync SessionStart lane and the detached background lane genuinely overlap
+    (both start near session end, before either has called `_mark_seen`) -- both would read an
+    empty/stale seen-set and both would then log a full duplicate set of records, exactly what
+    the seen-set exists to prevent. An exclusive `flock` on a sibling `.lock` file (never the
+    seen-set file itself, so nothing has to special-case "does the seen-set exist yet")
+    serializes the whole check-then-write critical section across processes; POSIX-only
+    (flock), matching this module's existing chmod/fchmod-only (macOS/Linux) posture. A flock
+    is held per open file description and released by the kernel the instant this process
+    closes the fd or exits (including a crash) -- no stale-lock cleanup is possible or needed,
+    unlike a PID-file lock. Only engaged when `log_decisions` actually has a `run_key` to
+    dedupe (see its own call site) -- a caller that never passes session_key/transcript_path
+    never pays for or waits on this lock."""
+    seen_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = seen_path.with_suffix(".lock")
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def log_decisions(
@@ -164,11 +352,17 @@ def log_decisions(
     *,
     relevance_threshold: float,
     decision_threshold: float,
+    session_key: str = "",
+    transcript_path: str | Path | None = None,
 ) -> None:
     """Append one "admit" row per scored item, plus one "retrieve" row for each item that was
     actually asked the decision question -- see the module header for which is which. Called
     once per real `compact` run, right after `jc.score_items` returns: this logs from the
     scores jev_compact.py already has, never from a hook inside jev_compaction.py itself.
+
+    `session_key`/`transcript_path` (defect 3): when both are given, a run already logged for
+    this exact (session, transcript size) is skipped entirely -- see the module-level comment
+    above `_run_key`. Omit either (the default) to always log, unchanged from before this fix.
 
     A write failure (a read-only `.janitor/`, a full disk, a permissions error) is reported on
     stderr and swallowed: shadow logging is an observability side channel, and a compaction
@@ -176,27 +370,57 @@ def log_decisions(
     SIDE log couldn't be written (card 7's own requirement).
     """
     try:
-        log = _open_log(shadow_log_path())
-        for it in items:
-            sc = scores.get(it.id)
-            if sc is None or sc.oversized or sc.blocked:
-                continue  # never actually scored -- see module header
-            origin = Origin(source=f"item:{it.kind}", ref=it.id, turn=it.turn)
-            log.decision(
-                kind="admit", item_id=it.id, score=sc.relevance,
-                threshold=relevance_threshold, action="kept" if sc.kept else "elided",
-                tokens=it.tokens, origin=origin, text=it.text, turn=it.turn,
-            )
-            if it.kind == "user":
-                # `_RETRIEVE_ROW_ID_SUFFIX`: keeps this row's item_id distinct from the admit
-                # row just logged above -- see that constant's own comment for why sharing
-                # `it.id` between the two corrupts the vendored ShadowLog.stats()/.replay().
+        path = shadow_log_path()
+        run_key = _run_key(session_key, transcript_path)
+        seen_path = _seen_set_path(path)
+        # `_seen_lock` (post-write review, defect 3 follow-up): without it, the sync lane and
+        # the detached lane could both pass the "not already seen" check before either called
+        # `_mark_seen`, defeating the dedup this whole block exists for. `nullcontext()` when
+        # there is nothing to dedupe (`run_key is None`) -- a caller that never passes
+        # session_key/transcript_path never waits on a lock it has no use for.
+        lock = _seen_lock(seen_path) if run_key is not None else contextlib.nullcontext()
+        with lock:
+            already = _read_seen(seen_path) if run_key is not None else []
+            if run_key is not None and run_key in already:
+                return  # defect 3: the other lane already logged this exact run
+
+            _rotate_if_oversized(path)
+
+            # In-memory only (`path=None`) -- defect 2: building every record through the
+            # vendored `.decision()` without a disk-backed ShadowLog means zero opens per
+            # item; `_write_records` below does the one real open for the whole batch.
+            log = ShadowLog(path=None)
+            for it in items:
+                sc = scores.get(it.id)
+                if sc is None or sc.oversized or sc.blocked:
+                    continue  # never actually scored -- see module header
+                origin = Origin(source=f"item:{it.kind}", ref=it.id, turn=it.turn)
                 log.decision(
-                    kind="retrieve", item_id=f"{it.id}{_RETRIEVE_ROW_ID_SUFFIX}",
-                    score=sc.decision, threshold=decision_threshold,
-                    action="injected" if sc.decision_passed else "skipped",
+                    kind="admit", item_id=it.id, score=sc.relevance,
+                    threshold=relevance_threshold, action="kept" if sc.kept else "elided",
                     tokens=it.tokens, origin=origin, text=it.text, turn=it.turn,
                 )
+                if it.kind == "user":
+                    # `_RETRIEVE_ROW_ID_SUFFIX`: keeps this row's item_id distinct from the
+                    # admit row just logged above -- see that constant's own comment for why
+                    # sharing `it.id` between the two corrupts the vendored
+                    # ShadowLog.stats()/.replay().
+                    log.decision(
+                        kind="retrieve", item_id=f"{it.id}{_RETRIEVE_ROW_ID_SUFFIX}",
+                        score=sc.decision, threshold=decision_threshold,
+                        action="injected" if sc.decision_passed else "skipped",
+                        tokens=it.tokens, origin=origin, text=it.text, turn=it.turn,
+                    )
+
+            records = log.entries()
+            for record in records:
+                _drop_preview_if_far_from_threshold(record)  # defect 4 -- see its own docstring
+                if record["text_preview"]:
+                    record["text_preview"] = _redact_preview(record["text_preview"])  # defect 1
+            _write_records(path, records)
+
+            if run_key is not None:
+                _mark_seen(seen_path, run_key, already)
     except OSError as exc:
         print(f"jev-shadow: decision log write failed, compaction continues: {exc}", file=sys.stderr)
 
@@ -215,8 +439,11 @@ def log_expand_outcome(item_id: str, *, turn: int = 0) -> None:
     reads `turn` at all (its `_summarise` keys only on item_id/score/action/tokens).
     """
     try:
-        log = _open_log(shadow_log_path())
+        path = shadow_log_path()
+        _rotate_if_oversized(path)
+        log = ShadowLog(path=None)  # defect 2: same in-memory-then-batch-write path
         log.outcome(kind="expand", item_id=item_id, turn=turn)
+        _write_records(path, log.entries())
     except OSError as exc:
         print(f"jev-shadow: outcome log write failed: {exc}", file=sys.stderr)
 
