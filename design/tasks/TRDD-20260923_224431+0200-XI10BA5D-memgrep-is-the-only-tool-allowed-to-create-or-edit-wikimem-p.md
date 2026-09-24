@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-24T02:01:38+0200
+updated: 2026-09-24T17:32:45+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -30,6 +30,7 @@ eht: [FVYV6RSG]
 - NEXT ACTION: A1 (control-byte guard) is in flight. Step 0: the repair-skill half landed (7f983ec2, 0e964665); the --retire-atom fix has not started. Then A2 per section "Implementation plan".
 
 Owner directive 2026-09-23 (verbatim): "what? delete the part about the edit tool. memgrep must be able to handle creation, editing, metadata/frontmatter, sections, toc, wiki links, references, atoms, notes, see also.., and all that by itself. no other tool must be allowed to edit except memgrep." Earlier the same evening (verbatim): "since there is my rule: only memgrep can write/edit wikimem pages. amd since there are malformed wikimem pages. then it is clear that the memgrep tool is broken. unless the premises are wrong." Context: two wikimem pages on this machine (AgentlensPro, ghbook) hold raw 0x08 bytes where a regex \\b was meant, and memgrep validate/lint pass them; the shipped rule markdown-memory-recall.md says 'edit ONLY via memgrep verbs or the Edit tool', so the rule itself allowed a non-memgrep writer. Scope: (1) delete every Edit/Write/shell allowance for wikimem pages from the plugin's rules, rules-reference, skills and agents; (2) audit memgrep's verbs against the owner's list (create, edit, frontmatter/metadata, sections, TOC, wiki links, references, atoms, notes/lessons, see-also) and build every missing capability in memgrep; (3) memgrep validate/lint flag control bytes as ERROR and every memgrep write verb refuses them (investigation running: reports/memory-control-bytes/); (4) a PreToolUse guard that denies Edit, Write, MultiEdit, NotebookEdit and shell writes to any wikimem memory path, so memgrep is the only writer in practice. Order: 1 now; 2 and 3 before 4, so agents are never left with no allowed way to make a needed edit.
+Standing constraint (2026-09-24): repair-skill SKILL.md is near its 4930/5000-token cap and fights CPV's mandatory reference-TOC rule; see section 'Repair-skill SKILL.md token cap vs reference-TOC constraint (2026-09-24)' before any further SKILL.md edit.
 
 ## Approval log
 
@@ -98,3 +99,7 @@ Release note (measured 2026-09-24, reports/memgrep-sole-writer/20260924_001402+0
 
 A page with more than one forbidden control byte cannot be repaired one span at a time (each partial fix leaves a byte in the result, so the gate refuses it); the repair path is update-mem-topic --replace-all when every occurrence takes the same fix, else the A3 whole-page replace.
 Sibling of the 4a2082a7 fix (found 2026-09-24): supersede_atom_lesson_free, behind add-atom --supersedes (memory.rs ~3085-3114), hard-refuses any atom carrying an unrelated status: prop with a misleading "already superseded" message. Fix the guard the same way (key it on superseded-by:); read how this function stamps the marker before choosing how to set status (it may rewrite the marker rather than append).
+
+## Repair-skill SKILL.md token cap vs reference-TOC constraint (2026-09-24)
+
+skills/janitor-memory-repair/SKILL.md body is 4930/5000 tokens (tests/test_rules_installer.py counter, CPV's cap) after 965d3ce0. CPV --strict also requires every reference .md linked in a SKILL.md list entry to carry its COMPLETE heading TOC right after the link, so the two rules fight: any new heading in references/repair-background.md or references/pre-transaction-verb-fixes.md needs a matching TOC line in SKILL.md in the SAME commit, and every SKILL.md edit must re-measure the token cap. Condensing SKILL.md instructions to make room is forbidden (226b2d97 silently dropped 'add it if not'); move whole background sections to references instead. History: 226b2d97 (lossy condense) -> b43059ce (lossless restore) -> b7c8ecac (verb-fix procedure behind a mandatory read) -> 0e7193ad (guards next to the read) -> 965d3ce0 (links re-pathed, TOCs restored), released in v3.6.0.
