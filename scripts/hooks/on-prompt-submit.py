@@ -21,6 +21,16 @@ skipped WITHOUT touching the breadcrumb.
 The hook never blocks and never emits agent-context output — it is invisible to
 the model. It exits 0 on every path; any error degrades to a no-op so a
 breadcrumb problem can never abort the user's turn.
+
+`hooks/hooks.json`'s `UserPromptSubmit` timeout for this script is **10s** (not
+`hooks.json` itself — JSON allows no comments, so the WHY lives here instead).
+Measured 60-70ms uncontended, but under host CPU contention (another process
+pegging the load average) the previous 2s budget expired on process start alone,
+before the script's own (fast) work ever ran — Claude Code then discarded the
+output and printed "timed out after 2s", including on cron-fired prompts. 10s
+matches the sibling `on-prompt-submit-autorecall.py` budget, which does strictly
+more I/O (a memgrep recall) and is not observed to time out at that number.
+See reports/hook-timeout/20260924_161443+0200-prompt-submit-timeout.md.
 """
 
 from __future__ import annotations

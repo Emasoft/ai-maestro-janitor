@@ -53,7 +53,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit.py",
-            "timeout": 2
+            "timeout": 10
           }
         ]
       },
