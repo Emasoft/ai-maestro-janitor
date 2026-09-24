@@ -1388,23 +1388,45 @@ def test_trailer_replace_id_wording_actually_lists_items(
     shell command line, so the render()-emitted instruction has to say REPLACE it, never
     APPEND after it -- a POSIX shell tokenizes a bare `<id>` as `<` `id` `>` (INPUT then
     OUTPUT redirection), not as three literal characters, so appending `--list --grep TEXT`
-    after it never even reaches the CLI's argument parser. This takes the actual rendered
-    trailer, tokenizes the `--list --grep` command BOTH the old (append) and new (replace)
-    way the same way a real shell would (`shlex` with shell punctuation split out), and
-    then actually runs the fixed argv through the CLI to prove it lists items.
+    after it never even reaches the CLI's argument parser.
+
+    Renders through the real CLI with `--inject-out` (so the injected copy carries the "Full
+    compacted context:" instruction) and `--max-elided-pointers 0` (so the fixture's one
+    non-decision elided item -- the dangling tool_result -- trips the "[[elided: N more
+    items...]]" instruction too): both are `render()`-emitted lines that name the SAME
+    trailer command, so this actually reads their wording instead of reconstructing the list
+    command by hand. Then it tokenizes the `--list --grep` command BOTH the old (append) and
+    new (replace) way the same way a real shell would (`shlex` with shell punctuation split
+    out), and actually runs the fixed argv through the CLI to prove it lists items.
     """
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
+    inject_out = tmp_path / "compacted.inject.md"
     client = FakeJevClient(_keep_only("bug"))
     monkeypatch.setattr(jev_compact, "make_client", lambda: client)
-    code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+    code, _output = _run([
+        "compact", "--transcript", str(transcript), "--out", str(out),
+        "--inject-out", str(inject_out), "--max-elided-pointers", "0", "--inject-max-bytes", "2000",
+    ])
     assert code == 0
-    doc = out.read_text(encoding="utf-8")
+    doc = inject_out.read_text(encoding="utf-8")
 
     trailer = next(line for line in doc.splitlines() if line.startswith("pointers expand with:"))
     real_cmd = trailer.split("pointers expand with: ", 1)[1]
     assert real_cmd.endswith("<id>"), f"trailer no longer ends in a bare <id>: {trailer!r}"
     assert str(transcript) in real_cmd
+
+    # Both render()-emitted instruction lines must actually be present in the injected copy,
+    # and both must say REPLACE <id>, never APPEND after it.
+    elided_line = next(line for line in doc.splitlines() if line.startswith("[[elided:"))
+    full_context_line = next(
+        line for line in doc.splitlines() if line.startswith("Full compacted context:")
+    )
+    for instruction in (elided_line, full_context_line):
+        assert "replace <id>" in instruction, f"expected 'replace <id>' wording: {instruction!r}"
+        assert "append" not in instruction.lower(), (
+            f"old 'append' wording leaked back in: {instruction!r}"
+        )
 
     word = "bug"  # present in the fixture's user message ("hello, please fix the bug")
 
