@@ -565,6 +565,7 @@ def _owner_kind(kind: ItemKind, text: str) -> ItemKind:
 def extract_items(
     transcript_path: str | Path, *, segmentation_failures: list[str] | None = None,
     window: ConversationWindow | None = None,
+    malformed_lines: list[int] | None = None,
 ) -> list[Item]:
     """Walk one transcript JSONL and return its extracted, chronologically ordered items.
 
@@ -576,6 +577,23 @@ def extract_items(
     `window`, when given (TRDD-D7RLXAN1), is filled in place with the LAST compact boundary,
     its preserved uuids and its paired summary -- see `ConversationWindow`. Neither the
     boundary line nor the summary entry ever becomes an item.
+
+    `malformed_lines` (TRDD-DQXMND59), when given, is appended to (in place) with the 1-based
+    line number of every line that could not be parsed as JSON -- the live-session case: the
+    process writing the transcript can leave the LAST line half-written mid-append, and any
+    line can carry non-UTF-8 bytes from a subprocess's raw output. Such a line is skipped, not
+    swallowed silently: the count is the caller's signal that the walk saw damage, mirroring
+    `segmentation_failures`. `None` (the default) costs nothing and changes no existing
+    caller's behaviour.
+
+    KNOWN LIMITATION (adversarial review, 2026-09-24): `errors="replace"` only catches damage
+    that ALSO breaks `json.loads` -- a line whose bad bytes decode to U+FFFD but still happens
+    to parse as valid JSON is not counted in `malformed_lines`, because nothing downstream of
+    the decode can tell "replaced" content from real content. A tool_result that genuinely
+    carries non-UTF-8 bytes (a subprocess's raw non-UTF-8 stdout, a binary diff) is silently
+    lossy in that one case. Accepted for this fix: the goal is "one bad byte never aborts the
+    whole compact run", not "every byte-level anomaly is flagged" -- the latter would need
+    per-field validity tracking `json.loads` does not offer.
 
     One pass, top to bottom: a `tool_use` block is remembered by its own `id` as soon as
     it's seen, so the `tool_result` block that answers it (which always appears in a LATER
@@ -617,12 +635,26 @@ def extract_items(
     # dropped, whatever else surrounds them in the same turn.
     quiet_tool_use_ids: set[str] = set()
 
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
+    # V7 robustness (TRDD-DQXMND59): read as BYTES and decode per line, not `open(encoding=
+    # "utf-8")` on the whole file -- a live session's transcript is written by another
+    # process, so a subprocess's raw (non-UTF-8) output can land in one line without
+    # poisoning the rest, and a mid-append last line decodes as garbage-then-EOF rather than
+    # raising `UnicodeDecodeError` and aborting the whole walk on the one line most likely to
+    # be incomplete. `errors="replace"` turns a bad byte into U+FFFD, which then fails
+    # `json.loads` on that line alone (caught below) instead of the file read itself.
+    with path.open("rb") as fh:
+        for line_no, raw_line in enumerate(fh, start=1):
+            line = raw_line.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
-            entry = json.loads(line)
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                # A truncated last line (session still writing) or genuinely corrupt JSON --
+                # counted, never swallowed silently: see `malformed_lines`' docstring above.
+                if malformed_lines is not None:
+                    malformed_lines.append(line_no)
+                continue
             entry_type = entry.get("type")
             # TRDD-D7RLXAN1: a `type: "system"` compact_boundary line is outside
             # `_WALKED_ENTRY_TYPES`, so it must be checked BEFORE that skip. The last one wins

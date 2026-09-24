@@ -1108,6 +1108,49 @@ def test_tool_result_without_matching_tool_use_falls_back(tmp_path: Path) -> Non
     assert items[0].text == "<unknown tool>()\norphaned result"
 
 
+def test_extract_items_survives_a_non_utf8_byte_line(tmp_path: Path) -> None:
+    """TRDD-DQXMND59 (V7): a transcript line carrying raw non-UTF-8 bytes (e.g. a subprocess's
+    unfiltered raw output landing in a tool_result) must not abort the whole walk -- only that
+    line is unreadable, everything around it is still extracted. Fails on HEAD: `path.open(
+    encoding="utf-8")` raises `UnicodeDecodeError` on the bad byte, aborting the whole walk."""
+    good1 = {"type": "user", "uuid": "u1", "parentUuid": None,
+             "message": {"role": "user", "content": [
+                 {"type": "tool_result", "tool_use_id": "t1", "content": "first result"}]}}
+    good2 = {"type": "user", "uuid": "u2", "parentUuid": "u1",
+             "message": {"role": "user", "content": [
+                 {"type": "tool_result", "tool_use_id": "t2", "content": "second result"}]}}
+    path = tmp_path / "badbytes.jsonl"
+    with path.open("wb") as fh:
+        fh.write((json.dumps(good1) + "\n").encode("utf-8"))
+        fh.write(b"\xff\xfe not valid utf-8 at all\n")
+        fh.write((json.dumps(good2) + "\n").encode("utf-8"))
+
+    malformed: list[int] = []
+    items = jc.extract_items(path, malformed_lines=malformed)
+
+    assert [it.id for it in items] == ["u1:0", "u2:0"]
+    assert malformed == [2]
+
+
+def test_extract_items_survives_a_truncated_final_line(tmp_path: Path) -> None:
+    """TRDD-DQXMND59 (V7): a session's transcript is written by another still-running process,
+    so the LAST line can be a half-written JSON record (killed or read mid-append). It must not
+    abort the walk -- earlier lines are still extracted, and the truncated line is counted.
+    Fails on HEAD: `json.loads` raises `json.JSONDecodeError`, uncaught, aborting the whole
+    `compact` run over the one line most likely to be incomplete."""
+    good = {"type": "user", "uuid": "u1", "parentUuid": None,
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "a result"}]}}
+    path = tmp_path / "truncated.jsonl"
+    path.write_text(json.dumps(good) + "\n" + '{"type": "user", "uuid": "u2", "mess')
+
+    malformed: list[int] = []
+    items = jc.extract_items(path, malformed_lines=malformed)
+
+    assert [it.id for it in items] == ["u1:0"]
+    assert malformed == [2]
+
+
 # --- TRDD-88DOI824 (card 6): jevctx.segments.segment() on large tool results ---
 
 
@@ -3127,6 +3170,30 @@ def test_injected_small_jev_kept_tool_results_render_inline_beside_a_large_admit
     # Precondition: the token stage really skipped the small ones (900 + 50 > 920).
     full = jc.compose(items, scores, budget_tokens=920, header=_H)
     assert _shown_ids(full, items)[0] == {"big:0", "newest:0"}
+
+
+def test_injected_non_owner_items_jev_did_not_keep_or_marked_oversized_stay_pointer_only() -> None:
+    """TRDD-U6C3YXEL amendment S1 negative case: `jev_kept = s.kept and not s.oversized` gates a
+    non-owner item's inline eligibility in the injected copy -- a small tool result Jev did NOT
+    keep (kept=False) and one it marked oversized (oversized=True) must stay pointer-only even
+    with an enormous room, because the gate is `jev_kept`, not membership in the token stage's
+    `kept_ids` (the pre-S1 read S1 replaced)."""
+    not_kept = _item("notkept:0", "tool", "Bash({})\n42 passed in 0.1s, all green", turn=1, tokens=50)
+    oversized = _item("oversz:0", "tool", "Bash({})\n7 passed in 0.2s, all green", turn=2, tokens=50)
+    newest = _item("newest:0", "user", "hi", turn=3, tokens=2)
+    items = [not_kept, oversized, newest]
+    scores = {
+        "notkept:0": _scores(0.9, kept=False),
+        "oversz:0": jc.Scores(relevance=0.9, decision=0.0, oversized=True, kept=True,
+                              decision_passed=False),
+        "newest:0": _scores(0.9),
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=10**6,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    inline, pointed = _shown_ids(doc, items)
+    assert "notkept:0" not in inline and "oversz:0" not in inline
+    assert "notkept:0" in pointed and "oversz:0" in pointed
 
 
 def test_injected_whole_tool_call_with_no_result_fails_the_gate() -> None:
