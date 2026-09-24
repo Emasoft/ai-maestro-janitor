@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-24T17:32:45+0200
+updated: 2026-09-24T17:35:23+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -102,4 +102,5 @@ Sibling of the 4a2082a7 fix (found 2026-09-24): supersede_atom_lesson_free, behi
 
 ## Repair-skill SKILL.md token cap vs reference-TOC constraint (2026-09-24)
 
-skills/janitor-memory-repair/SKILL.md body is 4930/5000 tokens (tests/test_rules_installer.py counter, CPV's cap) after 965d3ce0. CPV --strict also requires every reference .md linked in a SKILL.md list entry to carry its COMPLETE heading TOC right after the link, so the two rules fight: any new heading in references/repair-background.md or references/pre-transaction-verb-fixes.md needs a matching TOC line in SKILL.md in the SAME commit, and every SKILL.md edit must re-measure the token cap. Condensing SKILL.md instructions to make room is forbidden (226b2d97 silently dropped 'add it if not'); move whole background sections to references instead. History: 226b2d97 (lossy condense) -> b43059ce (lossless restore) -> b7c8ecac (verb-fix procedure behind a mandatory read) -> 0e7193ad (guards next to the read) -> 965d3ce0 (links re-pathed, TOCs restored), released in v3.6.0.
+skills/janitor-memory-repair/SKILL.md body is 4930/5000 tokens (tests/test_rules_installer.py counter, CPV's cap) after 965d3ce0. CPV --strict also requires every reference .md linked in a SKILL.md list entry to carry its COMPLETE heading TOC right after the link, so the two rules fight: any new heading in references/repair-background.md or references/pre-transaction-verb-fixes.md needs a matching TOC line in SKILL.md in the SAME commit, and every SKILL.md edit must re-measure the token cap. Condensing SKILL.md instructions to make room is forbidden (1854634c silently dropped 'add it if not'); move whole background sections to references instead. History: 1854634c (lossy condense) -> 4fb35291 (lossless restore) -> b5e1983d (verb-fix procedure behind a mandatory read) -> 4f1857cd (guards next to the read) -> 965d3ce0 (links re-pathed, TOCs restored), released in v3.6.0.
+Note: the subject of commit 6f5e6482 cites pre-rewrite id 226b2d97 (= 1854634c); commit messages are not rewritten after the fact.
