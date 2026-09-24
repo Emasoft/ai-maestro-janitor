@@ -1202,6 +1202,85 @@ def test_bulk_tool_use_mention_does_not_change_the_ranking(tmp_path, monkeypatch
         assert f"AAAAAAA{i}" in other_line
 
 
+def test_bulk_assistant_text_mention_does_not_change_the_ranking(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """6471f448 review of TRDD-O2FNJ4KW: the `tool_use` cap alone missed an assistant TEXT block
+    (a status update naming many new cards) -- that block must be dropped exactly like a bulk
+    `tool_use` input, since it is the identical skew in prose form."""
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    stub = bin_dir / "trddgrep"
+    stub.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "argv = sys.argv[1:]\n"
+        "if 'show' in argv:\n"
+        "    card_id = argv[argv.index('show') + 1]\n"
+        "    print(card_id + ' P? fake card')\n"
+        "    print('  design/tasks/fake.md')\n"
+        "    print()\n"
+        "    print('  \\u23f5 STATE (authoritative)')\n"
+        "    print()\n"
+        "    print('  - fake state line for ' + card_id)\n"
+        "else:\n"
+        "    print('5 open cards (design/tasks)')\n"
+        "    print('\\u2550\\u2550\\u2550 TODO (5)')\n"
+        "    print('  AAAAAAA1 P? todo          card one')\n"
+        "    print('  AAAAAAA2 P? todo          card two')\n"
+        "    print('  AAAAAAA3 P? todo          card three')\n"
+        "    print('  AAAAAAA4 P? todo          card four')\n"
+        "    print('  AAAAAAA5 P? todo          card five')\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{sys.exec_prefix}/bin")
+
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": (
+                "Opened TRDD-AAAAAAA1, TRDD-AAAAAAA2, TRDD-AAAAAAA3, TRDD-AAAAAAA4 and "
+                "TRDD-AAAAAAA5 for the fan-out."
+            )},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+    # `todo` is not a `STATE_HEAD_COLUMNS` fill column, so a real mention of any of these ids
+    # would have put it in `cards` -- none of them made it there, proving the whole bulk mention
+    # was dropped rather than merely de-prioritized.
+    assert cards == []
+    for i in range(1, 6):
+        assert f"AAAAAAA{i}" in other_line
+
+
+def test_assistant_text_mentioning_two_ids_still_counts(tmp_path, monkeypatch, _isolated_env):
+    """The 6471f448 text-block cap only drops a block past `_TOOL_USE_MENTION_CAP` (3) distinct
+    ids -- an ordinary assistant status update naming two cards is not a bulk listing and must
+    still rank both of them."""
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "TRDD-K0PMVRN6 and TRDD-WZKFSQ2N are both done now."},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, _other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+    ids = {c[0] for c in cards}
+    assert {"K0PMVRN6", "WZKFSQ2N"} <= ids
+
+
 def test_other_ids_line_caps_and_names_the_remainder():
     many_ids = [f"ID{i:06d}" for i in range(50)]
     line = jcl._format_other_ids_line(many_ids, cap=40)

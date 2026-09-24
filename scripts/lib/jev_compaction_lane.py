@@ -190,13 +190,17 @@ def _extract_state_section(show_output: str) -> str | None:
 # named -- so a random 8-char uppercase word can never false-positive -- and (b) may be spelled
 # `TRDD-<id>`, `#<id>`, or bare `<id>`, since real transcript prose overwhelmingly drops the
 # `TRDD-` prefix ("EFA4P42B is committed").
-#: How many DISTINCT open-card ids a single `tool_use` input block may name before the whole
-#: block is dropped from the scan (review correction 1): a worker prompt, a card batch, or a
-#: `grep -E 'A|B|C'` argument that happens to enumerate several ids is the TOOL CALL's business,
-#: not evidence that the assistant was actually WORKING all of them -- letting it count would put
-#: every named id at the same "most recent" rank, which is exactly the skew the review flagged.
-#: Owner prose and assistant text blocks are exempt: a human or the assistant actually writing
-#: "TRDD-A, TRDD-B, TRDD-C are all done" is a real, if unusual, multi-card mention.
+#: How many DISTINCT open-card ids a single ASSISTANT-authored block (`tool_use` input, or an
+#: assistant `text` block) may name before the whole block is dropped from the scan (review
+#: correction 1): a worker prompt, a card batch, or a `grep -E 'A|B|C'` argument that happens to
+#: enumerate several ids is the TOOL CALL's business, not evidence that the assistant was
+#: actually WORKING all of them -- letting it count would put every named id at the same "most
+#: recent" rank, which is exactly the skew the review flagged. Commit 6471f448's own review found
+#: the cap had been applied to `tool_use` only: an assistant TEXT block (a status update naming
+#: nine new cards) still counted every id at one position, the identical skew in prose form -- so
+#: the cap now covers both assistant block kinds. Owner (human) prose is still exempt: a human
+#: actually writing "TRDD-A, TRDD-B, TRDD-C are all done" is a real, if unusual, multi-card
+#: mention, and there is no tool call standing in for the human's own words to misattribute.
 _TOOL_USE_MENTION_CAP = 3
 
 
@@ -277,10 +281,11 @@ def _record_scan_blocks(entry: dict) -> list[tuple[str, str]]:
     """`[(block_kind, text), ...]` worth regex-scanning for a mention out of ONE transcript
     record's `message.content` -- a plain string (kind `"text"`), or the `text`/`tool_use`
     blocks of a content list (kind `"text"` / `"tool_use"` respectively). Returning the kind
-    alongside the text (TRDD-O2FNJ4KW follow-up, review correction 1) is what lets the caller
-    cap a single `tool_use` block's distinct-id count without also capping owner/assistant prose
-    -- collapsing every block into one joined string, as this used to do, throws that
-    distinction away before the caller ever sees it.
+    alongside the text (TRDD-O2FNJ4KW follow-up, review correction 1; extended to assistant
+    `text` blocks by the 6471f448 review) is what lets the caller cap a single assistant-authored
+    block's distinct-id count without also capping OWNER prose -- collapsing every block into one
+    joined string, as this used to do, throws that distinction away before the caller ever sees
+    it.
 
     `tool_result` (and any other block kind) is deliberately skipped: it is a board dump, a file
     read, or another tool's own output landing back in the transcript, not something this
@@ -327,11 +332,13 @@ def _scan_transcript_mentions(transcript_path: str, open_ids: frozenset[str]) ->
     notification, a heartbeat fire, a hook's own typed command): those are NOT the session's own
     words either, they are the harness/janitor talking to itself.
 
-    A single `tool_use` block naming more than `_TOOL_USE_MENTION_CAP` DISTINCT open-card ids
-    contributes NONE of them (TRDD-O2FNJ4KW follow-up, review correction 1) -- a worker prompt,
-    a card batch, or a `grep -E 'A|B|C'` argument enumerating many ids is not evidence the
-    assistant worked all of them just now, and letting it count put every named id at the same
-    "most recent" rank. Owner messages and assistant `text` blocks are never capped.
+    A single ASSISTANT-authored block (`tool_use`, or an assistant `text` block) naming more than
+    `_TOOL_USE_MENTION_CAP` DISTINCT open-card ids contributes NONE of them (TRDD-O2FNJ4KW
+    follow-up, review correction 1; the text-block half added by the 6471f448 review, which found
+    a status update naming nine new cards in prose still counted every one of them at a single
+    position) -- a worker prompt, a card batch, or a status update enumerating many ids is not
+    evidence the assistant worked all of them just now, and letting it count put every named id
+    at the same "most recent" rank. Owner (human) messages are the only thing never capped.
 
     A malformed line (partial write, non-UTF8) is skipped, not fatal -- one bad line in a
     multi-gigabyte transcript must never abort the whole scan."""
@@ -365,7 +372,12 @@ def _scan_transcript_mentions(transcript_path: str, open_ids: frozenset[str]) ->
                 continue
             for kind, text in _record_scan_blocks(entry):
                 ids = _text_mentions(text, open_ids)
-                if kind == "tool_use" and len(ids) > _TOOL_USE_MENTION_CAP:
+                # Cap applies to any ASSISTANT-authored block -- `tool_use` is always the
+                # assistant's own call, and a `text` block is capped too when `etype ==
+                # "assistant"` (6471f448 review: an assistant status update naming many ids in
+                # prose is the same bulk-listing skew as a tool_use argument doing it). A `text`
+                # block from an `etype == "user"` (owner) record is never capped.
+                if (kind == "tool_use" or etype == "assistant") and len(ids) > _TOOL_USE_MENTION_CAP:
                     continue  # bulk mention -- contributes nothing (review correction 1)
                 for card_id in ids:
                     mentions[card_id] = lineno  # last position wins -- later lines overwrite
@@ -553,6 +565,14 @@ LANE_INJECTION_MAX_BYTES = 8192
 # line-count contributor once the digest was capped. 12 pointers measured at ~1,732 bytes --
 # still enough to name the highest-scoring elided items, far short of showing all 40. Applies
 # ONLY to the `--inject-out` rendering, never to `--out`.
+#
+# 0c607b36 (TRDD-BLGZTHQ9) replaced the tiered injected-selection with `_select_injected`'s one
+# priority fill: this cap now bounds ONLY step 7's ORDINARY pointers (`_InjectSelection.pointers`
+# -- items that were never a decision/constraint/correction/instruction). A pointer to an
+# excluded DECISION item is a separate, capped-by-bytes-not-count reserve held BEFORE this tier
+# (`_InjectSelection.decision_pointers`, step 3: up to `_MAX_DECISION_POINTERS` of the newest
+# excluded decision items, within `_INJECT_DECISION_POINTER_SHARE` -- 25% -- of the room) and is
+# added ON TOP of the `LANE_MAX_ELIDED_POINTERS` ordinary pointers, not counted against it.
 LANE_MAX_ELIDED_POINTERS = 12
 # The backstop forwarded to `jev_compact.py compact --inject-max-bytes` (via `run_compact`) --
 # see `jev_compaction.py::compose`'s own docstring for the drop-oldest-kept-first / drop-lowest-
@@ -628,14 +648,17 @@ def inject_max_bytes_for(room: int, transcript_path: str) -> int:
 # so `room` can reach zero or go negative and `inject_max_bytes_for`'s own `max(0, ...)` silently
 # hands `jev_compact.py` `--inject-max-bytes 0`.
 #
-# That is NOT harmless. Read `jev_compact.py::cmd_compact` (scripts/jev_compact.py:616-638) and
-# `jev_compaction.py::compose`'s `max_item_bytes`+`max_bytes` branch (scripts/lib/
-# jev_compaction.py:1610-1761): with `max_bytes=0`, `available = max(0, 0 - baseline)` is 0
-# (jev_compaction.py:1619), so `kept_budget`/`pointer_budget` are both 0 -- no kept items, no
-# pointers survive admission at all (jev_compaction.py:1643, 1620). The digest is already forced
-# to `""` for every `--inject-out` render regardless of `--inject-max-bytes` (jev_compact.py:626,
-# unconditional), so the digest-truncation backstop (jev_compaction.py:1753-1759) never has
-# material to trim either. The eviction loop that follows (jev_compaction.py:1737) then has
+# That is NOT harmless. Read `jev_compact.py::cmd_compact`'s `--inject-out` render and
+# `jev_compaction.py::compose`'s injected branch, which hands off to `_select_injected`. (Cited
+# by symbol, never by line number: these files move under every Jev fix, and two line citations
+# here were already wrong one commit after they were written.) With `max_bytes=0`, compose's
+# `available = ... max(0, max_bytes - baseline)` line yields 0, and `_select_injected`'s own
+# `fits()` helper only admits a candidate whose cost is 0 against a
+# 0-byte `available` -- so no kept item and no pointer (ordinary or decision) survives admission.
+# The digest is already forced
+# to `""` for every `--inject-out` render regardless of `--inject-max-bytes` (`cmd_compact`'s
+# unconditional `inject_header["digest"] = ""`), so compose's digest-truncation backstop never has
+# material to trim either. The `evict_order` eviction loop that follows then has
 # nothing left to evict (`kept_order_list`/`shown_elided` are already empty), so it exits
 # immediately -- `compose()` returns its bare fixed skeleton (header + "N more items" line +
 # trailer) UNBOUNDED by `max_bytes` (there is no assertion or further slice enforcing the 0-byte
@@ -649,8 +672,9 @@ def inject_max_bytes_for(room: int, transcript_path: str) -> int:
 # 389B drop, on this project's own ~148-char real paths; a deeply nested project dir or a
 # synced/mirrored home directory elsewhere could still push it into the KB range). A tiny
 # positive value (1-399)
-# degrades the same way: `available`/`kept_budget`/`pointer_budget` are still ~0 once the baseline
-# skeleton is subtracted, so the injected companion is still just that same (path-scaled) skeleton
+# degrades the same way: `available` and `_select_injected`'s per-tier caps (`fits()`'s limits,
+# all derived from `available`) are still ~0 once the baseline skeleton is subtracted, so the
+# injected companion is still just that same (path-scaled) skeleton
 # -- a REAL Jev API call was paid for a document containing no actual summary content. A negative
 # value is never possible from `inject_max_bytes_for` itself (its own `max(0, ...)` already floors
 # it) -- there is no separate handling for it in `jev_compaction.py::compose` either (`available =
