@@ -3,7 +3,7 @@ trdd-id: BMITQ2MN
 title: Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault
 column: blocked
 created: 2026-09-09T16:37:29+0200
-updated: 2026-09-17T05:54:48+0200
+updated: 2026-09-24T07:37:23+0200
 current-owner: ai-maestro-janitor session
 task-type: feature
 scope: project
@@ -371,3 +371,8 @@ every subject line.
   was carried across eight rounds on a direct owner instruction with no card; this TRDD is the
   retroactive record and the home for the outstanding decisions above.
 - 2026-09-16T12:35:31+0200 — column → blocked. the remaining half is ai-maestro's to write (external repo); parked as fleet-ask (triage 2026-09-16)
+
+## Owner decisions 2026-09-24 (verbatim)
+
+> no need, now it is ok. but remember: the long lived tokens are not working, so you can remove that code. the current method you just used is the right one, so save it in memory. but still you must check that the rotation will actually happen in time, just before the api/time-limit error appear. otherwise continuity is broken. you must ensure rotate is executed without broken continuity of the agents jobs across all claude code, in or outside of the ai-maestro harness. i suggest to message the ai-maestro claude to inform it of the right procedures to rotate and renew you just used.
+Superseded direction: the owner reports the 1-year setup-token keys do not work and authorises removing the import code; tracked on the new removal card.

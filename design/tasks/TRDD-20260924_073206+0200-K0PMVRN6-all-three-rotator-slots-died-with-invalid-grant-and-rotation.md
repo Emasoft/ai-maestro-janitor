@@ -3,7 +3,7 @@ trdd-id: K0PMVRN6
 title: All three rotator slots died with invalid_grant and rotation stayed put for 17 days
 column: todo
 created: 2026-09-24T07:32:06+0200
-updated: 2026-09-24T07:32:09+0200
+updated: 2026-09-24T07:37:11+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -23,7 +23,7 @@ labels: [oauth-rotator]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-24
 
 - 2026-09-24 07:30: all three slots re-captured by hand with `slot_capture_browser.py`: emanuele.sabetta 07:27, ipazia.emasoft (live) 07:28, fmuaddib 07:30. Each OK line named the right account, and each slot is FULL-OAUTH with a refreshToken, expiring in about 8 h. The 07:29:47 tick probed the live account again ("live <the live account> 5h=3% 7d=1% — within limits"), so PROBING is restored. SWITCHING is NOT proven: no switch has happened since.
-- NEXT ACTION: discriminate the hypotheses below before any code change. H1 first, since it predicts the new slots will die again.
+- NEXT ACTION: verify the rotator switches BEFORE a 429/time-limit wall with no broken continuity (owner 2026-09-24), in and outside the ai-maestro harness; remove the setup-token code path (new card); tell the ai-maestro Claude the ratified procedure.
 - Prediction to check (H1): the first account the rotator switches to will log `refresh failed (credential-dead)` about one access-token lifetime (about 8 h) after the switch.
 
 ## Symptom (owner, 2026-09-24)
@@ -55,3 +55,8 @@ labels: [oauth-rotator]
 ## Approval log
 
 - 2026-09-24T07:32:06+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Owner decisions 2026-09-24 (verbatim)
+
+> no need, now it is ok. but remember: the long lived tokens are not working, so you can remove that code. the current method you just used is the right one, so save it in memory. but still you must check that the rotation will actually happen in time, just before the api/time-limit error appear. otherwise continuity is broken. you must ensure rotate is executed without broken continuity of the agents jobs across all claude code, in or outside of the ai-maestro harness. i suggest to message the ai-maestro claude to inform it of the right procedures to rotate and renew you just used.
+Context: "no need, now it is ok" answered the question whether to amend commit 3185baac to remove private data from TRDD-K0PMVRN6. The owner said no amend is needed.

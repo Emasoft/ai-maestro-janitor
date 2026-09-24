@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth-cascade
 description: "How the ROTATE / RENEW / REAUTHENTICATE cascade actually falls back — where rotation runs (daemon tick vs launchd), drain-first target selection, window-asymmetric switch thresholds (7d vs 5h), the RENEW_REFRESH keepalive vs RENEW_COOKIE browser-capture sub-legs, why REAUTH needs a human (passkey/2FA is OS-level), and the ~monthly reauth nudge. Symptoms: 'rotator failed to keep the session alive', '429 landed instead of rotating', 'renew shows the login page not Authorize', 'accounts won't switch', 'is the reauth step ever fully hands-free'."
 ocd: 2026-06-13
-lmd: 2026-09-17
+lmd: 2026-09-24
 metadata:
   node_type: memory
   type: project
@@ -41,7 +41,7 @@ findings, it does not heal.
 
 ## The three layers — what each does, when it fires, how it falls back
 
-^40IRZA94 [desc:"ROTATE swaps to the next healthy stored slot in real time near a usage limit; needs >=2 tokens, window-asymmetric thresholds, drain-first selection, debounced 429s.", keywords:"how_does_the_rotator_drain_first_select_a_target_account why_is_the_7_day_window_threshold_different_from_the_5_hour_threshold rotate_layer_switch_thresholds live_429_debounce api_independent_death_signal_expires_at switch_blob_merges_mcp_oauth rotate_needs_two_valid_tokens_to_switch_to", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
+^40IRZA94 [desc:"ROTATE swaps to the next healthy stored slot in real time near a usage limit; needs >=2 tokens, window-asymmetric thresholds, drain-first selection, debounced 429s.", keywords:"how_does_the_rotator_drain_first_select_a_target_account why_is_the_7_day_window_threshold_different_from_the_5_hour_threshold rotate_layer_switch_thresholds live_429_debounce api_independent_death_signal_expires_at switch_blob_merges_mcp_oauth rotate_needs_two_valid_tokens_to_switch_to", type: project, ocd: 2026-06-13, lmd: 2026-09-24]
 **1. ROTATE — swap to an already-stored token. Real-time, silent, works.**
 When the live account nears a usage limit (or its token is about to expire), the daemon
 swaps Claude Code's live keychain credential to the next healthy stored slot. Agents
@@ -59,6 +59,9 @@ switch TO — its whole job depends on the RENEW leg keeping the alternate slots
   `MIN_DWELL_S` (default 60s) between switches. Target selection is **DRAIN-FIRST**
   (`select_drain_first` — use the most-consumed-but-still-safe alternate first, so accounts
   drain evenly and the freshest stay in reserve; user decision 2026-05-29).
+
+^ATOM-YNDZ-PR9Z [desc: "ROTATE robustness: a live 429 is debounced (401/403 is authoritative), an API-unreachable-but-locally-expired token still rotates, and cmd_auto reconciles the live keychain email first.", keywords: live_429_debounced_not_immediate_rotation 401_403_authoritative_dead_token_no_debounce api_independent_death_signal_expires_at usage_endpoint_unreachable_but_token_locally_expired expiry_grace_h_default_0_5h reconcile_live_email_before_deciding state_json_live_email_drifted_out_of_band_login ground_truth_reconcile_first why_does_a_single_429_not_trigger_rotation live_429_debounce_env_var, type: project, ocd: 2026-09-24, lmd: 2026-09-24]
+
 - A live-account **429** is debounced (`LIVE_429_DEBOUNCE`, default 2 consecutive checks)
   because a single 429 on `/api/oauth/usage` can be a transient endpoint throttle, not a
   real limit. A **401/403** is an authoritative dead-token signal (no debounce).
@@ -71,6 +74,9 @@ switch TO — its whole job depends on the RENEW leg keeping the alternate slots
   drifted (an out-of-band login, a `switch` from another process, a reauth that wrote the
   token but not the index) is corrected, or the candidate list would treat the REAL live
   account as a rotation target.
+
+^ATOM-ZE05-RUNY [desc: "After a switch Claude Code adopts the new account on its next turn (no restart); _switch_blob merges claudeAiOauth, preserving mcpOAuth; ROTATE falls back to RENEW when no alternate is healthy.", keywords: claude_adopts_new_account_without_restart keychain_read_on_next_turn_macos switch_blob_merges_claude_ai_oauth mcp_oauth_preserved_on_rotation rotation_must_not_wipe_mcp_tokens no_healthy_alternate_falls_back_to_renew all_accounts_maxed_no_software_fix rotate_has_nowhere_to_go fallback_trigger_rotate_to_renew window_reset_or_fresh_login_needed, type: project, ocd: 2026-09-24, lmd: 2026-09-24]
+
 - After a switch, a running `claude` re-reads the keychain on its NEXT turn (macOS, no
   `~/.claude/.credentials.json`), so it adopts the new account **without a restart**.
 - `_switch_blob` MERGES the slot's `claudeAiOauth` into the current live blob (preserving
