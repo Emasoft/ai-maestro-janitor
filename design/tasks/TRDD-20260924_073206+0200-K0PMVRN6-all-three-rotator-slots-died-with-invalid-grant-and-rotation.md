@@ -3,7 +3,7 @@ trdd-id: K0PMVRN6
 title: All three rotator slots died with invalid_grant and rotation stayed put for 17 days
 column: todo
 created: 2026-09-24T07:32:06+0200
-updated: 2026-09-24T07:52:38+0200
+updated: 2026-09-24T07:55:34+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -56,6 +56,7 @@ labels: [oauth-rotator]
 
 - 2026-09-24T07:32:06+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24 — identity correction: issuer fields changed from the host username (a trddgrep default) to the session id; original in git history.
+- 2026-09-24 — privacy status: this card still contains personal e-mail addresses and account names (owner accepted the commit 2026-09-24; redaction pending the owner's decision). publish.py's G1b address lint is expected to refuse a release until they are redacted; the correction above changed only the issuer fields and the MANDATE line's issuer.
 
 ## Owner decisions 2026-09-24 (verbatim)
 
