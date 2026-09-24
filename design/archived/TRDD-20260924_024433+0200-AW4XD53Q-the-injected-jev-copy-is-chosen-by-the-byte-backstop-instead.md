@@ -1,9 +1,9 @@
 ---
 trdd-id: AW4XD53Q
 title: The injected Jev copy is chosen by the byte backstop instead of by priority within its byte budget
-column: todo
+column: complete
 created: 2026-09-24T02:44:33+0200
-updated: 2026-09-24T02:45:28+0200
+updated: 2026-09-24T08:29:47+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -24,3 +24,14 @@ Found by the review of 862d30d4 (TRDD-RAEGS1D5). compose() admits items against 
 
 - 2026-09-24T02:44:33+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T02:45:28+0200 — column → todo by janitor-main-session. review of e30b0885: 3/3/3 regresses the 4/6/4 this unreleased series reached, on the owner's own complaint axis; it must not ship
+- 2026-09-24T08:29:47+0200 — COMPLETE by emanuelesabetta. acceptance met on cached real scores; trade accepted under delegation.
+
+## Decision 2026-09-24 (delegated)
+
+The owner-message trade is ACCEPTED (non-owner items first, per the owner's complaint that the resumed session must learn what was done). Acceptance is met on cached real scores: 5/6/5 non-owner items against a 4/6/4 target, newest owner message present, nothing sliced, and a test with fewer than 3 non-owner items is added. The measured cost (owner items inline 11/13/10 → 7/9/3; decision-passing owner items absent with no pointer 17/18/0 → 21/22/7) goes to the follow-up card below.
+
+## Acceptance checklist
+
+- [x] At least the 4/6/4 non-owner items of aabd8b0c on the cached real scores (measured: 5/6/5)
+- [x] Newest owner message present, nothing sliced
+- [x] Test added with fewer than 3 non-owner items in total
