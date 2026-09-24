@@ -1,9 +1,9 @@
 ---
 trdd-id: D7RLXAN1
 title: Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
-column: dev
+column: testing
 created: 2026-09-24T13:53:03+0200
-updated: 2026-09-24T18:05:42+0200
+updated: 2026-09-24T18:15:20+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -15,6 +15,8 @@ approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T13:53:03+0200
 parent-trdd: null
+implementation-commits: [c7779d84]
+status: tasked
 ---
 
 # Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
@@ -26,6 +28,7 @@ parent-trdd: null
 - Full design with the measurements: reports/compaction-replacement/20260924_133048+0200-prose-verbatim-design.md (gitignored scratch copy; THIS card holds the decisions).
 - Digest question CLOSED (advisor): keep build_digest(items, ...) sending the newest 3 owner + 2 assistant messages to Jev as task context — not a violation, since the directive governs what survives into the output, not what Jev sees as its task description; stripping prose from the digest would degrade every tool-item score for no gain.
 - OWNER QUESTIONS Q1-Q3 ANSWERED 2026-09-24 (see the first line of this block): (1) the ~20-35k-token one-time READ FIRST cost is accepted, single file; (2) "all" = since the session's LAST compact_boundary; (3) enforced in code, no prompt change, because a prompt sentence cannot guarantee a threshold outcome.
+UPDATED 2026-09-24: column -> testing, implementation-commits: [c7779d84]. Acceptance (a)(b)(c)(e)(f) PASS, (d) measured (b2bf5b7b 126 KB ~31.5k tok 2 Reads, d30bf250 169 KB ~42k tok 2 Reads -- above the 20-35k estimate Q1 was accepted on --, 4eb7bf5d 65 KB ~16k 1 Read, fd5cc3e0 62 KB ~15k 1 Read); the two-file option (~35 KB of kept items/pointers out of the mandatory read) is the next lever if the read cost matters, unbuilt. Risk added: nothing yet checks a resumed session actually obeys READ FIRST. NEXT ACTION: 350W5II2 can now unblock (its blocker-probe reads this card's column).
 
 ## Owner directive (verbatim, 2026-09-24)
 "its not good. assistant prose and user prose (the messages exchanges) should be all kept intact. modify the jev prompt to ensure that."
@@ -79,18 +82,21 @@ Re-render from the saved scores, filtered to the scored ids.
 - The mandatory READ FIRST cost is roughly 20-35k tokens, paid once into an empty context and cached afterwards: digest (up to 4,000 tokens) + Claude Code's own summary (13-15 KB, ~3.5k tokens) + live prose (0.3k-26k tokens measured) + kept tool items (up to budget_tokens 8,000) + pointers (advisor §4). It replaces about 2k tokens today: a reduction of about 96% instead of 99.7%, bounded by what one context window held before the boundary (preTokens ~868k, postTokens ~21-27k on fd5cc3e0). This is the owner's explicit choice, pending confirmation — see owner question (1) above.
 - The most likely way it is wrong: the turn and boundary alignment. It holds because the walk is strictly top to bottom and turn never decreases; test 3 pins it.
 - Measured-after-acceptance option, not built now: if acceptance (d)'s tool-item share turns out large, write the conversation (summary + live prose) to its own jev-conversation-<key>.md as the READ FIRST target, keeping the Jev document's "read only if needed" role; saves the tool-item budget and pointers from the mandatory read (roughly a quarter to a third of it) at the cost of one more atomic_write and one more path in the fixed lines (advisor §4). Build only if the single-file cost proves too high.
+Unverified: nothing yet checks that a resumed session actually obeys the READ FIRST line -- the injected render tells the agent to read the full copy before acting, but no test or runtime guard confirms a real resumed agent does so; the mandatory cost (risk above) is paid on faith that it gets read.
 
 ## Related
 
 TRDD-R9UXOSR5 — retire the decision question and owner tiers once prose is never scored (dead-code follow-up, sequenced after acceptance).
 TRDD-350W5II2 — Jev scores only live tool and event items, not pre-boundary ones (builds on D7RLXAN1's window/boundary machinery; advisor §7).
 TRDD-RAEGS1D5 — not this card's parent-trdd (RAEGS1D5's npt/eht does not list D7RLXAN1); tracked via Related links only; D7RLXAN1 must land before RAEGS1D5's release-blocking eht cards (BLGZTHQ9, DZ1KOGAC, O2FNJ4KW) can be re-measured on the final tree.
+TRDD-IYNS7H83 -- the shared heartbeat-reply predicate (transcript_roles.is_heartbeat_reply) still hides real assistant content outside Jev's path; this card's extract_items narrowing to bare-reply-only is what surfaced the split.
 
 ## Approval log
 
 - 2026-09-24T13:53:03+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T14:19:34+0200 — column → design_human_review by emanuelesabetta. AI review done (advisor: SOUND WITH CHANGES, fixes A-E folded in); awaiting owner answers to Q1-Q3 before implementation
 - 2026-09-24T17:32:35+0200 — column → dev by emanuelesabetta. Q1-Q3 decided under the owner's full-authority grant; implementing with advisor fixes A-E
+- 2026-09-24T18:13:52+0200 — column → testing by emanuelesabetta. implementation landed in c7779d84; moving to testing for acceptance/verification follow-through
 
 
 

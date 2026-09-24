@@ -1,9 +1,9 @@
 ---
 trdd-id: 350W5II2
 title: Jev scores only live tool and event items, not pre-boundary ones
-column: blocked
+column: todo
 created: 2026-09-24T14:12:56+0200
-updated: 2026-09-24T14:25:47+0200
+updated: 2026-09-24T18:14:56+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: refactor
@@ -14,10 +14,11 @@ mandated-by: user
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T14:12:56+0200
-pre-block-column: backburner
-blocked-by: [D7RLXAN1]
+pre-block-column: 
+blocked-by: []
 blocker-probe: [trddgrep, --porcelain, show, D7RLXAN1]
 blocker-holds-if: not-match:\t(complete|completed|cancelled|superseded)\t
+status: tasked
 ---
 
 # Jev scores only live tool and event items, not pre-boundary ones
@@ -36,3 +37,8 @@ Related: TRDD-D7RLXAN1 (builds on its window/boundary machinery; the advisor nam
 
 - 2026-09-24T14:12:56+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T14:24:55+0200 — column → blocked by emanuelesabetta. reuses D7RLXAN1's window/is_live machinery; cannot start until D7RLXAN1 lands
+- 2026-09-24T18:14:56+0200 — column → todo by emanuelesabetta. D7RLXAN1 landed (implementation-commits: c7779d84); its window/is_live machinery is now available to build on Cleared blocked-by (--clear-blocker override).
+
+## Timing evidence
+
+The real post-clear hook (run_hook.py) took 46 s on accccb8b against the hook's 60 s run_compact bound, at load average 50-117 -- 18 s on the same session this morning (D7RLXAN1 acceptance (e)), so load variance alone can trip a re-run into the template fallback. One more spike over 60 s loses Jev entirely for that session. Scoring only live items (this card) is the root fix -- D7RLXAN1's split_conversation still scores ALL tool/event items including pre-boundary ones (score_items docstring: 168 s serial on 7,075 items on 4eb7bf5d), which is most of that 46 s.
