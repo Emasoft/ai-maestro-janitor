@@ -854,7 +854,12 @@ def test_non_owner_floor_holds_in_injected_mode_too() -> None:
     production) actually uses. The floor-stopping while loop itself is shared code either way,
     but without this test the floor was proven correct only empirically, via the real-transcript
     re-render in this task's own report -- never by a fast, isolated unit test on the production
-    construction path. Same shape as the sibling test, `max_item_bytes=700` added."""
+    construction path. Same shape as the sibling test, `max_item_bytes=700` added.
+
+    TRDD-BLGZTHQ9: the injected copy now meets the floor by reservation in `_select_injected`
+    (step 2, before the owner tier), not by backstop eviction; `max_bytes=1120` re-pinned
+    (measured: exactly 3 tools and no rel item across 1070-1190) because the fixed lines are
+    now costed with the count line at its widest."""
     newest = _item("newest:0", "user", "hi there", turn=20, tokens=5)
     dec = _item("dec:0", "user", "policy decision text", turn=0, tokens=5)
     rel1 = _item("rel1:0", "user", "owner background one " * 5, turn=1, tokens=5)
@@ -881,9 +886,9 @@ def test_non_owner_floor_holds_in_injected_mode_too() -> None:
     })
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
-                      max_bytes=1050, max_item_bytes=700)
+                      max_bytes=1120, max_item_bytes=700)
 
-    assert len(doc.encode("utf-8")) <= 1050
+    assert len(doc.encode("utf-8")) <= 1120
     tool_count = sum(1 for i in range(5) if f"-- tool tool{i}:0 --" in doc)
     assert tool_count == jc._NON_OWNER_FLOOR, (
         f"expected exactly the floor ({jc._NON_OWNER_FLOOR}) non-owner items, got {tool_count}"
@@ -903,10 +908,12 @@ def test_injected_admission_keeps_more_than_the_floor_when_room_allows() -> None
     the exact non-owner floor (3) even when the byte budget had room for more (aabd8b0c
     reached 4/6/4 before this regression). Same item shape as the sibling
     `test_non_owner_floor_holds_in_injected_mode_too` above (which pins the floor itself at a
-    TIGHT `max_bytes=1050` -> exactly 3 tools) -- loosened here to `max_bytes=1500` (measured:
-    the render is 1491 bytes, fitting BEFORE any backstop stage ever runs -- `compose()`
+    TIGHT `max_bytes=1120` -> exactly 3 tools) -- loosened here to `max_bytes=1600` (measured:
+    the render is 1547 bytes, fitting BEFORE any backstop stage ever runs -- `compose()`
     returns at its own `len(doc) <= max_bytes` early-return, so stages (1)-(7) never touch
-    this document at all). The two non-guaranteed-owner items ("rel1"/"rel2") also survive.
+    this document at all; re-pinned from 1500/1491 by TRDD-BLGZTHQ9, whose selection costs
+    the count line at its widest). The two non-guaranteed-owner items ("rel1"/"rel2") also
+    survive.
     Review finding (TRDD-AW4XD53Q): this specific fixture does NOT by itself discriminate the
     pre-fix code from the fix -- verified directly by running it against a scratch copy of the
     pre-fix eviction-only backstop, which produces the identical 4-tool/rel1/rel2 result here
@@ -941,11 +948,11 @@ def test_injected_admission_keeps_more_than_the_floor_when_room_allows() -> None
     })
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
-                      max_bytes=1500, max_item_bytes=700)
+                      max_bytes=1600, max_item_bytes=700)
 
     doc_bytes = len(doc.encode("utf-8"))
-    assert doc_bytes <= 1500
-    assert doc_bytes < 1500, "must fit with room to spare -- proof admission alone did the work"
+    assert doc_bytes <= 1600
+    assert doc_bytes < 1600, "must fit with room to spare -- proof admission alone did the work"
     tool_count = sum(1 for i in range(6) if f"-- tool tool{i}:0 --" in doc)
     assert tool_count > jc._NON_OWNER_FLOOR, (
         f"expected more than the floor ({jc._NON_OWNER_FLOOR}) non-owner items, got {tool_count}"
@@ -961,16 +968,10 @@ def test_injected_admission_floor_of_3_holds_with_no_non_guaranteed_owner_items_
     (non-guaranteed-owner items) has NOTHING to sacrifice -- only the single guaranteed
     "newest" owner item exists here, no other owner items at all. So if the floor still holds
     at a tight budget, backstop stage (3) (buying room from non-guaranteed-owner items) cannot
-    be why -- there is nothing there to spend. `max_bytes=1050` (measured: stable at exactly 3
-    tools across the 980-1180 range; below 980 even the floor itself stops fitting and stage
-    (4) -- the documented, deliberate below-the-floor fallback -- takes over, which is correct
-    existing behaviour, not this test's subject). Review finding (TRDD-AW4XD53Q): at this
-    specific `max_bytes` all 3 tools fit `non_owner_remaining` on their own merit (measured:
-    969 of 1050 bytes used), so the `len(non_owner_admitted) < _NON_OWNER_FLOOR` force-admit
-    clause is not actually exercised by this fixture -- it pins the floor's END-STATE
-    (`tool_count == 3` exactly, no non-guaranteed-owner tier to thank for it), not the specific
-    force-admit CODE PATH; a fixture that drives `non_owner_remaining` below what 3 tools cost
-    would be needed for that, and none here does."""
+    be why -- there is nothing there to spend. `max_bytes=1050` (measured after TRDD-BLGZTHQ9:
+    stable at exactly 3 tools across the 1030-1250 range; below 1030 the third tool no longer
+    fits and `_select_injected` excludes it rather than force-admitting it over budget -- the
+    floor is a reservation, never an overrun)."""
     newest = _item("newest:0", "user", "hi", turn=50, tokens=5)
     tools = [
         _item(f"tool{i}:0", "tool", f"tool output number {i} " * 10, turn=10 + i, tokens=5)
@@ -1001,7 +1002,7 @@ def test_injected_admission_with_fewer_than_the_floor_total_keeps_them_all() -> 
     """TRDD-AW4XD53Q acceptance requirement: a transcript with fewer than `_NON_OWNER_FLOOR`
     non-owner items in total must not error, and must not try to manufacture a floor that
     cannot exist -- both non-owner items here (2, below the floor of 3) are simply admitted
-    whole, same as the guaranteed owner item; `max_bytes=900` (measured: fits at 747 bytes,
+    whole, same as the guaranteed owner item; `max_bytes=900` (measured: fits at 678 bytes,
     comfortable room, so this is about the ADMISSION path admitting everything there is, not
     about a tight-budget edge case -- that is the sibling floor test above)."""
     newest = _item("newest:0", "user", "hi", turn=50, tokens=5)
@@ -1032,26 +1033,36 @@ def test_owner_overflow_gets_a_partial_rescue_from_the_leftover_budget() -> None
     against the leftover budget once the non-owner tier is placed -- see that retry's own
     comment in `compose()`) had zero dedicated coverage; the other new tests only exercise the
     non-owner admission pass. Three non-guaranteed-owner items ("owx0" oldest/turn=1 through
-    "owx2" newest/turn=3, so `rest_owner`'s own newest-first order tries owx2, then owx1, then
+    "owx2" newest/turn=3, so the owner tier's newest-first order tries owx2, then owx1, then
     owx0) are each ~179 measured bytes -- big enough that even ONE exceeds the tiny 40%
-    `owner_budget` this `max_bytes=700` implies, so ALL THREE miss the direct owner-share
-    admission and land in `owner_overflow` together; the retry against the leftover (after the
-    2 floor-forced tool items and the guaranteed "newest" are placed) then rescues owx2 and
+    owner share this `max_bytes` implies, so ALL THREE miss the direct owner-share
+    admission and land in the owner overflow together; the retry against the leftover (after
+    the 2 floor tool items and the guaranteed "newest" are placed) then rescues owx2 and
     owx1 -- proving a PARTIAL rescue, not all-or-nothing -- but owx0 (lowest priority, oldest,
-    tried last) still does not fit and stays excluded. `max_bytes=700` (measured). Review
+    tried last) still does not fit and stays excluded. Review
     finding (TRDD-AW4XD53Q): this fixture does NOT discriminate the fix from the pre-fix
     unconditional-append code either -- verified directly against a scratch copy of the pre-fix
     logic, which produces the identical (owx0 absent, owx1/owx2 present) result here, because
     the pre-fix backstop's own stage (3) (non-guaranteed-owner eviction) ends up choosing the
     same priority-ordered subset once it has to evict SOMETHING to fit. This test exists to pin
     the RETRY MECHANISM's own contract (a genuine partial rescue, ordered by priority, not
-    all-or-nothing) now that it is a real code path, not to reproduce the historical bug."""
-    newest = _item("newest:0", "user", "hi", turn=100, tokens=5)
+    all-or-nothing) now that it is a real code path, not to reproduce the historical bug.
+
+    TRDD-BLGZTHQ9 re-pin: the retry is now `_select_injected` step 6. The tools used to be
+    `"x" * 10`, which the new content gate counts as content-free (10 body chars < 20), so they
+    would never be placed; they are short real test summaries now, and "newest" is a real
+    sentence (72 B rendered) so that the three owx items (179 B each) all miss the 40% share:
+    measured baseline 311 B, so at `max_bytes=870` the room is 559 B, the share 223 B < 72 +
+    179, and the floor (2 x 45 B) plus two rescued owx items fill 520 B -- a third does not fit.
+    The same outcome holds across max_bytes 831-937."""
+    newest = _item("newest:0", "user", "hi, please carry on with the release checklist now",
+                   turn=100, tokens=5)
     owner_extra = [
         _item(f"owx{i}:0", "user", f"owner note number {i} " * 8, turn=1 + i, tokens=5)
         for i in range(3)
     ]
-    tools = [_item(f"tool{i}:0", "tool", "x" * 10, turn=50 + i, tokens=5) for i in range(2)]
+    tools = [_item(f"tool{i}:0", "tool", f"12 passed in 0.{i}1s, run {i}", turn=50 + i, tokens=5)
+             for i in range(2)]
     items = [*owner_extra, *tools, newest]
     scores = {"newest:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
                                      decision_passed=False)}
@@ -1067,9 +1078,10 @@ def test_owner_overflow_gets_a_partial_rescue_from_the_leftover_budget() -> None
     })
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
-                      max_bytes=700, max_item_bytes=700)
+                      max_bytes=870, max_item_bytes=700)
 
-    assert len(doc.encode("utf-8")) <= 700
+    assert len(doc.encode("utf-8")) <= 870
+    assert "-- tool tool0:0 --" in doc and "-- tool tool1:0 --" in doc  # the floor was placed
     assert "-- user owx2:0 --" in doc, "highest-priority overflow item must be rescued"
     assert "-- user owx1:0 --" in doc, "the retry is a partial rescue, not a single item"
     assert "-- user owx0:0 --" not in doc, "lowest-priority overflow item still excluded"
@@ -2197,7 +2209,12 @@ def test_inject_mode_shows_at_least_five_kept_items_as_truncated_prefixes() -> N
     failure directly: every kept item individually exceeds the injected budget. Before this
     fix, the byte backstop's whole-item eviction would have dropped ALL of them (the measured
     0-kept-item real-data failure). With `max_item_bytes` set, several must survive as
-    verbatim-prefix + pointer instead."""
+    verbatim-prefix + pointer instead.
+
+    TRDD-U6C3YXEL rewrite: the old last line (`doc.count("[[elided id=k") == len(kept_headers)`)
+    encoded the bug -- a k-item excluded for bytes had NO pointer and was not even counted.
+    Now the truncation pointers are counted inside "## Kept items" only, and every excluded
+    k-item is either pointed at under "## Elided" or counted in the count line."""
     items = [
         _item(f"k{i}:0", "assistant", ("x" * 2000) + f" tail-{i}", turn=i, tokens=10)
         for i in range(10)
@@ -2218,7 +2235,13 @@ def test_inject_mode_shows_at_least_five_kept_items_as_truncated_prefixes() -> N
     # summary) capped at exactly `max_item_bytes`, immediately followed by a pointer back to
     # the rest -- the `x` * 700 prefix is the item's own transcript bytes, not a description.
     assert doc.count("x" * 700) == len(kept_headers)
-    assert doc.count("[[elided id=k") == len(kept_headers)
+    kept_section, elided_section = doc.split("\n## Elided\n", 1)
+    assert kept_section.count("[[elided id=k") == len(kept_headers)
+    elided_ids = [it.id for it in items if f"[[elided id={it.id} " in elided_section]
+    assert elided_ids, "the byte-excluded kept items must get pointers now"
+    m = re.search(r"\[\[elided: (\d+) more items", elided_section)
+    counted = int(m.group(1)) if m else 0
+    assert len(kept_headers) + len(elided_ids) + counted == len(items)
 
 
 def test_inject_mode_caps_pointer_bytes_to_their_share_of_the_budget() -> None:
@@ -2286,6 +2309,14 @@ def test_inject_mode_byte_cap_holds_through_the_full_degrade_chain() -> None:
     terminal stage instead of the ordinary chain this test means to exercise; 2200 is the
     smallest budget (measured) that still empties every pointer, evicts every one of k0-k3, and
     truncates the digest, while leaving enough room for k4's capped rendering and the trailer.
+
+    TRDD-BLGZTHQ9 + TRDD-U6C3YXEL re-pin: `_select_injected` now fits the render by
+    construction, so the backstop only runs when the fixed lines plus the unconditional k4
+    alone overflow -- `max_bytes=1500` (measured: 1400-1600 all truncate the digest, 1677 B is
+    the first untouched fit). k4 renders at the general 700-B cap (the S4 cap never drops
+    below `max_item_bytes`); k0-k3 are excluded AND now counted (the old count of 10 omitted
+    every byte-stage exclusion), and the e-items ("elided 0"...) are content-free under the
+    gate, so they are counted, not pointed at: 14 in all.
     """
     items = [_item(f"k{i}:0", "user", "y" * 3000, turn=i, tokens=5) for i in range(5)] + [
         _item(f"e{i}:0", "assistant", f"elided {i}", turn=100 + i, tokens=5) for i in range(10)
@@ -2302,14 +2333,15 @@ def test_inject_mode_byte_cap_holds_through_the_full_degrade_chain() -> None:
     })
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s", "digest": "z" * 500}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header,
-                      max_bytes=2200, max_item_bytes=700)
+                      max_bytes=1500, max_item_bytes=700)
 
-    assert len(doc.encode("utf-8")) <= 2200
+    assert len(doc.encode("utf-8")) <= 1500
     assert "pointers expand with:" in doc
     # The full chain actually fired, not just the byte bound: every pointer dropped to the
-    # summary line, k0-k3 (non-guaranteed owner items) evicted, the digest truncated, and the
+    # summary line, k0-k3 (non-guaranteed owner items) excluded, the digest truncated, and the
     # guaranteed k4 item is what survived.
-    assert "[[elided: 10 more items not listed" in doc
+    assert "[[elided id=" not in doc.split("\n## Elided\n", 1)[1]
+    assert "[[elided: 14 more items not listed" in doc
     for i in range(4):
         assert f"-- user k{i}:0 --" not in doc
     assert "-- user k4:0 --" in doc
@@ -2332,6 +2364,10 @@ def test_inject_mode_owner_share_capped_and_nonuser_items_survive() -> None:
        section (a generous tolerance around the ~40% ceiling, since the selection-time
        estimate and the final render can differ by a little -- not a source of flakiness);
     4. at least 3 non-user (tool) items appear, proving they are no longer crowded out.
+
+    TRDD-BLGZTHQ9: the tool items used to be 2,550 B each, shown as 700-B prefixes; a tool
+    result over its cap is now a pointer, never a prefix, so they are ~500 B here and fit the
+    700-B cap whole. Assertions unchanged.
     """
     owner_items = [
         _item(f"u{i}:0", "user", f"short owner note number {i}", turn=i, tokens=5)
@@ -2342,7 +2378,7 @@ def test_inject_mode_owner_share_capped_and_nonuser_items_survive() -> None:
     newest_owner_text = "owner instruction " * 100  # ~1900 bytes, no internal newline
     owner_items.append(_item("u19:0", "user", newest_owner_text, turn=19, tokens=5))
     tool_items = [
-        _item(f"t{i}:0", "tool", ("tool output line " * 150) + f" id{i}", turn=100 + i, tokens=5)
+        _item(f"t{i}:0", "tool", ("tool output line " * 29) + f" id{i}", turn=100 + i, tokens=5)
         for i in range(20)
     ]
     items = owner_items + tool_items
@@ -2403,49 +2439,54 @@ def test_non_owner_item_bytes_caps_non_owner_items_smaller_than_owner_items() ->
     # `max_item_bytes`, caps ONLY items whose `kind != "user"` -- an owner item beyond the
     # guaranteed slot still uses the general (bigger) `max_item_bytes`, unaffected by the
     # smaller non-owner cap. "owner2:0" (an owner item, NOT the guaranteed newest) proves the
-    # former; "tool:0" proves the latter.
+    # former; "reply:0" proves the latter. TRDD-BLGZTHQ9: the truncated non-owner item is an
+    # ASSISTANT item now -- a TOOL item over its cap is never shown as a prefix at all, only as
+    # a pointer ("tool:0").
     owner_text = "o" * 600
+    reply_text = "r" * 600
     tool_text = "t" * 600
     items = [
         _item("newest:0", "user", "hi", turn=10, tokens=10),
         _item("owner2:0", "user", owner_text, turn=1, tokens=10),
-        _item("tool:0", "tool", tool_text, turn=0, tokens=10),
+        _item("reply:0", "assistant", reply_text, turn=0, tokens=10),
+        _item("tool:0", "tool", tool_text, turn=2, tokens=10),
     ]
     scores = {
-        "newest:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
-                               decision_passed=False),
-        "owner2:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
-                               decision_passed=False),
-        "tool:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
-                             decision_passed=False),
+        it.id: jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in items
     }
     doc = jc.compose(
         items, scores, budget_tokens=8000,
         header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
         max_item_bytes=500, non_owner_item_bytes=100,
     )
-    assert owner_text[:500] in doc     # owner item: the general 500-byte cap applies
-    assert tool_text[:500] not in doc  # tool item would fit whole at 500...
-    assert tool_text[:100] in doc      # ...but only gets the smaller 100-byte non-owner cap
-    assert tool_text[:101] not in doc
+    assert owner_text[:500] in doc      # owner item: the general 500-byte cap applies
+    assert reply_text[:500] not in doc  # the reply would fit whole at 500...
+    assert reply_text[:100] in doc      # ...but only gets the smaller 100-byte non-owner cap
+    assert reply_text[:101] not in doc
+    assert "-- tool tool:0 --" not in doc  # a tool over its cap: never a prefix...
+    assert tool_text[:100] not in doc
+    assert "[[elided id=tool:0 " in doc.split("\n## Elided\n", 1)[1]  # ...only a pointer
 
 
 def test_non_owner_item_bytes_none_falls_back_to_max_item_bytes_for_every_caller() -> None:
     # Backward compatibility: `non_owner_item_bytes` defaults to `None` -- every existing
     # caller/test that never passes it (including `jev_compact.py`'s own `--out` full-copy
     # render, which never sets `max_item_bytes` either) must render a non-owner item exactly
-    # as before this parameter existed.
-    tool_text = "t" * 600
-    items = [_item("tool:0", "tool", tool_text, turn=0, tokens=10)]
-    scores = {"tool:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
-                                   decision_passed=False)}
+    # as before this parameter existed. TRDD-BLGZTHQ9: an ASSISTANT item, because a tool item
+    # over the cap is now pointer-only and so could not show which cap applied.
+    reply_text = "r" * 600
+    items = [_item("reply:0", "assistant", reply_text, turn=0, tokens=10)]
+    scores = {"reply:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                    decision_passed=False)}
     doc = jc.compose(
         items, scores, budget_tokens=8000,
         header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
         max_item_bytes=500,
     )
-    assert tool_text[:500] in doc
-    assert tool_text[:501] not in doc
+    assert reply_text[:500] in doc
+    assert reply_text[:501] not in doc
 
 
 def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_injected_copy_is_unchanged() -> None:
@@ -2454,9 +2495,13 @@ def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_
     `max_elided_pointers` cap -- the 258 MB real transcript had 250 decision-passing owner
     items and only 40 pointer slots, so 180 were reachable only via `expand --list --grep`,
     never named in the document a resumed session actually reads. The non-decision elided
-    items (here, relevant "tool" items) still respect the pre-existing 40-pointer cap, and the
-    byte-budgeted INJECTED copy is unaffected -- it still applies ONE `max_elided_pointers` cap
-    over every elided item together, decision-passing or not, exactly as before this fix.
+    items (here, relevant "tool" items) still respect the pre-existing 40-pointer cap.
+
+    TRDD-U6C3YXEL (part 3 rewritten): the INJECTED copy used to apply ONE `max_elided_pointers`
+    cap over every elided item, decision-passing or not. Its decision pointers now come on top
+    of that cap (amendment S8), in the ordinary `[[elided id=...]]` format (S2, never the
+    compact `id: preview` form); with no `max_bytes` there is no byte share, so all 50 are
+    named, bounded only by `_MAX_DECISION_POINTERS`.
     """
     guaranteed = _item("guaranteed:0", "user", "the newest decision", turn=1000, tokens=10)
     decision_items = [
@@ -2506,18 +2551,19 @@ def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_
     assert len(tool_pointer_lines) == jc._MAX_ELIDED_POINTERS
     assert "[[elided: 20 more items not listed" in full_doc
 
-    # (3) the injected copy is unaffected: still one cap over every elided item, never the
-    # compact format (`max_item_bytes` is always set for it, see `render`'s per-item cap).
+    # (3) the injected copy: 50 decision pointers on top of the 40 ordinary (tool) ones, all in
+    # the ordinary format, never the compact one.
     inject_doc = jc.compose(
         items, scores, budget_tokens=50, header=header,
         max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
     )
-    inject_pointer_lines = [
-        line for line in inject_doc.splitlines() if line.startswith("[[elided id=")
-    ]
-    assert len(inject_pointer_lines) == jc._MAX_ELIDED_POINTERS
-    inject_lines = inject_doc.splitlines()
-    assert not any(line.startswith(f"{it.id}: ") for it in decision_items for line in inject_lines)
+    inject_elided = inject_doc.split("\n## Elided\n", 1)[1].splitlines()
+    for it in decision_items:
+        assert any(line.startswith(f"[[elided id={it.id} ") for line in inject_elided), it.id
+    tool_pointers = [line for line in inject_elided if line.startswith("[[elided id=tool")]
+    assert len(tool_pointers) == jc._MAX_ELIDED_POINTERS
+    assert not any(line.startswith(f"{it.id}: ") for it in decision_items for line in inject_elided)
+    assert "[[elided: 20 more items not listed" in inject_doc
 
 
 def test_decision_pointer_hard_ceiling_keeps_newest_and_summarizes_the_rest() -> None:
@@ -2801,3 +2847,261 @@ def test_compose_still_valid_when_the_only_owner_typed_record_is_a_bare_resume()
     assert len(doc.encode("utf-8")) <= max_bytes
     assert "-- user resume:0 --" not in doc
     assert "-- user " not in doc  # no owner item exists to render at all
+
+
+# --- TRDD-BLGZTHQ9 + TRDD-U6C3YXEL: the injected copy's one reservation-first selection
+# (`_select_injected`). Measured defects on three real injected copies: 3/3/4 kept tool items
+# were truncated prefixes, 1/1/4 kept non-owner items were content-free stubs, 0 decision
+# pointers while 21/22/7 decision-passing owner messages were invisible, and a count line that
+# omitted every byte-stage exclusion. ---
+
+_H = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+# An informative non-owner line: over the 80-char content gate (86 body chars for i < 10).
+_WORK = ("Step {i}: re-rendered the cached transcripts, compared the full copies byte for byte, "
+         "and all matched.")
+
+
+def _scores(rel: float, *, kept: bool = True, decision: bool = False) -> jc.Scores:
+    return jc.Scores(relevance=rel, decision=0.9 if decision else 0.0, oversized=False,
+                     kept=kept, decision_passed=decision)
+
+
+def _count_line_n(doc: str) -> int:
+    m = re.search(r"\[\[elided: (\d+) more items not listed", doc)
+    return int(m.group(1)) if m else 0
+
+
+def _shown_ids(doc: str, items: list[jc.Item]) -> tuple[set[str], set[str]]:
+    """(ids shown inline, ids pointed at under "## Elided") -- a truncated kept item's own
+    pointer line sits inside "## Kept items" and does not count as an elided pointer."""
+    kept_section, elided_section = doc.split("\n## Elided\n", 1)
+    inline = {it.id for it in items if f"-- {it.kind} {it.id} --" in kept_section}
+    pointed = {it.id for it in items if f"[[elided id={it.id} " in elided_section}
+    return inline, pointed
+
+
+def test_select_injected_reserves_floor_and_decision_pointers_before_the_owner_tier() -> None:
+    """The fill order on hand-made exact costs (available=1000): the guaranteed item (100),
+    the non-owner floor (3 x 150), then decision-pointer reservations (3 x 50, newest first),
+    THEN the owner tier -- whose one admission (the newest decision item, 300) refunds its own
+    50-B reservation. The other two decision items stay pointers, and the 4th non-owner item
+    (150 inline, 60 as a pointer) fits neither way: it is counted. Total 950 <= 1000."""
+    def cand(id_: str, kind: jc.ItemKind, turn: int, score: float, inline: int, pointer: int,
+             *, decision: bool = False, guaranteed: bool = False) -> jc._InjectCandidate:
+        return jc._InjectCandidate(id=id_, kind=kind, turn=turn, score=score,
+                                   decision_passed=decision, guaranteed=guaranteed,
+                                   inline_cost=inline, pointer_cost=pointer,
+                                   pointer_eligible=True)
+
+    cands = [
+        cand("g", "user", 100, 0.9, 100, 50, guaranteed=True),
+        *(cand(f"n{i}", "assistant", 10 + i, 0.9 - i / 10, 150, 60) for i in range(4)),
+        *(cand(f"d{i}", "user", 20 + i, 0.9, 300, 50, decision=True) for i in range(3)),
+    ]
+    sel = jc._select_injected(cands, available=1000, max_pointers=12)
+
+    assert sel.kept == ["g", "d2", "n0", "n1", "n2"]
+    assert sel.decision_pointers == ["d1", "d0"]  # newest first; d2's reservation refunded
+    assert sel.pointers == []
+    assert sel.hidden == 1  # n3
+    costs = {c.id: c for c in cands}
+    total = (sum(costs[i].inline_cost or 0 for i in sel.kept)
+             + sum(costs[i].pointer_cost for i in sel.decision_pointers))
+    assert total == 950
+
+
+def test_select_injected_holds_the_decision_reserve_when_a_reserved_item_goes_inline() -> None:
+    """TRDD-U6C3YXEL (D2): the reserve always names the newest excluded decision items up to
+    its limit -- a reserved item may go inline only if the next-newest one can take its pointer
+    place. Hand costs, available=880: the limit is 220 B (4 pointers of 50); ten decision items
+    at 200 B inline. Held, d9 and d8 go inline and d7..d4 keep 4 pointers. Refunding a
+    reserved item's bytes to general admission (the design's literal rule) ended with 1
+    pointer here; re-reserving only from leftover room ended with 3 (d7 inline, no room left
+    for d3's pointer)."""
+    cands = [
+        jc._InjectCandidate(id="g", kind="user", turn=100, score=0.9, decision_passed=False,
+                            guaranteed=True, inline_cost=100, pointer_cost=50,
+                            pointer_eligible=True),
+        *(
+            jc._InjectCandidate(id=f"d{i}", kind="user", turn=i, score=0.9, decision_passed=True,
+                                guaranteed=False, inline_cost=200, pointer_cost=50,
+                                pointer_eligible=True)
+            for i in range(10)
+        ),
+    ]
+    sel = jc._select_injected(cands, available=880, max_pointers=12)
+
+    assert sel.kept == ["g", "d9", "d8"]
+    assert sel.decision_pointers == ["d7", "d6", "d5", "d4"]
+    assert sel.hidden == 4  # d3..d0, past the reserve's limit
+
+
+def test_injected_tool_item_over_its_cap_is_a_pointer_never_a_prefix() -> None:
+    """TRDD-BLGZTHQ9: a tool result over `non_owner_item_bytes` used to render as a 350-B
+    verbatim prefix plus a pointer -- a few lines of a diff for 3-4x the bytes of the pointer,
+    whose preview already says what it is. It is now pointer-only; a tool result that fits the
+    cap is still shown whole."""
+    big_text = "".join(f"-    old line {i} of the patched function\n" for i in range(20))
+    small_text = "commit 8a623a28: fix the injected selection, all 194 tests green"
+    items = [
+        _item("big:0", "tool", big_text, turn=1),
+        _item("small:0", "tool", small_text, turn=2),
+        _item("newest:0", "user", "hi", turn=3),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert "-- tool big:0 --" not in doc
+    assert "old line 1 of" not in doc  # not even the first lines as a prefix
+    assert "[[elided id=big:0 " in doc.split("\n## Elided\n", 1)[1]
+    assert f"-- tool small:0 --\n{small_text}\n" in doc
+
+
+def test_injected_content_free_non_owner_items_are_neither_inlined_nor_pointed() -> None:
+    """TRDD-BLGZTHQ9 content gate: whole-but-empty non-owner items won inline slots on
+    relevance alone in the real injected copies -- a bare `resume` event, a Read result that is
+    just a heading (`57\\t## The open work`), a task notification that is only its wrapper. Each
+    is now counted, never inlined and never pointed at (a content-free pointer is content-free
+    too); an informative item beside them is still inlined."""
+    prose = _WORK.format(i=0)
+    items = [
+        _item("resume:0", "event", "resume", turn=1),
+        _item("heading:0", "tool", "57\t## The open work\n58\t", turn=2),
+        _item("notif:0", "event",
+              "<task-notification><status>done</status></task-notification>", turn=3),
+        _item("prose:0", "assistant", prose, turn=4),
+        _item("newest:0", "user", "hi", turn=5),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    for gated in ("resume:0", "heading:0", "notif:0"):
+        assert gated not in doc, f"{gated} must be neither inlined nor pointed at"
+    assert f"-- assistant prose:0 --\n{prose}\n" in doc
+    assert _count_line_n(doc) == 3
+    assert jc._body_chars(prose) >= jc._INJECT_MIN_BODY_CHARS  # fixture sanity
+
+
+def test_injected_excluded_decision_items_get_newest_first_pointers_and_the_count_is_exact() -> None:
+    """TRDD-U6C3YXEL: excluded decision-passing owner messages had NO pointer in the injected
+    copy (21/22/7 on the three real transcripts) and the count line omitted them, so the resumed
+    session could not tell they existed. The NEWEST excluded ones now get pointers up to
+    `_INJECT_DECISION_POINTER_SHARE`, the rest are counted, and the count line's N is exactly
+    `len(items) - shown`. The newest decision items also go inline through the owner tier and
+    its overflow retry; each such admission refunds its reservation, which must go to the next-
+    newest excluded decision item -- not to a further inline item (measured: 0 decision
+    pointers on this fixture when the refunds were spent that way)."""
+    decisions = [
+        _item(f"dec{i}:0", "user", f"decision {i}: always run the full gate before publishing. " * 5,
+              turn=i)
+        for i in range(20)
+    ]
+    work = [_item(f"work{i}:0", "assistant", _WORK.format(i=i), turn=30 + i) for i in range(3)]
+    newest = _item("newest:0", "user", "carry on", turn=50)
+    items = [*decisions, *work, newest]
+    scores = {it.id: _scores(0.9, decision=it.id.startswith("dec")) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=80000, header=_H, max_bytes=3000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert len(doc.encode("utf-8")) <= 3000
+    inline, pointed = _shown_ids(doc, items)
+    excluded = [it for it in decisions if it.id not in inline]
+    pointed_dec = [it for it in excluded if it.id in pointed]
+    counted_dec = [it for it in excluded if it.id not in pointed]
+    assert pointed_dec, "excluded decision items must get pointers"
+    assert counted_dec, "past the share, the rest must be counted (fixture sanity)"
+    assert min(it.turn for it in pointed_dec) > max(it.turn for it in counted_dec)  # newest first
+    assert _count_line_n(doc) == len(items) - len(inline) - len(pointed)
+
+
+def test_injected_selection_is_exact_including_decision_pointers() -> None:
+    """TRDD-BLGZTHQ9 exactness (amendment S9: with decision pointers in the fixture): the render
+    is the fixed lines plus the exact cost of every selected item, so a `max_bytes` equal to the
+    unconstrained render shows everything, and one byte less drops exactly one selection -- the
+    last-reserved decision pointer -- with no backstop stage running. A gated "resume" event
+    keeps the count line present (N=1 -> N=2, same width) so the fixed lines never change."""
+    newest = _item("newest:0", "user", "carry on", turn=50, tokens=5)
+    dec_new = _item("decnew:0", "user", "never push; publish only via publish.py", turn=40, tokens=5)
+    dec_old = [_item(f"dec{t}:0", "user", f"rule {t}", turn=t, tokens=1000) for t in (10, 20)]
+    work = [_item(f"work{i}:0", "assistant", _WORK.format(i=i), turn=30 + i, tokens=5)
+            for i in range(3)]
+    resume = _item("resume:0", "event", "resume", turn=45, tokens=5)
+    items = [*dec_old, *work, dec_new, resume, newest]
+    scores = {it.id: _scores(0.9, decision=it.id.startswith("dec")) for it in items}
+    # budget_tokens=100: the two 1000-token decision items leave the token stage, so they can
+    # only ever be pointers (amendment S1); dec_new is the guaranteed newest decision item.
+    kwargs: dict[str, Any] = {"budget_tokens": 100, "header": _H, "max_item_bytes": 700,
+                              "non_owner_item_bytes": 350}
+
+    full = jc.compose(items, scores, max_bytes=10**6, **kwargs)
+    inline, pointed = _shown_ids(full, items)
+    assert inline == {"newest:0", "decnew:0", "work0:0", "work1:0", "work2:0"}
+    assert pointed == {"dec10:0", "dec20:0"}
+    assert {p.id for p in find_pointers(full)} == pointed  # ordinary, parseable format (S2)
+    exact = len(full.encode("utf-8"))
+
+    assert jc.compose(items, scores, max_bytes=exact, **kwargs) == full
+    tight = jc.compose(items, scores, max_bytes=exact - 1, **kwargs)
+    assert _shown_ids(tight, items) == (inline, {"dec20:0"})  # newest reservation kept
+    assert len(tight.encode("utf-8")) == exact - len(jc._format_pointer(dec_old[0]).encode()) - 1
+    assert _count_line_n(tight) == 2
+    assert jc._DIGEST_TRUNCATED_NOTE not in tight and jc._MINIMAL_FIXED_LINE not in tight
+
+
+def test_injected_gate_keeps_a_short_whole_tool_result_but_not_a_heading_stub() -> None:
+    """Amendment S3 thresholds, both sides: a WHOLE tool result needs only 20 body chars, so a
+    real `pytest -q` result ("...  [100%]" then "3 passed in 0.18s", 23 chars) is shown; a Read
+    result that is just a heading (17 chars) is not. Prose and events need 80: a 60-char
+    assistant line is gated even though a tool result of the same length would pass."""
+    pytest_out = "...                                                          [100%]\n3 passed in 0.18s"
+    reply = "Looked at the diff; it is fine and ready to go ahead. Done."
+    items = [
+        _item("pytest:0", "tool", pytest_out, turn=1),
+        _item("heading:0", "tool", "57\t## The open work\n58\t", turn=2),
+        _item("reply:0", "assistant", reply, turn=3),
+        _item("newest:0", "user", "hi", turn=4),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert f"-- tool pytest:0 --\n{pytest_out}\n" in doc
+    assert "heading:0" not in doc
+    assert "reply:0" not in doc
+    assert jc._body_chars(pytest_out) == 23 and jc._body_chars(reply) < 80  # fixture sanity
+
+
+def test_injected_long_newest_message_leaves_room_for_three_non_owner_items() -> None:
+    """Amendment S4: a 1,500-B newest owner message used to be shown whole (its 1,500-B cap)
+    next to an 800-B newest decision item, leaving too little of a 3,900-B room for the
+    non-owner floor. The newest message is now capped at 35% of the available bytes (here
+    ~1,200 B, a verbatim prefix plus a pointer), the decision item becomes a reserved decision
+    pointer because both together exceed 50% of the room, and three informative non-owner
+    items fit -- with no backstop stage running."""
+    newest_text = "please finish the injected selection and re-render every transcript. " * 22
+    assert 1450 <= len(newest_text) <= 1550
+    items = [
+        _item("dec:0", "user", "decision: the holdout transcript is never used to tune. " * 14,
+              turn=10),
+        *(
+            _item(f"work{i}:0", "assistant",
+                  f"Step {i}: compared the baseline and after renders for every transcript. " * 4,
+                  turn=20 + i)
+            for i in range(4)
+        ),
+        _item("newest:0", "user", newest_text, turn=30),
+    ]
+    scores = {it.id: _scores(0.9, decision=it.id == "dec:0") for it in items}
+    doc = jc.compose(items, scores, budget_tokens=80000, header=_H, max_bytes=3900,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert len(doc.encode("utf-8")) <= 3900
+    assert jc._DIGEST_TRUNCATED_NOTE not in doc and jc._MINIMAL_FIXED_LINE not in doc
+    inline, pointed = _shown_ids(doc, items)
+    assert newest_text not in doc
+    newest_body = doc.split("-- user newest:0 --\n", 1)[1].split("\n[[elided id=newest:0 ", 1)[0]
+    assert jc.DEFAULT_INJECT_ITEM_BYTES < len(newest_body) <= int(3900 * 0.35)
+    assert "dec:0" not in inline and "dec:0" in pointed
+    assert sum(1 for i in inline if i.startswith("work")) >= jc._NON_OWNER_FLOOR
