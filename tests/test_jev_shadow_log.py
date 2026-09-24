@@ -289,6 +289,67 @@ def test_log_decisions_redacts_a_literal_secret_in_the_preview_and_locks_file_mo
     assert (path.stat().st_mode & 0o777) == 0o600
 
 
+def test_log_decisions_redacts_a_secret_cut_at_the_truncation_boundary(project_dir: Path) -> None:
+    """Coordinator, second follow-up (post-e904477d review): `_redact_preview` used to run on
+    the ALREADY-truncated 200-char preview -- a real secret straddling that cut kept only its
+    surviving prefix, which no longer completes the "known prefix + minimum length" shape any
+    pattern requires, so the fragment leaked unredacted. Places a full 20-char AWS-shaped key
+    starting at index 190 (so a naive truncate-then-redact keeps only its first 10 characters,
+    "AKIAIOSFOD" -- ten characters alone never match `AKIA[0-9A-Z]{16}`) -- the fix redacts the
+    FULL text first, so no raw fragment of the key can survive truncation."""
+    aws_key = "AKIAIOSFODNN7EXAMPLE"
+    text = "x" * 190 + aws_key + "y" * 50
+    items = [_item("u-1:0", kind="assistant", text=text)]
+    scores = {"u-1:0": _score(relevance=0.5, kept=True)}  # close to threshold -> preview kept
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
+    assert aws_key[:10] not in preview  # the fragment a truncate-first order used to leak
+    assert aws_key not in preview
+    assert "[REDACTED]" in preview
+
+
+@pytest.mark.parametrize(
+    ("text", "forbidden"),
+    [
+        pytest.param(
+            "config dump: password=TopSecretValue123 continue", "TopSecretValue123", id="password=",
+        ),
+        pytest.param("creds:\n  passwd: TopSecretValue123\n", "TopSecretValue123", id="passwd:"),
+        pytest.param("export secret=TopSecretValue123 done", "TopSecretValue123", id="secret="),
+        pytest.param("auth header token=TopSecretValue123 end", "TopSecretValue123", id="token="),
+        # Review fork, third pass: the first draft's unquoted-only value class missed a
+        # human-pasted password with a space/punctuation before its first 6 alnum characters.
+        pytest.param(
+            'password: "hi there! 9x"', "hi there! 9x", id="password-quoted-with-space-and-punct",
+        ),
+        pytest.param(
+            "Authorization: Bearer abcDEF123456.ghiJKL7890tokenvalue", "abcDEF123456", id="bearer",
+        ),
+        pytest.param(
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAmorebase64keydata\n"
+            "-----END RSA PRIVATE KEY-----",
+            "MIIEowIBAAKCAQEA",
+            id="private-key-block",
+        ),
+    ],
+)
+def test_log_decisions_redacts_generic_secret_shapes(
+    project_dir: Path, text: str, forbidden: str,
+) -> None:
+    """Coordinator, second follow-up: `_KNOWN_SECRET_RE` only matches vendor-PREFIXED tokens
+    -- these four generic (unprefixed) shapes were added next to that reuse (see the module's
+    own comment on why scripts/hooks/post-edit-safety.py and pre-bash-safety.py had nothing
+    further to reuse) and must each come out redacted."""
+    items = [_item("u-1:0", kind="assistant", text=text)]
+    scores = {"u-1:0": _score(relevance=0.5, kept=True)}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
+    assert forbidden not in preview
+    assert "[REDACTED]" in preview
+
+
 def test_log_decisions_opens_the_shadow_log_exactly_once_regardless_of_item_count(
     project_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -445,6 +506,33 @@ def test_batched_records_round_trip_through_vendored_load_and_replay(project_dir
     assert log.stats().total == 14
     replayed = log.replay(0.5)
     assert replayed.total == 14
+
+
+def test_log_decisions_record_text_count_mismatch_degrades_gracefully(
+    project_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Review fork, third pass: `zip(records, raw_texts, strict=True)` protects against a
+    future maintenance slip that desyncs the two lists, but its `ValueError` is not an
+    `OSError` -- unguarded it would propagate out of `log_decisions` and break the CALLER's
+    compaction. Forces a length mismatch (monkeypatching `ShadowLog.entries` to return one
+    extra row) and asserts this degrades exactly like a write failure already does: a stderr
+    line, nothing raised, and -- critically -- nothing written (never fall back to writing the
+    vendor's own unredacted preview)."""
+    real_entries = ShadowLog.entries
+
+    def entries_with_one_extra(self: ShadowLog) -> list[dict[str, Any]]:
+        rows = real_entries(self)
+        return [*rows, dict(rows[0])] if rows else rows
+
+    monkeypatch.setattr(ShadowLog, "entries", entries_with_one_extra)
+
+    items = [_item("u-1:0", kind="assistant", text="hello")]
+    scores = {"u-1:0": _score()}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)  # must not raise
+
+    err = capsys.readouterr().err
+    assert "mismatch" in err
+    assert not jsl.shadow_log_path().exists()  # nothing written for this batch
 
 
 # --- write failure never breaks the caller -------------------------------------------------- #

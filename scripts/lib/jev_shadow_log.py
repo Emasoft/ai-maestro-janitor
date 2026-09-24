@@ -39,6 +39,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import sys
 import tempfile
 from collections.abc import Iterable, Iterator, Mapping
@@ -46,7 +47,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import state
-from jevctx.shadow import ShadowLog, ShadowStats
+from jevctx.shadow import PREVIEW_CHARS, ShadowLog, ShadowStats
 from jevctx.types import Origin
 
 # Card 7 follow-up (TRDD-N9LDHF7N, review defect 1 -- "run every preview through the
@@ -57,6 +58,47 @@ from jevctx.types import Origin
 # risky *commands*, not pasted credential shapes). Reused as-is, not copied: this module stays
 # a thin project-specific wrapper around the vendored shadow log, never its own secret scanner.
 from serverless_function_patterns import _KNOWN_SECRET_RE as _SECRET_VALUE_RE
+
+# Post-write review, second follow-up (coordinator, verified against commit e904477d): the
+# prefixed-token regex above misses generic, unprefixed secret shapes -- checked
+# scripts/hooks/post-edit-safety.py and scripts/hooks/pre-bash-safety.py (the coordinator's
+# own named candidates) AND everything they import: both are stdlib-only (json/os/re/sys, no
+# `scripts/lib` import), and their own "secret"/"credential" hits are sensitive FILE PATHS
+# (~/.aws/credentials, ~/.git-credentials, /etc/shadow), not a value-shape matcher -- there is
+# nothing further to reuse from those two files. These four are therefore NEW, added next to
+# the reuse above per the coordinator's own fallback ("if it still misses the common generic
+# shapes... add those"), not a duplicate of something already shared elsewhere.
+#
+# Review fork (third pass) caught a real gap in the first draft's value class
+# (`[A-Za-z0-9_\-+/=]{6,}`, unquoted-only): a human-pasted password containing a space or
+# punctuation before 6 alnum characters -- `password: "hi there!"` -- matched nothing and
+# escaped redaction entirely, exactly this log's own threat model (transcript text, not a
+# config file). Fixed by matching a QUOTED value (any run inside matching quotes, punctuation
+# and spaces included) as its own alternative, ahead of the unquoted fallback.
+_GENERIC_KV_SECRET_RE = re.compile(
+    r"(?i:\b(?:password|passwd|secret|token)\s*[:=]\s*)"
+    r"(?:\"[^\"\n]{3,}\"|'[^'\n]{3,}'|[A-Za-z0-9_\-+/=]{6,})"
+)
+_BEARER_TOKEN_RE = re.compile(r"(?i:\bauthorization\s*:\s*bearer\s+)[A-Za-z0-9\-._~+/=]{8,}")
+_PRIVATE_KEY_BLOCK_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"
+    r".*?"
+    r"-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----",
+    re.DOTALL,  # a real PEM block spans many lines -- `.` must cross them to match the whole thing
+)
+# Known, undocumented-until-now limitation (review fork, third pass): this pattern requires
+# BOTH the BEGIN and END markers inside the SAME item's text. jev_compaction.py's own large
+# tool-result segmentation (`_segment_tool_result`) can split one big result across multiple
+# items/records, and a PEM key split across that boundary -- BEGIN in one item, base64 body and
+# END in the next -- leaves bare key material in one or both fragments with no marker for any
+# pattern here to anchor on. No per-item redaction pass can close this without carrying state
+# across the whole batch, which none of these patterns attempt; flagged, not fixed, since it is
+# a different (cross-item) problem than the one this follow-up was scoped to.
+_GENERIC_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    _PRIVATE_KEY_BLOCK_RE,  # multi-line, run first so a narrower pattern can't split it apart
+    _BEARER_TOKEN_RE,
+    _GENERIC_KV_SECRET_RE,
+)
 
 __all__ = [
     "SHADOW_LOG_NAME",
@@ -192,19 +234,64 @@ def _rotate_if_oversized(path: Path) -> None:
         print(f"jev-shadow: rotation failed, appending to the oversized file: {exc}", file=sys.stderr)
 
 
-def _redact_preview(preview: str) -> str:
-    """Defect 1 (review): a decision record's 200-char preview is raw transcript/tool-output
-    text -- an API key or AWS credential pasted into a tool result would land in this file
-    verbatim otherwise. `_SECRET_VALUE_RE` (imported, not written here -- see the module
-    header) is checked against the preview only; `text_sha256` is left hashing the REAL text.
-    A hash is not the same exposure as a plaintext preview -- it can't be read back -- but it
-    is not a zero-risk residual either: post-write review noted that anyone who already
-    SUSPECTS a specific literal secret can confirm the guess by hashing it and comparing. That
-    is a narrow threat (it requires already having the candidate string), the task scoped this
-    fix to the preview specifically, and the hash's own job (letting a caller correlate
-    identical content across records) needs the real text regardless of redaction -- so it is
-    left alone, not silently treated as risk-free."""
-    return _SECRET_VALUE_RE.sub("[REDACTED]", preview)
+def _redact_text(text: str) -> str:
+    """Defect 1 (review): a decision record's preview is raw transcript/tool-output text -- an
+    API key or AWS credential pasted into a tool result would land in this file verbatim
+    otherwise. Runs `_SECRET_VALUE_RE` (the vendor-prefix reuse) plus the four generic shapes
+    above (see their own comment). `text_sha256` is left hashing the REAL text throughout. A
+    hash is not the same exposure as a plaintext preview -- it can't be read back -- but it is
+    not a zero-risk residual either: post-write review noted that anyone who already SUSPECTS
+    a specific literal secret can confirm the guess by hashing it and comparing. That is a
+    narrow threat (it requires already having the candidate string), the task scoped this fix
+    to the preview specifically, and the hash's own job (letting a caller correlate identical
+    content across records) needs the real text regardless of redaction -- so it is left
+    alone, not silently treated as risk-free.
+
+    Takes the FULL item text, not an already-truncated preview (coordinator, second
+    follow-up): redacting after truncation misses a secret cut at the 200-char boundary --
+    its surviving prefix no longer completes the "known prefix + minimum length" shape any of
+    these patterns require, so it leaked. `_safe_preview` (below) is the only caller and is
+    the one that truncates, always AFTER this runs."""
+    redacted = _SECRET_VALUE_RE.sub("[REDACTED]", text)
+    for pattern in _GENERIC_SECRET_PATTERNS:
+        redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
+
+
+# Coordinator, second follow-up: even redacting the full text first, the TRUNCATION itself can
+# still slice a real, otherwise-unredacted secret in half (one that starts too close to the
+# 200-char cut for its own pattern to have matched at all -- e.g. a bare high-entropy token
+# with no recognized prefix, which none of the patterns above catch by design). The trailing
+# fragment is `_PARTIAL_TOKEN_TAIL_MIN_LEN`+ alnum/underscore/dash characters that run straight
+# to the cut with nothing after them -- exactly what an in-progress token cut mid-string looks
+# like -- and is masked outright rather than left as a shortened-but-still-readable prefix.
+_PARTIAL_TOKEN_TAIL_MIN_LEN = 12
+_TRUNC_TAIL_WINDOW = 40  # coordinator's own spec: inspect the last 40 characters for the cut
+_PARTIAL_TOKEN_TAIL_RE = re.compile(rf"[A-Za-z0-9_\-]{{{_PARTIAL_TOKEN_TAIL_MIN_LEN},}}$")
+
+
+def _safe_preview(text: str) -> str:
+    """Redact the full text, THEN truncate to `PREVIEW_CHARS`, THEN mask a trailing partial
+    token the truncation itself created -- see `_redact_text`'s and the module constants'
+    docstrings/comments above for why each step has to happen in this order.
+
+    Disclosed trade-off (review fork, third pass): redacting before truncating means a long
+    early match (e.g. a multi-KB PEM block collapsing to one `[REDACTED]`) shrinks the text,
+    which can pull originally-later bytes -- ones a truncate-FIRST preview could never have
+    reached at all -- into the 200-char window. That is not a leak of the matched secret
+    itself, but it does mean the preview is no longer a stable prefix of the raw text, so any
+    pattern-coverage gap elsewhere (an unquoted value with unusual punctuation, a secret shape
+    none of these patterns recognize) has more raw bytes to potentially appear through. This
+    is accepted as the necessary cost of fixing the truncation-order bug correctly, not
+    something this function tries to further mitigate."""
+    redacted = _redact_text(text)
+    was_truncated = len(redacted) > PREVIEW_CHARS
+    preview = redacted[:PREVIEW_CHARS]
+    if was_truncated:
+        m = _PARTIAL_TOKEN_TAIL_RE.search(preview[-_TRUNC_TAIL_WINDOW:])
+        if m:
+            preview = preview[: len(preview) - len(m.group(0))] + "[TRUNC]"
+    return preview
 
 
 _FAR_FROM_THRESHOLD_MARGIN = 0.3
@@ -389,7 +476,12 @@ def log_decisions(
             # In-memory only (`path=None`) -- defect 2: building every record through the
             # vendored `.decision()` without a disk-backed ShadowLog means zero opens per
             # item; `_write_records` below does the one real open for the whole batch.
+            # `raw_texts` runs parallel to the records `log.entries()` returns below (same
+            # append order) -- `_safe_preview` (coordinator, second follow-up) needs the FULL
+            # original text of each row, not the already-truncated `text_preview` the vendored
+            # `.decision()` computed from it, to redact before truncating rather than after.
             log = ShadowLog(path=None)
+            raw_texts: list[str] = []
             for it in items:
                 sc = scores.get(it.id)
                 if sc is None or sc.oversized or sc.blocked:
@@ -400,6 +492,7 @@ def log_decisions(
                     threshold=relevance_threshold, action="kept" if sc.kept else "elided",
                     tokens=it.tokens, origin=origin, text=it.text, turn=it.turn,
                 )
+                raw_texts.append(it.text)
                 if it.kind == "user":
                     # `_RETRIEVE_ROW_ID_SUFFIX`: keeps this row's item_id distinct from the
                     # admit row just logged above -- see that constant's own comment for why
@@ -411,12 +504,29 @@ def log_decisions(
                         action="injected" if sc.decision_passed else "skipped",
                         tokens=it.tokens, origin=origin, text=it.text, turn=it.turn,
                     )
+                    raw_texts.append(it.text)
 
             records = log.entries()
-            for record in records:
+            # Review fork (third pass): `zip(strict=True)` below is the right tool to catch a
+            # future maintenance slip (a `.decision()` call added without its matching
+            # `raw_texts.append`) LOUDLY in dev/CI -- but the `ValueError` it raises is not an
+            # `OSError`, so left unguarded it would propagate out of this function's own
+            # `except OSError` and break the CALLER's compaction, contradicting this module's
+            # one stated contract. This explicit length check degrades the SAME way an OSError
+            # write failure already does (log to stderr, write nothing for this batch) instead
+            # of writing UNREDACTED vendor previews (the only other "safe" option here would
+            # be worse than failing) or letting the exception through.
+            if len(records) != len(raw_texts):
+                print(
+                    f"jev-shadow: internal record/text-count mismatch ({len(records)} vs "
+                    f"{len(raw_texts)}), skipping this batch rather than risk an unredacted "
+                    "preview", file=sys.stderr,
+                )
+                return
+            for record, raw_text in zip(records, raw_texts, strict=True):
                 _drop_preview_if_far_from_threshold(record)  # defect 4 -- see its own docstring
                 if record["text_preview"]:
-                    record["text_preview"] = _redact_preview(record["text_preview"])  # defect 1
+                    record["text_preview"] = _safe_preview(raw_text)  # defect 1, from the FULL text
             _write_records(path, records)
 
             if run_key is not None:
