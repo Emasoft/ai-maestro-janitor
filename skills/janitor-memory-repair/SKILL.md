@@ -142,7 +142,11 @@ full and run it exactly. Skip it only when neither defect is present. Control-fl
 summary in case the file is not yet read: re-read and re-diagnose the page after the
 verb fixes, before `begin`; a page whose only defects were these two fixes skips
 `begin`/`commit` entirely but still prints its Output line and closes the claim; on a
-refusal from either verb, report it and continue with the rest of the checklist.
+refusal from either verb, report it and continue with the rest of the checklist. Their
+guards, missing from the bare `reference-mem-topic`/`update-mem-atom` calls above: dry-run
+the one-sided link first — `to gains a link` means do NOT run it live, report the one-sided
+link as a finding instead — and re-read the page and recompute `--base-sha256` immediately
+before EACH verb call.
 
 ## EXECUTE the repair THROUGH the transaction core
 

@@ -820,6 +820,8 @@ def test_janitor_memory_repair_still_points_at_the_pre_transaction_reference():
     """
     skill_dir = _PROJECT_ROOT / "skills" / "janitor-memory-repair"
     skill_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    # Why this guard exists: 226b2d97 condensed the skill to fit the token cap and silently
+    # dropped "add it if not" — the REQUIRED read line must never be condensed away again.
     assert "references/pre-transaction-verb-fixes.md" in skill_text, (
         "janitor-memory-repair/SKILL.md no longer names "
         "references/pre-transaction-verb-fixes.md — the MANDATORY read step that "
