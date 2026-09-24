@@ -3,7 +3,7 @@ trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 column: todo
 created: 2026-09-24T08:12:01+0200
-updated: 2026-09-24T08:28:18+0200
+updated: 2026-09-24T11:30:12+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -73,3 +73,8 @@ The 2026-09-24 read test ran at about 08:16 from an INTERACTIVE session. The dae
 - M9 and the latch split: primary-read latch separate from the shared latch. A primary DENIAL trips it at once; primary TIMEOUTS need 3 consecutive; cooldown 600 s. The shared latch is unchanged for slots, writes and every other `security` call.
 - Vault: DATA/oauth-rotator/vault/slots-vault.json in a 0700 dir holding .metadata_never_index, file 0600, both re-asserted on every write, tmutil addexclusion, the .bak/.sha256 integrity sidecar, and `live_snapshot` replacing -livebak. "Claude Code-credentials" becomes the only keychain item either side touches.
 - VER-1: every change ships with a test that fails without it, plus one real automatic switch observed with sessions continuing, in each ownership direction. The server-owns direction is blocked until the ai-maestro server can boot.
+
+## Review corrections 2026-09-24
+
+Release 1 moved two items out of this card: item (f), the immediate tick on a retry wedge, is TRDD-GXXKAGY6; the at-switch live-to-slot mirror is TRDD-IT5GEZDZ. They are no longer this card's scope.
+Handover state agreed with the ai-maestro Claude on 2026-09-24: its oauth-rotator-tick opt-in flag is off (renamed, the R3 kill switch), so the janitor daemon owns rotation until the lease-protocol return; ai-maestro commits 884ce61b0 and 155d31b51 make the server stamp a chore's last-run file only while it claims the chore, and fail closed when its claim predicate is unregistered (superseding its TRDD-14HI8ZPR stamp contract). Verified on both sides after the 10:42 restart: capabilities omit both rotator chores, every oauth-rotator-tick stamp matched a janitor daemon run. At flag-on, statusline-route ticks do not stamp, so claimed-chore-stale depends on the main server instance stamping every beat.

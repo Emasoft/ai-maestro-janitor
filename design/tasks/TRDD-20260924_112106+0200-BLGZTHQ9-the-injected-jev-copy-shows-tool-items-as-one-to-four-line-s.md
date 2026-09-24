@@ -3,7 +3,7 @@ trdd-id: BLGZTHQ9
 title: The injected Jev copy shows tool items as one-to-four-line stubs
 column: todo
 created: 2026-09-24T11:21:06+0200
-updated: 2026-09-24T11:21:06+0200
+updated: 2026-09-24T11:29:45+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -23,3 +23,7 @@ Found by a fresh real-transcript run on HEAD f06621c6 (reports/compaction-replac
 ## Approval log
 
 - 2026-09-24T11:21:06+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Review corrections 2026-09-24
+
+Advisor root cause: E1 and E3 share one root. The non-owner floor force-admits 350-byte tool stubs over budget (jev_compaction.py ~2086), and the byte backstop then evicts the owner's directives to pay for them (~2186-2204). Fix, injected mode only: a tool item over its cap goes to the pointer pool (assistant and event prose may still be a verbatim prefix); drop the protected-segment boost from the injected non-owner order; replace the floor's force-admit with a reservation made before the owner tier. Acceptance is judged by reading the three injected copies, not by an item count. Lands after EFA4P42B, DZ1KOGAC and O2FNJ4KW and a re-measure.

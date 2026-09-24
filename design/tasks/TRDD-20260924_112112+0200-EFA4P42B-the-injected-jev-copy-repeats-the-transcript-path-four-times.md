@@ -3,7 +3,7 @@ trdd-id: EFA4P42B
 title: The injected Jev copy repeats the transcript path four times
 column: todo
 created: 2026-09-24T11:21:12+0200
-updated: 2026-09-24T11:21:12+0200
+updated: 2026-09-24T11:29:46+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -23,3 +23,7 @@ Same run (E5). The injected copy prints the transcript path in the header, the e
 ## Approval log
 
 - 2026-09-24T11:21:12+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Review corrections 2026-09-24
+
+"Once" means: the path appears only in the final "pointers expand with:" trailer line; every other expand instruction refers to that command. Also, in the injected copy, an empty digest drops the "## Digest" heading and the usage line.

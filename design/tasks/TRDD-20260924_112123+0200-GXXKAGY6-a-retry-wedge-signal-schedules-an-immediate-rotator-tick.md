@@ -3,7 +3,7 @@ trdd-id: GXXKAGY6
 title: A retry-wedge signal schedules an immediate rotator tick
 column: todo
 created: 2026-09-24T11:21:23+0200
-updated: 2026-09-24T11:21:23+0200
+updated: 2026-09-24T11:29:24+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -23,3 +23,7 @@ Release 1 of TRDD-RAEGS1D5; item (f) and term D7 on TRDD-4XND73XD. When the 429 
 ## Approval log
 
 - 2026-09-24T11:21:23+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Review corrections 2026-09-24
+
+Open decision, to settle before code: how the wedge signal counts against LIVE_429_DEBOUNCE. An immediate tick that still waits out the debounce saves only one beat. Proposed: a detected retry wedge counts as a debounced 429 for the live account. Test: with a wedge signal and a single 429 the tick rotates; without the change it stays put.

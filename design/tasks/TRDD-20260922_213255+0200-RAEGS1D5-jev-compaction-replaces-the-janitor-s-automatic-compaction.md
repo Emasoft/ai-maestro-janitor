@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-24T11:21:46+0200
+updated: 2026-09-24T11:30:12+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -17,7 +17,7 @@ approval-datetime: 2026-09-22T21:32:55+0200
 npt: [541CBN36]
 relevant-rules: []
 implementation-commits: [051625a4, 0b883373]
-eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG]
+eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1KOGAC, O2FNJ4KW, EFA4P42B, 4P4Y2KBR, ZKXQXHBI, IT5GEZDZ, GXXKAGY6, TK529Q0F]
 ---
 
 # Jev compaction replaces the janitor's automatic compaction
@@ -25,7 +25,7 @@ eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-23
 
 - 2026-09-24 RELEASE SCOPE CHANGED under the owner's delegation (Q-DELEGATION: 'i leave the decisions to you and the ai-maestro claude. plan well. always verify.'), superseding the 2026-09-23 'wait to complete all before publishing' scope. Release 1 = the finished Jev work (AW4XD53Q, N9LDHF7N) + rotation continuity fixes (OOZP38MN, V6USCGC9, the daemon primary read, the live→slot mirror at switch-away, the immediate tick on a retry wedge, the can't-rotate alert) + the pre-commit privacy scan for this repo (FWDZDB7W steps 1-2) + the idle-agent resume prompt (ADIGRD0T) if small. DEFERRED to later releases: 88DOI824, XI10BA5D, the vault/lease/policy-file protocol (4XND73XD; it waits on the joint spec), DG2V7D5P, BUR8AW77, and FWDZDB7W step 3. The owner's three real-session compactions before publishing STILL apply.
-- 2026-09-24 CURRENT: landed since the morning: d4fa7685 (token budget keeps non-owner items), 23713d53 (per-item owner cap, decision items first on pointers). In flight: every decision item named in the FULL copy (compact pointers); the injected summary sized to the measured compose_handoff room. NEXT ACTION (full pre-publish path, per the owner's release scope below): land both, then cards 6 (88DOI824) and 7 (N9LDHF7N), then TRDD-AW4XD53Q (the injected copy chosen by priority in its byte budget, back to 4/6/4), then XI10BA5D (memgrep sole writer) and I63GQJTK (heartbeat progress line), then the final gate and the three real-session runs measured against section "Publish acceptance criteria".
+- 2026-09-24 CURRENT (supersedes the earlier CURRENT line): the real-transcript run on f06621c6 passed size, slicing and time but the injected copy's content failed (reports/compaction-replacement/20260924_112500+0200-jev-real-run-verification.md). NEXT ACTION, one bounded commit each: EFA4P42B, DZ1KOGAC, O2FNJ4KW, re-measure the three transcripts, BLGZTHQ9 with the floor reservation, U6C3YXEL, re-measure; rotation: ZKXQXHBI, IT5GEZDZ, GXXKAGY6, TK529Q0F, OOZP38MN; then FWDZDB7W steps 1-2, the K0PMVRN6 redaction, the full gate and the three real-session runs. AW4XD53Q is complete; N9LDHF7N is in testing; 88DOI824 is deferred.
 - Cards 1-4 and card 5 (post-clear Jev injection, cooldown/recovery vetoes, hook-output caps) landed. NPT TRDD-541CBN36 closed 2026-09-23 after its last defect (OpenRouter 402/403 -> JevAuthError, 0b883373). The stale pane-key test was fixed in 051625a4; it had failed since the 2026-09-23 reader switch, and eba1f1ff landed on that red suite (process gap).
 - Scope audit 2026-09-23 (reports/compaction-replacement/20260923_105904+0200-raegs1d5-scope-audit.md): 16 of 17 card-3/4 items done. Item 8 (fleet-lease renamed to compaction-lane, a lock on the automatic lane) DROPPED by owner decision 2026-09-23: the compaction only reads the closed session's transcript file, so no lock is needed; the manual llm-ext lane keeps its existing fleet lease unchanged.
 - NO PUBLISH until a real-transcript Jev compaction passes on the FINAL tree (owner, 2026-09-23 evening: "don't publish until you tested the compaction of jev on a true session jsonl file from projects"). Derived by us, owner to confirm scope: the pass must fit the lane time limits (sync 60 s, detached 5-min budget), and the reference modules the gap analysis (reports/compaction-replacement/*-jev-reference-gap-analysis.md) marks as needed are adopted first (the owner said most reference functions are still not implemented). llm-ext cannot produce output on this machine until Emasoft/llm-externalizer-plugin#15 is fixed, so a Jev failure lands on the fact-only template; large sessions are rescued only by the 5-minute detached Jev attempt. SUPERSEDED (2026-09-23 morning), old next step: land the retry-then-llm-ext fallback (worker running), the extraction fix (task-notification records and heartbeat turns are not human; worker running), then TRDD for parallel batch scoring and the reference adoption; re-run the real-transcript test (4.7 MB took 10 s, 49 MB took 168 s on HEAD).
@@ -131,3 +131,7 @@ Measured 2026-09-24 on 862d30d4 (cached real scores): 3/3/3 non-owner items in t
 ## Release 1 blockers found 2026-09-24
 
 Real-transcript run on f06621c6: Jev runs within size and time, the injected copy's content fails (E1-E5). Blockers: BLGZTHQ9, DZ1KOGAC, O2FNJ4KW, EFA4P42B and TRDD-U6C3YXEL; rotation release items: ZKXQXHBI, IT5GEZDZ, GXXKAGY6, TK529Q0F.
+
+## Review corrections 2026-09-24
+
+The publish criterion "at least 3 non-owner items inline" is gameable by one-line stubs (BLGZTHQ9). It is replaced by: at least 3 non-owner items whose injected body carries information when read, judged by reading the three injected copies, and no injected tool item is a truncated prefix.
