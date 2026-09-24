@@ -258,6 +258,156 @@ def test_missing_inject_out_falls_back_to_the_full_document_not_the_template(tmp
     )
 
 
+_STUB_JEV_COMPACT_EMPTY_INJECT = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+argv = sys.argv
+if "--out" in argv:
+    Path(argv[argv.index("--out") + 1]).write_text({full_text!r}, encoding="utf-8")
+# `--inject-out` IS written (unlike _STUB_JEV_COMPACT_OUT_ONLY above -- no OSError on read), but
+# with EMPTY content -- mirrors `jev_compaction.compose`'s own terminal budget-floor stage
+# (`_render_minimal_fallback`) degrading all the way to "" when `--inject-max-bytes` is too
+# small even for its own constant-size marker.
+if "--inject-out" in argv:
+    Path(argv[argv.index("--inject-out") + 1]).write_text("", encoding="utf-8")
+sys.exit(0)
+"""
+
+
+def test_empty_inject_out_gets_a_marked_line_not_silence_or_the_full_document(
+    tmp_path, monkeypatch,
+):
+    """Round 4 coordinator task (TRDD-RAEGS1D5): `compose()`'s own terminal budget-floor stage
+    can legitimately write an EMPTY `--inject-out` file (see `_render_minimal_fallback`) -- the
+    read succeeds (no `OSError`), so the "missing companion" fallback above (falls back to the
+    full document) never fires. Feeding that empty string straight to `external_clear.
+    compose_handoff` as `summary` would be silently indistinguishable from `summary=None`
+    ("Jev never ran") -- its own `if summary:` check treats `""` exactly like `None`, dropping
+    the WHOLE compacted-context section with no notice at all. The hook must instead inject one
+    short marked line naming where the full copy landed -- never the full uncapped document
+    (that would refill the very context the clear was meant to empty) and never nothing."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%13")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%13"}, transcript=str(transcript))
+
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_EMPTY_INJECT.format(full_text=_COMPACTED_DOC), encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    key = handoff_files.session_key(str(transcript))
+    out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
+
+    assert rc == 0
+    assert handoff_files.TEMPLATE_MARKER not in out, "must not degrade to the template fallback"
+    # Never the full document refilling the injection (the "missing companion" fallback is a
+    # DIFFERENT, OSError-triggered path -- not this one).
+    assert "some text" not in out, "must not fall back to the full uncapped document"
+    # Never silent either -- one short marked line, naming the real path to the full copy.
+    assert (
+        f"compacted context too large for the handoff; read the full copy at {out_path}"
+    ) in out
+    # The keyed handoff FILE on disk still carries the full document, untouched.
+    group = handoff_files.newest_group(sd)
+    assert group and "some text" in group[0].read_text(encoding="utf-8")
+
+
+_STUB_JEV_COMPACT_MARKER_ONLY_INJECT = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+argv = sys.argv
+if "--out" in argv:
+    Path(argv[argv.index("--out") + 1]).write_text({full_text!r}, encoding="utf-8")
+# `--inject-out` gets JUST the marker `jev_compaction.py::_render_minimal_fallback` can write
+# alone (no truncated owner-message body, no pointer) when there is room for the marker but not
+# for anything else -- non-empty (`.strip()` alone would not catch it), but as content-free as
+# "" for a resumed session: no real transcript content, no path back to the full copy either
+# (review finding, round 4: the FIRST fix here only caught the fully-empty case).
+if "--inject-out" in argv:
+    Path(argv[argv.index("--inject-out") + 1]).write_text(
+        "(budget too small, see full copy)", encoding="utf-8",
+    )
+sys.exit(0)
+"""
+
+
+def test_marker_only_inject_out_also_gets_the_marked_line_not_passed_through(
+    tmp_path, monkeypatch,
+):
+    """Round 4 review finding (TRDD-RAEGS1D5): `_render_minimal_fallback` in jev_compaction.py
+    has THREE possible outputs, not two -- `""`, its own fixed marker ALONE (no body, no
+    pointer, no path), or the marker plus a truncated body plus a pointer. The first fix here
+    (`test_empty_inject_out_gets_a_marked_line_...`) only special-cased the fully-empty string;
+    the marker-alone case is non-empty so `.strip()` alone lets it straight through to
+    `external_clear.compose_handoff`, which would render it VERBATIM as the compacted-context
+    body -- "(budget too small, see full copy)" with no path at all, a dead end for a resumed
+    session (round 3's own report, finding 2, named this exact gap and deferred the fix to
+    "whichever caller wires the injected copy in"). This hook must replace THIS case with the
+    same marked-line-plus-real-path treatment, not pass the pathless marker through."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%14")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%14"}, transcript=str(transcript))
+
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_MARKER_ONLY_INJECT.format(full_text=_COMPACTED_DOC), encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    key = handoff_files.session_key(str(transcript))
+    out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
+
+    assert rc == 0
+    assert handoff_files.TEMPLATE_MARKER not in out, "must not degrade to the template fallback"
+    assert "some text" not in out, "must not fall back to the full uncapped document"
+    # The bare, pathless marker must never reach the printed injection unchanged.
+    assert mod._JEV_MINIMAL_FALLBACK_MARKER not in out
+    assert (
+        f"compacted context too large for the handoff; read the full copy at {out_path}"
+    ) in out
+
+
 def test_a_stale_sidecar_is_ignored_and_never_composed(tmp_path, monkeypatch):
     """A sidecar older than 300s is consumed (so it is never replayed later) but triggers NO
     compose and NO injection."""

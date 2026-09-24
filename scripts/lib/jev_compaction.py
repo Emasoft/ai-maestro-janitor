@@ -1123,6 +1123,18 @@ def _oversized_preview(item: Item) -> str:
 
 
 
+# TRDD-RAEGS1D5 (compose() budget floor round 5, coordinator ruling on the round 4 regression
+# report): round 4's literal "non-owner items, then non-guaranteed-owner items" backstop order
+# could empty the non-owner tier ENTIRELY before touching a single non-guaranteed-owner item --
+# measured on real data, this dropped non-owner items in the final injected copy from 4/6/4
+# (aabd8b0c, "jev newest+3") to 0/0/3 on three real transcripts. Owner ruling: "the at-least-3
+# non-owner target stands; its purpose is that the resumed session learns what was DONE" -- so
+# stage (2) below stops SHORT of this floor, deferring the harder choice (non-guaranteed-owner
+# items, stage (3)) first, and only comes back for the last `_NON_OWNER_FLOOR` non-owner items
+# (stage (4)) once stage (3) alone was not enough. See compose()'s own docstring for the full
+# stage list.
+_NON_OWNER_FLOOR = 3
+
 # Card 5 content-fit measured fact (reports/compaction-replacement/): the appended note for a
 # digest truncated by compose()'s max_bytes backstop -- see compose()'s own docstring.
 _DIGEST_TRUNCATED_NOTE = "\n\n[[digest truncated to fit the handoff budget]]"
@@ -1391,29 +1403,52 @@ def compose(
     already fits in the common case (measured: reports/compaction-replacement/ -- the pointer
     list, not the kept-items budget, dominated the old default). This only degrades further
     when a PARTICULAR transcript still overflows -- e.g. an unusually verbose digest or long
-    pointer previews -- and it degrades in priority order, never a blind byte slice: (1) drop
-    kept items by `evict_key` priority when `max_item_bytes` is unset (TRDD-RAEGS1D5: the
-    `budget_tokens` eviction above now admits by an owner-share-capped order instead, but this
-    narrower byte-only fallback keeps `evict_key`'s plain (decision_passed, max_score) rule,
-    unchanged) -- lowest first, oldest among ties -- never bare
-    chronological order, so a decision-passed item (a user instruction/correction) is not
-    sacrificed ahead of a newer, lower-priority one just for being older, (2) drop pointers
-    LOWEST-SCORE-first (the ones already least likely to be worth expanding), (3) truncate the
-    digest text itself. The trailing "pointers
-    expand with:" line is NEVER dropped by stages (1)-(3) -- it is the model's only way back to
-    everything elided, and a blind `raw[:room]` slice downstream (`external_clear.compose_
-    handoff`, before this fix) used to cut it off along with the newest kept items because both
-    sit at the tail of the joined string.
+    pointer previews -- and it degrades in priority order, never a blind byte slice (TRDD-
+    RAEGS1D5, compose() budget floor round 5 -- coordinator ruling on the round 4 regression: a
+    pointer is a breadcrumb to an item still fully recoverable via `expand --list --grep` --
+    losing one costs far less than a KEPT item vanishing with NO trace at all (`elided_items`/
+    `shown_elided` are computed once, before this backstop runs, so an item evicted here is
+    never added back as a pointer). But the round 4 attempt at "cheapest sacrifice first"
+    literally sacrificed EVERY non-owner item before a single non-guaranteed-owner one, which
+    measurably emptied the non-owner tier on real data -- reintroducing, inside the backstop
+    specifically, the exact failure commit aabd8b0c ("jev newest+3") fixed at admission time.
+    Owner ruling: "the at-least-3 non-owner target stands; its purpose is that the resumed
+    session learns what was DONE". So:
+      (1) drop pointers LOWEST-SCORE-first (the ones already least likely to be worth
+          expanding) -- can empty the elided-pointer list entirely;
+      (2) evict NON-OWNER kept items (`kind != "user"`), lowest priority first, but only DOWN TO
+          a floor of `_NON_OWNER_FLOOR` (3) -- stops short of the floor even if the doc still
+          does not fit, deferring to (3) first;
+      (3) evict NON-GUARANTEED-OWNER kept items (`kind == "user"`, excluding the two guaranteed
+          slots below), lowest priority first;
+      (4) only once (2)+(3) together are still not enough, come back for the last
+          `_NON_OWNER_FLOOR` non-owner items -- the SAME lowest-priority-first order (2) already
+          computed and stopped partway through, now continued with no floor;
+      (5) truncate the digest text itself;
+      (6) the newest DECISION item -- the second guaranteed slot (owner ruling, commit
+          aabd8b0c) -- sacrificed on its own, distinct from (2)-(4), only once (1)-(5) are still
+          not enough, and only when it differs from the newest owner message.
+    When `max_item_bytes` is unset (TRDD-RAEGS1D5: the `budget_tokens` eviction above now admits
+    by an owner-share-capped order instead, but this narrower byte-only fallback keeps
+    `evict_key`'s plain (decision_passed, max_score) rule for (2)-(4), unchanged) -- lowest
+    first, oldest among ties -- never bare chronological order, so a decision-passed item (a
+    user instruction/correction) is not sacrificed ahead of a newer, lower-priority one just for
+    being older. The trailing "pointers expand with:" line is NEVER dropped by stages (1)-(6) --
+    it is the model's only way back to everything elided, and a blind `raw[:room]` slice
+    downstream (`external_clear.compose_handoff`, before an earlier fix) used to cut it off
+    along with the newest kept items because both sit at the tail of the joined string.
 
-    (4) the SOLE exception (TRDD-RAEGS1D5, budget floor round 3): `render()`'s own fixed lines
+    (7) the SOLE exception (TRDD-RAEGS1D5, budget floor round 3): `render()`'s own fixed lines
     -- header, section headings, that same trailing line -- embed `transcript_path` up to FOUR
-    times (`full_context_path` a fifth), so stages (1)-(3) alone cannot guarantee the fixed
+    times (`full_context_path` a fifth), so stages (1)-(6) alone cannot guarantee the fixed
     skeleton itself fits a small `max_bytes` or survives a long transcript path. Only once
-    (1)-(3) still leave the render over budget, the ENTIRE document -- trailer included -- is
-    replaced by `_render_minimal_fallback`'s constant-size marker plus the newest owner message
-    truncated to whatever room remains, or `""` when nothing fits at all. This is the function's
-    actual, load-bearing guarantee: `max_bytes`, when given, is NEVER exceeded by the return
-    value, not merely "usually" or "in the common case" above.
+    (1)-(6) still leave the render over budget, the ENTIRE document -- trailer included -- is
+    replaced by `_render_minimal_fallback`'s constant-size marker plus the newest OWNER message
+    (`guaranteed_owner_items[0]`, the FIRST guaranteed slot) truncated to whatever room remains,
+    or `""` when nothing fits at all -- the one item no stage above ever sacrifices, per the
+    owner ruling "the owner's newest message first" (fe38e095) -- it is dropped LAST, if at
+    all. This is the function's actual, load-bearing guarantee: `max_bytes`, when given, is
+    NEVER exceeded by the return value, not merely "usually" or "in the common case" above.
 
     Within the `budget_tokens` admission itself (TRDD-RAEGS1D5, owner per-item token cap): an
     owner item beyond the one guaranteed slot is admitted at its capped cost
@@ -1998,34 +2033,17 @@ def compose(
     if max_bytes is None or len(doc.encode("utf-8")) <= max_bytes:
         return doc
 
-    # Backstop degrade, in priority order -- see the docstring. Each step only runs if the
-    # previous one was not enough; `evict_order`/`ranked` are popped from one end so this is
-    # bounded (at most `len(items)` iterations total) and never loops forever.
-    #
-    # In injected mode `evict_order` is simply the REVERSE of the explicit tier order built
-    # above (`kept_order_list` is already priority-ordered highest-first, so its tail is
-    # always the lowest tier -- catch-all owner overflow -- and its head, the newest owner
-    # message, is evicted only as an absolute last resort). Every other caller (`--out` never
-    # passes `max_item_bytes`) keeps `evict_key` -- the SAME (decision_passed, max_score, turn)
-    # priority the budget_tokens eviction above already uses -- not by bare chronological
-    # position (review finding, card 5 content-fit): a plain "oldest first" pop would drop a
-    # decision-passed item (a user instruction/correction the budget eviction deliberately
-    # protects) ahead of a newer, lower-priority relevance-only item just because it happens
-    # to be older. Oldest-among-equal-priority is still the tiebreaker in both, matching the
-    # "oldest kept items first" instruction wherever priority does not already decide it.
-    if max_item_bytes is not None:
-        evict_order = list(reversed(kept_order_list))
-    else:
-        evict_order = sorted(kept_order_list, key=evict_key)
-    while evict_order and len(doc.encode("utf-8")) > max_bytes:
-        dropped_id = evict_order.pop(0).id
-        kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
-        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+    # Backstop degrade, in priority order -- see the docstring for the full rationale (round 5
+    # coordinator ruling, on the round 4 regression report). Each step only runs if the
+    # previous ones were not enough; lists are popped from one end so this is bounded (at most
+    # `len(items)` iterations total) and never loops forever.
 
+    # (1) pointers, lowest `_pointer_priority` first -- ties broken by lowest score, but a
+    # decision_passed pointer is never dropped ahead of a non-decision one (same "first claim"
+    # rule the two earlier pointer selections already use). Cheapest sacrifice: a dropped
+    # pointer's item is still recoverable via `expand --list --grep`, unlike a kept item
+    # evicted below, which vanishes with no trace at all.
     if len(doc.encode("utf-8")) > max_bytes and shown_elided:
-        # Ascending `_pointer_priority` -- ties broken by lowest score, but a decision_passed
-        # pointer is never dropped ahead of a non-decision one (same "first claim" rule as the
-        # two selections above; this is the THIRD and last place pointer slots get rationed).
         ranked = sorted(shown_elided, key=_pointer_priority)
         while ranked and len(doc.encode("utf-8")) > max_bytes:
             dropped = ranked.pop(0)
@@ -2033,6 +2051,76 @@ def compose(
             hidden_count += 1
             doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
 
+    # (2) non-owner kept items, lowest priority first, down to a floor of `_NON_OWNER_FLOOR` --
+    # coordinator ruling (TRDD-RAEGS1D5, budget floor round 5, on the round 4 regression report):
+    # "the at-least-3 non-owner target stands; its purpose is that the resumed session learns
+    # what was DONE" (commit aabd8b0c, "jev newest+3"). The floor is checked against
+    # `kept_order_list` itself (a running count, not a slice of the eviction list), so it holds
+    # even when there were fewer than the floor to begin with -- nothing is ever evicted TO
+    # reach the floor, only stopped short of falling below it. `non_owner_evict_order` is built
+    # unconditionally (not inside an `if over budget` guard) because stage (4) below reuses
+    # whatever this stage did NOT get to pop -- same lowest-priority-first order, continued.
+    #
+    # In injected mode this is the REVERSE of the non-owner slice of the explicit tier order
+    # `kept_order_list` already encodes above (`decision_non_owner` + `relevance_non_owner`).
+    # Every other caller (`--out` never passes `max_item_bytes` in production; this branch only
+    # runs under direct test) keeps `evict_key` -- the SAME (decision_passed, max_score, turn)
+    # priority the `budget_tokens` eviction above already uses -- not by bare chronological
+    # position (review finding, card 5 content-fit): a plain "oldest first" pop would drop a
+    # decision-passed item (a user instruction/correction the budget eviction deliberately
+    # protects) ahead of a newer, lower-priority relevance-only item just because it happens to
+    # be older. Oldest-among-equal-priority is still the tiebreaker in both, matching the
+    # "oldest kept items first" instruction wherever priority does not already decide it.
+    if max_item_bytes is not None:
+        non_owner_evict_order = list(
+            reversed([it for it in kept_order_list if it.kind != "user"])
+        )
+    else:
+        non_owner_evict_order = sorted(
+            (it for it in kept_order_list if it.kind != "user"), key=evict_key,
+        )
+    while (
+        non_owner_evict_order
+        and len(doc.encode("utf-8")) > max_bytes
+        and sum(1 for it in kept_order_list if it.kind != "user") > _NON_OWNER_FLOOR
+    ):
+        dropped_id = non_owner_evict_order.pop(0).id
+        kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+
+    # (3) non-guaranteed-owner kept items, lowest priority first -- `guaranteed_owner_items` (the
+    # newest owner message, always, plus the newest decision item when it differs) is excluded;
+    # see (6) and the terminal stage below for when either of those two is ever sacrificed. The
+    # floor from (2) is NOT touched here -- deferred to (4), only if this alone is not enough.
+    if len(doc.encode("utf-8")) > max_bytes:
+        if max_item_bytes is not None:
+            non_guaranteed_owner_tier = [
+                it for it in kept_order_list
+                if it.kind == "user" and it.id not in guaranteed_owner_ids
+            ]
+            evict_order = list(reversed(non_guaranteed_owner_tier))
+        else:
+            evict_order = sorted(
+                (
+                    it for it in kept_order_list
+                    if it.kind == "user" and it.id not in guaranteed_owner_ids
+                ),
+                key=evict_key,
+            )
+        while evict_order and len(doc.encode("utf-8")) > max_bytes:
+            dropped_id = evict_order.pop(0).id
+            kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
+            doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+
+    # (4) the remaining non-owner items BELOW the floor -- only reached once (2)+(3) together
+    # were not enough. Continues `non_owner_evict_order` (2) already built and stopped partway
+    # through -- same lowest-priority-first order, now with no floor at all.
+    while non_owner_evict_order and len(doc.encode("utf-8")) > max_bytes:
+        dropped_id = non_owner_evict_order.pop(0).id
+        kept_order_list = [it for it in kept_order_list if it.id != dropped_id]
+        doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+
+    # (5) the digest, truncated to whatever room remains.
     if len(doc.encode("utf-8")) > max_bytes and digest_text:
         overflow = len(doc.encode("utf-8")) - max_bytes
         digest_bytes = digest_text.encode("utf-8")
@@ -2040,6 +2128,16 @@ def compose(
         keep = max(0, len(digest_bytes) - overflow - note_bytes)
         digest_text = digest_bytes[:keep].decode("utf-8", "ignore").rstrip() + _DIGEST_TRUNCATED_NOTE
         doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+
+    # (6) the newest DECISION item -- the second guaranteed slot (owner ruling, commit
+    # aabd8b0c) -- sacrificed on its own, distinct from (2)-(4), only once the digest is
+    # already spent and only when it still differs from the newest owner message (an empty
+    # `guaranteed_owner_items[1:]` means there is nothing here to drop).
+    if len(doc.encode("utf-8")) > max_bytes and len(guaranteed_owner_items) > 1:
+        decision_id = guaranteed_owner_items[1].id
+        if any(it.id == decision_id for it in kept_order_list):
+            kept_order_list = [it for it in kept_order_list if it.id != decision_id]
+            doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
 
     if len(doc.encode("utf-8")) > max_bytes:
         # TRDD-RAEGS1D5 (compose() budget floor round 3): every lever above only shrinks the

@@ -75,6 +75,17 @@ _INJECTION_HEADER = (
 _SIDECAR_FRESH_MAX_AGE_S = 300
 _RUN_COMPACT_TIMEOUT_S = 60
 
+# TRDD-RAEGS1D5 (compose() budget floor round 4, review finding): a DUPLICATE, not an import, of
+# `jev_compaction.py::_MINIMAL_FIXED_LINE` -- this hook is deliberately stdlib-only
+# (`jev_compaction_lane.py`'s own module docstring: "Never add a jevctx/httpx/jev_compaction
+# import here", enforced by `tests/test_jev_boundary.py`), so it cannot import the constant and
+# must match its literal text instead. `_render_minimal_fallback` (jev_compaction.py) can write
+# this marker ALONE (no truncated owner-message body, no pointer) to `--inject-out` when there is
+# room for the marker but not for anything else -- non-empty, so `.strip()` alone would not catch
+# it, but exactly as content-free as `""` for a resumed session's purposes: no real transcript
+# content, no path back to the full copy either.
+_JEV_MINIMAL_FALLBACK_MARKER = "(budget too small, see full copy)"
+
 
 def _payload() -> dict:
     """The hook's stdin JSON, or {} when there is none. Never raises."""
@@ -324,6 +335,31 @@ def _main() -> int:
                     f"document for injection: {exc!r}",
                 )
                 inject_text = full_text
+            else:
+                # TRDD-RAEGS1D5 (compose() budget floor round 4, coordinator task): a genuinely
+                # tiny `inject_max_bytes` can drive `jev_compaction.compose`'s own terminal stage
+                # (`_render_minimal_fallback`) down to EITHER `""` OR just its own constant
+                # marker with no body/pointer (`_JEV_MINIMAL_FALLBACK_MARKER` above) -- the file
+                # still exists and reads fine either way (no `OSError`, so the fallback above
+                # never fires). Both are "near-empty" for a resumed session's purposes: no real
+                # transcript content. `external_clear.compose_handoff`'s own `if summary:` check
+                # treats an empty string exactly like `summary=None` ("Jev never ran"), which
+                # would silently drop the WHOLE compacted-context section with no notice at all
+                # -- worse than a stated failure, since a resumed session cannot tell "nothing to
+                # show" from "something ran and vanished" -- and the marker-alone text, passed
+                # through unchanged, is a dead end that says "see full copy" without ever naming
+                # a path (round 3's own report, finding 2, explicitly deferred fixing this to
+                # "whichever caller wires the injected copy in" -- this hook). Either case gets
+                # the SAME one short marked line instead, naming where the full copy actually is
+                # (`out_path`, never `full_context_path` -- keeping this fixed-size line's own
+                # cost from scaling with a long transcript path is the same reasoning
+                # `_MINIMAL_FIXED_LINE` in jev_compaction.py already uses).
+                stripped = inject_text.strip()
+                if not stripped or stripped == _JEV_MINIMAL_FALLBACK_MARKER:
+                    inject_text = (
+                        "(compacted context too large for the handoff; read the full copy "
+                        f"at {out_path})"
+                    )
 
     if full_text is not None:
         # Card 5 two-renderings (TRDD-RAEGS1D5): the keyed handoff FILE on disk is the FULL
