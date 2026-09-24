@@ -1561,11 +1561,13 @@ def cmd_capture(only_if_running: bool) -> int:
         return 0  # unchanged since last capture; no /roles call
     email = account_email(blob)
     if not email:
-        # could not identify; record fp so we don't spam /roles, but do not
-        # misfile the blob into an unknown slot.
-        state["live_fp"] = fp
-        save_state(state)
-        print("captured: unidentified account (roles lookup failed); not filed")
+        # Do NOT write live_fp (or anything else) here: state.live_email still names the
+        # OLD account, so recording this fp under it would make _reconcile_live_email's
+        # `state.get("live_fp") == real_fp` early return treat the mislabel as "already in
+        # sync" forever — the drift becomes permanent and undetectable (TRDD-V6USCGC9, same
+        # rule as F5 in TRDD-7PYTX4E9). Leaving state untouched costs one retried /roles
+        # lookup per capture while roles is unreachable, which is cheap by comparison.
+        print("captured: unidentified account (roles lookup failed); state left unchanged, will retry")
         return 0
     write_slot(email, blob)
     # READ-BACK VERIFY (TRDD-5539cd6e): the keychain write silently truncated large blobs to

@@ -2068,6 +2068,27 @@ def test_cmd_capture_skips_mirror_sourced_blob(tmp_path: Path, monkeypatch: pyte
     assert rotator.load_state()["live_email"] == "healed@x"   # identity NOT re-poisoned
 
 
+def test_cmd_capture_leaves_state_untouched_when_account_unresolvable(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-V6USCGC9: when account_email() can't identify a NEW blob (fp differs from
+    state), cmd_capture must NOT write live_fp under the OLD live_email — that mislabel
+    would make _reconcile_live_email's fp-equality early return treat it as in sync
+    forever (same rule as F5 in TRDD-7PYTX4E9). State must stay exactly as it was so the
+    drift is still detectable and the next capture/tick retries the lookup."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    rotator.save_state({"live_email": "old@x", "live_fp": "o" * 16, "slots": {}})
+    monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    monkeypatch.setattr(rotator, "read_live_blob_with_source",
+                        lambda: (_blob("NEW-UNRESOLVED", expires_ms=_ms_in(8)), "primary"))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a, **_k: None)
+    rc = rotator.cmd_capture(only_if_running=False)
+    assert rc == 0
+    state = rotator.load_state()
+    assert state["live_email"] == "old@x"      # UNCHANGED — not mislabeled
+    assert state["live_fp"] == "o" * 16        # UNCHANGED — fp-equality early return stays honest
+
+
 def test_repair_refuses_mirror_restore_when_primary_merely_unreadable(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """F1 write-path gate: primary unreadable but PRESENT (the ACL-denied post-/login
