@@ -1568,7 +1568,11 @@ def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
 
     TRDD-EFA4P42B: this line used to spell out its own `expand --transcript <path> --list
     --grep TEXT` command -- the FOURTH `transcript_path` copy in the render -- and now just
-    points at the expand command in the trailer below instead."""
+    points at the expand command in the trailer below instead.
+
+    TRDD-EFA4P42B followup: "(append --list --grep TEXT)" was wrong -- the trailer ends in a
+    literal `<id>`, and appending after it makes `<id>` a shell redirect target instead of the
+    placeholder it is. Pins the corrected "(replace <id> with --list --grep TEXT)" wording."""
     items = [_item("k:0", "user", "kept text", turn=0)]
     scores = {"k:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
                                 decision_passed=False)}
@@ -1579,8 +1583,8 @@ def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
     lines = doc.splitlines()
     assert (
         "Full compacted context: /tmp/full-compacted.md -- read it ONLY if what you need is "
-        "not shown above; try list/search first with the expand command below (append --list "
-        "--grep TEXT)."
+        "not shown above; try list/search first with the expand command below (replace <id> "
+        "with --list --grep TEXT)."
     ) in lines
     pointer_idx = next(i for i, line in enumerate(lines) if line.startswith("Full compacted context:"))
     trailer_idx = next(i for i, line in enumerate(lines) if line.startswith("pointers expand with:"))

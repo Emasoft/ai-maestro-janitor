@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.util as _u
 import json
 import re
+import shlex
 import sys
 import time
 from collections.abc import Iterator
@@ -1378,3 +1379,63 @@ def test_replay_subcommand_on_an_empty_log_still_exits_0(
     code, output = _run(["replay", "--threshold", "0.5"])
     assert code == 0
     assert "0 decisions" in output
+
+
+def test_trailer_replace_id_wording_actually_lists_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TRDD-EFA4P42B followup: the trailer's `<id>` sits bare (unquoted) at the end of a
+    shell command line, so the render()-emitted instruction has to say REPLACE it, never
+    APPEND after it -- a POSIX shell tokenizes a bare `<id>` as `<` `id` `>` (INPUT then
+    OUTPUT redirection), not as three literal characters, so appending `--list --grep TEXT`
+    after it never even reaches the CLI's argument parser. This takes the actual rendered
+    trailer, tokenizes the `--list --grep` command BOTH the old (append) and new (replace)
+    way the same way a real shell would (`shlex` with shell punctuation split out), and
+    then actually runs the fixed argv through the CLI to prove it lists items.
+    """
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+    assert code == 0
+    doc = out.read_text(encoding="utf-8")
+
+    trailer = next(line for line in doc.splitlines() if line.startswith("pointers expand with:"))
+    real_cmd = trailer.split("pointers expand with: ", 1)[1]
+    assert real_cmd.endswith("<id>"), f"trailer no longer ends in a bare <id>: {trailer!r}"
+    assert str(transcript) in real_cmd
+
+    word = "bug"  # present in the fixture's user message ("hello, please fix the bug")
+
+    def _shell_tokens(cmd: str) -> list[str]:
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+
+    # OLD (broken) wording: "append --list --grep TEXT to the expand command below" -- a
+    # real shell reads the trailer's bare `<id>` as redirection, so `--list`/`--grep` land
+    # after an `id > --list` redirect chain instead of as CLI arguments.
+    old_tokens = _shell_tokens(f"{real_cmd} --list --grep {word}")
+    assert "<" in old_tokens and ">" in old_tokens, (
+        f"expected the old 'append' wording to tokenize as shell redirection: {old_tokens!r}"
+    )
+
+    # NEW (fixed) wording: "replace <id> in the expand command below with --list --grep
+    # TEXT" -- no redirection metacharacters left in the resulting command line.
+    new_cmd = real_cmd[: -len("<id>")] + f"--list --grep {word}"
+    new_tokens = _shell_tokens(new_cmd)
+    assert "<" not in new_tokens and ">" not in new_tokens, (
+        f"the new 'replace' wording must not contain shell redirection: {new_tokens!r}"
+    )
+
+    # And it is genuinely runnable: the tail of the fixed command's own tokens (everything
+    # from "expand" on, i.e. past the "uv run --script ..." launcher) is exactly the argv
+    # the CLI needs, run in-process via the same `_run` helper the rest of this file uses.
+    argv = new_tokens[new_tokens.index("expand") :]
+    run_code, output = _run(argv)
+    assert run_code == 0, f"the new 'replace' wording must produce a runnable command: {output}"
+    listed_ids = [
+        line for line in output.splitlines() if line.strip() and not line.startswith("transcript:")
+    ]
+    assert listed_ids, "expected --list --grep to print at least one id"

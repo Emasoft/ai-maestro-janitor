@@ -170,7 +170,7 @@ def test_keyed_handoff_gets_the_full_document_injection_gets_the_capped_one(tmp_
         "# Compacted context (Jev compaction)\n\n"
         "## Kept items\nsome text\n\nFull compacted context: /tmp/full.md -- read it ONLY if "
         "what you need is not shown above; try list/search first with the expand command "
-        'below (append --list --grep TEXT).\n\npointers expand with: uv run --script '
+        'below (replace <id> with --list --grep TEXT).\n\npointers expand with: uv run --script '
         '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /tmp/x <id>'
     )
     script = plugin_root / "scripts" / "jev_compact.py"

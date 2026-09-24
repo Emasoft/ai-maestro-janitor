@@ -1932,11 +1932,15 @@ def compose(
             # TRDD-EFA4P42B: this used to spell out the whole `expand --transcript <path>
             # --list --grep TEXT` command (the THIRD of four `transcript_path` copies) --
             # pointing at "the expand command below" (the trailer, which already carries the
-            # same path) says the same thing without repeating the path. The literal
-            # `--list --grep` text stays -- a test greps for it.
+            # same path) says the same thing without repeating the path.
+            # TRDD-EFA4P42B followup: "append ... to the expand command below" was wrong --
+            # the trailer ends in a literal `<id>`, and appending after it makes `<id>` a
+            # shell redirect target. `<id>` is a placeholder to REPLACE, not a tail to extend,
+            # so this now says "replace <id> ... with". The literal `--list --grep` text
+            # stays -- a test greps for it.
             lines.append(
-                f"[[elided: {hidden} more items not listed -- list/search: append --list "
-                "--grep TEXT to the expand command below]]"
+                f"[[elided: {hidden} more items not listed -- list/search: replace <id> in "
+                "the expand command below with --list --grep TEXT]]"
             )
 
         if full_context_path:
@@ -1949,11 +1953,13 @@ def compose(
             # TRDD-EFA4P42B: this line used to spell out its own `expand --transcript <path>
             # --list --grep TEXT` command (the FOURTH `transcript_path` copy) -- the trailer
             # below already gives that exact command, so this now just points there instead.
+            # TRDD-EFA4P42B followup: "append ... TEXT)" was wrong for the same reason as the
+            # elided-count line above -- the trailer's `<id>` is a placeholder to replace.
             lines.append("")
             lines.append(
                 f"Full compacted context: {full_context_path} -- read it ONLY if what you "
                 "need is not shown above; try list/search first with the expand command "
-                "below (append --list --grep TEXT)."
+                "below (replace <id> with --list --grep TEXT)."
             )
 
         lines.append("")

@@ -22,19 +22,14 @@ one-line pointer:
 
 ## Getting the original text back
 
-The compacted context's header carries the transcript path ONCE:
+The compacted context's LAST line carries the full expand command, path
+included:
 
 ```
-transcript: /path/to/the/old/session/transcript.jsonl
+pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /path/to/the/old/session/transcript.jsonl <id>
 ```
 
-Expand a pointer with:
-
-```bash
-uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript <path from the header> <id>
-```
-
-Example:
+Replace `<id>` with a pointer's id to expand it:
 
 ```bash
 uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand \
@@ -44,6 +39,14 @@ uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand \
 This prints the block's ORIGINAL bytes to stdout and exits 0, or prints why it
 failed and exits 3 (bad id, unknown uuid, or the block index isn't in that
 entry's content list).
+
+Or replace `<id>` with `--list --grep TEXT` to list every item's id instead
+(optionally filtered by `TEXT`), when you don't have an id yet:
+
+```bash
+uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand \
+  --transcript /path/to/the/old/session/transcript.jsonl --list --grep auth
+```
 
 ## NEVER Read the transcript file yourself
 
