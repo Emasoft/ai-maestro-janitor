@@ -59,5 +59,8 @@ instead of a nag that recurs forever.
 - `[[debugging-methodology]]` (USER scope) — the general investigation methods this
   project keeps generating: prove SLOW vs STUCK before touching a timeout, a green check
   that scanned nothing is not green, the installed copy is not the source.
+- [[jev-compaction]] — already listed in the Parts map above (backtick-wrapped there,
+  which the link-law checker does not parse as a link); this unwrapped form is the formal
+  reciprocal edge.
 
 ## Notes and lessons learned
