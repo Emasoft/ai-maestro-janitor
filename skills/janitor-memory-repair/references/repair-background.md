@@ -103,31 +103,31 @@ write. See the rejection comment above `repair_defect` for the full record (TRDD
 ## Resources per-heading link inventory (moved from SKILL.md)
 
 Moved verbatim out of SKILL.md's Resources section (token-cap margin pass,
-TRDD-D7RLXAN1). The [wikimem-model](../janitor-memory-write/references/wikimem-model.md)
+TRDD-D7RLXAN1). The [wikimem-model](../../janitor-memory-write/references/wikimem-model.md)
 per-heading anchors:
 
-  - [A wiki, not a pile — and collaborative like Wikipedia](../janitor-memory-write/references/wikimem-model.md#a-wiki-not-a-pile--and-collaborative-like-wikipedia)
-  - [The editorial decision flow (run this on any change worth remembering)](../janitor-memory-write/references/wikimem-model.md#the-editorial-decision-flow-run-this-on-any-change-worth-remembering)
-  - [EXPAND and REDUCE — radiating suns vs receiving terminals](../janitor-memory-write/references/wikimem-model.md#expand-and-reduce--radiating-suns-vs-receiving-terminals)
-  - [The three tiers (a page's role in the pyramid)](../janitor-memory-write/references/wikimem-model.md#the-three-tiers-a-pages-role-in-the-pyramid)
-  - [The edge model — EVERY link is bidirectional (the link law)](../janitor-memory-write/references/wikimem-model.md#the-edge-model--every-link-is-bidirectional-the-link-law)
-  - [Page anatomy](../janitor-memory-write/references/wikimem-model.md#page-anatomy)
-  - [Atoms — first-class body elements (block-properties)](../janitor-memory-write/references/wikimem-model.md#atoms--first-class-body-elements-block-properties)
+  - [A wiki, not a pile — and collaborative like Wikipedia](../../janitor-memory-write/references/wikimem-model.md#a-wiki-not-a-pile--and-collaborative-like-wikipedia)
+  - [The editorial decision flow (run this on any change worth remembering)](../../janitor-memory-write/references/wikimem-model.md#the-editorial-decision-flow-run-this-on-any-change-worth-remembering)
+  - [EXPAND and REDUCE — radiating suns vs receiving terminals](../../janitor-memory-write/references/wikimem-model.md#expand-and-reduce--radiating-suns-vs-receiving-terminals)
+  - [The three tiers (a page's role in the pyramid)](../../janitor-memory-write/references/wikimem-model.md#the-three-tiers-a-pages-role-in-the-pyramid)
+  - [The edge model — EVERY link is bidirectional (the link law)](../../janitor-memory-write/references/wikimem-model.md#the-edge-model--every-link-is-bidirectional-the-link-law)
+  - [Page anatomy](../../janitor-memory-write/references/wikimem-model.md#page-anatomy)
+  - [Atoms — first-class body elements (block-properties)](../../janitor-memory-write/references/wikimem-model.md#atoms--first-class-body-elements-block-properties)
 
 This file's own `## Table of contents` above already names the same 10
 repair-background sections; these are the same entries as clickable per-heading anchors,
 for a reader who wants to jump straight to one of them:
 
-  - [Why REPAIR exists](references/repair-background.md#why-repair-exists)
-  - [What REPAIR is (and is not)](references/repair-background.md#what-repair-is-and-is-not)
-  - [Claim exit codes](references/repair-background.md#claim-exit-codes)
-  - [desc: quoting grammar (TRDD-3SOO1RWE)](references/repair-background.md#desc-quoting-grammar-trdd-3soo1rwe)
-  - [desc-trim keyword incident (747b8bef)](references/repair-background.md#desc-trim-keyword-incident-747b8bef)
-  - [Superseded-atom delimiter mechanics](references/repair-background.md#superseded-atom-delimiter-mechanics)
-  - [Why `publish-globally` is NOT a repair defect](references/repair-background.md#why-publish-globally-is-not-a-repair-defect)
-  - [Execution context and what this is](references/repair-background.md#execution-context-and-what-this-is)
-  - [EXIT / SUCCESS / idempotency contract](references/repair-background.md#exit-success-idempotency-contract)
-  - [Scope](references/repair-background.md#scope)
+  - [Why REPAIR exists](#why-repair-exists)
+  - [What REPAIR is (and is not)](#what-repair-is-and-is-not)
+  - [Claim exit codes](#claim-exit-codes)
+  - [desc: quoting grammar (TRDD-3SOO1RWE)](#desc-quoting-grammar-trdd-3soo1rwe)
+  - [desc-trim keyword incident (747b8bef)](#desc-trim-keyword-incident-747b8bef)
+  - [Superseded-atom delimiter mechanics](#superseded-atom-delimiter-mechanics)
+  - [Why `publish-globally` is NOT a repair defect](#why-publish-globally-is-not-a-repair-defect)
+  - [Execution context and what this is](#execution-context-and-what-this-is)
+  - [EXIT / SUCCESS / idempotency contract](#exit-success-idempotency-contract)
+  - [Scope](#scope)
 
 ## Pre-transaction verb fixes — extended rationale
 

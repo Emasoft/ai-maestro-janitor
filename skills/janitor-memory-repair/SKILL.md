@@ -217,13 +217,12 @@ If `complete` exits 2 saying more than one claim is in flight, re-run it adding 
 
 ## Resources
 
-- [wikimem-model](../janitor-memory-write/references/wikimem-model.md) — the wiki model:
-  tiers, the editorial decision flow, expand/reduce, the bidirectional link law, page
-  anatomy, atoms. (Per-heading links: [inventory](references/repair-background.md#resources-per-heading-link-inventory-moved-from-skillmd).)
-- [repair-background](references/repair-background.md) — why REPAIR exists and what it
-  is not, claim exit codes, `desc:` quoting grammar + the trim-keyword incident,
-  superseded-atom delimiter mechanics, why `publish-globally` is not a repair defect.
-  (Per-heading links: [inventory](references/repair-background.md#resources-per-heading-link-inventory-moved-from-skillmd).)
+The shared data model lives in the OTHER skill's
+[wikimem-model](../janitor-memory-write/references/wikimem-model.md); read it once. Its TOC:
+A wiki, not a pile — and collaborative like Wikipedia; The editorial decision flow (run this on any change worth remembering); EXPAND and REDUCE — radiating suns vs receiving terminals; The three tiers (a page's role in the pyramid); The edge model — EVERY link is bidirectional (the link law); Page anatomy; Atoms — first-class body elements (block-properties).
+
+- [repair-background](references/repair-background.md) — this skill's own TOC:
+  Why REPAIR exists; What REPAIR is (and is not); Claim exit codes; desc: quoting grammar (TRDD-3SOO1RWE); desc-trim keyword incident (747b8bef); Superseded-atom delimiter mechanics; Why `publish-globally` is NOT a repair defect; Execution context and what this is; EXIT / SUCCESS / idempotency contract; Scope.
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides
   (`begin`/`commit --op repair`/`abort`/`resume`); `verify_repair` is its gate.
 - `scripts/lib/memory_settings.py` — cadence (`is_due`/`mark_ran`,
