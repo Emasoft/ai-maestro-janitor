@@ -109,6 +109,28 @@ def _write_transcript(tmp_path: Path) -> Path:
     return path
 
 
+def _write_attachment_transcript(tmp_path: Path, prompt: Any) -> Path:
+    """A single `type: "attachment"` entry (TRDD-DQXMND59) -- a mid-turn queued owner
+    message, the shape `extract_items`'s "attachment" branch scores under id "att-1:0"
+    (see jev_compaction.py). `prompt` is either a plain str or a block-list, matching the
+    two shapes TRDD-RAEGS1D5 measured on real transcripts.
+    """
+    entry = {
+        "type": "attachment",
+        "uuid": "att-1",
+        "parentUuid": "u-1",
+        "attachment": {
+            "type": "queued_command",
+            "commandMode": "prompt",
+            "origin": {"kind": "human"},
+            "prompt": prompt,
+        },
+    }
+    path = tmp_path / "transcript.jsonl"
+    path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    return path
+
+
 def _run(argv: list[str]) -> tuple[int, str]:
     import contextlib
     import io
@@ -139,6 +161,47 @@ def test_expand_tool_result_block(tmp_path: Path) -> None:
     code, out = _run(["expand", "--transcript", str(transcript), "u-2:0"])
     assert code == 0
     assert out.strip() == "file written: 12 lines"
+
+
+def test_expand_attachment_string_prompt(tmp_path: Path) -> None:
+    # A typed mid-turn owner message: `attachment.prompt` is a plain str. Fails on HEAD
+    # (before the TRDD-DQXMND59 fix) because `_extract_block` only looked at
+    # `entry["message"]`/`entry["content"]`, both absent on an attachment entry.
+    transcript = _write_attachment_transcript(tmp_path, "please hold off on the merge")
+    code, out = _run(["expand", "--transcript", str(transcript), "att-1:0"])
+    assert code == 0
+    assert out.strip() == "please hold off on the merge"
+
+
+def test_expand_attachment_block_list_prompt(tmp_path: Path) -> None:
+    # An owner message with a pasted image alongside text: `attachment.prompt` is a list of
+    # content blocks, same shape as `message.content` (TRDD-RAEGS1D5). Must join only the
+    # `text` blocks, exactly as `jc._tool_result_text` does for `extract_items`.
+    prompt = [
+        {"type": "text", "text": "go ahead and ship it"},
+        {"type": "image", "source": {"type": "base64", "data": "..."}},
+    ]
+    transcript = _write_attachment_transcript(tmp_path, prompt)
+    code, out = _run(["expand", "--transcript", str(transcript), "att-1:0"])
+    assert code == 0
+    assert out.strip() == "go ahead and ship it"
+
+
+def test_expand_attachment_non_queued_command_fails(tmp_path: Path) -> None:
+    # `extract_items` only materializes an item for `attachment.type == "queued_command"` --
+    # every other attachment kind (hook output, ...) produces no item and so no id `expand`
+    # should ever resolve. Proves the type gate added after review, not just that a missing
+    # "prompt" key happens to come back empty.
+    entry = {
+        "type": "attachment",
+        "uuid": "att-1",
+        "parentUuid": "u-1",
+        "attachment": {"type": "hook_success", "prompt": "this must never be returned"},
+    }
+    path = tmp_path / "transcript.jsonl"
+    path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    code, _out = _run(["expand", "--transcript", str(path), "att-1:0"])
+    assert code == 3
 
 
 def test_expand_thinking_block_is_not_expandable(tmp_path: Path) -> None:
