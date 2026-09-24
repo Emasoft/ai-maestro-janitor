@@ -3,7 +3,7 @@ trdd-id: DQXMND59
 title: Jev compaction passes a twelve-row verification matrix on real transcripts before release
 column: todo
 created: 2026-09-24T12:13:04+0200
-updated: 2026-09-24T13:29:58+0200
+updated: 2026-09-24T13:38:55+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: audit
@@ -38,3 +38,11 @@ Owner, 2026-09-24: "continue testing the jev compaction, make it flawless". Rele
 ## Approval log
 
 - 2026-09-24T12:13:04+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Release checklist
+
+- [ ] The installed ~/.claude/rules/janitor-heartbeat-protocol.md still carries the old STATE_DIR recipe (f0eb0848 moved it into a code block below the heartbeat table in the repo's rules/janitor-heartbeat-protocol.md; on 2026-09-24 the two files differ). The release must install the repo's rule; check: the installed copy is byte-identical to the repo's after the upgrade.
+
+## Notes
+
+V5 baseline (one developer machine, 2026-09-24, from the previous session's measurement): on the 258 MB transcript the sync lane spent about 46.5 s in the compose plus about 4.7 s in state_head_paths, roughly 51 s of run_compact's 60 s bound, about 9 s of headroom; a slower host can exceed it. V5 must be re-measured on the final tree before this row can pass.

@@ -3,7 +3,7 @@ trdd-id: EKJKVSZF
 title: The context gate clears past its ceiling while background agents are live, and their results land in a fresh session with no context
 column: backburner
 created: 2026-09-24T13:30:29+0200
-updated: 2026-09-24T13:30:29+0200
+updated: 2026-09-24T13:39:05+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: spike
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T13:30:29+0200
-parent-trdd: L32WC0H7
+parent-trdd: null
 ---
 
 # The context gate clears past its ceiling while background agents are live, and their results land in a fresh session with no context
@@ -28,3 +28,4 @@ Question, not yet a decision. Evidence: .janitor/logs/token-meter.log lines 157-
 ## Related
 
 TRDD-911PCSFZ (backburner): the idle-clear gate clears a session with live subagents using a stale handoff. A different trigger (idle-clear, not the Stop-hook ceiling) with the same outcome; decide the two together.
+TRDD-L32WC0H7 (testing): the trigger and loop-guard card (card 1 of the Jev program). This spike is NOT one of its derived tasks (it is not an effect of L32WC0H7's change, and adding it to L32WC0H7's eht would block that card's completion on a backburner question), so there is no parent-trdd link; the relation is recorded here only. parent-trdd was cleared on 2026-09-24 because it named L32WC0H7 while L32WC0H7's npt/eht do not list this card (a one-directional derivation edge).
