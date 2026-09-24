@@ -1,9 +1,9 @@
 ---
 trdd-id: D7RLXAN1
 title: Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
-column: design_human_review
+column: dev
 created: 2026-09-24T13:53:03+0200
-updated: 2026-09-24T14:24:35+0200
+updated: 2026-09-24T18:05:42+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -20,12 +20,12 @@ parent-trdd: null
 # Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-24
-- DO NOT IMPLEMENT until the owner answers Q1–Q3.
-- Column: design_human_review. The design is complete and has not been implemented; the advisor's AI review passed (SOUND WITH CHANGES). No code has been written.
-- NEXT ACTION: fable-advisor:advisor reviewed this card 2026-09-24 (report: reports/compaction-replacement/20260924_140604+0200-advisor-prose-verbatim.md) — VERDICT SOUND WITH CHANGES; blocking fixes A-E are folded into this card below. Next: implement in two commits (behaviour, then dead code — the dead-code commit is now its own follow-up card, see below), after F1/F3 (TRDD-RAEGS1D5) are committed. jev_compaction.py and jev_compaction_lane.py must not have two writers at once.
+- DECIDED 2026-09-24 (owner gave full authority: "i've given you full authority to decide by yourself, just made the decisions on the base of verified facts and tests"): Q1 accept the one-time READ FIRST cost (single file; the two-file alternative stays unbuilt unless acceptance (d) shows it is too costly); Q2 "all" = since the session's LAST compact_boundary, older prose represented by Claude Code's own summary kept verbatim; Q3 enforce in code (prose is never a scored item), no prompt text changed. Implementation in progress (column dev).
+- Column: dev. IMPLEMENTED 2026-09-24, NOT YET COMMITTED (the orchestrator commits; drafts docs_dev/20260924-d7-commit-*.txt): the change list with advisor fixes A-E and 14 test functions (tests 1-12, test 11 split into its Jev and llm-ext halves, plus one for the rule below) -- 13 shown failing on HEAD, the llm-ext guard (which HEAD already satisfies) shown failing on a tail=() mutant. One measured addition: extract_items drops only the BARE 'janitor heartbeat' reply -- transcript_roles.is_heartbeat_reply also matches that reply plus up to two lines, which silently dropped 9 real assistant messages from b2bf5b7b's full copy (acceptance (a) caught it). Report: reports/compaction-replacement/20260924_180444+0200-d7rlxan1-implementation.md
+- NEXT ACTION: review and commit the behaviour change (only the 10 files this card touched -- other agents have uncommitted edits in the same tree), then decide acceptance (c)'s one failing criterion: d30bf250's injected copy shows 0 tool/event items and 4eb7bf5d's 2 (thin), because the token stage (budget_tokens 8000) admits large tool items the injected copy can only point at (TRDD-U6C3YXEL amendment S1 limits inline items to the token stage's set). Pre-existing -- HEAD showed 0 tool items on d30bf250 too, its floor met by assistant prose that now sits in the exchanges block. A scratch probe reading S1 as 'Jev kept' (scores.kept) gave 8/10/8 inline tool/event items on d30bf250/fd5cc3e0/b2bf5b7b; that is a change to another card's rule, so it needs its own card. Advisor fixes A-E and the review history: reports/compaction-replacement/20260924_140604+0200-advisor-prose-verbatim.md.
 - Full design with the measurements: reports/compaction-replacement/20260924_133048+0200-prose-verbatim-design.md (gitignored scratch copy; THIS card holds the decisions).
 - Digest question CLOSED (advisor): keep build_digest(items, ...) sending the newest 3 owner + 2 assistant messages to Jev as task context — not a violation, since the directive governs what survives into the output, not what Jev sees as its task description; stripping prose from the digest would degrade every tool-item score for no gain.
-- OWNER QUESTIONS STILL OPEN (Q1-Q3, advisor/orchestrator, 2026-09-24): (1) is the ~20-35k-token one-time READ FIRST cost acceptable, or should the two-file alternative be built instead (see Risks); (2) confirm "since the last compaction" as the reading of "all" in the directive -- meaning since the session's LAST compaction (compact_boundary), not the whole transcript's prose; (3) the directive said "modify the jev prompt to ensure that", but this design enforces it in code instead and changes no prompt, because a prompt sentence cannot guarantee a threshold outcome -- confirm that reading is correct.
+- OWNER QUESTIONS Q1-Q3 ANSWERED 2026-09-24 (see the first line of this block): (1) the ~20-35k-token one-time READ FIRST cost is accepted, single file; (2) "all" = since the session's LAST compact_boundary; (3) enforced in code, no prompt change, because a prompt sentence cannot guarantee a threshold outcome.
 
 ## Owner directive (verbatim, 2026-09-24)
 "its not good. assistant prose and user prose (the messages exchanges) should be all kept intact. modify the jev prompt to ensure that."
@@ -90,6 +90,7 @@ TRDD-RAEGS1D5 — not this card's parent-trdd (RAEGS1D5's npt/eht does not list 
 
 - 2026-09-24T13:53:03+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T14:19:34+0200 — column → design_human_review by emanuelesabetta. AI review done (advisor: SOUND WITH CHANGES, fixes A-E folded in); awaiting owner answers to Q1-Q3 before implementation
+- 2026-09-24T17:32:35+0200 — column → dev by emanuelesabetta. Q1-Q3 decided under the owner's full-authority grant; implementing with advisor fixes A-E
 
 
 
@@ -101,3 +102,12 @@ TRDD-RAEGS1D5 — not this card's parent-trdd (RAEGS1D5's npt/eht does not list 
 
 
 
+
+## Acceptance results (2026-09-24)
+
+- (a) PASS on all 4 cached sessions: every jq-extracted live prose record is either in the full copy's conversation section as its exact block, in order (b2bf5b7b 116/194, d30bf250 188/215, 4eb7bf5d 27/35, fd5cc3e0 3/3), or a documented exclusion (bare heartbeat replies; notifications, peer messages and other system-role records, all scored as events); 0 unexplained, 0 out of order; rendered blocks == found; Claude Code's summary present and anchor-paired where a boundary exists; no unpreserved pre-boundary prose.
+- (b) PASS: no owner, assistant or control id in any scored set.
+- (c) injected copy wrapped by compose_handoff: 6,946 / 5,776 / 5,720 / 5,425 B (all under 9,000); READ FIRST is line one; newest owner message whole on 3 sessions (fd5cc3e0 has no owner message since its last boundary -- the preserved set holds none; by design, advisor test-12 case); newest message present (whole or stated prefix). FAIL on 'at least 3 tool/event items with real content': b2bf5b7b 4, fd5cc3e0 3, 4eb7bf5d 2 (thin headings), d30bf250 0 -- see NEXT ACTION.
+- (d) full copy: b2bf5b7b 126,204 B (~31.5k tokens, 1,155 lines, 2 Reads), d30bf250 169,035 B (~42k tokens, 1,942 lines, 2 Reads), 4eb7bf5d 65,136 B (~16k, 1 Read), fd5cc3e0 61,669 B (~15k, 1 Read). d30bf250 exceeds the 20-35k estimate: its 188 live messages alone are 124.5 KB; the unbuilt two-file option would take the ~35 KB of kept items and pointers out of the mandatory read.
+- (e) PASS: the real hook (run_hook.py) printed 6,683 B on accccb8b (46 s) and 5,903 B on fd5cc3e0 (22 s), Jev really ran, no truncation marker; the accccb8b injection opens its exchanges with the owner's directive itself, verbatim.
+- (f) compose() stays pure; byte identity with HEAD's output is retired by this design.
