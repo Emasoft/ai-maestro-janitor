@@ -3,7 +3,7 @@ trdd-id: U6C3YXEL
 title: Items excluded from the injected Jev copy get a pointer and are counted in the elided line
 column: todo
 created: 2026-09-24T08:29:57+0200
-updated: 2026-09-24T08:29:57+0200
+updated: 2026-09-24T13:28:36+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T08:29:57+0200
+implementation-commits: [0c607b36]
 ---
 
 # Items excluded from the injected Jev copy get a pointer and are counted in the elided line
@@ -23,3 +24,9 @@ Follow-up to TRDD-AW4XD53Q (complete). Measured 2026-09-24 on three cached real 
 ## Approval log
 
 - 2026-09-24T08:29:57+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Review corrections 2026-09-24
+
+Landed in 0c607b36 (with TRDD-BLGZTHQ9; reports/compaction-replacement/20260924_130147+0200-injected-selection-worker.md §2 item 1). Deviation D2, accepted: the decision reserve is HELD, not refunded. Its byte limit is fixed at fill step 3 as min(25% of available, room left after steps 1-2), and a reserved item goes inline only if the next-newest excluded decision item can take its pointer place. Measured decision pointers on the four cached transcripts b2bf5b7b/d30bf250/4eb7bf5d/fd5cc3e0: design literal (refund) 2/0/2/1, refund then re-reserve 3/4/8/2, held (shipped) 5/6/9/2, against 7/12/230/2 excluded decision items. b2bf5b7b still falls short of the acceptance row min(6, excluded) = 6, with 5.
+Fill-order trade, accepted: the held reserve is paid for with the owner's verbatim text (owner items inline 5 -> 4 on b2bf5b7b). Its measured value was inflated by content-free command wrappers (3 of 9 decision pointers on 4eb7bf5d were /compact wrappers, 1 of 6 on d30bf250 was /ponytail) until 12351362 made them control inputs; re-measure before quoting the numbers above again (review of 0c607b36).
+KNOWN DESIGN LIMIT, not a tuning miss: b2bf5b7b reaches 7 of 8 key owner directives. The owner tier is ordered (decision_passed, newest first), so an early owner message Jev did not score as a decision (score 0.14) always loses to newer ones, and no constant or share can fix that. The unreachable one is the message that started the incident: "i had to manually rotate again. why?". Recorded as a limit of this design, not as "7/8 accepted".
