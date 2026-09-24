@@ -3,16 +3,16 @@ trdd-id: K0PMVRN6
 title: All three rotator slots died with invalid_grant and rotation stayed put for 17 days
 column: todo
 created: 2026-09-24T07:32:06+0200
-updated: 2026-09-24T07:37:11+0200
-current-owner: emanuelesabetta
-created-by: emanuelesabetta
+updated: 2026-09-24T07:52:38+0200
+current-owner: janitor-main-session
+created-by: janitor-main-session
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: janitor-main-session
 mandate: true
 mandated-by: none
 approved: true
-approval-judge: emanuelesabetta
+approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T07:32:06+0200
 relevant-rules: []
 labels: [oauth-rotator]
@@ -54,7 +54,8 @@ labels: [oauth-rotator]
 
 ## Approval log
 
-- 2026-09-24T07:32:06+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-24T07:32:06+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-24 — identity correction: issuer fields changed from the host username (a trddgrep default) to the session id; original in git history.
 
 ## Owner decisions 2026-09-24 (verbatim)
 
