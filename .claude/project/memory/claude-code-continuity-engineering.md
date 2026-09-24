@@ -19,7 +19,8 @@ CC docs verified 2026-07-18. The owner's standing directive: *"they must never s
 
 ## The stack — six layers, each owned by its own page
 
-^4ESPVFB8 [desc:"The six-layer never-stall stack: settings substrate, account rotation (prevention), freeze recovery (ESC-only unstick), compaction discipline, nudging idle-armed sessions, rollout observability.", keywords:"how_does_account_rotation_prevent_429_stalls window_asymmetric_rotation_thresholds_7d_vs_5h how_to_unstick_a_frozen_retrying_session why_does_typing_text_into_a_blocked_session_flood_the_input_buffer janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks session_stuck_in_a_retry_loop_after_a_429 fleet_reachability_which_pane_can_be_injected", lmd: 2026-09-24]
+^ATOM-787X-6DYV [desc: "How does account rotation prevent 429 stalls, how do you unstick a frozen retrying session -- layers 1-3 of the never-stall stack: settings substrate, account rotation, freeze recovery.", keywords:"how_does_account_rotation_prevent_429_stalls window_asymmetric_rotation_thresholds_7d_vs_5h how_to_unstick_a_frozen_retrying_session why_does_typing_text_into_a_blocked_session_flood_the_input_buffer session_stuck_in_a_retry_loop_after_a_429 claude_stalled_overnight fleet_stopped_working_in_my_absence what_is_the_settings_substrate_layer why_must_the_harness_retry_instead_of_stopping what_does_esc_only_injection_mean retrying_in_Xm_wait_state_frozen_session which_layers_are_prevention_vs_recovery", ocd: 2026-09-24, lmd: 2026-09-24]
+
 1. **Settings substrate** — the harness must retry instead of stopping, and questions must
    auto-continue: [[claude-code-continuity-settings]] (watchdog + AFK chain, ensured by BOTH
    the janitor and the ai-maestro server in lockstep).
@@ -31,8 +32,7 @@ CC docs verified 2026-07-18. The owner's standing directive: *"they must never s
    freed with ESC-ONLY injection (2 raw ESCs, zero text, zero Enter — anything typed BUFFERS
    and floods). Semantics: [[claude-code-esc-input-semantics]]; record: TRDD-P7WU40G9 §BUG 3.
 
-^ATOM-DSGY-OJ87 [desc: "The last three layers of the never-stall stack: compaction discipline (janitor backstops harness auto-compact, never competes), nudging idle-armed sessions to keep going, and rollout observability (a ", keywords: janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks fleet_reachability_which_pane_can_be_injected compaction_discipline_backstop_not_compete rollout_observability_hook_reload when_does_the_janitor_backstop_auto_compact why_is_a_fix_not_live_after_shipping, ocd: 2026-09-24, lmd: 2026-09-24]
-
+^ATOM-DSGY-OJ87 [desc: "Why does the janitor compact when the harness could, why are idle sessions nudged to continue, why does a shipped fix look unfixed -- layers 4-6: compaction, nudging, rollout observability.", keywords:"janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks fleet_reachability_which_pane_can_be_injected compaction_discipline_backstop_not_compete rollout_observability_hook_reload when_does_the_janitor_backstop_auto_compact why_is_a_fix_not_live_after_shipping", ocd: 2026-09-24, lmd: 2026-09-24]
 4. **Compaction discipline** — the janitor only BACKSTOPS a failed harness auto-compact,
    never competes with it: fire only above `CLAUDE_CODE_AUTO_COMPACT_WINDOW − overhead +
    margin` (`cold_cache_compact.min_context_tokens()`); record: TRDD-P7WU40G9 §BUG 2. The
@@ -47,9 +47,6 @@ CC docs verified 2026-07-18. The owner's standing directive: *"they must never s
    reloads its hooks; stale-hook "ghosts" mimic unfixed bugs:
    [[claude-code-plugin-rollout-staleness]].
 
-Fleet reachability (which pane can be injected, via which channel): USER-scope page
-`janitor-fleet-guardian-reachability`.
-
 ## Design laws (cross-layer, all owner-ratified)
 
 ^M96S3JQO [desc:"Four cross-layer, owner-ratified design laws: prevention beats recovery, never type text+Enter into a blocked session, per-project alert channeling, ai-maestro/janitor outcome parity.", keywords:"prevention_versus_recovery_two_layer_stall_fix janitor_kept_injecting_commands_or_compacting_at_random per_project_channeling_so_a_burn_alarm_reaches_only_its_own_project ai_maestro_server_chore_must_match_janitor_chore_outcome_parity never_type_text_enter_into_a_blocked_session rate_limited_flag_janitor_resume_machinery"]
@@ -63,6 +60,20 @@ Fleet reachability (which pane can be injected, via which channel): USER-scope p
 - **Outcome parity**: any ai-maestro server function replicating a janitor chore must be
   identical in outcome (owner 2026-07-18); parity deltas are posted on janitor#100.
 
+## Superseded
+
+
+^4ESPVFB8 [desc:"The six-layer never-stall stack: settings substrate, account rotation (prevention), freeze recovery (ESC-only unstick), compaction discipline, nudging idle-armed sessions, rollout observability.", keywords:"how_does_account_rotation_prevent_429_stalls window_asymmetric_rotation_thresholds_7d_vs_5h how_to_unstick_a_frozen_retrying_session why_does_typing_text_into_a_blocked_session_flood_the_input_buffer janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks session_stuck_in_a_retry_loop_after_a_429 fleet_reachability_which_pane_can_be_injected", lmd: 2026-09-24, status: superseded, superseded-by: ATOM-787X-6DYV]
+1. **Settings substrate** — the harness must retry instead of stopping, and questions must
+   auto-continue: [[claude-code-continuity-settings]] (watchdog + AFK chain, ensured by BOTH
+   the janitor and the ai-maestro server in lockstep).
+2. **Account rotation (PREVENTION — the load-bearing layer)** — a 429 only stalls a session
+   for hours when every retry re-hits the same exhausted account. Window-ASYMMETRIC rotation
+   thresholds (7d rejected only at 99, 5h at 97) guarantee a live rotation target:
+   [[oauth-rotation-renew-reauth-cascade]]; record: TRDD-P7WU40G9 §BUG 1.
+3. **Freeze recovery (UNSTICK)** — a session in the retry-watchdog "Retrying in Xm" wait is
+   freed with ESC-ONLY injection (2 raw ESCs, zero text, zero Enter — anything typed BUFFERS
+   and floods). Semantics: [[claude-code-esc-input-semantics]]; record: TRDD-P7WU40G9 §BUG 3.
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-CONT-2LAYER, status:valid, keywords:"claude stuck retry loop 429 hours overnight stall two layer fix rotation prevents esc unsticks", ocd:2026-07-18, lmd:2026-07-18]

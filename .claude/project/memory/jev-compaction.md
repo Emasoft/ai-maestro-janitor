@@ -64,7 +64,6 @@ As of 2026-09-24: a measured timing limit, not yet fully fixed (matrix report an
 
 - [[janitor-hooks-two-import-conventions]]
 - [[janitor-architecture-control-flow]]
-- [[jev-heartbeat-diagnostics-local]]
 - [[ai-maestro-janitor-overview]]
 
 ## Governed by

@@ -173,7 +173,6 @@ Commit 7ed4cdeb (2026-09-24; measurement report: LOCAL scope). Under load, every
 
 
 ^ATOM-PHXC-VE71 [desc:"The full CLAUDE.md 'Control flow' section verbatim: dispatch.py's numbered heartbeat steps 1-8+3a, the daemon loop + background bulk lane, and the release-triggered self-update fast path", keywords: control_flow_heartbeat_dispatch.py_steps_numbered daemon_loop_bulk_lane_background_tasks release_triggered_self_update_version-update-requested_flag dispatcher_stub_os.execv_auto_roll what_happens_during_a_janitor_heartbeat_fire why_does_a_plugin_update_auto-roll_without_re-arming what_is_the_dynamic_TTL-aware_cadence why_does_the_bulk_lane_run_in_one_detached_child what_is_the_1800s_task_run_cap why_is_version-update_latency_5-6_min_not_6h, type: project, ocd: 2026-08-02, lmd: 2026-08-02] [^2] [^4] [^6]
-- [[jev-heartbeat-diagnostics-local]]
 
 ### Control flow
 

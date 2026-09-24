@@ -4,7 +4,7 @@ title: Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a h
 column: backburner
 status: tasked
 created: 2026-09-24T19:20:05+0200
-updated: 2026-09-24T19:36:03+0200
+updated: 2026-09-24T19:56:23+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: bugfix
@@ -24,7 +24,7 @@ Fixed: Jev's own transcript reader was fixed in 73df900b and 2729b1cb with a sha
 
 Scope, redefined 2026-09-24 (review of the first draft): code that opens the live Claude Code session transcript -- a session's own transcript, or a background/subagent's own live transcript (both are the same JSONL shape and carry the same non-UTF-8/torn-line risk) -- and parses it itself. Excludes a caller that only resolves/forwards a transcript_path to another function (dispatch.py, clear_trigger.py, terminal_trigger.py, on-session-start-post-clear-compact.py, pre-tool-context-usage.py, pre-tool-token-budget.py, jev_compact.py: all delegate, none parse). Excludes the janitor's own NDJSON ledgers, which are a different file family that happens to share the .jsonl extension (tickets.py's dispatch-ledger.jsonl, findings_ledger.py's own ledger), Jev's own shadow log (jevctx/shadow.py's jev-shadow.jsonl), and a test fixture (agent_context_bench.py's tests/agent_context_bench/corpus.jsonl).
 
-How this list was built (2026-09-24): grep -rnE "transcript_path|transcript\.open|\.jsonl" scripts (275 hits, 47 files), narrowed to files ALSO matching a `for line in ...: json.loads(...)`-shaped loop, then every one of those hits read by hand to classify it as reader/delegator/other-ledger; complete as of 2026-09-24 -- a later file added to the tree is not covered by this pass.
+How this list was built (2026-09-24): grep -rnE "transcript_path|transcript\.open|\.jsonl" scripts (275 hits, 47 files), narrowed to files ALSO matching a `for line in ...: json.loads(...)`-shaped loop, then every one of those hits read by hand to classify it as reader/delegator/other-ledger; complete for this search method as of 2026-09-24 -- a later file added to the tree is not covered by this pass. The method keeps only files with a line-loop json.loads, so a reader that parses chunk.splitlines() or a comprehension could be missed.
 - scripts/lib/external_clear.py -- _classified_tail_lines / _tail_text_lines, the recent-turns tail on the clear/handoff path. Highest priority: a crash here repeats the stale-handoff class of bug.
 - scripts/hooks/pre-compact-handoff.py -- _recent_turns.
 - scripts/lib/user_intent.py -- recently_interrupted (walks the transcript backwards in growing windows looking for an Esc/Ctrl-C marker).
@@ -48,3 +48,4 @@ Design constraint: the shared walk lives in a NEW stdlib-only module, scripts/li
 ## Related
 
 TRDD-DQXMND59 -- Jev's own reader (extract_items/expand) was fixed there in 73df900b and 2729b1cb with the shared iter_jsonl_entries walk this card generalizes to the readers outside Jev.
+The dependency on TRDD-DQXMND59 stage 3 (jsonl_walk.py) lives only in prose because npt is a derived-child link (GRAPH-TWO-PARENTS). When this card leaves backburner, record it as `unblock-when: [trdd:DQXMND59 ...]` or `blocked-by`, so it cannot be pulled before jsonl_walk.py exists.
