@@ -438,10 +438,10 @@ def test_compact_reports_blocked_zero_when_nothing_was_blocked(
 
     assert code == 0
     assert "blocked=0 blocked_digest=" in output
-    # TRDD-RAEGS1D5 (jev newest+3): `segmentation_failed=N` is now the LAST field on the
-    # summary line (see cmd_compact) -- `blocked_digest=` (empty, nothing blocked) is
-    # followed by a space and it, not the end of the line anymore.
-    assert output.strip().endswith("segmentation_failed=0")
+    # TRDD-RAEGS1D5 (jev newest+3): `segmentation_failed=N` follows `blocked_digest=` (empty,
+    # nothing blocked); TRDD-D7RLXAN1 appended `conversation=N` (the fixture's owner message and
+    # assistant reply, never scored) as the new LAST field.
+    assert output.strip().endswith("segmentation_failed=0 conversation=2")
 
 
 def test_compact_reports_blocked_count_and_a_content_digest(
@@ -980,8 +980,9 @@ def test_compact_inject_out_writes_a_capped_companion_pointing_at_the_full_out(
     # digest is always empty there.
     assert "## Digest" not in inject_doc
     assert "usage:" not in inject_doc
-    assert f"Full compacted context: {out.resolve()}" in inject_doc
-    assert "Full compacted context:" not in full_doc
+    # TRDD-D7RLXAN1: the way back to `--out` is now the capped copy's FIRST line.
+    assert inject_doc.splitlines()[0].startswith(f"READ FIRST: {out.resolve()} holds every")
+    assert "READ FIRST" not in full_doc
 
 def test_compact_inject_out_scores_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -1236,10 +1237,10 @@ def test_expand_list_default_limit_and_transcript_header(tmp_path: Path) -> None
 def test_compact_logs_shadow_decisions_for_every_item(
     tmp_path: Path, _isolated_project_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`compact` must log one "admit" row per scored item, plus a "retrieve" row for the one
-    item that is actually a "user"-kind item (`_write_transcript`'s "u-1" human message --
-    the tool_result item "u-2" classifies as kind="tool", not "user", so it gets no
-    retrieve row -- see jev_compaction.py's own `_score_batch` docstring)."""
+    """`compact` must log one "admit" row per SCORED item. TRDD-D7RLXAN1: only the tool_result
+    item "u-2" is scored -- the owner message "u-1" and the assistant reply "a-1" are
+    conversation, never scored, so they get no admit row and (no "user" item ever being scored)
+    no "retrieve" row exists at all."""
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
     client = FakeJevClient(_keep_only("bug"))
@@ -1254,13 +1255,8 @@ def test_compact_logs_shadow_decisions_for_every_item(
     rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line]
     admit_rows = [r for r in rows if r["kind"] == "admit"]
     retrieve_rows = [r for r in rows if r["kind"] == "retrieve"]
-    assert len(admit_rows) == 3  # u-1:0, a-1:1, u-2:0 -- one per extracted item
-    assert len(retrieve_rows) == 1  # only "u-1:0" is a "user"-kind item
-    # suffixed, never the bare id -- a shared item_id between the admit and retrieve rows
-    # would collide in ShadowLog.stats()/.replay()'s own per-item action map (see
-    # jsl._RETRIEVE_ROW_ID_SUFFIX's comment).
-    assert retrieve_rows[0]["item_id"] == "u-1:0#decision"
-    assert "u-1:0" in {r["item_id"] for r in admit_rows}  # the admit row keeps the bare id
+    assert [r["item_id"] for r in admit_rows] == ["u-2:0"]  # one per scored item
+    assert retrieve_rows == []
 
 
 def test_expand_records_a_shadow_outcome_for_the_expanded_id(
@@ -1316,7 +1312,7 @@ def test_compact_run_twice_for_the_same_session_and_transcript_does_not_double_t
 
     rows = [json.loads(line) for line in jsl.shadow_log_path().read_text(encoding="utf-8").splitlines() if line]
     admit_rows = [r for r in rows if r["kind"] == "admit"]
-    assert len(admit_rows) == 3  # still just the FIRST run's worth, not six
+    assert len(admit_rows) == 1  # still just the FIRST run's worth (one scored item), not two
 
 
 def test_compact_completes_normally_when_the_shadow_log_write_raises(
@@ -1349,7 +1345,8 @@ def test_compact_completes_normally_when_the_shadow_log_write_raises(
     assert out.exists()  # the real compaction output was still written
     assert "jev-shadow: ValueError" in output  # names the exception type on stderr
     assert re.search(
-        r"blocked=\d+ blocked_digest=\S* segmentation_failed=\d+ shadow_log_failed=1", output,
+        r"blocked=\d+ blocked_digest=\S* segmentation_failed=\d+ conversation=\d+ "
+        r"shadow_log_failed=1", output,
     )
 
 
@@ -1390,12 +1387,12 @@ def test_trailer_replace_id_wording_actually_lists_items(
     OUTPUT redirection), not as three literal characters, so appending `--list --grep TEXT`
     after it never even reaches the CLI's argument parser.
 
-    Renders through the real CLI with `--inject-out` (so the injected copy carries the "Full
-    compacted context:" instruction) and `--max-elided-pointers 0` (so the fixture's one
-    non-decision elided item -- the dangling tool_result -- trips the "[[elided: N more
-    items...]]" instruction too): both are `render()`-emitted lines that name the SAME
-    trailer command, so this actually reads their wording instead of reconstructing the list
-    command by hand. Then it tokenizes the `--list --grep` command BOTH the old (append) and
+    Renders through the real CLI with `--inject-out` and `--max-elided-pointers 0` (so the
+    fixture's one non-decision elided item -- the dangling tool_result -- trips the "[[elided: N
+    more items...]]" instruction): a `render()`-emitted line that names the trailer command, so
+    this actually reads its wording instead of reconstructing the list command by hand.
+    (TRDD-D7RLXAN1 retired the second such line, "Full compacted context:", for READ FIRST,
+    which names no command.) Then it tokenizes the `--list --grep` command BOTH the old (append) and
     new (replace) way the same way a real shell would (`shlex` with shell punctuation split
     out), and actually runs the fixed argv through the CLI to prove it lists items.
     """
@@ -1416,17 +1413,13 @@ def test_trailer_replace_id_wording_actually_lists_items(
     assert real_cmd.endswith("<id>"), f"trailer no longer ends in a bare <id>: {trailer!r}"
     assert str(transcript) in real_cmd
 
-    # Both render()-emitted instruction lines must actually be present in the injected copy,
-    # and both must say REPLACE <id>, never APPEND after it.
+    # The render()-emitted instruction line must actually be present in the injected copy, and
+    # must say REPLACE <id>, never APPEND after it.
     elided_line = next(line for line in doc.splitlines() if line.startswith("[[elided:"))
-    full_context_line = next(
-        line for line in doc.splitlines() if line.startswith("Full compacted context:")
+    assert "replace <id>" in elided_line, f"expected 'replace <id>' wording: {elided_line!r}"
+    assert "append" not in elided_line.lower(), (
+        f"old 'append' wording leaked back in: {elided_line!r}"
     )
-    for instruction in (elided_line, full_context_line):
-        assert "replace <id>" in instruction, f"expected 'replace <id>' wording: {instruction!r}"
-        assert "append" not in instruction.lower(), (
-            f"old 'append' wording leaked back in: {instruction!r}"
-        )
 
     word = "bug"  # present in the fixture's user message ("hello, please fix the bug")
 
@@ -1461,3 +1454,52 @@ def test_trailer_replace_id_wording_actually_lists_items(
         line for line in output.splitlines() if line.strip() and not line.startswith("transcript:")
     ]
     assert listed_ids, "expected --list --grep to print at least one id"
+
+
+def test_compact_never_sends_prose_to_jev(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-D7RLXAN1 test 9 -- the enforcement point. Owner directive (2026-09-24): "assistant
+    prose and user prose (the messages exchanges) should be all kept intact". `compact` must
+    hand `score_items` only tool/event items: no owner, assistant or control message is ever a
+    scored item (so no score can drop one, and the decision question is never asked), the shadow
+    log still works on the scored subset, and both documents carry every message verbatim."""
+    owner, reply, control = "please fix the bug in login", "I will fix the bug now.", "resume"
+    entries = [
+        {"type": "user", "uuid": "u-1", "message": {"role": "user", "content": owner}},
+        {"type": "assistant", "uuid": "a-1", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": reply},
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "pytest"}}]}},
+        {"type": "user", "uuid": "u-2", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "3 passed, 1 failed: login"}]}},
+        {"type": "user", "uuid": "u-3", "message": {"role": "user", "content": control}},
+    ]
+    transcript = tmp_path / "prose.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    out, inject_out = tmp_path / "full.md", tmp_path / "inject.md"
+
+    asked: list[str] = []
+    real_score_items = jc.score_items
+
+    def spy(items: list[jc.Item], *args: Any, **kwargs: Any) -> dict[str, jc.Scores]:
+        asked.extend(it.id for it in items)
+        return real_score_items(items, *args, **kwargs)
+
+    monkeypatch.setattr(jc, "score_items", spy)
+    client = FakeJevClient.constant(0.9)
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out),
+                         "--inject-out", str(inject_out)])
+
+    assert code == 0, output
+    assert asked == ["u-2:0"]
+    sent: list[str] = []  # the scored items' texts -- `task` (the digest) is Jev's context, not an item
+    for call in client.calls:
+        assert isinstance(call.state, dict)
+        sent.extend(entry["text"] for entry in call.state["items"])
+    assert sent and not {owner, reply, control} & set(sent)
+    assert all(key.endswith(":rel") for call in client.calls for key in call.questions)
+    assert "shadow_log_failed" not in output
+    assert "compacted items=1/1 " in output and output.strip().endswith("conversation=3")
+    full, inject = out.read_text(encoding="utf-8"), inject_out.read_text(encoding="utf-8")
+    for text in (owner, reply, control):
+        assert text in full and text in inject

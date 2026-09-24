@@ -282,10 +282,13 @@ def _main() -> int:
         trigger="jev-compaction", findings=findings, cards=in_flight_cards,
         other_open_ids=other_open_ids_line,
     )
-    # Computed BEFORE `run_compact` (TRDD-RAEGS1D5 retune follow-up): `tail` only needs
-    # `transcript_path`, already known, and `compose_handoff_room` needs the SAME facts+tail
-    # `compose_handoff` itself will use once a summary exists -- see that function's own
-    # docstring for why a flat `LANE_COMPACTED_MAX_BYTES` guess is what this replaces.
+    # Computed BEFORE `run_compact` (TRDD-RAEGS1D5 retune follow-up): `compose_handoff_room`
+    # needs the SAME facts `compose_handoff` itself will use once a summary exists -- see that
+    # function's own docstring for why a flat `LANE_COMPACTED_MAX_BYTES` guess is what this
+    # replaces. `tail=()` (TRDD-D7RLXAN1): the newest exchanges now arrive VERBATIM inside the
+    # Jev block, so the "Recent turns" tail (a whitespace-flattened copy of the same messages)
+    # is neither sized for nor injected -- its ~2.7 KB pays for the exchanges block. The
+    # template/failure branch below has no tail parameter at all (advisor finding B).
     #
     # `inject_inputs` (TRDD-RAEGS1D5 room-floor follow-up, round 2) may carry SHORTER card titles
     # than `inputs` -- `jcl.trim_cards_for_room` shrinks titles toward "" (every id kept, never
@@ -294,9 +297,8 @@ def _main() -> int:
     # the SUCCESS path below (which actually injects a summary) uses `inject_inputs`; the
     # failure/template branch keeps the original, untouched `inputs` -- shortening titles buys it
     # nothing there, since no summary is being sized.
-    tail = ec.recent_messages(transcript_path)
     inject_inputs, inject_max_bytes = jcl.trim_cards_for_room(
-        inputs, now_iso=now_iso, tail=tail, transcript_path=transcript_path,
+        inputs, now_iso=now_iso, tail=(), transcript_path=transcript_path,
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
 
@@ -337,8 +339,10 @@ def _main() -> int:
                 # case would orphan a full compose that already paid its Jev cost, in favour of
                 # the weaker template fallback -- falling back to the full document as the
                 # injection SUMMARY instead (`compose_handoff`'s own `max_bytes` backstop below
-                # still bounds it) means a genuinely missing companion costs only its own
-                # "Full compacted context" pointer line, never the whole compose.
+                # still bounds it) means a genuinely missing companion costs its READ FIRST line
+                # and its newest-exchanges selection (TRDD-D7RLXAN1: the full copy's own head --
+                # digest, then the conversation from its oldest message -- is what survives the
+                # slice), never the whole compose.
                 state.log_line(
                     "jev-post-clear-hook",
                     f"capped companion unreadable ({inject_path}), falling back to the full "
@@ -375,16 +379,16 @@ def _main() -> int:
         # Card 5 two-renderings (TRDD-RAEGS1D5): the keyed handoff FILE on disk is the FULL
         # document (`full_text`) -- the defect this card fixes was that it used to be the
         # capped ~4.3 KB rendering. Only the PRINTED stdout injection is the capped one (or,
-        # per the fallback above, the full one when the capped companion is missing). `tail`
-        # was already computed above, before `run_compact`, to size `inject_max_bytes` -- same
-        # transcript, reused rather than re-read.
+        # per the fallback above, the full one when the capped companion is missing).
         # This hook only ever runs `jcl.run_compact` (a real Jev compose) -- no llm-ext fallback
-        # path here (TRDD-RAEGS1D5, `compose_handoff`'s `source` is now required).
+        # path here (TRDD-RAEGS1D5, `compose_handoff`'s `source` is now required), so the
+        # exchanges are always in the Jev block and `tail=()` (TRDD-D7RLXAN1): a second,
+        # flattened copy would show every message twice.
         # `inject_inputs` (room-floor follow-up), not `inputs` -- keeps this call's own room
         # computation faithful to the (possibly title-shortened) facts `inject_max_bytes` was
         # sized against above.
         text = ec.compose_handoff(
-            inject_inputs, now_iso=now_iso, summary=inject_text, source=jcl.SOURCE_JEV, tail=tail,
+            inject_inputs, now_iso=now_iso, summary=inject_text, source=jcl.SOURCE_JEV, tail=(),
             max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
         )
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, full_text, now=now)
@@ -441,7 +445,8 @@ def _main() -> int:
         f"Handoff you wrote before the clear: {model_handoff} — read it first.\n"
         if model_handoff is not None else ""
     )
-    # Defang against marker-mimicry (the tail is raw prior-session messages, and a `[janitor-…]`
+    # Defang against marker-mimicry (the Jev block's exchanges are raw prior-session messages
+    # -- TRDD-D7RLXAN1, formerly the tail's -- and a `[janitor-…]`
     # -shaped line inside one would otherwise arrive at session start as marker mimicry) --
     # same treatment `on-session-start.py::_handoff_body` applies to its own injected body.
     print(_INJECTION_HEADER + handoff_note + state.sanitize_for_drift_line(text))

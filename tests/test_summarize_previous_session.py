@@ -468,7 +468,7 @@ def test_card_heavy_facts_section_keeps_every_id_and_shortens_titles_first(
     # must produce for this fixture -- exact equality against an independently-computed value, not
     # just a bound.
     now_iso_probe = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    tail_probe = ec.recent_messages(str(prev))
+    tail_probe = ()  # TRDD-D7RLXAN1: the lane sizes the Jev room with no "Recent turns" tail
     raw_room = ec.compose_handoff_room(
         ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards),
         now_iso=now_iso_probe, tail=tail_probe,
@@ -1935,3 +1935,73 @@ def test_llm_ext_fallback_outer_timeout_on_windows_calls_proc_kill_not_killpg(
     assert calls["killpg"] == 0, "os.killpg must never be reached on the win32 branch"
     assert ok is False
     assert "timed out" in detail
+
+
+# --- TRDD-D7RLXAN1: the "Recent turns" tail only where it is the ONLY verbatim carrier ---------
+
+
+def _make_exchange_transcript(tmp_path: Path) -> Path:
+    p = tmp_path / "exchange.jsonl"
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content":
+            "please ship it NEWEST-OWNER-MARKER"}},
+        {"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "on it ASSISTANT-REPLY-MARKER"}]}},
+    ]
+    p.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    return p
+
+
+def test_jev_source_handoff_has_no_recent_turns_and_each_exchange_once(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """TRDD-D7RLXAN1 test 11 (Jev source): the detached lane mirrors the hook -- the Jev
+    injected copy carries the newest exchanges verbatim, so the written handoff has no "##
+    Recent turns" tail repeating them, and each message appears exactly once."""
+    prev = _make_exchange_transcript(_isolated_env)
+    assert ec.recent_messages(str(prev)), "fixture must give the old tail something to show"
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    inject_text = (
+        "READ FIRST: /tmp/full.md holds every message since the last compaction verbatim (2 "
+        "messages; 2 shown below).\n# Compacted context (Jev compaction)\nsession: s\n\n"
+        "## Newest messages since the last compaction (verbatim, never scored)\n"
+        "-- user u1:0 --\nplease ship it NEWEST-OWNER-MARKER\n"
+        "-- assistant a1:0 --\non it ASSISTANT-REPLY-MARKER\n\n## Kept items\n\n"
+        'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
+        "expand --transcript /tmp/x <id>"
+    )
+    _stub_jev_compact_two_docs(plugin_root, full_text=inject_text, inject_text=inject_text)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    assert sps.main() == 0
+
+    text = handoff_files.newest_group(state.state_dir())[0].read_text(encoding="utf-8")
+    assert "## Recent turns" not in text
+    assert text.count("NEWEST-OWNER-MARKER") == 1
+    assert text.count("ASSISTANT-REPLY-MARKER") == 1
+
+
+def test_llm_ext_fallback_handoff_keeps_the_recent_turns_tail(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """TRDD-D7RLXAN1 test 11 (llm-ext source, advisor finding A): an llm-ext fallback text is a
+    prose PARAPHRASE, so the "## Recent turns" tail is its only carrier of the owner's and the
+    assistant's own words -- it must stay (`tail=tail if source == SOURCE_LLM_EXT else ()`)."""
+    prev = _make_exchange_transcript(_isolated_env)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact_appending(plugin_root, tmp_path / "argv.jsonl", exit_code=jcl.EXIT_JEV_ERROR)
+    _stub_llm_ext_compact(plugin_root, text="a generated paraphrase of the session")
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+    _write_probe_stamp(kind="auth", reason="401 invalid key")  # falls back on the first failure
+    clock = _fake_clock()
+
+    assert sps.main(now_fn=clock.time, sleep_fn=clock.sleep) == 0
+
+    text = handoff_files.newest_group(state.state_dir())[0].read_text(encoding="utf-8")
+    assert "a generated paraphrase of the session" in text
+    assert "## Recent turns" in text
+    assert "NEWEST-OWNER-MARKER" in text.split("## Recent turns", 1)[1]

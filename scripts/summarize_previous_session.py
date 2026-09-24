@@ -23,7 +23,8 @@ invoke it, and wait.
 JEV COMPACTION (TRDD-RAEGS1D5, docs_dev/jev-compaction-spec.md card 3) replaced the llm-ext
 summary here: instead of `external_clear.summarize_with_retry`, this script now runs
 `scripts/jev_compact.py compact` as a subprocess and, on success, composes the injected payload
-(facts + the compacted context + a message tail) via `external_clear.compose_handoff`. This
+(facts + the compacted context, plus a message tail on the llm-ext fallback only --
+TRDD-D7RLXAN1) via `external_clear.compose_handoff`. This
 module stays stdlib-only PEP-723 on purpose — `jev_compact.py` is the ONE place `httpx`/`jevctx`
 may be imported in-process (see its own module docstring and `tests/test_jev_boundary.py`, which
 pins this file into the forbidden-import list). Never `import jevctx`, `httpx`, or
@@ -245,11 +246,12 @@ def _main(
     # compact.py` already uses, for the same reason -- `compose_handoff`'s own `max_bytes` below
     # bounds the FINAL assembled handoff only with a raw byte-slice, which cuts the TAIL of an
     # oversized summary (the newest kept items, the pointer line) instead of Jev's own
-    # priority-aware trim ever getting to decide what to drop. `tail`/`room` are computed BEFORE
+    # priority-aware trim ever getting to decide what to drop. `room` is computed BEFORE
     # `run_compact_with_fallback` so `--inject-max-bytes` can be sized to what `compose_handoff`
     # will actually have room for -- see `external_clear.compose_handoff_room`'s own docstring.
+    # Sized with `tail=()` (TRDD-D7RLXAN1): the room is for the Jev injected copy, which now
+    # carries the newest exchanges verbatim itself.
     inject_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.inject.md"
-    tail = ec.recent_messages(str(prev))
     room_inputs = ec.HandoffInputs(
         trigger="jev-compaction", findings=findings, cards=in_flight_cards,
         other_open_ids=other_open_ids_line,
@@ -262,7 +264,7 @@ def _main(
     # `in_flight_cards` -- shortening titles buys it nothing there, since no summary is being
     # sized.
     room_inputs, inject_max_bytes = jcl.trim_cards_for_room(
-        room_inputs, now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"), tail=tail,
+        room_inputs, now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"), tail=(),
         transcript_path=str(prev), max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
 
@@ -330,9 +332,11 @@ def _main(
         trigger=trigger, findings=findings, cards=room_inputs.cards,
         other_open_ids=other_open_ids_line,
     )
-    # `tail` was already computed above, before `run_compact_with_fallback`, to size
-    # `inject_max_bytes` -- same transcript (`prev` never changes mid-call), reused rather than
-    # re-read.
+    # TRDD-D7RLXAN1 (advisor finding A): the "Recent turns" tail only on the llm-ext fallback.
+    # A Jev text carries the newest exchanges verbatim already, so a tail would repeat them;
+    # an llm-ext text is a prose paraphrase, and this call is its ONLY carrier of the owner's
+    # and assistant's own words -- stripping the tail there would lose every message.
+    tail = ec.recent_messages(str(prev)) if source == jcl.SOURCE_LLM_EXT else ()
     # Owner review finding #3 (TRDD-RAEGS1D5), fixed at the source: `ec.compose_handoff` now
     # takes `source` and renders the TRUE header itself (see
     # `external_clear._COMPACTED_CONTEXT_HEADS`) -- `source` is already exactly `jcl.SOURCE_JEV`

@@ -57,7 +57,9 @@ __all__ = [
     "DECISION_QUESTION",
     "DEFAULT_RELEVANCE_THRESHOLD",
     "DEFAULT_DECISION_THRESHOLD",
+    "ConversationWindow",
     "extract_items",
+    "split_conversation",
     "build_digest",
     "score_items",
     "compose",
@@ -69,7 +71,14 @@ __all__ = [
 # item rather than dropped; it is just never counted as a human message. See
 # `is_human_record` and `build_digest`'s "last three human messages" ordering, which relies
 # on `kind == "user"` meaning genuinely human now.
-ItemKind = Literal["user", "assistant", "tool", "event"]
+#
+# "control" (TRDD-D7RLXAN1): a content-free owner input -- a bare "resume"/"continue"/argument-
+# less "/compact" (`transcript_roles.is_control_input`). It used to be demoted to "event"
+# (TRDD-DZ1KOGAC), which put the owner's own words into the SCORED stream, where a score could
+# drop them. It is conversation now (see `split_conversation`): kept verbatim, never scored,
+# and still never `kind == "user"`, so `build_digest` and the newest-owner pick ignore it
+# exactly as DZ1KOGAC intended.
+ItemKind = Literal["user", "assistant", "tool", "event", "control"]
 
 # Entry `type`s that ever carry a extractable item (spec: skip `system` entries and the
 # auxiliary types -- mode, file-history-snapshot, last-prompt, queue-operation -- outright).
@@ -95,6 +104,10 @@ _TOOL_INPUT_TRUNCATE = 300
 # raw JSON `input` before truncation) and its paired result; everything else in the turn --
 # other tool calls, other tool results, real assistant prose -- is now kept like any other item.
 _DISPATCHER_STUB_MARKER = "dispatcher-stub.py"
+
+# The janitor heartbeat protocol's exact quiet reply ("reply with exactly `janitor heartbeat`",
+# rules/janitor-heartbeat-protocol.md) -- the one assistant text that carries nothing.
+_BARE_HEARTBEAT_REPLY = "janitor heartbeat"
 
 # Pointer first-line preview cap (spec: `"<first line ≤80 chars>"`).
 _POINTER_PREVIEW_CHARS = 80
@@ -154,6 +167,59 @@ class Scores:
     # existing `Scores(...)` call site (including every test that builds one by hand) needs
     # no change.
     blocked: bool = False
+
+
+# TRDD-D7RLXAN1 (owner directive 2026-09-24: "assistant prose and user prose (the messages
+# exchanges) should be all kept intact"): the item kinds that are the conversation itself.
+# They are never sent to Jev as scored items -- a prompt sentence cannot guarantee a threshold
+# outcome, so the guarantee is that no score exists to drop them (see `split_conversation`).
+_CONVERSATION_KINDS = frozenset({"user", "assistant", "control"})
+
+
+@dataclass
+class ConversationWindow:
+    """What the session's LAST compaction left in context, recorded by `extract_items`.
+
+    TRDD-D7RLXAN1: "all" prose means all prose since the session's last `compact_boundary`;
+    the prose before it is represented by Claude Code's own compaction summary (`summary`, kept
+    verbatim). Filled in place by `extract_items(..., window=...)`, the same out-parameter idiom
+    as `segmentation_failures`, so the transcript is still walked once.
+
+    `boundary_turn` is the item counter when the last boundary line was read (None: no
+    boundary); `preserved_uuids` is that boundary's `compactMetadata.preservedMessages.allUuids`
+    (pre-boundary entries Claude Code kept verbatim in the new context); `summary` is the
+    `isCompactSummary` text paired to THAT boundary (None when the session died between the two
+    lines -- never a stale earlier summary, see `extract_items`).
+    """
+
+    boundary_turn: int | None = None
+    preserved_uuids: frozenset[str] = frozenset()
+    summary: str | None = None
+    # The boundary's `preservedMessages.anchorUuid`: the uuid of the summary entry that belongs
+    # to it (measured on fd5cc3e0, both boundaries). None when no boundary is pending an anchor.
+    pending_anchor: str | None = None
+
+    def is_live(self, item: Item) -> bool:
+        """True iff `item` was in the context the cleared session actually had: after the last
+        boundary, or preserved across it. `turn` never decreases during the walk, so every item
+        appended after the boundary line has `turn >= boundary_turn` and every earlier one less."""
+        return (self.boundary_turn is None or item.turn >= self.boundary_turn
+                or item.id.split(":", 1)[0] in self.preserved_uuids)
+
+
+def split_conversation(
+    items: list[Item], window: ConversationWindow
+) -> tuple[list[Item], list[Item]]:
+    """`(conversation, scored)` -- TRDD-D7RLXAN1's enforcement split.
+
+    `conversation`: every LIVE owner/assistant/control item, chronological -- rendered verbatim
+    by `compose(conversation=...)`, never scored. `scored`: every tool and event item, before
+    and after the boundary -- the only items `score_items` ever sees. Pre-boundary prose that
+    was not preserved is in neither list: `window.summary` covers it, and `jev_compact.py expand
+    <id>` still resolves it from the raw JSONL."""
+    conversation = [it for it in items if it.kind in _CONVERSATION_KINDS and window.is_live(it)]
+    scored = [it for it in items if it.kind not in _CONVERSATION_KINDS]
+    return conversation, scored
 
 
 class NoDigest(Exception):
@@ -490,8 +556,15 @@ def _segment_tool_result(
     return pieces
 
 
+def _owner_kind(kind: ItemKind, text: str) -> ItemKind:
+    """`kind`, except an owner ("user") text that is a bare control word becomes "control"
+    (TRDD-DZ1KOGAC's demotion, retargeted by TRDD-D7RLXAN1 -- see `ItemKind`)."""
+    return "control" if kind == "user" and transcript_roles.is_control_input(text) else kind
+
+
 def extract_items(
-    transcript_path: str | Path, *, segmentation_failures: list[str] | None = None
+    transcript_path: str | Path, *, segmentation_failures: list[str] | None = None,
+    window: ConversationWindow | None = None,
 ) -> list[Item]:
     """Walk one transcript JSONL and return its extracted, chronologically ordered items.
 
@@ -499,6 +572,10 @@ def extract_items(
     every tool result whose segmentation attempt failed and fell back to the pre-card-6 whole
     item -- see `_segment_tool_result`'s own docstring. `None` (the default) costs nothing and
     changes no existing caller's behaviour.
+
+    `window`, when given (TRDD-D7RLXAN1), is filled in place with the LAST compact boundary,
+    its preserved uuids and its paired summary -- see `ConversationWindow`. Neither the
+    boundary line nor the summary entry ever becomes an item.
 
     One pass, top to bottom: a `tool_use` block is remembered by its own `id` as soon as
     it's seen, so the `tool_result` block that answers it (which always appears in a LATER
@@ -518,7 +595,7 @@ def extract_items(
        KEPT. Only two patterns are still dropped, matched directly rather than via a
        whole-turn skip window: the dispatcher-stub `tool_use`/`tool_result` pair
        (`_DISPATCHER_STUB_MARKER`), and an assistant text block that is nothing but the bare
-       heartbeat-protocol reply (`transcript_roles.is_heartbeat_reply`). Real work a
+       heartbeat-protocol reply (`_BARE_HEARTBEAT_REPLY`, TRDD-D7RLXAN1). Real work a
        `[janitor-resume]` turn does -- other tool calls, other results, real prose -- survives.
 
     3. `type: "attachment"` entries (defect 4): a mid-turn queued owner message or queued
@@ -547,6 +624,21 @@ def extract_items(
                 continue
             entry = json.loads(line)
             entry_type = entry.get("type")
+            # TRDD-D7RLXAN1: a `type: "system"` compact_boundary line is outside
+            # `_WALKED_ENTRY_TYPES`, so it must be checked BEFORE that skip. The last one wins
+            # (Claude Code's summaries are cumulative). The summary is reset here and paired by
+            # anchorUuid below (advisor finding D): a boundary whose summary line never landed
+            # (session killed between the two) must not show the PREVIOUS summary as if it
+            # covered the gap.
+            if (window is not None and entry_type == "system"
+                    and entry.get("subtype") == "compact_boundary"
+                    and not entry.get("isSidechain")):
+                preserved = (entry.get("compactMetadata") or {}).get("preservedMessages") or {}
+                window.boundary_turn = turn
+                window.preserved_uuids = frozenset(preserved.get("allUuids") or ())
+                window.summary = None
+                window.pending_anchor = preserved.get("anchorUuid")
+                continue
             if entry_type not in _WALKED_ENTRY_TYPES:
                 continue
             # A subagent's turns live in the SAME main transcript file (isSidechain: true)
@@ -560,6 +652,14 @@ def extract_items(
             content = entry.get("message", {}).get("content")
 
             if entry_type == "user":
+                # TRDD-D7RLXAN1: Claude Code's own compaction summary, kept verbatim as the
+                # stand-in for every pre-boundary message. Captured only when it belongs to the
+                # pending boundary (its uuid == the boundary's anchorUuid) or no anchor is
+                # pending (an older shape, or an orphan summary) -- then skipped as before.
+                if window is not None and entry.get("isCompactSummary"):
+                    if window.pending_anchor is None or uuid == window.pending_anchor:
+                        window.summary = _tool_result_text(content)
+                    continue
                 if _is_heartbeat_entry(entry):
                     continue  # the fire's OWN prompt -- always dropped, see point 2 above
 
@@ -573,8 +673,10 @@ def extract_items(
                     # still the owner's own words (role stays "human" -- authorship is true),
                     # but it carries no content, and measured on real transcripts it was
                     # displacing the owner's actual instructions from the owner tier, the
-                    # guaranteed newest-owner slot, and the digest. Demote the ITEM KIND only.
-                    item_kind = "event" if transcript_roles.is_control_input(content) else kind
+                    # guaranteed newest-owner slot, and the digest. Demote the ITEM KIND only --
+                    # to "control" (TRDD-D7RLXAN1), not "event": it stays conversation, never
+                    # scored. A non-human record keeps its "event" kind whatever its text.
+                    item_kind = _owner_kind(kind, content)
                     items.append(Item(f"{uuid}:0", item_kind, content,
                                        estimate_tokens(content), ts, turn))
                     turn += 1
@@ -585,7 +687,7 @@ def extract_items(
                         btype = block.get("type")
                         if btype == "text":
                             text = block.get("text", "")
-                            item_kind = "event" if transcript_roles.is_control_input(text) else kind
+                            item_kind = _owner_kind(kind, text)
                             items.append(Item(f"{uuid}:{idx}", item_kind, text,
                                                estimate_tokens(text), ts, turn))
                             turn += 1
@@ -644,9 +746,9 @@ def extract_items(
                 else:
                     continue  # an attachment.commandMode never measured -- skip, don't guess
                 # TRDD-DZ1KOGAC: same demotion as the main "user" branch above -- a mid-turn
-                # queued bare control word is still the owner's words, never content.
-                if att_kind == "user" and transcript_roles.is_control_input(text):
-                    att_kind = "event"
+                # queued bare control word is still the owner's words, never content
+                # ("control", TRDD-D7RLXAN1).
+                att_kind = _owner_kind(att_kind, text)
                 items.append(Item(f"{uuid}:0", att_kind, text, estimate_tokens(text), ts, turn))
                 turn += 1
 
@@ -663,7 +765,13 @@ def extract_items(
                         continue  # never an item, never remembered
                     if btype == "text":
                         text = block.get("text", "")
-                        if transcript_roles.is_heartbeat_reply(text):
+                        # TRDD-D7RLXAN1: only the BARE quiet reply is dropped, not
+                        # `transcript_roles.is_heartbeat_reply`'s wider match (the reply plus up
+                        # to two lines). Those lines are drift the owner was shown and the
+                        # assistant's own words -- measured on b2bf5b7b, 9 such replies ("The
+                        # live account is ...", "The rotation outlook is better than I feared")
+                        # vanished from the full copy. Every assistant message is kept intact.
+                        if text.strip() == _BARE_HEARTBEAT_REPLY:
                             continue  # bare heartbeat-protocol reply -- see point 2 above
                         items.append(Item(f"{uuid}:{idx}", "assistant", text,
                                            estimate_tokens(text), ts, turn))
@@ -1335,6 +1443,16 @@ _INJECT_MIN_WHOLE_TOOL_BODY_CHARS = 20
 _INJECT_NEWEST_OWNER_SHARE = 0.35
 _INJECT_GUARANTEED_SHARE = 0.50
 
+# TRDD-D7RLXAN1: the injected copy's share, of the room left after its fixed lines, for the
+# newest owner/assistant messages (verbatim, never scored) -- the READ FIRST line included. The
+# other 40% keeps room for Jev's tool/event items, the `_NON_OWNER_FLOOR` (3) of them at ~400 B
+# each (advisor arithmetic, reports/compaction-replacement/20260924_140604+0200-advisor-prose-
+# verbatim.md §3). A starting value; the acceptance run on the cached real sessions checks it.
+_INJECT_EXCHANGE_SHARE = 0.60
+_EXCHANGES_HEADING = "## Newest messages since the last compaction (verbatim, never scored)"
+_CONVERSATION_HEADING = "## Conversation since the last compaction (verbatim, never scored)"
+_SUMMARY_HEADING = "### Claude Code's own compaction summary (verbatim)"
+
 
 def _truncate_prefix_bytes(text: str, limit: int) -> str:
     """A VERBATIM prefix of `text`, at most `limit` UTF-8 bytes -- never paraphrased.
@@ -1418,6 +1536,93 @@ def _render_minimal_fallback(newest_owner: Item | None, max_bytes: int) -> str:
     if len(doc.encode("utf-8")) > max_bytes:
         doc = _MINIMAL_FIXED_LINE if fixed_bytes <= max_bytes else ""
     return doc
+
+
+def _exchange_block(it: Item, cap: int | None) -> str:
+    """One conversation message as rendered by `compose()` (TRDD-D7RLXAN1): its header, then
+    its text whole, or -- over `cap` bytes -- a verbatim prefix plus a pointer to the rest.
+    A "control" input is labelled "user" (advisor §3): the kind is internal classification,
+    the words are the owner's."""
+    label = "user" if it.kind == "control" else it.kind
+    if cap is None or len(it.text.encode("utf-8")) <= cap:
+        return f"-- {label} {it.id} --\n{it.text}"
+    return f"-- {label} {it.id} --\n{_truncate_prefix_bytes(it.text, cap)}\n{_format_pointer(it)}"
+
+
+def _read_first_line(path: str, total: int, shown: int) -> str:
+    """TRDD-D7RLXAN1: the injected copy's first line -- the way to every message it could not
+    show. An instruction, deliberately (owner Q1, 2026-09-24: the one-time read is accepted)."""
+    return (f"READ FIRST: {path} holds every message since the last compaction verbatim "
+            f"({total} messages; {shown} shown below). Read it in full before acting; it may "
+            "take several Reads (offset/limit).")
+
+
+def _select_exchanges(conversation: list[Item], budget: int | None) -> tuple[list[str], int]:
+    """The injected copy's newest exchanges (TRDD-D7RLXAN1), chronological, within `budget`
+    bytes (None = unbounded): (1) the newest OWNER message, capped at `NEWEST_OWNER_ITEM_BYTES`
+    or shrunk to what the budget holds; (2) a CONTIGUOUS run backward from the newest message,
+    each capped at `DEFAULT_INJECT_ITEM_BYTES`, stopping at the first that does not fit or at
+    the owner message -- and when it reaches the owner message, on past it into older messages
+    while they fit; (3) a marker counting the messages between the two. Contiguous, not
+    skip-and-continue: a hole inside an exchange reads as a conversation that never happened.
+    Returns `(blocks, shown)`: each block costs its UTF-8 length plus the one "\\n" `render()`
+    joins it with; `shown` counts the messages among them (markers excluded)."""
+    def cost(block: str) -> int:
+        return len(block.encode("utf-8")) + 1
+
+    def fits(used: int, c: int) -> bool:
+        return budget is None or used + c <= budget
+
+    used = 0
+    owner_idx = next((i for i in range(len(conversation) - 1, -1, -1)
+                      if conversation[i].kind == "user"), None)
+    owner_block = ""
+    if owner_idx is not None:
+        owner = conversation[owner_idx]
+        owner_block = _exchange_block(owner, NEWEST_OWNER_ITEM_BYTES)
+        # The gap marker is charged at its widest up front, so the run below cannot overrun.
+        marker_reserve = cost(f"[{len(conversation)} messages between these are only in the "
+                              "full copy]")
+        if budget is not None and not fits(used, cost(owner_block) + marker_reserve):
+            overhead = cost(f"-- user {owner.id} --\n\n{_format_pointer(owner)}") + marker_reserve
+            owner_block = (_exchange_block(owner, budget - overhead)
+                           if budget - overhead > 0 else "")
+        if owner_block:
+            used += cost(owner_block) + marker_reserve
+    stop = owner_idx if owner_block and owner_idx is not None else -1
+
+    def run_back(start: int, stop_at: int) -> tuple[list[str], int]:
+        """Blocks from `start` backward while they fit, newest first; and the first index
+        NOT shown (== `stop_at` when every message down to it was)."""
+        nonlocal used
+        out: list[str] = []
+        i = start
+        while i > stop_at:
+            block = _exchange_block(conversation[i], DEFAULT_INJECT_ITEM_BYTES)
+            if not fits(used, cost(block)):
+                break
+            out.append(block)
+            used += cost(block)
+            i -= 1
+        return out, i
+
+    run, i = run_back(len(conversation) - 1, stop)
+    older: list[str] = []
+    if owner_block and owner_idx is not None and i == owner_idx:
+        # The run reached the owner message, so the exchange is whole from there on: keep
+        # going backward past it, still contiguous, while the share lasts (the room would
+        # otherwise sit unused whenever the owner spoke last or second-to-last).
+        older, _ = run_back(owner_idx - 1, -1)
+
+    blocks: list[str] = list(reversed(older))
+    if owner_block and owner_idx is not None:
+        blocks.append(owner_block)
+        gap = i - owner_idx  # messages after the owner's that the run did not reach
+        if gap > 0:
+            where = "between these" if run else "after this"
+            blocks.append(f"[{gap} messages {where} are only in the full copy]")
+    blocks.extend(reversed(run))
+    return blocks, len(older) + len(run) + (1 if owner_block else 0)
 
 
 def _inline_cost(it: Item, cap: int) -> int:
@@ -1713,8 +1918,19 @@ def compose(
     full_context_path: str | None = None,
     max_item_bytes: int | None = None,
     non_owner_item_bytes: int | None = None,
+    conversation: list[Item] | None = None,
+    conversation_summary: str | None = None,
 ) -> str:
     """Assemble the final injected document: header, kept items verbatim, then pointers.
+
+    `conversation` / `conversation_summary` (TRDD-D7RLXAN1, owner directive 2026-09-24: "assistant
+    prose and user prose (the messages exchanges) should be all kept intact"): the live owner/
+    assistant/control messages `split_conversation` kept OUT of scoring, and Claude Code's own
+    compaction summary. The FULL render (`max_item_bytes is None`) prints both, every message
+    whole and in order, before the kept items. The injected render prints the newest exchanges
+    (`_select_exchanges`) within `_INJECT_EXCHANGE_SHARE` of the room left by its fixed lines;
+    the block is part of `render()`'s fixed text, so `_select_injected` fits the tool/event
+    items into what remains and the `max_bytes` guarantee below is untouched.
 
     `header` carries: `transcript_path`, `session_key`, `digest`, and an optional `usage`
     dict (`{"tokens": int, "cost": float}` from the Jev response). The transcript path is
@@ -1729,13 +1945,11 @@ def compose(
 
     `full_context_path`, when given (card 5 two-renderings, TRDD-RAEGS1D5): this render is a
     CAPPED companion to a separate, uncapped `compose()` call over the SAME `items`/`scores`
-    ("score once, render twice" -- the caller never re-scores). One extra line is appended,
-    right before the fixed "pointers expand with" trailer: "Full compacted context: <path> --
-    read it ONLY if what you need is not shown above; try `expand --list` first." (reworded in
-    the card 5 injection-caps review, TRDD-RAEGS1D5 -- the old "Read it for everything not
-    shown here" phrasing invited an ~11k-token read of the whole full document on every capped
-    render) -- the capped rendering's own way back to everything the byte backstop below had to
-    drop, once the cheap targeted `expand --list --grep` path genuinely is not enough.
+    ("score once, render twice" -- the caller never re-scores). TRDD-D7RLXAN1: the document's
+    FIRST line is then `_read_first_line` naming that path -- the full copy holds every message
+    since the last compaction, which the owner ruled must be read in full (Q1, 2026-09-24). It
+    replaced the old trailing "Full compacted context: <path> -- read it ONLY if ..." line, which
+    would contradict it (advisor finding C: the parameter stays, its consumer changed).
 
     `max_bytes`, when given, is a BACKSTOP (card 5 content-fit, TRDD-RAEGS1D5): the caller is
     expected to size `budget_tokens` / the digest / `max_elided_pointers` so the document
@@ -2068,11 +2282,18 @@ def compose(
         f"{transcript_path} --list --grep TEXT"
     )
 
+    # TRDD-D7RLXAN1: the conversation section and the READ FIRST line -- FIXED text for render(),
+    # which reads both names at call time. Filled in below, after the injected render's baseline
+    # without them is measured (the exchange budget is a share of the room that baseline leaves).
+    conversation_lines: list[str] = []
+    read_first = ""
+
     def render(
         kept_order: list[Item], elided: list[Item], hidden: int, digest_text: str,
         decision_hidden: int = 0,
     ) -> str:
         lines: list[str] = [
+            *([read_first] if read_first else []),
             "# Compacted context (Jev compaction)",
             f"session: {header.get('session_key', '')}",
             "",
@@ -2093,6 +2314,7 @@ def compose(
             lines.append("")
             lines.append(f"usage: tokens={usage.get('tokens', '?')} cost={usage.get('cost', '?')}")
             lines.append("")
+        lines.extend(conversation_lines)
         lines.append("## Kept items")
         for it in kept_order:
             lines.append(f"-- {it.kind} {it.id} --")
@@ -2207,25 +2429,6 @@ def compose(
                 "the expand command below with --list --grep TEXT]]"
             )
 
-        if full_context_path:
-            # Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
-            # uncapped document composed from the SAME items/scores -- see the docstring. Card
-            # 5 injection-caps review (TRDD-RAEGS1D5): "Read it for everything not shown here"
-            # invited an ~11k-token read of the whole full document on every capped render --
-            # reworded to try `expand --list` first, the cheap targeted path, and read the full
-            # document only when that genuinely is not enough.
-            # TRDD-EFA4P42B: this line used to spell out its own `expand --transcript <path>
-            # --list --grep TEXT` command (the FOURTH `transcript_path` copy) -- the trailer
-            # below already gives that exact command, so this now just points there instead.
-            # TRDD-EFA4P42B followup: "append ... TEXT)" was wrong for the same reason as the
-            # elided-count line above -- the trailer's `<id>` is a placeholder to replace.
-            lines.append("")
-            lines.append(
-                f"Full compacted context: {full_context_path} -- read it ONLY if what you "
-                "need is not shown above; try list/search first with the expand command "
-                "below (replace <id> with --list --grep TEXT)."
-            )
-
         lines.append("")
         lines.append(
             'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
@@ -2234,6 +2437,35 @@ def compose(
         return "\n".join(lines)
 
     digest_text = header.get("digest", "")
+
+    # TRDD-D7RLXAN1: the conversation, never scored -- see the docstring. Full render: the
+    # summary and every live message, whole. Injected render: the newest exchanges within their
+    # share of the room the fixed lines leave (READ FIRST and heading charged inside the share).
+    n_messages = len(conversation or [])
+    shown_messages = n_messages
+    if max_item_bytes is None:
+        if conversation is not None or conversation_summary is not None:
+            conversation_lines = [_CONVERSATION_HEADING]
+            if conversation_summary is not None:
+                conversation_lines += [_SUMMARY_HEADING, conversation_summary, ""]
+            conversation_lines += [_exchange_block(it, None) for it in conversation or []]
+            conversation_lines.append("")
+    else:
+        exchange_budget = (
+            None if max_bytes is None
+            else int(max(0, max_bytes - len(render([], [], len(items), digest_text).encode("utf-8")))
+                     * _INJECT_EXCHANGE_SHARE)
+        )
+        if exchange_budget is not None:
+            if full_context_path:  # at its widest: `shown` only ever shrinks the line
+                exchange_budget -= len(_read_first_line(
+                    full_context_path, n_messages, n_messages).encode("utf-8")) + 1
+            exchange_budget -= len(_EXCHANGES_HEADING.encode("utf-8")) + 2  # + trailing blank
+        blocks, shown_messages = _select_exchanges(conversation or [], exchange_budget)
+        if blocks:
+            conversation_lines = [_EXCHANGES_HEADING, *blocks, ""]
+    if full_context_path:
+        read_first = _read_first_line(full_context_path, n_messages, shown_messages)
 
     if max_item_bytes is not None:
         # TRDD-BLGZTHQ9 + TRDD-U6C3YXEL: the injected copy's selection, as one pure fill over
@@ -2482,7 +2714,11 @@ def compose(
         # this small to begin with -- see `_render_minimal_fallback`'s docstring). This is the
         # function's own hard guarantee: `max_bytes`, when given, is NEVER exceeded -- degrading
         # all the way to `""` rather than ever returning an over-budget string.
-        newest_owner = guaranteed_owner_items[0] if guaranteed_owner_items else None
+        # TRDD-D7RLXAN1: owner messages now arrive in `conversation`, never in `items`, so the
+        # newest one comes from there (owner ruling fe38e095 still holds at this last stage).
+        conv_owner = [it for it in conversation or [] if it.kind == "user"]
+        newest_owner = (conv_owner[-1] if conv_owner
+                        else guaranteed_owner_items[0] if guaranteed_owner_items else None)
         doc = _render_minimal_fallback(newest_owner, max_bytes)
 
     return doc

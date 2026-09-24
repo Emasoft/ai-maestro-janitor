@@ -714,10 +714,12 @@ def test_computed_inject_max_bytes_matches_room_and_summary_is_not_sliced(tmp_pa
     # `now_iso`'s exact clock reading does not matter to the byte count, only its fixed
     # strftime length, so a fresh call here reproduces the same byte total the hook's own
     # (differently-timed) call produced.
+    # `tail=()` (TRDD-D7RLXAN1): the Jev block carries the newest exchanges itself, so the
+    # hook sizes the room with no "Recent turns" tail.
     room = ec.compose_handoff_room(
         ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=[]),
         now_iso=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        tail=ec.recent_messages(str(transcript)),
+        tail=(),
         max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
     )
     expected_inject_max_bytes = jcl.inject_max_bytes_for(room, str(transcript))
@@ -782,7 +784,7 @@ def test_card_heavy_facts_section_keeps_every_id_and_shortens_titles_first(tmp_p
     # value, not just a bound). Doubles as the fixture-adversarial check: if the RAW, full-title
     # room already met the target, this fixture would prove nothing new.
     now_iso_probe = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    tail_probe = ec.recent_messages(str(transcript))
+    tail_probe = ()  # TRDD-D7RLXAN1: the hook sizes the room with no "Recent turns" tail
     raw_room = ec.compose_handoff_room(
         ec.HandoffInputs(trigger="jev-compaction", findings=[], cards=cards),
         now_iso=now_iso_probe, tail=tail_probe,
@@ -1330,6 +1332,75 @@ def test_other_open_cards_line_reaches_the_injected_stdout(tmp_path, monkeypatch
     assert rc == 0
     assert "## Other open cards" in out
     assert "other open cards: ZZZZ9999" in out
+
+
+# TRDD-D7RLXAN1: a real two-message transcript and the injected copy the real `jev_compact.py`
+# now writes for it -- the exchanges verbatim inside the Jev block, READ FIRST as line one.
+_EXCHANGE_TRANSCRIPT = [
+    {"type": "user", "uuid": "u1", "message": {"role": "user", "content":
+        "please ship it NEWEST-OWNER-MARKER"}},
+    {"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "on it ASSISTANT-REPLY-MARKER"}]}},
+]
+_EXCHANGE_INJECT_DOC = (
+    "READ FIRST: /tmp/full.md holds every message since the last compaction verbatim (2 "
+    "messages; 2 shown below). Read it in full before acting; it may take several Reads "
+    "(offset/limit).\n# Compacted context (Jev compaction)\nsession: s\n\n"
+    "## Newest messages since the last compaction (verbatim, never scored)\n"
+    "-- user u1:0 --\nplease ship it NEWEST-OWNER-MARKER\n"
+    "-- assistant a1:0 --\non it ASSISTANT-REPLY-MARKER\n\n## Kept items\n\n## Elided\n\n"
+    'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
+    "expand --transcript /tmp/x <id>"
+)
+
+
+def test_success_injection_has_no_recent_turns_section_and_each_exchange_once(
+    tmp_path, monkeypatch,
+):
+    """TRDD-D7RLXAN1 test 10: on the Jev success path the newest exchanges arrive verbatim
+    inside the Jev block, so the hook must not ALSO inject its "## Recent turns" tail -- a
+    whitespace-flattened second copy of the same messages. Each message appears exactly once,
+    and READ FIRST opens the Jev block's own text."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%31")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text(
+        "\n".join(json.dumps(r) for r in _EXCHANGE_TRANSCRIPT) + "\n", encoding="utf-8",
+    )
+    assert ec.recent_messages(str(transcript)), "fixture must give the old tail something to show"
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%31"}, transcript=str(transcript))
+    script = plugin_root / "scripts" / "jev_compact.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(
+        _STUB_JEV_COMPACT_TWO_DOCS.format(full_text=_EXCHANGE_INJECT_DOC,
+                                          inject_text=_EXCHANGE_INJECT_DOC),
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    assert rc == 0
+    assert "## Recent turns" not in out
+    assert out.count("NEWEST-OWNER-MARKER") == 1
+    assert out.count("ASSISTANT-REPLY-MARKER") == 1
+    jev_block = out.split("## Compacted context (Jev compaction)", 1)[1]
+    assert jev_block.index("READ FIRST:") < jev_block.index("-- user u1:0 --")
 
 
 if __name__ == "__main__":

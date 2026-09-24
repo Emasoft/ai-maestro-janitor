@@ -1570,22 +1570,13 @@ def test_extraction_skips_sidechain_entries(tmp_path: Path) -> None:
     assert items[0].text == "the real, main-conversation message"
 
 
-def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
+def test_full_context_path_is_named_by_the_read_first_line() -> None:
     """Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
-    uncapped document `jev_compact.py compact` composes from the SAME items/scores -- one line,
-    right before the fixed "pointers expand with" trailer, never after it (the trailer is the
-    model's own fixed anchor, always last). Card 5 injection-caps review: the pointer line's
-    wording was reworded away from "Read it for everything not shown here" (an ~11k-token read
-    invitation), so this pins the NEW wording instead.
-
-    TRDD-EFA4P42B: this line used to spell out its own `expand --transcript <path> --list
-    --grep TEXT` command -- the FOURTH `transcript_path` copy in the render -- and now just
-    points at the expand command in the trailer below instead.
-
-    TRDD-EFA4P42B followup: "(append --list --grep TEXT)" was wrong -- the trailer ends in a
-    literal `<id>`, and appending after it makes `<id>` a shell redirect target instead of the
-    placeholder it is. Pins the corrected "(replace <id> with --list --grep TEXT)" wording."""
-    items = [_item("k:0", "user", "kept text", turn=0)]
+    uncapped document `jev_compact.py compact` composes from the SAME items/scores.
+    TRDD-D7RLXAN1: that way back is now the document's FIRST line, "READ FIRST: <path> ...",
+    which replaced the old trailing "Full compacted context: ... read it ONLY if" line (the
+    two contradict each other; the owner accepted the one-time full read, Q1 2026-09-24)."""
+    items = [_item("k:0", "tool", "kept text", turn=0)]
     scores = {"k:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
                                 decision_passed=False)}
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
@@ -1593,17 +1584,11 @@ def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
                       full_context_path="/tmp/full-compacted.md")
 
     lines = doc.splitlines()
-    assert (
-        "Full compacted context: /tmp/full-compacted.md -- read it ONLY if what you need is "
-        "not shown above; try list/search first with the expand command below (replace <id> "
-        "with --list --grep TEXT)."
-    ) in lines
-    pointer_idx = next(i for i, line in enumerate(lines) if line.startswith("Full compacted context:"))
-    trailer_idx = next(i for i, line in enumerate(lines) if line.startswith("pointers expand with:"))
-    assert pointer_idx < trailer_idx, "the pointer must precede the fixed trailer, not follow it"
+    assert lines[0].startswith("READ FIRST: /tmp/full-compacted.md holds every message")
+    assert "Full compacted context:" not in doc
 
 
-def test_no_full_context_path_omits_the_pointer_line() -> None:
+def test_no_full_context_path_omits_the_read_first_line() -> None:
     """The default (`full_context_path=None`, what `--out`'s own uncapped compose call uses)
     must never grow this line -- it exists only for a SEPARATE capped rendering."""
     items = [_item("k:0", "user", "kept text", turn=0)]
@@ -1612,7 +1597,7 @@ def test_no_full_context_path_omits_the_pointer_line() -> None:
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header)
 
-    assert "Full compacted context:" not in doc
+    assert "READ FIRST" not in doc
 
 
 # --- TRDD-RAEGS1D5 (2026-09-23): task-notification/heartbeat-turn extraction bug fix ---
@@ -1664,27 +1649,36 @@ def test_task_notification_becomes_event_and_is_excluded_from_the_digest() -> No
     assert "Background lint check finished" not in digest
 
 
-def test_bare_owner_typed_resume_is_kind_event_not_user(tmp_path: Path) -> None:
-    # TRDD-DZ1KOGAC: a bare "resume" (or "continue", or an unwrapped argument-less
-    # "/compact"/"/clear") carries `origin.kind: "human"`/no origin at all -- authorship is
-    # genuinely the owner's, so `transcript_roles.classify_record` correctly says "human".
-    # But it is content-free: measured on real transcripts, it kept displacing the owner's
-    # real instructions out of the injected copy's owner tier, the guaranteed newest-owner
-    # slot, and the digest. `extract_items` must demote only the ITEM KIND to "event" -- a
-    # normal owner message right next to it must stay kind "user".
+def test_bare_owner_control_input_is_kind_control_in_every_branch(tmp_path: Path) -> None:
+    """TRDD-D7RLXAN1 test 1 (was TRDD-DZ1KOGAC's "kind event"): a bare "resume"/"continue" typed
+    by the owner is content-free, so it must stay out of `kind == "user"` (digest, newest-owner
+    pick) -- but it is still the owner's words in the exchange, so it is kind "control"
+    (conversation, never scored), not "event" (scored), in the str, text-block and mid-turn
+    attachment branches alike. A peer's "resume" is not the owner's and stays "event"."""
     records = [
         {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "resume"}},
         {"type": "user", "uuid": "u2",
          "message": {"role": "user", "content": "please fix the failing test"}},
+        {"type": "user", "uuid": "u3",
+         "message": {"role": "user", "content": [{"type": "text", "text": "continue"}]}},
+        {"type": "attachment", "uuid": "att1", "attachment": {
+            "type": "queued_command", "prompt": "resume", "commandMode": "prompt",
+            "origin": {"kind": "human"}}},
+        {"type": "attachment", "uuid": "att2", "attachment": {
+            "type": "queued_command", "prompt": "resume", "commandMode": "prompt",
+            "origin": {"kind": "peer"}}},
     ]
     path = tmp_path / "control.jsonl"
     path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
 
     items = jc.extract_items(path)
     by_id = {it.id: it for it in items}
-    assert by_id["u1:0"].kind == "event"
+    assert by_id["u1:0"].kind == "control"
     assert by_id["u1:0"].text == "resume"
     assert by_id["u2:0"].kind == "user"
+    assert by_id["u3:0"].kind == "control"
+    assert by_id["att1:0"].kind == "control"
+    assert by_id["att2:0"].kind == "event"
 
 
 def test_origin_less_legacy_record_still_classified_human() -> None:
@@ -3373,3 +3367,259 @@ def test_injected_long_newest_message_leaves_room_for_three_non_owner_items() ->
     assert jc.DEFAULT_INJECT_ITEM_BYTES < len(newest_body) <= int(3900 * 0.35)
     assert "dec:0" not in inline and "dec:0" in pointed
     assert sum(1 for i in inline if i.startswith("work")) >= jc._NON_OWNER_FLOOR
+
+
+# --- TRDD-D7RLXAN1: owner and assistant prose since the last compaction, verbatim, never scored ---
+# Owner directive (2026-09-24): "assistant prose and user prose (the messages exchanges) should be
+# all kept intact". Enforced in code: prose never becomes a scored item.
+
+
+def _jsonl(tmp_path: Path, records: list[dict[str, Any]], name: str = "t.jsonl") -> Path:
+    path = tmp_path / name
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    return path
+
+
+def _user(uuid: str, text: str) -> dict[str, Any]:
+    return {"type": "user", "uuid": uuid, "message": {"role": "user", "content": text}}
+
+
+def _assistant(uuid: str, text: str) -> dict[str, Any]:
+    return {"type": "assistant", "uuid": uuid,
+            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def _tool_pair(use_uuid: str, result_uuid: str, tool_id: str, result: str) -> list[dict[str, Any]]:
+    return [
+        {"type": "assistant", "uuid": use_uuid, "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": tool_id, "name": "Bash", "input": {"command": "ls"}}]}},
+        {"type": "user", "uuid": result_uuid, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool_id, "content": result}]}},
+    ]
+
+
+def _boundary(uuid: str, anchor: str, preserved: list[str]) -> dict[str, Any]:
+    """The real shape (fd5cc3e0, 2026-09-24): `type: system`, `subtype: compact_boundary`,
+    `compactMetadata.preservedMessages.{anchorUuid, allUuids}`."""
+    return {"type": "system", "subtype": "compact_boundary", "uuid": uuid,
+            "compactMetadata": {"trigger": "auto", "preservedMessages": {
+                "anchorUuid": anchor, "allUuids": preserved}}}
+
+
+def _summary(uuid: str, text: str) -> dict[str, Any]:
+    return {"type": "user", "uuid": uuid, "isCompactSummary": True,
+            "isVisibleInTranscriptOnly": True, "message": {"role": "user", "content": text}}
+
+
+def test_window_pairs_each_boundary_to_its_own_summary_by_anchor_uuid(tmp_path: Path) -> None:
+    """TRDD-D7RLXAN1 test 2 (advisor finding D): the window records the LAST boundary, its
+    preserved uuids, and the summary whose uuid is that boundary's anchorUuid -- not "the last
+    isCompactSummary line seen" (the stray after s2 below), and never a stale earlier summary
+    when a boundary's own summary never landed (session killed between the two lines)."""
+    path = _jsonl(tmp_path, [
+        _user("u0", "first owner message"),
+        _boundary("b1", "s1", ["u0"]),
+        {"type": "attachment", "uuid": "x1", "attachment": {"type": "date"}},
+        _summary("s1", "SUMMARY ONE"),
+        _user("u1", "second owner message"),
+        _boundary("b2", "s2", ["u1", "names-no-line"]),
+        _summary("s2", "SUMMARY TWO"),
+        _summary("sx", "A STRAY SUMMARY PAIRED TO NO BOUNDARY"),
+        _user("u2", "third owner message"),
+    ])
+    window = jc.ConversationWindow()
+    items = jc.extract_items(path, window=window)
+    assert [it.id for it in items] == ["u0:0", "u1:0", "u2:0"]  # neither line is ever an item
+    assert window.summary == "SUMMARY TWO"
+    assert window.preserved_uuids == frozenset({"u1", "names-no-line"})
+    assert window.boundary_turn == 2
+
+    killed = _jsonl(tmp_path, [
+        _user("u0", "a"), _boundary("b1", "s1", []), _summary("s1", "OLD SUMMARY"),
+        _user("u1", "b"), _boundary("b2", "s2", []),
+    ], name="killed.jsonl")
+    window2 = jc.ConversationWindow()
+    jc.extract_items(killed, window=window2)
+    assert window2.summary is None
+    assert window2.boundary_turn == 2
+
+
+def test_split_conversation_drops_unpreserved_pre_boundary_prose_only(tmp_path: Path) -> None:
+    """TRDD-D7RLXAN1 test 3: conversation = live owner/assistant/control messages (after the
+    boundary, or preserved across it); scored = every tool and event item, pre-boundary ones
+    included. Only unpreserved pre-boundary prose is in neither -- the summary stands in for it.
+    Also pins the turn/boundary alignment (the card's "most likely way it is wrong")."""
+    path = _jsonl(tmp_path, [
+        _user("pu", "pre-boundary owner message"),
+        _assistant("pa", "pre-boundary assistant reply"),
+        *_tool_pair("ptu", "ptr", "t1", "pre-boundary tool output"),
+        _user("keep", "preserved owner message"),
+        _boundary("b", "s", ["keep", "ptu"]),
+        _summary("s", "THE SUMMARY"),
+        _user("nu", "post-boundary owner message"),
+        _assistant("na", "post-boundary assistant reply"),
+        *_tool_pair("ntu", "ntr", "t2", "post-boundary tool output"),
+        _user("nc", "resume"),
+    ])
+    window = jc.ConversationWindow()
+    items = jc.extract_items(path, window=window)
+    conversation, scored = jc.split_conversation(items, window)
+
+    assert [it.id for it in conversation] == ["keep:0", "nu:0", "na:0", "nc:0"]
+    assert [it.kind for it in conversation] == ["user", "user", "assistant", "control"]
+    assert [it.id for it in scored] == ["ptr:0", "ntr:0"]
+    assert {it.id for it in items} - {it.id for it in conversation + scored} == {"pu:0", "pa:0"}
+    assert window.summary == "THE SUMMARY"
+    # No boundary at all: every message is live.
+    no_boundary, _ = jc.split_conversation(items, jc.ConversationWindow())
+    assert [it.id for it in no_boundary] == ["pu:0", "pa:0", "keep:0", "nu:0", "na:0", "nc:0"]
+
+
+def test_only_the_bare_heartbeat_reply_is_dropped_a_reply_with_content_is_kept(
+    tmp_path: Path,
+) -> None:
+    """TRDD-D7RLXAN1 (acceptance (a) on the real b2bf5b7b transcript): `is_heartbeat_reply` also
+    matches "janitor heartbeat" plus up to two lines -- 9 real replies with content ("The live
+    account is ...") vanished from the full copy that way. Only the exact bare reply carries
+    nothing; every other assistant message is conversation, kept verbatim."""
+    with_content = "janitor heartbeat\nThe rotation outlook is better than I feared."
+    path = _jsonl(tmp_path, [
+        _assistant("bare", "janitor heartbeat"),
+        _assistant("said", with_content),
+    ])
+    items = jc.extract_items(path)
+    assert [(it.id, it.kind, it.text) for it in items] == [("said:0", "assistant", with_content)]
+
+
+def test_boundary_as_the_last_walked_entry_leaves_only_preserved_prose(tmp_path: Path) -> None:
+    """TRDD-D7RLXAN1 (advisor finding D): a boundary as the LAST line -- no summary yet, no
+    post-boundary prose. `boundary_turn == len(items)`, the conversation is the preserved prose
+    only, and an injected render with no owner message in it still works."""
+    path = _jsonl(tmp_path, [
+        _user("u1", "owner asks something"),
+        _assistant("a1", "assistant answers"),
+        *_tool_pair("tu", "tr", "t1", "tool output"),
+        _boundary("b", "s", ["a1"]),
+    ])
+    window = jc.ConversationWindow()
+    items = jc.extract_items(path, window=window)
+    assert window.boundary_turn == len(items)
+    assert window.summary is None
+    conversation, scored = jc.split_conversation(items, window)
+    assert [it.id for it in conversation] == ["a1:0"]
+    assert [it.id for it in scored] == ["tr:0"]
+
+    doc = jc.compose(scored, {"tr:0": _scores(0.9)}, budget_tokens=8000, header=_H,
+                     max_bytes=5000, max_item_bytes=700, non_owner_item_bytes=350,
+                     full_context_path="/abs/full.md", conversation=conversation)
+    assert doc.splitlines()[0].startswith("READ FIRST: /abs/full.md holds every message")
+    assert "-- assistant a1:0 --\nassistant answers" in doc
+    assert "owner asks something" not in doc
+
+
+def test_full_render_contains_every_live_message_verbatim_in_order() -> None:
+    """TRDD-D7RLXAN1 test 4: the full (`--out`) copy carries Claude Code's summary, then every
+    conversation message byte for byte, in order, uncapped -- none of them scored. A control
+    input is labelled "user" (the owner's words), not by its internal kind."""
+    conversation = [
+        _item(f"m{i}:0", "user" if i % 2 == 0 else "assistant",
+              f"message {i} line one\n  indented   line two  with spaces\n\nline four of {i}\n"
+              + "long " * 200, turn=i)
+        for i in range(30)
+    ] + [_item("c:0", "control", "resume", turn=30)]
+    tools = [_item("t:0", "tool", "Bash(ls)\nfile.txt", turn=31)]
+    doc = jc.compose(tools, {"t:0": _scores(0.9)}, budget_tokens=8000, header=_H,
+                     conversation=conversation,
+                     conversation_summary="CLAUDE CODE SUMMARY\nsecond line")
+
+    summary_at = doc.index("CLAUDE CODE SUMMARY\nsecond line")
+    assert doc.index(jc._CONVERSATION_HEADING) < summary_at < doc.index("## Kept items")
+    last = summary_at
+    for it in conversation:
+        assert doc.count(it.text) == 1, it.id
+        at = doc.index(it.text)
+        assert at > last, f"{it.id} out of order"
+        last = at
+    assert "-- user c:0 --\nresume" in doc
+    assert last < doc.index("## Kept items")
+
+
+def test_injected_render_starts_with_read_first_and_shows_the_newest_run() -> None:
+    """TRDD-D7RLXAN1 test 5: the injected copy's FIRST line is READ FIRST, naming the full copy
+    and counting what is shown; the messages shown are one contiguous newest run (the owner's
+    newest message inside it, then older ones while the share lasts), the oldest absent."""
+    conversation = [_item(f"m{i}:0", "user" if i % 2 == 0 else "assistant",
+                          f"exchange {i:02d} " + "x" * 280, turn=i) for i in range(40)]
+    tools = [_item(f"t{i}:0", "tool", f"Bash(ls {i})\nresult {i} " + "y" * 150, turn=40 + i)
+             for i in range(5)]
+    doc = jc.compose(tools, {it.id: _scores(0.9) for it in tools}, budget_tokens=8000,
+                     header=_H, max_bytes=5000, max_item_bytes=700, non_owner_item_bytes=350,
+                     full_context_path="/abs/full.md", conversation=conversation)
+
+    first = doc.splitlines()[0]
+    assert first.startswith("READ FIRST: /abs/full.md holds every message since the last "
+                            "compaction verbatim (40 messages; ")
+    match = re.search(r"; (\d+) shown below\)", first)
+    assert match is not None
+    shown = int(match.group(1))
+    blocks = re.findall(r"^-- (?:user|assistant) m(\d+):0 --$", doc, re.M)
+    assert len(blocks) == shown and 2 < shown < 40
+    assert sorted(int(b) for b in blocks) == list(range(40 - shown, 40))
+    assert "exchange 39 " in doc and "exchange 00 " not in doc
+    assert len(doc.encode("utf-8")) <= 5000
+
+
+def test_injected_render_keeps_newest_owner_message_behind_long_assistant_tail() -> None:
+    """TRDD-D7RLXAN1 test 6: one owner message, then ten 2 KB assistant replies. The owner's
+    message survives whole, the newest replies follow as verbatim prefixes, and an explicit
+    marker counts the replies in between that only the full copy has."""
+    owner_text = "OWNER-INSTRUCTION: fix the login flow and keep the old API " + "o" * 60
+    conversation = [_item("owner:0", "user", owner_text, turn=0)] + [
+        _item(f"a{i}:0", "assistant", f"ASSISTANT-{i} " + "z" * 2000, turn=1 + i)
+        for i in range(10)]
+    tools = [_item(f"t{i}:0", "tool", f"Bash(ls {i})\nresult {i} " + "y" * 150, turn=20 + i)
+             for i in range(5)]
+    doc = jc.compose(tools, {it.id: _scores(0.9) for it in tools}, budget_tokens=8000,
+                     header=_H, max_bytes=5000, max_item_bytes=700, non_owner_item_bytes=350,
+                     full_context_path="/abs/full.md", conversation=conversation)
+
+    assert f"-- user owner:0 --\n{owner_text}" in doc
+    marker = re.search(r"\[(\d+) messages between these are only in the full copy\]", doc)
+    assert marker is not None and 1 <= int(marker.group(1)) < 10
+    assert "ASSISTANT-9 " in doc and "ASSISTANT-0 " not in doc
+    assert len(doc.encode("utf-8")) <= 5000
+
+
+def test_injected_render_never_exceeds_max_bytes_with_100kb_of_prose() -> None:
+    """TRDD-D7RLXAN1 test 7: the exchanges block is fixed text measured before
+    `_select_injected` runs, so `max_bytes` still holds with 100 KB of prose -- at a normal
+    room and at a pathological one (where the minimal fallback takes the owner's newest message
+    from the conversation, since no owner item is in `items` any more)."""
+    conversation = [_item(f"m{i}:0", "user" if i % 3 == 0 else "assistant",
+                          f"p{i} " + "w" * 1000, turn=i) for i in range(100)]
+    tools = [_item(f"t{i}:0", "tool", f"Bash(ls {i})\nresult {i} " + "y" * 150, turn=100 + i)
+             for i in range(10)]
+    for max_bytes in (5000, 600):
+        doc = jc.compose(tools, {it.id: _scores(0.9) for it in tools}, budget_tokens=8000,
+                         header=_H, max_bytes=max_bytes, max_item_bytes=700,
+                         non_owner_item_bytes=350, full_context_path="/abs/full.md",
+                         conversation=conversation)
+        assert len(doc.encode("utf-8")) <= max_bytes, max_bytes
+        if jc._MINIMAL_FIXED_LINE in doc:
+            assert "m99:0" in doc  # the newest owner message, from the conversation
+
+
+def test_injected_render_still_shows_three_tool_items_beside_exchanges() -> None:
+    """TRDD-D7RLXAN1 test 8: the exchanges take at most their share, so the tool/event items
+    Jev kept still reach the `_NON_OWNER_FLOOR` (3) -- what the session DID -- beside them."""
+    conversation = [_item(f"m{i}:0", "user" if i % 2 == 0 else "assistant",
+                          f"p{i} " + "w" * 1000, turn=i) for i in range(40)]
+    tools = [_item(f"t{i}:0", "tool", f"Bash(cmd {i})\nresult line {i}: " + "r" * 120,
+                   turn=100 + i) for i in range(20)]
+    doc = jc.compose(tools, {it.id: _scores(0.9) for it in tools}, budget_tokens=8000,
+                     header=_H, max_bytes=6000, max_item_bytes=700, non_owner_item_bytes=350,
+                     full_context_path="/abs/full.md", conversation=conversation)
+
+    assert jc._EXCHANGES_HEADING in doc
+    assert len(re.findall(r"^-- tool t\d+:0 --$", doc, re.M)) >= jc._NON_OWNER_FLOOR
+    assert len(doc.encode("utf-8")) <= 6000

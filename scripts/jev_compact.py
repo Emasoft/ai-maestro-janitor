@@ -533,7 +533,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
     `jc.compose()` call over the SAME `items`/`scores` (no second scoring pass) renders a
     capped companion there: the digest omitted (it dominated the old single-document size --
     the full digest is still in `--out`), `--max-elided-pointers`/`--inject-max-bytes` applied,
-    and a trailing pointer back at `--out`'s absolute path.
+    and a READ FIRST first line naming `--out`'s absolute path.
+
+    TRDD-D7RLXAN1: only tool and event items are scored. Every owner/assistant message since
+    the session's last compaction is kept verbatim -- whole in `--out` (after Claude Code's own
+    compaction summary), the newest exchanges in `--inject-out`.
     """
     provider = _current_provider()
 
@@ -581,7 +585,16 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # its length feeds the `segmentation_failed=N` summary field below, so it is never silent
     # to a caller that only reads stdout.
     segmentation_failures: list[str] = []
-    items = jc.extract_items(args.transcript, segmentation_failures=segmentation_failures)
+    window = jc.ConversationWindow()
+    items = jc.extract_items(
+        args.transcript, segmentation_failures=segmentation_failures, window=window,
+    )
+    # TRDD-D7RLXAN1 (owner directive 2026-09-24: "assistant prose and user prose (the messages
+    # exchanges) should be all kept intact"): THE enforcement point. Owner/assistant/control
+    # messages are split off here and never reach `score_items`, so no Jev score can drop one;
+    # the compose calls below render them verbatim. A prompt sentence could not guarantee this:
+    # a kept/elided decision is a threshold on a returned probability.
+    conversation, scored = jc.split_conversation(items, window)
 
     state_heads: list[str] = []
     for head_path in args.state_heads or []:
@@ -594,6 +607,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
             print(f"compact: skipping unreadable state head {head_path!r}: {exc}", file=sys.stderr)
 
     try:
+        # `items`, not `scored`: the newest owner/assistant messages are Jev's TASK context
+        # (what each tool item is judged relevant to), never a scored item (advisor, TRDD-D7RLXAN1).
         digest = jc.build_digest(items, state_heads, cap_tokens=args.digest_tokens)
     except jc.NoDigest as exc:
         print(f"declined: no digest material: {exc}", file=sys.stderr)
@@ -603,7 +618,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
     try:
         client = make_client()
         scores = jc.score_items(
-            items, digest, client,
+            scored, digest, client,
             relevance_threshold=args.relevance_threshold,
             decision_threshold=args.decision_threshold,
         )
@@ -640,8 +655,10 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # completes and exits 0 either way.
     shadow_log_failed = False
     try:
+        # TRDD-D7RLXAN1: `scored` -- log only what was scored. Not forced by jsl's zip guard (an
+        # unscored item is skipped before it, advisor finding E); the prose rows just vanish.
         jsl.log_decisions(
-            items, scores,
+            scored, scores,
             relevance_threshold=args.relevance_threshold, decision_threshold=args.decision_threshold,
             # TRDD-N9LDHF7N card 7 follow-up, defect 3: the sync SessionStart lane and the
             # detached background lane can both `compact` the same just-closed session's
@@ -668,7 +685,12 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # default pointer cap, no byte backstop). Never shrunk by `--max-elided-pointers`/
     # `--inject-max-bytes`, which apply ONLY to the `--inject-out` rendering below.
     out_path = Path(args.out)
-    full_doc = jc.compose(items, scores, budget_tokens=args.budget_tokens, header=compose_header)
+    # TRDD-D7RLXAN1: the full copy carries Claude Code's own summary and every live message,
+    # whole -- it is the READ FIRST target the injected copy names.
+    full_doc = jc.compose(
+        scored, scores, budget_tokens=args.budget_tokens, header=compose_header,
+        conversation=conversation, conversation_summary=window.summary,
+    )
     state.atomic_write(out_path, full_doc)
 
     if args.inject_out:
@@ -679,7 +701,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
             inject_kwargs["max_bytes"] = args.inject_max_bytes
         # The digest dominated the old single-document size (measured ~11KB, reports/
         # compaction-replacement/) -- omitted here on purpose; the full digest still lives in
-        # `--out`, and the "Full compacted context" trailer below points there.
+        # `--out`, and the READ FIRST line (`full_context_path`) points there.
         inject_header = dict(compose_header)
         inject_header["digest"] = ""
         # TRDD-RAEGS1D5 (injected-copy content fix): `max_item_bytes` is ALWAYS passed for the
@@ -688,8 +710,9 @@ def cmd_compact(args: argparse.Namespace) -> int:
         # own docstring); measured on three real transcripts, the old whole-item-only eviction
         # rendered 3, 0 and 0 kept items into the injected copy.
         inject_doc = jc.compose(
-            items, scores, budget_tokens=args.budget_tokens, header=inject_header,
+            scored, scores, budget_tokens=args.budget_tokens, header=inject_header,
             full_context_path=str(out_path.resolve()),
+            conversation=conversation,
             max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
             # TRDD-RAEGS1D5 (jev newest+3): a smaller cap for NON-owner items only, so the
             # session's own tool calls/replies/events are not crowded out by owner messages
@@ -712,7 +735,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # for identical content -- `jev_compaction_lane.py` uses it as a cross-SESSION dedupe
     # key (item ids embed the transcript's own uuids, which differ every session; the
     # blocked CONTENT is what actually recurs).
-    blocked_items = [it for it in items if scores[it.id].blocked]
+    blocked_items = [it for it in scored if scores[it.id].blocked]
     blocked_digest = ""
     if blocked_items:
         item_hashes = sorted(
@@ -721,10 +744,12 @@ def cmd_compact(args: argparse.Namespace) -> int:
         blocked_digest = hashlib.sha256("".join(item_hashes).encode("utf-8")).hexdigest()
     elapsed_ms = int((time.monotonic() - start) * 1000)
     out_tokens = estimate_tokens(full_doc)
+    # TRDD-D7RLXAN1: `items=` counts only the scored items; `conversation=` the verbatim, never-
+    # scored messages. Appended after `blocked=… blocked_digest=…`, which the lane's regex reads.
     summary = (
-        f"compacted items={kept}/{len(items)} tokens={out_tokens} cost={usage_cost} "
+        f"compacted items={kept}/{len(scored)} tokens={out_tokens} cost={usage_cost} "
         f"ms={elapsed_ms} blocked={len(blocked_items)} blocked_digest={blocked_digest} "
-        f"segmentation_failed={len(segmentation_failures)}"
+        f"segmentation_failed={len(segmentation_failures)} conversation={len(conversation)}"
     )
     # Coordinator's decision: `shadow_log_failed=1` is appended at the very END, after every
     # existing field -- `jev_compaction_lane.py`'s own `blocked=… blocked_digest=…` regex
@@ -784,7 +809,7 @@ def main(argv: list[str] | None = None) -> int:
     p_compact.add_argument("--max-elided-pointers", type=int, default=None)
     # `--inject-out`/`--inject-max-bytes`: when given, a SECOND `jc.compose()` call over the
     # SAME scored items renders a capped companion document at this path, sized to fit
-    # `--inject-max-bytes` (the digest omitted, a trailer pointing back at `--out`). Unset
+    # `--inject-max-bytes` (the digest omitted, a READ FIRST line pointing at `--out`). Unset
     # means "no second rendering" -- a bare manual `compact` invocation is unchanged.
     p_compact.add_argument("--inject-out", default=None)
     p_compact.add_argument("--inject-max-bytes", type=int, default=None)
