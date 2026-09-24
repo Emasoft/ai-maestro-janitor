@@ -327,8 +327,13 @@ def test_log_decisions_redacts_a_secret_cut_at_the_truncation_boundary(project_d
             "Authorization: Bearer abcDEF123456.ghiJKL7890tokenvalue", "abcDEF123456", id="bearer",
         ),
         pytest.param(
-            "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAmorebase64keydata\n"
-            "-----END RSA PRIVATE KEY-----",
+            # Fragmented per tests/README.md (fixture-hygiene gate): the BEGIN
+            # marker is split across a `+` so no contiguous "-----BEGIN ...
+            # PRIVATE KEY-----" literal sits in source; the runtime string is
+            # byte-identical to the un-fragmented form.
+            ("-----BEGIN RSA " + "PRIVATE KEY-----")
+            + "\nMIIEowIBAAKCAQEAmorebase64keydata\n"
+            + "-----END RSA PRIVATE KEY-----",
             "MIIEowIBAAKCAQEA",
             id="private-key-block",
         ),
@@ -389,7 +394,13 @@ def test_log_decisions_redacts_generic_secret_shapes(
 def test_log_decisions_redacts_url_credentials_keeping_scheme_and_host(project_dir: Path) -> None:
     """Coordinator, fourth follow-up: `://user:pass@host` becomes `://[REDACTED]@host` --
     the exact worked example -- not a blanket whole-match wipe of the scheme/host too."""
-    text = "clone with postgres://dbadmin:hunter2VerySecret@db.internal.example:5432/app"
+    # Fragmented per tests/README.md (fixture-hygiene gate): the user:pass@host
+    # run is split across `+` so no contiguous credential literal sits in
+    # source; the runtime string is byte-identical to the un-fragmented form.
+    text = (
+        "clone with postgres://dbadmin:" + "hunter2VerySecret"
+        + "@db.internal.example:5432/app"
+    )
     items = [_item("u-1:0", kind="assistant", text=text)]
     scores = {"u-1:0": _score(relevance=0.5, kept=True)}
     jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
