@@ -685,6 +685,28 @@ def test_parse_malformed_summary_extracts_count() -> None:
     assert jcl.parse_malformed_summary("compacted items=8/8 tokens=100\n") == 0
 
 
+def test_parse_functions_against_the_real_cmd_compact_summary_line_shape() -> None:
+    """TRDD-DQXMND59 stage 3b item E: the two tests above hand-build their OWN summary lines,
+    which would keep passing even if `jev_compact.py::cmd_compact`'s real f-string renamed a
+    field -- `parse_blocked_summary`/`parse_malformed_summary` would then silently degrade to
+    `(0, "")`/`0` in production with no test ever catching it. This copies that f-string's
+    EXACT field order (its own comment: "`items=` counts only the scored items ... Appended
+    after `blocked=... blocked_digest=...` ... `malformed=` ... `pre_boundary=` ... appended
+    last"), so a rename on either side of that contract breaks this test instead of parsing
+    silently to 0."""
+    kept, scored_n, out_tokens, usage_cost, elapsed_ms = 5, 8, 100, 0.01, 50
+    blocked_n, blocked_digest = 2, "cd" * 32
+    segmentation_failed_n, conversation_n, malformed_n, pre_boundary_n = 1, 3, 4, 0
+    summary = (
+        f"compacted items={kept}/{scored_n} tokens={out_tokens} cost={usage_cost} "
+        f"ms={elapsed_ms} blocked={blocked_n} blocked_digest={blocked_digest} "
+        f"segmentation_failed={segmentation_failed_n} conversation={conversation_n} "
+        f"malformed={malformed_n} pre_boundary={pre_boundary_n}"
+    )
+    assert jcl.parse_blocked_summary(summary) == (blocked_n, blocked_digest)
+    assert jcl.parse_malformed_summary(summary) == malformed_n
+
+
 def test_a_nonzero_malformed_count_reaches_the_session_summary_log(
     tmp_path, monkeypatch, _isolated_env,
 ):

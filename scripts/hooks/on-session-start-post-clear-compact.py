@@ -312,9 +312,12 @@ def _main() -> int:
     # itself, honoured by every caller.) `budget_tokens`/`digest_tokens` are left unset -- the
     # automatic lane no longer shrinks them (card 5 two-renderings: that used to shrink `--out`
     # too, which is now always the full document).
+    # `sd=sd` (TRDD-DQXMND59 stage 3b item A): `run_compact` now parses+records the
+    # `blocked=`/`malformed=` counts itself on a real exit-0 success -- this hook never read
+    # `proc.stdout` for either, so both were silently lost before this fix.
     proc, timed_out = jcl.run_compact(
         plugin_root, transcript=transcript_path, out_path=out_path, session_key=key,
-        heads_args=heads_args, timeout=_RUN_COMPACT_TIMEOUT_S,
+        heads_args=heads_args, sd=sd, timeout=_RUN_COMPACT_TIMEOUT_S,
         inject_out_path=inject_path, max_elided_pointers=jcl.LANE_MAX_ELIDED_POINTERS,
         inject_max_bytes=inject_max_bytes,
     )

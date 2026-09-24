@@ -2169,6 +2169,21 @@ def compose(
     default) keeps every existing caller's behaviour -- non-owner items fall back to
     `max_item_bytes`, same as before this parameter existed.
     """
+    # TRDD-DQXMND59 stage 3b item B: sanitize every str input `compose()` receives at this ONE
+    # boundary, instead of trusting each source separately (a lone surrogate reaching a bare
+    # f-string/print below raises UnicodeEncodeError). `header`'s string values, `full_context_
+    # path`, and `conversation_summary` are the parameters this function itself ever embeds
+    # verbatim into `render()`'s output; `conversation`/`items` are `Item`s, already sanitized on
+    # construction by `Item.__post_init__` (items are DATA, not parameters -- untouched here).
+    header = {
+        k: (jsonl_walk.drop_lone_surrogates(v) if isinstance(v, str) else v)
+        for k, v in header.items()
+    }
+    if full_context_path is not None:
+        full_context_path = jsonl_walk.drop_lone_surrogates(full_context_path)
+    if conversation_summary is not None:
+        conversation_summary = jsonl_walk.drop_lone_surrogates(conversation_summary)
+
     # Oversized is re-checked here, not just trusted from `scores[...].kept`, because
     # "never inlined" is the compose-time invariant the spec actually cares about -- this
     # function is where inlining happens, so this is where the guard has to hold even if a

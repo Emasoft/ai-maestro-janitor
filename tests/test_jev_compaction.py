@@ -3652,6 +3652,27 @@ def test_window_summary_survives_a_lone_surrogate_and_reaches_compose(tmp_path: 
     assert "�" in doc  # reaches the final document, sanitized -- never dropped, never raw
 
 
+def test_compose_sanitizes_every_str_parameter_at_one_boundary() -> None:
+    """TRDD-DQXMND59 stage 3b item B: `compose()` used to trust each str-shaped source to have
+    sanitized its own lone surrogates BEFORE reaching it (`Item.__post_init__` for item text,
+    the `window.summary` call site for the conversation summary) -- but `header`'s own string
+    values (`transcript_path`, `session_key`, `digest`) and `full_context_path` had no such
+    guard at all, since neither is an `Item`. A lone (unpaired) UTF-16 surrogate in ANY of
+    `header`'s values, `full_context_path`, or `conversation_summary` used to reach a bare
+    `.encode("utf-8")`/f-string downstream and raise `UnicodeEncodeError`. Fails on HEAD (before
+    the entry-point sanitization this item adds) for every one of these parameters; passes
+    after, with each replaced by U+FFFD in the final document -- never silently dropped."""
+    lone = "before \ud83d after"
+    doc = jc.compose(
+        [], {}, budget_tokens=8000,
+        header={"transcript_path": lone, "session_key": lone, "digest": lone},
+        full_context_path=lone, conversation=[], conversation_summary=lone,
+    )
+    assert doc.encode("utf-8")  # must not raise UnicodeEncodeError
+    assert "\ud83d" not in doc
+    assert doc.count("�") >= 4  # transcript_path, session_key, digest, full_context_path/summary
+
+
 def test_split_conversation_drops_unpreserved_pre_boundary_prose_only(tmp_path: Path) -> None:
     """TRDD-D7RLXAN1 test 3, extended by TRDD-350W5II2: conversation = live owner/assistant/
     control messages (after the boundary, or preserved across it); scored = LIVE tool and event

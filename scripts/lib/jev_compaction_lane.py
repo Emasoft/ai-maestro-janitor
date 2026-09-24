@@ -999,13 +999,23 @@ def record_once_per_reason(sd: Path, key: str, reason: str) -> str | None:
 
 def run_compact(
     plugin_root: Path, *, transcript: str, out_path: Path, session_key: str,
-    heads_args: list[str], timeout: int = 120, budget_tokens: int | None = None,
+    heads_args: list[str], sd: Path, timeout: int = 120, budget_tokens: int | None = None,
     digest_tokens: int | None = None, max_elided_pointers: int | None = None,
     inject_out_path: Path | None = None, inject_max_bytes: int | None = None,
     no_decline: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str] | None, bool]:
     """Exec `jev_compact.py compact` BY PATH (it is git-tracked 100755, own shebang runs it) and
-    return `(proc, timed_out)`. `timeout` defaults to 120s (jev's own client retries 3x with
+    return `(proc, timed_out)`. On a real exit-0 success, ALSO parses and records the
+    `blocked=`/`malformed=` counts off the summary line (`parse_blocked_summary`,
+    `parse_malformed_summary`, `record_blocked_finding`) -- this is now the ONE place both
+    real-world callers (`on-session-start-post-clear-compact.py`'s hook and
+    `run_compact_with_fallback` below) get this, since TRDD-DQXMND59 stage 3b found the hook
+    calls `run_compact` directly and never reads `proc.stdout` itself, so both findings were
+    silently lost on the production post-clear path even though `jev_compact.py` had already
+    printed them. `sd` (the project state dir) is required for exactly this -- it is what
+    `record_blocked_finding` writes its dedupe/day-cap files under, and every real caller
+    already has one on hand (`state.state_dir()`), so there is no good default to fall back to.
+    `timeout` defaults to 120s (jev's own client retries 3x with
     <=8s backoff on a 15s request timeout; six parallel batches bound the worst case near 70s)
     for a bare caller that passes none -- the sync hook passes its own smaller
     `_RUN_COMPACT_TIMEOUT_S` (60s) explicitly, and `run_compact_with_fallback` (below) passes
@@ -1055,6 +1065,17 @@ def run_compact(
         proc = subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
     except subprocess.TimeoutExpired:
         return None, True
+    if proc.returncode == EXIT_OK:
+        # TRDD-DQXMND59 stage 3b item A: moved here from `run_compact_with_fallback`'s own
+        # success branch (the ONE function both real callers share) -- see this function's own
+        # docstring for why the hook losing both records was the bug.
+        blocked, blocked_digest = parse_blocked_summary(proc.stdout or "")
+        record_blocked_finding(sd, blocked=blocked, blocked_digest=blocked_digest)
+        malformed = parse_malformed_summary(proc.stdout or "")
+        if malformed:
+            state.log_line(
+                _LOG, f"jev compact skipped {malformed} malformed transcript line(s)",
+            )
     return proc, False
 
 
@@ -1349,7 +1370,7 @@ def run_compact_with_fallback(
 
         proc, timed_out = run_compact(
             plugin_root, transcript=transcript, out_path=out_path, session_key=session_key,
-            heads_args=heads_args, timeout=int(remaining), budget_tokens=budget_tokens,
+            heads_args=heads_args, sd=sd, timeout=int(remaining), budget_tokens=budget_tokens,
             digest_tokens=digest_tokens, no_decline=True,
             inject_out_path=inject_out_path, inject_max_bytes=inject_max_bytes,
             max_elided_pointers=max_elided_pointers,
@@ -1362,23 +1383,11 @@ def run_compact_with_fallback(
             except OSError:
                 pass  # written but unreadable -- treat exactly like any other failed attempt
             else:
-                # TRDD-1ETALGDG followup: a successful (exit 0) compact can still have had
-                # to pointer some items -- surface that here, the one place this retry
-                # loop's own Jev success returns through. (`run_compact`'s OTHER caller,
-                # on-session-start-post-clear-compact.py, does not go through this loop and
-                # is unaffected -- out of this followup's file set.)
-                blocked, blocked_digest = parse_blocked_summary(proc.stdout or "")
-                record_blocked_finding(sd, blocked=blocked, blocked_digest=blocked_digest)
-                # TRDD-DQXMND59 stage 3, item B: a plain log line, not a `record_finding` --
-                # unlike `blocked` (a content-stable digest, dedupeable, worth a day-capped
-                # finding) a malformed-line count has no stable identity to dedupe against
-                # across runs, so this is a diagnostic breadcrumb for `session-summary.log`,
-                # not a recurring finding.
-                malformed = parse_malformed_summary(proc.stdout or "")
-                if malformed:
-                    state.log_line(
-                        _LOG, f"jev compact skipped {malformed} malformed transcript line(s)",
-                    )
+                # TRDD-DQXMND59 stage 3b item A: the `blocked=`/`malformed=` parse+record used
+                # to live here (TRDD-1ETALGDG followup, then stage 3 item B) -- moved into
+                # `run_compact` itself, the one function both this loop and the post-clear
+                # hook share, so the hook (which never reads `proc.stdout`) stops losing both
+                # records on its own success path. See `run_compact`'s own docstring.
                 if inject_out_path is not None:
                     # TRDD-RAEGS1D5 retune follow-up: prefer the size-bounded companion Jev's
                     # own priority-aware trim produced over the FULL document just read above --

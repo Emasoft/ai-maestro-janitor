@@ -23,6 +23,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import external_clear as ec  # noqa: E402
+import findings_ledger  # noqa: E402
 import handoff_files  # noqa: E402
 import jev_compaction_lane as jcl  # noqa: E402
 import state  # noqa: E402
@@ -50,15 +51,23 @@ if out_text and "--out" in argv:
 # which only assert on presence/size/content markers, never on the two documents differing).
 if out_text and "--inject-out" in argv:
     Path(argv[argv.index("--inject-out") + 1]).write_text(out_text, encoding="utf-8")
+sys.stdout.write({stdout!r})
 sys.exit({exit_code})
 """
 
 
-def _stub_jev_compact(plugin_root: Path, argv_log: Path, *, exit_code: int, out_text: str = "") -> None:
+def _stub_jev_compact(
+    plugin_root: Path, argv_log: Path, *, exit_code: int, out_text: str = "", stdout: str = "",
+) -> None:
+    """`stdout` (TRDD-DQXMND59 stage 3b item A): the real CLI's own `compacted items=...`
+    success line -- unset (the default) reproduces the OLD stub behaviour (no stdout at all),
+    so every existing caller is unaffected."""
     script = plugin_root / "scripts" / "jev_compact.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(
-        _STUB_JEV_COMPACT.format(argv_log=str(argv_log), out_text=out_text, exit_code=exit_code),
+        _STUB_JEV_COMPACT.format(
+            argv_log=str(argv_log), out_text=out_text, exit_code=exit_code, stdout=stdout,
+        ),
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
@@ -126,6 +135,59 @@ def test_consumes_fresh_sidecar_and_injects_real_compacted_context(tmp_path, mon
     assert consumed, "expected a .consumed-<epoch> sidecar after this run"
     group = handoff_files.newest_group(sd)
     assert group and "pointers expand with:" in group[0].read_text(encoding="utf-8")
+
+
+def test_hook_records_blocked_and_malformed_from_a_real_compact_success(
+    tmp_path, monkeypatch,
+) -> None:
+    """TRDD-DQXMND59 stage 3b item A: this hook calls `jcl.run_compact(...)` directly and never
+    reads `proc.stdout` itself -- before this fix, both the `blocked=N` finding
+    (`JEV-COMPACT-BLOCKED`, recorded via `findings_ledger`) and the `malformed=N` log line
+    (`session-summary.log`) were parsed ONLY inside `run_compact_with_fallback`, which this
+    production post-clear path never calls, so a stubbed success carrying both counts used to
+    leave neither trace anywhere. Fails on HEAD (both assertions), passes once `run_compact`
+    itself parses+records them (item A's fix)."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%5")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%5"}, transcript=str(transcript))
+    _stub_jev_compact(
+        plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=_COMPACTED_DOC,
+        stdout="compacted items=5/8 tokens=100 cost=0.01 ms=50 blocked=2 blocked_digest="
+               + "ab" * 32 + " segmentation_failed=0 conversation=2 malformed=3 pre_boundary=0\n",
+    )
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    assert rc == 0
+
+    ledger_path = findings_ledger.ledger_path()
+    entries = (
+        [json.loads(x) for x in ledger_path.read_text(encoding="utf-8").splitlines() if x.strip()]
+        if ledger_path.is_file() else []
+    )
+    blocked_hits = [e for e in entries if e["code"] == "JEV-COMPACT-BLOCKED"]
+    assert blocked_hits, "expected a JEV-COMPACT-BLOCKED finding from the hook's own run_compact"
+
+    log_path = state.log_dir() / "session-summary.log"
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    # The exact `jcl.run_compact` log line (review finding: a bare "3" in log_text could
+    # coincidentally match a timestamp/pid digit instead of the actual count).
+    assert "skipped 3 malformed transcript line(s)" in log_text
 
 
 _STUB_JEV_COMPACT_TWO_DOCS = """#!/usr/bin/env python3

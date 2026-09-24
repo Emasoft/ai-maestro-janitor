@@ -390,7 +390,12 @@ def _extract_block(entry: dict[str, Any], index: int) -> str | None:
     ``attachment`` entry's queued prompt (the joined TEXT blocks only when the prompt is a
     list of content blocks -- see the WHY comment below; NOT byte-verbatim in that one case).
     ``thinking``/``tool_use`` blocks are not expandable on their own (card 3 pairs a
-    ``tool_use`` with its ``tool_result`` — expanding the tool_result is the pointer)."""
+    ``tool_use`` with its ``tool_result`` — expanding the tool_result is the pointer).
+
+    "Verbatim" here means byte-for-byte EXCEPT that a lone (unpaired) UTF-16 surrogate becomes
+    U+FFFD -- this function itself returns the raw block text unchanged, but `cmd_expand` (the
+    only caller that prints it) always runs the result through `jsonl_walk.drop_lone_surrogates`
+    before printing (stage 3b, "also" item)."""
     if entry.get("type") == "attachment":
         # TRDD-DQXMND59 follow-up (adversarial review of e23e0b39): this used to restate
         # `extract_items`'s attachment predicate (the `queued_command` type gate, the

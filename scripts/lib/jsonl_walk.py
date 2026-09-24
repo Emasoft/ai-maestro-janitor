@@ -1,5 +1,7 @@
-"""Byte-safe JSONL transcript walk, shared by every reader of a live Claude Code session
-transcript.
+"""Byte-safe JSONL transcript walk, intended for every transcript reader (TRDD-A8DRRW0I); used
+today by `extract_items` and `expand` (stage 3b item G: corrected from "shared by every reader"
+-- TRDD-A8DRRW0I's own follow-up, moving the OTHER readers onto this module, had not landed at
+the time this was last touched).
 
 TRDD-DQXMND59 stage 3: extracted out of ``scripts/lib/jev_compaction.py``, where
 ``iter_jsonl_entries`` first landed (73df900b, 2729b1cb) as Jev's own fix for a transcript that
@@ -32,9 +34,16 @@ started reading real content.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+
+# Stage 3b item H: the slow path used to rebuild the string one Python-level `for c in text`
+# character at a time -- `re.sub` runs the scan+replace in C, and a lone-surrogate string is
+# rare enough (the whole point of the fast `encode` check below) that this only matters on the
+# path that already pays for a full re-copy anyway.
+_LONE_SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
 def drop_lone_surrogates(text: str) -> str:
@@ -51,7 +60,7 @@ def drop_lone_surrogates(text: str) -> str:
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
-        return "".join("�" if 0xD800 <= ord(c) <= 0xDFFF else c for c in text)
+        return _LONE_SURROGATE_RE.sub("�", text)
     return text
 
 
@@ -77,12 +86,14 @@ def parse_jsonl_line(
     all, or JSON whose top level is not an object (a bare number/string/list/null line would
     otherwise make a caller's `entry.get(...)` raise `AttributeError`).
 
-    `except ValueError`, not `except json.JSONDecodeError` (TRDD-DQXMND59 stage 3, finding F):
-    CPython 3.11+'s integer-string-conversion length limit (PEP 3.11) makes `json.loads` raise a
-    plain `ValueError` -- not the `JSONDecodeError` subclass -- for an integer literal longer
-    than 4300 digits. `json.JSONDecodeError` IS a `ValueError` subclass, so this widening loses
-    no precision on the case it already covered; it closes the gap on the one `json.loads`
-    failure mode that was never a `JSONDecodeError` at all.
+    `except ValueError`, not `except json.JSONDecodeError` (TRDD-DQXMND59 stage 3, finding F;
+    citation corrected stage 3b item D -- there is no "PEP 3.11"): CPython's integer-string-
+    conversion length limit (`sys.set_int_max_str_digits`, CVE-2020-10735, landed in 3.11 and
+    backported to 3.7.14/3.8.14/3.9.14/3.10.7) makes `json.loads` raise a plain `ValueError` --
+    not the `JSONDecodeError` subclass -- for an integer literal longer than 4300 digits.
+    `json.JSONDecodeError` IS a `ValueError` subclass, so this widening loses no precision on the
+    case it already covered; it closes the gap on the one `json.loads` failure mode that was
+    never a `JSONDecodeError` at all.
     """
     line = raw_line.decode("utf-8", errors="replace").strip()
     if not line:
