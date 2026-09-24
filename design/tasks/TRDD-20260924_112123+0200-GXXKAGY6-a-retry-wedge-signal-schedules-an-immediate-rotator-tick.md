@@ -26,4 +26,4 @@ Release 1 of TRDD-RAEGS1D5; item (f) and term D7 on TRDD-4XND73XD. When the 429 
 
 ## Review corrections 2026-09-24
 
-Open decision, to settle before code: how the wedge signal counts against LIVE_429_DEBOUNCE. An immediate tick that still waits out the debounce saves only one beat. Proposed: a detected retry wedge counts as a debounced 429 for the live account. Test: with a wedge signal and a single 429 the tick rotates; without the change it stays put.
+Open decision, to settle before code: how the wedge signal counts against LIVE_429_DEBOUNCE. An immediate tick that still waits out the debounce saves only one beat. Scope stays within term D7 of TRDD-4XND73XD (a trigger only schedules a tick). Counting a wedge as a debounced 429 would amend D7 and needs the ai-maestro Claude's agreement first. Test: a wedge signal starts a tick within one second instead of the next 60 s beat, and a second signal inside MIN_DWELL_S starts none.

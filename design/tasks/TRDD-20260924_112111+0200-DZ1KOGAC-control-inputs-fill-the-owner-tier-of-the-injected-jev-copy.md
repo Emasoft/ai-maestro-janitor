@@ -18,7 +18,7 @@ approval-datetime: 2026-09-24T11:21:11+0200
 
 # Control inputs fill the owner tier of the injected Jev copy
 
-Same run (E2). The owner tier of the injected copy is filled with control inputs: `resume`, `RESUME`, `/compact` twice, `/goal` and `/eli5` command wrappers. They displace the owner's real instructions. Whether they were decision-passing is not yet measured. Proposed direction (pending the advisor): slash-command records and bare control words are excluded from the injected owner tier and are still pointed at. Acceptance: on the three transcripts no injected owner item is a bare control word or an argument-less slash command; a test fails without the fix. Release blocker for TRDD-RAEGS1D5.
+Same run (E2). The owner tier of the injected copy is filled with control inputs: `resume`, `RESUME`, `/compact` twice, `/goal` and `/eli5` command wrappers. They displace the owner's real instructions. Whether they were decision-passing is not yet measured. Direction (advisor, 2026-09-24): a content predicate, not authorship; see Review corrections below. /goal and /eli5 with arguments stay as owner items. Acceptance: on the three transcripts no injected owner item is a bare control word or an argument-less slash command; a test fails without the fix. Release blocker for TRDD-RAEGS1D5.
 
 ## Approval log
 

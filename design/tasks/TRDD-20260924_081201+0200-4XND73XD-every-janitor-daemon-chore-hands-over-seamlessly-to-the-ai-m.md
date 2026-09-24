@@ -3,7 +3,7 @@ trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 column: todo
 created: 2026-09-24T08:12:01+0200
-updated: 2026-09-24T11:30:12+0200
+updated: 2026-09-24T11:39:02+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -77,4 +77,5 @@ The 2026-09-24 read test ran at about 08:16 from an INTERACTIVE session. The dae
 ## Review corrections 2026-09-24
 
 Release 1 moved two items out of this card: item (f), the immediate tick on a retry wedge, is TRDD-GXXKAGY6; the at-switch live-to-slot mirror is TRDD-IT5GEZDZ. They are no longer this card's scope.
-Handover state agreed with the ai-maestro Claude on 2026-09-24: its oauth-rotator-tick opt-in flag is off (renamed, the R3 kill switch), so the janitor daemon owns rotation until the lease-protocol return; ai-maestro commits 884ce61b0 and 155d31b51 make the server stamp a chore's last-run file only while it claims the chore, and fail closed when its claim predicate is unregistered (superseding its TRDD-14HI8ZPR stamp contract). Verified on both sides after the 10:42 restart: capabilities omit both rotator chores, every oauth-rotator-tick stamp matched a janitor daemon run. At flag-on, statusline-route ticks do not stamp, so claimed-chore-stale depends on the main server instance stamping every beat.
+Handover state agreed with the ai-maestro Claude on 2026-09-24: its oauth-rotator-tick opt-in flag is off (renamed, the R3 kill switch), so the janitor daemon owns rotation until the lease-protocol return; ai-maestro commits 884ce61b0 and 155d31b51 make the server stamp a chore's last-run file only while it claims the chore, and fail closed when its claim predicate is unregistered (superseding its TRDD-14HI8ZPR stamp contract). After the 10:42 restart the ai-maestro Claude measured (15 minutes) that capabilities omit both rotator chores and every oauth-rotator-tick stamp matched a janitor daemon run; the janitor side confirmed the 10:45:09 yield line and the 11:01:57 auto line. The fail-closed path (claim predicate unregistered) is not yet exercised. At flag-on, statusline-route ticks do not stamp, so claimed-chore-stale depends on the main server instance stamping every beat.
+Handback condition (from TRDD-IT5GEZDZ): before the ai-maestro server's oauth-rotator-tick flag returns, the server implements the same at-switch live-to-slot mirror, or the slots decay again after the handback.

@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-24T11:30:12+0200
+updated: 2026-09-24T11:38:30+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -16,8 +16,8 @@ approval-judge: Emasoft
 approval-datetime: 2026-09-22T21:32:55+0200
 npt: [541CBN36]
 relevant-rules: []
-implementation-commits: [051625a4, 0b883373]
-eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1KOGAC, O2FNJ4KW, EFA4P42B, 4P4Y2KBR, ZKXQXHBI, IT5GEZDZ, GXXKAGY6, TK529Q0F]
+implementation-commits: [051625a4, 0b883373, 61cad99c, 3006e92f, d4fa7685, 23713d53, 0cf40380, 012b091e, 44fdec8c, aa038127, aabd8b0c, 8c5db5e0, 862d30d4, c560ca76]
+eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1KOGAC, O2FNJ4KW, EFA4P42B, 4P4Y2KBR]
 ---
 
 # Jev compaction replaces the janitor's automatic compaction
@@ -25,7 +25,7 @@ eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1K
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-23
 
 - 2026-09-24 RELEASE SCOPE CHANGED under the owner's delegation (Q-DELEGATION: 'i leave the decisions to you and the ai-maestro claude. plan well. always verify.'), superseding the 2026-09-23 'wait to complete all before publishing' scope. Release 1 = the finished Jev work (AW4XD53Q, N9LDHF7N) + rotation continuity fixes (OOZP38MN, V6USCGC9, the daemon primary read, the live→slot mirror at switch-away, the immediate tick on a retry wedge, the can't-rotate alert) + the pre-commit privacy scan for this repo (FWDZDB7W steps 1-2) + the idle-agent resume prompt (ADIGRD0T) if small. DEFERRED to later releases: 88DOI824, XI10BA5D, the vault/lease/policy-file protocol (4XND73XD; it waits on the joint spec), DG2V7D5P, BUR8AW77, and FWDZDB7W step 3. The owner's three real-session compactions before publishing STILL apply.
-- 2026-09-24 CURRENT (supersedes the earlier CURRENT line): the real-transcript run on f06621c6 passed size, slicing and time but the injected copy's content failed (reports/compaction-replacement/20260924_112500+0200-jev-real-run-verification.md). NEXT ACTION, one bounded commit each: EFA4P42B, DZ1KOGAC, O2FNJ4KW, re-measure the three transcripts, BLGZTHQ9 with the floor reservation, U6C3YXEL, re-measure; rotation: ZKXQXHBI, IT5GEZDZ, GXXKAGY6, TK529Q0F, OOZP38MN; then FWDZDB7W steps 1-2, the K0PMVRN6 redaction, the full gate and the three real-session runs. AW4XD53Q is complete; N9LDHF7N is in testing; 88DOI824 is deferred.
+- 2026-09-24 CURRENT (supersedes the earlier CURRENT line): the real-transcript run on f06621c6 passed size, slicing and time but the injected copy's content failed (reports/compaction-replacement/20260924_112500+0200-jev-real-run-verification.md). NEXT ACTION, one bounded commit each: EFA4P42B, DZ1KOGAC, O2FNJ4KW, re-measure the three transcripts, BLGZTHQ9 with the floor reservation, U6C3YXEL, re-measure; rotation: ZKXQXHBI, IT5GEZDZ, GXXKAGY6, TK529Q0F, OOZP38MN; then FWDZDB7W steps 1-2, the K0PMVRN6 redaction, the full gate and the three real-session runs. Landed before this run: d4fa7685, 23713d53, 0cf40380 (the FULL copy names every stated decision), 012b091e (the injected summary is sized to the handoff room), 3006e92f (88DOI824's tool-result segmentation: it ships in release 1 even though that card's remaining scope is deferred, and BLGZTHQ9 changes its injected-mode behaviour). AW4XD53Q is complete; N9LDHF7N is in testing. Release items outside eht: ZKXQXHBI, IT5GEZDZ, GXXKAGY6, TK529Q0F, OOZP38MN, FWDZDB7W steps 1-2. 4P4Y2KBR is a blocker only if HEAD can inject another session's handoff: decide that before the re-measure.
 - Cards 1-4 and card 5 (post-clear Jev injection, cooldown/recovery vetoes, hook-output caps) landed. NPT TRDD-541CBN36 closed 2026-09-23 after its last defect (OpenRouter 402/403 -> JevAuthError, 0b883373). The stale pane-key test was fixed in 051625a4; it had failed since the 2026-09-23 reader switch, and eba1f1ff landed on that red suite (process gap).
 - Scope audit 2026-09-23 (reports/compaction-replacement/20260923_105904+0200-raegs1d5-scope-audit.md): 16 of 17 card-3/4 items done. Item 8 (fleet-lease renamed to compaction-lane, a lock on the automatic lane) DROPPED by owner decision 2026-09-23: the compaction only reads the closed session's transcript file, so no lock is needed; the manual llm-ext lane keeps its existing fleet lease unchanged.
 - NO PUBLISH until a real-transcript Jev compaction passes on the FINAL tree (owner, 2026-09-23 evening: "don't publish until you tested the compaction of jev on a true session jsonl file from projects"). Derived by us, owner to confirm scope: the pass must fit the lane time limits (sync 60 s, detached 5-min budget), and the reference modules the gap analysis (reports/compaction-replacement/*-jev-reference-gap-analysis.md) marks as needed are adopted first (the owner said most reference functions are still not implemented). llm-ext cannot produce output on this machine until Emasoft/llm-externalizer-plugin#15 is fixed, so a Jev failure lands on the fact-only template; large sessions are rescued only by the 5-minute detached Jev attempt. SUPERSEDED (2026-09-23 morning), old next step: land the retry-then-llm-ext fallback (worker running), the extraction fix (task-notification records and heartbeat turns are not human; worker running), then TRDD for parallel batch scoring and the reference adoption; re-run the real-transcript test (4.7 MB took 10 s, 49 MB took 168 s on HEAD).
@@ -123,7 +123,7 @@ No PRRD rule applies here (relevant-rules field left empty): checked prrdgrep's 
 
 ## Publish acceptance criteria (reviews of d4fa7685 and 23713d53, 2026-09-23)
 
-- Measured on the FINAL tree, in the FINAL SessionStart hook stdout (not X.inject.md), on the 4.7 / 49 / 258 MB transcripts: hook stdout under 10,000 bytes and not cut by the compose_handoff byte slice; at least 3 non-owner items inline; the newest owner message present; wall time under 60 s (sync lane).
+- Measured on the FINAL tree, in the FINAL SessionStart hook stdout (not X.inject.md), on the 4.7 / 49 / 258 MB transcripts: hook stdout under 10,000 bytes and not cut by the compose_handoff byte slice; at least 3 non-owner items inline (SUPERSEDED 2026-09-24 by the content criterion under Review corrections); the newest owner message present; wall time under 60 s (sync lane).
 - In the FULL copy: at least 5 non-owner items; every decision-passing owner item inline or pointed to (0 absent), counted from the compact run's own item flags, never from a second scoring pass (the two disagree at the threshold).
 - Corrections: the d4fa7685 message says its numbers were measured, but they came from the pre-review version; the 23713d53 message says LANE_COMPACTED_MAX_BYTES 6500 came "from the measured room", but 6500 is ABOVE the measured room (5,250 / 6,442 / 5,286 B), so the summary was sliced whenever the injected render exceeded the room (render sizes not measured) (being fixed: the room is computed first and passed as --inject-max-bytes). _OWNER_ITEM_TOKEN_CAP = 500 is unmeasured.
 Measured 2026-09-24 on 862d30d4 (cached real scores): 3/3/3 non-owner items in the injected copy, down from 4/6/4 on aabd8b0c, because the byte backstop, not admission, selects the injected content on every normal run; our own at-least-3 floor is met (the owner set no number), but 4/6/4 was reached earlier in this series, so TRDD-AW4XD53Q is a release blocker (todo).
