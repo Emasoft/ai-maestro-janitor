@@ -1,9 +1,9 @@
 ---
 trdd-id: 350W5II2
 title: Jev scores only live tool and event items, not pre-boundary ones
-column: backburner
+column: blocked
 created: 2026-09-24T14:12:56+0200
-updated: 2026-09-24T14:12:56+0200
+updated: 2026-09-24T14:25:47+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: refactor
@@ -14,6 +14,10 @@ mandated-by: user
 approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T14:12:56+0200
+pre-block-column: backburner
+blocked-by: [D7RLXAN1]
+blocker-probe: [trddgrep, --porcelain, show, D7RLXAN1]
+blocker-holds-if: not-match:\t(complete|completed|cancelled|superseded)\t
 ---
 
 # Jev scores only live tool and event items, not pre-boundary ones
@@ -24,10 +28,11 @@ Advisor review (reports/compaction-replacement/20260924_140604+0200-advisor-pros
 
 Change: restrict scored to LIVE items only, using the same is_live predicate D7RLXAN1 defines for conversation items (turn >= boundary_turn or uuid in preserved_uuids) applied to tool/event items too. This applies D7RLXAN1's own logic ("what the cleared context actually contained") to tool items, cuts Jev cost and time, and makes the injected non-owner floor draw from live items only. expand <id> still reaches pre-boundary items by uuid (scripts/jev_compact.py:358-380) — nothing becomes unreachable, only unscored.
 
-Sequencing: depends on D7RLXAN1 landing first (needs its window/is_live machinery). Largest cost lever named by the advisor but explicitly out of D7RLXAN1's scope.
+Sequencing: depends on D7RLXAN1 landing first (needs its window/is_live machinery). Likely the largest remaining Jev cost lever (inferred from the score_items docstring, not measured), named by the advisor but explicitly out of D7RLXAN1's scope.
 
 Related: TRDD-D7RLXAN1 (builds on its window/boundary machinery; the advisor named this as the next follow-up).
 
 ## Approval log
 
 - 2026-09-24T14:12:56+0200 — MANDATE issued by emanuelesabetta (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-24T14:24:55+0200 — column → blocked by emanuelesabetta. reuses D7RLXAN1's window/is_live machinery; cannot start until D7RLXAN1 lands

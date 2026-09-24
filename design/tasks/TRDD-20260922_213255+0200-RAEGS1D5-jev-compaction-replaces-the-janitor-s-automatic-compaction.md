@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-24T13:38:43+0200
+updated: 2026-09-24T14:24:46+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -34,6 +34,7 @@ eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1K
 - Supersession (owner, 2026-09-23): the llm-ext summary is allowed in the automatic lane ONLY as this fallback, which relaxes this card's "never generated prose" rule for the fallback case alone; /janitor-handoff-and-clear and /janitor-write-handoff are still never typed automatically.
 - Follow-ups from the 402/403 fix: the JEV-AUTH-REJECTED headline says "key rejected" even for a 402 credits problem; the per-reason dedupe can re-fire if the 402 body text varies. Carded 2026-09-24: TRDD-JIYBKY27.
 - OpenRouter's openapi.json documents these statuses for the decisions endpoint: 400, 401, 402, 403, 404, 413, 429, 500, 502, 503, 524, 529 (422 is not documented). SUPERSEDED 2026-09-24 (decision (b) landed, 88aea2d9): 400, 404, 408, 413 and 422 now raise JevValidationError -> stamped kind "invalid" (non-declining), and the probe-fail TTL is 5 minutes (PROBE_FAIL_TTL_S in scripts/jev_compact.py), not 30 -- verified against _stamp_kind_for_error in the source and against git log -S on scripts/jev_compact.py.
+- 2026-09-24 RELATED: TRDD-D7RLXAN1 (Jev keeps every owner/assistant message verbatim) is NOT this card's npt/eht — corrected from an earlier parent-trdd claim on D7RLXAN1 itself; tracked only via Related links on both cards. D7RLXAN1 must land before the eht cards BLGZTHQ9/DZ1KOGAC/O2FNJ4KW can be re-measured on the final tree.
 
 
 
