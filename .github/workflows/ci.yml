@@ -130,6 +130,16 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # pyrightconfig.json points this job's CPV --strict pyright run at ./.venv too
+      # (same as the lint job's sync above), and this job never synced it before —
+      # CI run 36020834789 failed with pyright unable to resolve `httpx` (2 MINOR),
+      # a real dev-extra dependency, because nothing was installed on the runner.
+      # `--frozen` (uv.lock is git-tracked): pin to the locked, hashed versions
+      # rather than letting `uv sync` re-resolve anything, matching release.yml's
+      # identical fix in the same incident (commit e20609f6).
+      - name: Sync deps so pyright can resolve imports
+        run: uv sync --extra dev --frozen
+
       - name: Validate plugin (strict)
         run: |
           # The CPV pin is written LITERALLY here and kept equal to `.cpv-version` by

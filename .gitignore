@@ -67,6 +67,10 @@ id_rsa*
 htmlcov/
 .pytest_cache/
 *.log
+# CI run 36020834789: these two synthetic (~400B) fixtures are read by
+# tests/jevctx tests via fixture path, not generated at test time — *.log
+# above was silently keeping them out of every commit.
+!tests/jevctx/fixtures/*.log
 
 # Distribution packages
 *.tar.gz
