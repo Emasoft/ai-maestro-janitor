@@ -3,7 +3,7 @@ trdd-id: DQXMND59
 title: Jev compaction passes a twelve-row verification matrix on real transcripts before release
 column: todo
 created: 2026-09-24T12:13:04+0200
-updated: 2026-09-24T13:38:55+0200
+updated: 2026-09-24T19:21:36+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: audit
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T12:13:04+0200
+implementation-commits: [e23e0b39, 73df900b, 2729b1cb]
 ---
 
 # Jev compaction passes a twelve-row verification matrix on real transcripts before release
@@ -46,3 +47,12 @@ Owner, 2026-09-24: "continue testing the jev compaction, make it flawless". Rele
 ## Notes
 
 V5 baseline (one developer machine, 2026-09-24, from the previous session's measurement): on the 258 MB transcript the sync lane spent about 46.5 s in the compose plus about 4.7 s in state_head_paths, roughly 51 s of run_compact's 60 s bound, about 9 s of headroom; a slower host can exceed it. V5 must be re-measured on the final tree before this row can pass.
+
+## STATE
+
+2026-09-24 — expand now restores attachment items (453 of 453 on 4 real sessions); extract_items and expand share one byte-safe walk; the compact summary line now reports malformed=N; lone surrogates are replaced when an Item is constructed (landed e23e0b39, 73df900b, 2729b1cb). CORRECTION to 2729b1cb's commit message: the claim that the other transcript readers were swept is incomplete -- scripts/lib/external_clear.py still reads transcript records with its own loop (~line 641), and about 20 hooks have json.loads(line loops; see the new sweep card, linked below. Pending stage 2 (the shared attachment rule) and stage 3 (the review fixes, spec in docs_dev/20260924-stage3-malformed-review-fixes.md).
+CORRECTION to the count above: "about 20 hooks" was carried over from the dispatching instructions unverified. The actual grep -rln "json.loads(line" scripts on 2026-09-24 found 9 files (scripts/agent_context_bench.py, scripts/hooks/pre-compact-handoff.py, scripts/lib/user_mem_lib.py, scripts/lib/tickets.py, scripts/lib/findings_ledger.py, scripts/lib/external_clear.py, scripts/lib/orphaned_resume.py, scripts/lib/jev_compaction.py, scripts/lib/pending_agents.py, scripts/lib/jevctx/shadow.py -- jev_compaction.py already uses the shared safe walk). See TRDD-A8DRRW0I for the full sweep.
+
+## Related
+
+TRDD-A8DRRW0I -- sweeps the transcript JSONL readers outside Jev (scripts/lib/external_clear.py and the json.loads(line) hooks) onto the same shared byte-safe walk this card's extract_items/expand fix introduced.

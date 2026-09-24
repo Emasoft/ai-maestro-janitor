@@ -3,7 +3,7 @@ trdd-id: D7RLXAN1
 title: Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
 column: testing
 created: 2026-09-24T13:53:03+0200
-updated: 2026-09-24T18:15:20+0200
+updated: 2026-09-24T19:19:53+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: feature
@@ -29,6 +29,7 @@ status: tasked
 - Digest question CLOSED (advisor): keep build_digest(items, ...) sending the newest 3 owner + 2 assistant messages to Jev as task context — not a violation, since the directive governs what survives into the output, not what Jev sees as its task description; stripping prose from the digest would degrade every tool-item score for no gain.
 - OWNER QUESTIONS Q1-Q3 ANSWERED 2026-09-24 (see the first line of this block): (1) the ~20-35k-token one-time READ FIRST cost is accepted, single file; (2) "all" = since the session's LAST compact_boundary; (3) enforced in code, no prompt change, because a prompt sentence cannot guarantee a threshold outcome.
 UPDATED 2026-09-24: column -> testing, implementation-commits: [c7779d84]. Acceptance (a)(b)(c)(e)(f) PASS, (d) measured (b2bf5b7b 126 KB ~31.5k tok 2 Reads, d30bf250 169 KB ~42k tok 2 Reads -- above the 20-35k estimate Q1 was accepted on --, 4eb7bf5d 65 KB ~16k 1 Read, fd5cc3e0 62 KB ~15k 1 Read); the two-file option (~35 KB of kept items/pointers out of the mandatory read) is the next lever if the read cost matters, unbuilt. Risk added: nothing yet checks a resumed session actually obeys READ FIRST. NEXT ACTION: 350W5II2 can now unblock (its blocker-probe reads this card's column).
+2026-09-24 -- the heartbeat stagger and hook-timeout follow-ups landed in 7ed4cdeb and 9efd5df3.
 
 ## Owner directive (verbatim, 2026-09-24)
 "its not good. assistant prose and user prose (the messages exchanges) should be all kept intact. modify the jev prompt to ensure that."
