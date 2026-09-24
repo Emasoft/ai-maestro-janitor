@@ -2,7 +2,7 @@
 name: reference_memgrep_links_to_from_semantics
 description: "memgrep links --to --from look inverted / backlinks vs out-links confusion / which flag shows who points at a page / does --to mean out-links or backlinks / does --from mean out-links or backlinks / memgrep links --to NOTE shows NOTE's out-links / memgrep links --from NOTE shows NOTE's backlinks / how was the inverted intuition first documented wrong / does fm.KEY match nested frontmatter at any depth / does fm.metadata.tier work as a dotted path / where does --where live on the memgrep command / why did a symmetric link fixture fail to catch the inversion / how to verify a CLI's directional flags with an asymmetric fixture / what confirms any hypothesis about link direction / see also memory-system for the wikimem model"
 ocd: 2026-06-10
-lmd: 2026-06-13
+lmd: 2026-09-24
 metadata:
   node_type: memory
   type: reference
@@ -11,6 +11,7 @@ metadata:
 publish-globally: false
 ---
 
+^I3P7THOS [desc: "memgrep links --to returns out-links; --from returns backlinks; --where lives on the main grep command; fm.KEY matches nested frontmatter at any depth, a dotted path does not", keywords: "memgrep_links_to_from_look_inverted backlinks_vs_out_links_confusion which_flag_shows_who_points_at_a_page does_to_mean_out_links_or_backlinks does_from_mean_out_links_or_backlinks does_fm_key_match_nested_frontmatter_at_any_depth does_fm_metadata_tier_work_as_dotted_path where_does_where_live_on_memgrep_command how_to_verify_cli_directional_flags_with_asymmetric_fixture what_confirms_any_hypothesis_about_link_direction", type: reference, ocd: 2026-06-10, lmd: 2026-09-24]
 memgrep `links` flags read relative to the NAMED note, not the link arrow
 (verified live, memgrep 0.1.0 `--help` + asymmetric fixture):
 
