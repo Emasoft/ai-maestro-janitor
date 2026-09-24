@@ -385,30 +385,26 @@ def _extract_block(entry: dict[str, Any], index: int) -> str | None:
     """The original bytes of block ``index`` of ``entry`` — user text (str content, index
     must be 0), or one block of a list-shaped ``user``/``assistant`` content (a
     ``text`` block's ``text``, or a ``tool_result`` block's ``content``, verbatim), or an
-    ``attachment`` entry's queued prompt.
+    ``attachment`` entry's queued prompt (the joined TEXT blocks only when the prompt is a
+    list of content blocks -- see the WHY comment below; NOT byte-verbatim in that one case).
     ``thinking``/``tool_use`` blocks are not expandable on their own (card 3 pairs a
     ``tool_use`` with its ``tool_result`` — expanding the tool_result is the pointer)."""
     if entry.get("type") == "attachment":
-        # TRDD-DQXMND59: `extract_items` gives an attachment-derived item the id
-        # "<uuid>:0" with text = jc._tool_result_text(attachment["prompt"]) -- but ONLY for
-        # `attachment.type == "queued_command"` (see the "attachment" branch of
-        # jev_compaction.py::extract_items); every other attachment kind (hook_success,
-        # hook_additional_context, ...) produces no item at all. An attachment entry has no
-        # top-level "content" and no "message", so falling through to the lookup below
-        # always returned None here (matrix row V2, 19/125 pointers; row V10, every
-        # mid-turn owner decision). Gate on the SAME predicate `extract_items` uses, and
-        # reuse the SAME text-join helper, so `expand` accepts exactly the ids
-        # `extract_items` could have generated -- never a wider set (review finding on the
-        # first cut of this fix: omitting the type gate let `expand` "succeed" on an
-        # attachment id that was never a legitimate pointer, even though today's known
-        # non-`queued_command` attachments carry no "prompt" key and would have come back
-        # empty anyway).
+        # TRDD-DQXMND59 follow-up (adversarial review of e23e0b39): this used to restate
+        # `extract_items`'s attachment predicate (the `queued_command` type gate, the
+        # prompt text-join) here, calling the OTHER module's PRIVATE `jc._tool_result_text`
+        # directly -- two independent copies of one rule that could drift the moment either
+        # changed without the other (matrix row V2: `expand` "not found" for a real pointer;
+        # row V10: `expand` accepting an id `extract_items` never generated). Now calls
+        # `jc.attachment_item_text`, the ONE shared, public rule -- see its own docstring.
+        #
+        # WHY this is not byte-verbatim like the other branches: `attachment_item_text` joins
+        # only the `text`-type blocks of a list-shaped prompt (matching what `extract_items`
+        # scores/inlines) -- an image or other non-text block in the same prompt is silently
+        # excluded from the returned string, same as the docstring above now says.
         if index != 0:
             return None
-        attachment = entry.get("attachment")
-        if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
-            return None
-        return jc._tool_result_text(attachment.get("prompt", "")) or None
+        return jc.attachment_item_text(entry)
     message = entry.get("message")
     content = (message.get("content") if isinstance(message, dict) else None) or entry.get("content")
     if isinstance(content, str):

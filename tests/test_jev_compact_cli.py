@@ -199,7 +199,10 @@ def test_expand_attachment_string_prompt(tmp_path: Path) -> None:
 def test_expand_attachment_block_list_prompt(tmp_path: Path) -> None:
     # An owner message with a pasted image alongside text: `attachment.prompt` is a list of
     # content blocks, same shape as `message.content` (TRDD-RAEGS1D5). Must join only the
-    # `text` blocks, exactly as `jc._tool_result_text` does for `extract_items`.
+    # `text` blocks, via `jc.attachment_item_text` -- the ONE shared rule `extract_items` and
+    # `expand` both call (TRDD-DQXMND59 follow-up, adversarial review of e23e0b39). Pins
+    # `_extract_block`'s own docstring, which now says plainly this is NOT byte-verbatim for a
+    # list-shaped prompt: the image block is silently excluded, only the text block comes back.
     prompt = [
         {"type": "text", "text": "go ahead and ship it"},
         {"type": "image", "source": {"type": "base64", "data": "..."}},
@@ -208,6 +211,7 @@ def test_expand_attachment_block_list_prompt(tmp_path: Path) -> None:
     code, out = _run(["expand", "--transcript", str(transcript), "att-1:0"])
     assert code == 0
     assert out.strip() == "go ahead and ship it"
+    assert "base64" not in out and "image" not in out  # the image block never leaks through
 
 
 def test_expand_attachment_non_queued_command_fails(tmp_path: Path) -> None:

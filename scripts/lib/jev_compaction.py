@@ -370,6 +370,33 @@ def _tool_result_text(content: Any) -> str:
     return ""
 
 
+def attachment_item_text(entry: dict[str, Any]) -> str | None:
+    """The item text for a `type: "attachment"` entry, or `None` if this attachment produces
+    no item at all -- the ONE place this rule is allowed to live.
+
+    TRDD-DQXMND59 follow-up (adversarial review of e23e0b39): before this function, the SAME
+    predicate -- "only `attachment.type == "queued_command"`, text = the joined text blocks of
+    `attachment.prompt`" -- was written out twice: once in `extract_items`'s own attachment
+    branch below, and once in `scripts/jev_compact.py::_extract_block` (which also reached
+    across the module boundary to call this file's PRIVATE `_tool_result_text` directly). Two
+    copies drift the moment one changes without the other: `expand` would start returning
+    "not found" for a real pointer (matrix row V2, TRDD-DQXMND59's own report), or accept an id
+    `extract_items` never actually generated (matrix row V10). Both call sites now call this
+    function instead of restating the rule.
+
+    `_tool_result_text` (not a plain string read) because TRDD-RAEGS1D5: `attachment.prompt`
+    is a plain str for a typed message, but a LIST of content blocks (text/image, same shape
+    as `message.content`) when the owner pastes an image alongside text -- measured on the
+    183 MB c8a95d7e transcript, whose crash was `is_control_input` calling `.strip()` on that
+    list. Fixed in af09571b by reusing `_tool_result_text`, the existing str-or-block-list
+    joiner, rather than assuming str.
+    """
+    attachment = entry.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+        return None
+    return _tool_result_text(attachment.get("prompt", "")) or None
+
+
 def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit]
 
@@ -830,18 +857,20 @@ def extract_items(
                 # Defect 4 (orchestrator scope extension): a mid-turn queued record -- the
                 # owner typed while a turn was running, or a task-notification was delivered
                 # mid-turn. Every other attachment kind (hook output, ...) is noise.
+                # TRDD-DQXMND59 follow-up: the type gate AND the prompt text-join both live in
+                # `attachment_item_text` now, the ONE place this rule is allowed to exist (see
+                # its own docstring) -- `expand` (`jev_compact.py::_extract_block`) calls the
+                # SAME function, so the two can never drift apart again.
+                text = attachment_item_text(entry)
+                if text is None:
+                    continue
                 attachment = entry.get("attachment")
-                if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
-                    continue
-                # TRDD-RAEGS1D5: `attachment.prompt` is a plain str for a typed message but a
-                # list of content blocks (text/image, same shape as `message.content`) when the
-                # owner pastes an image alongside text -- measured on the 183 MB c8a95d7e
-                # transcript, whose crash was `is_control_input` calling `.strip()` on that
-                # list. Reuse `_tool_result_text`, the existing str-or-block-list joiner, rather
-                # than assuming str.
-                text = _tool_result_text(attachment.get("prompt", ""))
-                if not text:
-                    continue
+                # A `continue` here would be a SILENT skip of a broken invariant: `text is not
+                # None` already proves `attachment_item_text` found `attachment` to be a dict
+                # (its own only non-None return path) -- this assert exists to satisfy the type
+                # checker's narrowing, not to handle a real case, so a failure means the
+                # invariant itself broke and must be loud, not swallowed like a normal skip.
+                assert isinstance(attachment, dict)
                 command_mode = attachment.get("commandMode")
                 att_origin = attachment.get("origin")
                 att_origin_kind = att_origin.get("kind") if isinstance(att_origin, dict) else None
