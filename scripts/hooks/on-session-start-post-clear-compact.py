@@ -261,7 +261,9 @@ def _main() -> int:
     # why the ordering is load-bearing.
     model_handoff = _recent_model_handoff(sd, key, transcript_path)
     plugin_root = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_PLUGIN_ROOT))
-    head_paths, heads_unavailable, in_flight_cards = jcl.state_head_paths(root, sd)
+    head_paths, heads_unavailable, in_flight_cards, other_open_ids_line = jcl.state_head_paths(
+        root, sd, transcript_path,
+    )
     heads_args = ["--state-heads", *head_paths] if head_paths else []
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
     # Card 5 two-renderings (TRDD-RAEGS1D5): the SEPARATE capped companion `jev_compact.py
@@ -271,6 +273,10 @@ def _main() -> int:
 
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
+    # TRDD-O2FNJ4KW: `in_flight_cards` is now only the top `jcl.TOP_CARD_COUNT` -- every other
+    # open card is still named, just on this one capped line rather than with its own title.
+    if other_open_ids_line:
+        findings.append(other_open_ids_line)
     inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
     # Computed BEFORE `run_compact` (TRDD-RAEGS1D5 retune follow-up): `tail` only needs
     # `transcript_path`, already known, and `compose_handoff_room` needs the SAME facts+tail

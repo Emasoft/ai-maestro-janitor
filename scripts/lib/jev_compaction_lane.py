@@ -44,6 +44,8 @@ import external_clear  # noqa: E402
 import findings_ledger  # noqa: E402
 import global_state  # noqa: E402
 import state  # noqa: E402
+import transcript_roles  # noqa: E402  -- stdlib-only, shared classifier (used by _scan_transcript_mentions)
+import trdd_common  # noqa: E402  -- stdlib-only (TERMINAL_COLUMNS), shared with the drift detectors
 
 _LOG = "session-summary"
 
@@ -68,11 +70,17 @@ EXIT_COMMAND_NOT_FOUND = 127
 PROBE_STAMP_NAME = "jev-probe.json"
 
 # Which board columns count as "in-flight" for STATE-head selection (brief: docs_dev/
-# jev-card3c-brief.md, C1). Cards outside these columns (backburner, complete, blocked, ...)
-# are not active work a resuming session needs restated.
-STATE_HEAD_COLUMNS = frozenset(
-    {"dev", "testing", "ai_review", "verify_assumptions", "plan", "dispatch"}
-)
+# jev-card3c-brief.md, C1). TRDD-O2FNJ4KW: no longer the sole candidate set for the top-6 cards
+# a resumed session is shown -- ALL non-terminal columns are candidates now (see
+# `_select_and_rank_cards`), a card the transcript actually mentions in `todo`/`live_auditing`/
+# etc. ranks ahead of a stale card sitting in one of these columns. This set is now only the
+# deterministic FILL-IN pool used when fewer than `TOP_CARD_COUNT` cards were mentioned at all.
+# A `frozenset` here was measured to iterate in a different order across three separate Python
+# processes (hash-randomized `PYTHONHASHSEED`), which made both the STATE-head list AND their
+# `build_digest` eviction order non-reproducible run to run -- a plain `tuple` fixes that (the
+# fill-in path below also re-sorts by `(column, id)` before use, so this tuple's own order is
+# belt-and-suspenders, not load-bearing on its own).
+STATE_HEAD_COLUMNS = ("dev", "testing", "ai_review", "verify_assumptions", "plan", "dispatch")
 
 # `trddgrep`'s bare board dump is ANSI-colored, human prose -- there is no machine-readable
 # board listing in the installed CLI (its own --help says `--porcelain` covers `show`/search
@@ -177,30 +185,195 @@ def _extract_state_section(show_output: str) -> str | None:
     return cleaned[idx:].strip()
 
 
+# TRDD-O2FNJ4KW mention regex: `TRDD-` followed by the 8-char uppercase-base36 id
+# (`trdd-design-tasks.md`'s own id grammar). Matched against RAW record text -- see
+# `_scan_transcript_mentions`'s own docstring for what counts as "the session's own work".
+_TRDD_MENTION_RE = re.compile(r"TRDD-([A-Z0-9]{8})")
+
+# How many of the mentioned/in-flight cards get a title + a STATE head in the facts section.
+# TRDD-O2FNJ4KW: a real run measured 19 cards listed (17 stale) with no cap and no relevance --
+# 6 is enough to name every card a typical session actually touches without the list itself
+# becoming the thing that needs summarizing.
+TOP_CARD_COUNT = 6
+
+# Byte cap for the "every other open card" line `_format_other_ids_line` builds (TRDD-O2FNJ4KW,
+# review corrections bullet 4). Sized as a small, fixed fraction of `LANE_INJECTION_MAX_BYTES`
+# (8192) -- this line names ids only (no titles, no STATE heads), so it never competes with the
+# summary body for room; ~300B holds roughly 20 bare 8-char ids before falling back to the
+# "and N more" form, comfortably above what any single session's own board churn produces.
+_OTHER_IDS_LINE_MAX_BYTES = 300
+_OTHER_IDS_LINE_TOOL_HINT = "trddgrep"
+
+
+def _record_scan_text(entry: dict) -> str:
+    """Text worth regex-scanning for a `TRDD-XXXXXXXX` mention out of ONE transcript record's
+    `message.content` -- a plain string, or the `text`/`tool_use` blocks of a content list.
+    `tool_result` (and any other block kind) is deliberately skipped: it is a board dump, a file
+    read, or another tool's own output landing back in the transcript, not something this
+    session's owner or assistant WROTE (TRDD-O2FNJ4KW review corrections bullet, `state_head_
+    paths` docstring)."""
+    content = entry.get("message", {}).get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            parts.append(block.get("text", ""))
+        elif btype == "tool_use":
+            # The assistant's OWN tool call (e.g. a `move <id>` or `edit <id>` argument) is the
+            # assistant's own work, unlike the `tool_result` that comes back from running it --
+            # `json.dumps` on the raw input is enough to regex-match an id embedded in any
+            # argument, string or not.
+            parts.append(json.dumps(block.get("input", "")))
+    return "\n".join(parts)
+
+
+def _scan_transcript_mentions(transcript_path: str) -> dict[str, int]:
+    """`{card_id: last_line_number_mentioned}` over the WHOLE transcript, one single streamed
+    pass (TRDD-O2FNJ4KW) -- never loads the file into memory (measured up to 258MB on this
+    project) and never re-parses a line whose raw bytes don't even contain `TRDD-`, which skips
+    the `json.loads`+`transcript_roles.classify_record` cost for the overwhelming majority of
+    lines (tool_result payloads, board dumps, file reads) before it's paid.
+
+    Counts ONLY text that reflects the session's OWN work, per the review corrections on
+    TRDD-O2FNJ4KW: the owner's own messages (`transcript_roles.classify_record(entry) ==
+    "human"`) and the assistant's own text/tool_use (any assistant record `classify_record`
+    doesn't call `"skip"` -- a sidechain subagent turn or hook-injected hidden context). A
+    `tool_result` block (a board dump, a file read) never counts even inside an otherwise-human
+    or otherwise-assistant record -- `_record_scan_text` already drops that block kind -- and
+    neither does a `notification`/`system`/`peer`-classified `user`-type record (a task
+    notification, a heartbeat fire, a hook's own typed command): those are NOT the session's own
+    words either, they are the harness/janitor talking to itself.
+
+    A malformed line (partial write, non-UTF8) is skipped, not fatal -- one bad line in a
+    multi-gigabyte transcript must never abort the whole scan."""
+    mentions: dict[str, int] = {}
+    try:
+        fh = open(transcript_path, "rb")  # noqa: SIM115 -- explicit close below, streamed read
+    except OSError:
+        return mentions
+    with fh:
+        for lineno, raw in enumerate(fh):
+            if b"TRDD-" not in raw:
+                continue
+            try:
+                entry = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(entry, dict):
+                continue
+            # Same `type` **or** `message.role` fallback `external_clear._record_text`'s own
+            # caller uses -- real transcripts always carry a top-level `type`, but fixtures (and
+            # this module's own tests) commonly omit it and set only `message.role`.
+            etype = entry.get("type") or (entry.get("message") or {}).get("role") or ""
+            if etype not in ("user", "assistant"):
+                continue
+            role = transcript_roles.classify_record(entry)
+            if etype == "user" and role != "human":
+                continue
+            if etype == "assistant" and role == "skip":
+                continue
+            text = _record_scan_text(entry)
+            for m in _TRDD_MENTION_RE.finditer(text):
+                mentions[m.group(1)] = lineno  # last position wins -- later lines overwrite
+    return mentions
+
+
+def _select_and_rank_cards(
+    by_col: dict[str, list[tuple[str, str]]], mentions: dict[str, int],
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """(top `TOP_CARD_COUNT` cards, every OTHER open card id) -- TRDD-O2FNJ4KW.
+
+    Candidates are every card in a NON-TERMINAL column (`trdd_common.TERMINAL_COLUMNS`), not
+    just `STATE_HEAD_COLUMNS` -- the bug this fixes is exactly that a `todo`/`live_auditing`
+    card the session actually worked sat outside that narrower set and was never shown. Cards
+    the transcript mentions rank first, most-recent mention first; when fewer than
+    `TOP_CARD_COUNT` were mentioned at all, the remainder is filled from `STATE_HEAD_COLUMNS`
+    (the in-flight work columns) in a fixed `(column, id)` order -- deterministic, so two runs
+    over the identical board+transcript always pick the identical top set."""
+    open_cards = [
+        (card_id, col, title)
+        for col, items in by_col.items()
+        if col not in trdd_common.TERMINAL_COLUMNS
+        for card_id, title in items
+    ]
+    # Explicit `(column, id)` tiebreak for two cards mentioned at the SAME line (review finding,
+    # TRDD-O2FNJ4KW): without it, Python's stable sort falls back to `open_cards`'s own order,
+    # which is `by_col.items()` insertion order -- itself a silent dependency on trddgrep's own
+    # column-dump rendering order. Naming the tiebreak here means a future trddgrep output-order
+    # change cannot silently reorder same-mention-position cards.
+    mentioned = sorted(
+        (c for c in open_cards if c[0] in mentions),
+        key=lambda c: (-mentions[c[0]], c[1], c[0]),
+    )
+    mentioned_ids = {c[0] for c in mentioned}
+    fill = sorted(
+        (c for c in open_cards if c[0] not in mentioned_ids and c[1] in STATE_HEAD_COLUMNS),
+        key=lambda c: (c[1], c[0]),
+    )
+    top = (mentioned + fill)[:TOP_CARD_COUNT]
+    top_ids = {c[0] for c in top}
+    other_ids = sorted(card_id for card_id, _col, _title in open_cards if card_id not in top_ids)
+    return top, other_ids
+
+
+def _format_other_ids_line(
+    other_ids: Sequence[str], cap: int = _OTHER_IDS_LINE_MAX_BYTES,
+) -> str:
+    """One line naming every OTHER open card id, comma-separated, bare (no titles) -- `""` when
+    there are none. Past `cap` bytes it stops and ends `and N more (trddgrep)` instead of
+    growing without bound (TRDD-O2FNJ4KW review corrections bullet 4): a card the session never
+    mentioned is the BOARD's business, not this handoff's, so naming it once on a bounded line
+    is enough for a resuming session to run `trddgrep` itself -- every id is still SURFACED,
+    never dropped without a trace, only NOT individually titled/state-headed."""
+    if not other_ids:
+        return ""
+    prefix = "other open cards: "
+    ids_str = ""
+    for i, card_id in enumerate(other_ids):
+        candidate = card_id if not ids_str else f"{ids_str}, {card_id}"
+        if len(candidate.encode("utf-8")) > cap:
+            remaining = len(other_ids) - i
+            tail = f"and {remaining} more ({_OTHER_IDS_LINE_TOOL_HINT})"
+            return f"{prefix}{ids_str}, {tail}" if ids_str else f"{prefix}{tail}"
+        ids_str = candidate
+    return f"{prefix}{ids_str}"
+
+
 def state_head_paths(
-    root: Path, sd: Path,
-) -> tuple[list[str], bool, list[tuple[str, str, str]]]:
-    """Paths of `<state_dir>/jev-heads/<id>.txt`, one per in-flight card's STATE block; whether
-    trddgrep was unavailable/failing (the caller's cue to note that in the injected header);
-    and the SAME cards as `(id, column, title)` tuples for `HandoffInputs.cards` -- reusing the
-    one board-dump call already made here rather than shipping an always-empty `cards=[]` whose
-    NEXT-ACTION prose ("read the first in-flight card below") would otherwise point at nothing
-    (review finding on TRDD-RAEGS1D5 C1). Never reads a TRDD file directly — every touch goes
+    root: Path, sd: Path, transcript: str = "",
+) -> tuple[list[str], bool, list[tuple[str, str, str]], str]:
+    """Paths of `<state_dir>/jev-heads/<id>.txt`, one per TOP card's STATE block; whether
+    trddgrep was unavailable/failing (the caller's cue to note that in the injected header); the
+    top `TOP_CARD_COUNT` cards as `(id, column, title)` tuples for `HandoffInputs.cards`, most-
+    recently-mentioned first; and one capped line naming every OTHER open card id
+    (`_format_other_ids_line`) -- TRDD-O2FNJ4KW superseded the old flat `STATE_HEAD_COLUMNS`
+    listing (see that constant's own comment): candidates are now every non-terminal-column
+    card, ranked by the session's OWN transcript mentions (`_scan_transcript_mentions`), not by
+    which column they happen to sit in. `transcript` defaults to `""` (no scan, mention-based
+    ranking degrades to the old in-flight-columns fill order) so a caller that hasn't got one
+    yet still gets a deterministic answer. Never reads a TRDD file directly — every touch goes
     through `trddgrep`."""
     exe = shutil.which("trddgrep")
     if not exe:
-        return [], True, []
+        return [], True, [], ""
     by_col = _board_ids_by_column(root)
     if by_col is None:
-        return [], True, []
-    cards = [
-        (card_id, col, title)
-        for col in STATE_HEAD_COLUMNS
-        for card_id, title in by_col.get(col, [])
-    ]
+        return [], True, [], ""
+    mentions = _scan_transcript_mentions(transcript) if transcript else {}
+    top, other_ids = _select_and_rank_cards(by_col, mentions)
+    other_line = _format_other_ids_line(other_ids)
     heads_dir = sd / "jev-heads"
     paths: list[str] = []
-    for card_id, _col, _title in cards:
+    # Least-relevant-first (TRDD-O2FNJ4KW review corrections bullet 5): `jev_compaction.py::
+    # build_digest` drops STATE heads from the FRONT of the list once the digest overruns its
+    # budget, so the MOST relevant top card must be LAST here to be the LAST one dropped.
+    for card_id, _col, _title in reversed(top):
         try:
             proc = subprocess.run(
                 [exe, "--design-dir", str(root / "design"), "show", card_id],
@@ -220,7 +393,7 @@ def state_head_paths(
         except OSError:
             continue
         paths.append(str(head_path))
-    return paths, False, cards
+    return paths, False, top, other_line
 
 
 def fmt_age(seconds: float) -> str:
@@ -413,6 +586,17 @@ def inject_max_bytes_for(room: int, transcript_path: str) -> int:
 # with_title_cap` below truncates every card's TITLE (never its id or column) toward "" instead --
 # the least load-bearing part of the line -- so every id survives no matter how much trimming is
 # needed.
+#
+# TRDD-O2FNJ4KW (2026-09-24) partially SUPERSEDES this ruling's SCOPE, not its substance: the
+# flat, unranked, uncapped `STATE_HEAD_COLUMNS` card list this ruling used to protect no longer
+# reaches this function at all -- `state_head_paths` now hands `trim_cards_for_room` only the
+# top `TOP_CARD_COUNT` (6) cards, ranked by the session's OWN transcript mentions, with every
+# OTHER open card named once on a separate, independently-capped one-line list
+# (`_format_other_ids_line`) instead. "Never drop a card, only shrink its title" still holds,
+# unchanged, for that top-6 set -- this function's own behaviour below is not touched by
+# TRDD-O2FNJ4KW at all. What changed is upstream: which cards are relevant enough to EARN a
+# title and a slot in `inputs.cards` in the first place, and the fact that a card that doesn't
+# earn one is still named (a bare id), never silently absent.
 #
 # (2) THE RETURNED VALUE IS NEVER FORCED ABOVE THE NATURALLY-COMPUTED ONE. Round 1's final
 # `return inputs, max(LANE_MIN_INJECT_BYTES, inject_max_bytes)` was itself unsafe: `inject_max_

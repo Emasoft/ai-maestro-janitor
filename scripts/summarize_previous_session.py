@@ -228,9 +228,15 @@ def _main(
     print(f"SUMMARY_HOLD_TAKEN {prev.name}")
     state.log_line(_LOG, f"holding this session while jev_compact compacts {prev.name}")
 
-    head_paths, heads_unavailable, in_flight_cards = jcl.state_head_paths(root, sd)
+    head_paths, heads_unavailable, in_flight_cards, other_open_ids_line = jcl.state_head_paths(
+        root, sd, str(prev),
+    )
     heads_args = ["--state-heads", *head_paths] if head_paths else []
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
+    # TRDD-O2FNJ4KW: `in_flight_cards` is now only the top `jcl.TOP_CARD_COUNT` -- every other
+    # open card is still named, just on this one capped line rather than with its own title.
+    if other_open_ids_line:
+        findings.append(other_open_ids_line)
 
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
     # Card 5 two-renderings (TRDD-RAEGS1D5) + TRDD-RAEGS1D5 retune follow-up: this detached lane

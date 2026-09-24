@@ -108,7 +108,7 @@ def test_consumes_fresh_sidecar_and_injects_real_compacted_context(tmp_path, mon
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -183,7 +183,7 @@ def test_keyed_handoff_gets_the_full_document_injection_gets_the_capped_one(tmp_
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -243,7 +243,7 @@ def test_missing_inject_out_falls_back_to_the_full_document_not_the_template(tmp
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -310,7 +310,7 @@ def test_empty_inject_out_gets_a_marked_line_not_silence_or_the_full_document(
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -389,7 +389,7 @@ def test_marker_only_inject_out_also_gets_the_marked_line_not_passed_through(
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -463,7 +463,7 @@ def test_compose_failure_writes_the_template_marker(tmp_path, monkeypatch):
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -508,7 +508,7 @@ def test_compose_failure_spawns_the_detached_retry_fallback_lane_with_transcript
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import subprocess as _subprocess
 
@@ -585,7 +585,7 @@ def test_large_compacted_context_still_injects_under_9000_bytes(tmp_path, monkey
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -641,7 +641,7 @@ def test_large_multibyte_compacted_context_stays_under_9000_bytes_with_no_split_
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -698,7 +698,7 @@ def test_computed_inject_max_bytes_matches_room_and_summary_is_not_sliced(tmp_pa
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -710,7 +710,7 @@ def test_computed_inject_max_bytes_matches_room_and_summary_is_not_sliced(tmp_pa
     assert rc == 0
 
     # Independently compute the SAME room the hook must have computed, from the SAME inputs
-    # (empty findings/cards -- `state_head_paths` was stubbed to `([], False, [])` above).
+    # (empty findings/cards -- `state_head_paths` was stubbed to `([], False, [], "")` above).
     # `now_iso`'s exact clock reading does not matter to the byte count, only its fixed
     # strftime length, so a fresh call here reproduces the same byte total the hook's own
     # (differently-timed) call produced.
@@ -764,7 +764,7 @@ def test_card_heavy_facts_section_keeps_every_id_and_shortens_titles_first(tmp_p
     # the fix's own behaviour on it.
     long_title = ("a very long TRDD title describing exactly what this card is about " * 20)[:750]
     cards = [(f"CARD{i:04d}", "dev", long_title) for i in range(10)]
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, cards))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, cards, ""))
 
     small_doc = (
         "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Kept items\n"
@@ -1030,7 +1030,7 @@ def test_iterm_session_id_prefix_is_stripped_to_match_writer_side_pane_key(tmp_p
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -1073,7 +1073,7 @@ def test_tmux_wins_over_iterm_when_both_env_vars_are_set(tmp_path, monkeypatch):
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -1125,7 +1125,7 @@ def test_declines_fast_on_a_fresh_unreachable_probe_stamp_without_spawning_jev_c
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -1248,7 +1248,7 @@ def test_a_model_authored_handoff_before_the_clear_is_named_in_the_injection(tmp
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io
@@ -1281,7 +1281,7 @@ def test_no_recent_model_handoff_omits_the_line(tmp_path, monkeypatch):
 
     mod = _import()
     monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     import contextlib
     import io

@@ -306,7 +306,7 @@ def test_exit_0_writes_a_composed_handoff_and_releases_the_hold(tmp_path, monkey
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     rc = sps.main()
     assert rc == 0
@@ -383,7 +383,7 @@ def test_exit_0_prefers_the_capped_inject_out_companion_over_the_full_document(
     )
     _stub_jev_compact_two_docs(plugin_root, full_text=full_text, inject_text=inject_text)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     rc = sps.main()
     assert rc == 0
@@ -451,7 +451,7 @@ def test_card_heavy_facts_section_keeps_every_id_and_shortens_titles_first(
     # inputs (a different `prev` transcript/tail than the hook's fixture uses).
     long_title = ("a very long TRDD title describing exactly what this card is about " * 20)[:750]
     cards = [(f"CARD{i:04d}", "dev", long_title) for i in range(10)]
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, cards))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, cards, ""))
 
     small_doc = (
         "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Kept items\n"
@@ -553,7 +553,7 @@ def test_nonzero_exit_maps_to_the_right_finding(
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=exit_code)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     if stamp is not None:
         _write_probe_stamp(**stamp)
     # A transient/rate-limited kind retries inside the 5-minute budget -- the fake clock makes
@@ -591,7 +591,7 @@ def test_kind_rate_limited_with_retry_after_is_medium(tmp_path, monkeypatch, _is
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     _write_probe_stamp(kind="rate_limited", reason="429", retry_after_s=42)
     clock = _fake_clock()
 
@@ -614,7 +614,7 @@ def test_kind_rate_limited_without_retry_after_falls_back_to_unavailable(
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     _write_probe_stamp(kind="rate_limited", reason="429 no window given")
     clock = _fake_clock()
 
@@ -633,7 +633,7 @@ def test_auth_finding_deduped_on_the_same_reason(tmp_path, monkeypatch, _isolate
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     _write_probe_stamp(kind="auth", reason="401 invalid key")
 
     from external_handoff_clear import _release_summary_hold  # noqa: PLC0415
@@ -681,7 +681,7 @@ def test_blocked_finding_deduped_by_content_across_two_sessions(tmp_path, monkey
     project_dir = _isolated_env
     plugin_root = tmp_path / "plugin"
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     same_digest = "cd" * 32
     _stub_jev_compact(
         plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC,
@@ -727,7 +727,7 @@ def test_timeout_expired_is_a_high_bug_finding(tmp_path, monkeypatch, _isolated_
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     # No `llm_ext_compact.py` under this empty plugin root: the llm-ext fallback (owner review
     # finding #4) now runs via `subprocess.Popen`, not `subprocess.run` -- it is no longer
     # covered by the `subprocess.run` monkeypatch below, so it must be neutralized separately
@@ -767,7 +767,7 @@ def test_transient_failure_retries_more_than_once_then_llm_ext_fallback_succeeds
     _stub_jev_compact_appending(plugin_root, argv_log, exit_code=jcl.EXIT_JEV_ERROR)
     _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary")
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     _write_probe_stamp(kind="unreachable", reason="DNS resolution failed")
     clock = _fake_clock()
 
@@ -806,7 +806,7 @@ def test_auth_failure_falls_back_to_llm_ext_without_waiting(tmp_path, monkeypatc
     _stub_jev_compact_appending(plugin_root, argv_log, exit_code=jcl.EXIT_JEV_ERROR)
     _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary")
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     _write_probe_stamp(kind="auth", reason="401 invalid key")
     clock = _fake_clock()
     start = clock.now
@@ -835,7 +835,7 @@ def test_rate_limited_retry_after_exceeding_the_budget_falls_back_immediately(
     _stub_jev_compact_appending(plugin_root, argv_log, exit_code=jcl.EXIT_JEV_ERROR)
     _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary")
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     # retry_after_s (1000s) comfortably exceeds the whole default 300s retry budget.
     _write_probe_stamp(kind="rate_limited", reason="429", retry_after_s=1000)
     clock = _fake_clock()
@@ -864,7 +864,7 @@ def test_jev_timeout_is_never_retried_falls_straight_to_llm_ext(tmp_path, monkey
     plugin_root = tmp_path / "plugin"
     _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary")
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     real_run = subprocess.run
     jev_calls = {"n": 0}
@@ -933,13 +933,17 @@ def _install_stub_trddgrep(bin_dir: Path, monkeypatch) -> None:
     monkeypatch.setenv("PATH", f"{bin_dir}:{sys.exec_prefix}/bin")
 
 
-def test_state_heads_written_for_in_flight_columns_only(tmp_path, monkeypatch, _isolated_env):
+def test_state_heads_written_for_unmentioned_in_flight_fill_only(tmp_path, monkeypatch, _isolated_env):
+    """TRDD-O2FNJ4KW: with no transcript passed (no mentions at all), the top set falls back to
+    the old deterministic in-flight-columns fill -- the DEV card qualifies, the BACKBURNER one
+    doesn't (not an in-flight column) but is still named on the "other open cards" line, never
+    silently dropped."""
     project_dir = _isolated_env
     (project_dir / "design" / "tasks").mkdir(parents=True)
     _install_stub_trddgrep(tmp_path / "bin", monkeypatch)
 
     sd = state.state_dir()
-    paths, unavailable, cards = jcl.state_head_paths(project_dir, sd)
+    paths, unavailable, cards, other_line = jcl.state_head_paths(project_dir, sd)
 
     assert unavailable is False
     assert len(paths) == 1  # only the DEV card, never the BACKBURNER one
@@ -948,19 +952,149 @@ def test_state_heads_written_for_in_flight_columns_only(tmp_path, monkeypatch, _
     assert "STATE" in text
     assert "fake state line for ABCDEF12" in text
 
-    # `cards` reuses the SAME board dump -- (id, column, title), restricted to the in-flight
-    # columns, so `HandoffInputs.cards` is never silently empty when real cards exist (review
-    # finding on TRDD-RAEGS1D5 C1).
+    # `cards` reuses the SAME board dump -- (id, column, title) -- so `HandoffInputs.cards` is
+    # never silently empty when real cards exist (review finding on TRDD-RAEGS1D5 C1).
     assert cards == [("ABCDEF12", "dev", "A fake in-flight card")]
+    # BACKBURNER never earns a title/STATE head here, but it is still SURFACED -- TRDD-O2FNJ4KW's
+    # whole point is that an unmentioned open card is named, not dropped.
+    assert "ZZZZZZZZ" in other_line
 
 
 def test_state_heads_unavailable_when_trddgrep_absent(tmp_path, monkeypatch, _isolated_env):
     monkeypatch.setenv("PATH", "/nonexistent-bin-only")
     sd = state.state_dir()
-    paths, unavailable, cards = jcl.state_head_paths(_isolated_env, sd)
+    paths, unavailable, cards, other_line = jcl.state_head_paths(_isolated_env, sd)
     assert paths == []
     assert unavailable is True
     assert cards == []
+    assert other_line == ""
+
+
+# --- TRDD-O2FNJ4KW: ranking the top cards by the session's OWN transcript mentions ----------
+
+
+_RANK_TRDDGREP_STUB = """#!/usr/bin/env python3
+import sys
+
+argv = sys.argv[1:]
+if "show" in argv:
+    card_id = argv[argv.index("show") + 1]
+    print(card_id + " P? fake card")
+    print("  design/tasks/fake.md")
+    print()
+    print("  \\u23f5 STATE (authoritative)")
+    print()
+    print("  - fake state line for " + card_id)
+else:
+    print("1 open cards (design/tasks)")
+    print("\\u2550\\u2550\\u2550 TODO (1)")
+    print("  K0PMVRN6 P? todo          Mentioned only in assistant text")
+    print("\\u2550\\u2550\\u2550 LIVE_AUDITING (1)")
+    print("  WZKFSQ2N P? live_auditing Mentioned only in a tool_use input")
+    print("\\u2550\\u2550\\u2550 DEV (1)")
+    print("  ABCDEF12 P? dev           Never mentioned, in-flight fallback")
+    print("\\u2550\\u2550\\u2550 TESTING (1)")
+    print("  STALE001 P? testing       Never mentioned, stale in-flight fallback")
+sys.exit(0)
+"""
+
+
+def _install_rank_stub_trddgrep(bin_dir: Path, monkeypatch) -> None:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = bin_dir / "trddgrep"
+    stub.write_text(_RANK_TRDDGREP_STUB, encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{sys.exec_prefix}/bin")
+
+
+def _write_transcript(tmp_path: Path, lines: list[dict]) -> Path:
+    p = tmp_path / "rank-transcript.jsonl"
+    p.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    return p
+
+
+def test_mention_in_assistant_text_ranks_above_unmentioned_in_flight_card(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "Working TRDD-K0PMVRN6 now."},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+
+    # The mentioned card leads the list; the never-mentioned in-flight fallback cards follow.
+    assert cards[0][0] == "K0PMVRN6"
+    ids = [c[0] for c in cards]
+    assert ids.index("K0PMVRN6") < ids.index("ABCDEF12")
+    assert "WZKFSQ2N" in other_line  # not mentioned, not an in-flight column -- named, not lost
+
+
+def test_mention_only_in_tool_result_or_hook_record_does_not_count(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = _write_transcript(tmp_path, [
+        # A tool_result (e.g. a board dump) mentioning WZKFSQ2N must NOT count as a mention.
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "board dump: TRDD-WZKFSQ2N in live_auditing"},
+        ]}},
+        # A janitor-typed automation command mentioning K0PMVRN6 must NOT count either --
+        # `origin.kind` "system"/automation, never the owner's own words.
+        {"type": "user", "origin": {"kind": "auto-continuation"},
+         "message": {"role": "user", "content": "see TRDD-K0PMVRN6"}},
+    ])
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+
+    ids = {c[0] for c in cards}
+    assert "WZKFSQ2N" not in ids
+    assert "K0PMVRN6" not in ids
+    # Both fall back to the deterministic in-flight fill/other-line path, same as no mentions.
+    assert "WZKFSQ2N" in other_line
+
+
+def test_state_head_ranking_order_is_deterministic_across_two_runs(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "TRDD-K0PMVRN6 and TRDD-WZKFSQ2N both open."},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    first = jcl.state_head_paths(project_dir, sd, str(transcript))
+    second = jcl.state_head_paths(project_dir, sd, str(transcript))
+    assert [c[0] for c in first[2]] == [c[0] for c in second[2]]
+    assert first[3] == second[3]
+
+
+def test_other_ids_line_caps_and_names_the_remainder():
+    many_ids = [f"ID{i:06d}" for i in range(50)]
+    line = jcl._format_other_ids_line(many_ids, cap=40)
+    assert line.startswith("other open cards: ")
+    assert "and " in line and "more (trddgrep)" in line
+    assert len(line.split("other open cards: ", 1)[1].rsplit(", and", 1)[0].encode("utf-8")) <= 40 + 2
+
+    short_line = jcl._format_other_ids_line(["ONLYONE1"], cap=300)
+    assert short_line == "other open cards: ONLYONE1"
+    assert jcl._format_other_ids_line([]) == ""
 
 
 def test_heads_unavailable_note_lands_in_the_written_handoff(tmp_path, monkeypatch,
@@ -1035,7 +1169,7 @@ def test_transcript_flag_skips_the_pane_claim_check_and_the_guess(tmp_path, monk
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     rc = sps.main(["--transcript", str(explicit)])
 
@@ -1137,7 +1271,7 @@ def test_stale_consumed_pane_sidecar_does_not_block_composing_forever(
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     assert sps.main() == 0
     assert handoff_files.newest_group(sd), "a stale consumed marker must not block a real compose"
@@ -1162,7 +1296,7 @@ def test_a_stale_pane_sidecar_for_a_DIFFERENT_pane_does_not_block_composing(
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     assert sps.main() == 0
     assert handoff_files.newest_group(sd), "this pane's own transcript must still compose"
@@ -1185,7 +1319,7 @@ def test_template_marked_handoff_does_not_count_as_already_summarized(
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     assert sps.main() == 0
     texts = [p.read_text(encoding="utf-8") for p in handoff_files.newest_group(sd)]
@@ -1229,7 +1363,7 @@ def test_overlapping_lanes_release_only_the_matching_key(tmp_path, monkeypatch, 
     assert key_a != key_b
 
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev_a)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
@@ -1268,7 +1402,7 @@ def test_exit_6_no_digest_never_tries_llm_ext_fallback(tmp_path, monkeypatch, _i
     plugin_root = tmp_path / "plugin"
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=jcl.EXIT_DECLINED_NO_DIGEST)
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     def _boom(*_a, **_kw):
         raise AssertionError("exit 6 (no digest) must never try the llm-ext fallback")
@@ -1296,7 +1430,7 @@ def test_exit_127_command_not_found_never_tries_llm_ext_fallback(
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
     plugin_root = tmp_path / "plugin"
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
 
     real_run = subprocess.run
 
@@ -1345,7 +1479,7 @@ def test_llm_ext_fallback_handoff_declares_itself_not_verbatim_jev_output(
     _stub_jev_compact_appending(plugin_root, argv_log, exit_code=jcl.EXIT_JEV_ERROR)
     _stub_llm_ext_compact(plugin_root, text="the fallback prose")
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     _write_probe_stamp(kind="auth", reason="401 invalid key")  # non-retryable -> fast fallback
 
     assert sps.main() == 0
@@ -1382,7 +1516,7 @@ def test_lane_actually_retries_through_a_decline_gate_mimicking_stub(
     _stub_jev_compact_decline_gate(plugin_root, argv_log, stamp_path)
     _stub_llm_ext_compact(plugin_root, text="llm-ext fallback summary")
     monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
-    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd: ([], False, []))
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     clock = _fake_clock()
 
     rc = sps.main(now_fn=clock.time, sleep_fn=clock.sleep)
