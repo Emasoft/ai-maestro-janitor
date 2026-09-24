@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util as _u
 import json
+import re
 import sys
 import time
 from collections.abc import Iterator
@@ -1305,6 +1306,40 @@ def test_compact_run_twice_for_the_same_session_and_transcript_does_not_double_t
     rows = [json.loads(line) for line in jsl.shadow_log_path().read_text(encoding="utf-8").splitlines() if line]
     admit_rows = [r for r in rows if r["kind"] == "admit"]
     assert len(admit_rows) == 3  # still just the FIRST run's worth, not six
+
+
+def test_compact_completes_normally_when_the_shadow_log_write_raises(
+    tmp_path: Path, _isolated_project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coordinator's decision on the previously-flagged review finding: the shadow log must
+    never break a compaction AND never fail silently. Forces jsl's zip-mismatch guard to raise
+    (monkeypatching `ShadowLog.entries` to return one extra row -- the same mechanism
+    test_jev_shadow_log.py's own unit test uses) through the REAL `compact` CLI path, and
+    asserts: exit 0, the real `--out` file is written (the compaction itself completes), one
+    stderr line names the exception, and the summary line carries `shadow_log_failed=1`
+    appended strictly AFTER `blocked=…/blocked_digest=…` so `jev_compaction_lane.py`'s own
+    (untouched) regex over those two fields keeps matching."""
+    real_entries = ShadowLog.entries
+
+    def entries_with_one_extra(self: ShadowLog) -> list[dict[str, Any]]:
+        rows = real_entries(self)
+        return [*rows, dict(rows[0])] if rows else rows
+
+    monkeypatch.setattr(ShadowLog, "entries", entries_with_one_extra)
+
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert out.exists()  # the real compaction output was still written
+    assert "jev-shadow: ValueError" in output  # names the exception type on stderr
+    assert re.search(
+        r"blocked=\d+ blocked_digest=\S* segmentation_failed=\d+ shadow_log_failed=1", output,
+    )
 
 
 def test_replay_subcommand_prints_shadow_stats(

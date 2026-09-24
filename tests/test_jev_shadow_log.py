@@ -332,6 +332,42 @@ def test_log_decisions_redacts_a_secret_cut_at_the_truncation_boundary(project_d
             "MIIEowIBAAKCAQEA",
             id="private-key-block",
         ),
+        # Coordinator, fourth follow-up: four more shapes.
+        pytest.param(
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fw",
+            "SflKxwRJSMeKKF2QT4fw",
+            id="jwt",
+        ),
+        pytest.param(
+            "found this in env: api_key=TopSecretValue123 (not password/secret/token)",
+            "TopSecretValue123",
+            id="key-name-substring-api_key=",
+        ),
+        pytest.param(
+            "cfg apikey:TopSecretValue123zz here", "TopSecretValue123zz", id="key-name-substring-apikey:",
+        ),
+        pytest.param(
+            "export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+            "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+            id="key-name-substring-AWS_SECRET_ACCESS_KEY=",
+        ),
+        pytest.param(
+            "blob dump: " + "Qk7xZ9mP2vT8wL4nR1sV6yB3dF0hJ5kM9pS2uX7zA4cE8g" + " end",
+            "Qk7xZ9mP2vT8wL4nR1sV6yB3dF0hJ5kM9pS2uX7zA4cE8g",
+            id="high-entropy-blob-no-prefix",
+        ),
+        # Review fork, fourth pass: a hex-shaped secret (digit + one letter case -- 2 classes,
+        # not 3) was invisible to the original all-3-classes gate.
+        pytest.param(
+            "sha ref: " + "a3f9c2b8e1d4567890abcdef1234567890abcdef" + " end",
+            "a3f9c2b8e1d4567890abcdef1234567890abcdef",
+            id="high-entropy-blob-hex-shaped",
+        ),
+        # Review fork, fourth pass: a JSON credential dump's closing key-quote used to sit
+        # between the keyword and the separator, breaking the match entirely.
+        pytest.param(
+            '{"api_key": "TopSecretValue123456"}', "TopSecretValue123456", id="json-quoted-key",
+        ),
     ],
 )
 def test_log_decisions_redacts_generic_secret_shapes(
@@ -348,6 +384,36 @@ def test_log_decisions_redacts_generic_secret_shapes(
     preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
     assert forbidden not in preview
     assert "[REDACTED]" in preview
+
+
+def test_log_decisions_redacts_url_credentials_keeping_scheme_and_host(project_dir: Path) -> None:
+    """Coordinator, fourth follow-up: `://user:pass@host` becomes `://[REDACTED]@host` --
+    the exact worked example -- not a blanket whole-match wipe of the scheme/host too."""
+    text = "clone with postgres://dbadmin:hunter2VerySecret@db.internal.example:5432/app"
+    items = [_item("u-1:0", kind="assistant", text=text)]
+    scores = {"u-1:0": _score(relevance=0.5, kept=True)}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
+    assert "dbadmin" not in preview
+    assert "hunter2VerySecret" not in preview
+    assert "://[REDACTED]@db.internal.example:5432/app" in preview  # scheme + host preserved
+
+
+def test_safe_preview_boundary_mask_keeps_earlier_path_segments_intact(project_dir: Path) -> None:
+    """Coordinator: "a path cut mid-segment at the 200-character boundary keeps its earlier
+    segments" -- `_PARTIAL_TOKEN_TAIL_RE` only matches a run of alnum/dash/underscore
+    characters ending at the cut, and `/` is not in that character class, so an earlier
+    `/`-delimited segment survives even when the final segment is left unfinished by the cut."""
+    prefix = "/opt/service/config/release-branch/"
+    tail = "very-long-directory-segment-name-that-keeps-going-" * 4  # crosses the 200-char cut
+    items = [_item("u-1:0", kind="assistant", text=prefix + tail)]
+    scores = {"u-1:0": _score(relevance=0.5, kept=True)}
+    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
+
+    preview = _read_jsonl(jsl.shadow_log_path())[0]["text_preview"]
+    assert prefix in preview  # every earlier "/"-delimited segment survives, untouched
+    assert preview.endswith("[TRUNC]")  # the unfinished LAST segment is masked
 
 
 def test_log_decisions_opens_the_shadow_log_exactly_once_regardless_of_item_count(
@@ -508,16 +574,16 @@ def test_batched_records_round_trip_through_vendored_load_and_replay(project_dir
     assert replayed.total == 14
 
 
-def test_log_decisions_record_text_count_mismatch_degrades_gracefully(
-    project_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+def test_log_decisions_record_text_count_mismatch_raises_not_drops_silently(
+    project_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Review fork, third pass: `zip(records, raw_texts, strict=True)` protects against a
-    future maintenance slip that desyncs the two lists, but its `ValueError` is not an
-    `OSError` -- unguarded it would propagate out of `log_decisions` and break the CALLER's
-    compaction. Forces a length mismatch (monkeypatching `ShadowLog.entries` to return one
-    extra row) and asserts this degrades exactly like a write failure already does: a stderr
-    line, nothing raised, and -- critically -- nothing written (never fall back to writing the
-    vendor's own unredacted preview)."""
+    """Coordinator, fourth follow-up: "the zip-mismatch guard raises; it never drops records
+    silently" -- supersedes the previous round's print-and-return. Forces a length mismatch
+    (monkeypatching `ShadowLog.entries` to return one extra row) and asserts `log_decisions`
+    RAISES `ValueError` (from `zip(..., strict=True)`, deliberately left uncaught by this
+    function's own `except OSError`) rather than silently skipping the batch -- and that
+    nothing is written either way (never fall back to writing the vendor's own unredacted
+    preview)."""
     real_entries = ShadowLog.entries
 
     def entries_with_one_extra(self: ShadowLog) -> list[dict[str, Any]]:
@@ -528,11 +594,10 @@ def test_log_decisions_record_text_count_mismatch_degrades_gracefully(
 
     items = [_item("u-1:0", kind="assistant", text="hello")]
     scores = {"u-1:0": _score()}
-    jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)  # must not raise
+    with pytest.raises(ValueError, match="zip"):
+        jsl.log_decisions(items, scores, relevance_threshold=0.5, decision_threshold=0.5)
 
-    err = capsys.readouterr().err
-    assert "mismatch" in err
-    assert not jsl.shadow_log_path().exists()  # nothing written for this batch
+    assert not jsl.shadow_log_path().exists()  # nothing written, not even a partial batch
 
 
 # --- write failure never breaks the caller -------------------------------------------------- #

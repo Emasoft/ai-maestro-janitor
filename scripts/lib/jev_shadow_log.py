@@ -42,7 +42,7 @@ import os
 import re
 import sys
 import tempfile
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -75,14 +75,36 @@ from serverless_function_patterns import _KNOWN_SECRET_RE as _SECRET_VALUE_RE
 # escaped redaction entirely, exactly this log's own threat model (transcript text, not a
 # config file). Fixed by matching a QUOTED value (any run inside matching quotes, punctuation
 # and spaces included) as its own alternative, ahead of the unquoted fallback.
+#
+# Coordinator, third follow-up (review of commit a07473b2): four more shapes still leaked.
+# Every quantifier here is bounded (RE2-style, matching this codebase's own convention -- see
+# cicd_secret_leak_patterns.py's own header) so none of these can run unbounded across a whole
+# preview -- "anchored" per the coordinator's own instruction.
+#
+# `\w*(?:pass|secret|token|key)\w*` is a deliberate SUBSTRING, case-insensitive match (the
+# coordinator's own spec) so `api_key=`, `apikey:` and `AWS_SECRET_ACCESS_KEY=` are all
+# covered, not just the four exact words the first draft matched -- the greedy `\w*` on both
+# sides naturally expands to the WHOLE surrounding identifier (regex backtracking finds the
+# widest `\w*...\w*` split around the keyword), not just the matched substring itself. This
+# over-redacts prose that merely contains one of these words ("monkey:" would match "key") --
+# accepted per the same principle already established for `_PARTIAL_TOKEN_TAIL_RE`: for a
+# preview whose entire purpose is calibration debugging, not verbatim record-keeping,
+# over-redaction is the correct failure direction for a security control.
+#
+# Review fork (fourth pass) caught a real gap: a JSON credential dump -- `{"api_key": "x"}` --
+# has the KEY's own closing quote sitting between the keyword and the separator, which the
+# original `\s*[:=]` required to follow the keyword directly. `['\"]?` between the keyword and
+# the separator covers exactly that quoted-JSON-key shape (API response bodies, curl output,
+# config dumps -- a common transcript/tool-output shape) without changing anything for the
+# unquoted `key=`/`key:` forms, where it simply matches zero characters.
 _GENERIC_KV_SECRET_RE = re.compile(
-    r"(?i:\b(?:password|passwd|secret|token)\s*[:=]\s*)"
-    r"(?:\"[^\"\n]{3,}\"|'[^'\n]{3,}'|[A-Za-z0-9_\-+/=]{6,})"
+    r"(?i:\w{0,64}(?:pass|secret|token|key)\w{0,64}['\"]?\s*[:=]\s*)"
+    r"(?:\"[^\"\n]{1,512}\"|'[^'\n]{1,512}'|[A-Za-z0-9_\-+/=]{6,512})"
 )
-_BEARER_TOKEN_RE = re.compile(r"(?i:\bauthorization\s*:\s*bearer\s+)[A-Za-z0-9\-._~+/=]{8,}")
+_BEARER_TOKEN_RE = re.compile(r"(?i:\bauthorization\s*:\s*bearer\s+)[A-Za-z0-9\-._~+/=]{8,512}")
 _PRIVATE_KEY_BLOCK_RE = re.compile(
     r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"
-    r".*?"
+    r".{1,65536}?"  # bounded, not `.*?` -- a real key body is at most a few KB, never unbounded
     r"-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----",
     re.DOTALL,  # a real PEM block spans many lines -- `.` must cross them to match the whole thing
 )
@@ -94,10 +116,68 @@ _PRIVATE_KEY_BLOCK_RE = re.compile(
 # pattern here to anchor on. No per-item redaction pass can close this without carrying state
 # across the whole batch, which none of these patterns attempt; flagged, not fixed, since it is
 # a different (cross-item) problem than the one this follow-up was scoped to.
-_GENERIC_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    _PRIVATE_KEY_BLOCK_RE,  # multi-line, run first so a narrower pattern can't split it apart
-    _BEARER_TOKEN_RE,
-    _GENERIC_KV_SECRET_RE,
+#
+# `://user:pass@host` (coordinator's own worked example: becomes `://[REDACTED]@host`, host
+# preserved) -- captures the `://` and `@` delimiters so the substitution can keep them and
+# blank only the credential pair between them.
+_URL_CREDENTIALS_RE = re.compile(r"(://)[^\s/@:]{1,256}:[^\s/@]{1,256}(@)")
+# A JWT: three dot-separated base64url segments, the first always starting `eyJ` (base64 of
+# `{"`) -- the coordinator's own literal shape, bounded per-segment.
+_JWT_RE = re.compile(r"\beyJ[\w-]{1,1024}\.[\w-]{1,1024}\.[\w-]{1,1024}")
+# A bare high-entropy/base64 blob with NO recognized prefix at all -- the one class every
+# pattern above (and `_KNOWN_SECRET_RE`) misses by construction, since they all key off a
+# known prefix or keyword. Context-free by design (the coordinator's own spec), so it is
+# ordered LAST: every more specific pattern above gets first claim on a match, and this only
+# mops up whatever 40+ character run of secret-shaped characters is still raw afterward.
+#
+# The coordinator's own character class (`[A-Za-z0-9+/=_-]`, needed so real base64's `/` and
+# `=` padding are covered) ALSO matches perfectly ordinary low-entropy text contiguously -- a
+# lowercase file path or dash-joined slug is drawn from the exact same alphabet ("/" included)
+# and can run past 40 characters easily. A bare length+charset test caught here on this
+# project's own coordinator-supplied path/segment boundary test: the WHOLE 244-character
+# "/opt/.../very-long-directory-segment..." path matched as one run and was wiped down to a
+# single "[REDACTED]", failing the coordinator's own "keeps its earlier segments" requirement.
+# Fixed with the same discriminator scripts/detectors/memory-scope-leak.py's own
+# `_generic_secret_shape` already uses for exactly this problem: a real secret mixes several
+# of {lowercase, uppercase, digit} in one run; a path/slug is overwhelmingly ONE class (an
+# all-lowercase path, all this file's own tests exercise). `_redact_high_entropy_match` is a
+# `re.sub` REPLACEMENT CALLABLE (not a plain string) so only a candidate that clears this bar
+# is actually blanked -- everything else is returned unchanged, matched but not modified.
+#
+# Review fork (fourth pass) caught a real gap in a first draft that required all 3 classes: a
+# HEX-encoded secret (a git SHA, an MD5/SHA-shaped token, hex-encoded API keys -- a common real
+# shape) is only 2 classes (digits + one letter case) and was invisible to it. Lowered to >= 2:
+# still excludes a plain lowercase path/slug (1 class), now also catches a hex-shaped secret.
+_HIGH_ENTROPY_BLOB_RE = re.compile(r"[A-Za-z0-9+/=_-]{40,2048}")
+_HIGH_ENTROPY_MIN_CLASSES = 2
+
+
+def _redact_high_entropy_match(m: re.Match[str]) -> str:
+    candidate = m.group(0)
+    classes = (
+        any(c.islower() for c in candidate)
+        + any(c.isupper() for c in candidate)
+        + any(c.isdigit() for c in candidate)
+    )
+    return "[REDACTED]" if classes >= _HIGH_ENTROPY_MIN_CLASSES else candidate
+
+
+# Most patterns replace their WHOLE match with "[REDACTED]"; `_URL_CREDENTIALS_RE` needs its
+# own template (`\1`/`\2` are the `://`/`@` delimiters it captured) to keep the coordinator's
+# exact worked example (`://[REDACTED]@host`, not `[REDACTED]host`), and the high-entropy blob
+# needs a CALLABLE (see its own comment above) rather than an unconditional string -- `re.sub`
+# accepts either. Order: the multi-line PEM block first (so a narrower pattern can't split it
+# apart), then the more CONTEXTUAL patterns (a match tied to a keyword/prefix/URL shape), then
+# the context-free high-entropy catch-all last -- by the time it runs, every contextual secret
+# is already "[REDACTED]" (10 chars, well under its own 40-char floor) and cannot be
+# re-matched or double-counted.
+_GENERIC_SECRET_SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str | Callable[[re.Match[str]], str]], ...] = (
+    (_PRIVATE_KEY_BLOCK_RE, "[REDACTED]"),
+    (_URL_CREDENTIALS_RE, r"\1[REDACTED]\2"),
+    (_JWT_RE, "[REDACTED]"),
+    (_BEARER_TOKEN_RE, "[REDACTED]"),
+    (_GENERIC_KV_SECRET_RE, "[REDACTED]"),
+    (_HIGH_ENTROPY_BLOB_RE, _redact_high_entropy_match),
 )
 
 __all__ = [
@@ -237,15 +317,15 @@ def _rotate_if_oversized(path: Path) -> None:
 def _redact_text(text: str) -> str:
     """Defect 1 (review): a decision record's preview is raw transcript/tool-output text -- an
     API key or AWS credential pasted into a tool result would land in this file verbatim
-    otherwise. Runs `_SECRET_VALUE_RE` (the vendor-prefix reuse) plus the four generic shapes
-    above (see their own comment). `text_sha256` is left hashing the REAL text throughout. A
-    hash is not the same exposure as a plaintext preview -- it can't be read back -- but it is
-    not a zero-risk residual either: post-write review noted that anyone who already SUSPECTS
-    a specific literal secret can confirm the guess by hashing it and comparing. That is a
-    narrow threat (it requires already having the candidate string), the task scoped this fix
-    to the preview specifically, and the hash's own job (letting a caller correlate identical
-    content across records) needs the real text regardless of redaction -- so it is left
-    alone, not silently treated as risk-free.
+    otherwise. Runs `_SECRET_VALUE_RE` (the vendor-prefix reuse) plus every generic shape above
+    (see their own comments). `text_sha256` is left hashing the REAL text throughout. A hash is
+    not the same exposure as a plaintext preview -- it can't be read back -- but it is not a
+    zero-risk residual either: post-write review noted that anyone who already SUSPECTS a
+    specific literal secret can confirm the guess by hashing it and comparing. That is a narrow
+    threat (it requires already having the candidate string), the task scoped this fix to the
+    preview specifically, and the hash's own job (letting a caller correlate identical content
+    across records) needs the real text regardless of redaction -- so it is left alone, not
+    silently treated as risk-free.
 
     Takes the FULL item text, not an already-truncated preview (coordinator, second
     follow-up): redacting after truncation misses a secret cut at the 200-char boundary --
@@ -253,8 +333,8 @@ def _redact_text(text: str) -> str:
     these patterns require, so it leaked. `_safe_preview` (below) is the only caller and is
     the one that truncates, always AFTER this runs."""
     redacted = _SECRET_VALUE_RE.sub("[REDACTED]", text)
-    for pattern in _GENERIC_SECRET_PATTERNS:
-        redacted = pattern.sub("[REDACTED]", redacted)
+    for pattern, replacement in _GENERIC_SECRET_SUBSTITUTIONS:
+        redacted = pattern.sub(replacement, redacted)
     return redacted
 
 
@@ -507,22 +587,17 @@ def log_decisions(
                     raw_texts.append(it.text)
 
             records = log.entries()
-            # Review fork (third pass): `zip(strict=True)` below is the right tool to catch a
-            # future maintenance slip (a `.decision()` call added without its matching
-            # `raw_texts.append`) LOUDLY in dev/CI -- but the `ValueError` it raises is not an
-            # `OSError`, so left unguarded it would propagate out of this function's own
-            # `except OSError` and break the CALLER's compaction, contradicting this module's
-            # one stated contract. This explicit length check degrades the SAME way an OSError
-            # write failure already does (log to stderr, write nothing for this batch) instead
-            # of writing UNREDACTED vendor previews (the only other "safe" option here would
-            # be worse than failing) or letting the exception through.
-            if len(records) != len(raw_texts):
-                print(
-                    f"jev-shadow: internal record/text-count mismatch ({len(records)} vs "
-                    f"{len(raw_texts)}), skipping this batch rather than risk an unredacted "
-                    "preview", file=sys.stderr,
-                )
-                return
+            # Coordinator (fourth follow-up): "the zip-mismatch guard raises; it never drops
+            # records silently" -- overrides the previous round's choice to print-and-return.
+            # `zip(strict=True)` raises `ValueError` on a length mismatch between `records` and
+            # `raw_texts` (a future maintenance slip: a `.decision()` call added without its
+            # matching `raw_texts.append`). That `ValueError` is deliberately left UNCAUGHT --
+            # `except OSError` below does not catch it, so it propagates out of `log_decisions`
+            # instead of being swallowed as a stderr line no one is watching. This is a
+            # DELIBERATE exception to the module's own "never fail the compaction" contract for
+            # exactly this one case: an internal-consistency violation here means the redaction
+            # invariant itself (never write an unredacted preview) can no longer be trusted, and
+            # that must be loud, not a silent partial write or a silently skipped batch.
             for record, raw_text in zip(records, raw_texts, strict=True):
                 _drop_preview_if_far_from_threshold(record)  # defect 4 -- see its own docstring
                 if record["text_preview"]:

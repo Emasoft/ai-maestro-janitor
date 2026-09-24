@@ -629,18 +629,29 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 close()
 
     # TRDD-N9LDHF7N card 7: log every keep/elide decision the scoring pass above just made --
-    # from the scores already in hand, never a hook inside jev_compaction.py itself. A
-    # write failure is swallowed by jsl.log_decisions itself (one stderr line, never raises),
-    # so this can never turn a successful compaction into a failed one.
-    jsl.log_decisions(
-        items, scores,
-        relevance_threshold=args.relevance_threshold, decision_threshold=args.decision_threshold,
-        # TRDD-N9LDHF7N card 7 follow-up, defect 3: the sync SessionStart lane and the
-        # detached background lane can both `compact` the same just-closed session's
-        # transcript -- `session_key` (already threaded through for the compose header) plus
-        # the transcript's own byte size lets jsl dedupe a run it already logged.
-        session_key=args.session_key, transcript_path=args.transcript,
-    )
+    # from the scores already in hand, never a hook inside jev_compaction.py itself. An
+    # OSError write failure is already swallowed inside jsl.log_decisions itself (one stderr
+    # line, never raises). Coordinator's decision (card 7 follow-up, fourth round): the
+    # card's rule is the shadow log never breaks a compaction AND never fails silently -- so
+    # this call site is ALSO the boundary for any OTHER unexpected exception jsl can raise
+    # (the zip-mismatch guard's `ValueError` on an internal-consistency violation, or
+    # anything else): caught here, named on stderr, and surfaced in the CLI summary line
+    # below (`shadow_log_failed=1`) rather than left silent -- the compaction itself still
+    # completes and exits 0 either way.
+    shadow_log_failed = False
+    try:
+        jsl.log_decisions(
+            items, scores,
+            relevance_threshold=args.relevance_threshold, decision_threshold=args.decision_threshold,
+            # TRDD-N9LDHF7N card 7 follow-up, defect 3: the sync SessionStart lane and the
+            # detached background lane can both `compact` the same just-closed session's
+            # transcript -- `session_key` (already threaded through for the compose header) plus
+            # the transcript's own byte size lets jsl dedupe a run it already logged.
+            session_key=args.session_key, transcript_path=args.transcript,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the shadow log must never break a real compaction
+        shadow_log_failed = True
+        print(f"jev-shadow: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     usage = getattr(client, "usage", None)
     usage_tokens = getattr(usage, "input_tokens", 0) + getattr(usage, "output_tokens", 0)
@@ -710,11 +721,18 @@ def cmd_compact(args: argparse.Namespace) -> int:
         blocked_digest = hashlib.sha256("".join(item_hashes).encode("utf-8")).hexdigest()
     elapsed_ms = int((time.monotonic() - start) * 1000)
     out_tokens = estimate_tokens(full_doc)
-    print(
+    summary = (
         f"compacted items={kept}/{len(items)} tokens={out_tokens} cost={usage_cost} "
         f"ms={elapsed_ms} blocked={len(blocked_items)} blocked_digest={blocked_digest} "
         f"segmentation_failed={len(segmentation_failures)}"
     )
+    # Coordinator's decision: `shadow_log_failed=1` is appended at the very END, after every
+    # existing field -- `jev_compaction_lane.py`'s own `blocked=… blocked_digest=…` regex
+    # (unchanged, not touched this round) keeps matching regardless. Only added on an actual
+    # failure, so a healthy compaction's summary line is byte-for-byte what it always was.
+    if shadow_log_failed:
+        summary += " shadow_log_failed=1"
+    print(summary)
     return 0
 
 
