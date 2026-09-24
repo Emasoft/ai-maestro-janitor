@@ -50,6 +50,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import agentlens_probe as alp  # noqa: E402  -- sibling lib (the reactive expiry read)
+import cron_period  # noqa: E402  -- sibling lib (shared */N + staggered {offset}-59/N parse)
 import state  # noqa: E402  -- sibling lib
 
 # TRDD-0UQSAFCW: the ONE shared classifier `recent_messages` uses to tell a human turn apart
@@ -990,28 +991,38 @@ def compose_handoff(
 
 
 def seconds_until_next_fire(cron: str, now: int) -> int | None:
-    """Seconds from `now` until the next `*/N * * * *` fire, or None when the cron is not that
-    shape. PURE apart from reading the LOCAL timezone (cron fires on local wall-clock).
+    """Seconds from `now` until the next `*/N * * * *` OR arm_prepare's staggered
+    `{offset}-59/N * * * *` fire, or None when the cron is not one of those two shapes. PURE
+    apart from reading the LOCAL timezone (cron fires on local wall-clock).
 
-    Only the minute-step form the janitor arms is understood — anything else returns None so the
-    caller falls back to "unknown headroom" rather than inventing a schedule from a cron it
-    cannot actually read (the same contract as `orphaned_resume.cadence_seconds`).
+    Only the minute-step forms the janitor itself arms are understood — anything else returns
+    None so the caller falls back to "unknown headroom" rather than inventing a schedule from a
+    cron it cannot actually read (the same contract as `orphaned_resume.cadence_seconds`).
+
+    Delegates the shape check to `cron_period.parse` (TRDD-D7RLXAN1 follow-up review item 1):
+    this function used to carry its own `*/N`-only regex, so once `arm_prepare._stagger`
+    started rewriting the armed cron onto `{offset}-59/N`, this was the one reader left that
+    still went blind on every armed session — `armed-cadence.cron` is exactly what
+    `external_handoff_clear.py` feeds it. `cron_period.parse` allows step==60 (a once-an-hour
+    cron); this function keeps its own, STRICTER `step > 59 -> None` on top of that so its
+    behavior on every plain `*/N` input is unchanged from before this fix — a once-an-hour
+    cron has no "headroom" question worth answering, only a "which minute" one this function
+    was never asked.
 
     The wrap is computed over the real minute-of-hour set, not by adding the step: cron's `*/7`
     fires at minutes 0,7,…,56 and then 0, a FOUR-minute gap. `cur_min + step` would report 7
-    there and we would think we had headroom we do not have.
+    there and we would think we had headroom we do not have. A staggered `7-59/15` wraps to
+    the SAME `offset` (7) every hour, not to 0 — cron re-evaluates the `7-59` range field on
+    every new hour, so the range's own start minute is the first fire after the wrap.
     """
-    field_min = (cron or "").strip().split(" ")[0] if cron else ""
-    if not field_min.startswith("*/"):
+    parsed = cron_period.parse(cron)
+    if parsed is None:
         return None
-    step_raw = field_min[2:]
-    if not step_raw.isdigit():
-        return None
-    step = int(step_raw)
-    if step <= 0 or step > 59:
+    offset, step = parsed
+    if step > 59:
         return None
     tm = time.localtime(now)
-    fire_minutes = [m for m in range(60) if m % step == 0]
+    fire_minutes = list(range(offset, 60, step))
     later = [m for m in fire_minutes if m > tm.tm_min]
     if later:
         minutes_ahead = later[0] - tm.tm_min

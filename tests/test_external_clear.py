@@ -71,6 +71,23 @@ def test_next_fire_is_unknown_for_a_cron_shape_we_cannot_read():
     assert ec.seconds_until_next_fire("*/abc * * * *", now) is None
 
 
+def test_next_fire_reads_arm_prepare_staggered_cron():
+    """`armed-cadence.cron` now holds `{offset}-59/N` (TRDD-D7RLXAN1 follow-up review item 1);
+    before the fix this fell through the `*/N`-only regex and returned None on every armed
+    session. `7-59/15` fires at :07, :22, :37, :52 every hour. At :50 the next fire is :52 —
+    2 minutes away; regression guard for this exact bug, must fail on the pre-fix code."""
+    at_50 = int(time.mktime(time.struct_time((2026, 8, 6, 14, 50, 0, 0, 0, -1))))
+    assert ec.seconds_until_next_fire("7-59/15 * * * *", at_50) == 2 * 60
+
+
+def test_next_fire_staggered_wraps_to_the_offset_not_to_zero():
+    """Past the range's last fire (:52) the next one is the FOLLOWING hour's :07 — the range
+    field's own start minute, not :00 like a plain `*/N` would wrap to. At :53 that is 14
+    minutes away."""
+    at_53 = int(time.mktime(time.struct_time((2026, 8, 6, 14, 53, 0, 0, 0, -1))))
+    assert ec.seconds_until_next_fire("7-59/15 * * * *", at_53) == 14 * 60
+
+
 # --- next_fire_misses_cache --------------------------------------------------
 
 

@@ -106,12 +106,18 @@ def _stagger(cron: str, project_dir: Path) -> str:
     run-queue wait, the very timeouts proposal 1 widened. A cron this janitor did not itself
     construct (anything not matching `_STEP_CRON_RE`) is returned UNCHANGED — staggering only
     the shape we know is safe to rewrite.
+
+    Step must be in [1, 60]: a step > 60 (e.g. a hand-edited `*/90` desired-cadence.cron) would
+    produce `{offset}-59/90 * * * *` with `offset` in [0, 90) — an offset above 59 gives an
+    invalid range (start > end), which CronCreate would reject, and an offset of 59 or less
+    gives a range that fires once an hour instead of every 90 minutes; either is worse than
+    leaving the original cron unstaggered (review finding, TRDD-D7RLXAN1 follow-up).
     """
     m = _STEP_CRON_RE.match(cron)
     if not m:
         return cron
     step = int(m.group(1))
-    if step <= 0:
+    if not 1 <= step <= 60:
         return cron
     offset = _stagger_offset(project_dir, step)
     return f"{offset}-59/{step} * * * *"

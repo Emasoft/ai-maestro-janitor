@@ -244,6 +244,15 @@ def test_stagger_leaves_a_non_step_cadence_untouched(project: Path) -> None:
         assert arm_prepare._stagger(cron, project) == cron
 
 
+def test_stagger_leaves_a_step_out_of_range_untouched(project: Path) -> None:
+    """`_STEP_CRON_RE` matches ANY `*/\\d+`, including a step > 60 a hand-edited
+    `desired-cadence.cron` could carry (e.g. `*/90`). Staggering it would emit
+    `{offset}-59/90 * * * *` — a range whose step exceeds its own 53-minute span, which cron
+    fires at most once and never again. Must come back unchanged instead, same as any other
+    cron this janitor did not itself construct."""
+    assert arm_prepare._stagger("*/90 * * * *", project) == "*/90 * * * *"
+
+
 def test_staggered_cron_round_trips_through_cron_period(project: Path) -> None:
     """Ties `_stagger()`'s output shape directly to `cron_period.period_minutes()` instead of
     letting the two modules agree only by convention (review finding: nothing else enforces

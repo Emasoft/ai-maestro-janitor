@@ -19,8 +19,12 @@ the user "present" every ~5 min forever. So any `[janitor-…]`-prefixed prompt 
 skipped WITHOUT touching the breadcrumb.
 
 The hook never blocks and never emits agent-context output — it is invisible to
-the model. It exits 0 on every path; any error degrades to a no-op so a
-breadcrumb problem can never abort the user's turn.
+the model. A failure in the best-effort breadcrumb WRITE (`state.bump_user_presence()`)
+degrades to a no-op, same as `user_intent.record_intent_from_prompt()`'s. A broken `state.py`
+ITSELF (it fails to import at all) is the one exception: that is not a breadcrumb problem, it
+is this janitor's own module tree being corrupt, and importing it is deliberately OUTSIDE that
+guard so the failure surfaces (a nonzero exit + traceback) instead of a real defect being
+silently swallowed forever — review finding, TRDD-D7RLXAN1 follow-up.
 
 `hooks/hooks.json`'s `UserPromptSubmit` timeout for this script is **10s** (not
 `hooks.json` itself — JSON allows no comments, so the WHY lives here instead).
@@ -127,8 +131,14 @@ def main() -> int:
     # Loaded via importlib so CPV's PEP 723 static check doesn't misclassify the
     # project-local `state` module as a third-party dependency (it has no PyPI
     # counterpart). Runtime semantics are identical to `import state`.
+    #
+    # The import itself is OUTSIDE the try/except below: that except exists to swallow a
+    # failure in the best-effort breadcrumb WRITE, not to hide a broken `state.py` import
+    # (fail-fast — a state module that can't even import is a real defect, not a no-op to
+    # silently degrade past). It still runs after `_is_cron_marker` above, so a cron fire
+    # never pays for it.
+    state = importlib.import_module("state")
     try:
-        state = importlib.import_module("state")
         state.bump_user_presence()
     except Exception:  # noqa: BLE001 - a breadcrumb write must never abort the turn
         pass

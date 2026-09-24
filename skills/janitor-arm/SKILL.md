@@ -29,7 +29,7 @@ previous cron's id:
 
 ```
 scope=ok
-cron=*/15 * * * *
+cron=7-59/15 * * * *       # staggered per project; the minute offset differs per repo
 prior-cron-id=ff020fd5     # empty ⇒ unknown
 sweep=no                   # yes ⇒ CronList and delete EVERY janitor heartbeat
 ```
