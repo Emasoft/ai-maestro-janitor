@@ -450,3 +450,54 @@ def test_is_control_input_false_for_real_replies_despite_trailing_punctuation() 
     assert tr.is_control_input("ok go on!") is False
     assert tr.is_control_input("yes, post it.") is False
     assert tr.is_control_input("/goal evaluate the plugin.") is False
+
+
+def _wrapper(name: str, args: str = "") -> str:
+    """Build a `<command-message>`/`<command-name>`/`<command-args>` wrapper the way Claude
+    Code actually emits it, so tests exercise the real shape rather than a hand-simplified one."""
+    message = name.lstrip("/")
+    return (
+        f"<command-message>{message}</command-message>\n"
+        f"<command-name>{name}</command-name>\n"
+        f"<command-args>{args}</command-args>"
+    )
+
+
+def test_is_control_input_true_for_empty_args_command_wrappers() -> None:
+    # TRDD-DZ1KOGAC gap: a real transcript wrapper with no args -- not caught by the bare
+    # `/name` branch above, since these arrive wrapped, not bare. Both names are in the
+    # explicit content-free-wrapper set (read-only/no-op commands).
+    assert tr.is_control_input(_wrapper("/usage-credits")) is True
+    assert tr.is_control_input(_wrapper("/compact")) is True
+
+
+def test_is_control_input_false_for_empty_args_wrapper_when_name_is_a_decision() -> None:
+    # Orchestrator correction: a command NAME can itself be the owner's decision -- an
+    # empty-args `/janitor-disarm` or `/ponytail` wrapper must NOT be swallowed as
+    # content-free just because it carries no separate arguments.
+    assert tr.is_control_input(_wrapper("/janitor-disarm")) is False
+    assert tr.is_control_input(_wrapper("/janitor-global-disarm")) is False
+    assert tr.is_control_input(_wrapper("/janitor-auto-manage-oauth-off")) is False
+    assert tr.is_control_input(_wrapper("/ponytail")) is False
+    assert tr.is_control_input(_wrapper("/colony")) is False
+
+
+def test_is_control_input_true_for_whitespace_only_command_args() -> None:
+    assert tr.is_control_input(_wrapper("/usage-credits", args="  \n ")) is True
+
+
+def test_is_control_input_true_for_wrapper_missing_command_args_element() -> None:
+    wrapper = "<command-message>usage-credits</command-message>\n<command-name>/usage-credits</command-name>"
+    assert tr.is_control_input(wrapper) is True
+
+
+def test_is_control_input_false_for_wrapper_with_real_arguments() -> None:
+    assert tr.is_control_input(_wrapper("/goal", args="evaluate the plugin")) is False
+    assert (
+        tr.is_control_input(_wrapper("/eli5", args="the decision i have to make")) is False
+    )
+
+
+def test_is_control_input_false_for_wrapper_followed_by_extra_owner_text() -> None:
+    text = _wrapper("/usage-credits") + "\nalso please check the dashboard"
+    assert tr.is_control_input(text) is False

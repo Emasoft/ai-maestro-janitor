@@ -73,6 +73,78 @@ def _is_automation_command_name(name: str) -> bool:
     return normalized.startswith(_AUTOMATION_COMMAND_NAME_PREFIXES)
 
 
+
+#: TRDD-DZ1KOGAC, gap found on real transcripts: a slash command usually arrives wrapped in
+#: Claude Code's own generated boilerplate, e.g.
+#: `<command-message>usage-credits</command-message>\n<command-name>/usage-credits</command-name>\n
+#: <command-args></command-args>` -- and an EMPTY `<command-args>` wrapper is AS content-free
+#: as a bare `/usage-credits` -- but ONLY for a command whose NAME itself carries no decision.
+#: Orchestrator correction after review: unlike the bare-slash-command branch, an empty wrapper
+#: must NOT be content-free for every command -- `/janitor-disarm`, `/janitor-global-disarm`,
+#: `/janitor-auto-manage-oauth-off`, `/ponytail`, `/colony` and the like are themselves the
+#: owner's decision (the command name IS the content), so only this small, explicit set of
+#: read-only/no-op-ish commands may be treated as content-free when their args are empty.
+#: `re.S` because `<command-message>` text can span lines.
+_COMMAND_MESSAGE_TAG_RE = re.compile(r"<command-message>.*?</command-message>", re.S)
+_COMMAND_NAME_TAG_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
+_COMMAND_ARGS_TAG_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+_CONTENT_FREE_WRAPPER_COMMAND_NAMES = frozenset(
+    {
+        "compact",
+        "clear",
+        "usage-credits",
+        "usage",
+        "cost",
+        "context",
+        "status",
+        "help",
+        "reload-plugins",
+        "doctor",
+    }
+)
+
+
+def _is_content_free_wrapper_command_name(name: str) -> bool:
+    """True iff `name` (a `<command-name>` tag's text) is a command whose empty-args
+    invocation is content-free -- deliberately NOT the `_is_automation_command_name`
+    `janitor-*`/`ai-maestro-janitor:*` prefix match, since those names (e.g.
+    `/janitor-disarm`) are themselves owner decisions, not no-ops."""
+    normalized = name.strip()
+    if normalized.startswith("/"):
+        normalized = normalized[1:]
+    return normalized in _CONTENT_FREE_WRAPPER_COMMAND_NAMES
+
+
+def _is_empty_command_wrapper(stripped: str) -> bool:
+    """True iff `stripped` is ONLY a `<command-message>`/`<command-name>`/`<command-args>`
+    wrapper, any order, with `<command-args>` absent or empty/whitespace-only, and
+    `<command-name>` is one `_is_content_free_wrapper_command_name` allows.
+
+    Removes each tag (found anywhere in what is left, so order doesn't matter) and requires
+    nothing but whitespace to remain -- a wrapper missing `<command-message>` or
+    `<command-name>`, a non-content-free command name, one with a non-empty `<command-args>`,
+    or one followed by real owner text all fail this and fall through to `is_control_input`'s
+    ordinary branches.
+    """
+    remainder = stripped
+    message_match = _COMMAND_MESSAGE_TAG_RE.search(remainder)
+    if message_match is None:
+        return False
+    remainder = remainder[: message_match.start()] + remainder[message_match.end() :]
+    name_match = _COMMAND_NAME_TAG_RE.search(remainder)
+    if name_match is None:
+        return False
+    if not _is_content_free_wrapper_command_name(name_match.group(1)):
+        return False
+    remainder = remainder[: name_match.start()] + remainder[name_match.end() :]
+    args_match = _COMMAND_ARGS_TAG_RE.search(remainder)
+    if args_match is not None:
+        if args_match.group(1).strip():
+            return False
+        remainder = remainder[: args_match.start()] + remainder[args_match.end() :]
+    return remainder.strip() == ""
+
+
 #: TRDD-DZ1KOGAC: an owner-typed bare control word carries `origin.kind: "human"`/absent, same
 #: as any real instruction, so `classify_record` correctly calls it "human" -- authorship is
 #: true. But it has no content: measured on real transcripts, a bare "resume"/"continue" or an
@@ -88,20 +160,32 @@ _BARE_SLASH_COMMAND_RE = re.compile(r"^/(\S+)$")
 
 def is_control_input(text: str) -> bool:
     """True iff `text`, stripped, is nothing but a bare control word (optionally followed only
-    by trailing punctuation from `.!`, e.g. "resume." or "Continue!") or an argument-less
-    automation slash command -- content-free regardless of who typed it.
+    by trailing punctuation from `.!`, e.g. "resume." or "Continue!"), an argument-less
+    automation slash command, or an empty-args `<command-message>`/`<command-name>`/
+    `<command-args>` wrapper -- content-free regardless of who typed it.
 
     Matches: a single token `resume`/`continue` (case-insensitive), with or without trailing
-    `.`/`!`, or `/name` with no arguments where `name` is one `_is_automation_command_name`
-    already treats as automation (reusing that list rather than duplicating it). Does NOT match
-    a slash command WITH arguments (`/goal evaluate the plugin`), a trailing `?` (`resume?`
-    is the owner asking a question, not a content-free control word), or a real reply that
-    merely contains one of these words (`resume the pending TRDD work`, `ok go on`,
+    `.`/`!`; `/name` with no arguments where `name` is one `_is_automation_command_name`
+    already treats as automation (reusing that list rather than duplicating it); or a
+    `<command-message>`/`<command-name>`/`<command-args>` wrapper, in any order, whose
+    `<command-args>` is absent or empty/whitespace-only AND whose `<command-name>` is one of
+    the small, explicit read-only/no-op set `_is_content_free_wrapper_command_name` allows
+    (TRDD-DZ1KOGAC coordinator correction: measured a real transcript where an empty-args
+    `/usage-credits` wrapper took the guaranteed newest-owner slot). Does NOT match a slash
+    command WITH arguments (`/goal evaluate the plugin`), an empty-args wrapper whose command
+    name is itself an owner decision (`/janitor-disarm`, `/janitor-global-disarm`,
+    `/janitor-auto-manage-oauth-off`, `/ponytail`, `/colony`) -- the name IS the content there,
+    unlike a bare `/compact` -- a wrapper whose `<command-args>` carries text (`/eli5 the
+    decision i have to make`), a wrapper followed by extra owner text, a trailing `?`
+    (`resume?` is the owner asking a question, not a content-free control word), or a real
+    reply that merely contains one of these words (`resume the pending TRDD work`, `ok go on`,
     `yes, post it`) -- those are the owner's actual words and must keep their standing.
     """
     stripped = text.strip()
     bare = stripped.rstrip(".!")
     if bare.lower() in _CONTROL_TOKENS:
+        return True
+    if _is_empty_command_wrapper(stripped):
         return True
     match = _BARE_SLASH_COMMAND_RE.match(stripped)
     if match is None:
