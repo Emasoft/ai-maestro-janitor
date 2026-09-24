@@ -51,6 +51,18 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # v3.6.0 Release run 36020824671 failed --strict with two MINOR findings:
+      # pyright could not resolve `httpx` in scripts/lib/jevctx/jev.py and
+      # openrouter.py. httpx is a real dependency (pyproject.toml's dev extra),
+      # but this job never synced the project venv before validation, so CPV's
+      # pyright ran with nothing installed. ci.yml already does this sync before
+      # its own pyright step (see "Sync deps so pyright can resolve imports"
+      # above it). `--frozen` here (uv.lock is git-tracked): the release path
+      # keeps uv's cache disabled against poisoning, so pin exactly the locked,
+      # hashed versions rather than letting `uv sync` re-resolve anything.
+      - name: Sync deps so pyright can resolve imports
+        run: uv sync --extra dev --frozen
+
       - name: Validate plugin (strict)
         # PINNED to a released CPV tag. Unpinned, this resolved the upstream
         # DEFAULT BRANCH and executed whatever was on it inside a job holding
