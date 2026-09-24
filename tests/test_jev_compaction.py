@@ -889,6 +889,188 @@ def test_non_owner_floor_holds_in_injected_mode_too() -> None:
     assert "-- user dec:0 --" in doc
 
 
+def test_injected_admission_keeps_more_than_the_floor_when_room_allows() -> None:
+    """TRDD-AW4XD53Q: the actual bug this fix targets. Pre-fix, `compose()` admitted the
+    injected copy's non-owner (and owner-share-overflow) items against the 8,000-token
+    `budget_tokens` gate and then appended ALL of them to `kept_order_list` regardless of the
+    injected render's own (much smaller) `max_bytes` -- so the coarse byte BACKSTOP, not any
+    admission pass, decided what survived, and on every real transcript it evicted down to
+    the exact non-owner floor (3) even when the byte budget had room for more (aabd8b0c
+    reached 4/6/4 before this regression). Same item shape as the sibling
+    `test_non_owner_floor_holds_in_injected_mode_too` above (which pins the floor itself at a
+    TIGHT `max_bytes=1050` -> exactly 3 tools) -- loosened here to `max_bytes=1500` (measured:
+    the render is 1491 bytes, fitting BEFORE any backstop stage ever runs -- `compose()`
+    returns at its own `len(doc) <= max_bytes` early-return, so stages (1)-(7) never touch
+    this document at all). The two non-guaranteed-owner items ("rel1"/"rel2") also survive.
+    Review finding (TRDD-AW4XD53Q): this specific fixture does NOT by itself discriminate the
+    pre-fix code from the fix -- verified directly by running it against a scratch copy of the
+    pre-fix eviction-only backstop, which produces the identical 4-tool/rel1/rel2 result here
+    (eviction-worst-first-until-fit and admission-best-first-until-budget converge on the same
+    final set absent the extra `owner_overflow` noise real transcripts carry). This test pins
+    the CURRENT correct behaviour (room allows more than the floor -> more than the floor is
+    kept); the actual regression proof against the historical bug is the cached-real-pickle
+    re-render in this task's own report (3/3/3 -> 5/6/5), not this synthetic fixture."""
+    newest = _item("newest:0", "user", "hi there", turn=20, tokens=5)
+    dec = _item("dec:0", "user", "policy decision text", turn=0, tokens=5)
+    rel1 = _item("rel1:0", "user", "owner background one " * 5, turn=1, tokens=5)
+    rel2 = _item("rel2:0", "user", "owner background two " * 5, turn=2, tokens=5)
+    tools = [
+        _item(f"tool{i}:0", "tool", f"tool output number {i} " * 10, turn=10 + i, tokens=5)
+        for i in range(6)
+    ]
+    items = [dec, rel1, rel2, *tools, newest]
+    scores = {
+        "newest:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                               decision_passed=False),
+        "dec:0": jc.Scores(relevance=0.6, decision=0.9, oversized=False, kept=True,
+                            decision_passed=True),
+        "rel1:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                             decision_passed=False),
+        "rel2:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                             decision_passed=False),
+    }
+    scores.update({
+        it.id: jc.Scores(relevance=0.7, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in tools
+    })
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header,
+                      max_bytes=1500, max_item_bytes=700)
+
+    doc_bytes = len(doc.encode("utf-8"))
+    assert doc_bytes <= 1500
+    assert doc_bytes < 1500, "must fit with room to spare -- proof admission alone did the work"
+    tool_count = sum(1 for i in range(6) if f"-- tool tool{i}:0 --" in doc)
+    assert tool_count > jc._NON_OWNER_FLOOR, (
+        f"expected more than the floor ({jc._NON_OWNER_FLOOR}) non-owner items, got {tool_count}"
+    )
+    assert "-- user rel1:0 --" in doc
+    assert "-- user rel2:0 --" in doc
+    assert "-- user newest:0 --" in doc
+    assert "-- user dec:0 --" in doc
+
+
+def test_injected_admission_floor_of_3_holds_with_no_non_guaranteed_owner_items_to_spend() -> None:
+    """TRDD-AW4XD53Q: the floor must hold even when the eviction-side backstop's stage (3)
+    (non-guaranteed-owner items) has NOTHING to sacrifice -- only the single guaranteed
+    "newest" owner item exists here, no other owner items at all. So if the floor still holds
+    at a tight budget, backstop stage (3) (buying room from non-guaranteed-owner items) cannot
+    be why -- there is nothing there to spend. `max_bytes=1050` (measured: stable at exactly 3
+    tools across the 980-1180 range; below 980 even the floor itself stops fitting and stage
+    (4) -- the documented, deliberate below-the-floor fallback -- takes over, which is correct
+    existing behaviour, not this test's subject). Review finding (TRDD-AW4XD53Q): at this
+    specific `max_bytes` all 3 tools fit `non_owner_remaining` on their own merit (measured:
+    969 of 1050 bytes used), so the `len(non_owner_admitted) < _NON_OWNER_FLOOR` force-admit
+    clause is not actually exercised by this fixture -- it pins the floor's END-STATE
+    (`tool_count == 3` exactly, no non-guaranteed-owner tier to thank for it), not the specific
+    force-admit CODE PATH; a fixture that drives `non_owner_remaining` below what 3 tools cost
+    would be needed for that, and none here does."""
+    newest = _item("newest:0", "user", "hi", turn=50, tokens=5)
+    tools = [
+        _item(f"tool{i}:0", "tool", f"tool output number {i} " * 10, turn=10 + i, tokens=5)
+        for i in range(6)
+    ]
+    items = [*tools, newest]
+    scores = {"newest:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                     decision_passed=False)}
+    scores.update({
+        it.id: jc.Scores(relevance=0.7, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in tools
+    })
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header,
+                      max_bytes=1050, max_item_bytes=700)
+
+    assert len(doc.encode("utf-8")) <= 1050
+    tool_count = sum(1 for i in range(6) if f"-- tool tool{i}:0 --" in doc)
+    assert tool_count == jc._NON_OWNER_FLOOR, (
+        f"expected exactly the floor ({jc._NON_OWNER_FLOOR}) non-owner items, got {tool_count}"
+    )
+    assert "-- user newest:0 --" in doc
+    assert jc._MINIMAL_FIXED_LINE not in doc
+
+
+def test_injected_admission_with_fewer_than_the_floor_total_keeps_them_all() -> None:
+    """TRDD-AW4XD53Q acceptance requirement: a transcript with fewer than `_NON_OWNER_FLOOR`
+    non-owner items in total must not error, and must not try to manufacture a floor that
+    cannot exist -- both non-owner items here (2, below the floor of 3) are simply admitted
+    whole, same as the guaranteed owner item; `max_bytes=900` (measured: fits at 747 bytes,
+    comfortable room, so this is about the ADMISSION path admitting everything there is, not
+    about a tight-budget edge case -- that is the sibling floor test above)."""
+    newest = _item("newest:0", "user", "hi", turn=50, tokens=5)
+    tools = [
+        _item(f"tool{i}:0", "tool", f"tool output number {i} " * 10, turn=10 + i, tokens=5)
+        for i in range(2)
+    ]
+    items = [*tools, newest]
+    scores = {"newest:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                     decision_passed=False)}
+    scores.update({
+        it.id: jc.Scores(relevance=0.7, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in tools
+    })
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header,
+                      max_bytes=900, max_item_bytes=700)
+
+    assert len(doc.encode("utf-8")) <= 900
+    tool_count = sum(1 for i in range(2) if f"-- tool tool{i}:0 --" in doc)
+    assert tool_count == 2, f"expected both non-owner items (below the floor), got {tool_count}"
+    assert "-- user newest:0 --" in doc
+
+
+def test_owner_overflow_gets_a_partial_rescue_from_the_leftover_budget() -> None:
+    """TRDD-AW4XD53Q review finding: the fix's OTHER necessary half (`owner_overflow`'s retry
+    against the leftover budget once the non-owner tier is placed -- see that retry's own
+    comment in `compose()`) had zero dedicated coverage; the other new tests only exercise the
+    non-owner admission pass. Three non-guaranteed-owner items ("owx0" oldest/turn=1 through
+    "owx2" newest/turn=3, so `rest_owner`'s own newest-first order tries owx2, then owx1, then
+    owx0) are each ~179 measured bytes -- big enough that even ONE exceeds the tiny 40%
+    `owner_budget` this `max_bytes=700` implies, so ALL THREE miss the direct owner-share
+    admission and land in `owner_overflow` together; the retry against the leftover (after the
+    2 floor-forced tool items and the guaranteed "newest" are placed) then rescues owx2 and
+    owx1 -- proving a PARTIAL rescue, not all-or-nothing -- but owx0 (lowest priority, oldest,
+    tried last) still does not fit and stays excluded. `max_bytes=700` (measured). Review
+    finding (TRDD-AW4XD53Q): this fixture does NOT discriminate the fix from the pre-fix
+    unconditional-append code either -- verified directly against a scratch copy of the pre-fix
+    logic, which produces the identical (owx0 absent, owx1/owx2 present) result here, because
+    the pre-fix backstop's own stage (3) (non-guaranteed-owner eviction) ends up choosing the
+    same priority-ordered subset once it has to evict SOMETHING to fit. This test exists to pin
+    the RETRY MECHANISM's own contract (a genuine partial rescue, ordered by priority, not
+    all-or-nothing) now that it is a real code path, not to reproduce the historical bug."""
+    newest = _item("newest:0", "user", "hi", turn=100, tokens=5)
+    owner_extra = [
+        _item(f"owx{i}:0", "user", f"owner note number {i} " * 8, turn=1 + i, tokens=5)
+        for i in range(3)
+    ]
+    tools = [_item(f"tool{i}:0", "tool", "x" * 10, turn=50 + i, tokens=5) for i in range(2)]
+    items = [*owner_extra, *tools, newest]
+    scores = {"newest:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                                     decision_passed=False)}
+    scores.update({
+        it.id: jc.Scores(relevance=0.6, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in owner_extra
+    })
+    scores.update({
+        it.id: jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                          decision_passed=False)
+        for it in tools
+    })
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header,
+                      max_bytes=700, max_item_bytes=700)
+
+    assert len(doc.encode("utf-8")) <= 700
+    assert "-- user owx2:0 --" in doc, "highest-priority overflow item must be rescued"
+    assert "-- user owx1:0 --" in doc, "the retry is a partial rescue, not a single item"
+    assert "-- user owx0:0 --" not in doc, "lowest-priority overflow item still excluded"
+    assert "-- user newest:0 --" in doc
+
+
 def test_tool_result_without_matching_tool_use_falls_back(tmp_path: Path) -> None:
     # A review of this module flagged that a dangling tool_result (no prior tool_use with
     # its id -- a plausible real-transcript defect from a truncated/crashed write) was

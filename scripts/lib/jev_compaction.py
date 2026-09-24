@@ -1486,10 +1486,17 @@ def compose(
     `_INJECT_POINTER_SHARE` of whatever `max_bytes` leaves after the fixed lines this function
     always emits (measured directly, not estimated -- see the pre-trim's own comment) BEFORE
     the render competes for space, so they can no longer crowd out kept items the way the old
-    single byte backstop did. The final byte
+    single byte backstop did. TRDD-AW4XD53Q: item (1)'s "priority order" used to mean ORDER
+    ONLY -- every non-owner item (and every owner item beyond its 40% share) still landed in
+    the render regardless of whether it fit `max_bytes`, so the coarse byte backstop below,
+    not this admission, decided what the injected copy actually showed on every real run (see
+    the byte-budgeted admission's own comment further down for the measured proof). Both
+    tiers are now genuinely admitted against the byte budget -- a miss is excluded outright,
+    not merely reordered for the backstop to clean up later. The final byte
     backstop below still runs afterward as a hard guarantee (`max_bytes` is never exceeded),
-    but with items already small it now only has to drop a handful of truncated items, not the
-    whole kept set -- and it evicts by the SAME `kind == "user"` priority, never `evict_key`.
+    but with the render now already fitting in the ordinary case, it only has to act on a
+    genuinely pathological input (e.g. the fixed lines alone overflowing a tiny `max_bytes`)
+    -- and it evicts by the SAME `kind == "user"` priority, never `evict_key`.
     `evict_key` itself now only governs the narrower byte-only backstop below (when
     `max_item_bytes` is unset but `max_bytes` still is) -- the token-budget admission above,
     shared by BOTH renderings, no longer uses it alone (TRDD-RAEGS1D5: see the owner-share
@@ -1970,10 +1977,23 @@ def compose(
         #      ceiling: short owner messages that do not use up the whole share leave the
         #      remainder to flow into tiers 3-5, never sitting unused.
         #   3. `decision_passed` items of any OTHER kind (an instruction/correction is worth
-        #      protecting regardless of who said it).
-        #   4. the highest-relevance assistant/tool/event items, newest first -- the work the
-        #      session actually did.
-        #   5. catch-all: owner messages that did not fit the share, in the same order as (2).
+        #      protecting regardless of who said it), THEN the highest-relevance assistant/
+        #      tool/event items, newest first (4) -- the work the session actually did.
+        #      TRDD-AW4XD53Q: both now admitted against whatever of `kept_budget` tier (2) did
+        #      not spend, the SAME `_item_cost` byte-budgeting tier (2) already uses -- not
+        #      appended unconditionally the way they were before this fix, which let the
+        #      coarse byte BACKSTOP decide the injected copy's content on every real run
+        #      instead of this admission (see the floor-of-`_NON_OWNER_FLOOR` force-admit at
+        #      that tier's own comment, a few lines below).
+        #   5. catch-all: owner messages that did not fit the share get ONE more try, in the
+        #      same priority order as (2), against whatever of `kept_budget` tiers (2)-(4) did
+        #      not spend (TRDD-AW4XD53Q) -- a miss here is a true exclusion now, not an
+        #      unconditional append for the backstop to sort out later.
+        #   6. (removed, TRDD-AW4XD53Q) -- there is no catch-all tier below (5) any more: a
+        #      non-owner item that misses tier (3)/(4) even past the floor, or an owner item
+        #      that misses tier (5)'s retry, is excluded outright. The backstop's hard
+        #      `max_bytes` guarantee is unchanged, but it now only has real work to do on a
+        #      genuinely pathological input; ordinary runs rarely reach it.
         owner_all = sorted(
             (it for it in items if it.id in kept_ids and it.kind == "user"),
             key=lambda it: it.turn, reverse=True,
@@ -2023,9 +2043,80 @@ def compose(
             # with it (capped to one segment per source item -- see that helper's comment).
             key=lambda it: (_effective_protected(it), max_score(it), it.turn), reverse=True,
         )
-        kept_order_list.extend(decision_non_owner)
-        kept_order_list.extend(relevance_non_owner)
-        kept_order_list.extend(owner_overflow)
+        # TRDD-AW4XD53Q: a second, byte-budgeted admission pass for non-owner items -- the
+        # SAME priority order above (decision_non_owner, then relevance_non_owner), gated by
+        # `_item_cost` against whatever of `kept_budget` the owner tier did not spend, exactly
+        # like `rest_owner`'s own admission a few lines up. Without this, EVERY non-owner item
+        # that survived the `budget_tokens` gate (sized for 8,000 tokens, far more than this
+        # render's ~5-6 KB `max_bytes`) landed in `kept_order_list` regardless of fit -- and
+        # unconditionally appending `owner_overflow` right after it (this block's own
+        # pre-fix code, one line below) meant a byte-budgeted admission here changed nothing
+        # anyway: the render was still built from the FULL survived set either way, so the
+        # coarse byte BACKSTOP below -- not any admission pass -- decided what the injected
+        # copy actually showed. Measured direct proof: gating only the non-owner tier while
+        # still appending `owner_overflow` unconditionally left the real-transcript numbers
+        # bit-for-bit unchanged (3/3/3, same final byte counts) -- confirming the backstop was
+        # still doing 100% of the trimming. A miss here is a true admission miss now, same as
+        # a token-stage non-owner item that does not fit `budget_tokens` -- SKIP semantics
+        # (`continue` via the `else` branch below, never `break`), so a smaller lower-priority
+        # item further down can still be admitted, per `test_non_owner_admission_skips_a_too_
+        # big_item_rather_than_stopping`'s own token-level pin of this rule. `_NON_OWNER_FLOOR`
+        # is still force-admitted even over budget -- the same "resumed session must learn
+        # what was done" ruling the eviction-side floor (stage (2) below) already honors, met
+        # by admission now instead of by the backstop merely happening to stop there. A miss
+        # (the implicit `else` -- no `continue` needed, this is a plain `if`, not a loop-skip)
+        # is a true admission exclusion: it is simply never appended, so it is never in
+        # `kept_order_list` for the backstop to find later, matching the token-level
+        # admission's own `continue`-to-skip semantics in spirit if not in syntax -- a
+        # smaller lower-priority item further down the SAME loop can still be admitted, per
+        # `test_non_owner_admission_skips_a_too_big_item_rather_than_stopping`'s own
+        # token-level pin of that rule.
+        non_owner_cap = non_owner_item_bytes if non_owner_item_bytes is not None else max_item_bytes
+        non_owner_remaining = (
+            max(0, kept_budget - owner_bytes_used) if kept_budget is not None else None
+        )
+        non_owner_admitted: list[Item] = []
+        non_owner_bytes_used = 0
+        for it in decision_non_owner + relevance_non_owner:
+            cost = _item_cost(it, non_owner_cap)
+            fits = (
+                non_owner_remaining is None
+                or non_owner_bytes_used + cost <= non_owner_remaining
+            )
+            if fits or len(non_owner_admitted) < _NON_OWNER_FLOOR:
+                non_owner_admitted.append(it)
+                non_owner_bytes_used += cost
+            # else: excluded -- see this pass's own docstring above. TRDD-AW4XD53Q review
+            # disclosure: NOT added to `hidden_count` (a fix was tried and reverted -- it
+            # changes the rendered "[[elided: N more items]]" line's own byte length, which
+            # feeds back into whether the SAME render still fits `max_bytes`, so it shifted
+            # several already-measured tests' item counts; `expand --list --grep` still finds
+            # these items directly from the transcript regardless of this count).
+        kept_order_list.extend(non_owner_admitted)
+
+        # TRDD-AW4XD53Q: `owner_overflow`'s own last chance -- mirrors the TOKEN admission's
+        # `token_owner_overflow` re-try above (same "one more shot at the LEFTOVER general
+        # budget, never restored to a full/whole re-admission" rule): an owner item that did
+        # not fit its 40% SHARE may still fit once the non-owner tier has taken its cut, so it
+        # is tried again here, in the SAME priority order it already lost in, against whatever
+        # of `kept_budget` remains. This is the fix's other necessary half -- see this pass's
+        # own docstring above for the measured proof that leaving `owner_overflow` appended
+        # unconditionally (this block's pre-fix code) neutralized the non-owner admission
+        # pass too, since BOTH tiers fed the same unbudgeted `kept_order_list` the backstop
+        # then had to trim from scratch.
+        if kept_budget is not None:
+            owner_overflow_leftover = max(0, kept_budget - owner_bytes_used - non_owner_bytes_used)
+            for it in owner_overflow:
+                cost = _item_cost(it, max_item_bytes)
+                if cost > owner_overflow_leftover:
+                    continue
+                kept_order_list.append(it)
+                owner_overflow_leftover -= cost
+        else:
+            # No byte budget at all (`max_bytes` unset) -- nothing was ever excluded above
+            # (`fits`/`owner_budget` are both unconditionally True/None), so `owner_overflow`
+            # is guaranteed empty; nothing to retry.
+            kept_order_list.extend(owner_overflow)
     else:
         kept_order_list = [it for it in items if it.id in kept_ids]  # `items` is chronological
 
