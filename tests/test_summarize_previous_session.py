@@ -1281,6 +1281,51 @@ def test_assistant_text_mentioning_two_ids_still_counts(tmp_path, monkeypatch, _
     assert {"K0PMVRN6", "WZKFSQ2N"} <= ids
 
 
+# e81d9f10 review: the tests above rank through a stub board, which cannot tell "counted" from
+# "fell back to the in-flight fill" at the cap's exact edge. These call the scanner directly so
+# each pins ONE side of the boundary -- exactly `_TOOL_USE_MENTION_CAP` ids counts, one more
+# counts none -- and who is exempt from the cap (the owner) versus excluded outright (a
+# task-notification, which is `user`-typed but never the owner's words).
+_CAP_IDS = [f"AAAAAAA{i}" for i in range(1, 6)]
+
+
+def _scan(tmp_path: Path, record: dict) -> dict[str, int]:
+    return jcl._scan_transcript_mentions(
+        str(_write_transcript(tmp_path, [record])), frozenset(_CAP_IDS),
+    )
+
+
+def _named(n: int) -> str:
+    return "Working " + ", ".join(f"TRDD-{i}" for i in _CAP_IDS[:n]) + "."
+
+
+def test_assistant_text_naming_exactly_the_cap_counts_every_id(tmp_path):
+    assert jcl._TOOL_USE_MENTION_CAP == 3  # the boundary these two tests pin
+    mentions = _scan(tmp_path, {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": _named(3)},
+    ]}})
+    assert set(mentions) == set(_CAP_IDS[:3])
+
+
+def test_assistant_text_naming_one_past_the_cap_counts_none(tmp_path):
+    mentions = _scan(tmp_path, {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": _named(4)},
+    ]}})
+    assert mentions == {}
+
+
+def test_owner_message_naming_five_ids_is_never_capped(tmp_path):
+    mentions = _scan(tmp_path, {"type": "user", "origin": {"kind": "human"},
+                                "message": {"role": "user", "content": _named(5)}})
+    assert set(mentions) == set(_CAP_IDS)
+
+
+def test_task_notification_naming_five_ids_contributes_nothing(tmp_path):
+    text = "<task-notification>\n<result>" + _named(5) + "</result>\n</task-notification>"
+    mentions = _scan(tmp_path, {"type": "user", "message": {"role": "user", "content": text}})
+    assert mentions == {}
+
+
 def test_other_ids_line_caps_and_names_the_remainder():
     many_ids = [f"ID{i:06d}" for i in range(50)]
     line = jcl._format_other_ids_line(many_ids, cap=40)
