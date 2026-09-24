@@ -40,30 +40,43 @@ _RULE_FILE = _PROJECT_ROOT / "rules" / "janitor-heartbeat-protocol.md"
 # The pre-fix recipe (before commit ac39cf13 added the `2>/dev/null || pwd -P`
 # fallback) — proves the recipe/state.py comparison can actually fail: in a
 # no-git folder this diverges from state.state_dir(), which is exactly the bug
-# ac39cf13 fixed.
-_OLD_RECIPE = '"$(git -C "$PWD" rev-parse --show-toplevel)/.janitor/state"'
+# ac39cf13 fixed. Written as a full `STATE_DIR=...` statement (see _run_recipe)
+# to match the shape the current recipe extraction now produces.
+_OLD_RECIPE = 'STATE_DIR="$(git -C "$PWD" rev-parse --show-toplevel)/.janitor/state"'
 
 
 def _extract_recipe() -> str:
-    """Pull the else-branch STATE_DIR bash expression out of the rule file, verbatim."""
+    """Pull the STATE_DIR bash recipe out of the rule file, verbatim.
+
+    Commit f0eb0848 moved the recipe out of the heartbeat table cell (where the
+    regex used to match an inline "else `<expr>`" span) into a fenced ```bash
+    code block below the table, introduced by the line "`STATE_DIR` composition
+    referenced by the memory-chore row above:". Extract that block's content
+    instead of the old inline form.
+    """
     text = _RULE_FILE.read_text()
-    match = re.search(r"composes `STATE_DIR`.*?else `([^`]+)`", text, re.DOTALL)
+    match = re.search(
+        r"composition referenced by the memory-chore row above:\s*```bash\n(.*?)\n```",
+        text,
+        re.DOTALL,
+    )
     if match is None:
         pytest.fail(
-            "could not find the '...composes `STATE_DIR`... else `<recipe>`' row in "
-            f"{_RULE_FILE} — the rule's wording changed; update this test's extraction regex"
+            "could not find the '...composition referenced by the memory-chore row "
+            f"above:\\n```bash ... ```' block in {_RULE_FILE} — the rule's wording "
+            "or structure changed; update this test's extraction regex"
         )
     recipe = match.group(1)
-    # Non-greedy `.*?` finds the FIRST backtick-quoted span after "else " — correct only
-    # while no OTHER backtick term sits between "composes `STATE_DIR`" and the real "else
-    # `<recipe>`". A prose edit that inserts one (e.g. "else, when `git` is present, `...`")
-    # would make the regex still MATCH, just the wrong span — a silent wrong-extraction, not
-    # the loud failure the docstring promises. This shape check turns that into a loud one.
-    if not recipe.startswith('"$('):
+    # Shape check anchored at the START of the capture (not just "somewhere in it") so a
+    # stray line sandwiched between the intro sentence and the real recipe inside the
+    # fence — which the non-greedy `.*?` would still capture and "match" — fails loudly
+    # instead of silently comparing junk (review finding: a substring-anywhere check is
+    # weaker than the old regex's `startswith` guard).
+    if not recipe.startswith("STATE_DIR=") or ".janitor/state" not in recipe:
         pytest.fail(
-            f"extracted STATE_DIR recipe {recipe!r} does not look like the expected "
-            "'\"$(...)/.janitor/state\"' shape — the rule's prose around the else-branch "
-            "changed; update this test's extraction regex"
+            f"extracted STATE_DIR recipe {recipe!r} does not look like a "
+            "'STATE_DIR=....janitor/state' assignment — the rule's code block changed; "
+            "update this test's extraction regex"
         )
     return recipe
 
@@ -85,14 +98,18 @@ def _clean_env(home: Path, ceiling: Path) -> dict[str, str]:
 
 
 def _run_recipe(recipe: str, cwd: Path, env: dict[str, str]) -> str:
-    # `recipe` is already a quoted bash expression (e.g. `"$(...)/.janitor/state"`) containing
-    # `$(...)` command substitution, which the suite's sandbox_guard (tests/sandbox_guard.py)
-    # refuses outright in a bare `bash -c "..."` argv — it cannot statically prove no hidden
-    # write happens inside the substitution. Writing it to a script FILE under tmp_path and
-    # running `bash <script>` is the guard's own sanctioned escape hatch (a script the test
-    # itself wrote into tmp is trusted at the test's own level; see _classify_shell).
+    # `recipe` is a full `STATE_DIR=...` bash statement (assignment + `||` fallback),
+    # containing `$(...)` command substitution, which the suite's sandbox_guard
+    # (tests/sandbox_guard.py) refuses outright in a bare `bash -c "..."` argv — it
+    # cannot statically prove no hidden write happens inside the substitution. Writing
+    # it to a script FILE under tmp_path and running `bash <script>` is the guard's own
+    # sanctioned escape hatch (a script the test itself wrote into tmp is trusted at
+    # the test's own level; see _classify_shell). Run the statement, then echo the
+    # variable it sets — the recipe no longer IS an expression to echo directly (it
+    # moved from an inline `else `<expr>`` span to a standalone assignment statement
+    # when the rule's recipe relocated into a fenced code block, commit f0eb0848).
     script = cwd / "recipe.sh"
-    script.write_text(f"echo {recipe}\n")
+    script.write_text(f'{recipe}\necho "$STATE_DIR"\n')
     result = subprocess.run(
         ["bash", str(script)],
         cwd=cwd,
