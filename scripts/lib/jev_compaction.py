@@ -1128,6 +1128,15 @@ def _oversized_preview(item: Item) -> str:
 _DIGEST_TRUNCATED_NOTE = "\n\n[[digest truncated to fit the handoff budget]]"
 
 
+# TRDD-RAEGS1D5 (compose() budget floor round 3 -- coordinator review of round 2,
+# reports/compaction-replacement/20260924_013141+0200-jev-inject-room-floor-round2.md finding
+# 2): `render()`'s own fixed lines (header, section headings, the trailing "pointers expand
+# with" line) embed `transcript_path` up to FOUR times, `full_context_path` a fifth -- neither
+# name appears here, on purpose, so this marker's byte cost is CONSTANT regardless of how long
+# either path is. See `_render_minimal_fallback`, compose()'s last-resort stage below.
+_MINIMAL_FIXED_LINE = "(budget too small, see full copy)"
+
+
 # Card 5 measured fact (docs_dev/jev-compaction-spec.md card 5 / reports/compaction-replacement/
 # 20260923_064108+0200-hook-output-experiments.md): the largest real transcript elides ~18,041
 # items -- one pointer line per elided item made `compose()` itself emit ~2.4 MB, independent of
@@ -1310,6 +1319,44 @@ def _truncate_prefix_tokens(text: str, max_tokens: int) -> str:
     return prefix[:nl] if nl > 0 else prefix
 
 
+def _render_minimal_fallback(newest_owner: Item | None, max_bytes: int) -> str:
+    """The absolute last-resort render (TRDD-RAEGS1D5, compose() budget floor round 3): reached
+    only when every earlier degrade step in `compose()` (evict kept items, drop pointers,
+    truncate the digest) still leaves `render()`'s own FIXED lines over `max_bytes` -- a small
+    `max_bytes` or a long `transcript_path` can overflow that skeleton alone even with nothing
+    else left to drop (see `_MINIMAL_FIXED_LINE`'s own comment for the round-2 finding this
+    closes). `_MINIMAL_FIXED_LINE` names no path, so its cost never scales with transcript size;
+    what follows it is the newest owner message, truncated to whatever room remains, plus a
+    pointer to its id (`_format_pointer` -- also path-free) -- the one thing "never sliced"
+    still has left to show once every other lever is spent.
+
+    Never exceeds `max_bytes`: `""` when even the marker line alone does not fit, the marker
+    alone when a pointer/body would not, the marker plus a truncated body plus its pointer
+    otherwise. The final length is re-measured, not trusted from the arithmetic that derives
+    `room` -- round 1 and round 2 (see the report cited above) both got exactly that arithmetic
+    wrong once already, which is the whole reason this function exists.
+
+    Adversarial-review disclosure (round 3): `newest_owner` is rendered as-is, including when
+    it is `blocked` (never sent to Jev, see `Scores.blocked`) -- its `.text` is still the real,
+    intact transcript bytes either way, and this function has no scoring-based content
+    requirement, so there is nothing to special-case.
+    """
+    fixed_bytes = len(_MINIMAL_FIXED_LINE.encode("utf-8"))
+    if fixed_bytes > max_bytes:
+        return ""
+    doc = _MINIMAL_FIXED_LINE
+    if newest_owner is not None:
+        pointer = _format_pointer(newest_owner)
+        # -1 -1 for the two "\n" separators between the fixed line, the body and the pointer.
+        room = max_bytes - fixed_bytes - 1 - len(pointer.encode("utf-8")) - 1
+        if room >= 0:
+            body = _truncate_prefix_bytes(newest_owner.text, room)
+            doc = f"{_MINIMAL_FIXED_LINE}\n{body}\n{pointer}"
+    if len(doc.encode("utf-8")) > max_bytes:
+        doc = _MINIMAL_FIXED_LINE if fixed_bytes <= max_bytes else ""
+    return doc
+
+
 def compose(
     items: list[Item],
     scores: dict[str, Scores],
@@ -1353,10 +1400,20 @@ def compose(
     sacrificed ahead of a newer, lower-priority one just for being older, (2) drop pointers
     LOWEST-SCORE-first (the ones already least likely to be worth expanding), (3) truncate the
     digest text itself. The trailing "pointers
-    expand with:" line is NEVER dropped by any of this -- it is the model's only way back to
+    expand with:" line is NEVER dropped by stages (1)-(3) -- it is the model's only way back to
     everything elided, and a blind `raw[:room]` slice downstream (`external_clear.compose_
     handoff`, before this fix) used to cut it off along with the newest kept items because both
     sit at the tail of the joined string.
+
+    (4) the SOLE exception (TRDD-RAEGS1D5, budget floor round 3): `render()`'s own fixed lines
+    -- header, section headings, that same trailing line -- embed `transcript_path` up to FOUR
+    times (`full_context_path` a fifth), so stages (1)-(3) alone cannot guarantee the fixed
+    skeleton itself fits a small `max_bytes` or survives a long transcript path. Only once
+    (1)-(3) still leave the render over budget, the ENTIRE document -- trailer included -- is
+    replaced by `_render_minimal_fallback`'s constant-size marker plus the newest owner message
+    truncated to whatever room remains, or `""` when nothing fits at all. This is the function's
+    actual, load-bearing guarantee: `max_bytes`, when given, is NEVER exceeded by the return
+    value, not merely "usually" or "in the common case" above.
 
     Within the `budget_tokens` admission itself (TRDD-RAEGS1D5, owner per-item token cap): an
     owner item beyond the one guaranteed slot is admitted at its capped cost
@@ -1983,5 +2040,16 @@ def compose(
         keep = max(0, len(digest_bytes) - overflow - note_bytes)
         digest_text = digest_bytes[:keep].decode("utf-8", "ignore").rstrip() + _DIGEST_TRUNCATED_NOTE
         doc = render(kept_order_list, shown_elided, hidden_count, digest_text, decision_hidden_count)
+
+    if len(doc.encode("utf-8")) > max_bytes:
+        # TRDD-RAEGS1D5 (compose() budget floor round 3): every lever above only shrinks the
+        # VARIABLE parts -- `render()`'s own fixed lines (embedding `transcript_path` up to
+        # four times, `full_context_path` a fifth) are never touched by any of it, so they can
+        # still be over budget alone once everything else is gone (a long path, or a `max_bytes`
+        # this small to begin with -- see `_render_minimal_fallback`'s docstring). This is the
+        # function's own hard guarantee: `max_bytes`, when given, is NEVER exceeded -- degrading
+        # all the way to `""` rather than ever returning an over-budget string.
+        newest_owner = guaranteed_owner_items[0] if guaranteed_owner_items else None
+        doc = _render_minimal_fallback(newest_owner, max_bytes)
 
     return doc

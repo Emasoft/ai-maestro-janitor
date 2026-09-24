@@ -2096,3 +2096,144 @@ def test_decision_pointer_hard_ceiling_keeps_newest_and_summarizes_the_rest() ->
 
     assert "... and 25 more decision items: run `" in doc
     assert "expand --transcript /tmp/t.jsonl --list --grep TEXT` to list them" in doc
+
+
+# --- TRDD-RAEGS1D5 (compose() budget floor round 3, coordinator review of round 2:
+# reports/compaction-replacement/20260924_013141+0200-jev-inject-room-floor-round2.md finding
+# 2) -- `render()`'s own fixed lines embed `transcript_path` up to FOUR times, so a long path
+# or a tiny `max_bytes` used to leave the skeleton itself over budget even after every prior
+# degrade step ran. ---
+
+_LONG_TRANSCRIPT_PATH = (
+    "/Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/.claude/projects/"
+    "some-very-long-slug-to-push-this-path-well-past-one-hundred-and-fifty-characters-"
+    "for-the-test/transcript.jsonl"
+)
+assert len(_LONG_TRANSCRIPT_PATH) > 150  # the whole point of this fixture
+
+
+def test_compose_never_exceeds_max_bytes_with_a_long_transcript_path() -> None:
+    """Requirements 1+2 (compose() budget floor round 3): across every `max_bytes` value in
+    the spec's own range -- including ones far below what the fixed skeleton alone costs once
+    `transcript_path` (150+ chars here) is embedded several times -- the rendered document must
+    NEVER exceed `max_bytes`, and the newest owner message must appear whenever there is
+    genuinely enough room for it (never just because a bigger budget exists in the abstract --
+    ten low-priority filler items are evicted first, same priority order as every other
+    `max_bytes` backstop test in this file)."""
+    newest_owner_text = "THE NEWEST OWNER MESSAGE CONTENT " * 3  # 99 bytes, no newline
+    owner = _item("u-newest:0", "user", newest_owner_text, turn=50)
+    filler = [
+        _item(f"a{i}:0", "assistant", f"filler assistant output line {i} " * 20, turn=i, tokens=5)
+        for i in range(10)
+    ]
+    items = [owner, *filler]
+    scores = {
+        owner.id: jc.Scores(relevance=0.9, decision=0.3, oversized=False, kept=True,
+                             decision_passed=False),
+        **{it.id: jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                             decision_passed=False)
+           for it in filler},
+    }
+    header = {"transcript_path": _LONG_TRANSCRIPT_PATH, "session_key": "s"}  # no digest
+
+    for max_bytes in (1, 50, 200, 800, 2000, 6000):
+        doc = jc.compose(items, scores, budget_tokens=80000, header=header,
+                          max_bytes=max_bytes, max_item_bytes=700)
+        assert len(doc.encode("utf-8")) <= max_bytes, f"max_bytes={max_bytes} overflowed"
+
+    # Below the fixed skeleton's own cost (measured: 618 bytes for this path with nothing
+    # kept), there is no room for owner content at all -- `""` is correct, not a bug.
+    tiny_doc = jc.compose(items, scores, budget_tokens=80000, header=header,
+                           max_bytes=1, max_item_bytes=700)
+    assert tiny_doc == ""
+
+    # At 200 bytes the fixed skeleton (618) still does not fit -- this exercises the NEW
+    # minimal-fallback stage specifically -- yet a truncated prefix of the newest owner
+    # message still comes through, with its id still reachable.
+    mid_doc = jc.compose(items, scores, budget_tokens=80000, header=header,
+                          max_bytes=200, max_item_bytes=700)
+    assert "THE NEWEST" in mid_doc
+    assert "u-newest:0" in mid_doc
+
+    # At 800/2000/6000 the ordinary render (not the fallback) has room for the item whole.
+    for max_bytes in (800, 2000, 6000):
+        doc = jc.compose(items, scores, budget_tokens=80000, header=header,
+                          max_bytes=max_bytes, max_item_bytes=700)
+        assert newest_owner_text in doc, f"max_bytes={max_bytes} lost the newest owner message"
+
+
+def test_normal_budget_renders_unchanged_by_the_new_minimal_fallback_stage() -> None:
+    """Requirement 3: a budget generous enough that the pre-existing degrade steps already fit
+    must render EXACTLY as before this fix -- the new minimal-fallback stage only replaces the
+    document once everything above it still overflows `max_bytes`. Pins the exact byte count
+    and exact text of a small, ordinary `compose()` call so a future edit to the new stage
+    cannot silently start firing on inputs that never needed it."""
+    item = _item("k1:0", "user", "kept text", turn=1, tokens=5)
+    elided = _item("e1:0", "assistant", "elided text", turn=2, tokens=5)
+    items = [item, elided]
+    scores = {
+        item.id: jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                            decision_passed=False),
+        elided.id: jc.Scores(relevance=0.1, decision=0.0, oversized=False, kept=False,
+                              decision_passed=False),
+    }
+    header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s", "digest": "the digest"}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=6000)
+
+    assert len(doc.encode("utf-8")) == 334  # pinned -- must not move for a normal-budget call
+    assert doc == (
+        "# Compacted context (Jev compaction)\n"
+        "transcript: /tmp/t.jsonl\n"
+        "session: s\n"
+        "\n"
+        "## Digest\n"
+        "the digest\n"
+        "\n"
+        "usage: tokens=? cost=?\n"
+        "\n"
+        "## Kept items\n"
+        "-- user k1:0 --\n"
+        "kept text\n"
+        "\n"
+        "## Elided\n"
+        '[[elided id=e1:0 tokens=5 "elided text"]]\n'
+        "\n"
+        'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
+        "expand --transcript /tmp/t.jsonl <id>"
+    )
+
+
+def test_render_minimal_fallback_boundary_never_exceeds_and_drops_the_pointer_first() -> None:
+    """Whitebox on the new `_render_minimal_fallback` itself (TRDD-RAEGS1D5, budget floor
+    round 3): pins the exact byte boundary where even the constant-size marker line stops
+    fitting (`""`), the boundary where it fits but a pointer/body would not (marker alone), and
+    confirms the combined output is re-measured, never just trusted from the room arithmetic."""
+    fixed_bytes = len(jc._MINIMAL_FIXED_LINE.encode("utf-8"))
+    owner = _item("u1:0", "user", "some owner text " * 10, turn=1)
+
+    assert jc._render_minimal_fallback(owner, fixed_bytes - 1) == ""
+    assert jc._render_minimal_fallback(owner, fixed_bytes) == jc._MINIMAL_FIXED_LINE
+    assert jc._render_minimal_fallback(None, 10_000) == jc._MINIMAL_FIXED_LINE
+
+    generous = jc._render_minimal_fallback(owner, 10_000)
+    assert generous.startswith(jc._MINIMAL_FIXED_LINE + "\n")
+    assert "some owner text" in generous
+    assert f"id={owner.id}" in generous  # the pointer -- the id survives even this degrade
+    assert len(generous.encode("utf-8")) <= 10_000
+
+    # Adversarial-review finding (round 3): the two boundary cases above only cover `room < 0`
+    # (two cases) and `room` generously positive -- neither pins the exact `room == 0`/`room ==
+    # 1` transition, precisely where an off-by-one in the "-1 -1" separator accounting would
+    # hide. `room == 0` means exactly enough space for the fixed line, both "\n" separators and
+    # the pointer, with a ZERO-byte truncated body between them; `room == 1` is the first byte
+    # that actually shows.
+    pointer = jc._format_pointer(owner)
+    pointer_bytes = len(pointer.encode("utf-8"))
+    room0_max_bytes = fixed_bytes + 1 + pointer_bytes + 1  # room == 0
+    room0 = jc._render_minimal_fallback(owner, room0_max_bytes)
+    assert room0 == f"{jc._MINIMAL_FIXED_LINE}\n\n{pointer}"
+    assert len(room0.encode("utf-8")) == room0_max_bytes
+
+    room1 = jc._render_minimal_fallback(owner, room0_max_bytes + 1)  # room == 1
+    assert room1 == f"{jc._MINIMAL_FIXED_LINE}\n{owner.text[0]}\n{pointer}"
+    assert len(room1.encode("utf-8")) == room0_max_bytes + 1
