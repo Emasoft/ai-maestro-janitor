@@ -3345,11 +3345,15 @@ fn marker_line<'a>(text: &'a str, id: &str) -> &'a str {
 fn retire_atom_stamps_superseded_by_even_when_an_unrelated_status_is_already_present() {
     let d = TempDir::new("retire-status-present");
     let page = d.join("p.md");
+    // The `see-also: [[…]]` field carries a COMMA inside a `[[wikilink]]` — the exact shape
+    // `split_top_level_commas` bracket-depth-tracks so it is never mistaken for an item boundary.
+    // It sits between `keywords` and `status` so replacing `status` in place also proves a
+    // bracketed neighbour survives the rewrite untouched, not just fields after the edit point.
     d.write(
         "p.md",
         "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
-         ^ATOM-AAAA-1111 [keywords: k, status: valid, ocd: 2026-01-01, lmd: 2026-01-01]\n\
-         the original fact.\n\n## Notes and lessons learned\n",
+         ^ATOM-AAAA-1111 [keywords: k, see-also: [[other note, revisited]], status: valid, \
+         ocd: 2026-01-01, lmd: 2026-01-01]\nthe original fact.\n\n## Notes and lessons learned\n",
     );
 
     let lesson_out = run_stdin(
@@ -3363,23 +3367,45 @@ fn retire_atom_stamps_superseded_by_even_when_an_unrelated_status_is_already_pre
 
     let text = std::fs::read_to_string(&page).unwrap();
     let marker = marker_line(&text, "ATOM-AAAA-1111");
+    // TRDD-XI10BA5D (second pass, 2026-09-24): a review of the FIRST fix caught that the
+    // injection still APPENDED a fresh `status:` unconditionally, so an atom that already had
+    // `status: valid` ended up with the key TWICE on one marker line — every reader still
+    // resolved it correctly (`parse_block_props` is a map; last occurrence wins) but it is a
+    // literal grammar violation, and a plain `.contains("status: superseded")` check (below)
+    // cannot tell "replaced in place" from "duplicated" since both satisfy it. Count instead: the
+    // guard now REPLACES an existing `status:` item's value rather than appending a second one.
+    assert_eq!(
+        marker.matches("status:").count(),
+        1,
+        "exactly one `status:` key on the marker — replaced in place, not duplicated:\n{marker}"
+    );
+    assert_eq!(
+        marker.matches("superseded-by:").count(),
+        1,
+        "exactly one `superseded-by:` key on the marker:\n{marker}"
+    );
+    // REVIEW FINDING (second adversarial fork, 2026-09-24): the rewrite reconstructs the props
+    // interior via `split_top_level_commas`, whose bracket-depth tracking is a PRE-EXISTING
+    // property of every read in this file, not something this diff introduces — but this is the
+    // first WRITE built on top of it, so an untouched neighbour field surviving the round trip is
+    // no longer just a read-path assumption, it is an invariant this code now depends on. Pin the
+    // realistic case (a `[[wikilink]]` value, the one bracket form the corpus's own grammar
+    // sanctions unquoted): its embedded comma must not be mistaken for a prop-item boundary.
+    assert!(
+        marker.contains("see-also: [[other note, revisited]]"),
+        "an unrelated bracketed field with an internal comma must survive the status \
+         replacement byte for byte, not be split on its embedded comma:\n{marker}"
+    );
     assert!(
         marker.contains(&format!("superseded-by: {lesson_id}")),
         "a pre-existing, UNRELATED `status:` prop must not block the superseded-by stamp:\n{marker}"
     );
     assert!(
         marker.contains("status: superseded"),
-        "the verb still sets status: superseded the way it always has:\n{marker}"
+        "the pre-existing `status: valid` is REPLACED with superseded, not left stale:\n{marker}"
     );
-    // REVIEW FINDING (adversarial fork, 2026-09-24): the injection appends its own `status:`
-    // unconditionally once the guard passes, so this marker now carries the key TWICE
-    // (`status: valid, …, status: superseded`) — the corpus's first intentionally-duplicate-key
-    // marker. `parse_block_props` is a `BTreeMap` keyed by the prop name, so the LAST occurrence
-    // in the string wins on every read (`recall`, `lint`, `status_from_props`, …) — but that is
-    // an inference about the parser, not proof the marker still SATISFIES the corpus's own
-    // oracle. Pin it: `validate` must still accept a page carrying this exact duplicate.
     let (_, code) = run_with_code(&["validate", page.to_str().unwrap()]);
-    assert_eq!(code, 0, "a duplicate `status:` key from --retire-atom must not fail validate");
+    assert_eq!(code, 0, "the rewritten marker must still pass validate");
 }
 
 #[test]

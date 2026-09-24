@@ -3659,21 +3659,54 @@ fn add_lesson_impl(
     //     atom that carried an unrelated `status:` value (e.g. `status: valid`, written by another
     //     tool) but no `superseded-by:` yet, so that atom could never be retired through this verb —
     //     the retro-lesson skill then had to tell agents to hand-edit the props bracket, which the
-    //     memgrep-only rule forbids (TRDD-XI10BA5D). `end` is one-past the props `]`, so `end - 1` is
-    //     the `]`'s byte index — inject just before it. Fields are Copy/owned (no live borrow into
-    //     the line), so the following mutable `insert_str` is sound.
+    //     memgrep-only rule forbids (TRDD-XI10BA5D).
+    //
+    //     A SECOND review (TRDD-XI10BA5D, 2026-09-24) caught what that first fix still got wrong:
+    //     it always APPENDED a fresh `status: superseded`, so an atom that already had a `status:`
+    //     key ended up with the key TWICE on one line. Every reader still resolved it correctly
+    //     (`parse_block_props` is a map, so the LAST occurrence wins) but a literal duplicate key is
+    //     exactly the grammar violation `render_block_props` exists to prevent (janitor#266) — this
+    //     file's own oracle, not just an aesthetic nit. So: REPLACE an existing `status:` item's
+    //     value in place when one is present; APPEND a fresh one only when absent. `superseded-by:`
+    //     is always appended (the guard above already proved it is missing). Both the replacement
+    //     and the appended text are built by `render_block_props` — never a hand-formatted
+    //     `key: value` literal — and the item to replace is located via `split_top_level_commas`,
+    //     the SAME quote/bracket-aware splitter `parse_block_props` itself uses internally, so a
+    //     comma inside a quoted `desc:"…"` value can never be mistaken for a prop boundary.
     if retire_atom
         && let Some((_s, end, _id, props_raw)) = first_block_property_marker(&lines[marker_idx])
         && superseded_by_from_props(&parse_block_props(&props_raw)).is_empty()
     {
-        // Through the shared renderer: this string used to carry BOTH spellings at once
-        // (`status: superseded` spaced, `superseded-by:{id}` not), inside a single format! —
-        // the clearest evidence that a per-site format string cannot hold a grammar (janitor#266).
-        let retire_props = render_block_props(&[
-            ("status", "superseded".to_string()),
-            ("superseded-by", lesson_id.clone()),
-        ]);
-        lines[marker_idx].insert_str(end - 1, &format!(", {retire_props}"));
+        let superseded_by_pair = render_block_props(&[("superseded-by", lesson_id.clone())]);
+        let status_pair = render_block_props(&[("status", "superseded".to_string())]);
+        let new_interior = if parse_block_props(&props_raw).contains_key("status") {
+            // Rewrite ONLY the `status:` item's text; every other item is carried over
+            // VERBATIM (including its own leading separator whitespace, which `split_top_level_
+            // commas` leaves attached to it) — rejoining with a bare `,` (not `, `) therefore
+            // reproduces every untouched item byte for byte.
+            let items: Vec<String> = split_top_level_commas(&props_raw)
+                .into_iter()
+                .map(|item| {
+                    let key = item.split_once(':').map(|(k, _)| k.trim()).unwrap_or("");
+                    if key == "status" {
+                        let leading_ws: String =
+                            item.chars().take_while(|c| c.is_whitespace()).collect();
+                        format!("{leading_ws}{status_pair}")
+                    } else {
+                        item.to_string()
+                    }
+                })
+                .collect();
+            format!("{}, {}", items.join(","), superseded_by_pair)
+        } else {
+            format!("{props_raw}, {status_pair}, {superseded_by_pair}")
+        };
+        // `end` is one-past the props `]`, so `end - 1` is the `]`'s byte index and (since
+        // `first_block_property_marker` guarantees `[`/`]` are ASCII boundaries) `end - 1 -
+        // props_raw.len()` is the byte index right after `[` — replace exactly that span, never
+        // the surrounding brackets.
+        let interior_start = end - 1 - props_raw.len();
+        lines[marker_idx].replace_range(interior_start..end - 1, &new_interior);
     }
 
     // 2. Append the `[^N]:` definition inside the notes section. When the section exists, append at

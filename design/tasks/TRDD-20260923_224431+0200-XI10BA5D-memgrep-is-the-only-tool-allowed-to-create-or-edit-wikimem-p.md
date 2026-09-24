@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-24T00:19:16+0200
+updated: 2026-09-24T02:01:38+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -97,3 +97,4 @@ Release note (measured 2026-09-24, reports/memgrep-sole-writer/20260924_001402+0
 ## Implementation plan (reviewed in two rounds, 2026-09-24 note)
 
 A page with more than one forbidden control byte cannot be repaired one span at a time (each partial fix leaves a byte in the result, so the gate refuses it); the repair path is update-mem-topic --replace-all when every occurrence takes the same fix, else the A3 whole-page replace.
+Sibling of the 4a2082a7 fix (found 2026-09-24): supersede_atom_lesson_free, behind add-atom --supersedes (memory.rs ~3085-3114), hard-refuses any atom carrying an unrelated status: prop with a misleading "already superseded" message. Fix the guard the same way (key it on superseded-by:); read how this function stamps the marker before choosing how to set status (it may rewrite the marker rather than append).
