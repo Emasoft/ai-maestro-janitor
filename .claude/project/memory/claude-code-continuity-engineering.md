@@ -2,7 +2,7 @@
 name: claude-code-continuity-engineering
 description: "claude stalled overnight / fleet stopped working in my absence / session stuck in a retry loop after a 429 / janitor kept injecting commands or compacting at random / how do we keep unattended Claude Code sessions ALWAYS working — the continuity-engineering topic HUB linking every layer of the never-stall stack / how does account rotation prevent 429 stalls / window-asymmetric rotation thresholds 7d vs 5h / how to unstick a frozen retrying session / why does typing text into a blocked session flood the input buffer / janitor backstop versus harness auto-compact competing / nudging an idle armed session to keep working / keep-going-off sentinel to mute nudges / stale-hook ghosts mimic an unfixed bug after a shipped fix / does a shipped fix apply without reloading hooks / per-project channeling so a burn alarm reaches only its own project / ai-maestro server chore must match janitor chore outcome parity / prevention versus recovery two-layer stall fix / TRDD-P7WU40G9 overnight stall incident record"
 ocd: 2026-07-18
-lmd: 2026-09-09
+lmd: 2026-09-24
 metadata:
   node_type: memory
   type: project
@@ -19,7 +19,7 @@ CC docs verified 2026-07-18. The owner's standing directive: *"they must never s
 
 ## The stack — six layers, each owned by its own page
 
-^4ESPVFB8 [desc:"The six-layer never-stall stack: settings substrate, account rotation (prevention), freeze recovery (ESC-only unstick), compaction discipline, nudging idle-armed sessions, rollout observability.", keywords:"how_does_account_rotation_prevent_429_stalls window_asymmetric_rotation_thresholds_7d_vs_5h how_to_unstick_a_frozen_retrying_session why_does_typing_text_into_a_blocked_session_flood_the_input_buffer janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks session_stuck_in_a_retry_loop_after_a_429 fleet_reachability_which_pane_can_be_injected"]
+^4ESPVFB8 [desc:"The six-layer never-stall stack: settings substrate, account rotation (prevention), freeze recovery (ESC-only unstick), compaction discipline, nudging idle-armed sessions, rollout observability.", keywords:"how_does_account_rotation_prevent_429_stalls window_asymmetric_rotation_thresholds_7d_vs_5h how_to_unstick_a_frozen_retrying_session why_does_typing_text_into_a_blocked_session_flood_the_input_buffer janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks session_stuck_in_a_retry_loop_after_a_429 fleet_reachability_which_pane_can_be_injected", lmd: 2026-09-24]
 1. **Settings substrate** — the harness must retry instead of stopping, and questions must
    auto-continue: [[claude-code-continuity-settings]] (watchdog + AFK chain, ensured by BOTH
    the janitor and the ai-maestro server in lockstep).
@@ -30,6 +30,9 @@ CC docs verified 2026-07-18. The owner's standing directive: *"they must never s
 3. **Freeze recovery (UNSTICK)** — a session in the retry-watchdog "Retrying in Xm" wait is
    freed with ESC-ONLY injection (2 raw ESCs, zero text, zero Enter — anything typed BUFFERS
    and floods). Semantics: [[claude-code-esc-input-semantics]]; record: TRDD-P7WU40G9 §BUG 3.
+
+^ATOM-DSGY-OJ87 [desc: "The last three layers of the never-stall stack: compaction discipline (janitor backstops harness auto-compact, never competes), nudging idle-armed sessions to keep going, and rollout observability (a ", keywords: janitor_backstop_versus_harness_auto_compact_competing nudging_an_idle_armed_session_to_keep_working keep_going_off_sentinel_to_mute_nudges stale_hook_ghosts_mimic_an_unfixed_bug_after_a_shipped_fix does_a_shipped_fix_apply_without_reloading_hooks fleet_reachability_which_pane_can_be_injected compaction_discipline_backstop_not_compete rollout_observability_hook_reload when_does_the_janitor_backstop_auto_compact why_is_a_fix_not_live_after_shipping, ocd: 2026-09-24, lmd: 2026-09-24]
+
 4. **Compaction discipline** — the janitor only BACKSTOPS a failed harness auto-compact,
    never competes with it: fire only above `CLAUDE_CODE_AUTO_COMPACT_WINDOW − overhead +
    margin` (`cold_cache_compact.min_context_tokens()`); record: TRDD-P7WU40G9 §BUG 2. The
