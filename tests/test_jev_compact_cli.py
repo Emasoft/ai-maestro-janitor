@@ -16,6 +16,7 @@ import importlib.util as _u
 import json
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,9 @@ _FIXTURE = _PROJECT_ROOT / "tests" / "fixtures" / "jev_transcript_small.jsonl"
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import jev_compaction as jc  # noqa: E402
+import jev_shadow_log as jsl  # noqa: E402  -- TRDD-N9LDHF7N card 7
+import state  # noqa: E402
+from jevctx.shadow import ShadowLog  # noqa: E402
 from jevctx.testing import FakeJevClient  # noqa: E402  -- needs the sys.path line above
 
 
@@ -51,6 +55,25 @@ def _isolated_control_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
     control = tmp_path / "control"
     monkeypatch.setenv("JANITOR_CONTROL_DIR", str(control))
     return control
+
+
+def _clear_project_state_caches() -> None:
+    state.project_root.cache_clear()
+    state.janitor_root.cache_clear()
+    state.state_dir.cache_clear()
+
+
+@pytest.fixture
+def _isolated_project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """TRDD-N9LDHF7N card 7: `jsl.shadow_log_path()` resolves through `state.state_dir()`,
+    which is `lru_cache`d and (per tests/conftest.py's session-wide isolation) already points
+    `CLAUDE_PROJECT_DIR` at ONE shared fake project for the whole session by default -- this
+    points it at THIS test's own `tmp_path` instead, matching tests/test_state_log_dir.py's
+    own isolation pattern, so shadow-log tests never share a log file with each other."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    _clear_project_state_caches()
+    yield tmp_path
+    _clear_project_state_caches()
 
 
 def _write_transcript(tmp_path: Path) -> Path:
@@ -1193,3 +1216,92 @@ def test_expand_list_default_limit_and_transcript_header(tmp_path: Path) -> None
     assert code == 0
     item_lines = out.strip("\n").splitlines()[1:]
     assert len(item_lines) == 5
+
+
+# --- Card 7 (TRDD-N9LDHF7N): shadow decision log wiring ----------------------------------
+
+
+def test_compact_logs_shadow_decisions_for_every_item(
+    tmp_path: Path, _isolated_project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`compact` must log one "admit" row per scored item, plus a "retrieve" row for the one
+    item that is actually a "user"-kind item (`_write_transcript`'s "u-1" human message --
+    the tool_result item "u-2" classifies as kind="tool", not "user", so it gets no
+    retrieve row -- see jev_compaction.py's own `_score_batch` docstring)."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+    assert code == 0
+
+    log_path = jsl.shadow_log_path()
+    assert log_path.exists()
+    assert log_path == _isolated_project_dir / ".janitor" / "state" / "jev-shadow.jsonl"
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+    admit_rows = [r for r in rows if r["kind"] == "admit"]
+    retrieve_rows = [r for r in rows if r["kind"] == "retrieve"]
+    assert len(admit_rows) == 3  # u-1:0, a-1:1, u-2:0 -- one per extracted item
+    assert len(retrieve_rows) == 1  # only "u-1:0" is a "user"-kind item
+    # suffixed, never the bare id -- a shared item_id between the admit and retrieve rows
+    # would collide in ShadowLog.stats()/.replay()'s own per-item action map (see
+    # jsl._RETRIEVE_ROW_ID_SUFFIX's comment).
+    assert retrieve_rows[0]["item_id"] == "u-1:0#decision"
+    assert "u-1:0" in {r["item_id"] for r in admit_rows}  # the admit row keeps the bare id
+
+
+def test_expand_records_a_shadow_outcome_for_the_expanded_id(
+    tmp_path: Path, _isolated_project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After `compact` elides the dangling tool_result item, `expand`-ing that same id must
+    append an "expand" outcome row -- and since it was logged "elided", the shadow log now
+    counts it as a false negative (ground truth the gate was too aggressive)."""
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+    assert code == 0
+
+    doc = out.read_text(encoding="utf-8")
+    pointer_line = next(line for line in doc.splitlines() if line.startswith("[[elided"))
+    elided_id = pointer_line.split("id=", 1)[1].split(" ", 1)[0]
+
+    code, _out = _run(["expand", "--transcript", str(transcript), elided_id])
+    assert code == 0
+
+    log = ShadowLog.load(jsl.shadow_log_path())
+    rows = log.entries()
+    outcome_rows = [r for r in rows if r["type"] == "outcome" and r["item_id"] == elided_id]
+    assert len(outcome_rows) == 1
+    assert outcome_rows[0]["kind"] == "expand"
+    assert log.stats().false_negatives == 1
+
+
+def test_replay_subcommand_prints_shadow_stats(
+    tmp_path: Path, _isolated_project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transcript = _write_transcript(tmp_path)
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+    code, _output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+    assert code == 0
+
+    code, output = _run(["replay", "--threshold", "0.5"])
+    assert code == 0
+    assert "decisions" in output  # ShadowStats.__str__'s own wording
+
+    code, output = _run(["replay", "--threshold", "0.9", "--question", "decision"])
+    assert code == 0
+    assert "decisions" in output
+
+
+def test_replay_subcommand_on_an_empty_log_still_exits_0(
+    _isolated_project_dir: Path,
+) -> None:
+    assert not jsl.shadow_log_path().exists()
+    code, output = _run(["replay", "--threshold", "0.5"])
+    assert code == 0
+    assert "0 decisions" in output

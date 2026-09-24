@@ -27,6 +27,15 @@ Sub-commands:
                                       _segment_tool_result` split a large tool result into —
                                       and prints exactly lines ``a..b`` of that block's raw
                                       text; exits 3 if the span is out of range.
+  replay --threshold T             — print `jevctx.shadow.ShadowStats` for the hypothetical
+                                      threshold T against the persisted shadow decision log
+                                      (TRDD-N9LDHF7N card 7) -- no Jev call, no transcript
+                                      walk, just the scores past `compact` runs already
+                                      logged. `--question relevance|decision` (default
+                                      "relevance") picks which of the two logged questions to
+                                      replay; see scripts/lib/jev_shadow_log.py's module
+                                      header for what each one means. Always exits 0 (an
+                                      empty/missing log just replays as zero decisions).
   compact --transcript P --out F   — compose the compacted context (card 3) and write it to
                                       F atomically. Exit code contract (a part C caller
                                       branches on these, so each is deliberate and stable):
@@ -114,6 +123,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 
 import global_state  # noqa: E402  -- needs the sys.path line above
 import jev_compaction as jc  # noqa: E402
+import jev_shadow_log as jsl  # noqa: E402  -- TRDD-N9LDHF7N card 7, shadow decision log
 import state  # noqa: E402
 from jevctx.openrouter import JevBlockedError  # noqa: E402  -- TRDD-1ETALGDG, see _stamp_kind_for_error
 from jevctx.provider import DEFAULT_PROVIDER, PROVIDER_ENV, make_client  # noqa: E402
@@ -487,7 +497,24 @@ def cmd_expand(args: argparse.Namespace) -> int:
             return 3
         text = "".join(lines[start - 1:end])
 
+    # TRDD-N9LDHF7N card 7: an expand of an id `compact` had logged as elided is a false
+    # negative -- ground truth the gate was too aggressive (jevctx.shadow.ShadowLog's own
+    # docstring). Logged only on this SUCCESS path (never for --list, never for a malformed
+    # id that exits 3 above): those never resolve to a real item, so there is nothing to
+    # match against a prior decision.
+    jsl.log_expand_outcome(args.id)
+
     print(text)
+    return 0
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    """TRDD-N9LDHF7N card 7: print `ShadowStats` for `--threshold` against the persisted
+    shadow decision log -- an offline tuning tool over past `compact` runs, no network call
+    and no transcript walk. Always exits 0: a missing or empty log just replays as zero
+    decisions (`jsl.replay_stats` treats "no file" the same as "no matching rows")."""
+    stats = jsl.replay_stats(args.threshold, question=args.question)
+    print(stats)
     return 0
 
 
@@ -601,6 +628,15 @@ def cmd_compact(args: argparse.Namespace) -> int:
             if callable(close):
                 close()
 
+    # TRDD-N9LDHF7N card 7: log every keep/elide decision the scoring pass above just made --
+    # from the scores already in hand, never a hook inside jev_compaction.py itself. A
+    # write failure is swallowed by jsl.log_decisions itself (one stderr line, never raises),
+    # so this can never turn a successful compaction into a failed one.
+    jsl.log_decisions(
+        items, scores,
+        relevance_threshold=args.relevance_threshold, decision_threshold=args.decision_threshold,
+    )
+
     usage = getattr(client, "usage", None)
     usage_tokens = getattr(usage, "input_tokens", 0) + getattr(usage, "output_tokens", 0)
     usage_cost = getattr(usage, "cost", 0.0)
@@ -695,6 +731,12 @@ def main(argv: list[str] | None = None) -> int:
     # `--grep` narrows further, `--limit` widens when 50 genuinely is not enough.
     p_expand.add_argument("--limit", type=int, default=50)
 
+    p_replay = sub.add_parser(
+        "replay", help="print ShadowStats for a hypothetical threshold (TRDD-N9LDHF7N card 7)"
+    )
+    p_replay.add_argument("--threshold", type=float, required=True)
+    p_replay.add_argument("--question", choices=["relevance", "decision"], default="relevance")
+
     p_compact = sub.add_parser("compact", help="compose the compacted context (card 3)")
     p_compact.add_argument("--transcript", required=True)
     p_compact.add_argument("--out", required=True)
@@ -736,6 +778,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_probe(args)
     if args.command == "expand":
         return cmd_expand(args)
+    if args.command == "replay":
+        return cmd_replay(args)
     return cmd_compact(args)
 
 
