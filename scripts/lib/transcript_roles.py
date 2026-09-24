@@ -87,18 +87,21 @@ _BARE_SLASH_COMMAND_RE = re.compile(r"^/(\S+)$")
 
 
 def is_control_input(text: str) -> bool:
-    """True iff `text`, stripped, is nothing but a bare control word or an argument-less
+    """True iff `text`, stripped, is nothing but a bare control word (optionally followed only
+    by trailing punctuation from `.!`, e.g. "resume." or "Continue!") or an argument-less
     automation slash command -- content-free regardless of who typed it.
 
-    Matches: a single token `resume`/`continue` (case-insensitive), or `/name` with no
-    arguments where `name` is one `_is_automation_command_name` already treats as automation
-    (reusing that list rather than duplicating it). Does NOT match a slash command WITH
-    arguments (`/goal evaluate the plugin`) or a real reply that merely contains one of these
-    words (`resume the pending TRDD work`, `yes, post it`) -- those are the owner's actual
-    words and must keep their standing.
+    Matches: a single token `resume`/`continue` (case-insensitive), with or without trailing
+    `.`/`!`, or `/name` with no arguments where `name` is one `_is_automation_command_name`
+    already treats as automation (reusing that list rather than duplicating it). Does NOT match
+    a slash command WITH arguments (`/goal evaluate the plugin`), a trailing `?` (`resume?`
+    is the owner asking a question, not a content-free control word), or a real reply that
+    merely contains one of these words (`resume the pending TRDD work`, `ok go on`,
+    `yes, post it`) -- those are the owner's actual words and must keep their standing.
     """
     stripped = text.strip()
-    if stripped.lower() in _CONTROL_TOKENS:
+    bare = stripped.rstrip(".!")
+    if bare.lower() in _CONTROL_TOKENS:
         return True
     match = _BARE_SLASH_COMMAND_RE.match(stripped)
     if match is None:

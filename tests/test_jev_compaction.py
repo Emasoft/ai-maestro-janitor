@@ -2742,3 +2742,62 @@ def test_render_minimal_fallback_boundary_never_exceeds_and_drops_the_pointer_fi
     room1 = jc._render_minimal_fallback(owner, room0_max_bytes + 1)  # room == 1
     assert room1 == f"{jc._MINIMAL_FIXED_LINE}\n{owner.text[0]}\n{pointer}"
     assert len(room1.encode("utf-8")) == room0_max_bytes + 1
+
+
+# --- TRDD-DZ1KOGAC follow-up: compose() must never seat a demoted "resume"/"continue" in the
+# guaranteed newest-owner slot, regardless of whether a real owner instruction exists alongside
+# it or is the transcript's only owner-typed record. `extract_items` already demotes a bare
+# control word from kind "user" to kind "event" (see the docstring on
+# `test_newest_owner_item_is_guaranteed_even_when_jev_scored_it_below_threshold` above); these
+# two tests pin `compose()`'s OWN side of that contract directly, at the `Item` level, so a
+# future change to the guaranteed-slot selection cannot silently start treating "event" like
+# "user" again.
+
+
+def test_guaranteed_owner_slot_shows_the_real_instruction_not_a_later_demoted_resume() -> None:
+    # A real owner instruction, followed chronologically by a bare "resume" (already demoted to
+    # kind "event" by extract_items -- built here directly as an Item, the way extract_items
+    # would produce it, rather than round-tripped through a fixture file). "resume" must never
+    # occupy the guaranteed newest-owner slot, and must never render as a "-- user --" item at
+    # all: kind "event" items are outside `kind == "user"` scoring/rendering entirely.
+    items = [
+        _item("instr:0", "user", "please rename the config field to max_retries", turn=0,
+              tokens=20),
+        _item("resume:0", "event", "resume", turn=1, tokens=5),
+    ]
+    scores = {
+        "instr:0": jc.Scores(relevance=0.6, decision=0.0, oversized=False, kept=True,
+                              decision_passed=False),
+        "resume:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                               decision_passed=False),
+    }
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      max_bytes=6000, max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES)
+    assert "-- user instr:0 --" in doc  # the real instruction takes the guaranteed slot
+    assert "-- user resume:0 --" not in doc  # never rendered as a user item
+    assert "-- event resume:0 --" not in doc  # and events are not inlined at all here
+
+
+def test_compose_still_valid_when_the_only_owner_typed_record_is_a_bare_resume() -> None:
+    # A transcript whose only owner-typed record is a bare "resume" has, by the time it reaches
+    # `compose()`, zero kind=="user" items at all (extract_items demoted it to "event"). compose
+    # must not crash or produce an oversized/invalid document -- it just has no guaranteed
+    # owner slot to fill -- and "resume" must never surface as a "-- user --" item.
+    items = [
+        _item("resume:0", "event", "resume", turn=0, tokens=5),
+        _item("tool:0", "tool", "some unrelated tool output", turn=1, tokens=20),
+    ]
+    scores = {
+        "resume:0": jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
+                               decision_passed=False),
+        "tool:0": jc.Scores(relevance=0.5, decision=0.0, oversized=False, kept=True,
+                             decision_passed=False),
+    }
+    max_bytes = 6000
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
+                      max_bytes=max_bytes, max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES)
+    assert len(doc.encode("utf-8")) <= max_bytes
+    assert "-- user resume:0 --" not in doc
+    assert "-- user " not in doc  # no owner item exists to render at all

@@ -429,3 +429,24 @@ def test_is_control_input_false_for_real_replies_that_contain_the_words() -> Non
 def test_is_control_input_false_for_slash_commands_with_arguments_or_non_automation_names() -> None:
     assert tr.is_control_input("/goal evaluate the plugin") is False
     assert tr.is_control_input("/task do something") is False
+
+
+def test_is_control_input_true_for_control_word_with_trailing_punctuation() -> None:
+    assert tr.is_control_input("resume.") is True
+    assert tr.is_control_input("Continue!") is True
+    assert tr.is_control_input("  Resume.  \n") is True
+
+
+def test_is_control_input_false_for_a_trailing_question_mark() -> None:
+    # A trailing "?" turns the bare word into the owner asking a question ("resume?", meaning
+    # "should I resume?") -- content, not a content-free control word, so it must NOT match.
+    assert tr.is_control_input("resume?") is False
+    assert tr.is_control_input("continue?") is False
+    assert tr.is_control_input("Continue?") is False
+
+
+def test_is_control_input_false_for_real_replies_despite_trailing_punctuation() -> None:
+    assert tr.is_control_input("resume the pending TRDD work.") is False
+    assert tr.is_control_input("ok go on!") is False
+    assert tr.is_control_input("yes, post it.") is False
+    assert tr.is_control_input("/goal evaluate the plugin.") is False
