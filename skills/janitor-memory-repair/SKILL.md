@@ -21,9 +21,9 @@ distinction: [repair-background § Execution context and what this is](reference
    fixes (the one-sided link via `reference-mem-topic`, the atom `desc:` via
    `update-mem-atom`) are each already an atomic, locked write on their own — those run
    live, on the page directly, BEFORE `begin` (see [PRE-TRANSACTION verb
-   fixes](#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page) below).
-   Every other fix still goes through the staged copy; nothing runs on the live page
-   inside or after a staged-copy pass.
+   fixes](references/pre-transaction-verb-fixes.md#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page)
+   — MANDATORY read below). Every other fix still goes through the staged copy; nothing
+   runs on the live page inside or after a staged-copy pass.
 3. **Single page, in place.** One write at the page's own path, ZERO deletes —
    moving a fact between pages is merge/split/conflict work, not repair.
 4. **`ocd` is immutable; `lmd` advances.** Never rewrite a page's creation date;
@@ -96,7 +96,9 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
   search will use (findability — the page stays found by recall).
 - **A page's OWN one-sided link** → a PRE-TRANSACTION fix, run live before `begin`
-  (details + `--base-sha256` and refusal handling in the section below): `memgrep
+  (details + `--base-sha256` and refusal handling in
+  [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —
+  MANDATORY read): `memgrep
   reference-mem-topic --page <this page> --to <target page>`. It wires both ends of
   the `[[wikilink]]` in one locked write; repair is single-page, so only fix the
   reciprocal FROM this page.
@@ -110,7 +112,9 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   `^id [...]` atom marker needs a `desc:` that is PRESENT, ≤200 chars, QUOTED or an
   unquoted clean legacy slug (`[a-z0-9_]+` only). **Backfill by SUMMARIZING the atom's
   own body** (rule 5: infer, never invent), then apply it as a PRE-TRANSACTION fix,
-  run live before `begin` (details below): `memgrep update-mem-atom --page <page>
+  run live before `begin` (details in
+  [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —
+  MANDATORY read): `memgrep update-mem-atom --page <page>
   --atom <id> --desc "<text>"`. Before trimming a `desc:`, check every cut
   symptom/cause/name is already in that atom's `keywords:` — add it if not. Full
   grammar + incident: [repair-background § desc](references/repair-background.md#desc-trim-keyword-incident-747b8bef).
@@ -128,70 +132,17 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
 It re-arms when the page's bytes change, and after 7 days — a verdict with an expiry,
 not a permanent silence. `--reason` must let the next reader re-check it.
 
-## PRE-TRANSACTION verb fixes (run BEFORE `begin`, live, per candidate page)
+## PRE-TRANSACTION verb fixes — REQUIRED when applicable
 
-Two checklist fixes are already atomic, locked memgrep writes and are never part of the
-staged-copy pass — run whichever apply to the candidate page BEFORE
-`memory_txn_cli.py begin`, never inside the staged copy and never after `commit`. Why a
-stale sha strands the second verb call: [rationale](references/repair-background.md#pre-transaction-verb-fixes--extended-rationale).
-
-**Re-read the page and recompute `--base-sha256` immediately before EACH verb call** —
-never reuse one sha for both.
-
-1. **The one-sided link — dry-run first, and only write if the TARGET is unaffected.**
-   `reference-mem-topic` always wires both ends, but repair is single-page (IRON RULE 3)
-   and a live write to the TARGET page could stale another chore's open transaction on
-   it. Check before writing:
-
-   Compute `sha` FIRST, from the page's current bytes, THEN read the page (the dry-run
-   itself reads it live) and decide from that read — never decide first and checksum
-   after, or a concurrent write between the two lands unnoticed:
-
-   ```bash
-   sha=$({ sha256sum <this page> 2>/dev/null || shasum -a 256 <this page>; } | cut -d' ' -f1)
-   if [ -n "$sha" ]; then memgrep reference-mem-topic --page <this page> --to <target page> --dry-run; else echo "unreadable: <this page> — report and skip its verb fixes"; fi
-   #   → "would link <this page> <-> <target page> (page {gains a link|unchanged}, to {gains a link|unchanged})"
-   ```
-
-   - `to unchanged` (only THIS page would change, or neither would — `page unchanged, to
-     unchanged` means the link is already bidirectional, nothing to do) → safe, run it
-     for real (a no-change run is harmless, but skip it outright if you can tell from
-     the dry-run text that nothing would change):
-
-     ```bash
-     if [ -n "$sha" ]; then memgrep reference-mem-topic --page <this page> --to <target page> --base-sha256 "$sha"; else echo "unreadable: <this page> — report and skip its verb fixes"; fi
-     ```
-   - `to gains a link` (the TARGET would also change) → do NOT run it live. Skip this
-     verb and report the one-sided link as a finding instead. Why this is the common
-     outcome, not the edge case: [rationale](references/repair-background.md#pre-transaction-verb-fixes--extended-rationale).
-
-2. **The atom `desc:` backfill.** Repeat the same pair — sha first, then re-read the
-   page to confirm the atom still needs it — even if verb 1 just ran; its write changed
-   the page's bytes, so step 1's `sha` is now stale for this call:
-
-   ```bash
-   sha=$({ sha256sum <page> 2>/dev/null || shasum -a 256 <page>; } | cut -d' ' -f1)
-   if [ -n "$sha" ]; then memgrep update-mem-atom --page <page> --atom <id> --desc "<text>" --base-sha256 "$sha"; else echo "unreadable: <page> — report and skip its verb fixes"; fi
-   ```
-
-**On refusal** (stale sha, or any other error) from either verb: report the refusal and
-continue with whatever other fixes the page still needs — a refused pre-transaction fix
-is not a reason to skip the rest of the checklist, nor to abandon the staged-copy pass
-for this page.
-
-**Re-read the page again after the pre-transaction step, before `begin`.** A verb call
-that wrote changed the page's bytes; re-diagnose the checklist against the CURRENT page
-so the candidate set handed to the staged-copy pass reflects what's actually still
-broken, not what was broken before the pre-transaction fixes landed. This re-diagnosis
-happens BEFORE the "does this page still need `begin`/`commit`" decision below, not
-after — the decision is made from the post-fix diagnosis, never the stale one that
-selected the page as a candidate.
-
-A page whose ONLY defects were these two verb-covered fixes (and both were applied, or
-correctly skipped/reported) needs no `begin`/`commit` at all — the pre-transaction step
-alone completed the repair. It still prints the normal per-page Output line and still
-closes the claim (`set-report` + `complete`), exactly as a page that went through the
-transaction core (see Output and Close the claim below).
+**PRE-TRANSACTION verb fixes — REQUIRED when the checklist finds a page's own one-sided
+link, or an atom `desc:` to backfill or trim:** before `memory_txn_cli.py begin` for
+that page, Read
+[references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) in
+full and run it exactly. Skip it only when neither defect is present. Control-flow
+summary in case the file is not yet read: re-read and re-diagnose the page after the
+verb fixes, before `begin`; a page whose only defects were these two fixes skips
+`begin`/`commit` entirely but still prints its Output line and closes the claim; on a
+refusal from either verb, report it and continue with the rest of the checklist.
 
 ## EXECUTE the repair THROUGH the transaction core
 
@@ -214,8 +165,8 @@ gap — never hand-edit the live page.
 of the repair is discarded, the live tree untouched by it. A pre-transaction verb fix
 (link/desc) already landed before `begin` and is NOT rolled back by this abort; the
 page is left with that fix applied and its remaining defects still open, exactly as
-the [PRE-TRANSACTION verb fixes](#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page)
-section describes. Fix the staged copy (restore a dropped lesson, reset a changed
+[references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page)
+describes. Fix the staged copy (restore a dropped lesson, reset a changed
 `ocd`, add a missing key) and re-commit. **Retry ≤3**; then `abort "<scope_root>"
 <txn_id>` and surface a finding.
 

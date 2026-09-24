@@ -807,3 +807,26 @@ def test_missing_agents_branch_never_prescribes_the_reload_that_causes_it():
             "the pre-HREGVXYP text: it sends an agent following the rule faithfully straight "
             "back into the operation that produced the symptom."
         )
+
+
+def test_janitor_memory_repair_still_points_at_the_pre_transaction_reference():
+    """Guard against a silent third condensation of janitor-memory-repair/SKILL.md
+    (TRDD-XI10BA5D): the 226b2d97 condensation already dropped an action once, and the
+    follow-up pure-move that fixed the token cap only holds if the MANDATORY read step
+    pointing at references/pre-transaction-verb-fixes.md survives future edits, and the
+    file it names still exists. Losing either half silently reintroduces the same class
+    of defect: an agent skipping the one-sided-link / desc backfill-trim fixes because
+    the pointer to them is gone or dangling.
+    """
+    skill_dir = _PROJECT_ROOT / "skills" / "janitor-memory-repair"
+    skill_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert "references/pre-transaction-verb-fixes.md" in skill_text, (
+        "janitor-memory-repair/SKILL.md no longer names "
+        "references/pre-transaction-verb-fixes.md — the MANDATORY read step that "
+        "replaced the pure-moved PRE-TRANSACTION verb-fix procedure has vanished, "
+        "silently re-dropping the one-sided-link / desc backfill-trim fixes."
+    )
+    assert (skill_dir / "references" / "pre-transaction-verb-fixes.md").is_file(), (
+        "janitor-memory-repair/SKILL.md points at "
+        "references/pre-transaction-verb-fixes.md but the file does not exist."
+    )
