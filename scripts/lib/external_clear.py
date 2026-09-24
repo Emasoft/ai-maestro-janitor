@@ -605,7 +605,14 @@ def _classify_line(rec: dict[str, Any]) -> tuple[str, str] | None:
         origin_kind = origin.get("kind") if isinstance(origin, dict) else None
         if attachment.get("commandMode") != "prompt" or origin_kind != "human":
             return None  # queued task-notification, or a peer/cross-session attachment
-        role_label, text = "USER", str(attachment.get("prompt") or "")
+        # af09571b: `attachment.prompt` is a plain str for a typed message but a LIST of
+        # content blocks (the same shape as `message.content`) when the owner pastes an
+        # image with text -- `_record_text` already handles both shapes for `msg.content`
+        # above, so reuse it here instead of `str(...)`, which would stringify the block
+        # list into a Python repr ("[{'type': 'text', ...}]") in the recent-turns tail.
+        # An image-only prompt (no text block) joins to "" and the line is dropped below,
+        # same as any other empty USER turn -- not represented as a placeholder.
+        role_label, text = "USER", _record_text(attachment.get("prompt"))
         if transcript_roles.is_control_input(text):
             return None
     elif entry_type == "assistant":

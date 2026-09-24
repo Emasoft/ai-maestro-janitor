@@ -1002,6 +1002,31 @@ def test_recent_messages_a_task_notification_never_appears_as_a_human_line(tmp_p
     assert not any("did the thing" in line for line in got), f"notification leaked in: {got}"
 
 
+def test_recent_messages_a_mid_turn_attachment_with_a_pasted_image_prompt_joins_the_text(tmp_path):
+    """af09571b (TRDD-RAEGS1D5): `attachment.prompt` is a plain str for a typed message but a
+    LIST of content blocks -- the same shape as `message.content` -- when the owner pastes an
+    image with text. The line must carry the joined text, never a Python repr of the block list."""
+    t = tmp_path / "s.jsonl"
+    records = [
+        {
+            "type": "attachment", "uuid": "att-image",
+            "attachment": {
+                "type": "queued_command", "commandMode": "prompt",
+                "origin": {"kind": "human"},
+                "prompt": [
+                    {"type": "text", "text": "hello owner"},
+                    {"type": "image", "source": {"type": "base64", "data": "..."}},
+                ],
+            },
+        },
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    got = ec.recent_messages(str(t))
+    assert got == ["USER: hello owner"]
+    assert not any("{'type'" in line for line in got), f"block-list repr leaked in: {got}"
+
+
 def test_recent_messages_a_mid_turn_human_attachment_appears(tmp_path):
     """A queued mid-turn owner message (`type: "attachment"`, `commandMode: "prompt"`,
     `origin.kind: "human"`) is the owner's own words and must appear as a USER: line -- but a
