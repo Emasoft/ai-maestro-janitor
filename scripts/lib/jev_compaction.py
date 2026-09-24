@@ -2491,6 +2491,18 @@ def compose(
             pointer_cost = len(_format_pointer(it).encode("utf-8")) + 1
             if s.blocked and not s.oversized:
                 pointer_cost += len("unscored (provider firewall)") + 1
+            # TRDD-U6C3YXEL amendment S1, re-read 2026-09-24: a NON-owner item may be inline when
+            # Jev kept it (the same test `kept_items` applies), not only when the `budget_tokens`
+            # stage admitted it. That stage ranks by score, so on real sessions it filled its
+            # 8,000 tokens with a few large tool results -- which this copy can only point at
+            # (a tool over its cap is never a prefix) -- and the small kept results it skipped
+            # could not be shown either: 0 tool/event items inline on d30bf250, 2 on 4eb7bf5d
+            # (reports/compaction-replacement/20260924_180444+0200-d7rlxan1-implementation.md,
+            # Finding 2). The copy is still a subset of what Jev kept, and its own byte fill
+            # (`_select_injected`) still decides which of them fit. Owner items keep the token
+            # stage's set: its owner share and caps are theirs, and D7RLXAN1 moved live owner
+            # prose out of `items` anyway.
+            jev_kept = s.kept and not s.oversized
             if it.kind == "user":
                 cap = guaranteed_item_cap if it.id in guaranteed_owner_ids else max_item_bytes
                 # Amendment S1: only what the token stage kept may be inline -- the injected
@@ -2512,7 +2524,7 @@ def compose(
                 # inline notifications passed on their full excerpt (557-3371 chars) but rendered
                 # only the agent's title (45-56 chars), ~990 B of a 4,000-B room for four titles.
                 # Such an item is pointer-only, and its bytes go to the next candidate.
-                inline_ok = (it.id in kept_ids and pointer_eligible
+                inline_ok = (jev_kept and pointer_eligible
                              and _body_chars(shown) >= _INJECT_MIN_BODY_CHARS)
                 inline_cost = block_cost if inline_ok else None
             else:
@@ -2532,7 +2544,7 @@ def compose(
                 # pointer's preview already says WHAT it is, and a 350-B slice of a diff/grep/
                 # Bash result added a few lines for 3-4x the bytes (all 7 truncated tool items
                 # measured in the three real injected copies). Prose reads fine as a prefix.
-                inline_ok = (it.id in kept_ids and pointer_eligible
+                inline_ok = (jev_kept and pointer_eligible
                              and (whole or it.kind != "tool"))
                 inline_cost = _inline_cost(it, non_owner_cap) if inline_ok else None
             cands.append(_InjectCandidate(

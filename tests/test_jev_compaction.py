@@ -3104,6 +3104,31 @@ def test_injected_gate_keeps_a_short_whole_tool_result_but_not_a_heading_stub() 
     assert jc._body_chars(pytest_out) == 23 and jc._body_chars(reply) < 80  # fixture sanity
 
 
+def test_injected_small_jev_kept_tool_results_render_inline_beside_a_large_admitted_one() -> None:
+    """TRDD-U6C3YXEL amendment S1, re-read 2026-09-24: the `budget_tokens` stage fills its budget
+    by score, so one large tool result wins it and the smaller results Jev also kept are skipped;
+    the injected copy can only point at the large one (a tool over its cap is never a prefix).
+    With S1 read as the token stage's set nothing was inline (d30bf250: 0 tool/event items). A
+    non-owner item Jev kept may now be inline, so the small results are shown."""
+    big = _item("big:0", "tool", "Bash({})\n" + "".join(
+        f"line {i}: a real row of the command's output\n" for i in range(100)), turn=1, tokens=900)
+    small = [_item(f"small{i}:0", "tool", f"Bash({{}})\n{i}{i} passed in 0.{i}s, all green",
+                   turn=2 + i, tokens=50) for i in range(3)]
+    newest = _item("newest:0", "user", "hi", turn=10, tokens=2)
+    items = [big, *small, newest]
+    scores = {"big:0": _scores(0.95), "newest:0": _scores(0.9),
+              **{it.id: _scores(0.8) for it in small}}
+    doc = jc.compose(items, scores, budget_tokens=920, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    inline, pointed = _shown_ids(doc, items)
+    assert {it.id for it in small} <= inline
+    assert "big:0" not in inline and "big:0" in pointed
+    # Precondition: the token stage really skipped the small ones (900 + 50 > 920).
+    full = jc.compose(items, scores, budget_tokens=920, header=_H)
+    assert _shown_ids(full, items)[0] == {"big:0", "newest:0"}
+
+
 def test_injected_whole_tool_call_with_no_result_fails_the_gate() -> None:
     """TRDD-BLGZTHQ9 addendum (2026-09-24): the 20-char whole-tool-result gate must count only
     the RESULT part -- a bare call echo (`_segment_tool_result`'s synthetic `name(input)` first
