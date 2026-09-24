@@ -11,7 +11,20 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-uv run pytest -q -p no:cacheprovider tests/test_detector_executable_bits.py || {
-    echo "pre-commit: a tracked script lost its executable bit — chmod 755 <file> && git add <file>"
+# Capture output (instead of letting pytest stream straight to the
+# terminal) so the failure message below can tell an exec-bit violation
+# apart from an unrelated pytest failure. WHY: on 2026-09-24 a concurrent
+# worker edited a tracked file mid-run, tripping the suite's real-state
+# write guard ("REAL-STATE WRITE GUARD FAILED … CHANGED: ...") — a failure
+# that has nothing to do with permission bits — and the old hook printed
+# the exec-bit remedy regardless of cause, which was simply wrong; a retry
+# passed. Never claim a specific cause the exit code alone can't prove.
+pytest_output="$(uv run pytest -q -p no:cacheprovider tests/test_detector_executable_bits.py 2>&1)" || {
+    echo "$pytest_output"
+    if grep -q "REAL-STATE WRITE GUARD FAILED" <<<"$pytest_output"; then
+      echo "pre-commit: test_detector_executable_bits.py failed — its real-state write guard tripped (see output above), meaning a tracked file was edited mid-run by another process. Re-run the commit; if it keeps failing, check for a lost executable bit: chmod 755 <file> && git add <file>."
+    else
+      echo "pre-commit: test_detector_executable_bits.py failed (see output above) — either a tracked script lost its executable bit (chmod 755 <file> && git add <file>) or the run was disturbed by a concurrent process (re-run the commit)."
+    fi
     exit 1
   }
