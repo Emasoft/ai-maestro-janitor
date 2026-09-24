@@ -3246,6 +3246,34 @@ def test_injected_notification_label_calls_a_heading_only_result_summary() -> No
     assert "(excerpt: summary and result)" not in doc
 
 
+def test_injected_notification_label_calls_a_surviving_heading_and_finding_summary_and_result() -> None:
+    """TRDD-BLGZTHQ9 F1b: the label is a claim about what is shown. A summary that passes the
+    gate on its own, plus a result whose one-word heading (`ADVERSARIAL-REVIEW`) is followed by a
+    real finding of >= 80 non-whitespace chars, both survive the cut when there is room for the
+    whole excerpt -- the label must still say "(excerpt: summary and result)", not drop "result"
+    just because the result STARTS with a bare heading line."""
+    summary = ("Agent \"Re-render the four cached transcripts and compare the full copies byte "
+               "for byte against the committed baseline\" finished")
+    finding = "finding " * 15
+    assert jc._body_chars(finding) >= 100
+    text = _notification_with(summary, "ADVERSARIAL-REVIEW\n\n" + finding)
+    items = [
+        _item("notif:0", "event", text, turn=1),
+        _item("newest:0", "user", "hi", turn=2),
+    ]
+    excerpt = jc._task_notification_excerpt(text)
+    # Precondition: room enough that the whole excerpt is shown, not a truncated prefix.
+    assert len(excerpt.encode("utf-8")) <= _notification_body_cap(items[0], 2000)
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=8000,
+                     max_item_bytes=2000, non_owner_item_bytes=2000)
+
+    inline, _ = _shown_ids(doc, items)
+    assert "notif:0" in inline
+    notif_block = doc.split("-- event notif:0 --\n", 1)[1].split("\n[[elided id=notif:0 ", 1)[0]
+    assert notif_block.endswith("(excerpt: summary and result)")
+
+
 def test_injected_title_only_notification_frees_its_bytes_for_the_next_candidate() -> None:
     """TRDD-BLGZTHQ9 F1b: a notification dropped to pointer-only gives its inline bytes back.
     Here a higher-scored title-only notification used to take the non-owner slot ahead of `work:0`,
