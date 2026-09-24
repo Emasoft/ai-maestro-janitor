@@ -3160,6 +3160,122 @@ def test_injected_task_notification_with_only_metadata_is_neither_shown_nor_poin
     assert jc._task_notification_excerpt(_TASK_NOTIFICATION_METADATA_ONLY) == ""
 
 
+def _notification_with(summary: str, result_line: str) -> str:
+    return (
+        "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n"
+        f"<summary>{summary}</summary>\n<result>{result_line}</result>\n</task-notification>"
+    )
+
+
+def _notification_body_cap(it: jc.Item, cap: int) -> int:
+    """The excerpt room `_notification_block` leaves under `cap` (label + pointer reserved)."""
+    return cap - len(f"\n{jc._NOTIFICATION_LABEL}\n{jc._format_pointer(it)}".encode("utf-8"))
+
+
+def _equal_cost_control(notif: jc.Item, id_: str, turn: int) -> jc.Item:
+    """An assistant prose item that passes the 80-char gate and costs EXACTLY what `notif`'s
+    inline block costs under the 350-B non-owner cap -- so any budget effect it has at a given
+    `max_bytes` is the effect the notification's own inline block had before F1b."""
+    cost = jc._notification_block(notif, 350)[1]
+    room = cost - len(f"-- assistant {id_} --\n".encode("utf-8")) - 1
+    text = ("Control: a real finding about the cached transcripts and their full copies. " * 4)[:room]
+    ctrl = _item(id_, "assistant", text, turn=turn)
+    assert jc._inline_cost(ctrl, 350) == cost
+    assert jc._body_chars(text) >= jc._INJECT_MIN_BODY_CHARS
+    return ctrl
+
+
+_TITLE_ONLY_NOTIFICATION = _notification_with('Agent "Fix item extraction" finished', "finding " * 60)
+
+
+def test_injected_notification_whose_shown_excerpt_is_only_a_title_is_pointed_not_inlined() -> None:
+    """TRDD-BLGZTHQ9 F1b: the inline gate measures the RENDERED excerpt. A short summary plus a
+    result whose one long line cannot fit the room left after the label and pointer renders as
+    the title alone -- measured on fd5cc3e0, 4 of 6 inline notifications were exactly this. The
+    full excerpt passes the gate, so the item is still pointed at; it is never shown inline."""
+    notif = _item("notif:0", "event", _TITLE_ONLY_NOTIFICATION, turn=1)
+    newest = _item("newest:0", "user", "hi", turn=3)
+    summary_line, result_line = jc._task_notification_excerpt(_TITLE_ONLY_NOTIFICATION).split("\n")
+    body_cap = _notification_body_cap(notif, 350)
+    # Precondition 1: only the title fits the cut, and the title alone fails the gate -- while
+    # the full excerpt passes it (so the item stays pointer-eligible).
+    assert len(summary_line.encode("utf-8")) <= body_cap < len(
+        f"{summary_line}\n{result_line}".encode("utf-8"))
+    assert jc._body_chars(summary_line) < jc._INJECT_MIN_BODY_CHARS
+    assert jc._body_chars(f"{summary_line}\n{result_line}") >= jc._INJECT_MIN_BODY_CHARS
+    kw: dict[str, Any] = dict(budget_tokens=8000, header=_H, max_bytes=4000, max_item_bytes=700,
+                              non_owner_item_bytes=350)
+    # Precondition 2: the room is not the reason -- an item costing exactly the notification's
+    # inline block IS shown inline at this budget (as the notification was before F1b).
+    ctrl = _equal_cost_control(notif, "ctrl:0", turn=1)
+    ctrl_doc = jc.compose([ctrl, newest], {"ctrl:0": _scores(0.9), "newest:0": _scores(0.9)}, **kw)
+    assert "ctrl:0" in _shown_ids(ctrl_doc, [ctrl])[0]
+
+    items = [notif, newest]
+    doc = jc.compose(items, {it.id: _scores(0.9) for it in items}, **kw)
+
+    inline, pointed = _shown_ids(doc, items)
+    assert "notif:0" not in inline
+    assert "notif:0" in pointed
+
+
+def test_injected_notification_label_calls_a_heading_only_result_summary() -> None:
+    """TRDD-BLGZTHQ9 F1b: the label is a claim about what is shown. A summary long enough to pass
+    the gate on its own, and a result cut down to its bare `ADVERSARIAL-REVIEW` heading (fd5cc3e0
+    `f396cd9b`/`a0d1f47f`), is labelled "(excerpt: summary)" -- a heading is not a result. The
+    constant label claimed "(excerpt: summary and result)" here."""
+    summary = ("Agent \"Re-render the four cached transcripts and compare the full copies byte "
+               "for byte against the committed baseline\" finished")
+    text = _notification_with(summary, "ADVERSARIAL-REVIEW\n\n" + "finding " * 60)
+    items = [
+        _item("notif:0", "event", text, turn=1),
+        _item("newest:0", "user", "hi", turn=2),
+    ]
+    excerpt = jc._task_notification_excerpt(text)
+    shown = jc._truncate_prefix_bytes(excerpt, _notification_body_cap(items[0], 350))
+    # Precondition: the cut keeps the summary and the heading, and nothing of the finding.
+    assert shown.rstrip().endswith("<result>ADVERSARIAL-REVIEW")
+    assert jc._body_chars(shown) >= jc._INJECT_MIN_BODY_CHARS  # so it is still shown inline
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    inline, _ = _shown_ids(doc, items)
+    assert "notif:0" in inline
+    assert "(excerpt: summary)" in doc
+    assert "(excerpt: summary and result)" not in doc
+
+
+def test_injected_title_only_notification_frees_its_bytes_for_the_next_candidate() -> None:
+    """TRDD-BLGZTHQ9 F1b: a notification dropped to pointer-only gives its inline bytes back.
+    Here a higher-scored title-only notification used to take the non-owner slot ahead of `work:0`,
+    and the room could not hold both; now `work:0` -- a real work record -- is shown inline."""
+    notif = _item("notif:0", "event", _TITLE_ONLY_NOTIFICATION, turn=1)
+    work = _item("work:0", "assistant", ("Step 1: re-rendered the cached transcripts, compared the "
+                                          "full copies byte for byte, and all matched. " * 3).strip(),
+                 turn=2)
+    newest = _item("newest:0", "user", "hi", turn=3)
+    kw: dict[str, Any] = dict(budget_tokens=8000, header=_H, max_bytes=780, max_item_bytes=700,
+                              non_owner_item_bytes=350)
+    # Precondition: at this budget an item costing exactly the notification's inline block, and
+    # outranking `work:0` the same way, leaves no room for `work:0` -- the pre-F1b situation.
+    ctrl = _equal_cost_control(notif, "ctrl:0", turn=1)
+    ctrl_items = [ctrl, work, newest]
+    ctrl_doc = jc.compose(ctrl_items, {"ctrl:0": _scores(0.95), "work:0": _scores(0.5),
+                                       "newest:0": _scores(0.9)}, **kw)
+    ctrl_inline, _ = _shown_ids(ctrl_doc, ctrl_items)
+    assert "ctrl:0" in ctrl_inline and "work:0" not in ctrl_inline
+
+    items = [notif, work, newest]
+    doc = jc.compose(items, {"notif:0": _scores(0.95), "work:0": _scores(0.5),
+                             "newest:0": _scores(0.9)}, **kw)
+
+    inline, pointed = _shown_ids(doc, items)
+    assert len(doc.encode("utf-8")) <= 780
+    assert "notif:0" not in inline and "notif:0" in pointed
+    assert "work:0" in inline
+
+
 def test_injected_long_newest_message_leaves_room_for_three_non_owner_items() -> None:
     """Amendment S4: a 1,500-B newest owner message used to be shown whole (its 1,500-B cap)
     next to an 800-B newest decision item, leaving too little of a 3,900-B room for the

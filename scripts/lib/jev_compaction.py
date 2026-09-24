@@ -1452,8 +1452,30 @@ def _tool_result_part(body: str) -> str:
 
 
 _NOTIFICATION_PREFIX = "<task-notification>"
+# The WIDEST label `_notification_label` can return -- `_notification_block` sizes its reserve
+# with it, so a shorter label only ever leaves the block a few bytes under its cap.
 _NOTIFICATION_LABEL = "(excerpt: summary and result)"
 _NOTIFICATION_ELEMENT_RE = re.compile(r"<(summary|result)>.*?</\1>", re.DOTALL)
+
+
+def _notification_label(body: str) -> str:
+    """The excerpt label naming only the elements whose text survived the cut in `body`.
+
+    TRDD-BLGZTHQ9 F1b: the constant "(excerpt: summary and result)" claimed a result on
+    notifications whose `<result>` the per-item cap had cut away entirely (fd5cc3e0 `a8ce36e6`,
+    `e9b4733a`, 2026-09-24) or down to its heading (`f396cd9b`, `a0d1f47f`: `<result>ADVERSARIAL-
+    REVIEW` and nothing else) -- a label is a claim about what is shown, so it is derived from it.
+    A result "survives" only when its shown text, minus a bare one-token heading line, passes the
+    same `_INJECT_MIN_BODY_CHARS` gate every inline item does: a heading is not a finding.
+    """
+    summary = body.partition("<summary>")[2].partition("</summary>")[0]
+    result = body.partition("<result>")[2].partition("</result>")[0].strip()
+    heading, sep, rest = result.partition("\n")
+    if sep and len(heading.split()) == 1:
+        result = rest
+    parts = [name for name, ok in (("summary", _body_chars(summary) > 0),
+                                   ("result", _body_chars(result) >= _INJECT_MIN_BODY_CHARS)) if ok]
+    return f"(excerpt: {' and '.join(parts)})" if parts else "(excerpt)"
 
 
 def _is_task_notification(it: Item) -> bool:
@@ -1475,23 +1497,24 @@ def _task_notification_excerpt(text: str) -> str:
     return "\n".join(m.group(0) for m in _NOTIFICATION_ELEMENT_RE.finditer(text))
 
 
-def _notification_block(it: Item, cap: int) -> tuple[str, int]:
-    """The kept-item body for a `<task-notification>` event under per-item byte `cap`, and its
-    `_inline_cost`-style exact byte cost: the `_task_notification_excerpt` (a verbatim prefix of
-    it when the excerpt alone would not fit alongside the label and pointer), the
-    `_NOTIFICATION_LABEL` marker, and -- coordinator addendum, unlike `_inline_cost`'s
-    only-when-truncated pointer -- ALWAYS `_format_pointer`: an excerpt is never the whole
-    wrapper, so the pointer is the only way back to the metadata the excerpt dropped, truncated
-    or not."""
+def _notification_block(it: Item, cap: int) -> tuple[str, int, str]:
+    """The kept-item block for a `<task-notification>` event under per-item byte `cap`, its
+    `_inline_cost`-style exact byte cost, and the excerpt body it SHOWS (before the label): the
+    `_task_notification_excerpt` (a verbatim prefix of it when the excerpt alone would not fit
+    alongside the label and pointer), the `_notification_label` marker, and -- coordinator
+    addendum, unlike `_inline_cost`'s only-when-truncated pointer -- ALWAYS `_format_pointer`:
+    an excerpt is never the whole wrapper, so the pointer is the only way back to the metadata
+    the excerpt dropped, truncated or not. The shown body is returned so the selection's content
+    gate measures what is rendered, not what exists (TRDD-BLGZTHQ9 F1b)."""
     excerpt = _task_notification_excerpt(it.text)
     pointer = _format_pointer(it)
     reserve = len(f"\n{_NOTIFICATION_LABEL}\n{pointer}".encode("utf-8"))
     body_cap = max(0, cap - reserve)
     body = (excerpt if len(excerpt.encode("utf-8")) <= body_cap
             else _truncate_prefix_bytes(excerpt, body_cap))
-    block = f"{body}\n{_NOTIFICATION_LABEL}\n{pointer}"
+    block = f"{body}\n{_notification_label(body)}\n{pointer}"
     cost = len(f"-- {it.kind} {it.id} --\n{block}\n".encode("utf-8"))
-    return block, cost
+    return block, cost, body
 
 
 @dataclass(frozen=True)
@@ -2095,7 +2118,7 @@ def compose(
                 # TRDD-BLGZTHQ9 addendum: injected-only (max_item_bytes is not None) -- the
                 # `--out` render (max_item_bytes is None) must stay byte-identical, so it never
                 # takes this branch and keeps showing `it.text` whole below.
-                block, _ = _notification_block(it, cap)
+                block, _, _ = _notification_block(it, cap)
                 lines.append(block)
                 continue
             text_bytes = it.text.encode("utf-8")
@@ -2242,9 +2265,18 @@ def compose(
                 # -- see `_task_notification_excerpt`. Never "whole": `_notification_block`
                 # always appends the pointer, so it is never exempt from `pointer_eligible`.
                 excerpt = _task_notification_excerpt(it.text)
+                # The POINTER gate stays on the full excerpt: the pointer leads back to all of it.
                 pointer_eligible = _body_chars(excerpt) >= _INJECT_MIN_BODY_CHARS
-                inline_ok = it.id in kept_ids and pointer_eligible
-                inline_cost = _notification_block(it, non_owner_cap)[1] if inline_ok else None
+                _, block_cost, shown = _notification_block(it, non_owner_cap)
+                # TRDD-BLGZTHQ9 F1b: the INLINE gate must measure what is shown, not what exists.
+                # The shown body is the excerpt cut to the cap minus label and pointer, and the
+                # cut backs off to the last newline -- measured on fd5cc3e0 (2026-09-24), 4 of 6
+                # inline notifications passed on their full excerpt (557-3371 chars) but rendered
+                # only the agent's title (45-56 chars), ~990 B of a 4,000-B room for four titles.
+                # Such an item is pointer-only, and its bytes go to the next candidate.
+                inline_ok = (it.id in kept_ids and pointer_eligible
+                             and _body_chars(shown) >= _INJECT_MIN_BODY_CHARS)
+                inline_cost = block_cost if inline_ok else None
             else:
                 whole = len(it.text.encode("utf-8")) <= non_owner_cap
                 body = it.text if whole else _truncate_prefix_bytes(it.text, non_owner_cap)
