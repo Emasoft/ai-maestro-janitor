@@ -3,7 +3,7 @@ trdd-id: WZKFSQ2N
 title: The janitor owns continuity and its other standing responsibilities, and proves each one works on this host
 column: live_auditing
 created: 2026-09-24T08:04:03+0200
-updated: 2026-09-24T08:30:33+0200
+updated: 2026-09-24T08:39:39+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: audit
@@ -82,3 +82,4 @@ Related existing cards: TRDD-K0PMVRN6 (rotation), TRDD-L32WC0H7 (resume nudge), 
 6. No Chrome capture per switch while the live→slot mirror works; browser re-capture only for revoked grants.
 7. Privacy hook: this repo first; the false-positive rate is measured before other projects; in other projects it installs only into untracked .git/hooks, and where a tracked hook manager exists it raises a finding instead of editing their files; warn first, then block.
 8. K0PMVRN6's addresses are redacted in a forward commit; the G1b dry-run happens before release.
+- Decision 4 outcome: publish.py has no branch guard, so a hotfix is technically possible, but it would push a separate branch and tag rather than main. REJECTED: one trimmed release 1 (scope on RAEGS1D5). A one-time 15:21 capture stopgap covers the gap until then (K0PMVRN6); decision 6 still holds for recurring captures.

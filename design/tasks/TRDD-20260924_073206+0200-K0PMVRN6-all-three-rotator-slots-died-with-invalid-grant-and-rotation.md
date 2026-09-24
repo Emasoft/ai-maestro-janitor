@@ -3,7 +3,7 @@ trdd-id: K0PMVRN6
 title: All three rotator slots died with invalid_grant and rotation stayed put for 17 days
 column: todo
 created: 2026-09-24T07:32:06+0200
-updated: 2026-09-24T08:19:02+0200
+updated: 2026-09-24T08:39:39+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -65,3 +65,4 @@ labels: [oauth-rotator]
 > no need, now it is ok. but remember: the long lived tokens are not working, so you can remove that code. the current method you just used is the right one, so save it in memory. but still you must check that the rotation will actually happen in time, just before the api/time-limit error appear. otherwise continuity is broken. you must ensure rotate is executed without broken continuity of the agents jobs across all claude code, in or outside of the ai-maestro harness. i suggest to message the ai-maestro claude to inform it of the right procedures to rotate and renew you just used.
 Context: "no need, now it is ok" answered the question whether to amend commit 3185baac to remove private data from TRDD-K0PMVRN6. The owner said no amend is needed.
 > why only the server can read the keychain? the janitor daemon must read it too. not to mention that the keychain stored oauth of the user accounts must all be shared between the ai-maestro server daemon (the janitor daemon equivalent that replaces it when the server is running) and the janitor daemon.
+- 2026-09-24 STOPGAP (delegated decision; one time only): no overnight or unattended recurring captures. One capture of the live account's saved copy at 15:21 today, run only if the 15:16 renewal evidence is clean (session healthy, live item rewritten). It knowingly deviates from the ratified 'capture the live account last' step, because the two alternates are already fresh. Session-only jobs: 4d234197 (15:21 capture) and d463edea (09:41 keepalive check); disable either with CronDelete <id>. Both die if this session restarts; re-create them or accept the gap. Rotator log line: interim-capture: <email> captured|skipped(<reason>).

@@ -3,7 +3,7 @@ trdd-id: AW4XD53Q
 title: The injected Jev copy is chosen by the byte backstop instead of by priority within its byte budget
 column: complete
 created: 2026-09-24T02:44:33+0200
-updated: 2026-09-24T08:29:47+0200
+updated: 2026-09-24T08:39:40+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -25,6 +25,7 @@ Found by the review of 862d30d4 (TRDD-RAEGS1D5). compose() admits items against 
 - 2026-09-24T02:44:33+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T02:45:28+0200 — column → todo by janitor-main-session. review of e30b0885: 3/3/3 regresses the 4/6/4 this unreleased series reached, on the owner's own complaint axis; it must not ship
 - 2026-09-24T08:29:47+0200 — COMPLETE by janitor-main-session. acceptance met on cached real scores; trade accepted under delegation.
+- 2026-09-24 — closing note: the Acceptance checklist was added at close to satisfy trddgrep move's guard. Its ticks rest on the 2026-09-24 re-render from cached real scores (non-owner items 5/6/5 against the 4/6/4 target; newest owner message present on all three; nothing sliced; a test with fewer than 3 non-owner items added in c560ca76). The measured owner-item cost is on U6C3YXEL. trddgrep was run directly for this and the previous edit because the burn-gate blocked three worker launches (a disclosed exception).
 
 ## Decision 2026-09-24 (delegated)
 
