@@ -3323,6 +3323,141 @@ fn add_lesson_anchors_from_an_atom_and_round_trips() {
     assert!(found.contains(&lesson_id), "lesson findable by keyword: {found}");
 }
 
+// ─── update-mem-atom --lesson --retire-atom: the superseded-by idempotence guard ───
+//
+// TRDD-XI10BA5D (audit reports/memgrep-sole-writer/20260923_225740+0200-capability-audit-final.md
+// §10.10): the guard used to skip stamping `superseded-by:` whenever the marker already carried
+// ANY `status:` prop, not just when it already carried `superseded-by:`. That left an atom with an
+// unrelated pre-existing `status:` value (e.g. `status: valid`, written by another tool) un-retirable
+// through this verb forever, forcing a hand-edit of the props bracket the memgrep-only rule forbids.
+// These three tests pin the fixed guard directly on the marker line.
+
+/// The one line the retire-atom guard is allowed to touch — `^<id> [...]`, matched by its own
+/// leading sigil so a lesson's `[^N]:` definition (which also carries `^`, mid-line) is never
+/// mistaken for it.
+fn marker_line<'a>(text: &'a str, id: &str) -> &'a str {
+    text.lines()
+        .find(|l| l.trim_start().starts_with(&format!("^{id} [")))
+        .unwrap_or_else(|| panic!("no marker line for {id} in:\n{text}"))
+}
+
+#[test]
+fn retire_atom_stamps_superseded_by_even_when_an_unrelated_status_is_already_present() {
+    let d = TempDir::new("retire-status-present");
+    let page = d.join("p.md");
+    d.write(
+        "p.md",
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+         ^ATOM-AAAA-1111 [keywords: k, status: valid, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+         the original fact.\n\n## Notes and lessons learned\n",
+    );
+
+    let lesson_out = run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-AAAA-1111",
+            "--lesson", "--supersedes", "--retire-atom", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT trust the old value, BECAUSE it changed. DO read the new value instead.",
+    );
+    let lesson_id = lesson_out.split_whitespace().next().unwrap().to_string();
+
+    let text = std::fs::read_to_string(&page).unwrap();
+    let marker = marker_line(&text, "ATOM-AAAA-1111");
+    assert!(
+        marker.contains(&format!("superseded-by: {lesson_id}")),
+        "a pre-existing, UNRELATED `status:` prop must not block the superseded-by stamp:\n{marker}"
+    );
+    assert!(
+        marker.contains("status: superseded"),
+        "the verb still sets status: superseded the way it always has:\n{marker}"
+    );
+    // REVIEW FINDING (adversarial fork, 2026-09-24): the injection appends its own `status:`
+    // unconditionally once the guard passes, so this marker now carries the key TWICE
+    // (`status: valid, …, status: superseded`) — the corpus's first intentionally-duplicate-key
+    // marker. `parse_block_props` is a `BTreeMap` keyed by the prop name, so the LAST occurrence
+    // in the string wins on every read (`recall`, `lint`, `status_from_props`, …) — but that is
+    // an inference about the parser, not proof the marker still SATISFIES the corpus's own
+    // oracle. Pin it: `validate` must still accept a page carrying this exact duplicate.
+    let (_, code) = run_with_code(&["validate", page.to_str().unwrap()]);
+    assert_eq!(code, 0, "a duplicate `status:` key from --retire-atom must not fail validate");
+}
+
+#[test]
+fn retire_atom_leaves_a_marker_with_an_existing_superseded_by_untouched() {
+    let d = TempDir::new("retire-already-superseded");
+    let page = d.join("p.md");
+    // The `superseeded-by` (doubled-e) misspelling — the SAME fallback the guard's own doc
+    // comment claims to honor (`superseded_by_from_props` reads it via `parse_block_props`).
+    // Fixed here to the misspelled key so this test actually exercises that fallback path,
+    // not just the canonical spelling every other fixture in this file already uses.
+    d.write(
+        "p.md",
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+         ^ATOM-BBBB-2222 [keywords: k, status: superseded, superseeded-by: ATOM-CCCC-3333, \
+         ocd: 2026-01-01, lmd: 2026-01-01]\nthe old claim.\n\n## Notes and lessons learned\n",
+    );
+    let before = marker_line(&std::fs::read_to_string(&page).unwrap(), "ATOM-BBBB-2222").to_string();
+
+    run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-BBBB-2222",
+            "--lesson", "--supersedes", "--retire-atom", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT trust the old value, BECAUSE it changed. DO read the new value instead.",
+    );
+
+    let after = marker_line(&std::fs::read_to_string(&page).unwrap(), "ATOM-BBBB-2222").to_string();
+    assert_eq!(
+        before, after,
+        "an atom that already names a forward pointer (even under the `superseeded-by` \
+         misspelling) must not be re-stamped, byte for byte, even though this call still \
+         authors a new lesson against it"
+    );
+}
+
+#[test]
+fn retire_atom_is_a_no_op_on_the_second_call_against_the_same_atom() {
+    let d = TempDir::new("retire-twice");
+    let page = d.join("p.md");
+    d.write(
+        "p.md",
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+         ^ATOM-DDDD-4444 [keywords: k, ocd: 2026-01-01, lmd: 2026-01-01]\n\
+         the live fact.\n\n## Notes and lessons learned\n",
+    );
+
+    let out1 = run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-DDDD-4444",
+            "--lesson", "--supersedes", "--retire-atom", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT trust the first value, BECAUSE it changed once. DO read the corrected value.",
+    );
+    let lesson_id_1 = out1.split_whitespace().next().unwrap().to_string();
+    let after_first = marker_line(&std::fs::read_to_string(&page).unwrap(), "ATOM-DDDD-4444").to_string();
+    assert!(
+        after_first.contains(&format!("superseded-by: {lesson_id_1}")),
+        "first retire stamps the pointer:\n{after_first}"
+    );
+
+    let out2 = run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-DDDD-4444",
+            "--lesson", "--supersedes", "--retire-atom", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT trust the second value either, BECAUSE it changed again. DO read the latest value.",
+    );
+    let lesson_id_2 = out2.split_whitespace().next().unwrap().to_string();
+    assert_ne!(lesson_id_1, lesson_id_2, "the second call really did author a distinct lesson");
+
+    let after_second = marker_line(&std::fs::read_to_string(&page).unwrap(), "ATOM-DDDD-4444").to_string();
+    assert_eq!(
+        after_first, after_second,
+        "running --retire-atom a second time changes nothing on the marker — the pointer still \
+         names the FIRST lesson, never re-stamped to the second"
+    );
+}
+
 /// A CLEAN corpus must still report `0 finding(s)` — silence is not a verdict (janitor#191).
 ///
 /// This used to print nothing at all: empty stdout, empty stderr, exit 0 — byte-identical to a run

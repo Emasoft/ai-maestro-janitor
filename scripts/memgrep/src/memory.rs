@@ -3651,12 +3651,20 @@ fn add_lesson_impl(
 
     // 1b. RETIRE the atom under --retire-atom: mark its marker `status: superseded` +
     //     `superseded-by:<this lesson>` so the retirement is greppable at the atom level. Idempotent:
-    //     skip if a `status:` prop is already present. `end` is one-past the props `]`, so `end - 1`
-    //     is the `]`'s byte index — inject just before it. Fields are Copy/owned (no live borrow into
+    //     skip ONLY when a `superseded-by:` (or the `superseeded-by` misspelling) prop is already
+    //     present — that pointer is the one field this block must never clobber, since re-running
+    //     under a NEW lesson must not orphan the FIRST forward pointer behind a second one. Guarding
+    //     on `status:` instead (the original guard, audit report reports/memgrep-sole-writer/
+    //     20260923_225740+0200-capability-audit-final.md §10.10) was too broad: it also skipped an
+    //     atom that carried an unrelated `status:` value (e.g. `status: valid`, written by another
+    //     tool) but no `superseded-by:` yet, so that atom could never be retired through this verb —
+    //     the retro-lesson skill then had to tell agents to hand-edit the props bracket, which the
+    //     memgrep-only rule forbids (TRDD-XI10BA5D). `end` is one-past the props `]`, so `end - 1` is
+    //     the `]`'s byte index — inject just before it. Fields are Copy/owned (no live borrow into
     //     the line), so the following mutable `insert_str` is sound.
     if retire_atom
         && let Some((_s, end, _id, props_raw)) = first_block_property_marker(&lines[marker_idx])
-        && !props_raw.contains("status:")
+        && superseded_by_from_props(&parse_block_props(&props_raw)).is_empty()
     {
         // Through the shared renderer: this string used to carry BOTH spellings at once
         // (`status: superseded` spaced, `superseded-by:{id}` not), inside a single format! —
