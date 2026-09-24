@@ -16,6 +16,7 @@ import importlib.util as _u
 import json
 import re
 import shlex
+import subprocess
 import sys
 import time
 from collections.abc import Iterator
@@ -186,6 +187,75 @@ def test_expand_finds_an_id_located_after_a_non_utf8_line(tmp_path: Path) -> Non
     assert "skipped 1 malformed line(s)" in out
 
 
+def test_expand_survives_a_lone_surrogate_in_the_expanded_text(tmp_path: Path) -> None:
+    """TRDD-DQXMND59 stage 3, item A: 2729b1cb made `extract_items`/`compact` safe for a lone
+    (unpaired) UTF-16 surrogate (`Item.__post_init__` sanitizes it) -- but `expand` builds its
+    printed text via `_extract_block`, which never goes through `Item` at all. `text` there was
+    still the RAW string, still holding `"\\ud83d"`, and `print()` to a UTF-8 stdout raises
+    `UnicodeEncodeError`. Fails on HEAD.
+
+    A REAL subprocess, not `_run()` (which redirects stdout to an in-process `io.StringIO` --
+    a `str` sink never encodes anything, so it CANNOT reproduce this crash: `print()` only
+    raises when its target stream is actually UTF-8-ENCODED, which only a real OS pipe is).
+    """
+    entry = {"type": "user", "uuid": "u1", "parentUuid": None,
+              "message": {"role": "user", "content": "before \ud83d after"}}
+    transcript = tmp_path / "surrogate.jsonl"
+    transcript.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        [str(_SCRIPT), "expand", "--transcript", str(transcript), "u1:0"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "�" in proc.stdout
+
+
+def test_expand_id_reports_skipped_malformed_line_count_on_a_truncated_line(
+    tmp_path: Path,
+) -> None:
+    """TRDD-DQXMND59 stage 3, item K: `expand <id>` must print its "skipped N malformed
+    line(s)" stderr count on a transcript with a TRUNCATED line (a live session's transcript
+    caught mid-append), not just a non-UTF-8 byte -- a different `malformed_lines` cause, same
+    reporting contract."""
+    good1 = {"type": "user", "uuid": "u1", "parentUuid": None,
+             "message": {"role": "user", "content": "before the truncated line"}}
+    good2 = {"type": "user", "uuid": "u2", "parentUuid": "u1",
+             "message": {"role": "user", "content": "after the truncated line"}}
+    transcript = tmp_path / "truncated.jsonl"
+    transcript.write_text(
+        json.dumps(good1) + "\n" + '{"type": "user", "uuid": "mid-write", "mess' + "\n"
+        + json.dumps(good2) + "\n",
+        encoding="utf-8",
+    )
+
+    code, out = _run(["expand", "--transcript", str(transcript), "u2:0"])
+
+    assert code == 0
+    assert "after the truncated line" in out
+    assert "skipped 1 malformed line(s)" in out
+
+
+def test_expand_list_reports_skipped_malformed_line_count_on_a_truncated_line(
+    tmp_path: Path,
+) -> None:
+    """TRDD-DQXMND59 stage 3, item K: `expand --list` must print its own "skipped N malformed
+    line(s)" stderr count too, on the same truncated-line shape."""
+    good = {"type": "user", "uuid": "u1", "parentUuid": None,
+            "message": {"role": "user", "content": "the only good line"}}
+    transcript = tmp_path / "truncated.jsonl"
+    transcript.write_text(
+        json.dumps(good) + "\n" + '{"type": "user", "uuid": "mid-write", "mess',
+        encoding="utf-8",
+    )
+
+    code, out = _run(["expand", "--transcript", str(transcript), "--list"])
+
+    assert code == 0
+    assert "expand --list: skipped 1 malformed line(s)" in out
+
+
 def test_expand_attachment_string_prompt(tmp_path: Path) -> None:
     # A typed mid-turn owner message: `attachment.prompt` is a plain str. Fails on HEAD
     # (before the TRDD-DQXMND59 fix) because `_extract_block` only looked at
@@ -290,7 +360,8 @@ def test_expand_segment_id_is_byte_exact(tmp_path: Path) -> None:
     # "some plausible substring". `jc.extract_items` on the SAME transcript is the oracle for
     # what the real id/text pairing is (this test does not hand-compute a line span).
     transcript, _result_text = _write_read_transcript(tmp_path)
-    items = [it for it in jc.extract_items(transcript, malformed_lines=[]) if it.kind == "tool"]
+    items = [it for it in jc.extract_items(transcript, malformed_lines=[], segmentation_failures=[])
+              if it.kind == "tool"]
     assert len(items) > 1, "the fixture must actually segment, or this test proves nothing"
     target = items[len(items) // 2]  # a middle segment, not just the first
     assert "@" in target.id
@@ -360,7 +431,8 @@ def test_expand_segment_id_is_byte_exact_for_list_shaped_content(tmp_path: Path)
     # list-shaped tool_result content independently -- this proves they agree byte for byte
     # for a SEGMENTED result, not just the plain-string shape every other test here uses.
     transcript, result_text = _write_list_content_read_transcript(tmp_path)
-    items = [it for it in jc.extract_items(transcript, malformed_lines=[]) if it.kind == "tool"]
+    items = [it for it in jc.extract_items(transcript, malformed_lines=[], segmentation_failures=[])
+              if it.kind == "tool"]
     assert len(items) > 1, "the fixture must actually segment, or this test proves nothing"
     assert "".join(it.text for it in items) == result_text
 
@@ -1029,7 +1101,7 @@ def test_expand_round_trips_a_composed_pointer_id() -> None:
     "name(input)\\nresult" pairing (see jev_compaction.extract_items), not the raw
     tool_result block's own content -- `expand` correctly returns the latter, so comparing
     against a tool item would be a false mismatch, not evidence of an indexing bug."""
-    items = jc.extract_items(_FIXTURE, malformed_lines=[])
+    items = jc.extract_items(_FIXTURE, malformed_lines=[], segmentation_failures=[])
     scores = {
         it.id: jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
                           decision_passed=False)

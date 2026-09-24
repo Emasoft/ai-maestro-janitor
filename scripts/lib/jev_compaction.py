@@ -17,7 +17,6 @@ import json
 import re
 import sys
 import threading
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +30,7 @@ _LIB_DIR = Path(__file__).resolve().parent
 if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
+import jsonl_walk  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared byte-safe JSONL walk (TRDD-DQXMND59 stage 3)
 import transcript_roles  # noqa: E402  -- needs the sys.path line above; stdlib-only, shared classifier
 from jevctx import scorer as _scorer  # noqa: E402
 from jevctx.budget import Batch, BudgetPlanner  # noqa: E402
@@ -114,17 +114,6 @@ _BARE_HEARTBEAT_REPLY = "janitor heartbeat"
 _POINTER_PREVIEW_CHARS = 80
 
 
-def _drop_lone_surrogates(text: str) -> str:
-    """`text`, or a copy with every lone (unpaired) UTF-16 surrogate codepoint replaced by
-    U+FFFD -- see `Item.__post_init__`, the one call site. Cheap on the common case: a string
-    that already encodes cleanly returns itself unchanged (identity, not a copy)."""
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return "".join("�" if 0xD800 <= ord(c) <= 0xDFFF else c for c in text)
-    return text
-
-
 @dataclass(frozen=True)
 class Item:
     """One scorable/inlinable unit of the OLD transcript.
@@ -160,7 +149,7 @@ class Item:
         # ONCE here, at Item construction (every extraction path and every test builds an
         # Item, none construct the text a caller already validated), rather than at each of
         # the dozen-plus `.encode("utf-8")` call sites in `compose()`.
-        fixed = _drop_lone_surrogates(self.text)
+        fixed = jsonl_walk.drop_lone_surrogates(self.text)
         if fixed is not self.text:
             object.__setattr__(self, "text", fixed)
 
@@ -215,6 +204,13 @@ class ConversationWindow:
     (pre-boundary entries Claude Code kept verbatim in the new context); `summary` is the
     `isCompactSummary` text paired to THAT boundary (None when the session died between the two
     lines -- never a stale earlier summary, see `extract_items`).
+
+    "Verbatim" here has ONE exception (TRDD-DQXMND59 stage 3, item G): a lone (unpaired) UTF-16
+    surrogate escape in the raw transcript (e.g. an emoji a writer's own bug cut in half) is
+    replaced with U+FFFD -- unavoidable, since a lone surrogate cannot be encoded to UTF-8 at
+    all, and `summary` is written into the final document as UTF-8 by `compose()`. `summary` is
+    never an `Item` (so `Item.__post_init__` never touches it) -- sanitized explicitly, at the
+    point it is set in `extract_items`, via `jsonl_walk.drop_lone_surrogates`.
     """
 
     boundary_turn: int | None = None
@@ -240,8 +236,11 @@ def split_conversation(
     `conversation`: every LIVE owner/assistant/control item, chronological -- rendered verbatim
     by `compose(conversation=...)`, never scored. `scored`: every tool and event item, before
     and after the boundary -- the only items `score_items` ever sees. Pre-boundary prose that
-    was not preserved is in neither list: `window.summary` covers it, and `jev_compact.py expand
-    <id>` still resolves it from the raw JSONL."""
+    was not preserved is in neither list: `window.summary` covers it (see its own docstring for
+    the ONE exception to "verbatim" -- a lone surrogate becomes U+FFFD), and `jev_compact.py
+    expand <id>` still resolves it from the raw JSONL. `conversation`'s own items are already
+    `Item`s -- `Item.__post_init__` sanitizes the same way, so this list needs no separate note.
+    """
     conversation = [it for it in items if it.kind in _CONVERSATION_KINDS and window.is_live(it)]
     scored = [it for it in items if it.kind not in _CONVERSATION_KINDS]
     return conversation, scored
@@ -371,8 +370,9 @@ def _tool_result_text(content: Any) -> str:
 
 
 def attachment_item_text(entry: dict[str, Any]) -> str | None:
-    """The item text for a `type: "attachment"` entry, or `None` if this attachment produces
-    no item at all -- the ONE place this rule is allowed to live.
+    """The item text for a `type: "attachment"` entry, or `None` if `entry` is not one, or if
+    it is one that produces no item at all -- the ONE place the EXISTENCE-and-text rule for an
+    attachment entry is allowed to live.
 
     TRDD-DQXMND59 follow-up (adversarial review of e23e0b39): before this function, the SAME
     predicate -- "only `attachment.type == "queued_command"`, text = the joined text blocks of
@@ -381,8 +381,23 @@ def attachment_item_text(entry: dict[str, Any]) -> str | None:
     across the module boundary to call this file's PRIVATE `_tool_result_text` directly). Two
     copies drift the moment one changes without the other: `expand` would start returning
     "not found" for a real pointer (matrix row V2, TRDD-DQXMND59's own report), or accept an id
-    `extract_items` never actually generated (matrix row V10). Both call sites now call this
-    function instead of restating the rule.
+    `extract_items` never actually generated (matrix row V10).
+
+    `entry.get("type") != "attachment"` is checked HERE, first (stage 3, item N -- a second
+    review of this function): the function now owns the WHOLE existence rule, not just the
+    `attachment.type` sub-check, so a caller cannot forget the outer gate the way
+    `_extract_block` almost did on its first cut (it used to check `entry.get("type") ==
+    "attachment"` itself, before ever calling this function).
+
+    Stage 3 correction (item O, same review): this is the existence-and-text rule ONLY. Later
+    filtering in `extract_items`'s own attachment branch (an unmeasured `commandMode` skips
+    item creation entirely -- see the `continue` after the commandMode/origin classification
+    below) is NOT mirrored here, so this function can return text for an attachment
+    `extract_items` itself goes on to drop. Harmless for `expand`: it reaches an entry by its
+    transcript `uuid`, never by asking "did `extract_items` keep this", so a wider accept here
+    does not let `expand` "succeed" on an id `extract_items` could never have generated (matrix
+    row V10 stays closed) -- it only means "not found" (V2) and "id extract_items would keep"
+    are no longer the exact same predicate as "id `attachment_item_text` accepts".
 
     `_tool_result_text` (not a plain string read) because TRDD-RAEGS1D5: `attachment.prompt`
     is a plain str for a typed message, but a LIST of content blocks (text/image, same shape
@@ -391,6 +406,8 @@ def attachment_item_text(entry: dict[str, Any]) -> str | None:
     list. Fixed in af09571b by reusing `_tool_result_text`, the existing str-or-block-list
     joiner, rather than assuming str.
     """
+    if entry.get("type") != "attachment":
+        return None
     attachment = entry.get("attachment")
     if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
         return None
@@ -614,71 +631,19 @@ def _owner_kind(kind: ItemKind, text: str) -> ItemKind:
     return "control" if kind == "user" and transcript_roles.is_control_input(text) else kind
 
 
-def _parse_jsonl_line(
-    raw_line: bytes, line_no: int, malformed_lines: list[int],
-) -> dict[str, Any] | None:
-    """Decode and parse one JSONL line; ``None`` for a blank line (not malformed -- just
-    whitespace between real lines) or for one that is malformed, in which case `line_no` is
-    also appended to `malformed_lines`. Shared by `iter_jsonl_entries` below and
-    `extract_items`'s own walk (kept as a separate loop there rather than switching to the
-    iterator, so its per-entry state -- `pending_tool_uses`, `quiet_tool_use_ids`, `window` --
-    stays at its existing indentation instead of a large, error-prone re-indent).
-
-    Read as BYTES and decoded per line, not `open(encoding="utf-8")` on the whole file: a live
-    session's transcript is written by another process, so one line's non-UTF-8 bytes (a
-    subprocess's raw stdout) must not poison every line after it, and a mid-append last line
-    decodes as garbage-then-EOF rather than raising and aborting the whole walk on the line
-    most likely to be incomplete. `errors="replace"` does not by itself guarantee a bad line
-    fails to parse (see `extract_items`'s KNOWN LIMITATION paragraph) -- what is actually
-    caught here is a line that is structurally broken: not valid JSON at all, or JSON whose
-    top level is not an object (finding D, adversarial review 2026-09-24: a bare
-    number/string/list/null line would otherwise make a caller's `entry.get(...)` raise
-    `AttributeError`).
-    """
-    line = raw_line.decode("utf-8", errors="replace").strip()
-    if not line:
-        return None
-    try:
-        entry = json.loads(line)
-    except json.JSONDecodeError:
-        malformed_lines.append(line_no)
-        return None
-    if not isinstance(entry, dict):
-        malformed_lines.append(line_no)
-        return None
-    return entry
-
-
-def iter_jsonl_entries(path: Path, *, malformed_lines: list[int]) -> Iterator[tuple[int, dict[str, Any]]]:
-    """Walk one transcript JSONL, yielding ``(1-based line number, parsed dict)`` for every
-    line that parses to a JSON OBJECT -- the one entry shape every reader in this codebase
-    (`extract_items`, `_read_jsonl_entry` in `scripts/jev_compact.py`) actually consumes.
-
-    TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): `extract_items` had
-    its own byte-read-and-decode loop and `_read_jsonl_entry` had a SECOND, older one that
-    still opened the file in text mode -- so `expand` crashed with `UnicodeDecodeError` on the
-    exact same damaged byte `compact` already knew how to skip, for every id located after it.
-    Sharing `_parse_jsonl_line` (not just its logic, copy-pasted) means one fix covers both
-    callers forever.
-    """
-    with path.open("rb") as fh:
-        for line_no, raw_line in enumerate(fh, start=1):
-            entry = _parse_jsonl_line(raw_line, line_no, malformed_lines)
-            if entry is not None:
-                yield line_no, entry
-
-
 def extract_items(
-    transcript_path: str | Path, *, segmentation_failures: list[str] | None = None,
+    transcript_path: str | Path, *, segmentation_failures: list[str],
     window: ConversationWindow | None = None,
     malformed_lines: list[int],
 ) -> list[Item]:
     """Walk one transcript JSONL and return its extracted, chronologically ordered items.
 
-    `segmentation_failures`, when given, is appended to (in place) with the `item_id_base` of
-    every tool result whose segmentation attempt failed and fell back to the pre-card-6 whole
-    item -- see `_segment_tool_result`'s own docstring. `None` (the default) costs nothing and
-    changes no existing caller's behaviour.
+    `segmentation_failures` is REQUIRED (TRDD-DQXMND59 stage 3, item E -- same reasoning as
+    `malformed_lines` below: a prior commit left it optional with a `None` default, and
+    `expand --list` was passing none at all, so a segmentation failure on THAT path was skipped
+    in total silence). Appended to (in place) with the `item_id_base` of every tool result whose
+    segmentation attempt failed and fell back to the pre-card-6 whole item -- see
+    `_segment_tool_result`'s own docstring.
 
     `window`, when given (TRDD-D7RLXAN1), is filled in place with the LAST compact boundary,
     its preserved uuids and its paired summary -- see `ConversationWindow`. Neither the
@@ -693,7 +658,8 @@ def extract_items(
     D). Such a line is skipped, not swallowed silently: the count is the caller's signal that
     the walk saw damage, mirroring `segmentation_failures`. A caller that genuinely does not
     care still has to write `malformed_lines=[]` -- that one extra word is cheap, "forgot to
-    look" is not. See `iter_jsonl_entries`, the shared walk this function and
+    look" is not. See `jsonl_walk.iter_jsonl_entries` (TRDD-DQXMND59 stage 3: moved to its own
+    stdlib-only module, see that module's docstring for why), the shared walk this function and
     `scripts/jev_compact.py::_read_jsonl_entry` both use.
 
     KNOWN LIMITATION (adversarial review, 2026-09-24): `errors="replace"` only catches damage
@@ -711,8 +677,11 @@ def extract_items(
     normal-looking `str` -- the line parses fine, `malformed_lines` is right to stay silent
     about it. What breaks is every LATER `.encode("utf-8")` on that text (`compose()`'s byte
     budget, in particular): `UnicodeEncodeError`, uncaught. Fixed at `Item.__post_init__`
-    (`_drop_lone_surrogates`), not here -- by the time this function returns, every `Item.text`
-    it produced is guaranteed `.encode("utf-8")`-safe.
+    (`jsonl_walk.drop_lone_surrogates`), not here -- by the time this function returns, every
+    `Item.text` it produced is guaranteed `.encode("utf-8")`-safe. TRDD-DQXMND59 stage 3, item
+    A: `expand` (which builds text WITHOUT going through `Item`) must run the same function over
+    what it prints, or the exact same crash resurfaces one layer up -- see
+    `jev_compact.py::cmd_expand`.
 
     One pass, top to bottom: a `tool_use` block is remembered by its own `id` as soon as
     it's seen, so the `tool_result` block that answers it (which always appears in a LATER
@@ -754,12 +723,13 @@ def extract_items(
     # dropped, whatever else surrounds them in the same turn.
     quiet_tool_use_ids: set[str] = set()
 
-    # V7 robustness (TRDD-DQXMND59): per-line decode+parse via `_parse_jsonl_line` (shared
-    # with `iter_jsonl_entries`, see its docstring) -- one bad byte or one structurally broken
-    # line is counted in `malformed_lines` and skipped, never aborting the rest of the walk.
+    # V7 robustness (TRDD-DQXMND59): per-line decode+parse via `jsonl_walk.parse_jsonl_line`
+    # (shared with `jsonl_walk.iter_jsonl_entries`, see its docstring) -- one bad byte or one
+    # structurally broken line is counted in `malformed_lines` and skipped, never aborting the
+    # rest of the walk.
     with path.open("rb") as fh:
         for line_no, raw_line in enumerate(fh, start=1):
-            entry = _parse_jsonl_line(raw_line, line_no, malformed_lines)
+            entry = jsonl_walk.parse_jsonl_line(raw_line, line_no, malformed_lines)
             if entry is None:
                 continue
             entry_type = entry.get("type")
@@ -797,7 +767,11 @@ def extract_items(
                 # pending (an older shape, or an orphan summary) -- then skipped as before.
                 if window is not None and entry.get("isCompactSummary"):
                     if window.pending_anchor is None or uuid == window.pending_anchor:
-                        window.summary = _tool_result_text(content)
+                        # TRDD-DQXMND59 stage 3, item G: `window.summary` never passes through
+                        # `Item.__post_init__` (it is not an `Item`) so, unlike every scored/
+                        # conversation item's `.text`, nothing sanitized a lone surrogate here
+                        # until now -- `compose()` writes it straight into the final document.
+                        window.summary = jsonl_walk.drop_lone_surrogates(_tool_result_text(content))
                     continue
                 if _is_heartbeat_entry(entry):
                     continue  # the fire's OWN prompt -- always dropped, see point 2 above

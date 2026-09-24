@@ -1133,6 +1133,27 @@ _BLOCKED_LAST_EMIT_FILE = "jev-blocked-finding-last-emit.ts"
 _BLOCKED_DAY_CAP_S = 86400.0
 
 
+# TRDD-DQXMND59 stage 3, item B: `jev_compact.py compact`'s summary line also carries
+# `malformed=N` (transcript lines the walk had to skip -- a half-written last line, a
+# non-UTF-8 byte, a line that parsed to non-object JSON) since 2729b1cb, but nothing in this
+# lane ever read it: `_BLOCKED_LINE_RE` above only captures `blocked=`/`blocked_digest=`, so a
+# nonzero `malformed` count reached this process's stdout and was then simply discarded --
+# production silence identical in shape to the CLI-only silence 2729b1cb itself fixed. A
+# SEPARATE regex/function, not a widened `_BLOCKED_LINE_RE`, so `parse_blocked_summary`'s own
+# existing `(count, digest)` contract (and its tests) stay untouched.
+_MALFORMED_LINE_RE = re.compile(r"\bmalformed=(\d+)")
+
+
+def parse_malformed_summary(stdout: str) -> int:
+    """The `malformed=N` count off `jev_compact.py compact`'s own `compacted items=...` stdout
+    summary line, or `0` when the line is missing/malformed -- same best-effort contract as
+    `parse_blocked_summary` (a parse miss means "nothing to report", never an error)."""
+    m = _MALFORMED_LINE_RE.search(stdout)
+    if not m:
+        return 0
+    return int(m.group(1))
+
+
 def parse_blocked_summary(stdout: str) -> tuple[int, str]:
     """`(blocked_count, blocked_digest)` off `jev_compact.py compact`'s own `compacted
     items=...` stdout summary line, or `(0, "")` when the line is missing/malformed (an
@@ -1348,6 +1369,16 @@ def run_compact_with_fallback(
                 # is unaffected -- out of this followup's file set.)
                 blocked, blocked_digest = parse_blocked_summary(proc.stdout or "")
                 record_blocked_finding(sd, blocked=blocked, blocked_digest=blocked_digest)
+                # TRDD-DQXMND59 stage 3, item B: a plain log line, not a `record_finding` --
+                # unlike `blocked` (a content-stable digest, dedupeable, worth a day-capped
+                # finding) a malformed-line count has no stable identity to dedupe against
+                # across runs, so this is a diagnostic breadcrumb for `session-summary.log`,
+                # not a recurring finding.
+                malformed = parse_malformed_summary(proc.stdout or "")
+                if malformed:
+                    state.log_line(
+                        _LOG, f"jev compact skipped {malformed} malformed transcript line(s)",
+                    )
                 if inject_out_path is not None:
                     # TRDD-RAEGS1D5 retune follow-up: prefer the size-bounded companion Jev's
                     # own priority-aware trim produced over the FULL document just read above --

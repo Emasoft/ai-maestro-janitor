@@ -124,6 +124,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 import global_state  # noqa: E402  -- needs the sys.path line above
 import jev_compaction as jc  # noqa: E402
 import jev_shadow_log as jsl  # noqa: E402  -- TRDD-N9LDHF7N card 7, shadow decision log
+import jsonl_walk  # noqa: E402  -- TRDD-DQXMND59 stage 3: iter_jsonl_entries/parse_jsonl_line/drop_lone_surrogates moved here from jc, its new home
 import state  # noqa: E402
 from jevctx.openrouter import JevBlockedError  # noqa: E402  -- TRDD-1ETALGDG, see _stamp_kind_for_error
 from jevctx.provider import DEFAULT_PROVIDER, PROVIDER_ENV, make_client  # noqa: E402
@@ -369,11 +370,12 @@ def _read_jsonl_entry(
     the file in TEXT mode (`encoding="utf-8"`) and its own bare `json.loads` loop, so a
     single non-UTF-8 byte anywhere before `target_uuid`'s line raised `UnicodeDecodeError`
     and crashed `expand` outright -- the exact damage `compact`'s `extract_items` already
-    knew how to skip. Now shares `jc.iter_jsonl_entries`, the SAME byte-safe walk, so a
-    damaged line earlier in the file no longer blocks reaching a healthy one later.
+    knew how to skip. Now shares `jsonl_walk.iter_jsonl_entries`, the SAME byte-safe walk
+    (stage 3: moved out of `jc` into its own stdlib-only module), so a damaged line earlier
+    in the file no longer blocks reaching a healthy one later.
     """
     try:
-        for _line_no, entry in jc.iter_jsonl_entries(transcript, malformed_lines=malformed_lines):
+        for _line_no, entry in jsonl_walk.iter_jsonl_entries(transcript, malformed_lines=malformed_lines):
             if entry.get("uuid") == target_uuid:
                 return entry
     except OSError:
@@ -444,14 +446,26 @@ def cmd_expand(args: argparse.Namespace) -> int:
         # `--list` is a human-browsing aid over whatever items DID parse, not the compaction
         # record of truth, but a caller must still be TOLD a line was skipped, not left to
         # infer it from a shorter-than-expected listing. Printed to stderr below.
+        # `segmentation_failures` is REQUIRED too now (stage 3, item E) -- this call used to
+        # pass none at all, so a segmentation failure on this exact path was invisible; now
+        # reported the same way as `malformed_lines`.
         malformed_lines: list[int] = []
+        segmentation_failures: list[str] = []
         try:
-            items = jc.extract_items(str(transcript), malformed_lines=malformed_lines)
+            items = jc.extract_items(
+                str(transcript), malformed_lines=malformed_lines,
+                segmentation_failures=segmentation_failures,
+            )
         except OSError as exc:
             print(f"expand --list failed: {exc}", file=sys.stderr)
             return 3
         if malformed_lines:
             print(f"expand --list: skipped {len(malformed_lines)} malformed line(s)", file=sys.stderr)
+        if segmentation_failures:
+            print(
+                f"expand --list: {len(segmentation_failures)} tool result(s) fell back to "
+                f"unsegmented after a segmentation failure", file=sys.stderr,
+            )
         needle = args.grep.lower() if args.grep else None
         # Card 5 two-renderings (TRDD-RAEGS1D5, item 6): name the transcript this listing is
         # against -- a bare id/kind/preview table gives no way to tell which transcript it came
@@ -535,7 +549,15 @@ def cmd_expand(args: argparse.Namespace) -> int:
     # match against a prior decision.
     jsl.log_expand_outcome(args.id)
 
-    print(text)
+    # TRDD-DQXMND59 stage 3, finding A: `text` here is the RAW block bytes -- unlike an
+    # `Item.text` (sanitized once, at construction, in `Item.__post_init__`), nothing upstream
+    # of this print has ever run it through `drop_lone_surrogates`. A lone (unpaired) UTF-16
+    # surrogate in the transcript (e.g. `"\ud83d"`, an emoji a writer's own bug cut in half) is
+    # valid JSON and parses fine, but `print()` to a UTF-8 stdout raises `UnicodeEncodeError` on
+    # it -- the exact crash `compose()`'s byte-budget accounting used to hit before `Item` was
+    # sanitized, now one layer up, on the one path (`expand`) that builds text WITHOUT going
+    # through `Item` at all.
+    print(jsonl_walk.drop_lone_surrogates(text))
     return 0
 
 

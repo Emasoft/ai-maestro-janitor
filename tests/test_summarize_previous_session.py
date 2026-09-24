@@ -671,6 +671,51 @@ def test_parse_blocked_summary_extracts_count_and_digest() -> None:
     assert jcl.parse_blocked_summary("compacted items=8/8 tokens=100\n") == (0, "")
 
 
+# --- TRDD-DQXMND59 stage 3, item B: malformed=N visibility on an exit-0 compaction --------
+
+
+def test_parse_malformed_summary_extracts_count() -> None:
+    """`jcl.parse_malformed_summary` pulls the `malformed=N` count off `jev_compact.py`'s own
+    `compacted items=...` stdout line, degrading to `0` -- never an exception -- when the
+    field is missing (an older `jev_compact.py`, or stdout captured mid-write)."""
+    line = ("compacted items=5/8 tokens=100 cost=0.01 ms=50 blocked=0 blocked_digest= "
+            "segmentation_failed=0 conversation=2 malformed=3")
+    assert jcl.parse_malformed_summary(line) == 3
+    assert jcl.parse_malformed_summary("") == 0
+    assert jcl.parse_malformed_summary("compacted items=8/8 tokens=100\n") == 0
+
+
+def test_a_nonzero_malformed_count_reaches_the_session_summary_log(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """TRDD-DQXMND59 stage 3, item B: before this fix, `malformed=N` existed only in
+    `jev_compact.py compact`'s own stdout -- nothing in `jev_compaction_lane.py`'s retry loop
+    (the ONE place a successful compact's stdout is read) ever parsed or logged it, so a
+    damaged-transcript signal reaching a real production run was silently discarded. Drives
+    `sps.main()` (which calls `jcl.run_compact_with_fallback`) against a stubbed
+    `jev_compact.py` whose stdout carries `malformed=2`, and asserts that count reaches
+    `session-summary.log`."""
+    project_dir = _isolated_env
+    plugin_root = tmp_path / "plugin"
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+    _stub_jev_compact(
+        plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC,
+        stdout="compacted items=5/8 tokens=100 cost=0.01 ms=50 blocked=0 blocked_digest= "
+               "segmentation_failed=0 conversation=2 malformed=2\n",
+    )
+
+    prev = _make_prev_transcript(project_dir, name="prevsess.jsonl")
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    assert sps.main() == 0
+
+    log_path = state.log_dir() / "session-summary.log"
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "malformed" in log_text and "2" in log_text
+    matching = [line for line in log_text.splitlines() if "malformed" in line]
+    assert any("2" in line for line in matching), log_text
+
+
 def test_blocked_finding_deduped_by_content_across_two_sessions(tmp_path, monkeypatch, _isolated_env):
     """Coordinator amendment (2026-09-23): the `blocked=N` finding must NOT be deduped only
     per session key -- the SAME poisoning content recurs in EVERY new session of this repo,

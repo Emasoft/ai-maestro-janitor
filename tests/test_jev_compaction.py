@@ -29,9 +29,11 @@ FIXTURE_ORIGIN = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_
 
 def _ei(path: Any, **kwargs: Any) -> list[jc.Item]:
     """`jc.extract_items` wrapper: `malformed_lines` became a REQUIRED keyword (TRDD-DQXMND59,
-    adversarial review 2026-09-24, finding A) -- most tests below don't care about damaged-line
-    counts and would otherwise repeat `malformed_lines=[]` at every one of ~25 call sites."""
+    adversarial review 2026-09-24, finding A), and `segmentation_failures` followed it (stage
+    3, item E) -- most tests below don't care about either count and would otherwise repeat
+    both at every one of ~25 call sites."""
     kwargs.setdefault("malformed_lines", [])
+    kwargs.setdefault("segmentation_failures", [])
     return jc.extract_items(path, **kwargs)
 
 
@@ -1204,6 +1206,30 @@ def test_extract_items_survives_a_line_that_is_not_a_json_object(tmp_path: Path)
     path = tmp_path / "not_an_object.jsonl"
     path.write_text(
         json.dumps(good1) + "\n" + "42\n" + json.dumps(good2) + "\n", encoding="utf-8",
+    )
+
+    malformed: list[int] = []
+    items = _ei(path, malformed_lines=malformed)
+
+    assert [it.id for it in items] == ["u1:0", "u2:0"]
+    assert malformed == [2]
+
+
+def test_extract_items_survives_a_json_line_with_an_oversized_int_literal(tmp_path: Path) -> None:
+    """TRDD-DQXMND59 stage 3, item F: CPython 3.11+'s integer-string-conversion length limit
+    (PEP 3.11) makes `json.loads` raise a plain `ValueError` -- NOT a `json.JSONDecodeError` --
+    for an integer literal longer than 4300 digits (`sys.set_int_max_str_digits`'s default).
+    `jsonl_walk.parse_jsonl_line` used to catch only `json.JSONDecodeError`, so this ValueError
+    propagated uncaught, aborting the whole walk. Fails on HEAD."""
+    good1 = {"type": "user", "uuid": "u1", "parentUuid": None,
+             "message": {"role": "user", "content": "before the oversized int"}}
+    good2 = {"type": "user", "uuid": "u2", "parentUuid": "u1",
+             "message": {"role": "user", "content": "after the oversized int"}}
+    oversized_int_line = '{"n": ' + ("9" * 5000) + "}"
+    path = tmp_path / "oversized_int.jsonl"
+    path.write_text(
+        json.dumps(good1) + "\n" + oversized_int_line + "\n" + json.dumps(good2) + "\n",
+        encoding="utf-8",
     )
 
     malformed: list[int] = []
@@ -3596,6 +3622,34 @@ def test_window_pairs_each_boundary_to_its_own_summary_by_anchor_uuid(tmp_path: 
     _ei(killed, window=window2)
     assert window2.summary is None
     assert window2.boundary_turn == 2
+
+
+def test_window_summary_survives_a_lone_surrogate_and_reaches_compose(tmp_path: Path) -> None:
+    """TRDD-DQXMND59 stage 3, item G follow-up (adversarial review finding B): `window.summary`
+    is set directly from `_tool_result_text` in `extract_items` -- it is NOT an `Item`, so
+    `Item.__post_init__`'s sanitization (stage 1) never touched it, and `compose()` writes it
+    straight into the final document. A lone (unpaired) UTF-16 surrogate in Claude Code's own
+    `isCompactSummary` text therefore used to reach `compose()` un-sanitized and raise
+    `UnicodeEncodeError` on its first `.encode("utf-8")`. Fails without the
+    `jsonl_walk.drop_lone_surrogates` call at the point `window.summary` is set."""
+    path = _jsonl(tmp_path, [
+        _user("u0", "first owner message"),
+        _boundary("b1", "s1", []),
+        _summary("s1", "before \ud83d after"),
+        _user("u1", "second owner message"),
+    ])
+    window = jc.ConversationWindow()
+    items = _ei(path, window=window)
+
+    assert window.summary is not None
+    assert window.summary.encode("utf-8")  # must not raise UnicodeEncodeError
+    assert "�" in window.summary
+
+    conversation, scored = jc.split_conversation(items, window)
+    doc = jc.compose(scored, {}, budget_tokens=8000,
+                      header={"transcript_path": str(path), "session_key": "s"},
+                      conversation=conversation, conversation_summary=window.summary)
+    assert "�" in doc  # reaches the final document, sanitized -- never dropped, never raw
 
 
 def test_split_conversation_drops_unpreserved_pre_boundary_prose_only(tmp_path: Path) -> None:
