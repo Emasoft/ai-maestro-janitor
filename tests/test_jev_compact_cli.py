@@ -164,6 +164,32 @@ def test_expand_tool_result_block(tmp_path: Path) -> None:
     assert out.strip() == "file written: 12 lines"
 
 
+def test_expand_still_returns_text_for_a_pre_boundary_item(tmp_path: Path) -> None:
+    """TRDD-350W5II2 test 4: a pre-boundary tool item is dropped from `scored` (not sent to
+    Jev, not rendered) but stays reachable -- `expand <id>` resolves ANY item by uuid straight
+    from the raw JSONL (`jev_compact.py::_read_jsonl_entry`), a path this change never touches.
+    Not a NEW behavior (unaffected by this change either way), pins the "nothing becomes
+    unreachable" half of the card."""
+    entries = [
+        {"type": "assistant", "uuid": "ptu", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}},
+        {"type": "user", "uuid": "ptr", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "pre-boundary tool text"}]}},
+        {"type": "user", "uuid": "keep", "message": {"role": "user", "content": "keep me"}},
+        {"type": "system", "subtype": "compact_boundary", "uuid": "b", "compactMetadata": {
+            "trigger": "auto",
+            "preservedMessages": {"anchorUuid": "s", "allUuids": ["keep"]}}},
+        {"type": "user", "uuid": "s", "isCompactSummary": True, "isVisibleInTranscriptOnly": True,
+         "message": {"role": "user", "content": "THE SUMMARY"}},
+    ]
+    transcript = tmp_path / "boundary.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+
+    code, out = _run(["expand", "--transcript", str(transcript), "ptr:0"])
+    assert code == 0
+    assert out.strip() == "pre-boundary tool text"
+
+
 def test_expand_finds_an_id_located_after_a_non_utf8_line(tmp_path: Path) -> None:
     """TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): `_read_jsonl_entry`
     used to open the transcript in TEXT mode (`encoding="utf-8"`), so a single non-UTF-8 byte
@@ -603,8 +629,47 @@ def test_compact_reports_blocked_zero_when_nothing_was_blocked(
     # TRDD-RAEGS1D5 (jev newest+3): `segmentation_failed=N` follows `blocked_digest=` (empty,
     # nothing blocked); TRDD-D7RLXAN1 appended `conversation=N` (the fixture's owner message and
     # assistant reply, never scored); TRDD-DQXMND59 appended `malformed=N` (no damaged lines in
-    # this fixture) as the new LAST field.
-    assert output.strip().endswith("segmentation_failed=0 conversation=2 malformed=0")
+    # this fixture); TRDD-350W5II2 appended `pre_boundary=N` (no boundary in this fixture, so
+    # every tool/event item is live -- 0) as the new LAST field. Fails on HEAD: no such field.
+    assert output.strip().endswith("segmentation_failed=0 conversation=2 malformed=0 pre_boundary=0")
+
+
+def test_compact_reports_pre_boundary_count_and_the_lane_still_parses_the_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-350W5II2 test 3: a transcript with a `compact_boundary` and one unpreserved
+    pre-boundary tool item must surface `pre_boundary=1` in the summary line, and
+    `jev_compaction_lane.py`'s own `blocked=…`/`malformed=…` regexes (unchanged, substring
+    searches) must keep matching a line that now carries a trailing field neither knew about.
+    Fails on HEAD: no `pre_boundary=` field exists in the summary at all."""
+    import jev_compaction_lane as jcl  # local import -- only this test needs the lane
+
+    entries = [
+        {"type": "assistant", "uuid": "ptu", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}},
+        {"type": "user", "uuid": "ptr", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "pre-boundary bug output"}]}},
+        {"type": "user", "uuid": "keep", "message": {"role": "user", "content": "keep me"}},
+        {"type": "system", "subtype": "compact_boundary", "uuid": "b", "compactMetadata": {
+            "trigger": "auto",
+            "preservedMessages": {"anchorUuid": "s", "allUuids": ["keep"]}}},
+        {"type": "user", "uuid": "s", "isCompactSummary": True, "isVisibleInTranscriptOnly": True,
+         "message": {"role": "user", "content": "THE SUMMARY"}},
+        {"type": "user", "uuid": "u2", "message": {"role": "user", "content": "please fix the bug"}},
+    ]
+    transcript = tmp_path / "boundary.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert "pre_boundary=1" in output
+    # The lane's regexes still match this line -- neither cares about a trailing field.
+    assert jcl.parse_blocked_summary(output) == (0, "")
+    assert jcl.parse_malformed_summary(output) == 0
 
 
 def test_compact_reports_malformed_count_for_a_half_written_last_line(
@@ -1530,7 +1595,7 @@ def test_compact_completes_normally_when_the_shadow_log_write_raises(
     assert "jev-shadow: ValueError" in output  # names the exception type on stderr
     assert re.search(
         r"blocked=\d+ blocked_digest=\S* segmentation_failed=\d+ conversation=\d+ "
-        r"malformed=\d+ shadow_log_failed=1", output,
+        r"malformed=\d+ pre_boundary=\d+ shadow_log_failed=1", output,
     )
 
 
@@ -1683,7 +1748,9 @@ def test_compact_never_sends_prose_to_jev(tmp_path: Path, monkeypatch: pytest.Mo
     assert sent and not {owner, reply, control} & set(sent)
     assert all(key.endswith(":rel") for call in client.calls for key in call.questions)
     assert "shadow_log_failed" not in output
-    assert "compacted items=1/1 " in output and output.strip().endswith("conversation=3 malformed=0")
+    assert "compacted items=1/1 " in output and output.strip().endswith(
+        "conversation=3 malformed=0 pre_boundary=0"
+    )
     full, inject = out.read_text(encoding="utf-8"), inject_out.read_text(encoding="utf-8")
     for text in (owner, reply, control):
         assert text in full and text in inject

@@ -230,20 +230,29 @@ class ConversationWindow:
 
 def split_conversation(
     items: list[Item], window: ConversationWindow
-) -> tuple[list[Item], list[Item]]:
-    """`(conversation, scored)` -- TRDD-D7RLXAN1's enforcement split.
+) -> tuple[list[Item], list[Item], int]:
+    """`(conversation, scored, pre_boundary)` -- TRDD-D7RLXAN1's enforcement split, extended by
+    TRDD-350W5II2 to apply the SAME liveness predicate to tool/event items.
 
     `conversation`: every LIVE owner/assistant/control item, chronological -- rendered verbatim
-    by `compose(conversation=...)`, never scored. `scored`: every tool and event item, before
-    and after the boundary -- the only items `score_items` ever sees. Pre-boundary prose that
-    was not preserved is in neither list: `window.summary` covers it (see its own docstring for
-    the ONE exception to "verbatim" -- a lone surrogate becomes U+FFFD), and `jev_compact.py
-    expand <id>` still resolves it from the raw JSONL. `conversation`'s own items are already
-    `Item`s -- `Item.__post_init__` sanitizes the same way, so this list needs no separate note.
+    by `compose(conversation=...)`, never scored. `scored`: every LIVE tool and event item --
+    the only items `score_items` ever sees. `pre_boundary`: count of tool/event items dropped
+    from `scored` because `window.is_live` said they predate the last boundary and were not
+    preserved across it (TRDD-350W5II2: `score_items` used to see every tool/event item
+    including these, most of the 168s/7075-item cost on 4eb7bf5d -- scoring a pre-boundary tool
+    result against the CURRENT digest judges it against a task it predates). Neither dropped
+    prose nor a dropped pre-boundary tool/event item becomes unreachable: `window.summary`
+    covers the prose (see its own docstring for the ONE exception to "verbatim" -- a lone
+    surrogate becomes U+FFFD), and `jev_compact.py expand <id>` resolves ANY item, live or not,
+    from the raw JSONL by uuid -- this function only decides what gets SCORED and RENDERED.
+    `conversation`'s own items are already `Item`s -- `Item.__post_init__` sanitizes the same
+    way, so this list needs no separate note.
     """
     conversation = [it for it in items if it.kind in _CONVERSATION_KINDS and window.is_live(it)]
-    scored = [it for it in items if it.kind not in _CONVERSATION_KINDS]
-    return conversation, scored
+    non_conversation = [it for it in items if it.kind not in _CONVERSATION_KINDS]
+    scored = [it for it in non_conversation if window.is_live(it)]
+    pre_boundary = len(non_conversation) - len(scored)
+    return conversation, scored, pre_boundary
 
 
 class NoDigest(Exception):

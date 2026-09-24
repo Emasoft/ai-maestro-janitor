@@ -3645,7 +3645,7 @@ def test_window_summary_survives_a_lone_surrogate_and_reaches_compose(tmp_path: 
     assert window.summary.encode("utf-8")  # must not raise UnicodeEncodeError
     assert "�" in window.summary
 
-    conversation, scored = jc.split_conversation(items, window)
+    conversation, scored, _pre_boundary = jc.split_conversation(items, window)
     doc = jc.compose(scored, {}, budget_tokens=8000,
                       header={"transcript_path": str(path), "session_key": "s"},
                       conversation=conversation, conversation_summary=window.summary)
@@ -3653,10 +3653,14 @@ def test_window_summary_survives_a_lone_surrogate_and_reaches_compose(tmp_path: 
 
 
 def test_split_conversation_drops_unpreserved_pre_boundary_prose_only(tmp_path: Path) -> None:
-    """TRDD-D7RLXAN1 test 3: conversation = live owner/assistant/control messages (after the
-    boundary, or preserved across it); scored = every tool and event item, pre-boundary ones
-    included. Only unpreserved pre-boundary prose is in neither -- the summary stands in for it.
-    Also pins the turn/boundary alignment (the card's "most likely way it is wrong")."""
+    """TRDD-D7RLXAN1 test 3, extended by TRDD-350W5II2: conversation = live owner/assistant/
+    control messages (after the boundary, or preserved across it); scored = LIVE tool and event
+    items only -- a pre-boundary one not itself preserved by uuid is dropped from `scored` too
+    (350W5II2: `is_live` now gates tool/event items the same way it already gated prose), and
+    counted in `pre_boundary` rather than silently vanishing. Only unpreserved pre-boundary prose
+    and unpreserved pre-boundary tool/event items are in neither list -- the summary stands in
+    for the prose, `expand <id>` still reaches the tool/event item by uuid. Also pins the
+    turn/boundary alignment (the card's "most likely way it is wrong")."""
     path = _jsonl(tmp_path, [
         _user("pu", "pre-boundary owner message"),
         _assistant("pa", "pre-boundary assistant reply"),
@@ -3671,16 +3675,71 @@ def test_split_conversation_drops_unpreserved_pre_boundary_prose_only(tmp_path: 
     ])
     window = jc.ConversationWindow()
     items = _ei(path, window=window)
-    conversation, scored = jc.split_conversation(items, window)
+    conversation, scored, pre_boundary = jc.split_conversation(items, window)
 
     assert [it.id for it in conversation] == ["keep:0", "nu:0", "na:0", "nc:0"]
     assert [it.kind for it in conversation] == ["user", "user", "assistant", "control"]
-    assert [it.id for it in scored] == ["ptr:0", "ntr:0"]
-    assert {it.id for it in items} - {it.id for it in conversation + scored} == {"pu:0", "pa:0"}
+    # "ptr:0" (the pre-boundary tool result) is dropped: its OWN entry uuid ("ptr") was never
+    # preserved -- only "ptu" (the tool_use half) was, and preservation is checked against the
+    # item's own id, not its paired entry. Fails on HEAD, where `scored` kept it regardless.
+    assert [it.id for it in scored] == ["ntr:0"]
+    assert pre_boundary == 1
+    assert {it.id for it in items} - {it.id for it in conversation + scored} == {
+        "pu:0", "pa:0", "ptr:0",
+    }
     assert window.summary == "THE SUMMARY"
-    # No boundary at all: every message is live.
-    no_boundary, _ = jc.split_conversation(items, jc.ConversationWindow())
+    # No boundary at all: every message is live, `pre_boundary` is 0.
+    no_boundary, no_boundary_scored, no_boundary_pre = jc.split_conversation(
+        items, jc.ConversationWindow()
+    )
     assert [it.id for it in no_boundary] == ["pu:0", "pa:0", "keep:0", "nu:0", "na:0", "nc:0"]
+    assert [it.id for it in no_boundary_scored] == ["ptr:0", "ntr:0"]
+    assert no_boundary_pre == 0
+
+
+def test_pre_boundary_tool_item_is_not_scored_or_rendered_a_live_one_is(tmp_path: Path) -> None:
+    """TRDD-350W5II2 test 1: a pre-boundary tool item never reaches `score_items` (it is absent
+    from `scored`, the only list `score_items` is called on -- see `jev_compact.py::cmd_compact`)
+    and its text never reaches `compose()`'s output; a live (post-boundary) one is both scored
+    and rendered. Fails on HEAD, where `scored` (and so the composed doc) carried both."""
+    path = _jsonl(tmp_path, [
+        *_tool_pair("ptu", "ptr", "t1", "PRE BOUNDARY TOOL TEXT"),
+        _user("keep", "owner message"),
+        _boundary("b", "s", ["keep"]),
+        _summary("s", "THE SUMMARY"),
+        *_tool_pair("ntu", "ntr", "t2", "POST BOUNDARY TOOL TEXT"),
+    ])
+    window = jc.ConversationWindow()
+    items = _ei(path, window=window)
+    conversation, scored, pre_boundary = jc.split_conversation(items, window)
+
+    scored_ids = {it.id for it in scored}
+    assert "ptr:0" not in scored_ids  # never sent to Jev
+    assert "ntr:0" in scored_ids
+    assert pre_boundary == 1
+
+    doc = jc.compose(scored, {"ntr:0": _scores(0.9)}, budget_tokens=8000, header=_H,
+                     conversation=conversation, conversation_summary=window.summary)
+    assert "PRE BOUNDARY TOOL TEXT" not in doc  # not rendered -- not even as a pointer
+    assert "POST BOUNDARY TOOL TEXT" in doc
+
+
+def test_no_boundary_scores_every_tool_and_event_item_as_before(tmp_path: Path) -> None:
+    """TRDD-350W5II2 test 2: a session that was never compacted (no `compact_boundary` line at
+    all) has `window.boundary_turn is None`, so `is_live` is True unconditionally -- every
+    tool/event item is scored exactly like before this change, and `pre_boundary` is 0."""
+    path = _jsonl(tmp_path, [
+        _user("u1", "owner message"),
+        _assistant("a1", "assistant reply"),
+        *_tool_pair("tu1", "tr1", "t1", "tool output one"),
+        *_tool_pair("tu2", "tr2", "t2", "tool output two"),
+    ])
+    window = jc.ConversationWindow()
+    items = _ei(path, window=window)
+    assert window.boundary_turn is None
+    conversation, scored, pre_boundary = jc.split_conversation(items, window)
+    assert [it.id for it in scored] == ["tr1:0", "tr2:0"]
+    assert pre_boundary == 0
 
 
 def test_only_the_bare_heartbeat_reply_is_dropped_a_reply_with_content_is_kept(
@@ -3713,9 +3772,13 @@ def test_boundary_as_the_last_walked_entry_leaves_only_preserved_prose(tmp_path:
     items = _ei(path, window=window)
     assert window.boundary_turn == len(items)
     assert window.summary is None
-    conversation, scored = jc.split_conversation(items, window)
+    conversation, scored, pre_boundary = jc.split_conversation(items, window)
     assert [it.id for it in conversation] == ["a1:0"]
-    assert [it.id for it in scored] == ["tr:0"]
+    # TRDD-350W5II2: "tr:0" is the pre-boundary tool result and its own uuid ("tr") was never
+    # preserved (only "a1" was) -- dropped from `scored`, counted in `pre_boundary`. Fails on
+    # HEAD, where `scored` still kept every pre-boundary tool item.
+    assert [it.id for it in scored] == []
+    assert pre_boundary == 1
 
     doc = jc.compose(scored, {"tr:0": _scores(0.9)}, budget_tokens=8000, header=_H,
                      max_bytes=5000, max_item_bytes=700, non_owner_item_bytes=350,

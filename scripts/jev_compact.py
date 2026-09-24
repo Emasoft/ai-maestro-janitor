@@ -651,7 +651,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # messages are split off here and never reach `score_items`, so no Jev score can drop one;
     # the compose calls below render them verbatim. A prompt sentence could not guarantee this:
     # a kept/elided decision is a threshold on a returned probability.
-    conversation, scored = jc.split_conversation(items, window)
+    # TRDD-350W5II2: `scored` is now LIVE tool/event items only (`pre_boundary` counts what got
+    # dropped) -- a pre-boundary tool result predates the digest it would be judged against, and
+    # was most of score_items' 168s/7075-item cost on 4eb7bf5d. `expand <id>` still reaches a
+    # dropped item by uuid; only scoring/rendering skip it.
+    conversation, scored, pre_boundary = jc.split_conversation(items, window)
 
     state_heads: list[str] = []
     for head_path in args.state_heads or []:
@@ -803,11 +807,15 @@ def cmd_compact(args: argparse.Namespace) -> int:
     out_tokens = estimate_tokens(full_doc)
     # TRDD-D7RLXAN1: `items=` counts only the scored items; `conversation=` the verbatim, never-
     # scored messages. Appended after `blocked=… blocked_digest=…`, which the lane's regex reads.
+    # TRDD-350W5II2: `pre_boundary=` (tool/event items dropped as not-live, never scored/rendered
+    # but still reachable via `expand <id>`) is appended last, after `malformed=` -- the lane's
+    # `_BLOCKED_LINE_RE`/`_MALFORMED_LINE_RE` match their own field by name+digits, so a trailing
+    # field never breaks either regex.
     summary = (
         f"compacted items={kept}/{len(scored)} tokens={out_tokens} cost={usage_cost} "
         f"ms={elapsed_ms} blocked={len(blocked_items)} blocked_digest={blocked_digest} "
         f"segmentation_failed={len(segmentation_failures)} conversation={len(conversation)} "
-        f"malformed={len(malformed_lines)}"
+        f"malformed={len(malformed_lines)} pre_boundary={pre_boundary}"
     )
     # Coordinator's decision: `shadow_log_failed=1` is appended at the very END, after every
     # existing field -- `jev_compaction_lane.py`'s own `blocked=… blocked_digest=…` regex
