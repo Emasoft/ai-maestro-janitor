@@ -1,9 +1,9 @@
 ---
 trdd-id: 88DOI824
 title: Jev segments large tool results losslessly instead of keeping or dropping them whole
-column: todo
+column: testing
 created: 2026-09-23T20:17:59+0200
-updated: 2026-09-24T11:38:51+0200
+updated: 2026-09-24T11:44:11+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -24,6 +24,7 @@ Card 6 of the Jev reference gap analysis (2026-09-23). 601 tool results of 2k-24
 ## Approval log
 
 - 2026-09-23T20:17:59+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-24T11:44:11+0200 — column → testing by janitor-main-session. segmentation landed in 3006e92f and ships in release 1; the remaining scope stays deferred
 
 ## Review corrections 2026-09-24
 

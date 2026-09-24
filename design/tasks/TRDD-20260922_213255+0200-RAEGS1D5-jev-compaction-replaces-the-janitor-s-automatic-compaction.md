@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-24T11:38:30+0200
+updated: 2026-09-24T11:43:42+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -16,7 +16,7 @@ approval-judge: Emasoft
 approval-datetime: 2026-09-22T21:32:55+0200
 npt: [541CBN36]
 relevant-rules: []
-implementation-commits: [051625a4, 0b883373, 61cad99c, 3006e92f, d4fa7685, 23713d53, 0cf40380, 012b091e, 44fdec8c, aa038127, aabd8b0c, 8c5db5e0, 862d30d4, c560ca76]
+implementation-commits: [012b091e, 051625a4, 0b883373, 0cf40380, 1b5ceec8, 1e36e9bc, 2353a88a, 23713d53, 29dd5501, 2c32448a, 2f463d3b, 40cc06d1, 434530ab, 44fdec8c, 49d733b7, 4a65338d, 4b8ba762, 522f1e3c, 54ea73bc, 6eba6f58, 6fd3e531, 82860cc7, 83fae099, 862d30d4, 88aea2d9, 8950ba16, 8c5db5e0, 9dfc409b, 9f7c86fe, aa038127, aabd8b0c, b058292d, b0e3e6a2, b0e94f43, b171d337, b2154831, c406c9b3, c560ca76, c5eac23d, d3364c01, d4fa7685, d67b10c1, d8c80b16, eb49e933, eba1f1ff, ef06432e, f4bc9541, fa6ceedd, fe38e095]
 eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1KOGAC, O2FNJ4KW, EFA4P42B, 4P4Y2KBR]
 ---
 
