@@ -1819,6 +1819,43 @@ def test_mid_turn_attachment_from_a_peer_agent_is_event_not_user() -> None:
     assert by_id["att4:0"].text == "Consultation request from a peer agent, not the owner."
 
 
+def test_mid_turn_attachment_with_list_prompt_does_not_crash(tmp_path: Path) -> None:
+    """TRDD-RAEGS1D5 crash fix: `attachment.prompt` is a plain str for a typed-only message but
+    a list of content blocks (text + image, same shape as `message.content`) when the owner
+    pastes an image alongside text -- measured on the real 183 MB `c8a95d7e` transcript, minimal
+    redacted shape reproduced below. Before the fix, `extract_items` crashed with
+    `AttributeError: 'list' object has no attribute 'strip'` inside `is_control_input`, which
+    assumed `attachment.prompt` is always a str. The text blocks must be joined the same way
+    `_tool_result_text` already joins a tool_result's block list -- an image block contributes
+    nothing, the text block's text survives."""
+    record = {
+        "type": "attachment",
+        "uuid": "att-list",
+        "parentUuid": "p1",
+        "isSidechain": False,
+        "timestamp": "2026-09-24T00:00:00.000Z",
+        "attachment": {
+            "type": "queued_command",
+            "commandMode": "prompt",
+            "origin": {"kind": "human"},
+            "prompt": [
+                {"type": "text", "text": "what are you talking about??"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                              "data": "Zm9v"}},
+            ],
+            "timestamp": "2026-09-24T00:00:00.000Z",
+        },
+    }
+    path = tmp_path / "list_prompt.jsonl"
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    items = jc.extract_items(path)  # must not raise
+
+    assert len(items) == 1
+    assert items[0].kind == "user"
+    assert items[0].text == "what are you talking about??"
+
+
 # --- TRDD-CC0CZLMO (card 3): score_items fans batches out on a ThreadPoolExecutor ---
 
 

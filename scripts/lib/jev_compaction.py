@@ -619,7 +619,13 @@ def extract_items(
                 attachment = entry.get("attachment")
                 if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
                     continue
-                text = attachment.get("prompt", "")
+                # TRDD-RAEGS1D5: `attachment.prompt` is a plain str for a typed message but a
+                # list of content blocks (text/image, same shape as `message.content`) when the
+                # owner pastes an image alongside text -- measured on the 183 MB c8a95d7e
+                # transcript, whose crash was `is_control_input` calling `.strip()` on that
+                # list. Reuse `_tool_result_text`, the existing str-or-block-list joiner, rather
+                # than assuming str.
+                text = _tool_result_text(attachment.get("prompt", ""))
                 if not text:
                     continue
                 command_mode = attachment.get("commandMode")
