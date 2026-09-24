@@ -24,7 +24,7 @@ approval-datetime: 2026-09-24T07:42:31+0200
 
 ## Why this card exists
 
-On 2026-09-24 commit 3185baac added TRDD-K0PMVRN6 to design/tasks/ carrying three personal e-mail addresses and the macOS username, and nothing stopped it. The privacy checks the janitor has all run too late or cover the wrong thing:
+On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying three personal e-mail addresses and the macOS username, and nothing stopped it. The privacy checks the janitor has all run too late or cover the wrong thing:
 - publish.py's G1b personal-address lint and CPV --strict (home paths) run only at PUBLISH, when the leak is already in history and can only be removed by rewriting it;
 - git-hooks/pre-push runs trufflehog, which covers secrets, not PII;
 - scripts/lib/privacy_patterns.py (PII shapes) is used by scan-time detectors, not at commit;

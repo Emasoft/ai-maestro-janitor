@@ -64,7 +64,7 @@ labels: [oauth-rotator]
 ## Owner decisions 2026-09-24 (verbatim)
 
 > no need, now it is ok. but remember: the long lived tokens are not working, so you can remove that code. the current method you just used is the right one, so save it in memory. but still you must check that the rotation will actually happen in time, just before the api/time-limit error appear. otherwise continuity is broken. you must ensure rotate is executed without broken continuity of the agents jobs across all claude code, in or outside of the ai-maestro harness. i suggest to message the ai-maestro claude to inform it of the right procedures to rotate and renew you just used.
-Context: "no need, now it is ok" answered the question whether to amend commit 3185baac to remove private data from TRDD-K0PMVRN6. The owner said no amend is needed.
+Context: "no need, now it is ok" answered the question whether to amend commit 2ef3b1f8 to remove private data from TRDD-K0PMVRN6. The owner said no amend is needed.
 > why only the server can read the keychain? the janitor daemon must read it too. not to mention that the keychain stored oauth of the user accounts must all be shared between the ai-maestro server daemon (the janitor daemon equivalent that replaces it when the server is running) and the janitor daemon.
 
 

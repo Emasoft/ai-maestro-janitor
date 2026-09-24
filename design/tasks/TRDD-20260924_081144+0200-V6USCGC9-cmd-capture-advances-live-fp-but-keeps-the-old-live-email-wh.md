@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T08:11:44+0200
-implementation-commits: [e322d8e1]
+implementation-commits: [88b10297]
 ---
 
 # cmd_capture advances live_fp but keeps the old live_email when the roles lookup fails, defeating the F5 reconcile
@@ -24,4 +24,4 @@ in cmd_capture (rotator.py:1541-1591), when account_email(blob) returns None, th
 ## Approval log
 
 - 2026-09-24T08:11:44+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
-- 2026-09-24T11:21:36+0200 — column → testing by janitor-main-session. fix landed in e322d8e1 with a failing-first test; awaiting the release
+- 2026-09-24T11:21:36+0200 — column → testing by janitor-main-session. fix landed in 88b10297 with a failing-first test; awaiting the release

@@ -33,7 +33,7 @@ Owner, 2026-09-24: "continue testing the jev compaction, make it flawless". Rele
 | V9 | isolation: run from the scratch dir | no file written under the real repo's .janitor/state |
 | V10 | the content read by hand for every V1 run | a resumed session can tell (a) the owner's last request, (b) what the session did, (c) what is next; every stated owner decision is inline or pointed at |
 | V11 | the cards section (TRDD-O2FNJ4KW) | the cards the session worked are listed first; the other open ids are named as many as fit in the capped line (ids part 300 B, line about 340 B), then the rest are counted |
-| V12 | the no-sidecar fallback (scripts/hooks/on-session-start.py) end to end: a clear flag, NO per-pane sidecar, and a foreign or legacy handoff as the newest file in the state dir | stdout is a pointer line naming that handoff, never its body (the path 737b4d6c changed; TRDD-4P4Y2KBR) |
+| V12 | the no-sidecar fallback (scripts/hooks/on-session-start.py) end to end: a clear flag, NO per-pane sidecar, and a foreign or legacy handoff as the newest file in the state dir | stdout is a pointer line naming that handoff, never its body (the path 5fba6c67 changed; TRDD-4P4Y2KBR) |
 
 ## Approval log
 

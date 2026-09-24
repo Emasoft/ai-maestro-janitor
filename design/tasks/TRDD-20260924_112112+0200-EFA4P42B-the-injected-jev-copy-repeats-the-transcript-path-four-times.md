@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:12+0200
-implementation-commits: [5b31b981, fe2433a7, c8e11ede]
+implementation-commits: [feae6152, 8cd3d8d6, 2fe19668]
 ---
 
 # The injected Jev copy repeats the transcript path four times
@@ -24,7 +24,7 @@ Same run (E5). The injected copy prints the transcript path in the header, the e
 ## Approval log
 
 - 2026-09-24T11:21:12+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
-- 2026-09-24T11:42:58+0200 — column → testing by janitor-main-session. fix landed in 5b31b981 with a failing-first test; re-measured with the next real-transcript run
+- 2026-09-24T11:42:58+0200 — column → testing by janitor-main-session. fix landed in feae6152 with a failing-first test; re-measured with the next real-transcript run
 
 ## Review corrections 2026-09-24
 
