@@ -27,6 +27,14 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_small.j
 FIXTURE_ORIGIN = Path(__file__).resolve().parent / "fixtures" / "jev_transcript_origin.jsonl"
 
 
+def _ei(path: Any, **kwargs: Any) -> list[jc.Item]:
+    """`jc.extract_items` wrapper: `malformed_lines` became a REQUIRED keyword (TRDD-DQXMND59,
+    adversarial review 2026-09-24, finding A) -- most tests below don't care about damaged-line
+    counts and would otherwise repeat `malformed_lines=[]` at every one of ~25 call sites."""
+    kwargs.setdefault("malformed_lines", [])
+    return jc.extract_items(path, **kwargs)
+
+
 def _item(id_: str, kind: jc.ItemKind, text: str, turn: int, tokens: int | None = None) -> jc.Item:
     from jevctx.tokens import estimate_tokens
 
@@ -36,7 +44,7 @@ def _item(id_: str, kind: jc.ItemKind, text: str, turn: int, tokens: int | None 
 
 
 def test_extraction_skips_heartbeat_thinking_meta_and_system_and_pairs_tool_results() -> None:
-    items = jc.extract_items(FIXTURE)
+    items = _ei(FIXTURE)
     ids = [it.id for it in items]
 
     # The fixture's isMeta (u3), heartbeat (u4), thinking-only (a2), and every
@@ -71,8 +79,8 @@ def test_extraction_skips_heartbeat_thinking_meta_and_system_and_pairs_tool_resu
 
 
 def test_ids_stable_across_reruns() -> None:
-    first = [it.id for it in jc.extract_items(FIXTURE)]
-    second = [it.id for it in jc.extract_items(FIXTURE)]
+    first = [it.id for it in _ei(FIXTURE)]
+    second = [it.id for it in _ei(FIXTURE)]
     assert first == second
 
 
@@ -1102,7 +1110,7 @@ def test_tool_result_without_matching_tool_use_falls_back(tmp_path: Path) -> Non
     path = tmp_path / "orphan.jsonl"
     path.write_text(json.dumps(line) + "\n")
 
-    items = jc.extract_items(path)
+    items = _ei(path)
     assert len(items) == 1
     assert items[0].kind == "tool"
     assert items[0].text == "<unknown tool>()\norphaned result"
@@ -1126,7 +1134,7 @@ def test_extract_items_survives_a_non_utf8_byte_line(tmp_path: Path) -> None:
         fh.write((json.dumps(good2) + "\n").encode("utf-8"))
 
     malformed: list[int] = []
-    items = jc.extract_items(path, malformed_lines=malformed)
+    items = _ei(path, malformed_lines=malformed)
 
     assert [it.id for it in items] == ["u1:0", "u2:0"]
     assert malformed == [2]
@@ -1145,9 +1153,63 @@ def test_extract_items_survives_a_truncated_final_line(tmp_path: Path) -> None:
     path.write_text(json.dumps(good) + "\n" + '{"type": "user", "uuid": "u2", "mess')
 
     malformed: list[int] = []
-    items = jc.extract_items(path, malformed_lines=malformed)
+    items = _ei(path, malformed_lines=malformed)
 
     assert [it.id for it in items] == ["u1:0"]
+    assert malformed == [2]
+
+
+def test_extract_items_and_compose_survive_a_lone_surrogate_in_tool_result_text(
+    tmp_path: Path,
+) -> None:
+    """TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding C): a lone (unpaired)
+    UTF-16 surrogate escape (e.g. an emoji cut in half by a writer's own bug) is VALID JSON --
+    `json.loads` parses it into a normal-looking `str` -- so `extract_items` must not (and does
+    not) flag the line as malformed. What must not happen is a crash LATER, the first time
+    something calls `.encode("utf-8")` on that text -- `compose()`'s own byte-budget accounting
+    does this on every item. This is a regression pin: `Item.__post_init__` sanitizes the
+    surrogate at construction, so this must NOT crash on either HEAD or before the fix -- it
+    pins the fix (`_drop_lone_surrogates`) rather than proving a bug, unlike the other tests in
+    this file that fail on HEAD."""
+    line = {"type": "user", "uuid": "u1", "parentUuid": None,
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "before \ud83d after"}
+            ]}}
+    path = tmp_path / "surrogate.jsonl"
+    path.write_text(json.dumps(line) + "\n", encoding="utf-8")
+
+    malformed: list[int] = []
+    items = _ei(path, malformed_lines=malformed)
+    assert malformed == []  # a parseable line, never flagged as damaged
+
+    assert items[0].text.encode("utf-8")  # must not raise UnicodeEncodeError
+    scores = {items[0].id: jc.Scores(relevance=1.0, decision=1.0, oversized=False, kept=True,
+                                      decision_passed=False)}
+    doc = jc.compose(items, scores, budget_tokens=8000,
+                      header={"transcript_path": str(path), "session_key": "s"})
+    assert "�" in doc  # the surrogate was replaced, not silently dropped
+
+
+def test_extract_items_survives_a_line_that_is_not_a_json_object(tmp_path: Path) -> None:
+    """TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding D): `json.loads`
+    happily parses a line whose top level is a bare number/string/list/null -- not just a
+    malformed line. The very next statement, `entry.get("type")`, then raises
+    `AttributeError` on anything but a dict, aborting the whole walk. Fails on HEAD."""
+    good1 = {"type": "user", "uuid": "u1", "parentUuid": None,
+             "message": {"role": "user", "content": [
+                 {"type": "tool_result", "tool_use_id": "t1", "content": "first result"}]}}
+    good2 = {"type": "user", "uuid": "u2", "parentUuid": "u1",
+             "message": {"role": "user", "content": [
+                 {"type": "tool_result", "tool_use_id": "t2", "content": "second result"}]}}
+    path = tmp_path / "not_an_object.jsonl"
+    path.write_text(
+        json.dumps(good1) + "\n" + "42\n" + json.dumps(good2) + "\n", encoding="utf-8",
+    )
+
+    malformed: list[int] = []
+    items = _ei(path, malformed_lines=malformed)
+
+    assert [it.id for it in items] == ["u1:0", "u2:0"]
     assert malformed == [2]
 
 
@@ -1179,7 +1241,7 @@ def test_small_tool_result_stays_one_item_unsegmented(tmp_path: Path) -> None:
     }
     path = tmp_path / "small.jsonl"
     path.write_text(json.dumps(line) + "\n")
-    items = jc.extract_items(path)
+    items = _ei(path)
     assert len(items) == 1
     assert items[0].id == "u1:0"
     assert "@" not in items[0].id
@@ -1304,7 +1366,7 @@ def test_extract_items_threads_segmentation_failures_through(
     path.write_text(json.dumps(line) + "\n")
 
     failures: list[str] = []
-    items = jc.extract_items(path, segmentation_failures=failures)
+    items = _ei(path, segmentation_failures=failures)
     assert failures == ["u1:0"]
     assert any(it.id == "u1:0" for it in items)
 
@@ -1331,7 +1393,7 @@ def test_large_read_result_segments_losslessly_into_multiple_code_items(tmp_path
     path = tmp_path / "read.jsonl"
     path.write_text(json.dumps(line) + "\n" + json.dumps(line2) + "\n")
 
-    items = jc.extract_items(path)
+    items = _ei(path)
     tool_items = [it for it in items if it.kind == "tool"]
     assert len(tool_items) > 1, "a large Read result must split into several Items"
     for it in tool_items:
@@ -1354,7 +1416,7 @@ def test_segment_ids_are_positional_never_content_hash(tmp_path: Path) -> None:
     }
     path = tmp_path / "dup.jsonl"
     path.write_text(json.dumps(line) + "\n")
-    items = [it for it in jc.extract_items(path) if it.kind == "tool"]
+    items = [it for it in _ei(path) if it.kind == "tool"]
     ids = [it.id for it in items]
     assert len(ids) == len(set(ids)), "segment ids must be unique even with repeated content"
 
@@ -1385,7 +1447,7 @@ def test_embedded_stacktrace_is_never_split_and_marked_protected(tmp_path: Path)
     }
     path = tmp_path / "trace.jsonl"
     path.write_text(json.dumps(line) + "\n")
-    items = [it for it in jc.extract_items(path) if it.kind == "tool"]
+    items = [it for it in _ei(path) if it.kind == "tool"]
     assert len(items) > 1, "the padded result must actually segment"
     assert "".join(it.text for it in items) == result_text  # losslessness holds regardless
 
@@ -1512,7 +1574,7 @@ def test_compose_with_many_segmented_items_stays_under_max_bytes(tmp_path: Path)
     }
     path = tmp_path / "big.jsonl"
     path.write_text(json.dumps(line) + "\n")
-    items = jc.extract_items(path)
+    items = _ei(path)
     assert len(items) > 5
     scores = {
         it.id: jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
@@ -1607,7 +1669,7 @@ def test_extraction_skips_sidechain_entries(tmp_path: Path) -> None:
     path = tmp_path / "sidechain.jsonl"
     path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
 
-    items = jc.extract_items(path)
+    items = _ei(path)
     assert len(items) == 1
     assert items[0].id == "main1:0"
     assert items[0].text == "the real, main-conversation message"
@@ -1677,14 +1739,14 @@ def test_scheduled_prompt_without_janitor_prefix_becomes_event() -> None:
     # (it is real requested work) nor counted as "user" (`transcript_roles.classify_record`
     # has no way to know it came from the owner rather than a `/loop` job) -- it becomes
     # kind "event", kept, but excluded from `build_digest`'s "last three human messages".
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     by_id = {it.id: it for it in items}
     assert by_id["sched1:0"].kind == "event"
     assert by_id["sched1:0"].text == "Check nightly build status"
 
 
 def test_task_notification_becomes_event_and_is_excluded_from_the_digest() -> None:
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     by_id = {it.id: it for it in items}
 
     assert by_id["u2:0"].kind == "event"  # not "user" -- see is_human_record
@@ -1714,7 +1776,7 @@ def test_bare_owner_control_input_is_kind_control_in_every_branch(tmp_path: Path
     path = tmp_path / "control.jsonl"
     path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
 
-    items = jc.extract_items(path)
+    items = _ei(path)
     by_id = {it.id: it for it in items}
     assert by_id["u1:0"].kind == "control"
     assert by_id["u1:0"].text == "resume"
@@ -1730,13 +1792,13 @@ def test_origin_less_legacy_record_still_classified_human() -> None:
     entry = {"type": "user", "isMeta": False, "message": {"content": "plain legacy text"}}
     assert jc.is_human_record(entry) is True
 
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     by_id = {it.id: it for it in items}
     assert by_id["u4:0"].kind == "user"  # u4 in the fixture carries no `origin` field
 
 
 def test_heartbeat_turn_skips_assistant_and_tool_items() -> None:
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     ids = [it.id for it in items]
 
     # hb1 (the fire itself) was already dropped before this fix; the NEW behaviour is that
@@ -1749,7 +1811,7 @@ def test_heartbeat_turn_skips_assistant_and_tool_items() -> None:
 
 
 def test_human_turn_after_heartbeat_resumes_extraction() -> None:
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     by_id = {it.id: it for it in items}
 
     # u4 (the next human record after the heartbeat) closes the skip window and is itself
@@ -1770,7 +1832,7 @@ def test_heartbeat_turn_keeps_real_work_after_the_quiet_stub_call() -> None:
     still dropped, but the real assistant prose (a6, a7), the real tool call it makes (the Read
     remembered on a6) and that tool's result (u6) all survive -- the OLD whole-turn skip window
     would have dropped every one of these too."""
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     ids = [it.id for it in items]
     by_id = {it.id: it for it in items}
 
@@ -1832,7 +1894,7 @@ def test_mid_turn_attachment_becomes_user_and_queued_notification_becomes_event(
     fixture's att1/att2/att3). `commandMode: "prompt"` is the owner's own words (kind "user");
     `commandMode: "task-notification"` is an agent report (kind "event", same as any other
     notification); any other `attachment.type` (att3: `hook_success`) contributes nothing."""
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     ids = [it.id for it in items]
     by_id = {it.id: it for it in items}
 
@@ -1850,7 +1912,7 @@ def test_mid_turn_attachment_from_a_peer_agent_is_event_not_user() -> None:
     ANOTHER agent, delivered through the SAME mid-turn queue a genuine keystroke uses). Only
     `origin.kind == "human"` is the owner's own words; a peer message is real content (kept)
     but must never be counted as the human in `build_digest`/`score_items`'s decision question."""
-    items = jc.extract_items(FIXTURE_ORIGIN)
+    items = _ei(FIXTURE_ORIGIN)
     by_id = {it.id: it for it in items}
     assert by_id["att4:0"].kind == "event"
     assert by_id["att4:0"].text == "Consultation request from a peer agent, not the owner."
@@ -1886,7 +1948,7 @@ def test_mid_turn_attachment_with_list_prompt_does_not_crash(tmp_path: Path) -> 
     path = tmp_path / "list_prompt.jsonl"
     path.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
-    items = jc.extract_items(path)  # must not raise
+    items = _ei(path)  # must not raise
 
     assert len(items) == 1
     assert items[0].kind == "user"
@@ -3520,7 +3582,7 @@ def test_window_pairs_each_boundary_to_its_own_summary_by_anchor_uuid(tmp_path: 
         _user("u2", "third owner message"),
     ])
     window = jc.ConversationWindow()
-    items = jc.extract_items(path, window=window)
+    items = _ei(path, window=window)
     assert [it.id for it in items] == ["u0:0", "u1:0", "u2:0"]  # neither line is ever an item
     assert window.summary == "SUMMARY TWO"
     assert window.preserved_uuids == frozenset({"u1", "names-no-line"})
@@ -3531,7 +3593,7 @@ def test_window_pairs_each_boundary_to_its_own_summary_by_anchor_uuid(tmp_path: 
         _user("u1", "b"), _boundary("b2", "s2", []),
     ], name="killed.jsonl")
     window2 = jc.ConversationWindow()
-    jc.extract_items(killed, window=window2)
+    _ei(killed, window=window2)
     assert window2.summary is None
     assert window2.boundary_turn == 2
 
@@ -3554,7 +3616,7 @@ def test_split_conversation_drops_unpreserved_pre_boundary_prose_only(tmp_path: 
         _user("nc", "resume"),
     ])
     window = jc.ConversationWindow()
-    items = jc.extract_items(path, window=window)
+    items = _ei(path, window=window)
     conversation, scored = jc.split_conversation(items, window)
 
     assert [it.id for it in conversation] == ["keep:0", "nu:0", "na:0", "nc:0"]
@@ -3579,7 +3641,7 @@ def test_only_the_bare_heartbeat_reply_is_dropped_a_reply_with_content_is_kept(
         _assistant("bare", "janitor heartbeat"),
         _assistant("said", with_content),
     ])
-    items = jc.extract_items(path)
+    items = _ei(path)
     assert [(it.id, it.kind, it.text) for it in items] == [("said:0", "assistant", with_content)]
 
 
@@ -3594,7 +3656,7 @@ def test_boundary_as_the_last_walked_entry_leaves_only_preserved_prose(tmp_path:
         _boundary("b", "s", ["a1"]),
     ])
     window = jc.ConversationWindow()
-    items = jc.extract_items(path, window=window)
+    items = _ei(path, window=window)
     assert window.boundary_turn == len(items)
     assert window.summary is None
     conversation, scored = jc.split_conversation(items, window)

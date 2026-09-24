@@ -17,6 +17,7 @@ import json
 import re
 import sys
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +114,17 @@ _BARE_HEARTBEAT_REPLY = "janitor heartbeat"
 _POINTER_PREVIEW_CHARS = 80
 
 
+def _drop_lone_surrogates(text: str) -> str:
+    """`text`, or a copy with every lone (unpaired) UTF-16 surrogate codepoint replaced by
+    U+FFFD -- see `Item.__post_init__`, the one call site. Cheap on the common case: a string
+    that already encodes cleanly returns itself unchanged (identity, not a copy)."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return "".join("�" if 0xD800 <= ord(c) <= 0xDFFF else c for c in text)
+    return text
+
+
 @dataclass(frozen=True)
 class Item:
     """One scorable/inlinable unit of the OLD transcript.
@@ -138,6 +150,19 @@ class Item:
     ts: str | None
     turn: int
     protected: bool = False
+
+    def __post_init__(self) -> None:
+        # TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding C): `json.loads`
+        # accepts a LONE surrogate escape (e.g. an emoji Node cut in half writing the
+        # transcript, `"\ud83d"` with no paired low surrogate) and hands back a `str` that
+        # LOOKS fine but raises `UnicodeEncodeError` on the first `.encode("utf-8")` --
+        # `compose()`'s own byte-budget accounting does this on every item's `.text`. Fixed
+        # ONCE here, at Item construction (every extraction path and every test builds an
+        # Item, none construct the text a caller already validated), rather than at each of
+        # the dozen-plus `.encode("utf-8")` call sites in `compose()`.
+        fixed = _drop_lone_surrogates(self.text)
+        if fixed is not self.text:
+            object.__setattr__(self, "text", fixed)
 
 
 @dataclass(frozen=True)
@@ -562,10 +587,64 @@ def _owner_kind(kind: ItemKind, text: str) -> ItemKind:
     return "control" if kind == "user" and transcript_roles.is_control_input(text) else kind
 
 
+def _parse_jsonl_line(
+    raw_line: bytes, line_no: int, malformed_lines: list[int],
+) -> dict[str, Any] | None:
+    """Decode and parse one JSONL line; ``None`` for a blank line (not malformed -- just
+    whitespace between real lines) or for one that is malformed, in which case `line_no` is
+    also appended to `malformed_lines`. Shared by `iter_jsonl_entries` below and
+    `extract_items`'s own walk (kept as a separate loop there rather than switching to the
+    iterator, so its per-entry state -- `pending_tool_uses`, `quiet_tool_use_ids`, `window` --
+    stays at its existing indentation instead of a large, error-prone re-indent).
+
+    Read as BYTES and decoded per line, not `open(encoding="utf-8")` on the whole file: a live
+    session's transcript is written by another process, so one line's non-UTF-8 bytes (a
+    subprocess's raw stdout) must not poison every line after it, and a mid-append last line
+    decodes as garbage-then-EOF rather than raising and aborting the whole walk on the line
+    most likely to be incomplete. `errors="replace"` does not by itself guarantee a bad line
+    fails to parse (see `extract_items`'s KNOWN LIMITATION paragraph) -- what is actually
+    caught here is a line that is structurally broken: not valid JSON at all, or JSON whose
+    top level is not an object (finding D, adversarial review 2026-09-24: a bare
+    number/string/list/null line would otherwise make a caller's `entry.get(...)` raise
+    `AttributeError`).
+    """
+    line = raw_line.decode("utf-8", errors="replace").strip()
+    if not line:
+        return None
+    try:
+        entry = json.loads(line)
+    except json.JSONDecodeError:
+        malformed_lines.append(line_no)
+        return None
+    if not isinstance(entry, dict):
+        malformed_lines.append(line_no)
+        return None
+    return entry
+
+
+def iter_jsonl_entries(path: Path, *, malformed_lines: list[int]) -> Iterator[tuple[int, dict[str, Any]]]:
+    """Walk one transcript JSONL, yielding ``(1-based line number, parsed dict)`` for every
+    line that parses to a JSON OBJECT -- the one entry shape every reader in this codebase
+    (`extract_items`, `_read_jsonl_entry` in `scripts/jev_compact.py`) actually consumes.
+
+    TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): `extract_items` had
+    its own byte-read-and-decode loop and `_read_jsonl_entry` had a SECOND, older one that
+    still opened the file in text mode -- so `expand` crashed with `UnicodeDecodeError` on the
+    exact same damaged byte `compact` already knew how to skip, for every id located after it.
+    Sharing `_parse_jsonl_line` (not just its logic, copy-pasted) means one fix covers both
+    callers forever.
+    """
+    with path.open("rb") as fh:
+        for line_no, raw_line in enumerate(fh, start=1):
+            entry = _parse_jsonl_line(raw_line, line_no, malformed_lines)
+            if entry is not None:
+                yield line_no, entry
+
+
 def extract_items(
     transcript_path: str | Path, *, segmentation_failures: list[str] | None = None,
     window: ConversationWindow | None = None,
-    malformed_lines: list[int] | None = None,
+    malformed_lines: list[int],
 ) -> list[Item]:
     """Walk one transcript JSONL and return its extracted, chronologically ordered items.
 
@@ -578,13 +657,17 @@ def extract_items(
     its preserved uuids and its paired summary -- see `ConversationWindow`. Neither the
     boundary line nor the summary entry ever becomes an item.
 
-    `malformed_lines` (TRDD-DQXMND59), when given, is appended to (in place) with the 1-based
-    line number of every line that could not be parsed as JSON -- the live-session case: the
-    process writing the transcript can leave the LAST line half-written mid-append, and any
-    line can carry non-UTF-8 bytes from a subprocess's raw output. Such a line is skipped, not
-    swallowed silently: the count is the caller's signal that the walk saw damage, mirroring
-    `segmentation_failures`. `None` (the default) costs nothing and changes no existing
-    caller's behaviour.
+    `malformed_lines` is REQUIRED (adversarial review, 2026-09-24, finding A): a prior commit
+    made it optional and no caller passed it, so a damaged line was skipped in total silence.
+    Appended to (in place) with the 1-based line number of every line that could not be parsed
+    as a JSON object -- the live-session case: the process writing the transcript can leave
+    the LAST line half-written mid-append, any line can carry non-UTF-8 bytes from a
+    subprocess's raw output, and a line can parse to valid JSON that is not an object (finding
+    D). Such a line is skipped, not swallowed silently: the count is the caller's signal that
+    the walk saw damage, mirroring `segmentation_failures`. A caller that genuinely does not
+    care still has to write `malformed_lines=[]` -- that one extra word is cheap, "forgot to
+    look" is not. See `iter_jsonl_entries`, the shared walk this function and
+    `scripts/jev_compact.py::_read_jsonl_entry` both use.
 
     KNOWN LIMITATION (adversarial review, 2026-09-24): `errors="replace"` only catches damage
     that ALSO breaks `json.loads` -- a line whose bad bytes decode to U+FFFD but still happens
@@ -594,6 +677,15 @@ def extract_items(
     lossy in that one case. Accepted for this fix: the goal is "one bad byte never aborts the
     whole compact run", not "every byte-level anomaly is flagged" -- the latter would need
     per-field validity tracking `json.loads` does not offer.
+
+    A related but SEPARATE anomaly (finding C, same review) is NOT a `malformed_lines` case at
+    all: `json.loads` accepts a lone (unpaired) UTF-16 surrogate escape inside a JSON string
+    (e.g. a multi-byte emoji Node's writer cut in half, `"\ud83d"` alone) and returns it as a
+    normal-looking `str` -- the line parses fine, `malformed_lines` is right to stay silent
+    about it. What breaks is every LATER `.encode("utf-8")` on that text (`compose()`'s byte
+    budget, in particular): `UnicodeEncodeError`, uncaught. Fixed at `Item.__post_init__`
+    (`_drop_lone_surrogates`), not here -- by the time this function returns, every `Item.text`
+    it produced is guaranteed `.encode("utf-8")`-safe.
 
     One pass, top to bottom: a `tool_use` block is remembered by its own `id` as soon as
     it's seen, so the `tool_result` block that answers it (which always appears in a LATER
@@ -635,25 +727,13 @@ def extract_items(
     # dropped, whatever else surrounds them in the same turn.
     quiet_tool_use_ids: set[str] = set()
 
-    # V7 robustness (TRDD-DQXMND59): read as BYTES and decode per line, not `open(encoding=
-    # "utf-8")` on the whole file -- a live session's transcript is written by another
-    # process, so a subprocess's raw (non-UTF-8) output can land in one line without
-    # poisoning the rest, and a mid-append last line decodes as garbage-then-EOF rather than
-    # raising `UnicodeDecodeError` and aborting the whole walk on the one line most likely to
-    # be incomplete. `errors="replace"` turns a bad byte into U+FFFD, which then fails
-    # `json.loads` on that line alone (caught below) instead of the file read itself.
+    # V7 robustness (TRDD-DQXMND59): per-line decode+parse via `_parse_jsonl_line` (shared
+    # with `iter_jsonl_entries`, see its docstring) -- one bad byte or one structurally broken
+    # line is counted in `malformed_lines` and skipped, never aborting the rest of the walk.
     with path.open("rb") as fh:
         for line_no, raw_line in enumerate(fh, start=1):
-            line = raw_line.decode("utf-8", errors="replace").strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                # A truncated last line (session still writing) or genuinely corrupt JSON --
-                # counted, never swallowed silently: see `malformed_lines`' docstring above.
-                if malformed_lines is not None:
-                    malformed_lines.append(line_no)
+            entry = _parse_jsonl_line(raw_line, line_no, malformed_lines)
+            if entry is None:
                 continue
             entry_type = entry.get("type")
             # TRDD-D7RLXAN1: a `type: "system"` compact_boundary line is outside

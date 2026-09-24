@@ -355,26 +355,27 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_jsonl_entry(transcript: Path, target_uuid: str) -> dict[str, Any] | None:
+def _read_jsonl_entry(
+    transcript: Path, target_uuid: str, *, malformed_lines: list[int],
+) -> dict[str, Any] | None:
     """Scan the transcript for the entry with ``uuid == target_uuid``.
 
     A plain linear scan, not an index: a transcript is read here once per `expand` call,
     which is an interactive, occasional operation (a pointer the model chose to follow) —
     not the hot path card 3's compaction pass walks. Building an index for a one-shot CLI
     invocation would be optimizing a call that happens a handful of times per session.
+
+    TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): this used to open
+    the file in TEXT mode (`encoding="utf-8"`) and its own bare `json.loads` loop, so a
+    single non-UTF-8 byte anywhere before `target_uuid`'s line raised `UnicodeDecodeError`
+    and crashed `expand` outright -- the exact damage `compact`'s `extract_items` already
+    knew how to skip. Now shares `jc.iter_jsonl_entries`, the SAME byte-safe walk, so a
+    damaged line earlier in the file no longer blocks reaching a healthy one later.
     """
     try:
-        with transcript.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if entry.get("uuid") == target_uuid:
-                    return entry
+        for _line_no, entry in jc.iter_jsonl_entries(transcript, malformed_lines=malformed_lines):
+            if entry.get("uuid") == target_uuid:
+                return entry
     except OSError:
         return None
     return None
@@ -443,11 +444,18 @@ def cmd_expand(args: argparse.Namespace) -> int:
         # `jev_compaction.py::compose()`'s output used to be a dead end -- `expand` needs an id,
         # and an id never shown could never be named. Reuses `jc.extract_items`, the SAME
         # transcript walk `compact` itself does -- no re-scoring, no Jev call, just a parse.
+        # `malformed_lines` is a REQUIRED keyword (finding A, adversarial review 2026-09-24) --
+        # `--list` is a human-browsing aid over whatever items DID parse, not the compaction
+        # record of truth, but a caller must still be TOLD a line was skipped, not left to
+        # infer it from a shorter-than-expected listing. Printed to stderr below.
+        malformed_lines: list[int] = []
         try:
-            items = jc.extract_items(str(transcript))
+            items = jc.extract_items(str(transcript), malformed_lines=malformed_lines)
         except OSError as exc:
             print(f"expand --list failed: {exc}", file=sys.stderr)
             return 3
+        if malformed_lines:
+            print(f"expand --list: skipped {len(malformed_lines)} malformed line(s)", file=sys.stderr)
         needle = args.grep.lower() if args.grep else None
         # Card 5 two-renderings (TRDD-RAEGS1D5, item 6): name the transcript this listing is
         # against -- a bare id/kind/preview table gives no way to tell which transcript it came
@@ -494,7 +502,12 @@ def cmd_expand(args: argparse.Namespace) -> int:
         print(f"expand failed: malformed id {args.id!r}, expected '<uuid>:<n>'", file=sys.stderr)
         return 3
 
-    entry = _read_jsonl_entry(transcript, target_uuid)
+    expand_malformed_lines: list[int] = []
+    entry = _read_jsonl_entry(transcript, target_uuid, malformed_lines=expand_malformed_lines)
+    if expand_malformed_lines:
+        print(
+            f"expand: skipped {len(expand_malformed_lines)} malformed line(s)", file=sys.stderr,
+        )
     if entry is None:
         print(f"expand failed: no transcript entry with uuid={target_uuid!r} in {transcript}", file=sys.stderr)
         return 3
@@ -607,9 +620,13 @@ def cmd_compact(args: argparse.Namespace) -> int:
     # its length feeds the `segmentation_failed=N` summary field below, so it is never silent
     # to a caller that only reads stdout.
     segmentation_failures: list[str] = []
+    # TRDD-DQXMND59: mirrors `segmentation_failures` above -- a skipped-line count feeds the
+    # `malformed=N` summary field below, so a damaged transcript is never silently under-read.
+    malformed_lines: list[int] = []
     window = jc.ConversationWindow()
     items = jc.extract_items(
         args.transcript, segmentation_failures=segmentation_failures, window=window,
+        malformed_lines=malformed_lines,
     )
     # TRDD-D7RLXAN1 (owner directive 2026-09-24: "assistant prose and user prose (the messages
     # exchanges) should be all kept intact"): THE enforcement point. Owner/assistant/control
@@ -771,7 +788,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
     summary = (
         f"compacted items={kept}/{len(scored)} tokens={out_tokens} cost={usage_cost} "
         f"ms={elapsed_ms} blocked={len(blocked_items)} blocked_digest={blocked_digest} "
-        f"segmentation_failed={len(segmentation_failures)} conversation={len(conversation)}"
+        f"segmentation_failed={len(segmentation_failures)} conversation={len(conversation)} "
+        f"malformed={len(malformed_lines)}"
     )
     # Coordinator's decision: `shadow_log_failed=1` is appended at the very END, after every
     # existing field -- `jev_compaction_lane.py`'s own `blocked=… blocked_digest=…` regex

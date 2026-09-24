@@ -163,6 +163,29 @@ def test_expand_tool_result_block(tmp_path: Path) -> None:
     assert out.strip() == "file written: 12 lines"
 
 
+def test_expand_finds_an_id_located_after_a_non_utf8_line(tmp_path: Path) -> None:
+    """TRDD-DQXMND59 follow-up (adversarial review, 2026-09-24, finding B): `_read_jsonl_entry`
+    used to open the transcript in TEXT mode (`encoding="utf-8"`), so a single non-UTF-8 byte
+    on ANY earlier line raised `UnicodeDecodeError` and crashed `expand` before it ever reached
+    a healthy line after it -- even though `compact`'s own `extract_items` already tolerated
+    the exact same damage. Fails on HEAD."""
+    good1 = {"type": "user", "uuid": "u1", "parentUuid": None,
+             "message": {"role": "user", "content": "before the bad line"}}
+    good2 = {"type": "user", "uuid": "u2", "parentUuid": "u1",
+             "message": {"role": "user", "content": "after the bad line"}}
+    transcript = tmp_path / "badbytes.jsonl"
+    with transcript.open("wb") as fh:
+        fh.write((json.dumps(good1) + "\n").encode("utf-8"))
+        fh.write(b"\xff\xfe not valid utf-8 at all\n")
+        fh.write((json.dumps(good2) + "\n").encode("utf-8"))
+
+    code, out = _run(["expand", "--transcript", str(transcript), "u2:0"])
+
+    assert code == 0
+    assert "after the bad line" in out
+    assert "skipped 1 malformed line(s)" in out
+
+
 def test_expand_attachment_string_prompt(tmp_path: Path) -> None:
     # A typed mid-turn owner message: `attachment.prompt` is a plain str. Fails on HEAD
     # (before the TRDD-DQXMND59 fix) because `_extract_block` only looked at
@@ -263,7 +286,7 @@ def test_expand_segment_id_is_byte_exact(tmp_path: Path) -> None:
     # "some plausible substring". `jc.extract_items` on the SAME transcript is the oracle for
     # what the real id/text pairing is (this test does not hand-compute a line span).
     transcript, _result_text = _write_read_transcript(tmp_path)
-    items = [it for it in jc.extract_items(transcript) if it.kind == "tool"]
+    items = [it for it in jc.extract_items(transcript, malformed_lines=[]) if it.kind == "tool"]
     assert len(items) > 1, "the fixture must actually segment, or this test proves nothing"
     target = items[len(items) // 2]  # a middle segment, not just the first
     assert "@" in target.id
@@ -333,7 +356,7 @@ def test_expand_segment_id_is_byte_exact_for_list_shaped_content(tmp_path: Path)
     # list-shaped tool_result content independently -- this proves they agree byte for byte
     # for a SEGMENTED result, not just the plain-string shape every other test here uses.
     transcript, result_text = _write_list_content_read_transcript(tmp_path)
-    items = [it for it in jc.extract_items(transcript) if it.kind == "tool"]
+    items = [it for it in jc.extract_items(transcript, malformed_lines=[]) if it.kind == "tool"]
     assert len(items) > 1, "the fixture must actually segment, or this test proves nothing"
     assert "".join(it.text for it in items) == result_text
 
@@ -503,8 +526,30 @@ def test_compact_reports_blocked_zero_when_nothing_was_blocked(
     assert "blocked=0 blocked_digest=" in output
     # TRDD-RAEGS1D5 (jev newest+3): `segmentation_failed=N` follows `blocked_digest=` (empty,
     # nothing blocked); TRDD-D7RLXAN1 appended `conversation=N` (the fixture's owner message and
-    # assistant reply, never scored) as the new LAST field.
-    assert output.strip().endswith("segmentation_failed=0 conversation=2")
+    # assistant reply, never scored); TRDD-DQXMND59 appended `malformed=N` (no damaged lines in
+    # this fixture) as the new LAST field.
+    assert output.strip().endswith("segmentation_failed=0 conversation=2 malformed=0")
+
+
+def test_compact_reports_malformed_count_for_a_half_written_last_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-DQXMND59: `extract_items`'s `malformed_lines` out-parameter was added by a prior
+    commit but no caller passed it, so a damaged transcript line was skipped in total silence.
+    A live session's transcript can be caught mid-append with its last line half-written --
+    that must surface as `malformed=1` in the CLI summary, not vanish."""
+    transcript = _write_transcript(tmp_path)
+    # Append a truncated (non-JSON) last line, as a mid-append transcript would have.
+    with transcript.open("a", encoding="utf-8") as fh:
+        fh.write('{"type": "user", "uuid": "u-3", "parentUuid": "u-2", "message": {"rol')
+    out = tmp_path / "compacted.md"
+    client = FakeJevClient(_keep_only("bug"))
+    monkeypatch.setattr(jev_compact, "make_client", lambda: client)
+
+    code, output = _run(["compact", "--transcript", str(transcript), "--out", str(out)])
+
+    assert code == 0
+    assert "malformed=1" in output
 
 
 def test_compact_reports_blocked_count_and_a_content_digest(
@@ -980,7 +1025,7 @@ def test_expand_round_trips_a_composed_pointer_id() -> None:
     "name(input)\\nresult" pairing (see jev_compaction.extract_items), not the raw
     tool_result block's own content -- `expand` correctly returns the latter, so comparing
     against a tool item would be a false mismatch, not evidence of an indexing bug."""
-    items = jc.extract_items(_FIXTURE)
+    items = jc.extract_items(_FIXTURE, malformed_lines=[])
     scores = {
         it.id: jc.Scores(relevance=0.0, decision=0.0, oversized=False, kept=False,
                           decision_passed=False)
@@ -1409,7 +1454,7 @@ def test_compact_completes_normally_when_the_shadow_log_write_raises(
     assert "jev-shadow: ValueError" in output  # names the exception type on stderr
     assert re.search(
         r"blocked=\d+ blocked_digest=\S* segmentation_failed=\d+ conversation=\d+ "
-        r"shadow_log_failed=1", output,
+        r"malformed=\d+ shadow_log_failed=1", output,
     )
 
 
@@ -1562,7 +1607,7 @@ def test_compact_never_sends_prose_to_jev(tmp_path: Path, monkeypatch: pytest.Mo
     assert sent and not {owner, reply, control} & set(sent)
     assert all(key.endswith(":rel") for call in client.calls for key in call.questions)
     assert "shadow_log_failed" not in output
-    assert "compacted items=1/1 " in output and output.strip().endswith("conversation=3")
+    assert "compacted items=1/1 " in output and output.strip().endswith("conversation=3 malformed=0")
     full, inject = out.read_text(encoding="utf-8"), inject_out.read_text(encoding="utf-8")
     for text in (owner, reply, control):
         assert text in full and text in inject
