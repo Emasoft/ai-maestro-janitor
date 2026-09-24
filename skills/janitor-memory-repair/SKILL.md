@@ -18,10 +18,12 @@ distinction: [repair-background § Execution context and what this is](reference
 2. **Never edit a live page — except through a locked memgrep verb, pre-transaction.**
    Every fix goes on the STAGED copy; `commit --op repair` applies it atomically under
    the per-scope flock + stale-snapshot guard. The sole exception: the two verb-covered
-   fixes (link + atom `desc:`) are each already an atomic, locked write on their own —
-   see [PRE-TRANSACTION verb
-   fixes](#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page) below.
-   Every other fix goes through the staged copy only.
+   fixes (the one-sided link via `reference-mem-topic`, the atom `desc:` via
+   `update-mem-atom`) are each already an atomic, locked write on their own — those run
+   live, on the page directly, BEFORE `begin` (see [PRE-TRANSACTION verb
+   fixes](#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page) below).
+   Every other fix still goes through the staged copy; nothing runs on the live page
+   inside or after a staged-copy pass.
 3. **Single page, in place.** One write at the page's own path, ZERO deletes —
    moving a fact between pages is merge/split/conflict work, not repair.
 4. **`ocd` is immutable; `lmd` advances.** Never rewrite a page's creation date;
@@ -68,43 +70,50 @@ distinction: [repair-background § Execution context and what this is](reference
 
 ## What makes a page malformed (the repair checklist)
 
-For each candidate page, diagnose and fix ONLY what is wrong. Full wording of every
-entry below (including the parts trimmed here for the token cap): [repair-background §
-Repair checklist — full detail](references/repair-background.md#repair-checklist--full-detail).
+For each candidate page, diagnose and fix ONLY what is wrong:
 
 - **No frontmatter at all** → add the full block: `name` (= filename stem),
-  `description` (a SYMPTOM/question derived from the body), `ocd`/`lmd`,
-  `metadata.{node_type: memory, type, tier}`.
-- **`publish-globally`** — DO NOT add or flip it by hand (the write path normalizes it
-  on every write). A believed-wrong VALUE is a refusal finding, not a fix.
+  `description` (the page's topic as a SYMPTOM/question — derived from the body),
+  `ocd`/`lmd`, `metadata.{node_type: memory, type, tier}`.
+- **`publish-globally` — DO NOT ADD OR FLIP IT BY HAND. Not a repair defect; not yours**
+  (the write path normalizes it on every write). A believed-wrong VALUE is a real
+  finding — record it as a refusal. Reasoning: [repair-background § publish-globally](references/repair-background.md#why-publish-globally-is-not-a-repair-defect).
 - **Missing `ocd`/`lmd`** → `lmd` = today (`date +%F`); `ocd` = the page's earliest
   known date (an existing `lmd`, else today). Never lower an existing `ocd`.
-- **Nested `metadata.ocd`/`metadata.lmd`** → move to the TOP level, value unchanged
-  (rule 4: `ocd` immutable — only the location moves).
+- **Nested `metadata.ocd` / `metadata.lmd`** → MOVE them to the TOP level (canonical
+  shape). VALUE preserved verbatim (rule 4: `ocd` immutable) — only the LOCATION
+  moves: `metadata:` keeps `node_type`/`type`/`tier`/`originSessionId`; `ocd`/`lmd`
+  become top-level keys above it.
 - **Missing `node_type`** → `node_type: memory`. **Missing `type`** → infer
   `project|reference|feedback|user` from the content.
 - **Missing/invalid `tier`** → infer: has `globs:` → `hub`; has `## Applies to`
   (radiates) → `aspect`; otherwise → `component` (the default).
 - **Inverted tier shape** → a `hub`/`aspect` page carrying only `## Governed by`
-  (receiving): give it the `## Applies to` ray-list it radiates, or re-tag `component`
-  if it governs nothing.
+  (receiving): give it the `## Applies to` ray-list it radiates, or re-tag it
+  `component` if it governs nothing. A `component` with `## Applies to` is the
+  mirror error.
 - **Missing `## Notes and lessons learned`** → append the empty section.
-- **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future search
-  will use.
-- **A page's OWN one-sided link** → a PRE-TRANSACTION fix (below): `memgrep
-  reference-mem-topic --page <this page> --to <target page>` (single-page: only fix
-  the reciprocal FROM this page).
+- **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
+  search will use (findability — the page stays found by recall).
+- **A page's OWN one-sided link** → a PRE-TRANSACTION fix, run live before `begin`
+  (details + `--base-sha256` and refusal handling in the section below): `memgrep
+  reference-mem-topic --page <this page> --to <target page>`. It wires both ends of
+  the `[[wikilink]]` in one locked write; repair is single-page, so only fix the
+  reciprocal FROM this page.
 - **Superseded atom above / without the `## Superseded` delimiter** (`memgrep lint`
   WARNs it): ensure a `## Superseded` section exists (exactly that spelling), after
   the live atoms and BEFORE `## Notes and lessons learned`, and MOVE each
-  `status:superseded` atom's whole block below it **VERBATIM**. Never move a
-  `status:valid` atom.
+  `status:superseded` atom's whole block below it **VERBATIM** — byte-identical,
+  order preserved. Never change props while moving; never move a `status:valid`
+  atom. Full rationale: [repair-background § superseded atoms](references/repair-background.md#superseded-atom-delimiter-mechanics).
 - **Atom `desc:` incomplete** (`verify_repair` refuses a repair that leaves one): every
-  `^id [...]` atom marker needs a `desc:` PRESENT, ≤200 chars, QUOTED or an unquoted
-  clean legacy slug (`[a-z0-9_]+` only). **Backfill by SUMMARIZING the atom's own
-  body** (rule 5: infer, never invent), as a PRE-TRANSACTION fix (below): `memgrep
-  update-mem-atom --page <page> --atom <id> --desc "<text>"`. Check every cut
-  symptom/cause/name is already in that atom's `keywords:` first.
+  `^id [...]` atom marker needs a `desc:` that is PRESENT, ≤200 chars, QUOTED or an
+  unquoted clean legacy slug (`[a-z0-9_]+` only). **Backfill by SUMMARIZING the atom's
+  own body** (rule 5: infer, never invent), then apply it as a PRE-TRANSACTION fix,
+  run live before `begin` (details below): `memgrep update-mem-atom --page <page>
+  --atom <id> --desc "<text>"`. Before trimming a `desc:`, check every cut
+  symptom/cause/name is already in that atom's `keywords:` — add it if not. Full
+  grammar + incident: [repair-background § desc](references/repair-background.md#desc-trim-keyword-incident-747b8bef).
 
 **WRITE DOWN EVERY defect you judge unfixable** (e.g. a shape an external writer keeps
 re-imposing) — unrecorded, it re-flags every run and, ranked by defect count, starves
@@ -121,15 +130,22 @@ not a permanent silence. `--reason` must let the next reader re-check it.
 
 ## PRE-TRANSACTION verb fixes (run BEFORE `begin`, live, per candidate page)
 
-Two checklist fixes are already atomic, locked memgrep writes — run whichever apply
-BEFORE `memory_txn_cli.py begin`, never inside the staged copy, never after `commit`.
-Recompute `sha` immediately before EACH verb call (the prior verb's write, if it ran,
-already changed the page's bytes — a reused sha makes the next call refuse). Full
-mechanics, the dry-run decision table, and why most one-sided links end up reported
-rather than auto-fixed: [repair-background § Pre-transaction verb fixes — full
-mechanics](references/repair-background.md#pre-transaction-verb-fixes--full-mechanics).
+Two checklist fixes are already atomic, locked memgrep writes and are never part of the
+staged-copy pass — run whichever apply to the candidate page BEFORE
+`memory_txn_cli.py begin`, never inside the staged copy and never after `commit`. Why a
+stale sha strands the second verb call: [rationale](references/repair-background.md#pre-transaction-verb-fixes--extended-rationale).
 
-1. **The one-sided link** — dry-run first, write only if the TARGET is unaffected:
+**Re-read the page and recompute `--base-sha256` immediately before EACH verb call** —
+never reuse one sha for both.
+
+1. **The one-sided link — dry-run first, and only write if the TARGET is unaffected.**
+   `reference-mem-topic` always wires both ends, but repair is single-page (IRON RULE 3)
+   and a live write to the TARGET page could stale another chore's open transaction on
+   it. Check before writing:
+
+   Compute `sha` FIRST, from the page's current bytes, THEN read the page (the dry-run
+   itself reads it live) and decide from that read — never decide first and checksum
+   after, or a concurrent write between the two lands unnoticed:
 
    ```bash
    sha=$({ sha256sum <this page> 2>/dev/null || shasum -a 256 <this page>; } | cut -d' ' -f1)
@@ -137,30 +153,45 @@ mechanics](references/repair-background.md#pre-transaction-verb-fixes--full-mech
    #   → "would link <this page> <-> <target page> (page {gains a link|unchanged}, to {gains a link|unchanged})"
    ```
 
-   `to unchanged` (or `page unchanged, to unchanged` = already bidirectional, nothing
-   to do) → safe, run for real:
+   - `to unchanged` (only THIS page would change, or neither would — `page unchanged, to
+     unchanged` means the link is already bidirectional, nothing to do) → safe, run it
+     for real (a no-change run is harmless, but skip it outright if you can tell from
+     the dry-run text that nothing would change):
 
-   ```bash
-   if [ -n "$sha" ]; then memgrep reference-mem-topic --page <this page> --to <target page> --base-sha256 "$sha"; else echo "unreadable: <this page> — report and skip its verb fixes"; fi
-   ```
+     ```bash
+     if [ -n "$sha" ]; then memgrep reference-mem-topic --page <this page> --to <target page> --base-sha256 "$sha"; else echo "unreadable: <this page> — report and skip its verb fixes"; fi
+     ```
+   - `to gains a link` (the TARGET would also change) → do NOT run it live. Skip this
+     verb and report the one-sided link as a finding instead. Why this is the common
+     outcome, not the edge case: [rationale](references/repair-background.md#pre-transaction-verb-fixes--extended-rationale).
 
-   `to gains a link` → do NOT run it live; report the one-sided link as a finding instead.
-
-2. **The atom `desc:` backfill** — same pair, sha recomputed fresh:
+2. **The atom `desc:` backfill.** Repeat the same pair — sha first, then re-read the
+   page to confirm the atom still needs it — even if verb 1 just ran; its write changed
+   the page's bytes, so step 1's `sha` is now stale for this call:
 
    ```bash
    sha=$({ sha256sum <page> 2>/dev/null || shasum -a 256 <page>; } | cut -d' ' -f1)
    if [ -n "$sha" ]; then memgrep update-mem-atom --page <page> --atom <id> --desc "<text>" --base-sha256 "$sha"; else echo "unreadable: <page> — report and skip its verb fixes"; fi
    ```
 
-On refusal from either verb: report the refusal and continue with the rest of the
-checklist — never abandon the staged-copy pass for this page. Re-read the page again
-after this step, before `begin`, and re-diagnose the checklist against the CURRENT
-page (a verb call just changed its bytes).
+**On refusal** (stale sha, or any other error) from either verb: report the refusal and
+continue with whatever other fixes the page still needs — a refused pre-transaction fix
+is not a reason to skip the rest of the checklist, nor to abandon the staged-copy pass
+for this page.
 
-A page whose ONLY defects were these two verb-covered fixes needs no `begin`/`commit`
-at all — it still prints the normal per-page Output line and still closes the claim
-(`set-report` + `complete`), exactly like a page that went through the transaction core.
+**Re-read the page again after the pre-transaction step, before `begin`.** A verb call
+that wrote changed the page's bytes; re-diagnose the checklist against the CURRENT page
+so the candidate set handed to the staged-copy pass reflects what's actually still
+broken, not what was broken before the pre-transaction fixes landed. This re-diagnosis
+happens BEFORE the "does this page still need `begin`/`commit`" decision below, not
+after — the decision is made from the post-fix diagnosis, never the stale one that
+selected the page as a candidate.
+
+A page whose ONLY defects were these two verb-covered fixes (and both were applied, or
+correctly skipped/reported) needs no `begin`/`commit` at all — the pre-transaction step
+alone completed the repair. It still prints the normal per-page Output line and still
+closes the claim (`set-report` + `complete`), exactly as a page that went through the
+transaction core (see Output and Close the claim below).
 
 ## EXECUTE the repair THROUGH the transaction core
 
@@ -181,13 +212,12 @@ gap — never hand-edit the live page.
 
 **On verify FAIL:** `commit` exits non-zero and self-aborts — the STAGED-COPY portion
 of the repair is discarded, the live tree untouched by it. A pre-transaction verb fix
-(link/desc) already landed before `begin` and is NOT rolled back by this abort — the
-page is left with that fix applied and its remaining defects still open. Full
-mechanics: [repair-background § Pre-transaction verb fixes — full
-mechanics](references/repair-background.md#pre-transaction-verb-fixes--full-mechanics).
-Fix the staged copy (restore a dropped lesson, reset a changed `ocd`, add a missing
-key) and re-commit. **Retry ≤3**; then `abort "<scope_root>" <txn_id>` and surface a
-finding.
+(link/desc) already landed before `begin` and is NOT rolled back by this abort; the
+page is left with that fix applied and its remaining defects still open, exactly as
+the [PRE-TRANSACTION verb fixes](#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page)
+section describes. Fix the staged copy (restore a dropped lesson, reset a changed
+`ocd`, add a missing key) and re-commit. **Retry ≤3**; then `abort "<scope_root>"
+<txn_id>` and surface a finding.
 
 Do NOT call `memory_settings.mark_ran` — the scheduler already stamped the cadence.
 
@@ -234,12 +264,11 @@ If `complete` exits 2 saying more than one claim is in flight, re-run it adding 
 
 - [wikimem-model](../janitor-memory-write/references/wikimem-model.md) — the wiki model:
   tiers, the editorial decision flow, expand/reduce, the bidirectional link law, page
-  anatomy, atoms. Full table of contents at the top of that file.
+  anatomy, atoms. (Per-heading links: [inventory](references/repair-background.md#resources-per-heading-link-inventory-moved-from-skillmd).)
 - [repair-background](references/repair-background.md) — why REPAIR exists and what it
   is not, claim exit codes, `desc:` quoting grammar + the trim-keyword incident,
-  superseded-atom delimiter mechanics, why `publish-globally` is not a repair defect,
-  pre-transaction verb mechanics, execution context, the exit/success contract, scope.
-  Full table of contents at the top of that file.
+  superseded-atom delimiter mechanics, why `publish-globally` is not a repair defect.
+  (Per-heading links: [inventory](references/repair-background.md#resources-per-heading-link-inventory-moved-from-skillmd).)
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides
   (`begin`/`commit --op repair`/`abort`/`resume`); `verify_repair` is its gate.
 - `scripts/lib/memory_settings.py` — cadence (`is_due`/`mark_ran`,
