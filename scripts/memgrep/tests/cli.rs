@@ -3408,6 +3408,64 @@ fn retire_atom_stamps_superseded_by_even_when_an_unrelated_status_is_already_pre
     assert_eq!(code, 0, "the rewritten marker must still pass validate");
 }
 
+/// Coordinator directive (2026-09-24), on top of the wikilink check above: the status-replace
+/// branch reconstructs the marker's interior from `split_top_level_commas`' item list, so EVERY
+/// other prop rides through that splitter on a retire, not just the one field being changed. A
+/// real `desc:` is quoted prose that routinely carries commas, and can carry a bracket pair or a
+/// `[[wikilink]]`-shaped pair too — exactly what quote/bracket-depth tracking exists to protect.
+/// This is the adversarial fixture spelled out in that directive, verbatim: a quoted desc with a
+/// comma, a plain bracket pair, AND a doubled `[[...]]` pair, all inside the quotes, plus
+/// keywords and ocd/lmd — asserting every prop OTHER than status/superseded-by survives the
+/// rebuild byte for byte. A pre-existing `status: valid` (not just an absent one) is what routes
+/// this call through the REBUILD branch rather than the untouched-append branch.
+#[test]
+fn retire_atom_preserves_a_quoted_desc_with_commas_and_brackets_byte_for_byte() {
+    let d = TempDir::new("retire-quoted-desc");
+    let page = d.join("p.md");
+    let desc = "a, b [c, d] and [[x-y]], e";
+    d.write(
+        "p.md",
+        &format!(
+            "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-QUOT-0001 [desc: \"{desc}\", keywords: alpha beta gamma, status: valid, \
+             ocd: 2026-01-01, lmd: 2026-01-02]\nthe original fact.\n\n## Notes and lessons learned\n"
+        ),
+    );
+
+    run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", "ATOM-QUOT-0001",
+            "--lesson", "--supersedes", "--retire-atom", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT trust the old value, BECAUSE it changed. DO read the new value instead.",
+    );
+
+    let text = std::fs::read_to_string(&page).unwrap();
+    let marker = marker_line(&text, "ATOM-QUOT-0001");
+    assert_eq!(marker.matches("status:").count(), 1, "exactly one status: key:\n{marker}");
+    assert_eq!(
+        marker.matches("superseded-by:").count(),
+        1,
+        "exactly one superseded-by: key:\n{marker}"
+    );
+    assert!(marker.contains("status: superseded"), "status replaced to superseded:\n{marker}");
+    // Every OTHER prop, byte for byte — the comma/bracket/wikilink-bearing desc above all.
+    assert!(
+        marker.contains(&format!("desc: \"{desc}\"")),
+        "the quoted desc — an internal comma, a bracket pair, AND a [[wikilink]]-shaped pair — \
+         must survive the rebuild byte for byte, not be split or truncated on an internal \
+         comma/bracket:\n{marker}"
+    );
+    assert!(
+        marker.contains("keywords: alpha beta gamma"),
+        "the atom's own keywords must survive the rebuild byte for byte:\n{marker}"
+    );
+    assert!(marker.contains("ocd: 2026-01-01"), "ocd must survive the rebuild byte for byte:\n{marker}");
+    assert!(marker.contains("lmd: 2026-01-02"), "lmd must survive the rebuild byte for byte:\n{marker}");
+    let (_, code) = run_with_code(&["validate", page.to_str().unwrap()]);
+    assert_eq!(code, 0, "the rewritten marker must still pass validate");
+}
+
 #[test]
 fn retire_atom_leaves_a_marker_with_an_existing_superseded_by_untouched() {
     let d = TempDir::new("retire-already-superseded");
