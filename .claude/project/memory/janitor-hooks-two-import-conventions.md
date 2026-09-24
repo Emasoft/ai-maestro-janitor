@@ -2,7 +2,7 @@
 name: janitor-hooks-two-import-conventions
 description: "writing a new janitor hook / ModuleNotFoundError: No module named 'state' / my hook dies on import but the detectors work / from lib import X fails at runtime / which sys.path entries does a hook need / why does dispatch.py import differently than the hooks / why do detectors use bare import state but hooks use from lib import state / what two sys.path entries must a hook add / global_state.py bare-imports its sibling state module / on-session-start.py died silently for three weeks over this / why does the CPV hook validator require the from lib import form / how to write a lib module safe under both import conventions / trdd_common.py try except import pattern / does tests/test_hooks_execute.py catch a missing sys.path entry / on-stop-proactive-compact.py patched bare state instead of lib.state and typed /compact into the developer's pane"
 ocd: 2026-07-11
-lmd: 2026-09-22
+lmd: 2026-09-24
 metadata:
   node_type: memory
   type: project
@@ -54,11 +54,17 @@ in the code says which convention a given module tolerates — a module that onl
 - `tests/test_hooks_execute.py` executes every hook as a subprocess and will fail loudly if
   this is ever gotten wrong again — see [[feedback-test-the-entry-point-the-way-the-platform-runs-it]].
 
+
+^ATOM-ZXLI-IB5B [desc: "A hook's cheap early-return check (e.g. the cron marker) should run BEFORE any heavy import, not after; on-prompt-submit.py used to import state before checking _is_cron_marker, paying ~50-60ms per no", keywords: hook_is_slow_on_a_cron_fire cheap_early_return_before_heavy_imports why_does_a_heartbeat_fire_cost_extra_milliseconds is_cron_marker_check_placement import_state_at_module_top_wastes_time_on_a_no-op hook_startup_cost_under_load should_a_hook_import_lazily where_should_the_cron_marker_check_go fail-fast_on_a_broken_state.py_import hook_authoring_performance_checklist, ocd: 2026-09-24, lmd: 2026-09-24]
+
+reports/hook-timeout/20260924_184119+0200-stagger-followup.md item 3, and reports/hook-timeout/20260924_175736+0200-startup-timing.md. A cron-marker check (_is_cron_marker in on-prompt-submit.py) is a CHEAP early-return: on a bare heartbeat cron fire the hook should do nothing and exit fast. But import state sat at module top, BEFORE that check, so every heartbeat fire paid the ~50-60ms cost of state.py's own imports for a pure no-op -- small alone, but on a host running many armed sessions in the same burst this is exactly the per-hook cost that a CPU-run-queue-wait burst turns into a spurious timeout (see the load-average-50-117 fact on janitor-beat-tasks-and-limitations). Fixed (part of 7ed4cdeb's stagger follow-up, still uncommitted as of 2026-09-24): the state import was moved BELOW the _is_cron_marker check -- but only inside the try/except that already guarded the best-effort state.bump_user_presence() write, not above it, because state.py failing to import at all should surface as a real error (fail-fast), not silently no-op like the write it guards. [^2]
+
 ## See also
 
 - [[janitor-compaction-floor-gate]] — `on-stop-proactive-compact.py` and its tests sit on this
   exact fault line: patching bare `state` instead of `lib.state` let a test run the REAL
   compact_trigger and type `/compact` into the developer's own pane (2026-07-17).
+- [[jev-compaction]]
 
 ## Notes and lessons learned
 
@@ -68,3 +74,4 @@ in the code says which convention a given module tolerates — a module that onl
   direction. Lesson: when a comment explains why something is ABSENT, it should also say what
   breaks if it is added back, or the next reader cannot tell a constraint from a preference.
   Adding the path is additive: the package form the validator wants is unchanged.
+[^2]: [id: ATOM-H673-OO2L, status: valid, desc: "Guardrail: put a hook's cheap early-return check before any heavy import, and import lazily inside the branch that needs it.", keywords: "do_not_import_heavy_modules_before_the_cheap_check hook_pays_import_cost_on_every_no-op_fire cron_marker_check_must_come_first why_is_my_hook_slow_under_load hook_timeout_under_contention lazy_import_in_a_hook state.py_import_ordering writing_a_new_janitor_hook_performance fail_loud_on_a_broken_required_import best-effort_try_except_swallows_import_errors", ocd: 2026-09-24, lmd: 2026-09-24] DO NOT import a heavy lib module (state, global_state, etc.) at a hook's module top before its cheap early-return check, BECAUSE every no-op fire (e.g. a bare cron heartbeat) then pays that import's full cost for nothing -- on-prompt-submit.py paid ~50-60ms per fire this way, and under a contended host that is exactly the per-hook margin a CPU-run-queue-wait burst turns into a spurious 2-3s timeout. DO put the cheap check (the cron-marker test) first, and import only inside the branch that actually needs it -- except a module whose absence must fail loudly (state.py here), which stays outside the best-effort try/except it would otherwise silently disappear into.

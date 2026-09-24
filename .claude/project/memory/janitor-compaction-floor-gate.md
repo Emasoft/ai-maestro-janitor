@@ -2,7 +2,7 @@
 name: janitor-compaction-floor-gate
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / prompt is too long / context window full and nothing happened / how do I turn auto-compact back on / claude stopped responding near the context limit / what is the compaction threshold now / why did the janitor clear my session / where did my context go / the summary replaced my conversation / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now / 16 agents hung on the externalized compaction / the fleet froze for 40 minutes after a restart / a resume storm serialized every session behind the llm-ext lane / sessions stuck at startup on a blocking SessionStart hook / the compaction fired below the floor because the installed plugin was a stale rollout"
 ocd: 2026-07-17
-lmd: 2026-09-23
+lmd: 2026-09-24
 metadata:
   node_type: memory
   type: project
@@ -33,6 +33,9 @@ the page-size cap; no fact moved, only relocated).
 - [[janitor-compaction-floor-gate-clear-lever]] — the cache-expired trigger, the clear+re-arm
   atomicity rule, the agent-invoked manual compaction lever, the external zero-model-turn clear,
   and the terminal-identity dict-shape trap.
+- [[jev-compaction]] — a DIFFERENT mechanism than the other three sub-pages: it compacts a
+  transcript that has already been cleared (the post-clear SessionStart hook + jev_compact.py
+  pipeline), rather than anything that triggers or gates a clear.
 
 ## Governed by
 

@@ -2,7 +2,7 @@
 name: ai-maestro-janitor-overview
 description: "how does ai-maestro-janitor work — the overall story + where the deeper pages are / what is ai-maestro-janitor / why did a hook fail silently / session stranded after a compaction / credential window burning twice as fast as its budget / difference between the heartbeat and the daemon / why does the cron stub re-resolve the newest plugin version / avoid N sessions racing claude plugin update stampede / where does the markdown memory wiki live / what is memgrep used for / how does the support-ticket system turn a finding into repair work / where is the architecture hub page / what runs on the per-session heartbeat cadence / janitor fleet control plane mode flags and locks / how does the janitor publish pipeline work / why does the auto-compact loop terminate / project-scoped versus global-scoped work invariant"
 ocd: 2026-07-28
-lmd: 2026-09-23
+lmd: 2026-09-24
 metadata:
   node_type: memory
   type: project
@@ -46,6 +46,8 @@ instead of a nag that recurs forever.
   one.
 - `[[janitor-compaction-floor-gate]]` — why the auto-compact loop terminates (gate on
   reclaimable tokens above the learned floor, never on raw context size).
+- `[[jev-compaction]]` — the post-clear pipeline: extract, score via the OpenRouter Jev model,
+  compose a full copy plus a small injected one, run synchronously by a SessionStart hook.
 
 ## Applies to
 
