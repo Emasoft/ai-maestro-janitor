@@ -3,7 +3,7 @@ trdd-id: O2FNJ4KW
 title: The compacted context lists in-flight cards by column instead of the cards the session worked
 column: todo
 created: 2026-09-24T11:21:12+0200
-updated: 2026-09-24T11:29:46+0200
+updated: 2026-09-24T12:12:41+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:12+0200
+implementation-commits: [0a1c2c58]
 ---
 
 # The compacted context lists in-flight cards by column instead of the cards the session worked
@@ -27,3 +28,4 @@ Same run (E4). The fact record's in-flight list is every card in a work column: 
 ## Review corrections 2026-09-24
 
 Advisor: STATE_HEAD_COLUMNS is a frozenset, so the list and the digest order vary per process (three processes gave three orders). Fix in the lane: scan the transcript once for TRDD ids, rank ALL board cards by last mention, list the top 6 with titles, then every other open card id (in-flight, todo and blocked) on one line without titles (every pending card stays named, as the owner's directive on TRDD-WZKFSQ2N requires, and the round-2 "every id kept" ruling still holds; only titles and STATE heads are dropped), pass STATE heads only for the listed cards (least relevant first, since build_digest drops from the front), and make the column set a tuple. Mentions inside janitor-injected text (post-clear handoffs, hook output) do not count, or every card ranks equally. The ordering and the heads change; no card id is dropped. Acceptance: WZKFSQ2N has no STATE block, so for b2bf5b7b the check is that K0PMVRN6 and WZKFSQ2N are listed and K0PMVRN6's STATE head is in the digest; the test uses a fixture transcript, not the live board.
+Measured on b2bf5b7b: the top 6 are the cards that session worked (K0PMVRN6, WZKFSQ2N, FWDZDB7W, 4XND73XD, ADIGRD0T, RAEGS1D5). Correction to 0a1c2c58's message: the ids part of the other-cards line is capped at 300 bytes and the whole line is about 340; on the current board the cap is always hit, so the line names as many ids as fit and counts the rest. Follow-up in flight: a tool_use input naming more than 3 open ids does not count, bare ids are matched against the open-card set, and the line gets its own section instead of travelling as a finding.

@@ -3,7 +3,7 @@ trdd-id: EFA4P42B
 title: The injected Jev copy repeats the transcript path four times
 column: testing
 created: 2026-09-24T11:21:12+0200
-updated: 2026-09-24T11:42:58+0200
+updated: 2026-09-24T12:12:29+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:12+0200
-implementation-commits: [5b31b981]
+implementation-commits: [5b31b981, fe2433a7, c8e11ede]
 ---
 
 # The injected Jev copy repeats the transcript path four times
