@@ -416,7 +416,9 @@ def test_compact_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert pointer_lines, "expected at least one elided pointer"
     for line in pointer_lines:
         assert str(transcript) not in line  # spec: a pointer never carries a path
-    assert doc.count(str(transcript)) == 2  # header line + the one fixed trailing line
+    # TRDD-EFA4P42B: was 2 (header line + the one fixed trailing line) -- the header no longer
+    # repeats the path, so only the fixed trailing line carries it now.
+    assert doc.count(str(transcript)) == 1
 
 
 def test_compact_reports_blocked_zero_when_nothing_was_blocked(
@@ -947,7 +949,13 @@ def test_compact_inject_out_writes_a_capped_companion_pointing_at_the_full_out(
 ) -> None:
     """`--out` stays the FULL, card-3-sized document (digest included); `--inject-out` is a
     SEPARATE, capped rendering over the SAME scored items (no second scoring call) -- digest
-    omitted, ending with a trailer pointing back at `--out`'s absolute path."""
+    omitted, ending with a trailer pointing back at `--out`'s absolute path.
+
+    TRDD-EFA4P42B: the digest is always forced to "" for `--inject-out`, and the injected
+    render now drops the "## Digest" heading + "usage:" line entirely when the digest text is
+    empty (they cost bytes for nothing in a byte-capped render) -- `--out` keeps them
+    unconditionally, since it has no such cap.
+    """
     transcript = _write_transcript(tmp_path)
     out = tmp_path / "compacted.md"
     inject_out = tmp_path / "compacted.inject.md"
@@ -967,8 +975,10 @@ def test_compact_inject_out_writes_a_capped_companion_pointing_at_the_full_out(
     # The digest text itself (the build_digest output, always non-empty here since the
     # transcript carries human messages) must be present in the full doc.
     assert full_doc.split("## Digest\n", 1)[1].split("\n\n", 1)[0].strip() != ""
-    # ... but omitted from the capped rendering.
-    assert inject_doc.split("## Digest\n", 1)[1].split("\n\n", 1)[0].strip() == ""
+    # ... but the whole heading (plus "usage:") is omitted from the capped rendering, since its
+    # digest is always empty there.
+    assert "## Digest" not in inject_doc
+    assert "usage:" not in inject_doc
     assert f"Full compacted context: {out.resolve()}" in inject_doc
     assert "Full compacted context:" not in full_doc
 

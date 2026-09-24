@@ -1143,9 +1143,10 @@ _DIGEST_TRUNCATED_NOTE = "\n\n[[digest truncated to fit the handoff budget]]"
 # TRDD-RAEGS1D5 (compose() budget floor round 3 -- coordinator review of round 2,
 # reports/compaction-replacement/20260924_013141+0200-jev-inject-room-floor-round2.md finding
 # 2): `render()`'s own fixed lines (header, section headings, the trailing "pointers expand
-# with" line) embed `transcript_path` up to FOUR times, `full_context_path` a fifth -- neither
-# name appears here, on purpose, so this marker's byte cost is CONSTANT regardless of how long
-# either path is. See `_render_minimal_fallback`, compose()'s last-resort stage below.
+# with" line) embed `transcript_path` (TRDD-EFA4P42B: once, in the trailer -- it used to be up
+# to four times) and `full_context_path` once -- neither name appears here, on purpose, so this
+# marker's byte cost is CONSTANT regardless of how long either path is. See
+# `_render_minimal_fallback`, compose()'s last-resort stage below.
 _MINIMAL_FIXED_LINE = "(budget too small, see full copy)"
 
 
@@ -1385,8 +1386,14 @@ def compose(
 
     `header` carries: `transcript_path`, `session_key`, `digest`, and an optional `usage`
     dict (`{"tokens": int, "cost": float}` from the Jev response). The transcript path is
-    written out exactly twice by design -- once in the header, once in the fixed trailing
-    "expand with" line -- never inside an individual pointer.
+    written out exactly ONCE by design (TRDD-EFA4P42B: it used to appear up to four times --
+    the header, the "N more items" line, the "Full compacted context" line, and the trailer --
+    costing ~580 B of a ~1,360 B fixed baseline inside a ~3 KB injected room) -- only in the
+    fixed trailing "expand with" line -- never inside an individual pointer. Sole exception:
+    the "N more decision items" summary line further below can ALSO embed it, but only in the
+    FULL (`--out`) render, and only past `_MAX_DECISION_POINTERS` (400) elided decision items --
+    `decision_elided` is forced empty whenever `max_item_bytes is not None`, so the injected
+    copy (the one this fix's byte budget is about) never triggers that line at all.
 
     `full_context_path`, when given (card 5 two-renderings, TRDD-RAEGS1D5): this render is a
     CAPPED companion to a separate, uncapped `compose()` call over the SAME `items`/`scores`
@@ -1439,8 +1446,9 @@ def compose(
     along with the newest kept items because both sit at the tail of the joined string.
 
     (7) the SOLE exception (TRDD-RAEGS1D5, budget floor round 3): `render()`'s own fixed lines
-    -- header, section headings, that same trailing line -- embed `transcript_path` up to FOUR
-    times (`full_context_path` a fifth), so stages (1)-(6) alone cannot guarantee the fixed
+    -- header, section headings, that same trailing line -- embed `transcript_path` (TRDD-
+    EFA4P42B: once, in the trailer, since the header/elided-line/full-context-line copies were
+    removed) and `full_context_path` once, so stages (1)-(6) alone cannot guarantee the fixed
     skeleton itself fits a small `max_bytes` or survives a long transcript path. Only once
     (1)-(6) still leave the render over budget, the ENTIRE document -- trailer included -- is
     replaced by `_render_minimal_fallback`'s constant-size marker plus the newest OWNER message
@@ -1799,16 +1807,26 @@ def compose(
     ) -> str:
         lines: list[str] = [
             "# Compacted context (Jev compaction)",
-            f"transcript: {transcript_path}",
             f"session: {header.get('session_key', '')}",
             "",
-            "## Digest",
-            digest_text,
-            "",
-            f"usage: tokens={usage.get('tokens', '?')} cost={usage.get('cost', '?')}",
-            "",
-            "## Kept items",
         ]
+        # TRDD-EFA4P42B: the header used to also print `transcript: {transcript_path}` -- the
+        # trailer below already carries the same path for the model's `expand` command, and
+        # that was the SECOND of four total copies (~580 B of a ~1,360 B fixed baseline inside
+        # a ~3 KB injected room) with no reader who needed it repeated. Dropped here; the
+        # trailer is now the ONLY place `transcript_path` appears.
+        #
+        # An empty digest (`--inject-out` always forces one, see jev_compact.py) still costs a
+        # "## Digest" heading plus an empty line plus a "usage: ..." line for nothing in the
+        # byte-capped injected render (`max_item_bytes is not None`) -- the `--out` render has
+        # no such cap and keeps a stable, always-shaped document regardless.
+        if digest_text or max_item_bytes is None:
+            lines.append("## Digest")
+            lines.append(digest_text)
+            lines.append("")
+            lines.append(f"usage: tokens={usage.get('tokens', '?')} cost={usage.get('cost', '?')}")
+            lines.append("")
+        lines.append("## Kept items")
         for it in kept_order:
             lines.append(f"-- {it.kind} {it.id} --")
             # TRDD-RAEGS1D5 (orchestrator rebalance) + coordinator ruling: BOTH guaranteed
@@ -1896,10 +1914,19 @@ def compose(
         if hidden:
             # Card 5 content-fit (TRDD-RAEGS1D5, item 3): a bare "N more items not listed" was
             # a dead end -- `expand` needs an id, and an id not shown here could never be
-            # named. `expand --list [--grep TEXT]` (added alongside this line) walks the SAME
+            # named. `--list [--grep TEXT]` (mentioned alongside this line) walks the SAME
             # transcript and prints every item's id, so this points the model at that instead
             # of leaving it to guess or give up.
-            lines.append(f"[[elided: {hidden} more items not listed -- list/search them with: {expand_list_cmd}]]")
+            #
+            # TRDD-EFA4P42B: this used to spell out the whole `expand --transcript <path>
+            # --list --grep TEXT` command (the THIRD of four `transcript_path` copies) --
+            # pointing at "the expand command below" (the trailer, which already carries the
+            # same path) says the same thing without repeating the path. The literal
+            # `--list --grep` text stays -- a test greps for it.
+            lines.append(
+                f"[[elided: {hidden} more items not listed -- list/search: append --list "
+                "--grep TEXT to the expand command below]]"
+            )
 
         if full_context_path:
             # Card 5 two-renderings (TRDD-RAEGS1D5): the capped rendering's own way back to the
@@ -1908,12 +1935,14 @@ def compose(
             # invited an ~11k-token read of the whole full document on every capped render --
             # reworded to try `expand --list` first, the cheap targeted path, and read the full
             # document only when that genuinely is not enough.
+            # TRDD-EFA4P42B: this line used to spell out its own `expand --transcript <path>
+            # --list --grep TEXT` command (the FOURTH `transcript_path` copy) -- the trailer
+            # below already gives that exact command, so this now just points there instead.
             lines.append("")
             lines.append(
                 f"Full compacted context: {full_context_path} -- read it ONLY if what you "
-                "need is not shown above; try list/search first: uv run --script "
-                '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript '
-                f"{transcript_path} --list --grep TEXT."
+                "need is not shown above; try list/search first with the expand command "
+                "below (append --list --grep TEXT)."
             )
 
         lines.append("")
@@ -1930,8 +1959,10 @@ def compose(
         # TRDD-RAEGS1D5 requirement 3 / orchestrator rebalance: both the pointer share and the
         # owner share below are measured against an EMPTY render (no kept items, no pointers)
         # rather than a flat fraction of `max_bytes` -- the fixed lines this function always
-        # emits (header, the "N more items" line, the "Full compacted context" trailer) embed
-        # the transcript path up to FOUR times and measured 1.3-1.6 KB on a real run, which a
+        # emits (header, the "N more items" line, the "Full compacted context" trailer) used to
+        # embed the transcript path up to FOUR times and measured 1.3-1.6 KB on a real run
+        # (TRDD-EFA4P42B cut that to one copy, in the trailer -- this baseline is measured
+        # live via `render()` below, so it tracks the current byte cost either way), which a
         # flat `max_bytes * SHARE` never sees, so it starved the very kept items this fix
         # exists to protect (real-data regression while developing this fix).
         baseline = len(render([], [], hidden_count, digest_text).encode("utf-8"))
@@ -2232,9 +2263,10 @@ def compose(
 
     if len(doc.encode("utf-8")) > max_bytes:
         # TRDD-RAEGS1D5 (compose() budget floor round 3): every lever above only shrinks the
-        # VARIABLE parts -- `render()`'s own fixed lines (embedding `transcript_path` up to
-        # four times, `full_context_path` a fifth) are never touched by any of it, so they can
-        # still be over budget alone once everything else is gone (a long path, or a `max_bytes`
+        # VARIABLE parts -- `render()`'s own fixed lines (embedding `transcript_path` once, in
+        # the trailer -- TRDD-EFA4P42B cut the other three copies -- and `full_context_path`
+        # once) are never touched by any of it, so they can still be over budget alone once
+        # everything else is gone (a long path, or a `max_bytes`
         # this small to begin with -- see `_render_minimal_fallback`'s docstring). This is the
         # function's own hard guarantee: `max_bytes`, when given, is NEVER exceeded -- degrading
         # all the way to `""` rather than ever returning an over-budget string.

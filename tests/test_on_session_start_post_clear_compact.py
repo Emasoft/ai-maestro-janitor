@@ -158,15 +158,19 @@ def test_keyed_handoff_gets_the_full_document_injection_gets_the_capped_one(tmp_
     sd = project_dir / ".janitor" / "state"
     _write_sidecar(sd, {"TMUX_PANE": "%11"}, transcript=str(transcript))
 
+    # TRDD-EFA4P42B: `render()` no longer repeats the transcript path in the header (the
+    # trailer is now the only place it appears), and drops the "## Digest" heading entirely
+    # from an injected render with an empty digest -- so `inject_doc` below carries neither.
     full_doc = (
-        "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Digest\nTHE-FULL-DIGEST"
+        "# Compacted context (Jev compaction)\n\n## Digest\nTHE-FULL-DIGEST"
         '-MARKER\n\n## Kept items\nsome text\n\npointers expand with: uv run --script '
         '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /tmp/x <id>'
     )
     inject_doc = (
-        "# Compacted context (Jev compaction)\ntranscript: /tmp/x\n\n## Digest\n\n\n"
-        "## Kept items\nsome text\n\nFull compacted context: /tmp/full.md -- Read it for "
-        'everything not shown here.\n\npointers expand with: uv run --script '
+        "# Compacted context (Jev compaction)\n\n"
+        "## Kept items\nsome text\n\nFull compacted context: /tmp/full.md -- read it ONLY if "
+        "what you need is not shown above; try list/search first with the expand command "
+        'below (append --list --grep TEXT).\n\npointers expand with: uv run --script '
         '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /tmp/x <id>'
     )
     script = plugin_root / "scripts" / "jev_compact.py"

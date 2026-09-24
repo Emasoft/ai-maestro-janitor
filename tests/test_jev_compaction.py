@@ -795,7 +795,9 @@ def test_non_owner_floor_of_3_holds_while_non_guaranteed_owner_items_are_evicted
     """Coordinator ruling (TRDD-RAEGS1D5, budget floor round 5): "the at-least-3 non-owner
     target stands; its purpose is that the resumed session learns what was DONE". 5 non-owner
     "tool" items, 2 non-guaranteed-owner items ("rel1"/"rel2"), plus the 2 guaranteed slots
-    ("newest"/"dec"). `max_bytes=590` (measured): stage (2) evicts non-owner items down to
+    ("newest"/"dec"). `max_bytes=565` (measured -- was 590 before TRDD-EFA4P42B dropped the
+    header's `transcript: <path>` line, shrinking the fixed baseline by 25 B and letting "rel2"
+    fit at the old threshold): stage (2) evicts non-owner items down to
     EXACTLY the floor (2 of 5 tools gone, 3 remain) and stops there even though the doc still
     does not fit; stage (3) then evicts BOTH "rel1" and "rel2" -- non-guaranteed-owner items,
     sacrificed AHEAD of the floor -- which is enough to reach budget, so stage (4) (the
@@ -826,9 +828,9 @@ def test_non_owner_floor_of_3_holds_while_non_guaranteed_owner_items_are_evicted
         for it in tools
     })
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s"}
-    doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=590)
+    doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=565)
 
-    assert len(doc.encode("utf-8")) <= 590
+    assert len(doc.encode("utf-8")) <= 565
     tool_count = sum(1 for i in range(5) if f"-- tool tool{i}:0 --" in doc)
     assert tool_count == jc._NON_OWNER_FLOOR, (
         f"expected exactly the floor ({jc._NON_OWNER_FLOOR}) non-owner items, got {tool_count}"
@@ -1559,7 +1561,11 @@ def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
     right before the fixed "pointers expand with" trailer, never after it (the trailer is the
     model's own fixed anchor, always last). Card 5 injection-caps review: the pointer line's
     wording was reworded away from "Read it for everything not shown here" (an ~11k-token read
-    invitation), so this pins the NEW wording instead."""
+    invitation), so this pins the NEW wording instead.
+
+    TRDD-EFA4P42B: this line used to spell out its own `expand --transcript <path> --list
+    --grep TEXT` command -- the FOURTH `transcript_path` copy in the render -- and now just
+    points at the expand command in the trailer below instead."""
     items = [_item("k:0", "user", "kept text", turn=0)]
     scores = {"k:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
                                 decision_passed=False)}
@@ -1570,9 +1576,8 @@ def test_full_context_path_appends_pointer_line_before_the_trailer() -> None:
     lines = doc.splitlines()
     assert (
         "Full compacted context: /tmp/full-compacted.md -- read it ONLY if what you need is "
-        'not shown above; try list/search first: uv run --script '
-        '"$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" expand --transcript /tmp/t.jsonl --list '
-        '--grep TEXT.'
+        "not shown above; try list/search first with the expand command below (append --list "
+        "--grep TEXT)."
     ) in lines
     pointer_idx = next(i for i, line in enumerate(lines) if line.startswith("Full compacted context:"))
     trailer_idx = next(i for i, line in enumerate(lines) if line.startswith("pointers expand with:"))
@@ -2613,10 +2618,12 @@ def test_normal_budget_renders_unchanged_by_the_new_minimal_fallback_stage() -> 
     header = {"transcript_path": "/tmp/t.jsonl", "session_key": "s", "digest": "the digest"}
     doc = jc.compose(items, scores, budget_tokens=8000, header=header, max_bytes=6000)
 
-    assert len(doc.encode("utf-8")) == 334  # pinned -- must not move for a normal-budget call
+    # TRDD-EFA4P42B: was 334 with a "transcript: <path>" header line -- that line was the
+    # second of four `transcript_path` copies in the render and is gone now (the trailer below
+    # is the only place the path still appears).
+    assert len(doc.encode("utf-8")) == 309  # pinned -- must not move for a normal-budget call
     assert doc == (
         "# Compacted context (Jev compaction)\n"
-        "transcript: /tmp/t.jsonl\n"
         "session: s\n"
         "\n"
         "## Digest\n"
@@ -2634,6 +2641,41 @@ def test_normal_budget_renders_unchanged_by_the_new_minimal_fallback_stage() -> 
         'pointers expand with: uv run --script "$CLAUDE_PLUGIN_ROOT/scripts/jev_compact.py" '
         "expand --transcript /tmp/t.jsonl <id>"
     )
+
+
+def test_injected_render_prints_the_transcript_path_exactly_once_and_trailer_is_last() -> None:
+    """TRDD-EFA4P42B: the injected copy used to embed `transcript_path` up to FOUR times
+    (header, the "N more items" line, the "Full compacted context" line, the trailer) --
+    ~580 B of a ~1,360 B fixed baseline inside a ~3 KB injected room. Only the trailer may
+    carry it now (`external_clear._split_trailing_pointer_line` depends on that line being
+    last), and every other fixed line must still say what it needs to without repeating it."""
+    path = "/Users/x/project/.claude/transcript.jsonl"
+    kept = _item("k1:0", "user", "kept text", turn=1, tokens=5)
+    elided = [
+        _item(f"e{i}:0", "assistant", f"elided text {i}", turn=i + 2, tokens=5)
+        for i in range(3)
+    ]
+    items = [kept, *elided]
+    scores = {
+        kept.id: jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
+                            decision_passed=False),
+        **{
+            it.id: jc.Scores(relevance=0.1, decision=0.0, oversized=False, kept=False,
+                              decision_passed=False)
+            for it in elided
+        },
+    }
+    header = {"transcript_path": path, "session_key": "s", "digest": ""}
+    doc = jc.compose(
+        items, scores, budget_tokens=8000, header=header, max_bytes=2000,
+        max_item_bytes=700, non_owner_item_bytes=350, max_elided_pointers=1,
+        full_context_path="/tmp/full.md",
+    )
+
+    assert doc.count(path) == 1, doc
+    lines = doc.rstrip("\n").splitlines()
+    assert lines[-1].startswith("pointers expand with:")
+    assert path in lines[-1]
 
 
 def test_render_minimal_fallback_boundary_never_exceeds_and_drops_the_pointer_first() -> None:

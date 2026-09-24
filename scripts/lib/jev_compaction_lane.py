@@ -369,12 +369,15 @@ def inject_max_bytes_for(room: int, transcript_path: str) -> int:
 # immediately -- `compose()` returns its bare fixed skeleton (header + "N more items" line +
 # trailer) UNBOUNDED by `max_bytes` (there is no assertion or further slice enforcing the 0-byte
 # request). NOT a fixed "few hundred bytes" (round-1 wording, corrected here -- round-2 adversarial
-# review): the skeleton embeds `transcript_path` up to FOUR times (jev_compaction.py:1691, 1682/
-# 1791 via `expand_list_cmd`, 1805/1812, 1818 -- read directly, not assumed) plus `full_context_
-# path` (the `--out` file's own path) once more (jev_compaction.py:1793/1809) for an inject-mode
-# render, which always sets it -- so the skeleton SCALES with how long these paths are (measured
-# 1.3-1.6KB on this project's own ~148-char real paths; a deeply nested project dir or a synced/
-# mirrored home directory elsewhere could push it into multiple KB). A tiny positive value (1-399)
+# review, TRDD-EFA4P42B correction): the skeleton used to embed `transcript_path` up to FOUR
+# times (the header, the "N more items" line, the "Full compacted context" line, and the
+# trailer) plus `full_context_path` once more for an inject-mode render, which always sets it.
+# TRDD-EFA4P42B cut the header/elided-line/full-context-line copies -- `render()` now embeds
+# `transcript_path` ONCE (the trailer) and `full_context_path` once, so the skeleton still
+# SCALES with how long these paths are, just by far less (measured 927B skeleton -> 538B, a
+# 389B drop, on this project's own ~148-char real paths; a deeply nested project dir or a
+# synced/mirrored home directory elsewhere could still push it into the KB range). A tiny
+# positive value (1-399)
 # degrades the same way: `available`/`kept_budget`/`pointer_budget` are still ~0 once the baseline
 # skeleton is subtracted, so the injected companion is still just that same (path-scaled) skeleton
 # -- a REAL Jev API call was paid for a document containing no actual summary content. A negative

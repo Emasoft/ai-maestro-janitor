@@ -741,11 +741,11 @@ def _compacted_doc(body_lines: int, *, transcript: str = "/tmp/fake-transcript.j
     """A `jev_compact.py compact` document shape (scripts/lib/jev_compaction.py::compose):
     a header, kept items, then the fixed trailing pointer-expand line -- built directly rather
     than importing jev_compaction (this test file must not import jevctx/httpx transitively;
-    see tests/test_jev_boundary.py)."""
+    see tests/test_jev_boundary.py). TRDD-EFA4P42B: `render()` no longer repeats the
+    transcript path in the header -- only the trailer carries it now."""
     body = "\n".join(f"line {i} of the compacted context, padded to a realistic width" for i in range(body_lines))
     return (
         "# Compacted context (Jev compaction)\n"
-        f"transcript: {transcript}\n"
         "\n## Kept items\n"
         f"{body}\n"
         "\n## Elided\n"
