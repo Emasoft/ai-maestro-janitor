@@ -294,6 +294,30 @@ def test_template_handoff_never_inlines_a_fenced_block():
     assert "```" not in text
 
 
+def test_template_handoff_renders_other_open_ids_under_its_own_heading():
+    """TRDD-O2FNJ4KW follow-up (review correction 3): the "other open cards" line is a
+    board-membership fact, not a janitor finding -- it must land under its own `## Other open
+    cards` heading, right after the in-flight cards, and never inside `## Open findings`."""
+    text = ec.compose_template_handoff(
+        _inputs(other_open_ids="other open cards: ZZZZZZZZ, YYYYYYYY"), now_iso=NOW_ISO,
+    )
+    assert "## Other open cards" in text
+    assert "other open cards: ZZZZZZZZ, YYYYYYYY" in text
+    findings_idx = text.index("## Open findings")
+    other_idx = text.index("## Other open cards")
+    cards_idx = text.index("## In-flight cards")
+    assert cards_idx < other_idx < findings_idx
+    # The other-ids line must not be one of the `## Open findings` bullets.
+    findings_section = text[findings_idx:]
+    assert "ZZZZZZZZ" not in findings_section
+
+
+def test_template_handoff_omits_other_open_ids_heading_when_empty():
+    """The default `other_open_ids=""` must never render an empty heading."""
+    text = ec.compose_template_handoff(_inputs(other_open_ids=""), now_iso=NOW_ISO)
+    assert "## Other open cards" not in text
+
+
 def test_template_handoff_trims_to_the_byte_budget_by_dropping_whole_items():
     """Over-budget input sheds tail ITEMS; a mid-line cut could leave a half-written TRDD id."""
     big = _inputs(

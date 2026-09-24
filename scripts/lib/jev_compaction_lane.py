@@ -185,10 +185,78 @@ def _extract_state_section(show_output: str) -> str | None:
     return cleaned[idx:].strip()
 
 
-# TRDD-O2FNJ4KW mention regex: `TRDD-` followed by the 8-char uppercase-base36 id
-# (`trdd-design-tasks.md`'s own id grammar). Matched against RAW record text -- see
-# `_scan_transcript_mentions`'s own docstring for what counts as "the session's own work".
-_TRDD_MENTION_RE = re.compile(r"TRDD-([A-Z0-9]{8})")
+# TRDD-O2FNJ4KW follow-up (review corrections 1-2): the id union built below replaces this fixed
+# `TRDD-<id>`-only pattern. A mention must now (a) be one of the OPEN cards the board already
+# named -- so a random 8-char uppercase word can never false-positive -- and (b) may be spelled
+# `TRDD-<id>`, `#<id>`, or bare `<id>`, since real transcript prose overwhelmingly drops the
+# `TRDD-` prefix ("EFA4P42B is committed").
+#: How many DISTINCT open-card ids a single `tool_use` input block may name before the whole
+#: block is dropped from the scan (review correction 1): a worker prompt, a card batch, or a
+#: `grep -E 'A|B|C'` argument that happens to enumerate several ids is the TOOL CALL's business,
+#: not evidence that the assistant was actually WORKING all of them -- letting it count would put
+#: every named id at the same "most recent" rank, which is exactly the skew the review flagged.
+#: Owner prose and assistant text blocks are exempt: a human or the assistant actually writing
+#: "TRDD-A, TRDD-B, TRDD-C are all done" is a real, if unusual, multi-card mention.
+_TOOL_USE_MENTION_CAP = 3
+
+
+# A MAXIMAL run of uppercase-base36 characters, length 8 or more -- the candidate extractor for
+# a mention, in ANY spelling (`TRDD-<id>`, `#<id>`, or bare `<id>`, review correction 2).
+#
+# No lookaround, no per-id alternation, and no capturing of `TRDD-`/`#` at all: `-` and `#` are
+# themselves non-alnum, so they already break the run on their own -- "TRDD-ABCD1234" tokenizes
+# as two runs, "TRDD" (4 chars, discarded below) and "ABCD1234" (8 chars, the candidate), with no
+# regex machinery needed to strip the prefix. A run's own greediness gives the boundary check for
+# free too: `finditer` always starts a match at the FIRST alnum position it can, so a matched
+# run's neighbours (if any) are guaranteed non-alnum -- "XABCD1234" and "ABCD12345" both tokenize
+# as ONE 9-char run, which the `len(...) == 8` filter below rejects outright, precisely the
+# "can't be a substring of a longer token" contract the old `(?<!...)...(?!...)` lookaround pair
+# enforced explicitly. This is also why this is FAST: an earlier version built the alternation of
+# every open id straight into the regex (`(?:id1|id2|...|id228)`) plus a lookaround pair, correct
+# but not fast -- Python's `re` engine tries alternatives in order with no shared-prefix
+# optimization, and lookaround adds its own per-position cost on top. MEASURED on the 258MB/138k-
+# line perf transcript this follow-up's own review demanded: the alternation+lookaround version
+# took 23.6s against a real 78-open-card board (~8x the 3s budget); the lookaround-only version
+# (id-set-independent shape, no alternation) still took 3.8s; this plain run scan measures 2.8s.
+# Board size never changes this regex's own cost -- only the SET LOOKUP below (`in open_ids`,
+# O(1) average) scales with it, and that lookup only runs for the rare EXACT-8 runs.
+#
+# UPPERCASE-ONLY IS LOAD-BEARING, not a display convention: `trdd-design-tasks.md`'s id grammar
+# is 8-char UPPERCASE base36, and `[A-Z0-9]` matches nothing else -- an id that ever reached this
+# scan lowercase or mixed-case (a board loader bug, a hand-edited test fixture) would silently
+# never match here, with no error, because the SHAPE check runs and fails BEFORE the `open_ids`
+# membership check ever gets a chance to see it (review finding, TRDD-O2FNJ4KW follow-up).
+_MENTION_RUN_STR_RE = re.compile(r"[A-Z0-9]{8,}")
+_MENTION_RUN_BYTES_RE = re.compile(rb"[A-Z0-9]{8,}")
+
+
+def _line_mentions_any_open_id(raw: bytes, open_ids: frozenset[str]) -> bool:
+    """Cheap first-pass check straight on the RAW transcript line: does it contain an exactly-8
+    uppercase-base36 run that is actually one of `open_ids`? Skips `json.loads` + role
+    classification for the overwhelming majority of lines (tool_result payloads, board dumps,
+    file reads) that carry no such run at all -- replaces the old fixed `b"TRDD-" not in raw`
+    prefilter, now also catching the bare-id and `#id` spellings it missed (review correction 2)."""
+    for m in _MENTION_RUN_BYTES_RE.finditer(raw):
+        token = m.group(0)
+        if len(token) != 8:
+            continue  # a longer run can never be a bounded id -- see the constant's own comment
+        try:
+            card_id = token.decode("ascii")
+        except UnicodeDecodeError:
+            continue
+        if card_id in open_ids:
+            return True
+    return False
+
+
+def _text_mentions(text: str, open_ids: frozenset[str]) -> set[str]:
+    """Every id in `open_ids` mentioned in `text`, spelled `TRDD-<id>`, `#<id>`, or bare `<id>`
+    (review correction 2) -- ids not on the board never match, since membership is checked
+    against the SET loaded from it, not inferred from shape alone."""
+    return {
+        m.group(0) for m in _MENTION_RUN_STR_RE.finditer(text)
+        if len(m.group(0)) == 8 and m.group(0) in open_ids
+    }
 
 # How many of the mentioned/in-flight cards get a title + a STATE head in the facts section.
 # TRDD-O2FNJ4KW: a real run measured 19 cards listed (17 stale) with no cap and no relevance --
@@ -205,61 +273,78 @@ _OTHER_IDS_LINE_MAX_BYTES = 300
 _OTHER_IDS_LINE_TOOL_HINT = "trddgrep"
 
 
-def _record_scan_text(entry: dict) -> str:
-    """Text worth regex-scanning for a `TRDD-XXXXXXXX` mention out of ONE transcript record's
-    `message.content` -- a plain string, or the `text`/`tool_use` blocks of a content list.
+def _record_scan_blocks(entry: dict) -> list[tuple[str, str]]:
+    """`[(block_kind, text), ...]` worth regex-scanning for a mention out of ONE transcript
+    record's `message.content` -- a plain string (kind `"text"`), or the `text`/`tool_use`
+    blocks of a content list (kind `"text"` / `"tool_use"` respectively). Returning the kind
+    alongside the text (TRDD-O2FNJ4KW follow-up, review correction 1) is what lets the caller
+    cap a single `tool_use` block's distinct-id count without also capping owner/assistant prose
+    -- collapsing every block into one joined string, as this used to do, throws that
+    distinction away before the caller ever sees it.
+
     `tool_result` (and any other block kind) is deliberately skipped: it is a board dump, a file
     read, or another tool's own output landing back in the transcript, not something this
     session's owner or assistant WROTE (TRDD-O2FNJ4KW review corrections bullet, `state_head_
     paths` docstring)."""
     content = entry.get("message", {}).get("content")
     if isinstance(content, str):
-        return content
+        return [("text", content)]
     if not isinstance(content, list):
-        return ""
-    parts = []
+        return []
+    blocks: list[tuple[str, str]] = []
     for block in content:
         if not isinstance(block, dict):
             continue
         btype = block.get("type")
         if btype == "text":
-            parts.append(block.get("text", ""))
+            blocks.append(("text", block.get("text", "")))
         elif btype == "tool_use":
             # The assistant's OWN tool call (e.g. a `move <id>` or `edit <id>` argument) is the
             # assistant's own work, unlike the `tool_result` that comes back from running it --
             # `json.dumps` on the raw input is enough to regex-match an id embedded in any
             # argument, string or not.
-            parts.append(json.dumps(block.get("input", "")))
-    return "\n".join(parts)
+            blocks.append(("tool_use", json.dumps(block.get("input", ""))))
+    return blocks
 
 
-def _scan_transcript_mentions(transcript_path: str) -> dict[str, int]:
+def _scan_transcript_mentions(transcript_path: str, open_ids: frozenset[str]) -> dict[str, int]:
     """`{card_id: last_line_number_mentioned}` over the WHOLE transcript, one single streamed
     pass (TRDD-O2FNJ4KW) -- never loads the file into memory (measured up to 258MB on this
-    project) and never re-parses a line whose raw bytes don't even contain `TRDD-`, which skips
-    the `json.loads`+`transcript_roles.classify_record` cost for the overwhelming majority of
-    lines (tool_result payloads, board dumps, file reads) before it's paid.
+    project) and never re-parses a line whose raw bytes don't contain any `open_ids` id at all
+    (`_line_mentions_any_open_id`), which skips the `json.loads`+`transcript_roles.classify_
+    record` cost for the overwhelming majority of lines (tool_result payloads, board dumps, file
+    reads) before it's paid. `open_ids` empty (no board, or trddgrep unavailable) short-circuits
+    to an empty result without opening the file at all -- there is nothing any mention could
+    rank.
 
     Counts ONLY text that reflects the session's OWN work, per the review corrections on
     TRDD-O2FNJ4KW: the owner's own messages (`transcript_roles.classify_record(entry) ==
     "human"`) and the assistant's own text/tool_use (any assistant record `classify_record`
     doesn't call `"skip"` -- a sidechain subagent turn or hook-injected hidden context). A
     `tool_result` block (a board dump, a file read) never counts even inside an otherwise-human
-    or otherwise-assistant record -- `_record_scan_text` already drops that block kind -- and
+    or otherwise-assistant record -- `_record_scan_blocks` already drops that block kind -- and
     neither does a `notification`/`system`/`peer`-classified `user`-type record (a task
     notification, a heartbeat fire, a hook's own typed command): those are NOT the session's own
     words either, they are the harness/janitor talking to itself.
 
+    A single `tool_use` block naming more than `_TOOL_USE_MENTION_CAP` DISTINCT open-card ids
+    contributes NONE of them (TRDD-O2FNJ4KW follow-up, review correction 1) -- a worker prompt,
+    a card batch, or a `grep -E 'A|B|C'` argument enumerating many ids is not evidence the
+    assistant worked all of them just now, and letting it count put every named id at the same
+    "most recent" rank. Owner messages and assistant `text` blocks are never capped.
+
     A malformed line (partial write, non-UTF8) is skipped, not fatal -- one bad line in a
     multi-gigabyte transcript must never abort the whole scan."""
     mentions: dict[str, int] = {}
+    if not open_ids:
+        return mentions
     try:
         fh = open(transcript_path, "rb")  # noqa: SIM115 -- explicit close below, streamed read
     except OSError:
         return mentions
     with fh:
         for lineno, raw in enumerate(fh):
-            if b"TRDD-" not in raw:
+            if not _line_mentions_any_open_id(raw, open_ids):
                 continue
             try:
                 entry = json.loads(raw)
@@ -278,9 +363,12 @@ def _scan_transcript_mentions(transcript_path: str) -> dict[str, int]:
                 continue
             if etype == "assistant" and role == "skip":
                 continue
-            text = _record_scan_text(entry)
-            for m in _TRDD_MENTION_RE.finditer(text):
-                mentions[m.group(1)] = lineno  # last position wins -- later lines overwrite
+            for kind, text in _record_scan_blocks(entry):
+                ids = _text_mentions(text, open_ids)
+                if kind == "tool_use" and len(ids) > _TOOL_USE_MENTION_CAP:
+                    continue  # bulk mention -- contributes nothing (review correction 1)
+                for card_id in ids:
+                    mentions[card_id] = lineno  # last position wins -- later lines overwrite
     return mentions
 
 
@@ -365,7 +453,17 @@ def state_head_paths(
     by_col = _board_ids_by_column(root)
     if by_col is None:
         return [], True, [], ""
-    mentions = _scan_transcript_mentions(transcript) if transcript else {}
+    # The mention scan only ever needs to recognize an OPEN card's own id (TRDD-O2FNJ4KW
+    # follow-up, review correction 2) -- computed once here and threaded through both the scan
+    # (which builds its match/prefilter patterns from it) and the ranking below (which already
+    # recomputes the same non-terminal-column filter for its own `(id, column, title)` tuples).
+    open_ids = frozenset(
+        card_id
+        for col, items in by_col.items()
+        if col not in trdd_common.TERMINAL_COLUMNS
+        for card_id, _title in items
+    )
+    mentions = _scan_transcript_mentions(transcript, open_ids) if transcript else {}
     top, other_ids = _select_and_rank_cards(by_col, mentions)
     other_line = _format_other_ids_line(other_ids)
     heads_dir = sd / "jev-heads"

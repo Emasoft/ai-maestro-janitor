@@ -235,8 +235,9 @@ def _main(
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
     # TRDD-O2FNJ4KW: `in_flight_cards` is now only the top `jcl.TOP_CARD_COUNT` -- every other
     # open card is still named, just on this one capped line rather than with its own title.
-    if other_open_ids_line:
-        findings.append(other_open_ids_line)
+    # TRDD-O2FNJ4KW follow-up (review correction 3): passed as `HandoffInputs.other_open_ids`
+    # below, its own section, never appended into `findings` -- a board-membership fact is not a
+    # janitor finding.
 
     out_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.md"
     # Card 5 two-renderings (TRDD-RAEGS1D5) + TRDD-RAEGS1D5 retune follow-up: this detached lane
@@ -249,7 +250,10 @@ def _main(
     # will actually have room for -- see `external_clear.compose_handoff_room`'s own docstring.
     inject_path = sd / f"jev-compacted-{key or handoff_files.UNKEYED_KEY}.inject.md"
     tail = ec.recent_messages(str(prev))
-    room_inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
+    room_inputs = ec.HandoffInputs(
+        trigger="jev-compaction", findings=findings, cards=in_flight_cards,
+        other_open_ids=other_open_ids_line,
+    )
     # `room_inputs` may come back with SHORTER card titles than `in_flight_cards` (TRDD-RAEGS1D5
     # room-floor follow-up, round 2): `jcl.trim_cards_for_room` shrinks titles toward "" (every id
     # kept, never dropped) when they would otherwise starve the summary's own room -- see that
@@ -294,7 +298,10 @@ def _main(
         # handoff exists for this key (the same fact-only degrade the sync hook writes on its
         # own failure) and release the hold immediately instead of waiting out a TTL whose
         # only original purpose was bounding a `jev_compact` that never returns.
-        inputs = ec.HandoffInputs(trigger="jev-compaction-failed", findings=findings, cards=in_flight_cards)
+        inputs = ec.HandoffInputs(
+            trigger="jev-compaction-failed", findings=findings, cards=in_flight_cards,
+            other_open_ids=other_open_ids_line,
+        )
         template = ec.compose_template_handoff(inputs, now_iso=now_iso)
         text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
@@ -319,7 +326,10 @@ def _main(
     # `cards=room_inputs.cards` (room-floor follow-up), not `in_flight_cards` -- keeps this call's
     # own room faithful to the (possibly title-shortened) facts `inject_max_bytes` was sized
     # against above; see `jcl.trim_cards_for_room`'s own docstring.
-    inputs = ec.HandoffInputs(trigger=trigger, findings=findings, cards=room_inputs.cards)
+    inputs = ec.HandoffInputs(
+        trigger=trigger, findings=findings, cards=room_inputs.cards,
+        other_open_ids=other_open_ids_line,
+    )
     # `tail` was already computed above, before `run_compact_with_fallback`, to size
     # `inject_max_bytes` -- same transcript (`prev` never changes mid-call), reused rather than
     # re-read.

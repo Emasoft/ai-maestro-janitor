@@ -1597,6 +1597,11 @@ class HandoffInputs:
     cards: Sequence[tuple[str, str, str]] = field(default_factory=list)  # (id, column, title)
     commits: Sequence[tuple[str, str]] = field(default_factory=list)  # (sha, subject)
     findings: Sequence[str] = field(default_factory=list)
+    # One capped line naming every OTHER open card id (`jev_compaction_lane._format_other_ids_
+    # line`) -- its OWN field, not appended into `findings` (TRDD-O2FNJ4KW follow-up, review
+    # correction 3): it is a board-membership fact, not a janitor finding, and rendering it under
+    # "## Open findings" mislabelled it as one. "" (the default) means no other open cards.
+    other_open_ids: str = ""
     memory_dir: str = ""
     trigger: str = ""
     idle_seconds: int | None = None
@@ -1623,7 +1628,7 @@ def compose_template_handoff(
     commits = list(inputs.commits)
     findings = list(inputs.findings)
 
-    def render(n_cards: int, n_commits: int, n_findings: int) -> str:
+    def render(n_cards: int, n_commits: int, n_findings: int, show_other_ids: bool) -> str:
         idle_h = "unknown" if inputs.idle_seconds is None else f"~{inputs.idle_seconds // 3600}h"
         ctx = "unknown" if inputs.context_tokens is None else f"~{inputs.context_tokens // 1000}k"
         out = [
@@ -1641,6 +1646,10 @@ def compose_template_handoff(
         if cards[:n_cards]:
             out += ["", "## In-flight cards (open work)", ""]
             out += [f"- TRDD-{cid} (`{col}`) — {title}" for cid, col, title in cards[:n_cards]]
+        if show_other_ids and inputs.other_open_ids:
+            # Its own section, right after the in-flight cards (TRDD-O2FNJ4KW follow-up, review
+            # correction 3) -- a board-membership fact, never an "## Open findings" entry.
+            out += ["", "## Other open cards", "", f"- {inputs.other_open_ids}"]
         if commits[:n_commits]:
             out += ["", "## Recent commits (the WHY lives in the messages — `git show <sha>`)", ""]
             out += [f"- {sha} {subject}" for sha, subject in commits[:n_commits]]
@@ -1658,17 +1667,30 @@ def compose_template_handoff(
         return "\n".join(out)
 
     n_cards, n_commits, n_findings = len(cards), len(commits), len(findings)
-    text = render(n_cards, n_commits, n_findings)
-    # Drop the least load-bearing section first (findings are re-derivable from the ledger every
-    # session; commits from git; the CARDS are the only thing that says what was being worked on).
-    while len(text.encode("utf-8")) > max_bytes and (n_findings or n_commits or n_cards > 1):
+    show_other_ids = True
+    text = render(n_cards, n_commits, n_findings, show_other_ids)
+    # Drop the least load-bearing section first (findings and the other-open-ids line are both
+    # re-derivable from the board/ledger every session -- trddgrep still has them -- so they go
+    # before commits from git, and the CARDS are the only thing that says what was being worked
+    # on, so they go last).
+    #
+    # POLICY NOTE (review finding, TRDD-O2FNJ4KW follow-up): giving `other_open_ids` its own
+    # heading (review correction 3) also means it now has its OWN place in this priority order --
+    # it sheds right after findings, BEFORE commits, same reasoning as findings ("the board still
+    # has it"), but that ordering choice was never itself the thing review correction 3 asked
+    # for and is not exercised by any test with real trim pressure on both sections at once.
+    while len(text.encode("utf-8")) > max_bytes and (
+        n_findings or show_other_ids or n_commits or n_cards > 1
+    ):
         if n_findings:
             n_findings -= 1
+        elif show_other_ids:
+            show_other_ids = False
         elif n_commits:
             n_commits -= 1
         else:
             n_cards -= 1
-        text = render(n_cards, n_commits, n_findings)
+        text = render(n_cards, n_commits, n_findings, show_other_ids)
     return text
 
 

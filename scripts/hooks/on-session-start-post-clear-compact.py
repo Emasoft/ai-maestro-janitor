@@ -275,9 +275,13 @@ def _main() -> int:
     findings = ["heads: none (trddgrep unavailable)"] if heads_unavailable else []
     # TRDD-O2FNJ4KW: `in_flight_cards` is now only the top `jcl.TOP_CARD_COUNT` -- every other
     # open card is still named, just on this one capped line rather than with its own title.
-    if other_open_ids_line:
-        findings.append(other_open_ids_line)
-    inputs = ec.HandoffInputs(trigger="jev-compaction", findings=findings, cards=in_flight_cards)
+    # TRDD-O2FNJ4KW follow-up (review correction 3): passed as `HandoffInputs.other_open_ids`
+    # below, its own section, never appended into `findings` -- a board-membership fact is not a
+    # janitor finding.
+    inputs = ec.HandoffInputs(
+        trigger="jev-compaction", findings=findings, cards=in_flight_cards,
+        other_open_ids=other_open_ids_line,
+    )
     # Computed BEFORE `run_compact` (TRDD-RAEGS1D5 retune follow-up): `tail` only needs
     # `transcript_path`, already known, and `compose_handoff_room` needs the SAME facts+tail
     # `compose_handoff` itself will use once a summary exists -- see that function's own

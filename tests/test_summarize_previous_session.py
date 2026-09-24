@@ -1085,6 +1085,123 @@ def test_state_head_ranking_order_is_deterministic_across_two_runs(
     assert first[3] == second[3]
 
 
+def test_bare_id_without_trdd_prefix_still_counts_as_a_mention(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """TRDD-O2FNJ4KW follow-up (review correction 2): real assistant prose overwhelmingly drops
+    the `TRDD-` prefix ("K0PMVRN6 is committed") -- the bare id alone must still rank the card."""
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "K0PMVRN6 is committed."},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, _other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+    assert cards[0][0] == "K0PMVRN6"
+
+
+def test_hash_prefixed_id_counts_as_a_mention(tmp_path, monkeypatch, _isolated_env):
+    """TRDD-O2FNJ4KW follow-up (review correction 2): `#<id>` is also a valid mention form."""
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "See #K0PMVRN6 for the fix."},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, _other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+    assert cards[0][0] == "K0PMVRN6"
+
+
+def test_random_uppercase_word_that_is_not_an_open_id_never_counts(
+    tmp_path, monkeypatch, _isolated_env,
+):
+    """TRDD-O2FNJ4KW follow-up (review correction 2): mentions are matched against the SET of
+    open-card ids the board already named, so an unrelated 8-char uppercase token can never
+    false-positive into a mention -- the ranking is identical to the no-transcript fallback."""
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    _install_rank_stub_trddgrep(tmp_path / "bin", monkeypatch)
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "RANDOM99 is not a real card on this board."},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    with_transcript = jcl.state_head_paths(project_dir, sd, str(transcript))
+    without_transcript = jcl.state_head_paths(project_dir, sd)
+    assert [c[0] for c in with_transcript[2]] == [c[0] for c in without_transcript[2]]
+    assert with_transcript[3] == without_transcript[3]
+
+
+def test_bulk_tool_use_mention_does_not_change_the_ranking(tmp_path, monkeypatch, _isolated_env):
+    """TRDD-O2FNJ4KW follow-up (review correction 1): a SINGLE `tool_use` input block naming
+    more than `jcl._TOOL_USE_MENTION_CAP` distinct open-card ids (a worker prompt, a card batch,
+    a `grep -E 'A|B|C|D|E'`) must contribute NONE of them -- letting it count would put every
+    named id at the same "most recent" rank, which is exactly the skew the review flagged."""
+    project_dir = _isolated_env
+    (project_dir / "design" / "tasks").mkdir(parents=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    stub = bin_dir / "trddgrep"
+    stub.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "argv = sys.argv[1:]\n"
+        "if 'show' in argv:\n"
+        "    card_id = argv[argv.index('show') + 1]\n"
+        "    print(card_id + ' P? fake card')\n"
+        "    print('  design/tasks/fake.md')\n"
+        "    print()\n"
+        "    print('  \\u23f5 STATE (authoritative)')\n"
+        "    print()\n"
+        "    print('  - fake state line for ' + card_id)\n"
+        "else:\n"
+        "    print('5 open cards (design/tasks)')\n"
+        "    print('\\u2550\\u2550\\u2550 TODO (5)')\n"
+        "    print('  AAAAAAA1 P? todo          card one')\n"
+        "    print('  AAAAAAA2 P? todo          card two')\n"
+        "    print('  AAAAAAA3 P? todo          card three')\n"
+        "    print('  AAAAAAA4 P? todo          card four')\n"
+        "    print('  AAAAAAA5 P? todo          card five')\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{sys.exec_prefix}/bin")
+
+    transcript = _write_transcript(tmp_path, [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "input": {
+                "command": "grep -E 'AAAAAAA1|AAAAAAA2|AAAAAAA3|AAAAAAA4|AAAAAAA5'",
+            }},
+        ]}},
+    ])
+
+    sd = state.state_dir()
+    _paths, _unavailable, cards, other_line = jcl.state_head_paths(
+        project_dir, sd, str(transcript),
+    )
+    # `todo` is not a `STATE_HEAD_COLUMNS` fill column, so a real mention of any of these ids
+    # would have put it in `cards` -- none of them made it there, proving the whole bulk mention
+    # was dropped rather than merely de-prioritized.
+    assert cards == []
+    for i in range(1, 6):
+        assert f"AAAAAAA{i}" in other_line
+
+
 def test_other_ids_line_caps_and_names_the_remainder():
     many_ids = [f"ID{i:06d}" for i in range(50)]
     line = jcl._format_other_ids_line(many_ids, cap=40)

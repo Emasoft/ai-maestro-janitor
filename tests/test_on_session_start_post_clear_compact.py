@@ -1295,6 +1295,43 @@ def test_no_recent_model_handoff_omits_the_line(tmp_path, monkeypatch):
     assert "Handoff you wrote before the clear:" not in out
 
 
+def test_other_open_cards_line_reaches_the_injected_stdout(tmp_path, monkeypatch):
+    """TRDD-O2FNJ4KW follow-up (review correction 3): the "other open cards" line
+    `jcl.state_head_paths` returns must reach the injected stdout the resumed session actually
+    reads, under its OWN heading -- not silently dropped by the hook on the way from
+    `state_head_paths` to `HandoffInputs`."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%7")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%7"}, transcript=str(transcript))
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=_COMPACTED_DOC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(
+        jcl, "state_head_paths",
+        lambda root, sd, transcript="": ([], False, [], "other open cards: ZZZZ9999"),
+    )
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    assert rc == 0
+    assert "## Other open cards" in out
+    assert "other open cards: ZZZZ9999" in out
+
+
 if __name__ == "__main__":
     import pytest
 
