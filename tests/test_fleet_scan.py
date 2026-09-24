@@ -894,6 +894,15 @@ def test_stale_threshold_scales_with_armed_cadence() -> None:
     assert fs.stale_threshold_for("*/bogus * * * *") == fs.STALE_S
 
 
+def test_stale_threshold_reads_the_staggered_arm_prepare_form_too() -> None:
+    """arm_prepare._stagger rewrites `*/N` to `{offset}-59/N` (TRDD-D7RLXAN1 report §2) — a
+    staggered cron must give the SAME window as its plain equivalent, not silently fall back
+    to `base_stale_s` (the bug this test guards: before cron_period existed, the inline
+    `first.startswith("*/")` check only matched the plain shape)."""
+    assert fs.stale_threshold_for("11-59/15 * * * *") == fs.stale_threshold_for("*/15 * * * *") == 3 * 15 * 60
+    assert fs.stale_threshold_for("0-59/30 * * * *") == 3 * 30 * 60
+
+
 def test_diagnose_root_respects_slow_armed_cadence(tmp_path: Path) -> None:
     """A */30-armed idle session is HEALTHY at a 28-min-old transcript (its own next
     beat has not even fired yet) and cron_dead only past 3× its interval."""

@@ -82,12 +82,12 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.py",
-            "timeout": 2
+            "timeout": 10
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-token-meter.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       }
@@ -98,7 +98,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-failure.py",
-            "timeout": 2
+            "timeout": 10
           }
         ]
       }
@@ -109,7 +109,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-subagent-start.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       }
@@ -120,7 +120,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-subagent-stop.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       }
@@ -132,7 +132,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-pkg-guard.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       },
@@ -142,12 +142,12 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash-safety.py",
-            "timeout": 3
+            "timeout": 10
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-agent-generator-guard.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       },
@@ -157,12 +157,12 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-publish-lock.py",
-            "timeout": 3
+            "timeout": 10
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-wikimem-write-path.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       },
@@ -192,7 +192,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-safety.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       },
@@ -202,7 +202,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-memory-correction.py",
-            "timeout": 3
+            "timeout": 10
           },
           {
             "type": "command",
@@ -217,7 +217,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/hook-run.sh ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-mcp-response-sanitizer.py",
-            "timeout": 3
+            "timeout": 10
           }
         ]
       },

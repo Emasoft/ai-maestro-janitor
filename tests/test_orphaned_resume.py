@@ -55,6 +55,17 @@ def test_cadence_seconds_reads_only_the_minute_step_form():
     assert orf.cadence_seconds("*/90 * * * *") is None   # >60 is not a minute step
 
 
+def test_cadence_seconds_reads_the_staggered_arm_prepare_form_too():
+    """arm_prepare._stagger rewrites `*/N` to `{offset}-59/N` (TRDD-D7RLXAN1 report §2) — a
+    staggered cron must recover the SAME period as its plain equivalent, not silently fall
+    back to the stricter default (the bug this test guards: before cron_period existed,
+    cadence_seconds only matched a leading "*/", so every staggered cron returned None here)."""
+    assert orf.cadence_seconds("7-59/15 * * * *") == orf.cadence_seconds("*/15 * * * *") == 900
+    assert orf.cadence_seconds("0-59/5 * * * *") == 300
+    assert orf.cadence_seconds("7-58/15 * * * *") is None  # anything but a literal "-59/" tail is not this janitor's stagger
+    assert orf.cadence_seconds("7-59/90 * * * *") is None  # step still bounded to (0, 60]
+
+
 def test_stale_window_scales_with_the_projects_OWN_cadence():
     """A `*/5` project is late after 15 min; a `*/30` one is not until 90.
 

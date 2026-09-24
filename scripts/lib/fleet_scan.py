@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import cron_period
 import harness_backend
 import session_liveness
 import state
@@ -653,14 +654,12 @@ def stale_threshold_for(armed_cron: str, base_stale_s: int = STALE_S) -> int:
     """The staleness window for a session armed at ``armed_cron`` — 3× its heartbeat
     interval (the same two-missed-fires tolerance ``STALE_S`` encodes for */5), never
     below ``base_stale_s``. Pure; an empty/unparseable cron keeps the base window
-    (fail to the stricter default, never to a looser one). TRDD-8DR0X08A F4."""
-    minutes = 0
-    first = armed_cron.strip().split()[0] if armed_cron.strip() else ""
-    if first.startswith("*/"):
-        try:
-            minutes = int(first[2:])
-        except ValueError:
-            minutes = 0
+    (fail to the stricter default, never to a looser one). TRDD-8DR0X08A F4.
+
+    Delegates the parse to ``cron_period.period_minutes`` so a staggered arm_prepare cron
+    (``{offset}-59/N * * * *``) recovers the same window as its plain ``*/N`` equivalent
+    instead of silently falling back to ``base_stale_s``."""
+    minutes = cron_period.period_minutes(armed_cron) or 0
     return max(base_stale_s, 3 * minutes * 60)
 
 

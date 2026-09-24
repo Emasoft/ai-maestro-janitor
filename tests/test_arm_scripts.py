@@ -28,7 +28,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PREPARE = ROOT / "scripts" / "arm_prepare.py"
 RECORD = ROOT / "scripts" / "arm_record.py"
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+import arm_prepare  # noqa: E402
 import state  # noqa: E402
 
 
@@ -48,6 +50,13 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 def _sd(project: Path) -> Path:
     return project / ".janitor" / "state"
+
+
+def _staggered(step: int, project: Path) -> str:
+    """The exact cron string `resolve_cron` must produce for a `*/step` cadence armed on
+    `project` — computed via the module under test's own helper, never a re-derivation, so this
+    test can't silently drift from the implementation it is meant to pin."""
+    return f"{arm_prepare._stagger_offset(project, step)}-59/{step} * * * *"
 
 
 def _run(script: Path, project: Path, *args: str) -> tuple[int, dict[str, str], str]:
@@ -168,15 +177,17 @@ def test_prepare_arms_the_cadence_the_DISPATCHER_asked_for(project: Path) -> Non
     rc, kv, _ = _prepare(project)
 
     assert rc == 0
-    assert kv["cron"] == "*/30 * * * *"
+    assert kv["cron"] == _staggered(30, project)
 
 
 def test_prepare_falls_back_to_the_default_cadence(project: Path) -> None:
-    """No override on disk and no user config knob (TRDD-BRHJHWW0) — the fixed default."""
+    """No override on disk and no user config knob (TRDD-BRHJHWW0) — the fixed default,
+    staggered onto this project's own offset (report:
+    reports/hook-timeout/20260924_175736+0200-startup-timing.md, proposal 2)."""
     rc, kv, _ = _prepare(project)
 
     assert rc == 0
-    assert kv["cron"] == "*/15 * * * *"
+    assert kv["cron"] == _staggered(15, project)
 
 
 def test_prepare_honors_the_user_cron_knob(project: Path) -> None:
@@ -185,7 +196,7 @@ def test_prepare_honors_the_user_cron_knob(project: Path) -> None:
     rc, kv, _ = _prepare_with_cron_env(project, "*/10 * * * *")
 
     assert rc == 0
-    assert kv["cron"] == "*/10 * * * *"
+    assert kv["cron"] == _staggered(10, project)
 
 
 def test_prepare_prefers_an_on_disk_override_over_the_user_knob(project: Path) -> None:
@@ -197,7 +208,64 @@ def test_prepare_prefers_an_on_disk_override_over_the_user_knob(project: Path) -
     rc, kv, _ = _prepare_with_cron_env(project, "*/10 * * * *")
 
     assert rc == 0
-    assert kv["cron"] == "*/20 * * * *"
+    assert kv["cron"] == _staggered(20, project)
+
+
+# --------------------------------------------------------------------------- #
+# The heartbeat stagger (report: 20260924_175736+0200-startup-timing.md, #2) —
+# N sessions must spread over the cadence, not all fire in the same minute.
+# --------------------------------------------------------------------------- #
+
+
+def test_stagger_offset_is_stable_for_the_same_project(project: Path) -> None:
+    """Re-arming the SAME project twice must land on the SAME offset — otherwise two arms of one
+    project would still collide with each other over time, and every consumer that persisted the
+    prior armed cron (arm_record, the dispatcher's cadence phase) would see spurious drift."""
+    first = arm_prepare._stagger_offset(project, 15)
+    second = arm_prepare._stagger_offset(project, 15)
+    assert first == second
+
+
+def test_stagger_offset_differs_across_projects() -> None:
+    """Two different project roots must (with overwhelming probability) land on different
+    offsets — that's the entire point: N sessions spread over the cadence instead of firing
+    together. `hashlib.sha256`, not `hash()` — a per-process-salted `hash()` would make the
+    RIGHT offsets today and DIFFERENT ones on the next process, defeating stability too."""
+    a = arm_prepare._stagger_offset(Path("/tmp/project-a"), 15)
+    b = arm_prepare._stagger_offset(Path("/tmp/project-b"), 15)
+    assert a != b
+
+
+def test_stagger_leaves_a_non_step_cadence_untouched(project: Path) -> None:
+    """A cron this janitor did not itself construct — anything other than a plain `*/N * * * *`
+    minute step — is NOT this feature's business to rewrite. A malformed or hand-written override
+    (a list, a range, a non-`*` hour field) must come back byte-for-byte."""
+    for cron in ("0 */2 * * *", "5,20,35,50 * * * *", "*/15 9-17 * * 1-5", "not a cron"):
+        assert arm_prepare._stagger(cron, project) == cron
+
+
+def test_staggered_cron_round_trips_through_cron_period(project: Path) -> None:
+    """Ties `_stagger()`'s output shape directly to `cron_period.period_minutes()` instead of
+    letting the two modules agree only by convention (review finding: nothing else enforces
+    that a future edit to either regex can't silently desync them). Any cron `_stagger`
+    actually emits, for any step, must recover exactly that step from `cron_period`."""
+    import cron_period
+
+    for step in (1, 5, 10, 15, 30, 60):
+        staggered = arm_prepare._stagger(f"*/{step} * * * *", project)
+        assert cron_period.period_minutes(staggered) == step
+
+
+def test_prepare_applies_the_project_specific_stagger_end_to_end(project: Path) -> None:
+    """The subprocess-level check: `arm_prepare`'s own stdout `cron=` line carries the staggered
+    form, not the bare default — pinning that `main()` actually wires `resolve_cron` to
+    `state.project_root()` rather than leaving the offset computed-but-unused."""
+    rc, kv, _ = _prepare(project)
+
+    assert rc == 0
+    expected = _staggered(15, project)
+    assert kv["cron"] == expected
+    assert kv["cron"] != "*/15 * * * *", "must not still be the un-staggered default"
 
 
 def test_prepare_revokes_the_opt_out_and_installs_the_stub(project: Path) -> None:

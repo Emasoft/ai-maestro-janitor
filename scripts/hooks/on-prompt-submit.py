@@ -31,6 +31,17 @@ output and printed "timed out after 2s", including on cron-fired prompts. 10s
 matches the sibling `on-prompt-submit-autorecall.py` budget, which does strictly
 more I/O (a memgrep recall) and is not observed to time out at that number.
 See reports/hook-timeout/20260924_161443+0200-prompt-submit-timeout.md.
+
+`state` (and `user_intent`) are imported LAZILY, inside `main()`, AFTER the
+`_is_cron_marker` check — not at module top. A cron/heartbeat fire is a no-op
+for this hook (it returns 0 without touching the breadcrumb), so importing
+`state` for it paid ~50-60ms of import time for nothing on every single
+heartbeat, on every armed session, every fire. Since every session's heartbeat
+prompt hits this hook, that cost was purely additive to the CPU-contention
+bursts measured in
+reports/hook-timeout/20260924_175736+0200-startup-timing.md (proposal 3): under
+load, cron fires should pay only interpreter start-up, not this script's own
+import graph.
 """
 
 from __future__ import annotations
@@ -42,11 +53,6 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
-
-# Loaded via importlib so CPV's PEP 723 static check doesn't misclassify the
-# project-local `state` module as a third-party dependency (it has no PyPI
-# counterpart). Runtime semantics are identical to `import state`.
-state = importlib.import_module("state")
 
 
 # How many leading lines may precede the marker before we stop looking. Small on purpose:
@@ -108,13 +114,21 @@ def main() -> int:
         return 0
 
     # The load-bearing filter: a cron `[janitor-…]` prompt is NOT user presence.
+    # Checked BEFORE importing `state` (below) so a cron/heartbeat fire — the
+    # overwhelming majority of this hook's invocations — pays only interpreter
+    # start-up, never this script's import graph. See the module docstring.
     if _is_cron_marker(prompt):
         return 0
 
     # Genuine user input — stamp both epochs. bump_user_presence is itself
     # best-effort (swallows OSError), but guard the whole call so an unexpected
     # error path still degrades to a silent no-op.
+    #
+    # Loaded via importlib so CPV's PEP 723 static check doesn't misclassify the
+    # project-local `state` module as a third-party dependency (it has no PyPI
+    # counterpart). Runtime semantics are identical to `import state`.
     try:
+        state = importlib.import_module("state")
         state.bump_user_presence()
     except Exception:  # noqa: BLE001 - a breadcrumb write must never abort the turn
         pass

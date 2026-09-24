@@ -34,7 +34,9 @@ never toward "leak a heartbeat". This mirrors the ordering rationale the skill a
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import re
 import shutil
 import sys
 from collections.abc import Mapping
@@ -67,20 +69,74 @@ def resolve_data_dir(env: Mapping[str, str] | None = None) -> Path:
     return Path(home) / DEFAULT_DATA_SUBPATH
 
 
-def resolve_cron(state_dir: Path, env: Mapping[str, str] | None = None) -> str:
+# Matches ONLY a plain `*/N * * * *` minute-step cron — the shape this janitor ever arms
+# (DEFAULT_CRON, the tier knob, or a manually-written desired-cadence.cron). Anything else
+# (a list, a range, a non-`*` hour/day field) is a cron this janitor did not construct and must
+# not rewrite — see `_stagger` below.
+_STEP_CRON_RE = re.compile(r"^\*/(\d+) \* \* \* \*$")
+
+
+def _stagger_offset(project_dir: Path, step: int) -> int:
+    """A per-project minute offset in [0, step), stable across re-arms of the SAME project and
+    (with high probability) different across projects — report:
+    reports/hook-timeout/20260924_175736+0200-startup-timing.md, proposal 2.
+
+    `hashlib.sha256`, never `hash()`: `hash(str)` is salted per-PROCESS (PYTHONHASHSEED), so the
+    offset would differ on every re-arm of the same project and undo the whole point — two arms
+    of the same project must land in the same minute-bucket, or the burst this exists to avoid
+    just reappears one hop later.
+
+    STABILITY DEPENDS ON `project_dir` BEING THE SAME STRING ACROSS ARMS. `resolve_cron`'s
+    default (`state.project_root()`) uses `$CLAUDE_PROJECT_DIR` when set, which every real
+    Claude Code invocation sets — so in practice every arm of one session sees the identical
+    string. The offset would only drift if a re-arm ran with that env var absent AND the
+    `git rev-parse --show-toplevel` fallback resolved a differently-spelled path (a symlinked
+    checkout, say) than a prior arm — an existing edge case of `project_root()` itself, not
+    introduced here, and one this function has no way to normalize away.
+    """
+    digest = hashlib.sha256(str(project_dir).encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % step
+
+
+def _stagger(cron: str, project_dir: Path) -> str:
+    """Spread a plain `*/N` minute-step cron onto a stable per-project offset:
+    `{offset}-59/{N} * * * *`. Every armed session otherwise shares the IDENTICAL cron grid, so
+    all of a host's heartbeat prompts — and every hook they fire — start in the same minute; at
+    load the report measured that burst pushing 30-60 concurrent hook launches to 1.4-2.0s of CPU
+    run-queue wait, the very timeouts proposal 1 widened. A cron this janitor did not itself
+    construct (anything not matching `_STEP_CRON_RE`) is returned UNCHANGED — staggering only
+    the shape we know is safe to rewrite.
+    """
+    m = _STEP_CRON_RE.match(cron)
+    if not m:
+        return cron
+    step = int(m.group(1))
+    if step <= 0:
+        return cron
+    offset = _stagger_offset(project_dir, step)
+    return f"{offset}-59/{step} * * * *"
+
+
+def resolve_cron(state_dir: Path, env: Mapping[str, str] | None = None, project_dir: Path | None = None) -> str:
     """The cadence to arm: an explicit `desired-cadence.cron` override, else the user's config
     knob, else the fixed default (TRDD-BRHJHWW0 — the dispatcher no longer drives tiers, so this
-    file is normally absent; the read stays so a future or manual override still wins).
+    file is normally absent; the read stays so a future or manual override still wins), then
+    STAGGERED onto a stable per-project offset (see `_stagger`) so this project's heartbeat does
+    not land in the same minute as every other armed session's.
     """
     environ: Mapping[str, str] = os.environ if env is None else env
     desired = state_dir / DESIRED_CADENCE_FILE
+    cron: str | None = None
     try:
-        cron = desired.read_text(encoding="utf-8").strip()
-        if cron:
-            return cron
+        candidate = desired.read_text(encoding="utf-8").strip()
+        if candidate:
+            cron = candidate
     except OSError:
         pass
-    return (environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON") or "").strip() or DEFAULT_CRON
+    if cron is None:
+        cron = (environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON") or "").strip() or DEFAULT_CRON
+    root = project_dir if project_dir is not None else state.project_root()
+    return _stagger(cron, root)
 
 
 def take_prior_cron_id(state_dir: Path) -> str:

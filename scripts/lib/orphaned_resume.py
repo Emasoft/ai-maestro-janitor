@@ -26,6 +26,8 @@ import json
 import os
 from pathlib import Path
 
+import cron_period
+
 # Fallback staleness window when a project records no armed cadence. Deliberately generous:
 # a false "your session is dead" is worse than a late one, because it trains the reader to
 # ignore the finding — the exact failure this detector exists to end.
@@ -86,20 +88,14 @@ def known_project_roots(projects_root: Path) -> list[str]:
 
 
 def cadence_seconds(cron: str) -> int | None:
-    """Seconds between fires for a `*/N * * * *` cron, or None when not that shape.
+    """Seconds between fires for a `*/N * * * *` or staggered `{offset}-59/N * * * *` cron, or
+    None when not one of those shapes.
 
-    Only the minute-step form the janitor arms is understood. Anything else returns None so
-    the caller falls back to the default window rather than inventing a period from a cron
-    it cannot actually read.
+    Delegates the parse to `cron_period.period_minutes` — see that module for why both shapes
+    matter (arm_prepare stagger) and why a second copy of this check must not exist.
     """
-    field = (cron or "").strip().split(" ")[0] if cron else ""
-    if not field.startswith("*/"):
-        return None
-    step = field[2:]
-    if not step.isdigit():
-        return None
-    n = int(step)
-    return n * 60 if 0 < n <= 60 else None
+    minutes = cron_period.period_minutes(cron)
+    return minutes * 60 if minutes is not None else None
 
 
 def stale_window(armed_cron: str, *, factor: int = 3) -> int:
