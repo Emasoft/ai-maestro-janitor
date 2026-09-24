@@ -1436,6 +1436,64 @@ def _body_chars(body: str) -> int:
     return len(_WHITESPACE_RE.sub("", _TAG_RE.sub("", body)))
 
 
+_TOOL_CALL_ECHO_RE = re.compile(r"^[^\s(]+\(.*\)$")
+
+
+def _tool_result_part(body: str) -> str:
+    """TRDD-BLGZTHQ9 addendum (2026-09-24): `_segment_tool_result` always builds a "tool" item's
+    text as `f"{name}({tool_input})\\n{result_text}"` -- its first line is that literal call
+    echo, one line, ending in `)` right before the `\\n`. This strips exactly that line (never a
+    naked tool body with no such echo, e.g. a unit-test fixture or a one-line real result whose
+    first line just doesn't look like a call), so a call with an EMPTY result (`ToolSearch({...})`
+    alone -- no `\\n` even -- or `name(...)\\n` with nothing after) reduces to `""` and fails the
+    whole-tool-result gate instead of passing on its own name and arguments."""
+    first, _, rest = body.partition("\n")
+    return rest if _TOOL_CALL_ECHO_RE.match(first) else body
+
+
+_NOTIFICATION_PREFIX = "<task-notification>"
+_NOTIFICATION_LABEL = "(excerpt: summary and result)"
+_NOTIFICATION_ELEMENT_RE = re.compile(r"<(summary|result)>.*?</\1>", re.DOTALL)
+
+
+def _is_task_notification(it: Item) -> bool:
+    """TRDD-BLGZTHQ9 (2026-09-24 addendum): only an `event` item wrapped in
+    `<task-notification>...</task-notification>` gets the excerpt treatment below -- every
+    other kind (including a plain `<cross-session-message>` event) keeps the existing
+    whole/truncated-prefix path."""
+    return it.kind == "event" and it.text.startswith(_NOTIFICATION_PREFIX)
+
+
+def _task_notification_excerpt(text: str) -> str:
+    """The `<summary>` and `<result>` elements of a `<task-notification>` event, each an EXACT
+    substring of `text` (tags included, no paraphrase), in that order, joined by "\\n"; "" if
+    neither is present. Measured on the real holdout transcript fd5cc3e0 (2026-09-24): the
+    350-byte `<task-id>`/`<tool-use-id>`/`<output-file>`/`<status>` prefix alone cleared the
+    80-char `_body_chars` gate on 3 of 3 inline non-owner items while saying nothing about what
+    the sub-agent actually found -- only `<summary>`/`<result>` carry that, so the gate and the
+    inline body both key on them instead of the wrapper."""
+    return "\n".join(m.group(0) for m in _NOTIFICATION_ELEMENT_RE.finditer(text))
+
+
+def _notification_block(it: Item, cap: int) -> tuple[str, int]:
+    """The kept-item body for a `<task-notification>` event under per-item byte `cap`, and its
+    `_inline_cost`-style exact byte cost: the `_task_notification_excerpt` (a verbatim prefix of
+    it when the excerpt alone would not fit alongside the label and pointer), the
+    `_NOTIFICATION_LABEL` marker, and -- coordinator addendum, unlike `_inline_cost`'s
+    only-when-truncated pointer -- ALWAYS `_format_pointer`: an excerpt is never the whole
+    wrapper, so the pointer is the only way back to the metadata the excerpt dropped, truncated
+    or not."""
+    excerpt = _task_notification_excerpt(it.text)
+    pointer = _format_pointer(it)
+    reserve = len(f"\n{_NOTIFICATION_LABEL}\n{pointer}".encode("utf-8"))
+    body_cap = max(0, cap - reserve)
+    body = (excerpt if len(excerpt.encode("utf-8")) <= body_cap
+            else _truncate_prefix_bytes(excerpt, body_cap))
+    block = f"{body}\n{_NOTIFICATION_LABEL}\n{pointer}"
+    cost = len(f"-- {it.kind} {it.id} --\n{block}\n".encode("utf-8"))
+    return block, cost
+
+
 @dataclass(frozen=True)
 class _InjectCandidate:
     """One item as `_select_injected` sees it: exact byte costs, no text (built by `compose`)."""
@@ -2033,6 +2091,13 @@ def compose(
                     else max_item_bytes
                 )
             )
+            if max_item_bytes is not None and cap is not None and _is_task_notification(it):
+                # TRDD-BLGZTHQ9 addendum: injected-only (max_item_bytes is not None) -- the
+                # `--out` render (max_item_bytes is None) must stay byte-identical, so it never
+                # takes this branch and keeps showing `it.text` whole below.
+                block, _ = _notification_block(it, cap)
+                lines.append(block)
+                continue
             text_bytes = it.text.encode("utf-8")
             token_cap = token_truncated.get(it.id)
             if cap is not None and len(text_bytes) > cap:
@@ -2171,14 +2236,28 @@ def compose(
                 # copy stays a subset of what Jev kept; everything else can only be pointed at.
                 inline_cost = _inline_cost(it, cap) if it.id in kept_ids else None
                 pointer_eligible = True
+            elif _is_task_notification(it):
+                # Coordinator addendum (2026-09-24): a task-notification's gate and inline body
+                # are the `<summary>`/`<result>` excerpt alone, never the id/path/status wrapper
+                # -- see `_task_notification_excerpt`. Never "whole": `_notification_block`
+                # always appends the pointer, so it is never exempt from `pointer_eligible`.
+                excerpt = _task_notification_excerpt(it.text)
+                pointer_eligible = _body_chars(excerpt) >= _INJECT_MIN_BODY_CHARS
+                inline_ok = it.id in kept_ids and pointer_eligible
+                inline_cost = _notification_block(it, non_owner_cap)[1] if inline_ok else None
             else:
                 whole = len(it.text.encode("utf-8")) <= non_owner_cap
                 body = it.text if whole else _truncate_prefix_bytes(it.text, non_owner_cap)
+                # TRDD-BLGZTHQ9 addendum: the 20-char whole-tool-result gate counts only the
+                # RESULT part -- see `_tool_result_part`'s own docstring for why a bare call
+                # echo with no result (e.g. `ToolSearch({...})` alone) fails the gate instead of
+                # passing on its own name and arguments.
+                gate_body = _tool_result_part(body) if whole and it.kind == "tool" else body
                 # Amendment S3: 20 chars for a whole tool result ("...  [100%]\n3 passed in
                 # 0.18s" survives), 80 for prose/events and for any truncated prefix.
                 min_chars = (_INJECT_MIN_WHOLE_TOOL_BODY_CHARS if whole and it.kind == "tool"
                              else _INJECT_MIN_BODY_CHARS)
-                pointer_eligible = _body_chars(body) >= min_chars
+                pointer_eligible = _body_chars(gate_body) >= min_chars
                 # TRDD-BLGZTHQ9: a tool result over the cap is a pointer, never a prefix -- the
                 # pointer's preview already says WHAT it is, and a 350-B slice of a diff/grep/
                 # Bash result added a few lines for 3-4x the bytes (all 7 truncated tool items

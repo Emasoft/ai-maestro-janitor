@@ -3073,6 +3073,93 @@ def test_injected_gate_keeps_a_short_whole_tool_result_but_not_a_heading_stub() 
     assert jc._body_chars(pytest_out) == 23 and jc._body_chars(reply) < 80  # fixture sanity
 
 
+def test_injected_whole_tool_call_with_no_result_fails_the_gate() -> None:
+    """TRDD-BLGZTHQ9 addendum (2026-09-24): the 20-char whole-tool-result gate must count only
+    the RESULT part -- a bare call echo (`_segment_tool_result`'s synthetic `name(input)` first
+    line) with no result at all must not pass on its own name and arguments."""
+    call_echo_only = 'ToolSearch({"max_results": 5, "query": "advisor design"})'
+    items = [
+        _item("echo:0", "tool", call_echo_only, turn=1),
+        _item("newest:0", "user", "hi", turn=2),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert "echo:0" not in doc
+    assert jc._tool_result_part(call_echo_only) == ""
+
+
+_TASK_NOTIFICATION_WITH_RESULT = (
+    "<task-notification>\n"
+    "<task-id>ae5ce5f0fb9b8f119</task-id>\n"
+    "<tool-use-id>toolu_01A5LkrwmwkhtCU5fGNAoMXH</tool-use-id>\n"
+    "<output-file>/tmp/tasks/ae5ce5f0fb9b8f119.output</output-file>\n"
+    "<status>completed</status>\n"
+    '<summary>Agent "Review commit 4b479214" finished</summary>\n'
+    "<note>A task-notification fires each time this agent stops.</note>\n"
+    "<result>ADVERSARIAL-REVIEW\n\n"
+    "This reviews commit 4b479214: the stopgap has probably been overtaken, its gate would now "
+    "read a switch as a renewal. Fix: gate Step 1 on \"no auto: switched line since 07:16\".</result>\n"
+    "<usage><subagent_tokens>239883</subagent_tokens></usage>\n"
+    "</task-notification>"
+)
+
+_TASK_NOTIFICATION_METADATA_ONLY = (
+    "<task-notification>\n"
+    "<task-id>a21335f6afcef1aae</task-id>\n"
+    "<tool-use-id>toolu_01Xyz</tool-use-id>\n"
+    "<output-file>/tmp/tasks/a21335f6afcef1aae.output</output-file>\n"
+    "<status>completed</status>\n"
+    "</task-notification>"
+)
+
+
+def test_injected_task_notification_with_a_result_shows_the_excerpt_not_the_wrapper() -> None:
+    """Coordinator addendum (2026-09-24): a `<task-notification>` with a real `<summary>`/
+    `<result>` is shown -- but only the excerpt (verbatim `<summary>`/`<result>` substrings), an
+    excerpt label, and the pointer, never the `<task-id>`/`<tool-use-id>`/`<output-file>`/
+    `<status>` metadata that gave a content-free notification the same eligibility before this
+    fix."""
+    items = [
+        _item("notif:0", "event", _TASK_NOTIFICATION_WITH_RESULT, turn=1),
+        _item("newest:0", "user", "hi", turn=2),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=1500, non_owner_item_bytes=900)
+
+    assert '<summary>Agent "Review commit 4b479214" finished</summary>' in doc
+    assert "ADVERSARIAL-REVIEW" in doc
+    assert "(excerpt: summary and result)" in doc
+    assert "[[elided id=notif:0 " in doc  # the pointer always follows, even when shown
+    assert "<task-id>" not in doc
+    assert "<tool-use-id>" not in doc
+    assert "<output-file>" not in doc
+    assert "<status>completed</status>" not in doc
+    assert "<usage>" not in doc
+
+
+def test_injected_task_notification_with_only_metadata_is_neither_shown_nor_pointed_at() -> None:
+    """Coordinator addendum: a `<task-notification>` whose `<summary>`/`<result>` are absent
+    (only ids/path/status/"completed") is content-free -- neither inlined nor pointed at, only
+    counted, exactly like any other content-free non-owner item (measured gap: this cleared the
+    old 80-char gate on the wrapper alone on 3 of 3 holdout-transcript items, TRDD-BLGZTHQ9)."""
+    items = [
+        _item("notif:0", "event", _TASK_NOTIFICATION_METADATA_ONLY, turn=1),
+        _item("newest:0", "user", "hi", turn=2),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=1500, non_owner_item_bytes=900)
+
+    assert "notif:0" not in doc
+    assert "<task-id>" not in doc
+    # counted, not silently dropped: the "N more items not listed" count line includes it.
+    assert "[[elided: 1 more items not listed" in doc
+    assert jc._task_notification_excerpt(_TASK_NOTIFICATION_METADATA_ONLY) == ""
+
+
 def test_injected_long_newest_message_leaves_room_for_three_non_owner_items() -> None:
     """Amendment S4: a 1,500-B newest owner message used to be shown whole (its 1,500-B cap)
     next to an 800-B newest decision item, leaving too little of a 3,900-B room for the
