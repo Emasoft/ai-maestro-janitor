@@ -24,7 +24,7 @@ Found by the review of 862d30d4 (TRDD-RAEGS1D5). compose() admits items against 
 
 - 2026-09-24T02:44:33+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T02:45:28+0200 — column → todo by janitor-main-session. review of e30b0885: 3/3/3 regresses the 4/6/4 this unreleased series reached, on the owner's own complaint axis; it must not ship
-- 2026-09-24T08:29:47+0200 — COMPLETE by emanuelesabetta. acceptance met on cached real scores; trade accepted under delegation.
+- 2026-09-24T08:29:47+0200 — COMPLETE by janitor-main-session. acceptance met on cached real scores; trade accepted under delegation.
 
 ## Decision 2026-09-24 (delegated)
 

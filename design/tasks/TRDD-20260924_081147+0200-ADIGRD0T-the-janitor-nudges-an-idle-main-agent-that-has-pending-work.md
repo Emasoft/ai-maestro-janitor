@@ -3,7 +3,7 @@ trdd-id: ADIGRD0T
 title: The janitor nudges an idle main agent that has pending work
 column: blocked
 created: 2026-09-24T08:11:47+0200
-updated: 2026-09-24T08:23:01+0200
+updated: 2026-09-24T08:28:48+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -16,7 +16,7 @@ approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T08:11:47+0200
 blocked-by: [6ESS2MGE]
 pre-block-column: todo
-blocker-probe: trddgrep --design-dir design show 6ESS2MGE --porcelain | cut -f3
+blocker-probe: trddgrep --design-dir "$(git rev-parse --show-toplevel)/design" show 6ESS2MGE --porcelain | cut -f3
 blocker-holds-if: not-match:^(complete|completed|cancelled|superseded|published|live|failed)$
 ---
 

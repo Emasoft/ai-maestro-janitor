@@ -21,7 +21,7 @@ labels: [oauth-rotator]
 # All three rotator slots died with invalid_grant and rotation stayed put for 17 days
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-24
-- 2026-09-24 08:2x: the live item IS readable by /usr/bin/security from a user process: rc=0, 14429-byte JSON, 0.02 s, no dialog (one bounded test, secret discarded). The daemon's 'unreadable' is its own policy skip (JANITOR_ROTATOR_HEADLESS). A re-test after the next rewrite is pending. The fix direction is TRDD-4XND73XD: mirror live→slot, including at the switch.
+- 2026-09-24 ~08:16: the live item IS readable by /usr/bin/security from a user process: rc=0, 14429-byte JSON, 0.02 s, no dialog (one bounded test, secret discarded). The daemon's 'unreadable' is its own policy skip (JANITOR_ROTATOR_HEADLESS). A re-test after the next rewrite is pending. The fix direction is TRDD-4XND73XD: mirror live→slot, including at the switch.
 - Privacy status: this card still contains personal e-mail addresses and account names (owner accepted 2026-09-24; redaction pending the owner's decision).
 
 - 2026-09-24 07:30: all three slots re-captured by hand with `slot_capture_browser.py`: emanuele.sabetta 07:27, ipazia.emasoft (live) 07:28, fmuaddib 07:30. Each OK line named the right account, and each slot is FULL-OAUTH with a refreshToken, expiring in about 8 h. The 07:29:47 tick probed the live account again ("live <the live account> 5h=3% 7d=1% — within limits"), so PROBING is restored. SWITCHING is NOT proven: no switch has happened since.

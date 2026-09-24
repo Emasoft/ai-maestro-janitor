@@ -3,7 +3,7 @@ trdd-id: WZKFSQ2N
 title: The janitor owns continuity and its other standing responsibilities, and proves each one works on this host
 column: live_auditing
 created: 2026-09-24T08:04:03+0200
-updated: 2026-09-24T08:18:43+0200
+updated: 2026-09-24T08:30:33+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: audit
@@ -71,3 +71,14 @@ TRDD-BUR8AW77 — Dependency and tool updates wait out a release-age observation
 TRDD-6ESS2MGE — Advisory findings reach the agent or the owner instead of dying in the ledger
 TRDD-4XND73XD — Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 Related existing cards: TRDD-K0PMVRN6 (rotation), TRDD-L32WC0H7 (resume nudge), TRDD-I63GQJTK (progress line), TRDD-FWDZDB7W (privacy), TRDD-X6I04SAO (CA bundle), TRDD-Q0Y4M1TF (rotator lands on a Fable-spent account), TRDD-A70YJLXN (plugin update promptness).
+
+## Decisions 2026-09-24 (delegated by the owner: Q-DELEGATION)
+
+1. M1 shared lock: yes.
+2. The daemon reads the primary: yes, one bounded read per tick behind the primary latch; a refusal or timeout falls back to the mirror; the LaunchAgent context must be tested first.
+3. Findings go to the AGENT as a resume prompt when idle with pending work; the owner heartbeat stays quiet (6ESS2MGE and ADIGRD0T).
+4. No hotfix unless the hotfix-cost measurement shows it is small (pending).
+5. Release scope as recorded on RAEGS1D5.
+6. No Chrome capture per switch while the live→slot mirror works; browser re-capture only for revoked grants.
+7. Privacy hook: this repo first; the false-positive rate is measured before other projects; in other projects it installs only into untracked .git/hooks, and where a tracked hook manager exists it raises a finding instead of editing their files; warn first, then block.
+8. K0PMVRN6's addresses are redacted in a forward commit; the G1b dry-run happens before release.
