@@ -3,7 +3,7 @@ trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
 column: design
 created: 2026-09-24T07:42:31+0200
-updated: 2026-09-24T07:52:43+0200
+updated: 2026-09-24T08:23:05+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -51,3 +51,4 @@ On 2026-09-24 commit 3185baac added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 ## Test cases
 
 - trddgrep new stamps $USER into created-by/approval-judge and the approval log unless --author is passed: the hook must catch a host username in a staged TRDD card (the 2026-09-24 incident on K0PMVRN6, PWIAEW40 and this card).
+- trddgrep writes a `blocker-probe:` field containing the absolute --design-dir path (a home path) when a card is moved to blocked: the hook must catch it (2026-09-24, ADIGRD0T).

@@ -18,7 +18,7 @@ approval-datetime: 2026-09-24T08:11:58+0200
 
 # Advisory findings reach the agent or the owner instead of dying in the ledger
 
-dispatch.py's _ADVISORY_DETECTORS (trdd-reminder, dirty-tree, gitignore-coverage, github-issues-watch, gh-reply-watch, and others) are quiet-filtered to the findings ledger, so new GitHub issues #306 and #307 (2026-09-22/23), 29 dirty-tree hits and 15 trdd-reminder hits in one week never reached anyone. The 2026-08-12 owner rule ("a fire prints janitor heartbeat, and ONLY adds to it when something genuinely needs the human") and the 2026-09-24 directive (TRDD-WZKFSQ2N) now conflict. OWNER DECISION needed on routing. TRDD-ADIGRD0T is the agent-facing half.
+dispatch.py's _ADVISORY_DETECTORS (trdd-reminder, dirty-tree, gitignore-coverage, github-issues-watch, gh-reply-watch, and others) are quiet-filtered to the findings ledger, so new GitHub issues #306 and #307 (2026-09-22/23), 29 dirty-tree hits and 15 trdd-reminder hits in one week (ledger counts, 2026-09-17 to 2026-09-24) never reached anyone. The 2026-08-12 owner rule ("a fire prints janitor heartbeat, and ONLY adds to it when something genuinely needs the human") and the 2026-09-24 directive (TRDD-WZKFSQ2N) now conflict. OWNER DECISION needed on routing. TRDD-ADIGRD0T is the agent-facing half.
 
 ## Approval log
 

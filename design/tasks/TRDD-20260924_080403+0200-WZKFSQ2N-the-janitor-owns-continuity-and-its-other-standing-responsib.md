@@ -3,7 +3,7 @@ trdd-id: WZKFSQ2N
 title: The janitor owns continuity and its other standing responsibilities, and proves each one works on this host
 column: live_auditing
 created: 2026-09-24T08:04:03+0200
-updated: 2026-09-24T08:12:28+0200
+updated: 2026-09-24T08:18:43+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: audit
@@ -55,6 +55,7 @@ A responsibility is met when (1) an owning component exists, (2) a fire of it is
 ## Corrections
 
 The Why section's 'never actually delivered' is scoped to the retained rotator logs (from 2026-09-24 02:01); earlier behaviour is unmeasured.
+The '2 of 10' in the audit result (and in commit 223d9d4a's message) is the orchestrator's correction: the audit report itself said about 3 of 10, because it counted OAuth rotation as working. No automatic switch appears in the retained logs, so rotation is counted as broken.
 
 ## Audit result 2026-09-24
 
