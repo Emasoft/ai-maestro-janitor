@@ -402,3 +402,30 @@ def test_is_heartbeat_reply_false_when_too_long_or_different() -> None:
 
 def test_is_heartbeat_reply_strips_surrounding_whitespace() -> None:
     assert tr.is_heartbeat_reply("  janitor heartbeat  \n") is True
+
+
+# --- is_control_input (TRDD-DZ1KOGAC) ---
+
+
+def test_is_control_input_true_for_bare_resume_and_continue_any_case() -> None:
+    assert tr.is_control_input("resume") is True
+    assert tr.is_control_input("RESUME") is True
+    assert tr.is_control_input("continue") is True
+    assert tr.is_control_input("  Resume  \n") is True
+
+
+def test_is_control_input_true_for_argument_less_automation_slash_commands() -> None:
+    assert tr.is_control_input("/compact") is True
+    assert tr.is_control_input("/clear") is True
+    assert tr.is_control_input("/janitor-arm") is True
+
+
+def test_is_control_input_false_for_real_replies_that_contain_the_words() -> None:
+    assert tr.is_control_input("ok go on") is False
+    assert tr.is_control_input("yes, post it") is False
+    assert tr.is_control_input("resume the pending TRDD work") is False
+
+
+def test_is_control_input_false_for_slash_commands_with_arguments_or_non_automation_names() -> None:
+    assert tr.is_control_input("/goal evaluate the plugin") is False
+    assert tr.is_control_input("/task do something") is False

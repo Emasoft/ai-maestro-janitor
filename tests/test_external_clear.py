@@ -1089,18 +1089,29 @@ def _typed_command_record(uuid: str, command_name: str, args: str = "") -> dict:
     return {"type": "user", "uuid": uuid, "message": {"role": "user", "content": content}}
 
 
+def _bare_record(uuid: str, text: str) -> dict:
+    """A plain, UNWRAPPED `user` record -- no `<command-message>` tag at all -- the shape a
+    bare "resume"/"continue"/argument-less "/compact" is actually recorded as (TRDD-DZ1KOGAC:
+    `_is_automation_command_name` only ever sees a `<command-name>` tag, so this shape never
+    reaches it; the drop has to happen on the raw text via `transcript_roles.is_control_input`)."""
+    return {"type": "user", "uuid": uuid, "message": {"role": "user", "content": text}}
+
+
 def test_recent_messages_janitor_typed_commands_never_occupy_owner_slots(tmp_path):
     """`recent_messages` feeds `compose_handoff`'s "## Recent turns" section, which the next
     session reads as its OWN prior exchange -- a `/janitor-resume`, `/clear` or
     `/reload-plugins --force` the JANITOR itself typed (`transcript_roles`'s own automation
     list) must never occupy an owner-message slot there, while the owner's own typed
-    `/loop 5m <prompt>` must (TRDD-RAEGS1D5 correction 4)."""
+    `/loop 5m <prompt>` must (TRDD-RAEGS1D5 correction 4). TRDD-DZ1KOGAC: a bare, unwrapped
+    "resume" the OWNER themselves typed is also content-free and must not occupy a slot
+    either -- authorship stays "human", only the item is dropped from the tail."""
     t = tmp_path / "s.jsonl"
     records = [
         _typed_command_record("r1", "/janitor-resume"),
         _typed_command_record("r2", "/clear"),
         _typed_command_record("r3", "/reload-plugins", args="--force"),
         _typed_command_record("r4", "/loop", args="5m fix the failing test"),
+        _bare_record("r5", "resume"),
     ]
     t.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
 
@@ -1113,6 +1124,9 @@ def test_recent_messages_janitor_typed_commands_never_occupy_owner_slots(tmp_pat
         assert automation not in joined, (
             f"the janitor's own typed {automation!r} must never occupy an owner-message slot"
         )
+    assert not any(ln.strip() == "USER: resume" for ln in got), (
+        "a bare owner-typed 'resume' must never occupy an owner-message slot"
+    )
 
 
 # ---------- the fleet lane (moved from tests/test_external_clear_retry.py, ------------------

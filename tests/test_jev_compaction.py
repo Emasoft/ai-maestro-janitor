@@ -329,14 +329,17 @@ def test_newest_owner_item_is_guaranteed_even_when_jev_scored_it_below_threshold
     # first"): card 6's own disclosure (TRDD-88DOI824) found the guarantee below silently
     # scoped to `kept_items`, dropping the genuinely newest owner message whenever Jev
     # itself scored it below threshold -- measured on a real 258 MB transcript, the
-    # transcript's chronologically LAST owner message (content "resume") scored
-    # relevance=0.29/decision=0.22, both under the 0.5 default thresholds, so `kept=False`
-    # and it never reached `kept_items` at all. Reproduced directly: "newest:0" is the
-    # newest owner item by `turn`, `kept=False`, and must still appear -- force-admitted,
-    # not merely named by a pointer.
+    # transcript's chronologically LAST owner message scored relevance=0.29/decision=0.22,
+    # both under the 0.5 default thresholds, so `kept=False` and it never reached
+    # `kept_items` at all. Reproduced directly: "newest:0" is the newest owner item by
+    # `turn`, `kept=False`, and must still appear -- force-admitted, not merely named by a
+    # pointer. TRDD-DZ1KOGAC: the original transcript's actual last message was the bare
+    # word "resume" -- `extract_items` now demotes that to kind "event" before it ever
+    # reaches `compose`, so this fixture uses a real (non-control) short owner message
+    # instead, keeping the test's intent (the guarantee itself) unchanged.
     items = [
         _item("older:0", "user", "an earlier owner message", turn=0, tokens=50),
-        _item("newest:0", "user", "resume", turn=5, tokens=10),
+        _item("newest:0", "user", "check the deploy status", turn=5, tokens=10),
         _item("tool:0", "tool", "some unrelated tool output", turn=6, tokens=50),
     ]
     scores = {
@@ -350,7 +353,7 @@ def test_newest_owner_item_is_guaranteed_even_when_jev_scored_it_below_threshold
     doc = jc.compose(items, scores, budget_tokens=8000,
                       header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"})
     assert "-- user newest:0 --" in doc
-    assert "resume" in doc
+    assert "check the deploy status" in doc
     # Force-admitted, not merely pointer-referenced -- never BOTH.
     assert "id=newest:0" not in doc
 
@@ -1643,6 +1646,29 @@ def test_task_notification_becomes_event_and_is_excluded_from_the_digest() -> No
     assert by_id["u2:0"].kind == "event"  # not "user" -- see is_human_record
     digest = jc.build_digest(items, [], cap_tokens=4000)
     assert "Background lint check finished" not in digest
+
+
+def test_bare_owner_typed_resume_is_kind_event_not_user(tmp_path: Path) -> None:
+    # TRDD-DZ1KOGAC: a bare "resume" (or "continue", or an unwrapped argument-less
+    # "/compact"/"/clear") carries `origin.kind: "human"`/no origin at all -- authorship is
+    # genuinely the owner's, so `transcript_roles.classify_record` correctly says "human".
+    # But it is content-free: measured on real transcripts, it kept displacing the owner's
+    # real instructions out of the injected copy's owner tier, the guaranteed newest-owner
+    # slot, and the digest. `extract_items` must demote only the ITEM KIND to "event" -- a
+    # normal owner message right next to it must stay kind "user".
+    records = [
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "resume"}},
+        {"type": "user", "uuid": "u2",
+         "message": {"role": "user", "content": "please fix the failing test"}},
+    ]
+    path = tmp_path / "control.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    items = jc.extract_items(path)
+    by_id = {it.id: it for it in items}
+    assert by_id["u1:0"].kind == "event"
+    assert by_id["u1:0"].text == "resume"
+    assert by_id["u2:0"].kind == "user"
 
 
 def test_origin_less_legacy_record_still_classified_human() -> None:

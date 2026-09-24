@@ -569,7 +569,13 @@ def extract_items(
                 kind: ItemKind = "user" if role == "human" else "event"
 
                 if isinstance(content, str):
-                    items.append(Item(f"{uuid}:0", kind, content,
+                    # TRDD-DZ1KOGAC: a bare "resume"/"continue"/argument-less "/compact" is
+                    # still the owner's own words (role stays "human" -- authorship is true),
+                    # but it carries no content, and measured on real transcripts it was
+                    # displacing the owner's actual instructions from the owner tier, the
+                    # guaranteed newest-owner slot, and the digest. Demote the ITEM KIND only.
+                    item_kind = "event" if transcript_roles.is_control_input(content) else kind
+                    items.append(Item(f"{uuid}:0", item_kind, content,
                                        estimate_tokens(content), ts, turn))
                     turn += 1
                 elif isinstance(content, list):
@@ -579,7 +585,8 @@ def extract_items(
                         btype = block.get("type")
                         if btype == "text":
                             text = block.get("text", "")
-                            items.append(Item(f"{uuid}:{idx}", kind, text,
+                            item_kind = "event" if transcript_roles.is_control_input(text) else kind
+                            items.append(Item(f"{uuid}:{idx}", item_kind, text,
                                                estimate_tokens(text), ts, turn))
                             turn += 1
                         elif btype == "tool_result":
@@ -630,6 +637,10 @@ def extract_items(
                     att_kind = "event"  # a peer/cross-session message, or a queued notification
                 else:
                     continue  # an attachment.commandMode never measured -- skip, don't guess
+                # TRDD-DZ1KOGAC: same demotion as the main "user" branch above -- a mid-turn
+                # queued bare control word is still the owner's words, never content.
+                if att_kind == "user" and transcript_roles.is_control_input(text):
+                    att_kind = "event"
                 items.append(Item(f"{uuid}:0", att_kind, text, estimate_tokens(text), ts, turn))
                 turn += 1
 

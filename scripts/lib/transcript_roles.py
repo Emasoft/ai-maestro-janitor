@@ -26,6 +26,7 @@ __all__ = [
     "HEARTBEAT_PREFIX",
     "classify_record",
     "is_heartbeat_reply",
+    "is_control_input",
 ]
 
 RecordRole = Literal["skip", "human", "notification", "system", "peer"]
@@ -70,6 +71,39 @@ def _is_automation_command_name(name: str) -> bool:
     if normalized in _AUTOMATION_COMMAND_NAMES_EXACT:
         return True
     return normalized.startswith(_AUTOMATION_COMMAND_NAME_PREFIXES)
+
+
+#: TRDD-DZ1KOGAC: an owner-typed bare control word carries `origin.kind: "human"`/absent, same
+#: as any real instruction, so `classify_record` correctly calls it "human" -- authorship is
+#: true. But it has no content: measured on real transcripts, a bare "resume"/"continue" or an
+#: unwrapped, argument-less `/compact`/`/clear` (no `<command-message>` wrapper at all, so
+#: `_is_automation_command_name` above never even sees it) was displacing the owner's real
+#: instructions out of the injected copy's owner tier, the guaranteed newest-owner slot, and
+#: the digest -- it scored like a decision because Jev has no other signal, then every other
+#: item got compared against "resume". The fix is content-based, not authorship-based: keep the
+#: role "human" (it IS the owner's own words) and let callers demote only the ITEM KIND.
+_CONTROL_TOKENS = frozenset({"resume", "continue"})
+_BARE_SLASH_COMMAND_RE = re.compile(r"^/(\S+)$")
+
+
+def is_control_input(text: str) -> bool:
+    """True iff `text`, stripped, is nothing but a bare control word or an argument-less
+    automation slash command -- content-free regardless of who typed it.
+
+    Matches: a single token `resume`/`continue` (case-insensitive), or `/name` with no
+    arguments where `name` is one `_is_automation_command_name` already treats as automation
+    (reusing that list rather than duplicating it). Does NOT match a slash command WITH
+    arguments (`/goal evaluate the plugin`) or a real reply that merely contains one of these
+    words (`resume the pending TRDD work`, `yes, post it`) -- those are the owner's actual
+    words and must keep their standing.
+    """
+    stripped = text.strip()
+    if stripped.lower() in _CONTROL_TOKENS:
+        return True
+    match = _BARE_SLASH_COMMAND_RE.match(stripped)
+    if match is None:
+        return False
+    return _is_automation_command_name(match.group(1))
 
 #: TRDD-RAEGS1D5, coordinator correction: measured 7,190 records with `origin.kind ==
 #: "unclassified"` -- mostly list/tool_result carriers, not an oddity. It means "origin gives

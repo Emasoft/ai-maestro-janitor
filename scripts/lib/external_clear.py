@@ -591,6 +591,12 @@ def _classify_line(rec: dict[str, Any]) -> tuple[str, str] | None:
         if transcript_roles.classify_record(rec) != "human":
             return None
         role_label, text = "USER", _record_text(msg.get("content"))
+        # TRDD-DZ1KOGAC: a bare "resume"/"continue"/argument-less "/compact" is still the
+        # owner's own words (role stays "human"), but it carries no content -- measured on
+        # real transcripts it filled the recent-turns tail with control noise instead of the
+        # owner's real instructions. Drop it here, same as `jev_compaction.extract_items`.
+        if transcript_roles.is_control_input(text):
+            return None
     elif entry_type == "attachment":
         attachment = rec.get("attachment")
         if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
@@ -600,6 +606,8 @@ def _classify_line(rec: dict[str, Any]) -> tuple[str, str] | None:
         if attachment.get("commandMode") != "prompt" or origin_kind != "human":
             return None  # queued task-notification, or a peer/cross-session attachment
         role_label, text = "USER", str(attachment.get("prompt") or "")
+        if transcript_roles.is_control_input(text):
+            return None
     elif entry_type == "assistant":
         if rec.get("isApiErrorMessage"):
             return None  # a transport-error placeholder, not real assistant output
