@@ -3,7 +3,7 @@ trdd-id: DQXMND59
 title: Jev compaction passes a twelve-row verification matrix on real transcripts before release
 column: todo
 created: 2026-09-24T12:13:04+0200
-updated: 2026-09-25T01:54:33+0200
+updated: 2026-09-25T14:02:58+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: audit
@@ -39,6 +39,8 @@ Owner, 2026-09-24: "continue testing the jev compaction, make it flawless". Rele
 | V10 | the content read by hand for every V1 run | a resumed session can tell (a) the owner's last request, (b) what the session did, (c) what is next; every stated owner decision is inline or pointed at |
 | V11 | the cards section (TRDD-O2FNJ4KW) | the cards the session worked are listed first; the other open ids are named as many as fit in the capped line (ids part 300 B, line about 340 B), then the rest are counted |
 | V12 | the no-sidecar fallback (scripts/hooks/on-session-start.py) end to end: a clear flag, NO per-pane sidecar, and a foreign or legacy handoff as the newest file in the state dir | stdout is a pointer line naming that handoff, never its body (the path 5fba6c67 changed; TRDD-4P4Y2KBR) |
+- 2026-09-25 13:50 — the full suite (no -x, clean tree 52c87cbb) is green: 17540 passed, 2 skipped. V3 and V12 remain to be run on this commit; results land here.
+- 2026-09-25 14:10 — V3 and V12 PASS on commit 52c87cbb via the existing scripts_dev/jev_verify harness (run_hook.py on real transcripts c8a95d7e 6.5s/5725B, d30bf250 4.4s/7959B, 35e1e917 5.0s/6983B — every assertion true, no truncation markers, live state untouched; run_v12.py all four assertions true). Full suite green (17540 passed, 2 skipped, no -x). MATRIX COMPLETE on this commit. Remaining is the owner decision recorded in the 2026-09-24 13:41 CURRENT line: reconcile whether the matrix gates the release only after BLGZTHQ9+U6C3YXEL re-measure, or ships after F1b+F3+one full run (the owner was told the latter). NOT published until the owner's explicit yes.
 
 ## Approval log
 

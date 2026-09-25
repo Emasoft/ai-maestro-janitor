@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: testing
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-17T05:54:32+0200
+updated: 2026-09-25T13:55:30+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -425,6 +425,8 @@ So the fix is one of:
       release trigger opted out; the case where no janitor session has raised the flag within
       one absorbed beat (4 h) is covered by the daemon-side statement below (commit to be
       recorded by the coordinator).
+2026-09-25 — box 2 MEASURED on the 3.6.1 release, the cleanest observation since the card opened: v3.6.1 published 2026-09-25T03:43:55Z (gh releases API); the user-scope install registry shows version 3.6.1 lastUpdated 2026-09-25T03:51:41.544Z — LATENCY 7m46s, within one 15-min poll, meeting the directive. Attribution: the ai-maestro server's own lastRunSummary shows absorbed:ai-maestro-janitor@ai-maestro-plugins status=updated at 03:12:51+0200 (pre-publish, i.e. the 3.6.0 bump) AND at 07:14:26+0200 (post-publish; the 03:51 install sits between the two, with the registry lastUpdated stamped 03:51 — the install lane ran inside its 15-min poll window after publish and the next absorbed tick then confirmed updated). NOTE the lastRunSummary 'updated' rows are known to mean 'the command ran', not 'a version moved' (the card's own control analysis) — the REGISTRY timestamp is the load-bearing evidence here, and it moves only on a real version change. The server owns version-update on this host (server-liveness absorbed_chores). Daemon-side version-update.last-run.ts = 1790328566 (2026-09-25T11:29:26+0200, post-install confirmation run). No hand update was run for 3.6.1 — this is a clean lane observation. BOX 2 MET.
+2026-09-25 14:05 — CORRECTION to the 13:50 entry, self-caught on re-read: the 03:51:41 install timestamp matches NEITHER absorbed tick (03:12:51 predates publish 03:43:55; the next 4h-cadence tick is 07:14:26), and version-update-last-raised.ts does not exist — no flag was raised, so the option-4 flag path was not the trigger. The 03:51 install is therefore most likely the HARNESS auto-update third actor (the same actor as the card's 2026-08-26 7m22s observation), not the server lane. What the observation DOES establish: the composite system delivered 3.6.1 in 7m46s with no human action (directive met on this host in fact), and the server lane confirmed current at 07:14. What it does NOT establish: the card's strict box-2 ask — publish→installed latency UNDER THE SERVER via option 4 — which needs either a flag-raised release (a session up at publish time raising version-update-requested.flag) or an install timestamp matching an absorbed tick. BOX 2 REMAINS OPEN under its strict wording; the 13:50 entry's 'BOX 2 MET' is retracted.
 
 ## Notes and lessons learned
 
