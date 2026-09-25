@@ -70,6 +70,7 @@ sys.path.insert(0, str(_SCRIPTS / "lib"))
 sys.path.insert(0, str(_SCRIPTS))  # for the top-level linter module
 
 import dedupe  # noqa: E402
+import issue_catalog  # noqa: E402
 import state  # noqa: E402
 import wikimem_syntax_lint as lint  # noqa: E402
 
@@ -169,6 +170,56 @@ def _remedy_for(codes: set[str]) -> str:
     return f"{generic_clause}."
 
 
+def _verb_for(code: str) -> str:
+    """The maintenance chore that owns a lint rule's remedy, named IN the ticket (TRDD-FVYV6RSG).
+
+    A ticket that only says "the corpus needs repair" sends the curator to guess the pass;
+    naming the chore up front is what makes the dispatch a decision instead of a question.
+    Unknown codes get the generic update remedy rather than a guess.
+    """
+    if code == "atom-oversized":
+        return "/janitor-memory-atomize (decompose the oversized atom)"
+    if code == "link-one-sided":
+        return "/janitor-memory-update (wire the reciprocal link)"
+    if code == _CROSS_SCOPE_CODE:
+        return "no chore — the scope decision is the agent's own (janitor#138)"
+    return "/janitor-memory-update"
+
+
+# Pages under another project's corpus (its notes published into USER scope) are NOT the
+# janitor's to repair — the owner held them out (TRDD-FVYV6RSG). A ticket filed on one would
+# dispatch an agent that edits another project's memory.
+_HELD_PAGE_MARKERS = ("agentlenspro", "ghbook")
+
+
+def _held(path: str) -> bool:
+    low = path.lower()
+    return any(m in low for m in _HELD_PAGE_MARKERS)
+
+
+def _file_tickets(findings: list[lint.Finding]) -> int:
+    """Open ONE MEMCORP-001 ticket per new (deduped) held-out finding, and return how many.
+
+    The ticket body carries page path, rule code and line only — never page text
+    (TRDD-FVYV6RSG). `raise_issue`'s own dedupe key makes this idempotent per finding, so
+    an unchanged corpus opens nothing after the first fire.
+    """
+    filed = 0
+    for f in findings:
+        if not f.code or _held(f.path):
+            continue
+        raised = issue_catalog.raise_issue(
+            "MEMCORP-001",
+            where=f"{f.path}:{f.line}",
+            scope="user",
+            detail=f"{f.code} — remedy: {_verb_for(f.code)}",
+            found=f"rule {f.code} at {f.path}:{f.line}",
+        )
+        if raised.ok:
+            filed += 1
+    return filed
+
+
 def main() -> int:
     try:
         state.init_state()
@@ -180,6 +231,7 @@ def main() -> int:
         n = len(sigs)
         codes = {f.code for f in findings if f.code}
         remedy = _remedy_for(codes)
+        _file_tickets(findings)
         msg = (
             f"[wikimem-syntax] {n} memory element(s) memgrep CANNOT parse (ERROR — "
             f"recall-invisible or ambiguous). e.g. {example}. Run "
