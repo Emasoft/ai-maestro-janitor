@@ -18,7 +18,7 @@ import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -1865,6 +1865,13 @@ class _InjectCandidate:
     inline_cost: int | None  # exact rendered bytes shown inline; None = never inline
     pointer_cost: int  # exact rendered bytes of its `[[elided id=...]]` line(s)
     pointer_eligible: bool  # False for a content-free non-owner item (counted, never pointed)
+    # TRDD-SK490HKU: the exact rendered bytes of a Jev-kept, over-cap tool/event item shown
+    # WHOLE (not a prefix) -- `_inline_cost(it, len(it.text.encode()))`, i.e. `cap == len(text)`
+    # so no truncation branch fires. `None` for every item that is already inline via
+    # `inline_cost`, a task-notification (excerpt-only, never whole), or a "user" item (owner
+    # tiers have their own share caps). Default last so the hand-built candidates in
+    # tests/test_jev_compaction.py keep compiling without naming it.
+    whole_cost: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1873,6 +1880,10 @@ class _InjectSelection:
     pointers: list[str]  # ordinary pointers (at most `max_pointers`)
     decision_pointers: list[str]  # reserved decision pointers, same `[[elided ...]]` format
     hidden: int  # everything else, for the count line
+    # TRDD-SK490HKU: ids the second fill pass admitted WHOLE past their normal cap -- `compose`
+    # reads this to build `relaxed_cap`, the per-id cap `render()` must use so an item costed
+    # whole also RENDERS whole (advisor report 20260925_054459, item 1 point 3).
+    whole: list[str] = field(default_factory=list)
 
 
 def _select_injected(
@@ -2003,6 +2014,26 @@ def _select_injected(
     # 6. One more try for the owner overflow, without the share cap.
     rescued = [c for c in owner_overflow if admit(c)]
 
+    # 6b. TRDD-SK490HKU: second fill pass -- spend whatever room remains on a Jev-kept, over-cap
+    # tool/event item WHOLE, highest score first, each only if its exact whole rendered cost
+    # fits what is left (never a prefix -- TRDD-BLGZTHQ9 holds). Runs BEFORE step 7's ordinary
+    # pointers (not after) so an admitted item's pointer bytes are never spent at all, rather
+    # than spent and then refunded -- advisor report 20260925_054459, item 1 point 2: this is
+    # also what lets a room reclaim an already-assigned pointer's bytes for a bigger whole item.
+    # `whole_cost` is only ever set (see `_InjectCandidate`) for a candidate not already inline,
+    # so this never re-admits one of steps 1-6's own picks.
+    whole: list[str] = []
+    for c in sorted(
+        (c for c in cands if c.whole_cost is not None and c.id not in inline_ids),
+        key=lambda c: (c.score, c.turn), reverse=True,
+    ):
+        cost = c.whole_cost
+        assert cost is not None  # narrowed by the generator's own filter above; mypy can't see it
+        if fits(available, total, cost):
+            whole.append(c.id)
+            inline_ids.add(c.id)
+            total += cost
+
     # 7. Ordinary pointers (amendment S1: every item not inline -- elided by the token stage or
     #    excluded here), highest score first, capped by count (`max_pointers`, S8: decision
     #    pointers come on top) and by `_INJECT_POINTER_SHARE`. Decision items are step 3's.
@@ -2022,13 +2053,17 @@ def _select_injected(
             pointer_bytes += c.pointer_cost
             total += c.pointer_cost
 
-    kept = [c.id for c in (*guaranteed, *owner_tier, *non_owner, *rescued)]
+    # TRDD-SK490HKU: `whole` sits right after `non_owner` in render order -- the backstop's
+    # stage (2) evicts non-owner items in reverse `kept_order` (jev_compaction.py:2818-2833),
+    # so a whole-admitted item (the largest, lowest-priority of the non-owner set) is the FIRST
+    # thing sacrificed if the pathological backstop ever has to run at all.
+    kept = [c.id for c in (*guaranteed, *owner_tier, *non_owner)] + whole + [c.id for c in rescued]
     decision_pointers = reserve()[0]
     # TRDD-U6C3YXEL: the count line names EVERYTHING not shown -- it used to omit every byte-
     # stage exclusion, so "681 more" hid 21 decision-passing owner messages.
     hidden = len(cands) - len(kept) - len(pointers) - len(decision_pointers)
     return _InjectSelection(kept=kept, pointers=pointers, decision_pointers=decision_pointers,
-                            hidden=hidden)
+                            hidden=hidden, whole=whole)
 
 
 def compose(
@@ -2410,6 +2445,13 @@ def compose(
     # (not a render() argument) because every later render -- the backstop's included -- must
     # use the same cap the selection costed, or the exact-fit arithmetic breaks.
     guaranteed_item_cap = NEWEST_OWNER_ITEM_BYTES
+    # TRDD-SK490HKU: per-id cap override for an item the second fill pass (`_select_injected`
+    # step 6b) admitted WHOLE past its normal `non_owner_item_bytes` cap -- a name `render()`
+    # reads at call time, like `guaranteed_item_cap`/`token_truncated` above, so every render
+    # (the backstop's re-renders included) agrees with what the selection actually costed. Set
+    # below once `selection.whole` is known; empty here so the pre-selection baseline render
+    # (which has no kept items yet) is unaffected.
+    relaxed_cap: dict[str, int] = {}
 
     transcript_path = header.get("transcript_path", "")
     usage = header.get("usage") or {}
@@ -2481,6 +2523,12 @@ def compose(
                     else max_item_bytes
                 )
             )
+            # TRDD-SK490HKU: an item the second fill pass admitted WHOLE past its normal cap
+            # must also RENDER whole, or the document shrinks while the item silently reverts
+            # to a pointer -- `relaxed_cap` is exactly `len(it.text.encode())` for such an id
+            # (see `_InjectSelection.whole`), so the `len(text_bytes) > cap` check below never
+            # fires for it. `--out` (max_item_bytes is None) never populates `relaxed_cap`.
+            cap = relaxed_cap.get(it.id, cap)
             if max_item_bytes is not None and cap is not None and _is_task_notification(it):
                 # TRDD-BLGZTHQ9 addendum: injected-only (max_item_bytes is not None) -- the
                 # `--out` render (max_item_bytes is None) must stay byte-identical, so it never
@@ -2491,27 +2539,20 @@ def compose(
             text_bytes = it.text.encode("utf-8")
             token_cap = token_truncated.get(it.id)
             if cap is not None and len(text_bytes) > cap:
-                if max_item_bytes is not None and it.kind not in _CONVERSATION_KINDS:
-                    # TRDD-BLGZTHQ9 (extended past kind == "tool" to every kind
-                    # `split_conversation` ever hands to Jev's scorer -- "tool" and "event";
-                    # "user"/"assistant"/"control" are conversation items, never scored,
-                    # never reach here as kept items in production, and keep the general
-                    # verbatim-prefix path below for the tests that exercise it directly):
-                    # injected-only -- an over-cap non-owner item (a task-notification never
-                    # reaches here, see the branch above) is pointer only, never a truncated
-                    # stub. `_select_injected`'s non-owner branch already keeps such an item
-                    # out of `kept_order` (inline_ok requires `whole` for these two kinds),
-                    # so this is a defense-in-depth guard that must agree with that gate, not
-                    # the primary decision point -- `--out` (`max_item_bytes` is `None`)
-                    # never takes this branch and stays byte-identical.
-                    lines.append(_format_pointer(it))
-                else:
-                    # TRDD-RAEGS1D5 requirement 2: a verbatim prefix, never a paraphrase,
-                    # plus a pointer back to the rest -- see `_truncate_prefix_bytes`'s own
-                    # docstring for why this is what stops one oversized-relative-to-budget
-                    # owner item from being evicted whole the way the old byte backstop did.
-                    lines.append(_truncate_prefix_bytes(it.text, cap))
-                    lines.append(_format_pointer(it))
+                # TRDD-SK490HKU: 90e890ce's "over-cap non-owner item is pointer-only" branch is
+                # deleted here -- `_select_injected` only ever inlines a tool/event item when it
+                # is `whole` under its normal cap OR admitted whole under `relaxed_cap` (the
+                # second fill pass), so no over-cap tool/event item ever reaches `kept_order`
+                # with `cap` unchanged; that guard was reachable only if the selection and this
+                # render ever disagreed, and a defense-in-depth branch that silently prints a
+                # pointer for an item costed whole HIDES that disagreement instead of surfacing
+                # it (CLAUDE.md: no fallback that hides a bug). One path now, for every kind:
+                # TRDD-RAEGS1D5 requirement 2's verbatim prefix, never a paraphrase, plus a
+                # pointer back to the rest -- see `_truncate_prefix_bytes`'s own docstring for
+                # why this is what stops one oversized-relative-to-budget owner item from being
+                # evicted whole the way the old byte backstop did.
+                lines.append(_truncate_prefix_bytes(it.text, cap))
+                lines.append(_format_pointer(it))
             elif token_cap is not None:
                 # TRDD-RAEGS1D5 (owner per-item token cap): the `--out` rendering never sets
                 # `max_item_bytes`, so the branch above never fires for it -- this is its own
@@ -2657,6 +2698,10 @@ def compose(
             # stage's set: its owner share and caps are theirs, and D7RLXAN1 moved live owner
             # prose out of `items` anyway.
             jev_kept = s.kept and not s.oversized
+            # TRDD-SK490HKU: only the plain tool/event branch below ever sets this to a real
+            # cost -- a "user" item has its own share-capped tiers, and a task-notification's
+            # excerpt is never shown whole (see `_InjectCandidate.whole_cost`'s own docstring).
+            whole_cost: int | None = None
             if it.kind == "user":
                 cap = guaranteed_item_cap if it.id in guaranteed_owner_ids else max_item_bytes
                 # Amendment S1: only what the token stage kept may be inline -- the injected
@@ -2713,15 +2758,32 @@ def compose(
                 inline_ok = (jev_kept and pointer_eligible
                              and (whole or it.kind in _CONVERSATION_KINDS))
                 inline_cost = _inline_cost(it, non_owner_cap) if inline_ok else None
+                # TRDD-SK490HKU: the second fill pass's own candidate cost -- this item's exact
+                # WHOLE rendered cost (`cap == len(text)`, so `_inline_cost` never truncates),
+                # set only for a Jev-kept, pointer-eligible, over-cap item that did NOT already
+                # get an `inline_cost` above (`inline_cost is None`) -- a "tool"/"event" item
+                # over its cap (`inline_ok` False there), never a conversation-kind one, which
+                # `inline_ok` already admits at `non_owner_cap` regardless of `whole`, and never
+                # a task-notification (its own excerpt-only path, above). `_select_injected`
+                # step 6b spends leftover room on these, highest score first, never producing a
+                # prefix (TRDD-BLGZTHQ9 holds).
+                whole_cost = (_inline_cost(it, len(it.text.encode("utf-8")))
+                              if jev_kept and pointer_eligible and not whole
+                              and inline_cost is None else None)
             cands.append(_InjectCandidate(
                 id=it.id, kind=it.kind, turn=it.turn, score=max_score(it),
                 decision_passed=s.decision_passed, guaranteed=it.id in guaranteed_owner_ids,
                 inline_cost=inline_cost, pointer_cost=pointer_cost,
-                pointer_eligible=pointer_eligible,
+                pointer_eligible=pointer_eligible, whole_cost=whole_cost,
             ))
         selection = _select_injected(cands, available=available,
                                      max_pointers=max_elided_pointers)
         by_id = {it.id: it for it in items}
+        # TRDD-SK490HKU: fill `relaxed_cap` before the first render() that can hit a `whole`
+        # id (2776) -- every later re-render (the backstop's included) then agrees with what
+        # the selection actually costed, the exact-fit invariant `_select_injected`'s own
+        # docstring promises.
+        relaxed_cap.update({i: len(by_id[i].text.encode("utf-8")) for i in selection.whole})
         kept_order_list = [by_id[i] for i in selection.kept]
         # render() walks `items` for the "## Elided" list, so pointers stay chronological.
         shown_elided = [by_id[i] for i in (*selection.pointers, *selection.decision_pointers)]

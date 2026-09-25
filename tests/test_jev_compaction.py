@@ -2604,10 +2604,17 @@ def test_non_owner_item_bytes_caps_non_owner_items_smaller_than_owner_items() ->
     # former; "reply:0" proves the latter. TRDD-BLGZTHQ9: the truncated non-owner item is an
     # ASSISTANT item now -- a TOOL/EVENT item over its cap is never shown as a prefix at all,
     # only as a pointer ("tool:0"; a non-notification "event" behaves the same way, see
-    # test_injected_event_item_over_its_cap_is_a_pointer_never_a_prefix). "assistant"/"control"
+    # test_injected_event_item_over_its_cap_is_a_pointer_when_room_is_too_small). "assistant"/"control"
     # are conversation kinds -- never scored, never a kept item in production (see
     # `_CONVERSATION_KINDS`) -- so this fixture keeps using "assistant" here purely to exercise
     # the general prefix-truncation path independently of the tool/event carve-out.
+    #
+    # TRDD-SK490HKU: `max_bytes=1800` pins the room tight enough that the second fill pass
+    # cannot afford "tool:0" WHOLE (~625 B) alongside the two owner items and the capped
+    # reply -- with no `max_bytes` at all the room is unbounded, and an unbounded room means a
+    # Jev-kept over-cap tool item is always admitted whole (see
+    # test_injected_tool_item_over_its_cap_is_shown_whole_when_the_room_holds_it),
+    # exactly what this fixture exists to rule OUT so the cap mechanics stay testable alone.
     owner_text = "o" * 600
     reply_text = "r" * 600
     tool_text = "t" * 600
@@ -2625,7 +2632,7 @@ def test_non_owner_item_bytes_caps_non_owner_items_smaller_than_owner_items() ->
     doc = jc.compose(
         items, scores, budget_tokens=8000,
         header={"transcript_path": "/tmp/t.jsonl", "session_key": "s"},
-        max_item_bytes=500, non_owner_item_bytes=100,
+        max_item_bytes=500, non_owner_item_bytes=100, max_bytes=1800,
     )
     assert owner_text[:500] in doc      # owner item: the general 500-byte cap applies
     assert reply_text[:500] not in doc  # the reply would fit whole at 500...
@@ -2668,6 +2675,15 @@ def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_
     of that cap (amendment S8), in the ordinary `[[elided id=...]]` format (S2, never the
     compact `id: preview` form); with no `max_bytes` there is no byte share, so all 50 are
     named, bounded only by `_MAX_DECISION_POINTERS`.
+
+    TRDD-SK490HKU (part 3 rewritten again): with no `max_bytes` the room is unbounded, and
+    `_select_injected`'s second fill pass spends unbounded room on every Jev-kept, pointer-
+    eligible, over-cap tool item WHOLE before a single ordinary pointer is ever assigned (see
+    that pass's own docstring) -- so all 60 tool items now render inline, none as a
+    `[[elided id=tool...]]` pointer, and the "N more items not listed" line -- everything not
+    a kept item or a pointer -- never fires (`hidden == 0`). The 50 decision pointers are
+    unaffected: `whole_cost` is only ever set for a "tool"/"event" candidate (see
+    `_InjectCandidate.whole_cost`), never a "user" (owner/decision) one.
     """
     guaranteed = _item("guaranteed:0", "user", "the newest decision", turn=1000, tokens=10)
     decision_items = [
@@ -2717,8 +2733,10 @@ def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_
     assert len(tool_pointer_lines) == jc._MAX_ELIDED_POINTERS
     assert "[[elided: 20 more items not listed" in full_doc
 
-    # (3) the injected copy: 50 decision pointers on top of the 40 ordinary (tool) ones, all in
-    # the ordinary format, never the compact one.
+    # (3) the injected copy: 50 decision pointers, all in the ordinary format, never the
+    # compact one. TRDD-SK490HKU: the 60 tool items no longer stop at 40 pointers -- the
+    # second fill pass has unbounded room here, so it admits every one of them WHOLE instead
+    # (see the docstring above), and "N more items not listed" never fires (hidden == 0).
     inject_doc = jc.compose(
         items, scores, budget_tokens=50, header=header,
         max_item_bytes=jc.DEFAULT_INJECT_ITEM_BYTES,
@@ -2727,9 +2745,11 @@ def test_full_copy_uncaps_decision_pointers_while_tool_pointers_stay_capped_and_
     for it in decision_items:
         assert any(line.startswith(f"[[elided id={it.id} ") for line in inject_elided), it.id
     tool_pointers = [line for line in inject_elided if line.startswith("[[elided id=tool")]
-    assert len(tool_pointers) == jc._MAX_ELIDED_POINTERS
+    assert len(tool_pointers) == 0
+    for it in tool_items:
+        assert f"-- tool {it.id} --" in inject_doc, it.id
     assert not any(line.startswith(f"{it.id}: ") for it in decision_items for line in inject_elided)
-    assert "[[elided: 20 more items not listed" in inject_doc
+    assert "more items not listed" not in inject_doc
 
 
 def test_decision_pointer_hard_ceiling_keeps_newest_and_summarizes_the_rest() -> None:
@@ -3102,11 +3122,36 @@ def test_select_injected_holds_the_decision_reserve_when_a_reserved_item_goes_in
     assert sel.hidden == 4  # d3..d0, past the reserve's limit
 
 
-def test_injected_tool_item_over_its_cap_is_a_pointer_never_a_prefix() -> None:
+def test_injected_tool_item_over_its_cap_is_a_pointer_when_room_is_too_small() -> None:
     """TRDD-BLGZTHQ9: a tool result over `non_owner_item_bytes` used to render as a 350-B
     verbatim prefix plus a pointer -- a few lines of a diff for 3-4x the bytes of the pointer,
-    whose preview already says what it is. It is now pointer-only; a tool result that fits the
-    cap is still shown whole."""
+    whose preview already says what it is. It is now never a prefix. TRDD-SK490HKU: "over the
+    cap" no longer means "pointer, unconditionally" -- the second fill pass admits an over-cap,
+    Jev-kept item WHOLE when the room holds its exact cost (see the sibling `..._when_the_room_
+    holds_it` test); this fixture pins the OTHER half, room too small for `big:0` (829 B) even
+    though `small:0` (which fits the ordinary 350-B cap) is still shown whole beside it."""
+    big_text = "".join(f"-    old line {i} of the patched function\n" for i in range(20))
+    small_text = "commit 8a623a28: fix the injected selection, all 194 tests green"
+    items = [
+        _item("big:0", "tool", big_text, turn=1),
+        _item("small:0", "tool", small_text, turn=2),
+        _item("newest:0", "user", "hi", turn=3),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=1000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert "-- tool big:0 --" not in doc
+    assert "old line 1 of" not in doc  # not even the first lines as a prefix
+    assert "[[elided id=big:0 " in doc.split("\n## Elided\n", 1)[1]
+    assert f"-- tool small:0 --\n{small_text}\n" in doc
+
+
+def test_injected_tool_item_over_its_cap_is_shown_whole_when_the_room_holds_it() -> None:
+    """TRDD-SK490HKU (advisor report 20260925_054459, item 1): the second fill pass spends
+    leftover room on a Jev-kept, over-cap tool item WHOLE, never a prefix (TRDD-BLGZTHQ9 still
+    holds -- see the sibling `..._when_room_is_too_small` test for the case it does NOT fit).
+    Same fixture as that test, a room large enough (4,000 B) for `big:0` (829 B) whole too."""
     big_text = "".join(f"-    old line {i} of the patched function\n" for i in range(20))
     small_text = "commit 8a623a28: fix the injected selection, all 194 tests green"
     items = [
@@ -3118,10 +3163,114 @@ def test_injected_tool_item_over_its_cap_is_a_pointer_never_a_prefix() -> None:
     doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
                      max_item_bytes=700, non_owner_item_bytes=350)
 
-    assert "-- tool big:0 --" not in doc
-    assert "old line 1 of" not in doc  # not even the first lines as a prefix
-    assert "[[elided id=big:0 " in doc.split("\n## Elided\n", 1)[1]
+    assert f"-- tool big:0 --\n{big_text}\n" in doc  # whole, not a prefix
     assert f"-- tool small:0 --\n{small_text}\n" in doc
+    assert "[[elided id=big:0 " not in doc
+
+
+def test_injected_second_pass_whole_admission_is_exact_to_the_byte() -> None:
+    """TRDD-SK490HKU: the exactness invariant `_select_injected`'s own docstring promises now
+    also covers the second fill pass -- `max_bytes` at exactly a single over-cap tool item's
+    whole cost shows it whole; one byte less drops it to a pointer, with no backstop stage
+    (no truncated-prefix marker) -- the one check that fails if the selection (`whole_cost`)
+    and the render (`relaxed_cap`) ever disagree, per advisor report 20260925_054459 item (1)
+    point 3. 1163 is the exact boundary for this fixture (measured, not derived from an
+    unconstrained render's own byte length): `_select_injected`'s `available` is sized off a
+    PESSIMISTIC "every item hidden" count line (the monotone-fit comment above `baseline` in
+    `compose`), so a doc rendered under no cap at all is shorter than the `max_bytes` its own
+    selection actually needed -- reusing that shorter length as `max_bytes` would under-fill."""
+    big_text = "".join(f"-    old line {i} of the patched function\n" for i in range(20))
+    items = [
+        _item("big:0", "tool", big_text, turn=1),
+        _item("newest:0", "user", "hi", turn=3),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    kwargs: dict[str, Any] = {"budget_tokens": 8000, "header": _H, "max_item_bytes": 700,
+                              "non_owner_item_bytes": 350}
+    exact = 1163
+
+    doc = jc.compose(items, scores, max_bytes=exact, **kwargs)
+    assert f"-- tool big:0 --\n{big_text}\n" in doc
+
+    tight = jc.compose(items, scores, max_bytes=exact - 1, **kwargs)
+    assert f"-- tool big:0 --\n{big_text}\n" not in tight
+    assert "-- tool big:0 --" not in tight  # not even a truncated prefix
+    assert "[[elided id=big:0 " in tight.split("\n## Elided\n", 1)[1]
+
+
+def test_injected_second_pass_admits_the_highest_scored_whole_item_first() -> None:
+    """TRDD-SK490HKU (advisor report 20260925_054459, item 1 point 2, "score-descending" over
+    "smallest-first" -- consistent with steps 2 and 5): two over-cap tool items of equal size,
+    room enough for exactly one WHOLE -- the higher-scored one is admitted, the lower-scored
+    one stays a pointer, regardless of which was declared first."""
+    text_hi = "".join(f"-    old line {i} of function A\n" for i in range(20))
+    text_lo = "".join(f"-    old line {i} of function B\n" for i in range(20))
+    items = [
+        _item("hi:0", "tool", text_hi, turn=1),
+        _item("lo:0", "tool", text_lo, turn=2),
+        _item("newest:0", "user", "hi", turn=3),
+    ]
+    scores = {"hi:0": _scores(0.95), "lo:0": _scores(0.5), "newest:0": _scores(0.9)}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=1200,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert f"-- tool hi:0 --\n{text_hi}\n" in doc  # higher score: admitted whole
+    assert "-- tool lo:0 --" not in doc  # lower score: still a pointer, no prefix either
+    assert "[[elided id=lo:0 " in doc.split("\n## Elided\n", 1)[1]
+
+
+def test_injected_second_pass_leaves_max_elided_pointers_capping_the_rest() -> None:
+    """TRDD-SK490HKU: the second fill pass and `max_elided_pointers` are two separate limits on
+    two separate things -- how many over-cap items fit WHOLE (byte-bounded, step 6b) vs how many
+    of the REST get an ordinary pointer at all (count-bounded, step 7). Six Jev-kept, over-cap
+    tool items and a room that fits exactly four whole: the two left over are still subject to
+    `max_elided_pointers=2` (both get one here, at the limit; a `max_elided_pointers` of e.g. 1
+    would additionally have to fall back to the "N more items not listed" count line for the
+    sixth) -- rewritten because the pre-fix pointer-only design left this cap with nothing else
+    to prove in the injected copy for THIS item shape (review of this fix, advisor turn 2)."""
+    tool_items = [
+        _item(f"tool{i}:0", "tool", f"result number {i}: " + ("x" * 500), turn=1 + i)
+        for i in range(6)
+    ]
+    newest = _item("newest:0", "user", "hi", turn=100)
+    items = [*tool_items, newest]
+    scores = {it.id: _scores(0.9 - i * 0.01) for i, it in enumerate(tool_items)}
+    scores["newest:0"] = _scores(0.9)
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=3000,
+                     max_item_bytes=700, non_owner_item_bytes=350, max_elided_pointers=2)
+
+    whole = [it.id for it in tool_items if f"-- tool {it.id} --\n" in doc]
+    assert whole == ["tool0:0", "tool1:0", "tool2:0", "tool3:0"]  # highest score first
+    elided_section = doc.split("\n## Elided\n", 1)[1]
+    pointer_ids = re.findall(r"\[\[elided id=(tool\d:0) ", elided_section)
+    assert pointer_ids == ["tool4:0", "tool5:0"]  # exactly `max_elided_pointers`, none hidden
+    assert "more items not listed" not in doc
+
+
+def test_injected_second_pass_does_not_disturb_the_decision_pointer_reserve() -> None:
+    """TRDD-SK490HKU: the second fill pass only ever considers `whole_cost` candidates, which
+    are set exclusively for "tool"/"event" items (see `_InjectCandidate.whole_cost`'s own
+    docstring) -- a "user" (owner/decision) item can never be admitted by it, so an excluded
+    decision-passing owner message's reserved pointer (step 3, `_select_injected`) must survive
+    unchanged alongside a Jev-kept over-cap tool item competing for the SAME room."""
+    dec_new = _item("decnew:0", "user", "never push; publish only via publish.py", turn=40)
+    dec_old = _item("decold:0", "user", "always run the full gate", turn=10, tokens=1000)
+    tool = _item("tool:0", "tool", "".join(
+        f"-    old line {i} of the patched function\n" for i in range(20)), turn=20)
+    newest = _item("newest:0", "user", "carry on", turn=50)
+    items = [dec_old, tool, dec_new, newest]
+    scores = {
+        "decold:0": _scores(0.9, decision=True), "tool:0": _scores(0.9),
+        "decnew:0": _scores(0.9, decision=True), "newest:0": _scores(0.9),
+    }
+    # budget_tokens=100: dec_old's 1000 tokens leave the token stage, so it can only ever be a
+    # decision pointer (amendment S1); dec_new is the guaranteed newest decision item.
+    doc = jc.compose(items, scores, budget_tokens=100, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert f"-- tool tool:0 --\n{tool.text}\n" in doc  # the second pass still admits it whole
+    assert "[[elided id=decold:0 " in doc.split("\n## Elided\n", 1)[1]  # decision pointer intact
+    assert "decnew:0" not in doc.split("\n## Elided\n", 1)[1]  # guaranteed inline, not pointed
 
 
 def test_injected_content_free_non_owner_items_are_neither_inlined_nor_pointed() -> None:
@@ -3264,15 +3413,42 @@ def test_injected_small_jev_kept_tool_results_render_inline_beside_a_large_admit
     assert _shown_ids(full, items)[0] == {"big:0", "newest:0"}
 
 
-def test_injected_event_item_over_its_cap_is_a_pointer_never_a_prefix() -> None:
+def test_injected_event_item_over_its_cap_is_a_pointer_when_room_is_too_small() -> None:
     """TRDD-BLGZTHQ9 extension: the fix for an over-cap "tool" item (see
-    `test_injected_tool_item_over_its_cap_is_a_pointer_never_a_prefix`) did not cover every other
-    non-owner kind -- an `event` item that is NOT a `<task-notification>` (e.g. a cross-session
-    peer message) took the generic `render()` branch with no `kind` guard at all and was cut to a
-    truncated prefix plus a pointer, 4 real instances measured on a live transcript
-    (reports/compaction-replacement/20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md). It is
-    now pointer-only, matching the tool-item fix; an event that fits the cap is still shown
-    whole."""
+    `test_injected_tool_item_over_its_cap_is_a_pointer_when_room_is_too_small`) did not cover
+    every other non-owner kind -- an `event` item that is NOT a `<task-notification>` (e.g. a
+    cross-session peer message) took the generic `render()` branch with no `kind` guard at all
+    and was cut to a truncated prefix plus a pointer, 4 real instances measured on a live
+    transcript (reports/compaction-replacement/20260925_025424+0200-trdd-dqxmnd59-v3-gaps-
+    closed.md). It is never a prefix now. TRDD-SK490HKU: the sibling `..._when_the_room_holds_
+    it` test pins the OTHER half -- room enough admits `big:0` WHOLE instead of a pointer; this
+    fixture keeps the room too small (1,600 B against `big:0`'s 1,786-B whole cost)."""
+    big_text = "".join(
+        f"peer message line {i}: a real cross-session update about the shared task\n"
+        for i in range(20)
+    )
+    small_text = ("peer: short update, all clear -- the shared task finished green, "
+                  "nothing else pending on this side")
+    items = [
+        _item("big:0", "event", big_text, turn=1),
+        _item("small:0", "event", small_text, turn=2),
+        _item("newest:0", "user", "hi", turn=3),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=1600,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert "-- event big:0 --" not in doc
+    assert "peer message line 1" not in doc  # not even the first lines as a prefix
+    assert "[[elided id=big:0 " in doc.split("\n## Elided\n", 1)[1]
+    assert f"-- event small:0 --\n{small_text}\n" in doc
+
+
+def test_injected_event_item_over_its_cap_is_shown_whole_when_the_room_holds_it() -> None:
+    """TRDD-SK490HKU: same fixture as `..._when_room_is_too_small`, a room large enough (4,000
+    B) for `big:0` (1,786 B whole cost) to be admitted whole by the second fill pass -- the
+    event-kind counterpart of `test_injected_tool_item_over_its_cap_is_shown_whole_when_the_
+    room_holds_it`, proving the pass is not accidentally tool-only."""
     big_text = "".join(
         f"peer message line {i}: a real cross-session update about the shared task\n"
         for i in range(20)
@@ -3288,10 +3464,9 @@ def test_injected_event_item_over_its_cap_is_a_pointer_never_a_prefix() -> None:
     doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
                      max_item_bytes=700, non_owner_item_bytes=350)
 
-    assert "-- event big:0 --" not in doc
-    assert "peer message line 1" not in doc  # not even the first lines as a prefix
-    assert "[[elided id=big:0 " in doc.split("\n## Elided\n", 1)[1]
+    assert f"-- event big:0 --\n{big_text}\n" in doc  # whole, not a prefix
     assert f"-- event small:0 --\n{small_text}\n" in doc
+    assert "[[elided id=big:0 " not in doc
 
 
 def test_injected_over_cap_tool_and_event_items_out_render_is_byte_identical() -> None:
