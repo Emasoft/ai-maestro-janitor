@@ -1,9 +1,9 @@
 ---
 trdd-id: U6C3YXEL
 title: Items excluded from the injected Jev copy get a pointer and are counted in the elided line
-column: todo
+column: superseded
 created: 2026-09-24T08:29:57+0200
-updated: 2026-09-24T19:19:45+0200
+updated: 2026-09-25T03:34:12+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -15,6 +15,8 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T08:29:57+0200
 implementation-commits: [f87a1a79, 09b769b2]
+status: archived
+superseded-by: [D7RLXAN1]
 ---
 
 # Items excluded from the injected Jev copy get a pointer and are counted in the elided line
@@ -31,6 +33,7 @@ Amendment S1 re-read (2026-09-24): non-owner inline eligibility now keys on "Jev
 ## Approval log
 
 - 2026-09-24T08:29:57+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-25T03:34:12+0200 — SUPERSEDED by main-agent@ai-maestro-janitor. re-measured on 90e890ce (reports/compaction-replacement/20260925_033239+0200-u6c3yxel-remeasure-post-d7rlxan1.md): owner messages since the boundary are now verbatim and never scored (D7RLXAN1), so the owner-tier pointer row min(6, excluded) no longer applies; decision_passed fires on no scored tool/event item; the elided count still includes byte-stage exclusions; injected copy 2,547-3,902 B, under 8,192 B on all 4 sessions.
 
 ## Review corrections 2026-09-24
 

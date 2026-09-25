@@ -4,7 +4,7 @@ title: Jev injected copy leaves its room unused while live over-cap tool results
 column: backburner
 status: tasked
 created: 2026-09-25T00:05:16+0200
-updated: 2026-09-25T00:05:16+0200
+updated: 2026-09-25T03:34:27+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,7 @@ Follow-up to TRDD-350W5II2, which moved scoring to LIVE tool/event items only. M
 ## Approval log
 
 - 2026-09-25T00:05:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Measurements
+
+2026-09-25 on 90e890ce: the injected copy is 3,902 / 2,547 / 3,557 / 2,649 B on b2bf5b7b / d30bf250 / 4eb7bf5d / fd5cc3e0, far under its 8,192 B limit. 90e890ce (TRDD-BLGZTHQ9) also makes over-cap non-notification event items (peer messages) pointer-only, which frees more room that the selection does not reuse; whether peer messages should instead show a labelled excerpt is an open owner decision.
