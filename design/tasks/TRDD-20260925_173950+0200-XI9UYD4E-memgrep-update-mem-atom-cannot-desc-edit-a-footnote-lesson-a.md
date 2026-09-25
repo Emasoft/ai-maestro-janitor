@@ -4,7 +4,7 @@ title: memgrep update-mem-atom cannot desc-edit a footnote-lesson atom (stdin bo
 column: testing
 status: tasked
 created: 2026-09-25T17:39:50+0200
-updated: 2026-09-25T21:29:34+0200
+updated: 2026-09-25T23:46:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,4 +26,5 @@ approval-datetime: 2026-09-25T17:39:50+0200
 
 ## STATE
 
-2026-09-25 21:40 — implemented: locate_atom_body_matching recognises '[^N]: [id:ATOM-...]' as a lesson marker (span = marker line only; a sibling footnote closes the span); update-mem-atom reads stdin only when the body span is non-empty and preserves the '[^N]: [...]' marker shape on rebuild (footnote_block_marker parses the props). 3 new tests (span, marker parse, CLI end-to-end without stdin); memgrep 441 green. The review's 3-desc migration COMPLETED with this verb: all 3 over-cap lesson descs shortened, zero over-cap descs remain corpus-wide.
+2026-09-25 21:40 — implemented: locate_atom_body_matching recognises '[^N]: [id:ATOM-...]' as a lesson marker (span = marker line only; a sibling footnote closes the span); update-mem-atom reads stdin only when the body span is non-empty and preserves the '[^N]: [...]' marker shape on rebuild (footnote_block_marker parses the props). 3 new tests (span, marker parse, CLI end-to-end without stdin); memgrep 441 green. The review's 3-desc migration ran with this verb: all 3 over-cap lesson descs shortened, zero over-cap descs remain corpus-wide. CORRECTION 2026-09-25 (T-H97PEEQZ): the migration's stdin-less desc-only edit SILENTLY DELETED all three lessons' inline bodies — the pre-XI9 verb refused (empty body on stdin), the refusal had been masking the body loss, and the XI9 empty-span rebuild replaced the whole marker line without the inline tail. All three bodies were recovered verbatim from pre-damage transcript reads and restored through memory_txn repair txns; update-mem-atom now preserves the inline body (fix branch fix/update-mem-atom-inline-lesson-body, memgrep commit 00bc8acb, regression test watched to fail on the pre-fix binary).
+- DO NOT mark a migration COMPLETED when the verb's output was not diffed against the source, BECAUSE a silent data loss (three lesson bodies deleted, exit 0) reads as success in the command's own one-line output and in a test suite that never asserted body survival — caught 2026-09-25 by T-H97PEEQZ when lint raised lesson-empty-body on all three pages. DO diff the mutated line against its pre-edit form before declaring a data-preserving migration done, and add the survival assertion to the test that exercises the verb.
