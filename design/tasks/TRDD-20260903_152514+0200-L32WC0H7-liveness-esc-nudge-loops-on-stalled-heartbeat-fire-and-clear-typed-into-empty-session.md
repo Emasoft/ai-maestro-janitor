@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-25T17:04:12+0200
+updated: 2026-09-25T17:46:33+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -70,6 +70,7 @@ created-by: ai-maestro-janitor main session
   (F0's pane capture was only ever corroboration, never a gate.)
 2026-09-25 16:00 — the row-count test of Acceptance box 1 LANDED: tests/test_liveness_episode_row_count.py (10 simulated stalled beats x 8 diagnoses through the real task_session_liveness seam, rate-limited.flag on disk per F1; asserts at most one ESC plan per episode, attempts <= MAX, GIVING UP as the finding). Remaining open: ONLY the F5 field observation (and the composite no-GIVING-UP-on-fresh-transcript live signature) after the next release. Column stays testing.
 2026-09-25 16:20 — review fix: F1 is now genuinely pinned. The row-count test's beats all kept one diagnosis, so the healthy+flag guard branch was never taken. New test_counter_survives_the_esc_provoked_healthy_beat drives frozen->healthy->frozen with the flag on disk: the counter SURVIVES the ESC-provoked healthy beat and advances on the next frozen beat. Mutation probe: deleting the F1 guard fails this test; restored, it passes. Also on the card: the 3 over-cap USER-scope descs (verify-cross-repo-cited-sha x2, debugging-methodology...full-3-atom) now hard-refuse on next write-verb touch — the curator must shorten them; recorded as the migration owed with the 23QM8H5F landing.
+2026-09-25 17:10 — second review round: all commits sound. Notes recorded: (1) the oscillation test pins F1 COMBINED with the identity guard (beat 2 shares pid/tty) — the mutation probe is what isolates the F1 branch as load-bearing; (2) the flag-ABSENT healthy reset is already pinned by test_recovered_instance_resets_its_attempt_budget (test_daemon_session_liveness.py:292), the reviewer's one ask, no new test needed; (3) the oscillation test's global time.time patch (+901s for beat 3) is cosmetic today but a caveat for any future wall-clock assertion.
 
 ## Symptom (owner report, 2026-09-03)
 
