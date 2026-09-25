@@ -67,6 +67,7 @@ fn walk_md_files(root: &Path, hidden: bool) -> Vec<PathBuf> {
     const SKIP: [&str; 3] = ["user-mem", ".maint-staging", ".trashcan"];
     ignore::WalkBuilder::new(root)
         .hidden(!hidden)
+        .follow_links(true)
         .build()
         .flatten()
         .filter(|e| {

@@ -60,7 +60,16 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
             // An EXPLICITLY named file always passes — the caller asked for it.
             out.push(p.clone());
         } else {
-            for e in WalkBuilder::new(p).hidden(!hidden).build().flatten() {
+            // GH-310: follow_links — publish-globally plants symlinks in the USER memdir
+            // pointing at real notes in the owning project's memdir; with the default
+            // follow_links(false) those notes never reach the index and recall misses
+            // them while reindex exits 0. `ignore` detects directory-symlink loops itself.
+            for e in WalkBuilder::new(p)
+                .hidden(!hidden)
+                .follow_links(true)
+                .build()
+                .flatten()
+            {
                 if e.file_type().map(|t| t.is_file()).unwrap_or(false)
                     && is_md(e.path())
                     && !under_excluded_subdir(e.path(), p)
@@ -75,8 +84,25 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
             }
         }
     }
-    out.sort();
-    out.dedup();
+    dedup_by_realpath(out)
+}
+
+/// GH-310 part 2: the same note is reachable as the PROJECT real file AND the USER memdir's
+/// publish-globally symlink — a path-string dedup keeps both and recall returns the note
+/// twice. Dedup by `fs::canonicalize` (the resolved target) where it succeeds, falling back
+/// to the raw path for files that fail to canonicalize. Keeps the FIRST spelling (walk
+/// order: the caller's named roots come before follow-on symlink discoveries), so the index
+/// records the path the caller asked about.
+fn dedup_by_realpath(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen: Vec<PathBuf> = Vec::with_capacity(paths.len());
+    let mut out: Vec<PathBuf> = Vec::with_capacity(paths.len());
+    for p in paths {
+        let key = std::fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
+        if !seen.contains(&key) {
+            seen.push(key);
+            out.push(p);
+        }
+    }
     out
 }
 
@@ -2553,6 +2579,18 @@ fn superseded_heading_line(text: &str) -> Option<usize> {
 /// knowledge silently is precisely what the write gate exists to prevent, so the correct
 /// behaviour is to REFUSE the page and say why — fail fast, never a lossy round-trip.
 pub(crate) fn read_page_for_write(page: &Path) -> Result<String> {
+    // GH-310 part 3: the WALK now follows symlinks, so a write verb handed a symlink must not
+    // follow it into another memdir (often the OWNING project's page) and rewrite it there —
+    // writes belong at the owning scope. `symlink_metadata` sees the link itself, not its target.
+    if std::fs::symlink_metadata(page)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        anyhow::bail!(
+            "--page is a symlink; write verbs only accept real pages — edit the note at its owning scope ({})",
+            page.display()
+        );
+    }
     let meta = std::fs::metadata(page)
         .with_context(|| format!("stat {}", page.display()))?;
     if !meta.is_file() {
@@ -3888,7 +3926,7 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
         }
         None => None,
     };
-    let body = read_body_from_stdin()?;
+    // NOTE: stdin is read AFTER the atom is located (TRDD-XI9UYD4E) — see the body-read below.
 
     let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
     if let Some(base) = a.base_sha256.as_deref() {
@@ -3907,11 +3945,39 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
                 unclosed_fence_hint(&text)
             )
         })?;
+    // TRDD-XI9UYD4E: a one-line footnote-lesson sets body_last_idx == marker_idx — its body
+    // span is EMPTY, so there is nothing to replace and a spliced body would INSERT a spurious
+    // line under the `[^N]` marker. A desc-only edit (no --lesson) must not need stdin at all:
+    // read it only when the span is non-empty. --lesson keeps requiring stdin (the lesson text
+    // IS the body it creates).
+    let body = if body_last_idx > marker_idx {
+        read_body_from_stdin()?
+    } else {
+        String::new()
+    };
 
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    let (_s, _end, id, props_raw) = first_block_property_marker(&lines[marker_idx]).ok_or_else(|| {
-        anyhow::anyhow!("atom `{}` on {} has no parseable marker line", a.atom, a.page.display())
-    })?;
+    // TRDD-XI9UYD4E: a footnote-lesson marker (`[^N]: [id:ATOM-…, …]`) is not a leading `^id`
+    // marker — parse its props with the footnote parser, and REMEMBER the footnote shape so the
+    // rebuilt marker below keeps `[^N]: [ … ]` instead of converting the lesson into a body atom.
+    let footnote_label = if first_block_property_marker(&lines[marker_idx]).is_some() {
+        None
+    } else {
+        Some(footnote_block_marker(&lines[marker_idx]).ok_or_else(|| {
+            anyhow::anyhow!("atom `{}` on {} has no parseable marker line", a.atom, a.page.display())
+        })?)
+    };
+    let (_s, _end, id, props_raw) = match (&footnote_label, first_block_property_marker(&lines[marker_idx])) {
+        (None, Some(hit)) => hit,
+        _ => {
+            let props_raw = footnote_label.clone().unwrap_or_default();
+            let id = props_raw.split("id:").nth(1)
+                .map(|s| s.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                    .next().unwrap_or("").to_string())
+                .unwrap_or_default();
+            (0usize, 0usize, id, props_raw)
+        }
+    };
     let props = parse_block_props(&props_raw);
 
     // Rebuild the props in the corpus's canonical order (`build_atom_marker`'s order): desc,
@@ -3975,7 +4041,15 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
     }
     let out_props_ref: Vec<(&str, String)> =
         out_props.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-    let marker = format!("^{id} [{}]", render_block_props(&out_props_ref));
+    let marker = match &footnote_label {
+        // Keep the footnote-lesson shape: the label came from the original `[^N]:` line.
+        Some(_) => {
+            let label = lines[marker_idx].trim_start().trim_start_matches("[^")
+                .split(']').next().unwrap_or("").to_string();
+            format!("[^{label}]: [{}]", render_block_props(&out_props_ref))
+        }
+        None => format!("^{id} [{}]", render_block_props(&out_props_ref)),
+    };
 
     if a.dry_run {
         println!(
@@ -3990,8 +4064,12 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
     // `marker_idx + 1 ..= body_last_idx` is the atom's CURRENT body span (possibly empty, when
     // `body_last_idx == marker_idx` — an inclusive range with start > end is a valid empty range
     // in Rust, so `splice` inserts the new body right after the marker without removing anything).
-    let new_body_lines: Vec<String> = body.lines().map(str::to_string).collect();
-    lines.splice(marker_idx + 1..=body_last_idx, new_body_lines);
+    // TRDD-XI9UYD4E: when the span is empty, `body` was never read (empty String) — the splice
+    // must NOT insert those zero lines as nothing; guard so a footnote's shape is untouched.
+    if body_last_idx > marker_idx {
+        let new_body_lines: Vec<String> = body.lines().map(str::to_string).collect();
+        lines.splice(marker_idx + 1..=body_last_idx, new_body_lines);
+    }
 
     let mut out = lines.join("\n");
     out.push('\n');
@@ -4191,6 +4269,42 @@ pub(crate) fn locate_atom_body_matching(
             continue;
         }
         let marker = if fence.is_some() { None } else { first_block_property_marker(line) };
+        // TRDD-XI9UYD4E: a `[^N]:` footnote line is a LESSON marker (its id lives inside the
+        // `[id:ATOM-…]` props), not prose. Without this, a footnote-lesson's body span swallowed
+        // every following footnote line, so a desc-only edit either demanded stdin (span
+        // "non-empty") or would splice away the sibling lessons. Recognise the OWN id's footnote
+        // line as the marker; any OTHER footnote line closes the open span like a heading does.
+        let footnote_marker_id = if fence.is_none() && marker.is_none() {
+            let t = line.trim_start();
+            t.strip_prefix("[^")
+                .and_then(|rest| {
+                    let close = rest.find(']')?;
+                    let after = rest[close + 1..].trim_start();
+                    after.starts_with(':').then(|| {
+                        // The lesson's corpus id is the `id:ATOM-…` prop, not the `[^N]` label —
+                        // `is_match` compares against the id the caller queried.
+                        rest[close + 1..]
+                            .split("id:")
+                            .nth(1)
+                            .map(|s| s.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                                .next().unwrap_or("").to_string())
+                            .unwrap_or_else(|| rest[..close].trim().to_string())
+                    })
+                })
+                .filter(|_| line.contains("id:ATOM-"))
+        } else {
+            None
+        };
+        if let Some(fid) = footnote_marker_id {
+            let is_own = open.as_ref().map(|(_, _, id)| *id == fid).unwrap_or(false);
+            if !is_own {
+                if let Some(hit) = finish(&open) {
+                    return Some(hit);
+                }
+            }
+            open = Some((i, i, fid));
+            continue;
+        }
         if let Some((_s, _end, id, _props)) = marker {
             if let Some(hit) = finish(&open) {
                 return Some(hit);
@@ -8642,6 +8756,53 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    // ── GH-310: symlinks are indexed, deduped by realpath, and refused on write ─────────────
+
+    #[test]
+    fn symlink_only_memdir_collects_the_linked_note() {
+        let dir = std::env::temp_dir().join(format!("memgrep_gh310_symlink_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("real")).expect("mkdir real");
+        std::fs::create_dir_all(dir.join("user")).expect("mkdir user");
+        let real = dir.join("real").join("note.md");
+        std::fs::write(
+            &real,
+            "---\nname: gh310\ndescription: the gh310 fixture note for symlink recall\n---\nBody.\n",
+        )
+        .expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, dir.join("user").join("link.md")).expect("symlink");
+
+        let got = collect_md(&[dir.join("user")], false);
+        assert_eq!(got.len(), 1, "the symlinked note must be collected: {got:?}");
+        assert_eq!(got[0], dir.join("user").join("link.md"));
+
+        // Realpath dedup: walking BOTH roots yields the note exactly ONCE.
+        let both = collect_md(&[dir.join("real"), dir.join("user")], false);
+        assert_eq!(both.len(), 1, "real + symlink of one note must dedup: {both:?}");
+        assert_eq!(both[0], real, "the first spelling (the real file) wins");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_page_for_write_refuses_a_symlinked_page() {
+        let dir =
+            std::env::temp_dir().join(format!("memgrep_gh310_writerefuse_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let real = dir.join("real.md");
+        std::fs::write(&real, "---\nname: r\ndescription: d\n---\nBody.\n").expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, dir.join("link.md")).expect("symlink");
+
+        let err = read_page_for_write(&dir.join("link.md")).unwrap_err().to_string();
+        assert!(err.contains("symlink"), "{err}");
+        assert!(err.contains("owning scope"), "{err}");
+        // The real page still passes.
+        assert!(read_page_for_write(&real).is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // ── control-byte guard (TRDD-XI10BA5D A1) — pure-function boundary tests ────────────────
 
@@ -13296,5 +13457,84 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         );
         // ...while a small replacement body sails through the gate the CLI applies to it.
         assert!(check_new_body_budget("the decomposed replacement fact", 1500, "atom").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod xi9_span_tests {
+    use super::*;
+
+    #[test]
+    fn footnote_lesson_span_is_the_marker_line_only() {
+        let page = "## Notes and lessons learned\n[^28]: [id:ATOM-60ZD-6UGR, status:valid, desc:\"old\", keywords:\"k1,k2\", ocd: 2026-09-25, lmd: 2026-09-25] a lesson body inline\n[^29]: [id:ATOM-BBBB-2222, status:valid, desc:\"next\", keywords:\"k3,k4\", ocd: 2026-09-25, lmd: 2026-09-25] another lesson\n";
+        let (m, last) = locate_atom_body_matching(page, &|id: &str| id == "ATOM-60ZD-6UGR")
+            .expect("footnote lesson must be located");
+        assert_eq!(last, m, "a consecutive footnote's span must be empty (marker line only)");
+    }
+}
+
+#[cfg(test)]
+mod xi9_cli_tests {
+    use super::*;
+
+    #[test]
+    fn update_lesson_desc_edits_footnote_without_stdin() {
+        let dir = std::env::temp_dir().join(format!("xi9-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let page = dir.join("p.md");
+        std::fs::write(&page, "## Notes and lessons learned\n[^28]: [id:ATOM-60ZD-6UGR, status:valid, desc:\"old\", keywords:\"k1,k2\", ocd: 2026-09-25, lmd: 2026-09-25] a lesson body inline\n[^29]: [id:ATOM-BBBB-2222, status:valid, desc:\"next\", keywords:\"k3,k4\", ocd: 2026-09-25, lmd: 2026-09-25] another lesson\n").expect("write");
+        let args: Vec<String> = ["--page", page.to_str().unwrap(),
+            "--atom", "ATOM-60ZD-6UGR",
+            "--desc", "a split pass declared a lesson pool permanently unsplittable from inside its own byte-preservation gates"]
+            .iter().map(|s| s.to_string()).collect();
+        // stdin closed: the whole point — no body piped.
+        let r = cmd_update_atom_cli(&args);
+        assert!(r.is_ok(), "desc-only edit of a footnote lesson must succeed without stdin: {r:?}");
+        let t = std::fs::read_to_string(&page).unwrap();
+        assert!(t.contains("[^29]"), "sibling footnote must survive");
+        assert!(t.contains("byte-preservation gates"), "new desc must be present");
+        assert!(!t.contains("desc:\"old\""), "old desc must be replaced");
+    }
+}
+
+/// TRDD-XI9UYD4E: parse a `[^N]: [id:ATOM-…, …]` footnote-lesson marker line — the
+/// footnote-lesson counterpart of `first_block_property_marker` (which requires a leading `^`).
+/// Returns the bracketed props verbatim. Only lines whose props carry an `id:` prop qualify,
+/// so a plain markdown footnote reference never parses as a lesson marker.
+fn footnote_block_marker(line: &str) -> Option<String> {
+    let t = line.trim_start();
+    let rest = t.strip_prefix("[^")?;
+    let close = rest.find(']')?;
+    let after = rest[close + 1..].trim_start();
+    let after = after.strip_prefix(':')?.trim_start();
+    let after = after.strip_prefix('[')?;
+    // `after` is now INSIDE the bracket (one deep) — the first unbalanced `]` closes it.
+    let bytes = after.as_bytes();
+    let mut d = 1i32;
+    for (m, &b) in bytes.iter().enumerate() {
+        match b {
+            b'[' => d += 1,
+            b']' => {
+                d -= 1;
+                if d == 0 {
+                    let props = &after[..m];
+                    return props.contains("id:ATOM-").then(|| props.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod xi9_marker_tests {
+    use super::*;
+    #[test]
+    fn footnote_marker_parses() {
+        let line = "[^28]: [id:ATOM-60ZD-6UGR, status:valid, desc:\"old\", keywords:\"k1,k2\", ocd: 2026-09-25, lmd: 2026-09-25] a lesson body inline";
+        let m = footnote_block_marker(line);
+        assert!(m.is_some(), "must parse: {m:?}");
+        assert!(m.unwrap().contains("id:ATOM-60ZD-6UGR"));
     }
 }
