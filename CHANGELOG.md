@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [3.6.2] — 2026-09-25
 
+### Styling
+
+- **memgrep:** Collapse nested if to let-chain per clippy::collapsible_if — release gate blocked v3.6.2 push on this lint; fmt-clean form, semantics identical (2e26ab9)
+## [3.6.2] — 2026-09-25
+
 ### Bug Fixes
 
 - **jev:** Spend leftover injected-copy room on Jev-kept tool/event items whole (TRDD-SK490HKU) (52c87cb)
@@ -32,6 +37,10 @@ All notable changes to this project will be documented in this file.
 
 - **memory:** Wikimem lint findings open bounded MEMCORP-001 tickets naming the owning chore; held AgentlensPro/ghbook pages skipped (TRDD-FVYV6RSG) (24be7c5)
 - **janitor:** Nested-repo projects get maintenance via .janitor/track-repo; silent skips now surface (TRDD-IEBZ4JC5) (acc4467)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.6.2 (bfdf382)
 
 ### Testing
 
