@@ -4331,10 +4331,8 @@ pub(crate) fn locate_atom_body_matching(
         };
         if let Some(fid) = footnote_marker_id {
             let is_own = open.as_ref().map(|(_, _, id)| *id == fid).unwrap_or(false);
-            if !is_own {
-                if let Some(hit) = finish(&open) {
-                    return Some(hit);
-                }
+            if !is_own && let Some(hit) = finish(&open) {
+                return Some(hit);
             }
             open = Some((i, i, fid));
             continue;
