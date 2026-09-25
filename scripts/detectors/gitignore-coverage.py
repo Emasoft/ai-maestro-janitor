@@ -59,7 +59,16 @@ def _git_verdicts(root: Path, paths: list[str]) -> dict[str, str]:
 def main() -> int:
     root = state.project_root()
     if not (root / ".git").exists():
-        return 0
+        # TRDD-IEBZ4JC5 (a): a non-repo root with a registered track-repo probes THAT
+        # repo's coverage; nothing registered → say so, never a silent skip.
+        repo = state.tracked_repo(str(root))
+        if repo is None:
+            state.log_line(
+                "gitignore-coverage",
+                "project root is not a git repo and no .janitor/track-repo is registered — skipping",
+            )
+            return 0
+        root = repo
 
     tracked_res = state.run_subprocess(
         ["git", "-C", str(root), "ls-files", "-z"], timeout=30, detector_name="gitignore-coverage",

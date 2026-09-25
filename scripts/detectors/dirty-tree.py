@@ -86,8 +86,18 @@ def main() -> int:
         env=git_env,
     )
     if proc.returncode != 0:
-        state.log_line("dirty-tree", "not a git repo — skipping")
-        return 0
+        # TRDD-IEBZ4JC5 (a): a non-repo root with a registered track-repo probes THAT
+        # repo; nothing registered → the skip is logged, not silent.
+        if state.tracked_repo(str(state.project_root())) is None:
+            state.log_line(
+                "dirty-tree",
+                "project root is not a git repo and no .janitor/track-repo is registered — skipping",
+            )
+            return 0
+        repo_dir = state.tracked_repo(str(state.project_root()))
+        assert repo_dir is not None
+    else:
+        repo_dir = state.project_root()
 
     status = subprocess.run(
         # `-uall` lists untracked FILES individually. Without it git collapses a wholly-untracked
@@ -97,7 +107,7 @@ def main() -> int:
         # "N uncommitted change(s)" count mean what it says. Ignored files are still skipped, so
         # this does not walk node_modules.
         ["git", "status", "--porcelain", "-uall"],
-        cwd=str(state.project_root()),
+        cwd=str(repo_dir),
         capture_output=True,
         text=True,
         check=False,

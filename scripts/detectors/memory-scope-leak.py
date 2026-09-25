@@ -609,8 +609,15 @@ def main() -> int:
     cwd = state.project_root()
     root = _git_toplevel(cwd)
     if root is None:
-        # Not a git repo → there is no PROJECT (pushed) scope to police.
-        state.log_line("memory-scope-leak", "not a git repo — skipping")
+        # TRDD-IEBZ4JC5 (a): a non-repo project root with a registered track-repo
+        # polices THAT repo's PROJECT scope; nothing registered → say the skip out
+        # loud instead of leaving the owner to find it by absence.
+        root = state.tracked_repo(str(cwd))
+    if root is None:
+        state.log_line(
+            "memory-scope-leak",
+            "project root is not a git repo and no .janitor/track-repo is registered — skipping",
+        )
         return 0
 
     memdir = root / ".claude" / "project" / "memory"

@@ -165,6 +165,53 @@ def state_dir() -> Path:
     return janitor_root() / "state"
 
 
+@lru_cache(maxsize=2)
+def tracked_repo(project_dir: str) -> Optional[Path]:
+    """The git repo whose tracking duties this project folder delegates (TRDD-IEBZ4JC5 option (a)).
+
+    Resolution: (i) the project dir itself inside a work tree → its toplevel (the
+    normal single-repo case, unchanged); (ii) else `<project_dir>/.janitor/track-repo`
+    names a relative subfolder whose repo carries the git-bound maintenance (gitignore
+    coverage, dirty tree, …) — return THAT toplevel; (iii) else None (callers keep
+    their existing graceful no-op). Read-only: GIT_OPTIONAL_LOCKS=0 like every probe
+    here, and the result is memoised per project dir for the process lifetime.
+    """
+    root = Path(project_dir)
+    git_env = dict(os.environ)
+    git_env["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=False, env=git_env,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return Path(proc.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    marker = root / ".janitor" / "track-repo"
+    try:
+        rel = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    # The contract is one relative subfolder path; absolute or parent-escaping
+    # values are a misconfiguration, not a repo to probe.
+    if not rel or Path(rel).is_absolute() or rel.startswith(".."):
+        return None
+    sub = root / rel
+    if not sub.is_dir():
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(sub), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=False, env=git_env,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return Path(proc.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return None
+
+
 @lru_cache(maxsize=1)
 def log_dir() -> Path:
     # The global daemon overrides this via JANITOR_LOG_DIR so its log lands
