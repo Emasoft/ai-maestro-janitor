@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.6.2] — 2026-09-25
+
+### Bug Fixes
+
+- **jev:** Spend leftover injected-copy room on Jev-kept tool/event items whole (TRDD-SK490HKU) (52c87cb)
+- **memgrep:** The write verbs refuse an atom desc over the 200-char cap instead of silently truncating it mid-word (TRDD-23QM8H5F) (65081d7)
+- **jev:** Ticket dedupe keys drop the line number; oscillation test pins the F1 guard (TRDD-FVYV6RSG, TRDD-L32WC0H7) (d6fccc4)
+- **memgrep:** Symlink-aware walk + realpath dedup; footnote-lesson descs editable without stdin (GH-310, TRDD-XI9UYD4E) (f9c5580)
+- **memgrep:** Fence the GH-310 walk — file symlinks admitted explicitly, walk stays link-blind (bad6b1d)
+
+### Documentation
+
+- TRDD-Q0Y4M1TF complete — box 3 ticked, 24h rotator capture shows zero 7d/Fable>=99% violations (7f84f64)
+- **jev:** Matrix rows V3+V12 PASS on 52c87cbb, suite 17540 green; SK490HKU acceptance re-verified -> testing; A70YJLXN box-2 correction (03:51 install = harness actor, box stays open); RAEGS1D5 next-action progress (1b8c772)
+- **jev:** TRDD-BLGZTHQ9 acceptance hand re-read complete on 52c87cbb -> testing; fd5cc3e0 room-sensitivity verified correct-by-design (eb9d6ac)
+- **trdd:** 1ETALGDG and I63GQJTK reconciled — fixes landed (c3fdc0ec/434530ab, ac751f1d) but cards were stale at todo; acceptance verified -> testing (09db3f9)
+- **trdd:** FVYV6RSG implemented and verified -> testing (TRDD-FVYV6RSG) (47ad1fc)
+- **trdd:** 23QM8H5F desc-cap guard implemented -> testing (TRDD-23QM8H5F) (05a97a2)
+- **trdd:** IEBZ4JC5 measured state + three-option proposal for the owner (TRDD-IEBZ4JC5) (551ee9a)
+- **trdd:** L32WC0H7 row-count test landed; only F5 field observation remains (TRDD-L32WC0H7) (b32f598)
+- **trdd:** Record review fixes — dedupe keying + F1 oscillation pin on their cards (TRDD-FVYV6RSG, TRDD-L32WC0H7) (14bf537)
+- **trdd:** Record lesson-desc memgrep gap; mint TRDD-XI9UYD4E (TRDD-23QM8H5F, TRDD-XI9UYD4E) (53e26e1)
+- **trdd:** Second review round recorded — flag-absent reset already pinned, cosmetic notes on the cards (TRDD-L32WC0H7, TRDD-FVYV6RSG) (ba2fce7)
+- **trdd:** XI9UYD4E and IEBZ4JC5(a) implemented -> testing (TRDD-XI9UYD4E, TRDD-IEBZ4JC5) (b96845d)
+- **memory:** Split 4 oversized atoms on oauth-rotation-renew-reauth-operations into 9 — janitor memory-split chore, all lessons verbatim (40580ce)
+
+### Features
+
+- **memory:** Wikimem lint findings open bounded MEMCORP-001 tickets naming the owning chore; held AgentlensPro/ghbook pages skipped (TRDD-FVYV6RSG) (24be7c5)
+- **janitor:** Nested-repo projects get maintenance via .janitor/track-repo; silent skips now surface (TRDD-IEBZ4JC5) (acc4467)
+
+### Testing
+
+- **liveness:** Row-count acceptance — N stalled beats through the beat seam fire at most ONE esc plan per episode (TRDD-L32WC0H7 box 1) (eac61a9)
 ## [3.6.1] — 2026-09-25
 
 ### Bug Fixes
@@ -51,6 +85,7 @@ All notable changes to this project will be documented in this file.
 
 - **release:** Sync the project venv before strict validation so pyright resolves httpx (e20609f)
 - Track the jevctx log fixtures and sync deps before strict validation (TRDD-RAEGS1D5) (44eda38)
+- Bump version to 3.6.1 (c4668ee)
 
 ### Performance
 
