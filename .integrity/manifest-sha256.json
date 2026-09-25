@@ -1,7 +1,7 @@
 {
   "files": {
     "CLAUDE.md": "2ceca5d19ee5b867a5802da88a83d0d231b9c26cface95440341f04ee30eadeb",
-    "README.md": "154284e9676e63996bab18ea66c945cc2ec88df7a2d40a39b5cc462184408420",
+    "README.md": "4770e080dddb6a673693405669ce887aeaf7d547821ec2f45d1aafea76d96a70",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
@@ -20,7 +20,7 @@
     "rules/universal-kanban.md": "03a3949c22a79f72739c942879354b54357403a473983fed2ec18f3dc71783f0",
     "rules/use-safe-delete.md": "391c2a7f2415aee83a67cde9147cb6bd879bc26316f6b6cd1fbc74b5126c75ff",
     "skills/janitor-actions-up/SKILL.md": "1010955f79ef5b64946f3e01a0a4f5feae9f1412f8616bbc9cce7b1bc72728b3",
-    "skills/janitor-arm/SKILL.md": "de6d095833783c30862cde18a19e02f7a065f17b07f31d7ebdb77d76e8e929ae",
+    "skills/janitor-arm/SKILL.md": "1ac9a7c16b59f293fa330d1aef017be6c6f0ac3ebf4fb07bcc890dffb678b8bd",
     "skills/janitor-audit/SKILL.md": "97d7cceecaab6d7b22e8e96e463022ad3f0c17662bc3338d73af9a121df4aac0",
     "skills/janitor-auto-manage-oauth-off/SKILL.md": "af65a802b078e277cf06e368ce783b42f03ad5f250b7082c2a63f90c7656194e",
     "skills/janitor-auto-manage-oauth-on/SKILL.md": "a56b7107dc62c89d157485c0b4db8ade90f5fcc1debaca7d7d2814a244d7f2e1",

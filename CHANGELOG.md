@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.6.1] — 2026-09-25
+
+### Bug Fixes
+
+- **hooks:** The pre-commit message no longer blames a lost executable bit for every failed run (d60b4ae)
+- **heartbeat:** Stagger each project's heartbeat minute, give every hook 10 s, and parse the staggered cron everywhere (7ed4cde)
+- **jev:** The injected copy may show any tool/event item Jev kept, not only the token stage's set (TRDD-U6C3YXEL) (09b769b)
+- **jev:** Expand restores the owner's mid-turn messages recorded as attachments (TRDD-DQXMND59) (e23e0b3)
+- **heartbeat:** Teach every remaining reader the staggered {offset}-59/N cron shape (TRDD-D7RLXAN1) (9efd5df)
+- **jev:** Extract_items survives non-UTF-8 bytes and a half-written last line (TRDD-DQXMND59) (73df900)
+- **jev:** Jev_compact reports transcript lines it had to skip (TRDD-DQXMND59) (2729b1c)
+- **jev:** Expand survives lone surrogates, and skipped-line counts reach the lane log (TRDD-DQXMND59) (8a5f385)
+- **jev:** The post-clear hook records blocked and malformed counts, and compose sanitizes its inputs once (TRDD-DQXMND59) (ba70288)
+- **transcript_roles:** Classify a typed-command wrapper regardless of tag order (TRDD-RAEGS1D5) (0e6faad)
+- **jev:** An over-cap non-notification event item is a pointer, never a truncated stub (TRDD-BLGZTHQ9) (90e890c)
+
+### Documentation
+
+- XI10BA5D records the repair skill's token-cap vs CPV-TOC constraint (TRDD-XI10BA5D) (6f5e648)
+- XI10BA5D cites the post-rewrite ids for the skill-cap history (TRDD-XI10BA5D) (5199f62)
+- Record D7RLXAN1's decisions, implementation state and acceptance results (TRDD-D7RLXAN1) (0019430)
+- Record the verbatim-prose review follow-ups: sizes, hook timing risk, heartbeat predicate (TRDD-D7RLXAN1) (07ead37)
+- **memory:** Record Jev compaction, the heartbeat stagger and the hook-timeout root cause in the PROJECT wikimem (b057fc9)
+- **memory:** Correct the Jev and heartbeat pages after review: landed fixes, fail-fast import, machine-local refs moved out (945fd97)
+- Record today's Jev landings on their cards and open TRDD-A8DRRW0I for the other transcript readers (3511169)
+- Fix the review findings on today's cards: A8DRRW0I scope, DQXMND59 STATE as current truth (f0f3209)
+- Second review round on TRDD-A8DRRW0I and TRDD-DQXMND59: real timeout cause, tail readers, dependency (948c092)
+- **memory:** Split one over-budget atom on claude-code-continuity-engineering (janitor split chore) (a5b76c6)
+- **memory:** Fix two cross-scope link errors and the half-split never-stall atom; open TRDD-J6BET92S (4b1b6cf)
+- Record H1 result on TRDD-K0PMVRN6 — no credential-dead after the 13:32 switch (4234e0e)
+- Correct the H1 record on TRDD-K0PMVRN6 per its review (0f02137)
+- Mark the H1 check on TRDD-K0PMVRN6 as most likely neutral (85b6403)
+- H1 check on TRDD-K0PMVRN6 turns on the 13:45:47 rewrite (fafe66d)
+- Add TRDD-SK490HKU -- Jev injected copy leaves its room unused while live over-cap tool results are pointer-only (4c07fad)
+- TRDD-350W5II2 to human_review, correct its root-fix claim (732b81e)
+- **jev:** Restore why the malformed count is a log line, not a finding (TRDD-DQXMND59) (ee3e096)
+- **memory:** Trim one over-long atom description on jev-compaction (janitor repair chore) (b2bb3d1)
+- **transcript_roles:** Self-contained evidence instead of a gitignored report path (TRDD-RAEGS1D5) (f8975db)
+- TRDD-U6C3YXEL superseded by TRDD-D7RLXAN1; room measurements on TRDD-SK490HKU (1c521ac)
+
+### Features
+
+- **jev:** Condensers that keep the results of tool calls, not their full output (TRDD-RAEGS1D5) (64d0b40)
+- **jev:** Keep every owner and assistant message since the last compaction verbatim, never scored (TRDD-D7RLXAN1) (c7779d8)
+
+### Miscellaneous Tasks
+
+- **release:** Sync the project venv before strict validation so pyright resolves httpx (e20609f)
+- Track the jevctx log fixtures and sync deps before strict validation (TRDD-RAEGS1D5) (44eda38)
+
+### Performance
+
+- **jev:** Score only live tool and event items, not the ones before the last compaction (TRDD-350W5II2) (71c7f66)
+
+### Refactor
+
+- **jev:** One shared rule for which attachment entries are items (TRDD-DQXMND59) (1461e7d)
 ## [3.6.0] — 2026-09-24
 
 ### Bug Fixes
@@ -201,6 +258,7 @@ All notable changes to this project will be documented in this file.
 
 - Two shebang scripts gain the executable bit they were missing (68d93bf)
 - Refresh the generated wikimem index block in CLAUDE.md (6095a01)
+- Bump version to 3.6.0 (9bc09f1)
 
 ### Refactor
 
