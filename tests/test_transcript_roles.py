@@ -220,6 +220,42 @@ def test_reload_plugins_with_force_flag_is_system() -> None:
     assert tr.classify_record(entry) == "system"
 
 
+def test_reversed_order_reload_plugins_is_still_system() -> None:
+    # TRDD-RAEGS1D5 gap fix: a real transcript also carries `<command-name>` FIRST,
+    # `<command-message>` second (reports/compaction-replacement/
+    # 20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md lines 110-118). Before the fix, the
+    # rule 4 wrapper check only matched text starting with `<command-message>`, so this order
+    # skipped it entirely and fell through to the legacy fallback, which decided by tag
+    # presence alone (never checks automation) and returned "human" -- misattributing the
+    # janitor's own automation command to the owner. Fails on HEAD.
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-name>/reload-plugins</command-name>\n"
+                "<command-message>reloading…</command-message>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "system"
+
+
+def test_reversed_order_non_automation_command_is_human() -> None:
+    # Same reversed order, but a non-automation command (`/task`) -- must still be "human",
+    # same as the `<command-message>`-first case (`test_task_command_with_args_is_human`).
+    entry = {
+        "origin": {"kind": "human"},
+        "message": {
+            "content": (
+                "<command-name>/task</command-name>\n"
+                "<command-message>running…</command-message>\n"
+                "<command-args>fix the failing test</command-args>"
+            )
+        },
+    }
+    assert tr.classify_record(entry) == "human"
+
+
 # --- derive the plugin's OWN command names and assert each is always "system" ---
 
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -290,6 +326,11 @@ def test_interrupt_marker_is_system() -> None:
 def test_command_name_wrapper_is_human() -> None:
     # Rule 8: `<command-name>` is a typed slash command -- a human invoked it, keep it "human".
     # No origin/turnOrigin/promptSource on this entry, so only rule 8 can classify it.
+    # TRDD-RAEGS1D5 gap-fix review: the reversed-order fix (below) deliberately does NOT match
+    # this shape -- it requires BOTH `<command-message>` and `<command-name>` present, since the
+    # reported gap was specifically about the two-tag wrapper PAIR reordering, not about a bare
+    # `<command-name>` fragment with no `<command-message>` companion (an unmeasured, different
+    # shape). This case still falls through to the catch-all "human", unchanged by the fix.
     entry = {"message": {"content": "<command-name>compact</command-name>"}}
     assert tr.classify_record(entry) == "human"
 

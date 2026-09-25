@@ -247,21 +247,34 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
     4. A fixed TEXT prefix, checked BEFORE `turnOrigin` -- a `<local-command-stdout>` record
        can itself carry `turnOrigin: "human"` (the field marks the TURN, not this record's own
        author), so the record's own wrapper tag must win first: `<task-notification>` ->
-       "notification"; a `<command-message>` that ALSO carries `<command-name>` (the owner
-       typed a slash command) with `origin.kind` "human" or absent -> "human" (TRDD-RAEGS1D5
-       defect 1: measured on real transcripts, every `<command-message>` record with a
-       `<command-name>` tag has `origin.kind: "human"` or no `origin` field at all -- the
-       generic wrapper-prefix rule below was matching it first and dropping owner instructions
-       like `/task ...`/`/loop 5m ...` as "system"), EXCEPT a `<command-name>` naming the
-       janitor's own typed automation (`/clear`, `/compact`, `/reload-plugins`, `/janitor-*`,
-       `/ai-maestro-janitor:*`, bare or plugin-qualified, with or without the leading slash)
-       -> "system" ALWAYS, even with a non-empty `<command-args>` (coordinator correction 4,
-       superseding an earlier args-presence tie-breaker: the janitor itself types
-       `/reload-plugins --force` and `/janitor-compact-context --hard` -- args riding along
-       does not make it the owner's words. The args exception applies only to NON-automation
-       commands, which fall to "human" regardless of args -- command name alone decides for
-       automation); otherwise `<local-command-stdout>`, `<local-command-caveat>`,
-       `<command-message>`, `[janitor-heartbeat]` or `[Request interrupted` -> "system".
+       "notification"; a typed-command wrapper PAIR -- BOTH `<command-message>` AND
+       `<command-name>` present, text starting with EITHER one (the two tags are also observed
+       in that reversed, name-first order on real transcripts -- gap fix below) -- with
+       `origin.kind` "human" or absent -> "human" (TRDD-RAEGS1D5
+       defect 1: measured on real transcripts, every such wrapper record has `origin.kind:
+       "human"` or no `origin` field at all -- the generic wrapper-prefix rule below was
+       matching it first and dropping owner instructions like `/task ...`/`/loop 5m ...` as
+       "system"), EXCEPT a `<command-name>` naming the janitor's own typed automation
+       (`/clear`, `/compact`, `/reload-plugins`, `/janitor-*`, `/ai-maestro-janitor:*`, bare or
+       plugin-qualified, with or without the leading slash) -> "system" ALWAYS, even with a
+       non-empty `<command-args>` (coordinator correction 4, superseding an earlier
+       args-presence tie-breaker: the janitor itself types `/reload-plugins --force` and
+       `/janitor-compact-context --hard` -- args riding along does not make it the owner's
+       words. The args exception applies only to NON-automation commands, which fall to
+       "human" regardless of args -- command name alone decides for automation); otherwise
+       `<local-command-stdout>`, `<local-command-caveat>`, `<command-message>`,
+       `[janitor-heartbeat]` or `[Request interrupted` -> "system". Gap fix (orchestrator,
+       2026-09-25): a real transcript also carries `<command-name>` FIRST,
+       `<command-message>` second (reports/compaction-replacement/
+       20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md lines 110-118) -- that order used
+       to skip this rule entirely (only `<command-message>`-first was checked) and reach the
+       generic `_SYSTEM_PREFIXES`/legacy-fallback path, which decides by tag presence alone
+       and never checks automation, so a reversed-order `/reload-plugins` was misclassified
+       "human" instead of "system". The decision is now order-independent: the wrapper PAIR
+       (both tags present) decides, and only the tags' order is irrelevant -- a bare
+       `<command-name>` with no `<command-message>` companion at all does NOT match this rule
+       (falls through to rule 8 below), since that is a different, unmeasured shape the
+       reported gap never described.
     5. `origin.kind` (Claude Code's own newer, most specific signal, so it outranks
        `turnOrigin`/`promptSource` below): `human` -> "human"; `task-notification` ->
        "notification"; `peer`/`coordinator` -> "peer"; `auto-continuation` -> "system"; any
@@ -277,9 +290,10 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
        "notification"; `peer` -> "peer"; `sdk` -> "human" (an operator's input to a headless
        session is still a human's words -- owner-level decision, orchestrator 2026-09-23).
     7. `promptSource`: `typed`/`queued` -> "human"; `system` -> "system"; `sdk` -> "human".
-    8. Text starts with `<command-name>` -> "human" (a typed slash command; its args are
-       human text).
-    9. No field above matched at all (a legacy, pre-`origin` transcript record) -> "human".
+    8. No field above matched at all (a legacy, pre-`origin` transcript record, or any other
+       unhandled shape) -> "human". A dedicated `<command-name>`-prefix check used to sit here
+       too, but it always returned the same "human" this catch-all already returns -- dead code,
+       removed (TRDD-RAEGS1D5 gap-fix review).
 
     Tool-result blocks are NOT classified by this function -- `jev_compaction.extract_items`
     keeps its own pairing-based handling for those regardless of the entry's role (report §4
@@ -298,13 +312,28 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
 
     if text.startswith(_NOTIFICATION_PREFIX):
         return "notification"
-    # Defect 1 (TRDD-RAEGS1D5, review): a typed slash command's `<command-message>` wrapper
-    # ALSO carries `<command-name>` (measured on real transcripts -- see the docstring), and
-    # its origin.kind is "human" or absent. The generic `_SYSTEM_PREFIXES` check below matches
-    # `<command-message>` regardless of who sent it, so this must be decided first or every
-    # `/task ...`/`/loop ...` the owner typed is dropped as "system".
+    # Defect 1 (TRDD-RAEGS1D5, review): a typed slash command's wrapper carries a
+    # `<command-name>` tag (measured on real transcripts -- see the docstring), and its
+    # origin.kind is "human" or absent. The generic `_SYSTEM_PREFIXES` check below matches a
+    # leading `<command-message>` regardless of who sent it, so this must be decided first or
+    # every `/task ...`/`/loop ...` the owner typed is dropped as "system".
+    #
+    # TRDD-RAEGS1D5 gap fix: the two wrapper tags are NOT always in `<command-message>` /
+    # `<command-name>` order -- a real transcript also carries the reversed order
+    # (`<command-name>` first, `<command-message>` second; see reports/compaction-replacement/
+    # 20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md lines 110-118). Requiring the text to
+    # START WITH `<command-message>` specifically skipped that shape and let it fall through to
+    # the `_COMMAND_NAME_PREFIX` fallback below, which decides purely by presence (never checks
+    # automation), so `/reload-plugins` in reversed order was misclassified "human". The decision
+    # must be the same regardless of which wrapper tag comes first -- but ONLY for the actual
+    # two-tag wrapper PAIR (`<command-message>` AND `<command-name>` BOTH present): the review
+    # for this fix flagged that matching on `<command-name>` presence alone would also catch a
+    # bare `<command-name>...</command-name>` fragment with no `<command-message>` companion at
+    # all -- an unmeasured, different shape the reported gap never described -- so both tags are
+    # required, only their ORDER is irrelevant.
     if (
-        text.startswith("<command-message>")
+        (text.startswith("<command-message>") or text.startswith(_COMMAND_NAME_PREFIX))
+        and "<command-message>" in text
         and _COMMAND_NAME_PREFIX in text
         and origin_kind in (None, "human")
     ):
@@ -368,10 +397,12 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
     if prompt_source == "sdk":
         return "human"
 
-    if text.startswith(_COMMAND_NAME_PREFIX):
-        return "human"
-
-    return "human"  # legacy record: no origin/turnOrigin/promptSource field at all
+    # No field above matched at all (a legacy, pre-`origin` transcript record, or a
+    # `<command-name>`-leading wrapper whose origin.kind fell through as neither "human" nor
+    # None) -- either way the outcome is "human", so a dedicated `_COMMAND_NAME_PREFIX` check
+    # here would be dead code: it can only ever produce the same "human" this catch-all already
+    # returns. Removed rather than kept as a no-op (TRDD-RAEGS1D5 gap-fix review).
+    return "human"
 
 
 def is_heartbeat_reply(text: str) -> bool:
