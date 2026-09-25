@@ -5060,6 +5060,13 @@ fn min_keywords() -> usize {
 /// failure as no description — it occupies the triage slot without discharging it.
 const MIN_DESC_CHARS: usize = 24;
 
+/// The atom `desc:` block-prop cap, shared with `sanitize_quoted_value` (the 200 it truncates
+/// to). The write verbs REFUSE over-cap input instead of letting that silent truncation cut the
+/// description mid-word (TRDD-23QM8H5F): a desc cut at 200 loses the tail of the symptom
+/// phrase, and the writer never knows. Page `description:` is exempt — it is uncapped on
+/// purpose (see `sanitize_quoted_uncapped`).
+const ATOM_DESC_MAX_CHARS: usize = 200;
+
 /// Minimum `/`-separated phrases in a PAGE `description:` (owner, 2026-08-23). Higher than the
 /// atom floor of 10 because a page's description is the recall surface for EVERY fact it holds:
 /// an atom answers one question, a page answers all of them, so it needs the union of their
@@ -5180,6 +5187,17 @@ pub(crate) fn check_desc(desc: Option<&str>, what: &str) -> Result<()> {
             "--desc is only {} chars ({MIN_DESC_CHARS} minimum) — `{d}` is a label, not a triage \
              surface. A reader seeing it in a listing still cannot tell whether this {what} \
              answers their question, which is the one job the field has.",
+            d.chars().count()
+        );
+    }
+    // TRDD-23QM8H5F: the marker builder would silently truncate an over-cap desc to 200 chars
+    // mid-word (`sanitize_quoted_value`); refuse here instead, so the writer shortens it
+    // deliberately and nothing is silently lost.
+    if d.chars().count() > ATOM_DESC_MAX_CHARS {
+        anyhow::bail!(
+            "--desc is {} chars, over the {ATOM_DESC_MAX_CHARS}-char atom cap — the marker \
+             block-prop would silently truncate it mid-word. Shorten the desc to the symptom \
+             phrases that matter (the body keeps the detail).",
             d.chars().count()
         );
     }
@@ -13218,6 +13236,19 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // again — which is the failure the ruling was about, not the one it was avoiding.
         let big = "w".repeat(1501);
         assert!(check_new_body_budget(&big, 1500, "atom").is_ok());
+    }
+
+    #[test]
+    fn desc_over_the_atom_cap_is_refused_not_truncated_mid_word() {
+        // TRDD-23QM8H5F: an over-cap desc must FAIL LOUD, never pass and then get silently
+        // cut to 200 chars by the marker builder (the observed mid-word truncation).
+        let over = "word ".repeat(50); // 250 chars > 200
+        let err = check_desc(Some(over.trim()), "atom").unwrap_err().to_string();
+        assert!(err.contains("over the 200-char atom cap"), "{err}");
+        // At exactly the cap: fine.
+        assert!(check_desc(Some(&"w".repeat(200)), "atom").is_ok());
+        // One over: refused.
+        assert!(check_desc(Some(&"w".repeat(201)), "atom").is_err());
     }
 
     #[test]
