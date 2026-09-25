@@ -3,7 +3,7 @@ trdd-id: FVYV6RSG
 title: memgrep lint tickets reach the janitor queue without flooding it
 column: testing
 created: 2026-09-23T23:05:42+0200
-updated: 2026-09-25T15:56:12+0200
+updated: 2026-09-25T17:04:12+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -35,3 +35,4 @@ the owner removed the per-call cap on OPENING tickets (TRDD-XI10BA5D), so dispat
 
 2026-09-25 15:30 — implemented: wikimem-syntax.py raises MEMCORP-001 per new finding (raise_issue's own dedupe makes it idempotent); body = path:line + rule code + the mapped chore (atom-oversized -> /janitor-memory-atomize, link-one-sided -> /janitor-memory-update, cross-scope -> agent's own decision), never page text; held agentlenspro/ghbook pages skipped; dispatch bound min(per_fire, budget, inflight) confirmed shared for memory-corpus via KIND_REGISTRY. 4 new tests (tests/test_wikimem_syntax_tickets.py); ruff/mypy/pyright clean. Column -> testing.
 2026-09-25 15:30 — implemented: wikimem-syntax.py raises MEMCORP-001 per new finding (raise_issue dedupe makes it idempotent); body = path:line + rule code + mapped chore (atom-oversized -> /janitor-memory-atomize, link-one-sided -> /janitor-memory-update, cross-scope -> agent's own decision), never page text; held agentlenspro/ghbook pages skipped; dispatch bound min(per_fire, budget, inflight) confirmed shared for memory-corpus via KIND_REGISTRY. 4 new tests (tests/test_wikimem_syntax_tickets.py); ruff/mypy/pyright clean. Column -> testing.
+2026-09-25 16:20 — review fix: dedupe key = code + page basename (line dropped). A line-sensitive key re-filed a durable ticket for the SAME defect after any edit above the atom shifted the line; where= still carries the newest line. Per-project ledger locality (N projects could each file one ticket for a machine-global corpus defect) accepted as a documented bound: the dispatch cap bounds agents, and the ERROR filter currently passes zero live findings.
