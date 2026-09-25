@@ -1,9 +1,9 @@
 ---
 trdd-id: IEBZ4JC5
 title: Janitor maintainers and indexers must run in project folders whose git repos live in subfolders
-column: todo
+column: testing
 created: 2026-09-23T13:13:10+0200
-updated: 2026-09-25T16:27:02+0200
+updated: 2026-09-25T21:29:45+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: bugfix
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: Emasoft
 approval-datetime: 2026-09-23T13:13:10+0200
+status: tasked
 ---
 
 # Janitor maintainers and indexers must run in project folders whose git repos live in subfolders
@@ -33,7 +34,9 @@ ac39cf13 (memory-marker STATE_DIR recipe falls back to the cwd when there is no 
 ## Approval log
 
 - 2026-09-23T13:13:10+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-25T21:29:45+0200 — column → testing by main-agent@ai-maestro-janitor. option (a) implemented with 5 tests; gates clean
 
 ## STATE
 
 2026-09-25 15:55 — measured, proposal ready for the owner (no code — the card's layout question is owner-owned): (1) state.py's root ladder (env > override > rev-parse > cwd) and trdd_common.local_design_root (worktree/submodule-aware, non-repo = project dir stands) already resolve correctly for nested-repo projects; the LOCAL corpus never hoists into a subrepo. (2) The silent-skip class is real but bounded: memory-scope-leak, ci-status, dirty-tree, github-issues-watch, branch-protection, gitignore-coverage each fail-open with a graceful no-op when the project root is not itself a repo — their remedial half (gitignore coverage, dirty tree, GitHub config) is genuinely meaningless without a repo, so the only true gaps are the memory/trdd MAINTENANCE chores. (3) PROPOSAL for the owner, three options: (a) RECOMMENDED — when the project root is not a repo, maintenance jobs walk the immediate subfolders' repos for the git-bound halves (trddgrep board discovery, project-memory-tracked check) and treat design/ + .claude/project/memory at the PROJECT ROOT as the corpus home, git-tracked via whichever subfolder repo the owner registers in a small config file (.janitor/track-repo); (b) corpus lives inside ONE designated subrepo; (c) corpus stays untracked for such projects (status quo, with the no-op surfaced as a finding instead of silent). Decide (a)/(b)/(c) and I implement.
+2026-09-25 21:40 — option (a) IMPLEMENTED (the card's recommended direction): state.tracked_repo() resolves own-repo > .janitor/track-repo subfolder > None; memory-scope-leak, dirty-tree and gitignore-coverage probe the registered subrepo instead of silently skipping, and an unregistered non-repo root emits one deduped drift line naming the gap. Tests tests/test_nested_repo_track.py (5) + existing suites; ruff/mypy clean. Column -> testing.
