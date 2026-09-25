@@ -1,9 +1,9 @@
 ---
 trdd-id: BLGZTHQ9
 title: The injected Jev copy shows tool items as one-to-four-line stubs
-column: todo
+column: testing
 created: 2026-09-24T11:21:06+0200
-updated: 2026-09-25T03:13:36+0200
+updated: 2026-09-25T14:42:19+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -15,6 +15,7 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:06+0200
 implementation-commits: [f87a1a79, f2e6ead7, 1fe03838]
+status: tasked
 ---
 
 # The injected Jev copy shows tool items as one-to-four-line stubs
@@ -28,10 +29,12 @@ implementation-commits: [f87a1a79, f2e6ead7, 1fe03838]
 Found by a fresh real-transcript run on HEAD 3ff01e50 (reports/compaction-replacement/20260924_112500+0200-jev-real-run-verification.md, E1). After the per-item byte cap, a kept tool item in the injected copy is a command echo plus one output line, card frontmatter, a two-line heading fragment or seven lines of a diff hunk: it counts as a non-owner item inline while carrying no information. Seen on all three transcripts (b2bf5b7b, d30bf250, 4eb7bf5d). Proposed direction (pending the advisor): a tool item that does not fit its injected cap is shown as a pointer only, never as a truncated stub. Acceptance: on the three transcripts no injected tool item is a truncated prefix (mechanical check), and every non-owner item shown states a fact, command result or decision that the recent-turns tail does not (read by hand); a test fails without the fix. Release blocker for TRDD-RAEGS1D5.
 2026-09-25 -- Extended past kind == "tool": render()'s over-cap branch and _select_injected's admission gate now key on it.kind not in _CONVERSATION_KINDS (tool or event), not kind != "tool", so a non-notification "event" item (a cross-session peer message) over its cap is pointer-only too -- 4 real instances on a live transcript (reports/compaction-replacement/20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md). Deliberately NOT widened to kind != "user": that broke two pre-existing tests using kind=="assistant" to exercise the general RAEGS1D5 prefix mechanism; reverted. 2 new tests added; 137/137 own file, 232/232 with the sibling suites; ruff/mypy/pyright clean. Report: reports/compaction-replacement/20260925_recheck-blgzthq9-event-tool-pointer-only-worker.md
 2026-09-25 (review) -- adversarial review of the extension found the selection-side guard used a literal ("tool","event") tuple instead of the shared _CONVERSATION_KINDS constant render() uses; fixed so both guards reference the same constant and cannot silently diverge if ItemKind grows a 6th member. Also flagged (accepted, NOT fixed, pre-existing and out of scope): compose() trusts its caller's items list -- nothing inside it structurally guarantees only tool/event kinds reach the scored path; that invariant lives in split_conversation, a different function I did not audit every caller of. Retest after the review fix: 232/232, ruff/mypy/pyright clean. Card ready for testing column.
+- 2026-09-25 14:40 — acceptance hand re-read DONE on HEAD 52c87cbb, fresh renders via scripts_dev/jev_verify/run_lane.py on the 4 real sessions (reports under /tmp/blg-reread, per-session inject.md). Verdict per acceptance: (1) every non-owner item shown states a fact/result/decision the recent-turns tail does not — b2bf5b7b 3 tool + 3 event (review verdicts with real content incl. 'the proposal was never posted'; section-heading excerpts from the rotation doc), d30bf250 2 tool (the memgrep-resolve and snapshot-check commands WITH their outputs — both load-bearing for the /clear drill), 4eb7bf5d 9 tool + 3 event (PreCompact handoff heading fragments + 2 agent-limit failures) — no metadata shell, no bare call echo, no truncated prefix observed on any item; fd5cc3e0 kept section empty. (2) fd5cc3e0 ROOM-SENSITIVITY finding, judged correct-by-design: at today's live room (4678 B; the board grew since the card's 06:23 measure at 6012-6036) the 2 Jev-kept live items (~2.4 KB whole) no longer fit after owner prose, so step 6b admits none — verified by re-running jev_compact.py compact with --inject-max-bytes 6100: both items return (inject 5485 B, 2 tool blocks). The SK490HKU acceptance holds at its measured room; at smaller live rooms the injected copy is owner-prose-only, which is the intended priority. Recorded here; no code change.
 
 ## Approval log
 
 - 2026-09-24T11:21:06+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-25T14:42:19+0200 — column → testing by main-agent@ai-maestro-janitor. acceptance hand re-read done 2026-09-25 on HEAD 52c87cbb: no metadata shells, no truncated prefixes, room-sensitivity behavior verified correct-by-design
 
 ## Review corrections 2026-09-24
 
