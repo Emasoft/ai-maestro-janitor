@@ -4001,6 +4001,53 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
             anyhow::anyhow!("atom `{}` on {} has no parseable marker line", a.atom, a.page.display())
         })?)
     };
+    // T-H97PEEQZ: a footnote-lesson's body lives INLINE on the marker line, after the props'
+    // closing `]` (`[^N]: [meta] DO NOT …`). The rebuild below replaced the whole line with a
+    // props-only marker and silently DELETED that inline body — the lesson kept its metadata and
+    // looked fine, but `find --only-notes` returned nothing and lint raised `lesson-empty-body`.
+    // Measured 2026-09-25: three real USER-scope lessons (ATOM-142L-S3V9 x2, ATOM-60ZD-6UGR)
+    // lost their bodies this way when a session shortened over-cap descs — the XI9 body-optional
+    // path made the previously-refusing call succeed, and the refusal had been masking the loss.
+    // Capture the tail here; re-attach it to the rebuilt marker below.
+    let footnote_inline_body = match &footnote_label {
+        Some(_) => {
+            let t = lines[marker_idx].trim_start();
+            // `[^N]: [props] body` — skip the label's own `[N]` (its `]` is NOT the props
+            // close), then `:`, then whitespace, to reach the props opener; depth-walk to the
+            // props' closing `]` so a `]` inside a quoted value cannot end the props early.
+            let after_open = t.strip_prefix("[^").and_then(|r| {
+                let c = r.find(']')?;
+                let s = r[c + 1..].trim_start().strip_prefix(':')?.trim_start();
+                s.strip_prefix('[')
+            });
+            match after_open {
+                Some(inner) => {
+                    let bytes = inner.as_bytes();
+                    let mut depth = 1i32;
+                    let mut close_pos: Option<usize> = None;
+                    for (i, &b) in bytes.iter().enumerate() {
+                        match b {
+                            b'[' => depth += 1,
+                            b']' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    close_pos = Some(i);
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    match close_pos {
+                        Some(p) => inner[p + 1..].trim().to_string(),
+                        None => String::new(),
+                    }
+                }
+                None => String::new(),
+            }
+        }
+        None => String::new(),
+    };
     let (_s, _end, id, props_raw) = match (&footnote_label, first_block_property_marker(&lines[marker_idx])) {
         (None, Some(hit)) => hit,
         _ => {
@@ -4077,10 +4124,18 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
         out_props.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
     let marker = match &footnote_label {
         // Keep the footnote-lesson shape: the label came from the original `[^N]:` line.
+        // Re-attach the INLINE lesson body after the props bracket (T-H97PEEQZ) — dropping it
+        // deletes the lesson's DO-NOT/BECAUSE/DO text. The stdin `body` path never fires for a
+        // footnote (empty span), so this tail is the lesson's ONLY body; an empty tail
+        // round-trips to exactly the props-only line.
         Some(_) => {
             let label = lines[marker_idx].trim_start().trim_start_matches("[^")
                 .split(']').next().unwrap_or("").to_string();
-            format!("[^{label}]: [{}]", render_block_props(&out_props_ref))
+            if footnote_inline_body.is_empty() {
+                format!("[^{label}]: [{}]", render_block_props(&out_props_ref))
+            } else {
+                format!("[^{label}]: [{}] {footnote_inline_body}", render_block_props(&out_props_ref))
+            }
         }
         None => format!("^{id} [{}]", render_block_props(&out_props_ref)),
     };
@@ -13526,6 +13581,63 @@ mod xi9_cli_tests {
         assert!(t.contains("[^29]"), "sibling footnote must survive");
         assert!(t.contains("byte-preservation gates"), "new desc must be present");
         assert!(!t.contains("desc:\"old\""), "old desc must be replaced");
+        // T-H97PEEQZ: the fixture's own inline body must survive too.
+        assert!(t.contains("a lesson body inline"), "inline lesson body must survive the rebuild");
+    }
+
+    #[test]
+    fn update_lesson_desc_preserves_inline_body() {
+        // T-H97PEEQZ regression: a desc-only edit of a footnote-lesson with an INLINE body
+        // must keep that body. The pre-fix rebuild emitted props-only and silently deleted
+        // the DO-NOT/BECAUSE/DO text — three real corpus lessons were damaged this way
+        // (all three stripped lines still carried `lmd: 2026-09-25` from the same-day edit).
+        // Watched to FAIL on the pre-fix binary: it dropped the body with exit 0.
+        let dir = std::env::temp_dir().join(format!("xi9-inline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let page = dir.join("p.md");
+        std::fs::write(&page, "## Notes and lessons learned\n[^28]: [id:ATOM-60ZD-6UGR, status:valid, desc:\"old\", keywords:\"k1,k2\", ocd: 2026-09-25, lmd: 2026-09-25] DO NOT trust the rebuild, BECAUSE it once dropped this text. DO assert the body survives.\n[^29]: [id:ATOM-BBBB-2222, status:valid, desc:\"next\", keywords:\"k3,k4\", ocd: 2026-09-25, lmd: 2026-09-25] another lesson\n").expect("write");
+        let args: Vec<String> = ["--page", page.to_str().unwrap(),
+            "--atom", "ATOM-60ZD-6UGR",
+            "--desc", "a split pass declared a lesson pool permanently unsplittable from inside its own byte-preservation gates"]
+            .iter().map(|s| s.to_string()).collect();
+        let r = cmd_update_atom_cli(&args);
+        assert!(r.is_ok(), "desc-only edit must succeed: {r:?}");
+        let t = std::fs::read_to_string(&page).unwrap();
+        assert!(
+            t.contains("DO NOT trust the rebuild"),
+            "inline lesson body must survive the rebuild"
+        );
+        assert!(
+            t.contains("DO assert the body survives"),
+            "inline lesson body tail must survive"
+        );
+        assert!(t.contains("[^29]"), "sibling footnote must survive");
+        assert!(
+            t.contains("desc: \"a split pass"),
+            "new desc must be present"
+        );
+    }
+
+    #[test]
+    fn update_lesson_desc_round_trips_props_only_footnote() {
+        // A footnote with NO inline body must round-trip props-only — the re-attach path must
+        // not fabricate a trailing space or leak the next footnote's text.
+        let dir = std::env::temp_dir().join(format!("xi9-bare-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let page = dir.join("p.md");
+        std::fs::write(&page, "## Notes and lessons learned\n[^28]: [id:ATOM-60ZD-6UGR, status:valid, desc:\"old\", keywords:\"k1,k2\", ocd: 2026-09-25, lmd: 2026-09-25]\n[^29]: [id:ATOM-BBBB-2222, status:valid, desc:\"next\", keywords:\"k3,k4\", ocd: 2026-09-25, lmd: 2026-09-25]\n").expect("write");
+        let args: Vec<String> = ["--page", page.to_str().unwrap(),
+            "--atom", "ATOM-60ZD-6UGR",
+            "--desc", "a split pass declared a lesson pool permanently unsplittable from inside its own byte-preservation gates"]
+            .iter().map(|s| s.to_string()).collect();
+        let r = cmd_update_atom_cli(&args);
+        assert!(r.is_ok(), "desc-only edit must succeed: {r:?}");
+        let t = std::fs::read_to_string(&page).unwrap();
+        assert!(
+            t.contains("[^28]: [desc: \"a split pass"),
+            "props-only footnote must stay props-only"
+        );
+        assert!(!t.contains("] \n[^"), "no trailing space fabricated before the next footnote");
     }
 }
 
