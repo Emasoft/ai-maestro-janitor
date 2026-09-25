@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth-operations
 description: "The rotator's exact CLI commands (rotator.py auto/tick/oauth-health/usage/list/switch, slot_capture_browser.py, reauth.py, slot_capture_token.py, open-login.sh), the user-facing janitor skills and heartbeat detectors that control rotation (/janitor-auto-manage-oauth-on|off, oauth-login-needed, oauth-cookie-reminder, /janitor-refresh-claude-logins), the diagnostic entry points for 'rotator failed to keep the session alive', the resume protocol before touching rotator code, and the CERTIFICATE_VERIFY_FAILED daemon-interpreter incident (had to rotate manually, refresh failed network on every tick), and the owner-ratified manual renew procedure for a credential-dead slot (had to rotate manually / refresh failed credential-dead / oauth-login-needed / no Authorize button after open-login / setup-token keys not working)."
 ocd: 2026-06-13
-lmd: 2026-09-24
+lmd: 2026-09-25
 metadata:
   node_type: memory
   type: project
@@ -21,7 +21,7 @@ alive", and the resume protocol before touching rotator code. Part of
 
 ## The exact commands
 
-^JIDASKGJ [desc:"The rotator's CLI subcommand table (rotator.py auto/tick/oauth-health/usage/list/switch, slot_capture_browser.py, reauth.py, slot_capture_token.py, open-login.sh) and locking caveats.", keywords:"what_rotator_commands_exist rotator_py_auto_tick_oauth_health_usage_list_switch slot_capture_browser_vs_slot_capture_token reauth_py_manual_dry_run_flags open_login_sh_one_time_seed older_installed_rotator_may_lack_newer_subcommands mutating_commands_serialize_behind_oauth_rotator_lock", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
+^JIDASKGJ [desc: "How to invoke rotator.py (run from repo-root; older installed builds may lack newer subcommands) and its decision commands: auto (proactive rotate) and tick (the full cascade beat).", keywords: what_rotator_commands_exist rotator_py_auto_usage_based_rotate_decision rotator_py_tick_full_cascade_beat rotator_cascade_renew_refresh_rotate_renew_cookie older_installed_rotator_unknown_command mutating_commands_serialize_oauth_rotator_lock env_unset_CLAUDE_PLUGIN_DATA only_if_claude_running_flag refresh_on_err_safety_net repo_root_newest_subcommands, type: project, ocd: 2026-06-13, lmd: 2026-09-25]
 Run from `<repo-root>` (the working-tree rotator has the newest subcommands; an older
 *installed* version may lack `oauth-health` / `print-profiles-root` and prints
 `unknown command: …` to stdout — guard any consumer with an absolute-path `/*` or
@@ -33,14 +33,25 @@ Run rotator tooling with `env -u CLAUDE_PLUGIN_DATA` when invoking against a spe
 |---|---|
 | `rotator.py auto` | One proactive usage-based ROTATE decision. No-op unless the live account is near a limit AND a safer alternate exists. Fails safe (unknown usage never switches). Includes the refresh-on-err safety net (lesson [^2]). |
 | `rotator.py tick [--only-if-claude-running]` | One full daemon beat: migrate-root once → log the cascade plan → `_keepalive_refresh` (RENEW_REFRESH) → integrity repair → capture live into a slot → `cmd_auto` (ROTATE) → `_bootstrap_seeded_slots` (RENEW_COOKIE, last). The cascade in one call. No-ops unless real `claude` is running. |
+
+^ATOM-4ACD-6I96 [desc: "The read-only diagnostic rotator commands: oauth-health (per-account has_refresh + token expiry read from the keychain, the SSOT), usage (5h/7d utilization), list, live-email/known-emails.", keywords: rotator_py_oauth_health_keychain_ssot rotator_py_usage_5h_7d_utilization rotator_py_list_captured_at rotator_py_live_email_known_emails which_account_is_live is_oauth_healthy is_a_slot_expired MAX_means_429_now read_only_diagnostic_commands_no_lock per_account_token_expiry_keychain, type: project, ocd: 2026-09-25, lmd: 2026-09-25]
+
 | `rotator.py oauth-health [--json]` | **Per-account `has_refresh` + token expiry, read from the KEYCHAIN** (the SSOT). TIME-VARYING — query live, never hardcode which account is healthy. The authoritative "is OAuth healthy / safe to refresh" source. |
 | `rotator.py usage` | Live + every slot's 5h/7d utilization (`MAX` = 429 now, `err`/`?` = unreachable). Zero inference cost. |
 | `rotator.py list` | Live account + each slot's `captured_at` and token-expiry. |
 | `rotator.py live-email` / `known-emails` | The currently-live email / every known email (used by reauth.py as the identity guard). |
+
+^ATOM-PDYW-S3LI [desc: "The manual-intervention rotator commands: switch <email> (manual ROTATE to a named slot, warns if expired) and capture (mirror the current live credential into its slot, read-back-verified).", keywords: rotator_py_switch_manual_rotate rotator_py_capture_mirror_live_credential manual_rotate_command force_rotation_to_slot refresh_slot_from_live_credential rotate_to_named_email warns_if_slot_token_expired read_back_verified_capture manual_rotation_how_to switch_command_usage, type: project, ocd: 2026-09-25, lmd: 2026-09-25]
 | `rotator.py switch <email>` | Manual ROTATE to a named slot. Warns if that slot's token is already expired. |
 | `rotator.py capture [--only-if-claude-running]` | Mirror the current live credential into its slot (read-back-verified). |
+
+^ATOM-D04Y-5WFT [desc: "The rotator.py maintenance and one-time-migration commands: print-profiles-root (canonical Chrome-profiles root), migrate-slots, delete-plaintext-slots, migrate-root.", keywords: rotator_py_print_profiles_root canonical_chrome_profiles_root migrate_slots_plaintext_to_keychain delete_plaintext_slots migrate_root_legacy_state one_time_migration_commands rotator_maintenance_commands where_does_rotator_resolve_chrome_profiles unknown_command_oauth_health_installed_rotator read_only_commands_take_no_lock, type: project, ocd: 2026-09-25, lmd: 2026-09-25]
+
 | `rotator.py print-profiles-root` | The canonical Chrome-profiles root (so shell helpers resolve the same path the Python engine uses). |
 | `rotator.py migrate-slots` / `delete-plaintext-slots` / `migrate-root` | One-time migrations (plaintext slots → keychain → delete; legacy state root → DATA dir). |
+
+^ATOM-E364-JI8R [desc: "The capture/reauth helper commands: slot_capture_browser.py AUTO lane, reauth.py, slot_capture_token.py HUMAN lane, the one-time open-login.sh seed, and the refresh-claude-logins orchestrator.", keywords: slot_capture_browser_auto_authorize_click reauth_py_hands_free_live_credential_login slot_capture_token_setup_token_paste open_login_sh_seed_clean_chrome one_time_seed_sessionKey_persists janitor_refresh_claude_logins_orchestrates_reauth which_command_mints_a_slot manual_capture_command how_do_i_capture_a_slot monthly_reauth_orchestrator, type: project, ocd: 2026-09-25, lmd: 2026-09-25]
+
 | `slot_capture_browser.py <email>` | AUTO lane: CDP-attach to the seeded profile, auto-click Authorize → mints an access+refresh slot (RENEW cookie path). |
 | `reauth.py --email <email>` | Hands-free LIVE-credential REAUTH (tmux + `claude auth login` + CDP-attach Authorize-click). `--manual` = human clicks; `--dry-run` prints the exact dedicated-Chrome launch line. |
 | `slot_capture_token.py <email>` | HUMAN lane: paste a CLI-minted setup-token (the `claude` `setup-token` subcommand; 1-year, NO refresh token) into a slot. |
@@ -55,7 +66,7 @@ expiry) — only reliable since the keychain-write fix (lesson [^4]).
 
 ## Janitor skills & commands for OAuth (the control surface — what each does, when to use it)
 
-^L7XKNBB1 [desc:"User-facing OAuth control surface: auto-manage-oauth-on|off skills toggle rotation; oauth-login-needed and oauth-cookie-reminder are surface-only detectors; refresh-claude-logins orchestrates reauth.", keywords:"what_janitor_commands_control_oauth_rotation oauth_login_needed_detector oauth_cookie_reminder_detector janitor_refresh_claude_logins_command what_do_i_actually_do_by_hand_for_oauth", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
+^L7XKNBB1 [desc: "The user-facing OAuth control surface: /janitor-auto-manage-oauth-on|off skills opt this machine in or out of daemon-managed rotation (flag-only, launchd retired).", keywords: how_do_i_turn_on_hands_free_rotation janitor_auto_manage_oauth_on janitor_auto_manage_oauth_off pause_rotation_debugging deliberate_single_account_stint needs_two_seeded_accounts refuses_credential_pinning_env clears_opt_in_flag_keeps_slots what_janitor_commands_control_oauth_rotation opt_in_flag_daemon_60s_tick, type: project, ocd: 2026-06-13, lmd: 2026-09-25]
 The scripts above are the engine; these are the user-facing slash-commands + the automatic
 heartbeat nudges you actually interact with. The whole point: turn rotation ON once, then the
 only thing you ever do BY HAND is heed the ~monthly reauth nudge.
@@ -64,6 +75,9 @@ only thing you ever do BY HAND is heed the ~monthly reauth nudge.
 |---|---|---|
 | `/janitor-auto-manage-oauth-on` (skill) | Opts THIS machine INTO the unattended rotator — sets the opt-in flag the daemon's 60 s `oauth-rotator-tick` reads, so ROTATE + RENEW run hands-free. Default OFF, macOS, idempotent; REFUSES if a credential-pinning env var would defeat rotation. | Once, to enable hands-free multi-account survival (e.g. before unattended / overnight work). Needs ≥2 seeded accounts to have somewhere to rotate TO. |
 | `/janitor-auto-manage-oauth-off` (skill) | Clears the opt-in flag → the tick STOPS rotating (no more credential backups or account swaps), and tears down any legacy launchd agent. Leaves your captured slots untouched. | To pause rotation (debugging, a deliberate single-account stint). Re-enable any time with `-on`; your slots survive. |
+
+^ATOM-Q2B2-FBQP [desc: "The two always-on OAuth heartbeat detectors (oauth-login-needed REAUTH nudge, oauth-cookie-reminder pre-expiry warning) and the refresh-claude-logins command they point at.", keywords: oauth_login_needed_detector_surfaces_reauth_nudge oauth_cookie_reminder_warns_before_cookie_expires do_i_ever_run_the_oauth_detectors_myself REAUTH_NUDGE_points_at_refresh_claude_logins what_nudges_monthly_reauth heartbeat_detector_surface_only monthly_reauth_the_one_human_step cookie_expiring_warn_before_renew_fails oauth_login_needed_daily_dedupe refresh_claude_logins_guides_human_login, type: project, ocd: 2026-09-25, lmd: 2026-09-25]
+
 | `oauth-login-needed` (heartbeat detector — AUTOMATIC, surface-only) | When the rotator is set up, SURFACES the REAUTH nudge: an account that can neither self-renew (no / dead refresh) NOR auto-bootstrap (no live cookie), token expired / near-expired → emits `REAUTH_NUDGE` pointing at `/janitor-refresh-claude-logins`. Machine-scoped daily-dedupe (~one nudge/day). | You don't run it — it nudges YOU (~monthly). Heed it: do the reauth for the named account (the one human step). |
 | `oauth-cookie-reminder` (heartbeat detector — AUTOMATIC, surface-only) | The PROACTIVE sibling: SURFACES a reminder BEFORE a seeded claude.ai cookie expires (warn before RENEW can fail, not after). | You don't run it — heed it: re-seed (one-time login) the warned account before its cookie lapses, so RENEW never falls to REAUTH by surprise. |
 | `/janitor-refresh-claude-logins` (command)[^9] | The orchestrating REAUTH flow the `REAUTH_NUDGE` points to: guides the human login per expired account, saves + scrubs the cookie, then triggers RENEW with the fresh cookies. | ~Monthly, when `oauth-login-needed` nudges — the ONE unavoidable human step (passkey / 2FA is OS-level; see layer 3). |
@@ -108,12 +122,12 @@ root-cause and promoted it to "fact"). Query `oauth-health` live; treat every su
 technical claim as UNVERIFIED until checked against the TRDD + the source headers.
 
 
-^ATOM-V316-ZKU6 [desc: "had to rotate the account manually again — every slot refresh failed (network) on every tick: the daemon's python.org interpreter has no CA bundle, CERTIFICATE_VERIFY_FAILED filed as network", keywords: had_to_rotate_manually_again refresh_failed_network_every_tick no_usable_slot_twin_staying_put rotation_stuck_all-accounts-maxed_refresh-failed CERTIFICATE_VERIFY_FAILED_daemon python.org_python_no_cert.pem Install_Certificates.command launchd_daemon_interpreter_trust_store oauth-health_days_negative rotator_did_not_rotate_on_wall primary_live_credential_unreadable_is_by_design, trdd: TRDD-X6I04SAO, ocd: 2026-09-02, lmd: 2026-09-02]
-When rotator.log shows [keepalive] <slot>: refresh failed (network) on EVERY tick for EVERY spare slot while the token endpoint answers from a shell, the daemon's interpreter is the problem, not the network. The launchd daemon runs whatever Python the plist names; a python.org framework build ships with etc/openssl/cert.pem MISSING until its Install Certificates.command is run, so every urlopen dies with CERTIFICATE_VERIFY_FAILED — a URLError, which classify_refresh_failure filed as network/benign. Seen 2026-09-02: ≥878 failures in one day across the two rotated logs, both spare slot tokens expired (oauth-health days negative), every auto tick ending 'no usable slot twin to probe — staying put (fail-safe)', rotation-stuck.json 'all-accounts-maxed refresh-failed' since 08-25 (onset unknown: the log rotates daily), and the user rotated by hand. Reproduce with the daemon's exact interpreter and env: env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin <plist python> -c 'urlopen(token endpoint)'; a shell's uv Python has a bundle and never shows it. Machine fix: the symlink Install Certificates.command creates (etc/openssl/cert.pem -> certifi/cacert.pem) — the next tick refreshed both slots. Durable fix: scripts/lib/tls_context.verifying_context() on every daemon-side https urlopen + the REFRESH_FAIL_TLS cause (TRDD-X6I04SAO). The model-scoped (Fable) wall trigger already exists in cmd_auto (f185e521) but needs the live account's usage read through a slot twin, which expired slots deny. 'primary live credential UNREADABLE from this context' every tick is the DESIGNED headless path (TRDD-7PYTX4E9 F1), not a fault.
+^ATOM-V316-ZKU6 [desc: "Diagnosis: refresh failed (network) on every tick for every spare slot while the token endpoint answers from a shell — the daemon's interpreter lacks a CA bundle; how to reproduce it.", keywords: had_to_rotate_manually_again refresh_failed_network_every_tick no_usable_slot_twin_staying_put rotation_stuck_all-accounts-maxed_refresh-failed CERTIFICATE_VERIFY_FAILED_daemon python.org_python_no_cert.pem env_i_repro_daemon_interpreter oauth-health_days_negative rotator_did_not_rotate_on_wall primary_live_credential_unreadable_by_design, trdd: TRDD-X6I04SAO, ocd: 2026-09-02, lmd: 2026-09-25]
+When rotator.log shows [keepalive] <slot>: refresh failed (network) on EVERY tick for EVERY spare slot while the token endpoint answers from a shell, the daemon's interpreter is the problem, not the network. The launchd daemon runs whatever Python the plist names; a python.org framework build ships with etc/openssl/cert.pem MISSING until its Install Certificates.command is run, so every urlopen dies with CERTIFICATE_VERIFY_FAILED — a URLError, which classify_refresh_failure filed as network/benign. Seen 2026-09-02: ≥878 failures in one day across the two rotated logs, both spare slot tokens expired (oauth-health days negative), every auto tick ending 'no usable slot twin to probe — staying put (fail-safe)', rotation-stuck.json 'all-accounts-maxed refresh-failed' since 08-25 (onset unknown: the log rotates daily), and the user rotated by hand. Reproduce with the daemon's exact interpreter and env: env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin <plist python> -c 'urlopen(token endpoint)'; a shell's uv Python has a bundle and never shows it.
 
 
 
-^ATOM-VH28-30GK [desc: "The owner-ratified 2026-09-24 manual renew procedure: open-login.sh then check-login.sh then slot_capture_browser.py, verify, alternates-before-live, redact output; setup-token keys are deprecated.", keywords: had_to_rotate_manually_again refresh_failed_credential-dead oauth-login-needed no_Authorize_button_after_open-login setup-token_keys_not_working check-login.sh open-login.sh slot_capture_browser.py capture_alternates_first_live_last redact_capture_output ratified_renew_procedure switching_not_yet_proven, type: project, trdd: TRDD-K0PMVRN6, ocd: 2026-09-24, lmd: 2026-09-24]
+^ATOM-VH28-30GK [desc: "The owner-ratified 2026-09-24 manual renew procedure for a credential-dead slot: open-login.sh seed, check-login.sh, slot_capture_browser.py, verify the filed slot, alternates first, redact output.", keywords: had_to_rotate_manually_again refresh_failed_credential-dead oauth-login_needed_nudge no_Authorize_button_after_open-login check-login.sh open-login.sh slot_capture_browser.py capture_alternates_first_live_last redact_capture_output ratified_renew_procedure verified_FULL-OAUTH_slot_filed, type: project, trdd: TRDD-K0PMVRN6, ocd: 2026-09-24, lmd: 2026-09-25]
 
 **The owner-ratified manual renew procedure (2026-09-24, TRDD-K0PMVRN6).** Use when a slot
 keepalive logs `refresh failed (credential-dead)`, or the `oauth-login-needed` heartbeat nudge
@@ -132,17 +146,26 @@ it in memory."
    token ~8h, then self-renewing through keepalive). Nothing runs this automatically:
    auto-bootstrap is opt-in (`CLAUDE_ROTATOR_AUTO_BOOTSTRAP`, default OFF, TRDD-5OJX3SCF) — a
    human or agent must run step 3 by hand every time, not just once.
+
+^ATOM-LTOX-A05P [desc: "Steps 3-4 of the ratified renew procedure: run slot_capture_browser.py by hand (auto-bootstrap is opt-in, CLAUDE_ROTATOR_AUTO_BOOTSTRAP default OFF) and verify the FULL-OAUTH slot for the SAME email.", keywords: slot_capture_browser_run_by_hand_every_time CLAUDE_ROTATOR_AUTO_BOOTSTRAP_opt_in auto_bootstrap_default_off_TRDD_5OJX3SCF OK_filed_FULL-OAUTH_slot profile_holding_other_account_refiles janitor179_wrong_email_slot verify_captured_fresh nothing_runs_capture_automatically check_login_cannot_tell_whose_session step_by_step_manual_renew, type: project, trdd: TRDD-K0PMVRN6, ocd: 2026-09-25, lmd: 2026-09-25]
+
 4. Verify: the final line reads `OK: filed FULL-OAUTH slot for <email>` naming THE SAME email (a
    profile holding another account's session re-files under that account, janitor#179);
    `env -u CLAUDE_PLUGIN_DATA python3 …/rotator.py list` shows a fresh `captured=`; on the next
    tick the log shows `auto: live <email> 5h=… 7d=…` instead of "no usable slot twin" — proving
    probing, not yet switching.
+
+^ATOM-3YMM-5PVC [desc: "Steps 5-6 of the ratified renew procedure: capture ALTERNATE accounts before the LIVE one, and REDACT capture output (a capture mints a new grant; evicting older ones can break the live session).", keywords: capture_alternates_before_live_account capture_mints_new_oauth_grant server_evicts_older_grants capture_can_break_live_session_refresh redact_capture_output sed_redact_access_token never_grep_v_drop_lines FAILED_token_exchange_HTTP_403 sk-ant_redact order_of_capture_operations, type: project, trdd: TRDD-K0PMVRN6, ocd: 2026-09-25, lmd: 2026-09-25]
+
 5. Capture ALTERNATES first and the LIVE account LAST (ideally while it is not live) — a capture
    mints a new OAuth grant, and if the server evicts older grants a capture on the live account
    can break the running session's own refresh.
 6. When showing capture output, REDACT (`sed` on `code=`, `state=`, `access_token=`,
    `refresh_token=`, `sk-ant-…`). Never DROP lines with `grep -v` — that hides the
    `FAILED: token exchange HTTP 403` reason line.
+
+
+^ATOM-JRFB-LI75 [desc: "Setup-token keys are DEPRECATED (owner 2026-09-24, removal TRDD-PWIAEW40). Open risk: switching to a captured account is not yet proven — two copies of one refresh-rotating grant kill each other.", keywords: setup-token_keys_deprecated import_oauth_tokens_py_removed janitor-import-oauth-tokens_retired slot_capture_token_human_lane_dead long_lived_tokens_not_working_owner switch_breaks_refresh_continuity two_copies_one_refresh_grant refresh_rotating_grant_eviction switching_not_yet_proven TRDD_PWIAEW40_removal TRDD_BMITQ2MN_superseded live_keychain_unreadable_F1, type: project, trdd: TRDD-K0PMVRN6, ocd: 2026-09-25, lmd: 2026-09-25]
 
 Do NOT use the 1-year `setup-token` keys (the CSV importer, `import_oauth_tokens.py`,
 `/janitor-import-oauth-tokens`, `slot_capture_token.py`'s HUMAN lane) — the owner says "the long
@@ -154,6 +177,11 @@ Code and the slot hold two copies of one refresh-rotating grant; whichever refre
 the other, because the daemon cannot read the live keychain item back (TRDD-7PYTX4E9 F1) to
 write the refreshed token into the slot. Switching-without-broken-continuity is NOT yet proven —
 only probing was, as of 2026-09-24.
+
+
+^ATOM-RQDO-2SJE [desc: "The CERTIFICATE_VERIFY_FAILED fix: Install Certificates.command / the cert.pem symlink gives the daemon's interpreter a trust store; durable fix is tls_context.verifying_context() + REFRESH_FAIL_TLS.", keywords: Install_Certificates.command_fix cert.pem_symlink_certifi tls_context_verifying_context REFRESH_FAIL_TLS_cause daemon_python_no_bundle_fix next_tick_refreshed_both_slots durable_fix_TRDD_X6I04SAO urlopen_cert_verify_daemon f185e521_wall_trigger slot_twin_usage_probe, type: project, trdd: TRDD-X6I04SAO, ocd: 2026-09-25, lmd: 2026-09-25]
+
+the symlink Install Certificates.command creates (etc/openssl/cert.pem -> certifi/cacert.pem) — the next tick refreshed both slots. Durable fix: scripts/lib/tls_context.verifying_context() on every daemon-side https urlopen + the REFRESH_FAIL_TLS cause (TRDD-X6I04SAO). The model-scoped (Fable) wall trigger already exists in cmd_auto (f185e521) but needs the live account's usage read through a slot twin, which expired slots deny. 'primary live credential UNREADABLE from this context' every tick is the DESIGNED headless path (TRDD-7PYTX4E9 F1), not a fault.
 
 ## Governed by
 
