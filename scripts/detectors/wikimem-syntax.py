@@ -201,16 +201,21 @@ def _file_tickets(findings: list[lint.Finding]) -> int:
     """Open ONE MEMCORP-001 ticket per new (deduped) held-out finding, and return how many.
 
     The ticket body carries page path, rule code and line only — never page text
-    (TRDD-FVYV6RSG). `raise_issue`'s own dedupe key makes this idempotent per finding, so
-    an unchanged corpus opens nothing after the first fire.
+    (TRDD-FVYV6RSG). The dedupe key is code + page BASENAME, deliberately WITHOUT the
+    line number (adversarial review 2026-09-25): the line shifts on every edit above the
+    atom, and a line-sensitive key would file a fresh durable ticket for the SAME defect
+    after each such edit — the drift-line dedupe could afford that (ephemeral output), a
+    dispatched ticket cannot. The ledger still shows the newest line via `where`.
     """
     filed = 0
     for f in findings:
         if not f.code or _held(f.path):
             continue
+        base = Path(f.path).name
         raised = issue_catalog.raise_issue(
             "MEMCORP-001",
             where=f"{f.path}:{f.line}",
+            dedupe_key=f"MEMCORP-001:{base}:{f.code}",
             scope="user",
             detail=f"{f.code} — remedy: {_verb_for(f.code)}",
             found=f"rule {f.code} at {f.path}:{f.line}",
