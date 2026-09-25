@@ -2491,12 +2491,27 @@ def compose(
             text_bytes = it.text.encode("utf-8")
             token_cap = token_truncated.get(it.id)
             if cap is not None and len(text_bytes) > cap:
-                # TRDD-RAEGS1D5 requirement 2: a verbatim prefix, never a paraphrase, plus a
-                # pointer back to the rest -- see `_truncate_prefix_bytes`'s own docstring for
-                # why this is what stops one oversized-relative-to-budget item from being
-                # evicted whole the way the old byte backstop did.
-                lines.append(_truncate_prefix_bytes(it.text, cap))
-                lines.append(_format_pointer(it))
+                if max_item_bytes is not None and it.kind not in _CONVERSATION_KINDS:
+                    # TRDD-BLGZTHQ9 (extended past kind == "tool" to every kind
+                    # `split_conversation` ever hands to Jev's scorer -- "tool" and "event";
+                    # "user"/"assistant"/"control" are conversation items, never scored,
+                    # never reach here as kept items in production, and keep the general
+                    # verbatim-prefix path below for the tests that exercise it directly):
+                    # injected-only -- an over-cap non-owner item (a task-notification never
+                    # reaches here, see the branch above) is pointer only, never a truncated
+                    # stub. `_select_injected`'s non-owner branch already keeps such an item
+                    # out of `kept_order` (inline_ok requires `whole` for these two kinds),
+                    # so this is a defense-in-depth guard that must agree with that gate, not
+                    # the primary decision point -- `--out` (`max_item_bytes` is `None`)
+                    # never takes this branch and stays byte-identical.
+                    lines.append(_format_pointer(it))
+                else:
+                    # TRDD-RAEGS1D5 requirement 2: a verbatim prefix, never a paraphrase,
+                    # plus a pointer back to the rest -- see `_truncate_prefix_bytes`'s own
+                    # docstring for why this is what stops one oversized-relative-to-budget
+                    # owner item from being evicted whole the way the old byte backstop did.
+                    lines.append(_truncate_prefix_bytes(it.text, cap))
+                    lines.append(_format_pointer(it))
             elif token_cap is not None:
                 # TRDD-RAEGS1D5 (owner per-item token cap): the `--out` rendering never sets
                 # `max_item_bytes`, so the branch above never fires for it -- this is its own
@@ -2675,16 +2690,28 @@ def compose(
                 # passing on its own name and arguments.
                 gate_body = _tool_result_part(body) if whole and it.kind == "tool" else body
                 # Amendment S3: 20 chars for a whole tool result ("...  [100%]\n3 passed in
-                # 0.18s" survives), 80 for prose/events and for any truncated prefix.
+                # 0.18s" survives), 80 for prose/events (a non-owner item is never a
+                # truncated prefix now -- see `inline_ok` below).
                 min_chars = (_INJECT_MIN_WHOLE_TOOL_BODY_CHARS if whole and it.kind == "tool"
                              else _INJECT_MIN_BODY_CHARS)
                 pointer_eligible = _body_chars(gate_body) >= min_chars
-                # TRDD-BLGZTHQ9: a tool result over the cap is a pointer, never a prefix -- the
-                # pointer's preview already says WHAT it is, and a 350-B slice of a diff/grep/
-                # Bash result added a few lines for 3-4x the bytes (all 7 truncated tool items
-                # measured in the three real injected copies). Prose reads fine as a prefix.
+                # TRDD-BLGZTHQ9 (extended past kind == "tool" to kind == "event" too, e.g. a
+                # cross-session-message that is not a task-notification -- "tool" and "event"
+                # are exactly the two kinds `split_conversation` ever scores, see
+                # `_CONVERSATION_KINDS`; an "assistant"/"control" item never reaches this
+                # branch in production and keeps the old prefix-eligible path for the tests
+                # that exercise it directly): a scored item over the cap is a pointer, never
+                # a prefix -- the pointer's preview already says WHAT it is, and a 350-B
+                # slice of a diff/grep/Bash result (or of a peer message cut mid-sentence)
+                # added a few lines for 3-4x the bytes. `whole` gates both kinds now, keyed on
+                # the SAME `_CONVERSATION_KINDS` constant render()'s guard uses (not a second,
+                # independently-written kind list) -- adversarial review of this fix flagged a
+                # literal `("tool", "event")` tuple here as silently divergent from render()'s
+                # `_CONVERSATION_KINDS` guard the moment `ItemKind` ever grows a 6th member; one
+                # shared constant means a new kind is non-owner (pointer-only-when-over-cap) or
+                # conversation (verbatim-prefix) in both places at once, never just one.
                 inline_ok = (jev_kept and pointer_eligible
-                             and (whole or it.kind != "tool"))
+                             and (whole or it.kind in _CONVERSATION_KINDS))
                 inline_cost = _inline_cost(it, non_owner_cap) if inline_ok else None
             cands.append(_InjectCandidate(
                 id=it.id, kind=it.kind, turn=it.turn, score=max_score(it),

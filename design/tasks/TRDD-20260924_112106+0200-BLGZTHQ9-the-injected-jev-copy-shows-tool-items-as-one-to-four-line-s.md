@@ -3,7 +3,7 @@ trdd-id: BLGZTHQ9
 title: The injected Jev copy shows tool items as one-to-four-line stubs
 column: todo
 created: 2026-09-24T11:21:06+0200
-updated: 2026-09-24T13:37:07+0200
+updated: 2026-09-25T03:13:36+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -26,6 +26,8 @@ implementation-commits: [f87a1a79, f2e6ead7, 1fe03838]
 - NEXT: the full suite on a clean tree; re-read the injected copies by hand against this card's acceptance (every non-owner item shown states a fact, result or decision the recent-turns tail does not; no injected tool item is a truncated prefix); then move to testing. Owner decision pending: a word-boundary cut for notification excerpts (the finding under an ADVERSARIAL-REVIEW heading is still dropped by the line-boundary cut).
 
 Found by a fresh real-transcript run on HEAD 3ff01e50 (reports/compaction-replacement/20260924_112500+0200-jev-real-run-verification.md, E1). After the per-item byte cap, a kept tool item in the injected copy is a command echo plus one output line, card frontmatter, a two-line heading fragment or seven lines of a diff hunk: it counts as a non-owner item inline while carrying no information. Seen on all three transcripts (b2bf5b7b, d30bf250, 4eb7bf5d). Proposed direction (pending the advisor): a tool item that does not fit its injected cap is shown as a pointer only, never as a truncated stub. Acceptance: on the three transcripts no injected tool item is a truncated prefix (mechanical check), and every non-owner item shown states a fact, command result or decision that the recent-turns tail does not (read by hand); a test fails without the fix. Release blocker for TRDD-RAEGS1D5.
+2026-09-25 -- Extended past kind == "tool": render()'s over-cap branch and _select_injected's admission gate now key on it.kind not in _CONVERSATION_KINDS (tool or event), not kind != "tool", so a non-notification "event" item (a cross-session peer message) over its cap is pointer-only too -- 4 real instances on a live transcript (reports/compaction-replacement/20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md). Deliberately NOT widened to kind != "user": that broke two pre-existing tests using kind=="assistant" to exercise the general RAEGS1D5 prefix mechanism; reverted. 2 new tests added; 137/137 own file, 232/232 with the sibling suites; ruff/mypy/pyright clean. Report: reports/compaction-replacement/20260925_recheck-blgzthq9-event-tool-pointer-only-worker.md
+2026-09-25 (review) -- adversarial review of the extension found the selection-side guard used a literal ("tool","event") tuple instead of the shared _CONVERSATION_KINDS constant render() uses; fixed so both guards reference the same constant and cannot silently diverge if ItemKind grows a 6th member. Also flagged (accepted, NOT fixed, pre-existing and out of scope): compose() trusts its caller's items list -- nothing inside it structurally guarantees only tool/event kinds reach the scored path; that invariant lives in split_conversation, a different function I did not audit every caller of. Retest after the review fix: 232/232, ruff/mypy/pyright clean. Card ready for testing column.
 
 ## Approval log
 

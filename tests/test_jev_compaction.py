@@ -2602,8 +2602,12 @@ def test_non_owner_item_bytes_caps_non_owner_items_smaller_than_owner_items() ->
     # guaranteed slot still uses the general (bigger) `max_item_bytes`, unaffected by the
     # smaller non-owner cap. "owner2:0" (an owner item, NOT the guaranteed newest) proves the
     # former; "reply:0" proves the latter. TRDD-BLGZTHQ9: the truncated non-owner item is an
-    # ASSISTANT item now -- a TOOL item over its cap is never shown as a prefix at all, only as
-    # a pointer ("tool:0").
+    # ASSISTANT item now -- a TOOL/EVENT item over its cap is never shown as a prefix at all,
+    # only as a pointer ("tool:0"; a non-notification "event" behaves the same way, see
+    # test_injected_event_item_over_its_cap_is_a_pointer_never_a_prefix). "assistant"/"control"
+    # are conversation kinds -- never scored, never a kept item in production (see
+    # `_CONVERSATION_KINDS`) -- so this fixture keeps using "assistant" here purely to exercise
+    # the general prefix-truncation path independently of the tool/event carve-out.
     owner_text = "o" * 600
     reply_text = "r" * 600
     tool_text = "t" * 600
@@ -2636,8 +2640,8 @@ def test_non_owner_item_bytes_none_falls_back_to_max_item_bytes_for_every_caller
     # Backward compatibility: `non_owner_item_bytes` defaults to `None` -- every existing
     # caller/test that never passes it (including `jev_compact.py`'s own `--out` full-copy
     # render, which never sets `max_item_bytes` either) must render a non-owner item exactly
-    # as before this parameter existed. TRDD-BLGZTHQ9: an ASSISTANT item, because a tool item
-    # over the cap is now pointer-only and so could not show which cap applied.
+    # as before this parameter existed. TRDD-BLGZTHQ9: an ASSISTANT item, because a tool/event
+    # item over the cap is now pointer-only and so could not show which cap applied.
     reply_text = "r" * 600
     items = [_item("reply:0", "assistant", reply_text, turn=0, tokens=10)]
     scores = {"reply:0": jc.Scores(relevance=0.9, decision=0.0, oversized=False, kept=True,
@@ -3258,6 +3262,59 @@ def test_injected_small_jev_kept_tool_results_render_inline_beside_a_large_admit
     # Precondition: the token stage really skipped the small ones (900 + 50 > 920).
     full = jc.compose(items, scores, budget_tokens=920, header=_H)
     assert _shown_ids(full, items)[0] == {"big:0", "newest:0"}
+
+
+def test_injected_event_item_over_its_cap_is_a_pointer_never_a_prefix() -> None:
+    """TRDD-BLGZTHQ9 extension: the fix for an over-cap "tool" item (see
+    `test_injected_tool_item_over_its_cap_is_a_pointer_never_a_prefix`) did not cover every other
+    non-owner kind -- an `event` item that is NOT a `<task-notification>` (e.g. a cross-session
+    peer message) took the generic `render()` branch with no `kind` guard at all and was cut to a
+    truncated prefix plus a pointer, 4 real instances measured on a live transcript
+    (reports/compaction-replacement/20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md). It is
+    now pointer-only, matching the tool-item fix; an event that fits the cap is still shown
+    whole."""
+    big_text = "".join(
+        f"peer message line {i}: a real cross-session update about the shared task\n"
+        for i in range(20)
+    )
+    small_text = ("peer: short update, all clear -- the shared task finished green, "
+                  "nothing else pending on this side")
+    items = [
+        _item("big:0", "event", big_text, turn=1),
+        _item("small:0", "event", small_text, turn=2),
+        _item("newest:0", "user", "hi", turn=3),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H, max_bytes=4000,
+                     max_item_bytes=700, non_owner_item_bytes=350)
+
+    assert "-- event big:0 --" not in doc
+    assert "peer message line 1" not in doc  # not even the first lines as a prefix
+    assert "[[elided id=big:0 " in doc.split("\n## Elided\n", 1)[1]
+    assert f"-- event small:0 --\n{small_text}\n" in doc
+
+
+def test_injected_over_cap_tool_and_event_items_out_render_is_byte_identical() -> None:
+    """TRDD-BLGZTHQ9 extension: the pointer-only fix is injected-only (`max_item_bytes is not
+    None`) -- `--out` (`max_item_bytes=None`, no `max_bytes`) must keep showing every item whole,
+    unaffected by this change, for both the "tool" kind the original card covered and the "event"
+    kind this extension adds."""
+    big_tool = "".join(f"-    old line {i} of the patched function\n" for i in range(20))
+    big_event = "".join(
+        f"<cross-session-message from=\"peer\">line {i} of a long peer message</cross-session-message>\n"
+        for i in range(20)
+    )
+    items = [
+        _item("big_tool:0", "tool", big_tool, turn=1),
+        _item("big_event:0", "event", big_event, turn=2),
+        _item("newest:0", "user", "hi", turn=3),
+    ]
+    scores = {it.id: _scores(0.9) for it in items}
+
+    doc = jc.compose(items, scores, budget_tokens=8000, header=_H)
+
+    assert f"-- tool big_tool:0 --\n{big_tool}\n" in doc
+    assert f"-- event big_event:0 --\n{big_event}\n" in doc
 
 
 def test_injected_non_owner_items_jev_did_not_keep_or_marked_oversized_stay_pointer_only() -> None:
