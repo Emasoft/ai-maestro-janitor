@@ -329,7 +329,7 @@ fn walk_and(paths: &[PathBuf], hidden: bool, mut f: impl FnMut(&Path)) {
             // An explicitly-named file is searched regardless of extension.
             visit(path, &mut f);
         } else {
-            for entry in WalkBuilder::new(path).hidden(!hidden).follow_links(true).build() {
+            for entry in WalkBuilder::new(path).hidden(!hidden).build() {
                 let Ok(entry) = entry else { continue };
                 if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
                     && is_markdown(entry.path())

@@ -60,16 +60,31 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
             // An EXPLICITLY named file always passes — the caller asked for it.
             out.push(p.clone());
         } else {
-            // GH-310: follow_links — publish-globally plants symlinks in the USER memdir
-            // pointing at real notes in the owning project's memdir; with the default
-            // follow_links(false) those notes never reach the index and recall misses
-            // them while reindex exits 0. `ignore` detects directory-symlink loops itself.
+            // GH-310: publish-globally plants FILE symlinks in the USER memdir pointing at
+            // real notes in the owning project's memdir; with follow_links(false) they never
+            // reach the index and recall misses them while reindex exits 0. The walk stays
+            // link-blind (a DIRECTORY symlink must not pull a foreign tree into the index —
+            // review 2026-09-25) and symlink FILE entries are admitted explicitly: a walk
+            // entry that IS a symlink, and whose target is a regular .md file, is pushed.
             for e in WalkBuilder::new(p)
                 .hidden(!hidden)
-                .follow_links(true)
                 .build()
                 .flatten()
             {
+                let is_link = e.file_type().map(|t| t.is_symlink()).unwrap_or(false);
+                if is_link {
+                    let target_is_md_file = std::fs::metadata(e.path())
+                        .map(|m| m.is_file())
+                        .unwrap_or(false)
+                        && is_md(e.path());
+                    if target_is_md_file
+                        && !under_excluded_subdir(e.path(), p)
+                        && !is_index_file(e.path())
+                    {
+                        out.push(e.path().to_path_buf());
+                    }
+                    continue; // never descend: the walk itself stays link-blind
+                }
                 if e.file_type().map(|t| t.is_file()).unwrap_or(false)
                     && is_md(e.path())
                     && !under_excluded_subdir(e.path(), p)
@@ -85,6 +100,25 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
         }
     }
     dedup_by_realpath(out)
+}
+
+#[cfg(test)]
+mod gh310_fence_tests {
+    use super::*;
+
+    #[test]
+    fn directory_symlinks_are_not_followed_into_foreign_trees() {
+        let dir = std::env::temp_dir().join(format!("gh310-fence-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("mem")).unwrap();
+        std::fs::create_dir_all(dir.join("foreign")).unwrap();
+        std::fs::write(dir.join("foreign/real.md"), "# x\n\n^ATOM-AAAA-1111 [desc:\"foreign note here\", keywords:\"k1,k2\"] body\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.join("foreign"), dir.join("mem/link")).unwrap();
+        let got = collect_md(&[dir.join("mem")], false);
+        let linked: Vec<_> = got.iter().filter(|p| p.file_name().map(|n| n == "real.md").unwrap_or(false)).collect();
+        assert!(linked.is_empty(), "directory symlink must NOT pull foreign tree: {got:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 /// GH-310 part 2: the same note is reachable as the PROJECT real file AND the USER memdir's
