@@ -1,9 +1,9 @@
 ---
 trdd-id: 1ETALGDG
 title: A Cloudflare block or an oversized batch kills the whole Jev compaction instead of splitting the batch
-column: todo
+column: testing
 created: 2026-09-23T21:10:19+0200
-updated: 2026-09-23T23:23:38+0200
+updated: 2026-09-25T15:03:08+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -16,6 +16,7 @@ approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T21:10:19+0200
 derived: true
 parent-trdd: RAEGS1D5
+status: tasked
 ---
 
 # A Cloudflare block or an oversized batch kills the whole Jev compaction instead of splitting the batch
@@ -25,3 +26,9 @@ Release blocker for TRDD-RAEGS1D5 (owner 2026-09-23: no publish until a real-tra
 ## Approval log
 
 - 2026-09-23T21:10:19+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-25T15:02:53+0200 — column → testing by main-agent@ai-maestro-janitor. fix+tests landed (c3fdc0ec, 434530ab); acceptance 49MB end-to-end met today; 5 split tests green
+- 2026-09-25T15:03:08+0200 — column → testing by main-agent@ai-maestro-janitor. fix+tests landed (c3fdc0ec, 434530ab); acceptance 49MB end-to-end met today; 5 split tests green
+
+## STATE
+
+2026-09-25 14:55 — RECONCILIATION: the card was left at todo with updated 2026-09-23 but BOTH fix commits landed (c3fdc0ec the split-and-retry, 434530ab the blocked-items-visible followup); _score_batch_resilient with serial-recursion + retry_budget + max_split_depth is in scripts/lib/jev_compaction.py:1050; 5 split-resilience tests pass on HEAD (pytest -k 'resilient or split'). ACCEPTANCE met: the 49 MB d30bf250 transcript compacted end to end today (source=jev, no abort, blocked=0). The Step-1 discrimination probe was made moot by landing the split for BOTH kinds, which the card's step 2 itself allows. Column -> testing.

@@ -1,9 +1,9 @@
 ---
 trdd-id: I63GQJTK
 title: A heartbeat during in-flight background work prints only janitor heartbeat, so a working session looks stalled to the owner
-column: todo
+column: testing
 created: 2026-09-23T22:35:38+0200
-updated: 2026-09-23T22:36:06+0200
+updated: 2026-09-25T15:08:10+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: bugfix
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: Emasoft
 approval-datetime: 2026-09-23T22:35:38+0200
+status: tasked
 ---
 
 # A heartbeat during in-flight background work prints only janitor heartbeat, so a working session looks stalled to the owner
@@ -23,8 +24,13 @@ Owner, 2026-09-23 22:35 (verbatim): "you stopped again? and the janitor is the o
 ## Approval log
 
 - 2026-09-23T22:35:38+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-25T15:08:10+0200 — column → testing by main-agent@ai-maestro-janitor. fix ac751f1d + 4 tests landed; acceptance shapes pinned
 
 ## Cause and threshold (review 2026-09-23)
 
 - Cause, stated honestly: the orchestrator knew workers were in flight and the owner was asking for speed, yet relayed nothing on quiet fires; the protocol forbids extra lines on quiet fires and gives no sanctioned way to report progress, but the silence was the orchestrator's choice, not something the protocol forced.
 - Stall threshold: a worker counts as stalled only after 15 minutes with no transcript activity AND no running child process (a long Bash call such as a 9-minute full test run updates no transcript), so full-suite runs never raise false stalls.
+
+## STATE
+
+2026-09-25 15:05 — RECONCILIATION: the fix landed in ac751f1d (fix(heartbeat): a quiet fire says how many background workers are running, and flags one that stalled) with its tests in tests/test_dispatch_phases.py (4 pass on HEAD; _phase_background_worker_progress in scripts/dispatch.py). All three acceptance shapes are pinned: progress line when workers run, plain quiet when idle, stall finding past the threshold. Acceptance met; column -> testing.
