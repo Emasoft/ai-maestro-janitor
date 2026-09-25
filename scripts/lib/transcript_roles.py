@@ -264,17 +264,22 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
        "human" regardless of args -- command name alone decides for automation); otherwise
        `<local-command-stdout>`, `<local-command-caveat>`, `<command-message>`,
        `[janitor-heartbeat]` or `[Request interrupted` -> "system". Gap fix (orchestrator,
-       2026-09-25): a real transcript also carries `<command-name>` FIRST,
-       `<command-message>` second (reports/compaction-replacement/
-       20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md lines 110-118) -- that order used
-       to skip this rule entirely (only `<command-message>`-first was checked) and reach the
-       generic `_SYSTEM_PREFIXES`/legacy-fallback path, which decides by tag presence alone
-       and never checks automation, so a reversed-order `/reload-plugins` was misclassified
-       "human" instead of "system". The decision is now order-independent: the wrapper PAIR
-       (both tags present) decides, and only the tags' order is irrelevant -- a bare
-       `<command-name>` with no `<command-message>` companion at all does NOT match this rule
-       (falls through to rule 8 below), since that is a different, unmeasured shape the
-       reported gap never described.
+       2026-09-25): observed on a real session transcript on 2026-09-25 (TRDD-DQXMND59 matrix
+       row V3): a janitor-typed `/reload-plugins` recorded `<command-name>` FIRST,
+       `<command-message>` second -- that order used to skip this rule entirely (only
+       `<command-message>`-first was checked) and reach the generic
+       `_SYSTEM_PREFIXES`/legacy-fallback path, which decides by tag presence alone and never
+       checks automation, so the reversed-order `/reload-plugins` was misclassified "human"
+       instead of "system". The decision is now order-independent: the wrapper PAIR (both tags
+       present) decides, and only the tags' order is irrelevant -- a bare `<command-name>` with
+       no `<command-message>` companion at all does NOT match this rule (falls through to rule 8
+       below), since that is a different, unmeasured shape the reported gap never described.
+       Side effect the review found: because this rule (4) runs before `origin.kind` (5),
+       `turnOrigin` (6), and `promptSource` (7), a name-first NON-automation wrapper with
+       `origin.kind` absent or `"human"` now resolves "human" even when `turnOrigin` is
+       "scheduled" or `promptSource` is "system" -- the same outcome the
+       `<command-message>`-first order already produced, so this is not a new gap, just the
+       pre-existing one extended to the reversed order.
     5. `origin.kind` (Claude Code's own newer, most specific signal, so it outranks
        `turnOrigin`/`promptSource` below): `human` -> "human"; `task-notification` ->
        "notification"; `peer`/`coordinator` -> "peer"; `auto-continuation` -> "system"; any
@@ -319,9 +324,9 @@ def classify_record(entry: dict[str, Any]) -> RecordRole:
     # every `/task ...`/`/loop ...` the owner typed is dropped as "system".
     #
     # TRDD-RAEGS1D5 gap fix: the two wrapper tags are NOT always in `<command-message>` /
-    # `<command-name>` order -- a real transcript also carries the reversed order
-    # (`<command-name>` first, `<command-message>` second; see reports/compaction-replacement/
-    # 20260925_025424+0200-trdd-dqxmnd59-v3-gaps-closed.md lines 110-118). Requiring the text to
+    # `<command-name>` order -- observed on a real session transcript on 2026-09-25
+    # (TRDD-DQXMND59 matrix row V3): a janitor-typed `/reload-plugins` recorded
+    # `<command-name>` first, `<command-message>` second. Requiring the text to
     # START WITH `<command-message>` specifically skipped that shape and let it fall through to
     # the `_COMMAND_NAME_PREFIX` fallback below, which decides purely by presence (never checks
     # automation), so `/reload-plugins` in reversed order was misclassified "human". The decision
