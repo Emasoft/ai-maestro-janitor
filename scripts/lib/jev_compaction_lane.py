@@ -1071,6 +1071,11 @@ def run_compact(
         # docstring for why the hook losing both records was the bug.
         blocked, blocked_digest = parse_blocked_summary(proc.stdout or "")
         record_blocked_finding(sd, blocked=blocked, blocked_digest=blocked_digest)
+        # A plain log line, not a `record_finding` (TRDD-DQXMND59 stage 3 item B): unlike `blocked`
+        # (a content-stable digest, deduped and day-capped as a finding) a malformed-line count has no
+        # stable identity to dedupe against across runs, so it is a diagnostic breadcrumb for
+        # `session-summary.log`. Known limit: this runs on any exit-0, before the caller checks the out
+        # file, so a retry after an unreadable out file logs the line again (rare, diagnostics only).
         malformed = parse_malformed_summary(proc.stdout or "")
         if malformed:
             state.log_line(
