@@ -3,7 +3,7 @@ trdd-id: L32WC0H7
 title: session-liveness ESC nudge loops on a stalled heartbeat fire and the cold-cache gate types /clear into an empty session
 column: testing
 created: 2026-09-03T15:25:14+0200
-updated: 2026-09-23T19:06:42+0200
+updated: 2026-09-25T16:33:59+0200
 current-owner: ai-maestro-janitor main session
 task-type: bugfix
 priority: high
@@ -68,6 +68,7 @@ created-by: ai-maestro-janitor main session
   wins by construction (`daemon.py:2077-2080` records zero `retry_wedged` diagnoses ever).
 - NEXT ACTION (2026-09-23): F1-F6 are done. Write the row-count test of Acceptance box 1 (N simulated stalled fires through the beat seam, assert at most one ESC plan), then observe F5 after the next release.
   (F0's pane capture was only ever corroboration, never a gate.)
+2026-09-25 16:00 — the row-count test of Acceptance box 1 LANDED: tests/test_liveness_episode_row_count.py (10 simulated stalled beats x 8 diagnoses through the real task_session_liveness seam, rate-limited.flag on disk per F1; asserts at most one ESC plan per episode, attempts <= MAX, GIVING UP as the finding). Remaining open: ONLY the F5 field observation (and the composite no-GIVING-UP-on-fresh-transcript live signature) after the next release. Column stays testing.
 
 ## Symptom (owner report, 2026-09-03)
 
