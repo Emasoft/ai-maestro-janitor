@@ -4,7 +4,7 @@ title: memgrep update-mem-atom cannot desc-edit a footnote-lesson atom (stdin bo
 column: testing
 status: tasked
 created: 2026-09-25T17:39:50+0200
-updated: 2026-09-25T23:46:33+0200
+updated: 2026-09-25T23:53:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -23,6 +23,7 @@ approval-datetime: 2026-09-25T17:39:50+0200
 
 - 2026-09-25T17:39:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-25T21:29:34+0200 — column → testing by main-agent@ai-maestro-janitor. implemented + migration completed; 441 memgrep tests green
+- 2026-09-25T23:53:42+0200 — CORRECTION (append-only note on the 21:29 line above): its "migration completed" claim is RETRACTED — the migration silently deleted 3 lesson inline bodies; see the STATE block's CORRECTION 2026-09-25 (T-H97PEEQZ) for the recovery and the fix.
 
 ## STATE
 
