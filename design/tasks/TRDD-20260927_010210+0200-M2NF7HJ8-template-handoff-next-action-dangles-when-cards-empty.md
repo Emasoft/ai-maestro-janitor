@@ -3,7 +3,7 @@ trdd-id: M2NF7HJ8
 title: compose_template_handoff NEXT ACTION dangles when cards is empty — handoff reads like an empty stub
 column: todo
 created: 2026-09-27T01:02:10+0200
-updated: 2026-09-27T01:02:10+0200
+updated: 2026-09-27T01:03:30+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: []
@@ -66,3 +66,7 @@ prose itself was left in place.
   `on-session-start-post-clear-compact.py:404`, `external_clear.py:820` — verify none parse
   the NEXT ACTION line itself; all three inject it as prose).
 - Parent card TRDD-RAEGS1D5 STATE block for vocabulary.
+
+## Adversarial review amendment (2026-09-27)
+
+REVIEW MINOR APPLIED — commit bae2ccea's subject overclaims: 'all three verified in source + live repro 2026-09-27' is true per-card only for K8YF2WQ5 (live repro tonight); C7M4RXQ2's repro evidence is from 2026-09-25, M2NF7HJ8's symptom from the 2026-09-26 handoff. Per-card evidence dates stand as written in the bodies. Also per review: workers run targeted pytest -k subsets only; the orchestrator runs the full suite once, serially, after all three land. No other amendment — the NEXT ACTION fix design itself survived review.

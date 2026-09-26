@@ -3,7 +3,7 @@ trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
 column: todo
 created: 2026-09-27T00:53:12+0200
-updated: 2026-09-27T00:53:12+0200
+updated: 2026-09-27T01:03:22+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -96,3 +96,7 @@ gated on EVIDENCE THAT A CLEAR JUST HAPPENED, not on the source string alone.
 Filed from the owner's complaint + this session's verification. Related live reproduction
 (TRDD-DQXMND59's hold defect) is carded separately — that one reproduces on EVERY clear,
 this one only on the startup-sourced re-entry shape.
+
+## Adversarial review amendments (2026-09-27)
+
+REVIEW FINDINGS 1+2 APPLIED — requirements 1-3 superseded. (1) _inject_post_clear_handoff alone does NOT inject on startup: when the per-pane sidecar exists it defers to on-session-start-post-clear-compact.py, whose _main gates source!=clear -> return 0 — so the fix ALSO relaxes that gate to accept source==startup (its existing _SIDECAR_FRESH_MAX_AGE_S minutes-scale freshness check stays). (2) The startup branch's evidence bound is the SIDECAR freshness (minutes-scale), never the 86400s flag age: a reused pane with a day-old flag must not inherit yesterday's clear's service. (3) The session-id stamp written at service time records the INHERITING session, so it cannot discriminate stale inheritance — the sidecar freshness bound is the real guard. Verified finding 1 against source before amending.

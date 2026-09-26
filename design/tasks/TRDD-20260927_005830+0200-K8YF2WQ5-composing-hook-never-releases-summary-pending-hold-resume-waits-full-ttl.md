@@ -3,7 +3,7 @@ trdd-id: K8YF2WQ5
 title: Composing hook never releases the summary-pending hold it finds — resume waits the full 15-minute TTL after the handoff is already in context
 column: todo
 created: 2026-09-27T00:58:30+0200
-updated: 2026-09-27T00:58:30+0200
+updated: 2026-09-27T01:03:22+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -92,3 +92,7 @@ whatever one-line resolution is real — do not widen scope.
   the template path is the fallback branch after it. Both end in `return 0` — release
   immediately before each.
 - Parent card: TRDD-RAEGS1D5 (read its STATE block first; vocabulary binding).
+
+## Adversarial review amendments (2026-09-27)
+
+REVIEW FINDINGS 3+4 APPLIED — requirement 2 superseded. The template-degradation path must NOT release the hold unconditionally: the TTL exists so the DETACHED lane (retry-then-llm-ext, same transcript/key) can still land a real Jev summary after a wedged compose; releasing while that lane is alive converts its future output into an unread file. Template path releases ONLY after a detached-lane-liveness check (use the existing liveness mechanism, do not invent one); a live lane defers the release to the TTL backstop, logged. SUCCESS-path release unchanged (correct, uncontested). Scope split per review: the silent external-clear.log item is INVESTIGATE-AND-REPORT only — no code change inside this bugfix card. Also per review: workers run targeted pytest -k subsets only; the orchestrator runs the full suite once, serially, after all three land (three uncommitted parallel edits in one tree make concurrent full-suite runs red from each other).
