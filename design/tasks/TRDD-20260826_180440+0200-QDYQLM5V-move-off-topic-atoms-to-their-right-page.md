@@ -3,7 +3,7 @@ trdd-id: QDYQLM5V
 title: Move an off-topic atom to the page that owns its topic
 column: testing
 created: 2026-08-26T18:04:40+0200
-updated: 2026-09-26T21:27:07+0200
+updated: 2026-09-26T21:33:13+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -97,3 +97,4 @@ disguised as a footnote-citation nit.
 
 Box 1 wiring landed 2026-09-26 pm: heartbeat rule row + _ALL_MARKERS pin + selftest list + janitor-memory-relocate skill (MOVE-vs-LINK decision rule per review blocker; STATE_DIR consume-don't-resolve) + agent skills list + guard-test 9-chore fixture + new cross-check test (detector _MARKERS must appear in rule/selftest/agent — enforced, not remembered). Review fork verdict: commit stands; its 3-shapes contract-test claim REFUTED vs memory.rs:6644-6656 (two message arms, both already pinned at :10814/:10836). Gates green pre-edit (17559/2); post-edit gates running.
 Full suite AT HEAD verified 2026-09-26 (the review's box-5 remediation): 17561 passed, 2 skipped, 8 subtests, exit 0 in 600.6s — the tick now cites current evidence, not the pre-wiring run. No further column move this turn per the review; ai_review awaits the board's pull.
+Box-5 stamp provenance settled (review round 6 remediation): the +2 vs the 17559 baseline are (1) tests/test_heartbeat_protocol_rule.py::test_rule_covers_every_detector_memory_marker (5a9d19c4) and (2) the parametrized tests/test_skill_frontmatter_yaml.py instance for the new janitor-memory-relocate skill dir — verified by diffing collected ids against a throwaway clone of 2a8380b0 (17561 → 17563). The 17561-run was concurrent with the split-chore agent; its blast radius is the live memory corpora only, which no repo-pinned suite test reads — nothing flaked and the pass count is exact.
