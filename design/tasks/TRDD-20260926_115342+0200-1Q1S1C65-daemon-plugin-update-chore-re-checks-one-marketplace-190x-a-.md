@@ -18,10 +18,10 @@ approval-datetime: 2026-09-26T11:53:42+0200
 unblock-when: decision:owner ratifies or reverts 3.6.3
 ---
 
-# daemon plugin-update chore re-checks one marketplace 190x a day when nothing changed — today's churn
+# daemon plugin-update chore re-checks one marketplace every ~3 min on no-change — continuous since 2026-09-24
 
 - Symptom (user 2026-09-26): agents continuously reloading plugins; user flags cache invalidation cost. daemon.log shows plugin-update fires every ~2-5 min all day — measured onset 2026-09-24 13:12, continuous since (09-24: 185, 09-25: 355 of which 349 no-change, 09-26: 199, all claude-menu-system; earlier days unmeasurable, neither log covers them). The original 'ZERO lines on 09-22 through 09-25' claim here was WRONG — a log-rotation artifact, corrected by the review (see the Correction section). Each fire is a subprocess 'claude plugin update' that can invalidate the prompt cache of sessions when it actually changes something, and the reload-flag path types /reload-plugins --force which re-bills the whole window (TRDD-VHPYSN56).
-- Suspected location: the daemon's plugin-update chore (task_plugin_update / daemon.py) — its min-interval or backoff for 'no change' results regressed or was never applied; the chore ran 190x/day instead of its normal cadence.
+- Suspected location: the daemon's plugin-update chore (task_plugin_update / daemon.py) — its min-interval or backoff for 'no change' results regressed or was never applied; the chore ran every ~3 min instead of its normal cadence (continuous since onset 2026-09-24 13:12).
 - Scope: (a) find why 09-26 cadence differs from 09-22..09-25 (grep chore interval config, daemon restarts); (b) enforce a sane minimum interval between 'no change' re-checks per marketplace; (c) ensure the janitor-reload marker fires only when the reload actually changes this session's loaded version, not on every 'reload flag set'.
 - Evidence: daemon.log 2026-09-26 lines (192 plugin-update, 190 no-change claude-menu-system); fleet-plugins-update.log shows unrelated local-scope timeouts.
 
