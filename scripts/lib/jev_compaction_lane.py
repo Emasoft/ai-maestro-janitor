@@ -146,7 +146,8 @@ def _board_ids_by_column(root: Path) -> dict[str, list[tuple[str, str]]] | None:
     `HandoffInputs.cards` entries from the SAME call, instead of shipping an always-empty
     facts section whose "read the first in-flight card" NEXT ACTION text would otherwise lie
     (review finding on TRDD-RAEGS1D5 C1: an empty `cards=[]` makes compose_template_handoff's
-    fixed NEXT-ACTION prose point at nothing)."""
+    fixed NEXT-ACTION prose point at nothing; TRDD-M2NF7HJ8 made the prose itself conditional,
+    but real titles still beat a stub)."""
     exe = shutil.which("trddgrep")
     if not exe:
         return None

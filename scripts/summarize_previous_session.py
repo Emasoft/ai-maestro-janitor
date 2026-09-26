@@ -317,10 +317,10 @@ def _main(
 
     # `cards` comes from the SAME board dump `jcl.state_head_paths` already made for the STATE
     # heads, not a fresh fetch -- so composing the facts section costs nothing extra here.
-    # WHY this matters (review finding, TRDD-RAEGS1D5 C1): `compose_template_handoff`'s
-    # boilerplate NEXT ACTION always reads "read the STATE block of the first in-flight card
-    # below" -- an empty `cards=[]` would leave that sentence pointing at nothing every time
-    # compaction succeeds, which is worse than the boilerplate being absent.
+    # WHY this matters (review finding, TRDD-RAEGS1D5 C1): feeding `cards` keeps the handoff's
+    # NEXT ACTION grounded in real work -- since TRDD-M2NF7HJ8 an empty `cards=[]` no longer
+    # leaves that sentence pointing at nothing (it renders a truthful fallback instead), but
+    # a card-listing handoff still beats a stub.
     #
     # `trigger` names WHICH source produced this text (cheap diagnostic, advisor §5): a reader
     # of the handoff can tell a Jev compose from an llm-ext fallback summary at a glance.

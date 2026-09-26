@@ -311,6 +311,56 @@ def test_template_handoff_never_inlines_a_fenced_block():
     assert "```" not in text
 
 
+def test_template_handoff_next_action_dangles_nothing_when_cards_empty():
+    """TRDD-M2NF7HJ8: with `cards=[]` the NEXT ACTION must not point at the in-flight-cards
+    section (it is not rendered) — the fallback is one truthful, runnable instruction, and
+    the handoff is still well-formed."""
+    text = ec.compose_template_handoff(
+        _inputs(cards=[], commits=[], findings=[]), now_iso=NOW_ISO
+    )
+    assert text.startswith("# Handoff — ")
+    assert "first in-flight card" not in text
+    assert "No in-flight cards" in text
+    assert "## In-flight cards" not in text
+
+
+def test_template_handoff_nonempty_cards_rendering_is_byte_identical():
+    """TRDD-M2NF7HJ8 regression fence: the non-empty-cards rendering is unchanged to the
+    byte — the NEXT-ACTION conditional only touched the empty case. Snapshot taken from the
+    PRE-FIX implementation (902 bytes)."""
+    text = ec.compose_template_handoff(_inputs(), now_iso=NOW_ISO)
+    expected = (
+        "# Handoff — 2026-08-06T18:07:00+0200 (auto-composed, no model turn — TRDD-PXP08ZQC)\n"
+        "\n"
+        "Written by the janitor's EXTERNAL watcher, not by the model: trigger `long-idle`, "
+        "idle ~2h, context ~460k. Link-only by construction — every pointer below is resolved "
+        "on demand, nothing is inlined.\n"
+        "\n"
+        "## NEXT ACTION (one step, runnable)\n"
+        "\n"
+        "Read the `## STATE` block of the first in-flight card below, then continue its "
+        "NEXT ACTION. A card's STATE block is authoritative; this handoff is only an index.\n"
+        "\n"
+        "## In-flight cards (open work)\n"
+        "\n"
+        "- TRDD-PXP08ZQC (`dev`) — External zero-turn handoff-and-clear\n"
+        "\n"
+        "## Recent commits (the WHY lives in the messages — `git show <sha>`)\n"
+        "\n"
+        "- f3f664de feat(fleet): rotation unblocks the panes it fixed\n"
+        "\n"
+        "## Open findings\n"
+        "\n"
+        "- HIGH WINDOW-BURN: 7d/Fable window 100% at 29% elapsed\n"
+        "\n"
+        "## Recall\n"
+        "\n"
+        "Deep knowledge is in the wiki, not here: `memgrep recall \"<symptom>\" "
+        ".claude/project/memory`.\n"
+    )
+    assert text == expected
+
+
 def test_template_handoff_renders_other_open_ids_under_its_own_heading():
     """TRDD-O2FNJ4KW follow-up (review correction 3): the "other open cards" line is a
     board-membership fact, not a janitor finding -- it must land under its own `## Other open

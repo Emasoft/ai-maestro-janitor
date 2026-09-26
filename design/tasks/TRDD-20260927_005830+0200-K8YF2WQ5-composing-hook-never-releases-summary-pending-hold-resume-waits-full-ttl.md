@@ -3,7 +3,7 @@ trdd-id: K8YF2WQ5
 title: Composing hook never releases the summary-pending hold it finds — resume waits the full 15-minute TTL after the handoff is already in context
 column: todo
 created: 2026-09-27T00:58:30+0200
-updated: 2026-09-27T01:03:22+0200
+updated: 2026-09-27T01:07:11+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -96,3 +96,7 @@ whatever one-line resolution is real — do not widen scope.
 ## Adversarial review amendments (2026-09-27)
 
 REVIEW FINDINGS 3+4 APPLIED — requirement 2 superseded. The template-degradation path must NOT release the hold unconditionally: the TTL exists so the DETACHED lane (retry-then-llm-ext, same transcript/key) can still land a real Jev summary after a wedged compose; releasing while that lane is alive converts its future output into an unread file. Template path releases ONLY after a detached-lane-liveness check (use the existing liveness mechanism, do not invent one); a live lane defers the release to the TTL backstop, logged. SUCCESS-path release unchanged (correct, uncontested). Scope split per review: the silent external-clear.log item is INVESTIGATE-AND-REPORT only — no code change inside this bugfix card. Also per review: workers run targeted pytest -k subsets only; the orchestrator runs the full suite once, serially, after all three land (three uncommitted parallel edits in one tree make concurrent full-suite runs red from each other).
+
+## Adversarial review round 2 (2026-09-27)
+
+LIVENESS PROBE DROPPED — round 2 confirmed no inspectable detached-lane liveness mechanism was ever verified (the lane spawns start_new_session=True, so a process check is plausibly not inspectable), and 'use the existing mechanism' delegated a 5-minute orchestrator verification to the worker. Honest fallback adopted: the template-degradation path does NOT release the hold at all — it leaves the TTL backstop (15 min) in place and logs one deferral line so a live detached lane can still land its real Jev summary. Net effect: the 15-minute dead-air bug is fixed on the SUCCESS path (the common case; tonight's repro), preserved-but-bounded on the degraded path (the TTL's documented purpose). Test (3) becomes 'template path → hold present, deferral logged'; test (4) dropped. Shared-file note: this card's edits to on-session-start-post-clear-compact.py and C7M4RXQ2's gate relaxation on the same file are SERIALIZED by the orchestrator — one writer at a time.

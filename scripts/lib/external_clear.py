@@ -1661,9 +1661,22 @@ def compose_template_handoff(
             "",
             "## NEXT ACTION (one step, runnable)",
             "",
-            "Read the `## STATE` block of the first in-flight card below, then continue its "
-            "NEXT ACTION. A card's STATE block is authoritative; this handoff is only an index.",
         ]
+        # TRDD-M2NF7HJ8: this prose must match the section list actually emitted below. With no
+        # in-flight cards the old unconditional text pointed at a section that did not exist.
+        # The empty-cards fallback stays ONE runnable instruction and does not exceed the old
+        # prose's byte cost, so max_bytes trimming behaviour is unchanged. Both renderings (the
+        # live call and the trim loop) go through this same render(), so one branch covers both.
+        if cards[:n_cards]:
+            out += [
+                "Read the `## STATE` block of the first in-flight card below, then continue its "
+                "NEXT ACTION. A card's STATE block is authoritative; this handoff is only an index.",
+            ]
+        else:
+            out += [
+                "No in-flight cards — this handoff is an index; hold for instructions, or pick "
+                "from Other open cards / Recent commits below if one of them is why you cleared.",
+            ]
         if cards[:n_cards]:
             out += ["", "## In-flight cards (open work)", ""]
             out += [f"- TRDD-{cid} (`{col}`) — {title}" for cid, col, title in cards[:n_cards]]

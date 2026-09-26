@@ -3,7 +3,7 @@ trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
 column: todo
 created: 2026-09-27T00:53:12+0200
-updated: 2026-09-27T01:03:22+0200
+updated: 2026-09-27T01:07:11+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -100,3 +100,7 @@ this one only on the startup-sourced re-entry shape.
 ## Adversarial review amendments (2026-09-27)
 
 REVIEW FINDINGS 1+2 APPLIED — requirements 1-3 superseded. (1) _inject_post_clear_handoff alone does NOT inject on startup: when the per-pane sidecar exists it defers to on-session-start-post-clear-compact.py, whose _main gates source!=clear -> return 0 — so the fix ALSO relaxes that gate to accept source==startup (its existing _SIDECAR_FRESH_MAX_AGE_S minutes-scale freshness check stays). (2) The startup branch's evidence bound is the SIDECAR freshness (minutes-scale), never the 86400s flag age: a reused pane with a day-old flag must not inherit yesterday's clear's service. (3) The session-id stamp written at service time records the INHERITING session, so it cannot discriminate stale inheritance — the sidecar freshness bound is the real guard. Verified finding 1 against source before amending.
+
+## Adversarial review round 2 (2026-09-27)
+
+TOPOLOGY + OWNERSHIP pinned. (i) Shared-file serialization: on-session-start-post-clear-compact.py is edited by BOTH workers' cards (the gate relaxation here, the hold release in K8YF2WQ5) — the two implementers are serialized on it: W1 lands on-session-start.py first, waits, applies the gate relaxation only after W2's edits land. (ii) ONE owner per clear: when the per-pane sidecar is present OR already consumed this start, on-session-start.py's startup branch stamps clear-observed.ts + session-id and injects NOTHING (the dedicated hook owns the body); absent sidecar falls through to the keyed-pointer path. A pointer must never follow a body for the same clear. (iii) Double-stamp semantics: the startup path stamping clear-observed.ts seconds after the source=clear stamp is an overwrite with the same epoch — expected-harmless, recorded in the test comment. (iv) The session-id stamp is BOOKKEEPING, not a guard (it records the inheriting session); the sidecar-freshness bound is the only staleness guard. (v) Review round-2 note: hook execution order within one SessionStart event was never pinned as a fact — the ownership rule above is written to be order-independent, which is why it is stated in terms of sidecar presence/consumption rather than which hook runs first.
