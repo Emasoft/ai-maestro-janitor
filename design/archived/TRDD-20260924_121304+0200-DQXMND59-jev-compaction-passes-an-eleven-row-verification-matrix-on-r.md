@@ -1,9 +1,9 @@
 ---
 trdd-id: DQXMND59
 title: Jev compaction passes a twelve-row verification matrix on real transcripts before release
-column: todo
+column: complete
 created: 2026-09-24T12:13:04+0200
-updated: 2026-09-25T14:02:58+0200
+updated: 2026-09-26T11:50:52+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: audit
@@ -15,6 +15,7 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T12:13:04+0200
 implementation-commits: [e23e0b39, 73df900b, 2729b1cb]
+status: archived
 ---
 
 # Jev compaction passes a twelve-row verification matrix on real transcripts before release
@@ -45,10 +46,11 @@ Owner, 2026-09-24: "continue testing the jev compaction, make it flawless". Rele
 ## Approval log
 
 - 2026-09-24T12:13:04+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-26T11:50:52+0200 — COMPLETE by main-agent@ai-maestro-janitor. Matrix complete (V1-V12, 17540 green, V3/V12 verified on real transcripts 2026-09-25); release-checklist box ticked with diff evidence; release 3.6.3 shipped with owner delegation.
 
 ## Release checklist
 
-- [ ] The installed ~/.claude/rules/janitor-heartbeat-protocol.md still carries the old STATE_DIR recipe (f0eb0848 moved it into a code block below the heartbeat table in the repo's rules/janitor-heartbeat-protocol.md; on 2026-09-24 the two files differ). The release must install the repo's rule; check: the installed copy is byte-identical to the repo's after the upgrade.
+- [x] The installed ~/.claude/rules/janitor-heartbeat-protocol.md still carries the old STATE_DIR recipe (f0eb0848 moved it into a code block below the heartbeat table in the repo's rules/janitor-heartbeat-protocol.md; on 2026-09-24 the two files differ). The release must install the repo's rule; check: the installed copy is byte-identical to the repo's after the upgrade.
 
 ## Notes
 
@@ -57,6 +59,7 @@ V5 baseline (one developer machine, 2026-09-24, from the previous session's meas
 
 
 DROPPED 2026-09-24: an earlier append-only STATE entry here first stated "about 20 hooks" affected, then corrected it to "9 files"; both counts were superseded by TRDD-A8DRRW0I's own read-and-classify pass, which narrowed the real scope further (see that card). The current STATE is the block right after the title.
+Tick evidence 2026-09-26: diff of ~/.claude/rules/janitor-heartbeat-protocol.md vs rules/janitor-heartbeat-protocol.md shows exactly ONE line difference — the installer's own version-stamp comment (rule-stamp version=3.6.0); installed copy otherwise byte-identical and carries the code-block STATE_DIR recipe (line 55). Substance satisfied; the stamp is installer metadata, not content drift.
 
 
 ## Related

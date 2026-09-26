@@ -1,9 +1,9 @@
 ---
 trdd-id: 23QM8H5F
 title: memgrep new-mem-atom truncates a long description mid-word instead of refusing or wrapping
-column: ai_review
+column: complete
 created: 2026-09-22T21:33:27+0200
-updated: 2026-09-26T09:28:38+0200
+updated: 2026-09-26T11:52:12+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: bugfix
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: Emasoft
 approval-datetime: 2026-09-22T21:33:27+0200
-status: tasked
+status: archived
 ---
 
 # memgrep new-mem-atom truncates a long description mid-word instead of refusing or wrapping
@@ -35,6 +35,7 @@ corrupts the recall ranking surface (description is the only field memgrep ranks
 - 2026-09-22T21:33:27+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T13:29:28+0200 — column → todo by janitor-main-session. recurred 2026-09-24 via the janitor-memory-split chore in AgentlensPro; validate and lint passed the truncated descs
 - 2026-09-25T16:18:40+0200 — column → testing by main-agent@ai-maestro-janitor. Rust guard + test landed; memgrep suite 436 green
+- 2026-09-26T11:52:12+0200 — COMPLETE by main-agent@ai-maestro-janitor. Fix landed 65081d77 with tests, suite 436 green, shipped in 3.6.3, CI green.
 
 ## Recurrence 2026-09-24
 
@@ -45,3 +46,7 @@ Reporter's hypothesis, not verified: a fixed character cap applied to the genera
 
 2026-09-25 15:45 — implemented (Rust): check_desc gains the ATOM_DESC_MAX_CHARS=200 maximum (shared constant with sanitize_quoted_value's cap), so every write verb (new-mem-atom, update-mem-atom, split's two call sites) REFUSES an over-cap desc with a message naming the fix, instead of the marker builder silently truncating mid-word. Page description: stays uncapped. Pinned by desc_over_the_atom_cap_is_refused_not_truncated_mid_word (refusal text, ==cap ok, 201 refused); full memgrep suite 436 passed. 3 pre-existing over-cap descs exist in USER scope (verify-cross-repo-cited-sha x2, debugging-methodology...full-3-atom) — they are legal as-written; the guard fires only when a write verb next touches them. Column -> testing.
 2026-09-25 16:40 — review's migration item PARTIALLY owed: the 3 live over-cap descs are all FOOTNOTE-LESSON atoms ([^N] one-line footnotes; ATOM-142L-S3V9 x2, ATOM-60ZD-6UGR). update-mem-atom cannot edit a lesson's desc without also piping a replacement body, and its stdin body is REQUIRED non-empty even when the target's body span is empty — splicing one in would corrupt the footnote shape. A hand edit is forbidden by the memory rules. Recorded as a memgrep gap (lesson desc-editing needs a body-optional path); the 3 descs stay as-is (legal as-written, the new guard fires only on a future write-verb touch). New card proposed for the memgrep gap.
+
+## Acceptance
+
+- [x] new-mem-atom no longer truncates a long description mid-word (65081d77: Rust guard + refusal-text test, full memgrep suite 436 green); shipped in 3.6.3, CI green on cea026f2
