@@ -1465,6 +1465,173 @@ def test_success_injection_has_no_recent_turns_section_and_each_exchange_once(
     assert jev_block.index("READ FIRST:") < jev_block.index("-- user u1:0 --")
 
 
+# --- TRDD-K8YF2WQ5: the completed-injection path releases the summary hold ------------------
+
+
+def _arm_summary_hold(sd: Path, transcript: Path) -> None:
+    """Write a `summary-pending.json` hold record naming `transcript` — the exact shape
+    `ehc._capture_summary_source` writes (same fields, same TTL arithmetic)."""
+    import external_handoff_clear as ehc
+
+    now = int(time.time())
+    record = {
+        "transcript": str(transcript),
+        "key": handoff_files.session_key(str(transcript)),
+        "captured": now,
+        "expires": now + ehc._HOLD_TTL_S,
+    }
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / ehc._PENDING_FILE).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+
+def test_success_path_releases_the_summary_hold_it_satisfied(tmp_path, monkeypatch):
+    """K8YF2WQ5: a hold taken for transcript K, a hook SUCCESS (real Jev compose injected)
+    for the SAME transcript — the hold file must be gone, not left to expire on the
+    15-minute TTL while the summary it was waiting for is already in context."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%41")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%41"}, transcript=str(transcript))
+    _arm_summary_hold(sd, transcript)
+    import external_handoff_clear as ehc
+
+    assert (sd / ehc._PENDING_FILE).is_file(), "the fixture must arm the hold first"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=_COMPACTED_DOC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+
+    assert rc == 0
+    assert "[janitor-handoff] Post-clear handoff, ALREADY IN CONTEXT below" in buf.getvalue()
+    assert not (sd / ehc._PENDING_FILE).is_file(), (
+        "the hold must be released the moment its summary is injected"
+    )
+
+
+def test_success_path_with_a_different_key_never_releases_another_lanes_hold(
+    tmp_path, monkeypatch,
+):
+    """K8YF2WQ5 key guard: a hold naming transcript K2 (a different clear's lane) must
+    survive a hook success for transcript K — `_release_summary_hold`'s key check makes
+    the release a no-op, and the hook must not bypass it."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%42")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    other_transcript = tmp_path / "other.jsonl"
+    other_transcript.write_text('{"message": {"role": "user", "content": "other"}}\n',
+                                encoding="utf-8")
+    assert (handoff_files.session_key(str(transcript))
+            != handoff_files.session_key(str(other_transcript))), (
+        "the two fixtures must hash to different keys, or this test proves nothing"
+    )
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%42"}, transcript=str(transcript))
+    _arm_summary_hold(sd, other_transcript)
+    import external_handoff_clear as ehc
+
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=_COMPACTED_DOC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+
+    assert rc == 0
+    assert (sd / ehc._PENDING_FILE).is_file(), (
+        "another lane's still-active hold (a different transcript/key) must survive this run"
+    )
+
+
+def test_template_degradation_defers_the_hold_to_the_detached_lane_or_ttl(
+    tmp_path, monkeypatch,
+):
+    """K8YF2WQ5 (amended design, review round 2): on the template-degradation path the hook
+    does NOT release the hold — the detached retry lane it spawns may still land a REAL Jev
+    summary for this same key, and no freshness-checkable liveness artifact exists to gate
+    the release on. The hold waits for that lane's own release (or the TTL backstop), and
+    the deferral is logged rather than silent."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%43")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    _write_sidecar(sd, {"TMUX_PANE": "%43"}, transcript=str(transcript))
+    _arm_summary_hold(sd, transcript)
+    import external_handoff_clear as ehc
+
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=7)  # EXIT_JEV_ERROR
+    # The hook only spawns the detached lane when it finds the script on disk; the spawn
+    # itself is faked below (same pattern as
+    # test_compose_failure_spawns_the_detached_retry_fallback_lane_with_transcript).
+    (plugin_root / "scripts" / "summarize_previous_session.py").write_text("", encoding="utf-8")
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    import subprocess as _subprocess
+
+    real_popen = _subprocess.Popen
+
+    def _fake_popen(argv, **kwargs):
+        if isinstance(argv, (list, tuple)) and argv and "summarize_previous_session.py" in str(argv[0]):
+            class _Dummy:
+                pass
+
+            return _Dummy()
+        return real_popen(argv, **kwargs)
+
+    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+
+    assert rc == 0
+    assert handoff_files.TEMPLATE_MARKER in buf.getvalue()
+    assert (sd / ehc._PENDING_FILE).is_file(), (
+        "the template path must NOT release the hold — a live detached lane may still "
+        "land the real summary for this key"
+    )
+    log_path = state.log_dir() / "jev-post-clear-hook.log"
+    assert log_path.is_file()
+    assert "summary hold left" in log_path.read_text(encoding="utf-8"), (
+        "the deferral must be logged, never silent"
+    )
+
+
 if __name__ == "__main__":
     import pytest
 

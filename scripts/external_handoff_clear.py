@@ -126,9 +126,10 @@ def _release_summary_hold(sd: Path, *, key: str) -> None:
     """Drop the hold. Its ABSENCE is the release signal, so this must be unlink-not-rewrite.
 
     `key` MUST match the PENDING RECORD's own `key` field or this is a no-op (TRDD-RAEGS1D5
-    advisor R4). REQUIRED, no unconditional path -- the ONE production caller
-    (`summarize_previous_session.py::_main`, verified via `tldr impact` before this was made
-    required) already always has its own lane's key in hand by the time it releases, so there
+    advisor R4). REQUIRED, no unconditional path -- the production callers
+    (`summarize_previous_session.py::_main` and, since TRDD-K8YF2WQ5, the post-clear-compact
+    hook's completed-injection path) always have their own lane's key in hand by the time
+    they release, so there
     is no legitimate caller left that needs to release "whichever record happens to be
     there". Before this guard existed at all the release was unconditional: a lane that just
     finished ITS OWN compaction would unlink `summary-pending.json` even if a SECOND,
