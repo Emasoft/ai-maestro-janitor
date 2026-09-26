@@ -1,10 +1,10 @@
 ---
 trdd-id: SWSNQAZF
 title: jev-verify harness silently no-ops when invoked from nested or backgrounded shells
-column: backburner
+column: todo
 status: tasked
 created: 2026-09-27T00:44:14+0200
-updated: 2026-09-27T00:44:14+0200
+updated: 2026-09-27T00:44:52+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Verified 2026-09-27 during the RAEGS1D5 V3/V12 re-stamp: scripts_dev/jev_verify/
 ## Approval log
 
 - 2026-09-27T00:44:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-27T00:44:52+0200 — column → todo. verified evidence on the card, ready for lean-worker dispatch

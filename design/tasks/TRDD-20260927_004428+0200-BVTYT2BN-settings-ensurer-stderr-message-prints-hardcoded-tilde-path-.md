@@ -1,10 +1,10 @@
 ---
 trdd-id: BVTYT2BN
 title: settings-ensurer stderr message prints hardcoded tilde path even when HOME is redirected
-column: backburner
+column: todo
 status: tasked
 created: 2026-09-27T00:44:28+0200
-updated: 2026-09-27T00:44:28+0200
+updated: 2026-09-27T00:44:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Verified 2026-09-27 during the V12 matrix run: scripts/hooks/on-session-start.py
 ## Approval log
 
 - 2026-09-27T00:44:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-27T00:44:53+0200 — column → todo. one-line fix scoped on the card, ready for lean-worker dispatch
