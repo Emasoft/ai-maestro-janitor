@@ -2,11 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.6.2] — 2026-09-25
+## [3.6.3] — 2026-09-26
 
-### Styling
+### Bug Fixes
 
-- **memgrep:** Collapse nested if to let-chain per clippy::collapsible_if — release gate blocked v3.6.2 push on this lint; fmt-clean form, semantics identical (2e26ab9)
+- **memgrep:** Preserve a footnote-lesson's INLINE body on update-mem-atom --desc (T-H97PEEQZ) (00bc8ac)
+
+### Documentation
+
+- **TRDD:** Record XI9UYD4E body-loss correction — migration's stdin-less desc edit silently deleted 3 lesson inline bodies; recovered via txn repair, fix landed 00bc8acb (TRDD-XI9UYD4E) (2c86da9)
+- **TRDD:** Append approval-log retraction for the XI9UYD4E migration — review found the 21:29 'migration completed' line standing uncorrected (TRDD-XI9UYD4E) (325b944)
+- **TRDD:** Name the unmerged fix branch as XI9UYD4E's remaining gate — review found 'RETRACTED + fix landed' reads as incident-closed while the merge is pending (TRDD-XI9UYD4E) (2f5b7e7)
+- **TRDD:** Record XI9UYD4E merge gate cleared — ff-merged into main, post-merge suite green; merge review found card/column/main disagreeing after the merge (TRDD-XI9UYD4E) (4296d48)
+- **TRDD:** Append merge-cleared note to XI9UYD4E approval log (TRDD-XI9UYD4E) (b6a4490)
+- **TRDD:** Honest coverage wording on XI9UYD4E gate-cleared line — name lib-target scope and the not-re-run full crate; mark REMAINING GATE superseded (review round on 4296d489/b6a4490b) (TRDD-XI9UYD4E) (b83b8e2)
+- **TRDD:** GATE CLEARED leads XI9UYD4E STATE gate history as past tense; full-crate run 444/0 established on main, resolving the 441/159 count tension (review round on b83b8e2f) (TRDD-XI9UYD4E) (416f725)
+- **TRDD:** XI9UYD4E full-crate claim scoped to its evidence — per-target ok-lines verified, exit 0 captured; publish-approval conjunct marked still-live; 441-to-444 difference labeled inference (review round on 416f725a) (TRDD-XI9UYD4E) (12bf1a9)
+
+### Memory
+
+- Split ATOM-ZG19-ZDYA into three under-cap atoms (PROJECT split chore) (c474426)
 ## [3.6.2] — 2026-09-25
 
 ### Bug Fixes
@@ -41,6 +56,11 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Bump version to 3.6.2 (bfdf382)
+- Bump version to 3.6.2 (a9626a8)
+
+### Styling
+
+- **memgrep:** Collapse nested if to let-chain per clippy::collapsible_if — release gate blocked v3.6.2 push on this lint; fmt-clean form, semantics identical (2e26ab9)
 
 ### Testing
 
