@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-27T00:13:09+0200
+updated: 2026-09-27T00:18:45+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -38,6 +38,7 @@ eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1K
 - 2026-09-25 13:50 — NEXT ACTION progress: the full suite ran WITHOUT -x on the clean tree at HEAD (52c87cbb, includes SK490HKU): 17540 passed, 2 skipped, 8 subtests passed in 12m27s. Remaining: V3 and V12 of TRDD-DQXMND59 on this commit, then the matrix-gate reconciliation question for the owner. Publish still waits on the owner's explicit yes.
 2026-09-26 — publish authorization status: 3.6.3 shipped on the owner's single-word 'resume' read against the 2026-09-24 delegation; the review flagged it as analogy, not explicit grant; RATIFY/REVERT STILL OPEN with the owner (revert = tag-deletion + corrective release; full disposition in the 'Publish authorization disposition (2026-09-26)' body section).
 V3+V12 re-stamped on HEAD 2e3fff3a 2026-09-27: 4/4 rows pass via scripts_dev/jev_verify (V3 on real transcripts c8a95d7e/d30bf250/35e1e917 - 8/8 assertions each, 4.3-6.4s, no truncation markers, live state untouched; V12 4/4 assertions, pointer-line-not-injection, body not leaked); one V3 run independently re-confirmed by the orchestrator. NEXT ACTION's two legs both current: full suite at HEAD green (17561/2 on 37b0741f; the three later commits are card-docs-only) and matrix rows on HEAD. Remaining before publish: the two owner decisions (matrix-gate reconciliation; 3.6.3 ratify/revert). Report: reports_dev/jev-v3v12-20260927_000823+0200.md
+Review-fork remediations on the 5acd3565 stamp, applied: (1) provenance clause corrected - the 17561/2 full suite ran on the pre-37b0741f tree (the run started before that commit existed); SIX docs-only commits (2045940d, ba52e9fd, 2e3fff3a, 5acd3565, 22a46a19, 8ad79a9f) separate it from HEAD, and 'both legs current at HEAD' holds through that docs-only-chain argument, now stated; the matrix ran at 2e3fff3a. (2) Evidence durability: the /tmp driver log held only exit codes, so the two un-orchestrator-verified V3 rows (d30bf250, 35e1e917) were RE-RUN by the orchestrator - both v3_pass=true, 4.2s/7977B and live_state_touched=false, JSON assertions now durable at reports_dev/jev-v3v12-orchestrator-reverify-20260927.json. Remaining worker-verified-only: V12's four assertions (run_v12.py output not re-run). Verdict: the stamp stands conditionally until cited; these clauses make it citable except for the V12 leg.
 
 
 
