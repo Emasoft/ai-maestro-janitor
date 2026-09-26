@@ -1376,6 +1376,17 @@ _ENRICH_SLUGS = frozenset({
 
 _ENRICH_FINDING_RE = re.compile(r"^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[(?P<slug>[a-z-]+)\]")
 
+# RELOCATE (TRDD-QDYQLM5V): the lint rule the relocate pass consumes. duty-14 defects
+# "do not announce themselves as duty-14 defects" — they arrive as lesson-uncited INFOs.
+# The gate is deliberately SEMI-structural: zero lesson-uncited findings is PROVEN idle
+# (suppress); any nonzero count means a semantic (atom, current-page, better-page)
+# judgment remains, which is the agent's job, not a precheck's. The churn bound is the
+# UNCHANGED-CORPUS gate + the recheck window, same as every sibling.
+_RELOCATE_SLUG = "lesson-uncited"
+_RELOCATE_LESSON_RE = re.compile(
+    r"^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[lesson-uncited\]\s+—\s+page-level lesson `\[\^?(?P<footnote>[^\]]+)\]:`"
+)
+
 
 def enrich_pages(root: Path) -> list[tuple[str, str]]:
     """Pages under `root` whose RECALL SURFACE is too thin or duplicated, as
@@ -1462,6 +1473,70 @@ def enrich_has_work(
         if scope is None:
             return True  # cannot read the ledger ⇒ never suppress
         if not memory_refusals.is_refused("enrich", scope, root, [Path(path)], now=now):
+            return True
+    return False
+
+
+def relocate_lesson_findings(root: Path) -> list[tuple[str, str, str]]:
+    """`(abs-path, line, footnote-id)` for every page-level lesson the linter flags
+    `lesson-uncited`, asked of `memgrep lint` itself (the enrich_pages pattern, and
+    for the same janitor#227 reason: the defect IS a lint rule, so deferring to lint
+    is the only non-looping design).
+
+    Fail CLOSED when memgrep is missing or fails — a dispatched agent would have no
+    linter either, so it could neither confirm the defect nor verify its own fix.
+    """
+    try:
+        import user_mem_lib  # noqa: PLC0415 -- optional; a lib import must not break the gate
+
+        binary = user_mem_lib.find_memgrep()
+    except Exception:  # noqa: BLE001
+        binary = None
+    if not binary:
+        return []
+    try:
+        proc = subprocess.run(  # noqa: S603 - resolved binary + one path, no shell
+            [binary, "lint", str(root)],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out: list[tuple[str, str, str]] = []
+    for ln in (proc.stdout or "").splitlines():
+        m = _RELOCATE_LESSON_RE.match(ln)
+        if m:
+            out.append((m.group("path"), m.group("line"), m.group("footnote")))
+    return out
+
+
+def relocate_has_work(
+    root: Path,
+    *,
+    scope: str | None = None,
+    now: int | None = None,
+    last_stats: dict[str, list[int]] | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_RECHECK_S,
+) -> bool:
+    """True iff the relocate pass (TRDD-QDYQLM5V) has a candidate on `root`.
+
+    SEMI-STRUCTURAL gate, deliberately: ZERO lesson-uncited findings is PROVEN idle
+    (the pass's only candidate channel is empty → suppress). Any nonzero count means a
+    semantic (atom-or-lesson, current-page, better-page) judgment remains — the pass's
+    own MOVE-vs-LINK decision — which a precheck must not claim to settle. What bounds
+    the false-positive churn the review flagged is the pair every sibling carries: the
+    UNCHANGED-CORPUS gate (a byte-identical corpus was already examined) plus the
+    recheck window. `scope` reads the refusal ledger; without it the filter is skipped,
+    never inverted.
+    """
+    if _unchanged_since_dispatch(
+        root, last_stats=last_stats, stamp_age_s=stamp_age_s, recheck_after_s=recheck_after_s
+    ):
+        return False
+    for path, _line, _footnote in relocate_lesson_findings(root):
+        if scope is None:
+            return True  # cannot read the ledger ⇒ never suppress
+        if not memory_refusals.is_refused("relocate", scope, root, [Path(path)], now=now):
             return True
     return False
 
@@ -1559,6 +1634,16 @@ def content_has_work(
         # memgrep is missing, unlike the fail-OPEN default around it — an agent without
         # the linter could not verify its own fix either.
         return enrich_has_work(
+            root, scope=scope, last_stats=last_stats, stamp_age_s=stamp_age_s,
+        )
+    if intervention == "relocate":
+        # SEMI-STRUCTURAL gate (TRDD-QDYQLM5V): zero lesson-uncited findings is proven
+        # idle; any nonzero count defers to the agent's semantic triple-selection, with
+        # the UNCHANGED-CORPUS gate + recheck window as the churn bound. Fail CLOSED
+        # when memgrep is missing (same reasoning as enrich — no linter, no verify).
+        # `scope` unlocks the per-page refusal filter for a page whose lesson was judged
+        # a legitimate page-level stay (LINK-and-leave, the card's other verdict).
+        return relocate_has_work(
             root, scope=scope, last_stats=last_stats, stamp_age_s=stamp_age_s,
         )
     # Unknown chores: fail-open by default.

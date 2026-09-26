@@ -110,7 +110,11 @@ import state  # noqa: E402
 # retro-lesson (backfill lesson form onto already-superseded atoms, TRDD-J3ZH3RSI —
 # after the structural passes so a page is well-formed before its history is
 # converted, before the costly merges), then consolidate (merge), then conflict
-# (the costly fact-verify), and LAST enrich (recall-surface backfill, TRDD-437UHNFS).
+# (the costly fact-verify), then relocate (duty-14 off-topic moves, TRDD-QDYQLM5V —
+# after conflict because a relocation is cheapest AFTER contradictory facts settled
+# where they belong, and BEFORE enrich because a move changes recall surfaces that
+# enrich would otherwise backfill in the wrong place), and LAST enrich
+# (recall-surface backfill, TRDD-437UHNFS).
 # enrich is deliberately last: its candidate set is the widest of any pass (every page
 # below the keyphrase/description floor qualifies), so anywhere earlier it would
 # out-rank and starve the structural passes that must run on a page first.
@@ -122,6 +126,7 @@ _MARKERS: list[tuple[str, str]] = [
     ("retro-lesson", "[janitor-memory-retro-lesson]"),
     ("consolidate", "[janitor-memory-consolidate]"),
     ("conflict", "[janitor-memory-conflict]"),
+    ("relocate", "[janitor-memory-relocate]"),
     ("enrich", "[janitor-memory-enrich]"),
 ]
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -2103,3 +2104,95 @@ def test_an_indented_heading_is_not_a_heading(tmp_path):
     """
     p = _shaped(tmp_path, "a.md", body="A fact.\n\n    ## Applies to\n    - [[x]]")
     assert mcp.repair_defect(p.read_text(encoding="utf-8")) == ""
+
+
+# ── relocate (TRDD-QDYQLM5V) — duty-14 gate + candidates ────────────────────────────
+
+_RELOCATE_PAGE_UNCITED = (
+    "---\nname: r\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n"
+    "a fact with no citation.\n\n## Notes and lessons learned\n"
+    "[^1]: [id:ATOM-AAAA-0001, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] DO NOT x.\n"
+)
+
+_RELOCATE_PAGE_CITED = (
+    "---\nname: r\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n"
+    "a fact. [^1]\n\n## Notes and lessons learned\n"
+    "[^1]: [id:ATOM-AAAA-0001, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] DO NOT x.\n"
+)
+
+
+@pytest.fixture
+def _pin_memgrep(monkeypatch):
+    """Point the gate's own find_memgrep() at the tree-built binary (the lint-gate
+    module's pattern): without this, the test guards on one binary and exercises a
+    code path that hunts for another."""
+    from conftest import MEMGREP_BIN_PATH
+    if MEMGREP_BIN_PATH:
+        monkeypatch.setenv("MEMGREP_BIN", MEMGREP_BIN_PATH)
+
+
+def test_relocate_zero_uncited_findings_is_proven_idle(tmp_path, _pin_memgrep):
+    """A page whose lesson IS cited produces no lesson-uncited finding — the pass's
+    only candidate channel is empty, so idleness is proven and the gate suppresses."""
+    (tmp_path / "r.md").write_text(_RELOCATE_PAGE_CITED, encoding="utf-8")
+    assert mcp.relocate_has_work(tmp_path) is False
+
+
+def test_relocate_an_uncited_page_level_lesson_has_work(tmp_path, _pin_memgrep):
+    """The duty-14 channel: an uncited page-level lesson is flagged lesson-uncited —
+    nonzero candidates, so a semantic triple judgment remains and the gate runs."""
+    (tmp_path / "r.md").write_text(_RELOCATE_PAGE_UNCITED, encoding="utf-8")
+    assert mcp.relocate_has_work(tmp_path) is True
+
+
+def test_relocate_findings_carry_the_triple_fields(tmp_path, _pin_memgrep):
+    """The candidate query's evidence fields: page path and footnote id, which the
+    agent uses to name (lesson, current-page, better-page)."""
+    (tmp_path / "r.md").write_text(_RELOCATE_PAGE_UNCITED, encoding="utf-8")
+    findings = mcp.relocate_lesson_findings(tmp_path)
+    assert len(findings) == 1
+    path, _line, footnote = findings[0]
+    assert path.endswith("r.md")
+    assert footnote == "1"
+
+
+def test_relocate_refused_page_is_not_work(tmp_path, _pin_memgrep):
+    """A page the ledger already covers (judged a legitimate LINK-and-leave) stops
+    being work — otherwise the pass re-fires on the same refusal forever."""
+    (tmp_path / "r.md").write_text(_RELOCATE_PAGE_UNCITED, encoding="utf-8")
+    memory_refusals.record(
+        "relocate", "PROJECT", tmp_path, [tmp_path / "r.md"],
+        reason="test: judged page-level by design",
+    )
+    assert mcp.relocate_has_work(
+        tmp_path, scope="PROJECT", now=int(time.time())
+    ) is False
+    memory_refusals.clear("relocate", "PROJECT", tmp_path, [tmp_path / "r.md"])
+
+
+def test_content_has_work_relocate_branch(tmp_path, _pin_memgrep):
+    """The dispatch branch: content_has_work('relocate', ...) delegates to the gate."""
+    assert mcp.content_has_work(
+        "relocate", tmp_path, split_max_bytes=_CAP
+    ) is False  # empty corpus → zero findings → proven idle
+
+
+def test_content_has_work_relocate_fail_open_without_memgrep(tmp_path, monkeypatch):
+    """No memgrep → the gate cannot verify → fail CLOSED was enrich's choice for a
+    LINT-OWNED defect, and relocate matches it: return False, never a blind True that
+    would spawn an agent with no linter either."""
+    monkeypatch.delenv("MEMGREP_BIN", raising=False)
+    monkeypatch.setattr(mcp, "relocate_lesson_findings", lambda _root: [])
+    (tmp_path / "r.md").write_text(_RELOCATE_PAGE_UNCITED, encoding="utf-8")
+    assert mcp.content_has_work("relocate", tmp_path, split_max_bytes=_CAP) is False
+
+
+def test_relocate_settings_key_resolves_and_is_registered():
+    """interval_s_for('relocate') must not raise ValueError at the first heartbeat —
+    the settings registry, DEFAULTS and _PER_DAY_KEYS all carry the new key."""
+    import memory_settings
+
+    assert "relocate" in memory_settings.INTERVENTIONS
+    assert memory_settings.INTERVENTIONS["relocate"] == "relocate_per_day"
+    assert "relocate_per_day" in memory_settings.DEFAULTS
+    assert memory_settings.interval_s_for("relocate") < float("inf")

@@ -203,12 +203,34 @@ def split_topic_candidates(
     return out
 
 
+def relocate_candidates(
+    root: Path, *, scope: str, now: int | None, max_bytes: int
+) -> list[tuple[str, str]]:
+    """`(page#footnote, "relocate or link: <evidence>")` for every page-level lesson
+    `memgrep lint` flags `lesson-uncited` (the duty-14 candidate channel, TRDD-QDYQLM5V),
+    MINUS pages a live `relocate` refusal already covers.
+
+    The row names the page#footnote and the lint line as EVIDENCE; choosing MOVE (via
+    memgrep migrate-mem-atom) versus LINK-and-leave, and naming the better page, is the
+    agent's semantic judgment — this CLI must not guess it. Refusal coverage is
+    PAGE-granular like every sibling: a judged-and-refused page retires until its bytes
+    change."""
+    out: list[tuple[str, str]] = []
+    for path, line, footnote in memory_content_precheck.relocate_lesson_findings(root):
+        p = Path(path)
+        if memory_refusals.is_refused("relocate", scope, root, [p], now=now):
+            continue
+        out.append((f"{_rel(root, p)}#{footnote}", f"lesson-uncited at :{line} — move or link"))
+    return sorted(out)
+
+
 _INTERVENTIONS = {
     "repair": repair_candidates,
     "atomize": atomize_candidates,
     "consolidate": consolidate_candidates,
     "enrich": enrich_candidates,
     "split-topic": split_topic_candidates,
+    "relocate": relocate_candidates,
 }
 
 
