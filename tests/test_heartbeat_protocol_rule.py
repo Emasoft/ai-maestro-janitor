@@ -295,7 +295,7 @@ def test_rule_covers_every_detector_memory_marker():
     missing_selftest = [m for m in markers if m not in selftest]
     missing_agent = [
         m for m in markers
-        if m.removeprefix("[janitor-memory-").removesuffix("]") not in agent
+        if f"janitor-memory-{m.removeprefix('[janitor-memory-').removesuffix(']')}" not in agent
     ]
     assert not missing_rule, f"detector markers absent from the heartbeat rule: {missing_rule}"
     assert not missing_selftest, f"detector markers absent from harness_selftest: {missing_selftest}"

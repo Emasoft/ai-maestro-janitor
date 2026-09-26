@@ -52,8 +52,12 @@ For each candidate, read the lesson and ask the card's own test for off-topic: *
 only of THIS page's subject, or would it still be true of a completely different subject?*
 
 - **LINK and leave** — when the general form of the lesson ALREADY exists on the
-  methodology/owning page (search the owning page for the same rule before deciding). Write a
-  `[[link]]` on the source page pointing at the owning page. Do NOT move.
+  methodology/owning page (search the owning page for the same rule before deciding). Route
+  the `[[link]]` through the transaction core — a hand edit of a wikimem page is forbidden
+  (only memgrep verbs and the txn core may edit one):
+  `memory_txn_cli begin <scope> repair <page>` → append the `[[owning-page]]` link to the
+  STAGED copy (touch nothing else) → `commit --op repair` (the verify gate proves no loss).
+  Do NOT move.
 - **MOVE** — when the general form does NOT yet exist elsewhere. Run, through the transaction
   core per the consolidate skill's shape:
 
