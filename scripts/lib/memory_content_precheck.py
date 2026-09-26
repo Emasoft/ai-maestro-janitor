@@ -1381,11 +1381,18 @@ _ENRICH_FINDING_RE = re.compile(r"^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[(?P<slu
 # The gate is deliberately SEMI-structural: zero lesson-uncited findings is PROVEN idle
 # (suppress); any nonzero count means a semantic (atom, current-page, better-page)
 # judgment remains, which is the agent's job, not a precheck's. The churn bound is the
-# UNCHANGED-CORPUS gate + the recheck window, same as every sibling.
+# UNCHANGED-CORPUS gate + the recheck window, same as every sibling. The inert-citation
+# variant ("sits INSIDE a code span") is excluded: that one is a REPAIR — move the
+# closing backtick so the citation falls outside the code span — not a relocation, and
+# emitting it as a move-or-link candidate would dispatch a move where a one-char fix
+# belongs (review 2026-09-26, finding 4).
 _RELOCATE_SLUG = "lesson-uncited"
 _RELOCATE_LESSON_RE = re.compile(
-    r"^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[lesson-uncited\]\s+—\s+page-level lesson `\[\^?(?P<footnote>[^\]]+)\]:`"
+    rf"^\S+\s+(?P<path>.+?):(?P<line>\d+)\s+\[{_RELOCATE_SLUG}\]\s+—\s+page-level lesson `\[\^?(?P<footnote>[^\]]+)\]:`"
 )
+# The inert-citation variant's message starts differently; a candidate line whose
+# evidence names a code-span citation is repair's business.
+_RELOCATE_INERT_RE = re.compile(r"^\S+\s+.+?:\d+\s+\[lesson-uncited\].*INSIDE a code span")
 
 
 def enrich_pages(root: Path) -> list[tuple[str, str]]:
@@ -1503,6 +1510,8 @@ def relocate_lesson_findings(root: Path) -> list[tuple[str, str, str]]:
         return []
     out: list[tuple[str, str, str]] = []
     for ln in (proc.stdout or "").splitlines():
+        if _RELOCATE_INERT_RE.match(ln):
+            continue  # inert-citation variant = a repair (move a backtick), not a relocation
         m = _RELOCATE_LESSON_RE.match(ln)
         if m:
             out.append((m.group("path"), m.group("line"), m.group("footnote")))

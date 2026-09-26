@@ -2196,3 +2196,64 @@ def test_relocate_settings_key_resolves_and_is_registered():
     assert memory_settings.INTERVENTIONS["relocate"] == "relocate_per_day"
     assert "relocate_per_day" in memory_settings.DEFAULTS
     assert memory_settings.interval_s_for("relocate") < float("inf")
+
+
+def test_relocate_offtopic_atom_scenario(tmp_path, monkeypatch):
+    """Acceptance box 4 of TRDD-QDYQLM5V, scenario half: an atom off-topic for its
+    page and on-topic for another is MOVED (real memgrep migrate-mem-atom), the
+    source retains a [[link]], and neither body loses bytes. The crash half of the
+    box is covered at verb level by
+    migrate_crash_between_writes_leaves_a_recoverable_duplicate_never_a_loss."""
+    from conftest import MEMGREP_BIN_PATH
+    if MEMGREP_BIN_PATH is None:
+        pytest.skip("memgrep binary unavailable")
+    import os as _os
+    import subprocess
+    monkeypatch.setenv("MEMGREP_BIN", MEMGREP_BIN_PATH)
+
+    src = tmp_path / "bulk-lane.md"
+    dst = tmp_path / "test-isolation.md"
+    atom = (
+        "^ATOM-BLKL-TEST [desc: \"test isolation lesson parked off-topic\", "
+        "keywords: \"monkeypatched CLAUDE_PROJECT_DIR lru cache state isolation / "
+        "test wrote real state dir / test isolation janitor / why did my test write "
+        "the real state / shared cache between tests / isolated state dir / test "
+        "polluted machine state / lru cached project root / state project root cache\", "
+        "ocd: 2026-01-01, lmd: 2026-01-01]\n\n"
+        "DO NOT assume a monkeypatched CLAUDE_PROJECT_DIR isolates janitor state in tests, "
+        "BECAUSE state.project_root/janitor_root/state_dir/log_dir are lru-cached "
+        "process-wide. DO point the caches at the tmp path instead.\n"
+    )
+    src.write_text(
+        "---\nname: bulk-lane\nocd: 2026-01-01\nlmd: 2026-01-01\n"
+        "description: \"the daemon bulk lane\"\ntier: component\n---\n"
+        "Bulk-lane facts live here.\n\n## Notes and lessons learned\n" + atom,
+        encoding="utf-8",
+    )
+    dst.write_text(
+        "---\nname: test-isolation\nocd: 2026-01-01\nlmd: 2026-01-01\n"
+        "description: \"a unit test wrote to the REAL state dir\"\ntier: component\n---\n"
+        "Test-isolation facts live here.\n\n## Notes and lessons learned\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [MEMGREP_BIN_PATH, "migrate-mem-atom", "ATOM-BLKL-TEST",
+         "--from", str(src), "--to", str(dst), "--leave-link"],
+        capture_output=True, text=True, timeout=60, check=False,
+        env={**_os.environ, "MEMGREP_BIN": MEMGREP_BIN_PATH},
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+    dst_after = dst.read_text(encoding="utf-8")
+    src_after = src.read_text(encoding="utf-8")
+    assert "ATOM-BLKL-TEST" in dst_after, "atom must land on the on-topic page"
+    assert "ATOM-BLKL-TEST" not in src_after, "atom must LEAVE the source page, not be copied"
+    # byte-for-byte payload conservation (box 4's letter): the full atom body the test
+    # wrote must survive verbatim on the destination — a net-byte bound can pass while
+    # content is lost under the link scaffolding's growth, so it is not evidence. The
+    # one permitted delta is trailing-newline layout, which the verb's section re-layout
+    # legitimately changes (an lmd bump changes frontmatter; the payload does not move).
+    assert " ".join(atom.split()) in " ".join(dst_after.split()), (
+        "the atom's body must survive byte-for-byte (whitespace-layout aside) on dst"
+    )
+    assert "bulk-lane" in dst_after, "source must retain a [[link]] to the move"
