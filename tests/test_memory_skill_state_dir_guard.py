@@ -40,6 +40,7 @@ def test_every_memory_chore_skill_actually_calls_the_claim_step():
         "janitor-memory-consolidate",
         "janitor-memory-enrich",
         "janitor-memory-harvest",
+        "janitor-memory-relocate",
         "janitor-memory-repair",
         "janitor-memory-retro-lesson",
         "janitor-memory-split",

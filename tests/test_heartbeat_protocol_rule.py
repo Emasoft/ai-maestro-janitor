@@ -39,6 +39,7 @@ _ALL_MARKERS = (
     "[janitor-memory-atomize]",
     "[janitor-memory-harvest]",
     "[janitor-memory-retro-lesson]",
+    "[janitor-memory-relocate]",
     "[janitor-memory-enrich]",
 )
 
@@ -257,4 +258,47 @@ def test_issue260_the_content_decision_belongs_to_the_skill_not_the_receiving_ag
     assert "memgrep lint" in row, (
         "lint is the specific tool a receiving agent reaches for, so the row must name it "
         "rather than warn generically about 'measuring'"
+    )
+
+
+def test_rule_covers_every_detector_memory_marker():
+    """Cross-check (TRDD-QDYQLM5V review round 3): the marker set lives in four
+    hand-synced places — detector _MARKERS, this rule, the selftest list, the agent's
+    skills frontmatter. This makes the alignment enforced instead of remembered: every
+    ("chore", "[janitor-memory-chore]") row in memory-maintenance.py::_MARKERS must
+    appear in the rule text, harness_selftest._MEMORY_MARKERS, and the subconscious
+    agent's skills list."""
+    import ast
+    import re as _re
+
+    det = _PROJECT_ROOT / "scripts" / "detectors" / "memory-maintenance.py"
+    det_text = det.read_text(encoding="utf-8")
+    tree = ast.parse(det_text)
+    markers_node = next(
+        n for n in tree.body
+        if (isinstance(n, ast.AnnAssign) or isinstance(n, ast.Assign))
+        and getattr(n.target if isinstance(n, ast.AnnAssign) else n.targets[0], "id", "") == "_MARKERS"
+    )
+    src = ast.get_source_segment(det_text, markers_node.value)  # type: ignore[arg-type]
+    assert src is not None, "_MARKERS source segment must be extractable"
+    markers = _re.findall(r"\[janitor-memory-[a-z-]+\]", src)
+
+    rule = _rule_text()
+    selftest = (_PROJECT_ROOT / "scripts" / "lib" / "harness_selftest.py").read_text(
+        encoding="utf-8"
+    )
+    agent = (
+        _PROJECT_ROOT / "agents" / "janitor-memory-subconscious-agent.md"
+    ).read_text(encoding="utf-8")
+
+    missing_rule = [m for m in markers if m not in rule]
+    missing_selftest = [m for m in markers if m not in selftest]
+    missing_agent = [
+        m for m in markers
+        if m.removeprefix("[janitor-memory-").removesuffix("]") not in agent
+    ]
+    assert not missing_rule, f"detector markers absent from the heartbeat rule: {missing_rule}"
+    assert not missing_selftest, f"detector markers absent from harness_selftest: {missing_selftest}"
+    assert not missing_agent, (
+        f"detector chores absent from subconscious agent skills list: {missing_agent}"
     )

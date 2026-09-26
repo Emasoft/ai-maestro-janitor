@@ -3,7 +3,7 @@ trdd-id: QDYQLM5V
 title: Move an off-topic atom to the page that owns its topic
 column: dev
 created: 2026-08-26T18:04:40+0200
-updated: 2026-09-26T13:23:24+0200
+updated: 2026-09-26T20:57:20+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -91,3 +91,7 @@ disguised as a footnote-citation nit.
 ## Approval log
 
 - 2026-09-26T13:23:24+0200 — column → dev by main-agent@ai-maestro-janitor. Machinery audit 2026-09-26: boxes 2-3 (two-page atomic move + LINK-instead-of-MOVE) already met by memgrep migrate-mem-atom with 12 Rust tests (159/0 suite green) — those boxes tick on evidence. Remaining: box 1 (candidate query) + box 4 (off-topic detection test) = a scheduler-level 'relocate' chore wired through memory_settings.INTERVENTIONS, memory-maintenance._MARKERS, content_has_work/migrate_has_work, memory_candidates_cli, the heartbeat-protocol rule, and the skill. Owner keep-going directive drives the pull.
+
+## STATE
+
+Box 1 wiring landed 2026-09-26 pm: heartbeat rule row + _ALL_MARKERS pin + selftest list + janitor-memory-relocate skill (MOVE-vs-LINK decision rule per review blocker; STATE_DIR consume-don't-resolve) + agent skills list + guard-test 9-chore fixture + new cross-check test (detector _MARKERS must appear in rule/selftest/agent — enforced, not remembered). Review fork verdict: commit stands; its 3-shapes contract-test claim REFUTED vs memory.rs:6644-6656 (two message arms, both already pinned at :10814/:10836). Gates green pre-edit (17559/2); post-edit gates running.
