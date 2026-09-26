@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-26T12:01:18+0200
+updated: 2026-09-26T12:06:35+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -36,6 +36,7 @@ eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1K
 - OpenRouter's openapi.json documents these statuses for the decisions endpoint: 400, 401, 402, 403, 404, 413, 429, 500, 502, 503, 524, 529 (422 is not documented). SUPERSEDED 2026-09-24 (decision (b) landed, 88aea2d9): 400, 404, 408, 413 and 422 now raise JevValidationError -> stamped kind "invalid" (non-declining), and the probe-fail TTL is 5 minutes (PROBE_FAIL_TTL_S in scripts/jev_compact.py), not 30 -- verified against _stamp_kind_for_error in the source and against git log -S on scripts/jev_compact.py.
 - 2026-09-24 RELATED: TRDD-D7RLXAN1 (Jev keeps every owner/assistant message verbatim) is NOT this card's npt/eht — corrected from an earlier parent-trdd claim on D7RLXAN1 itself; tracked only via Related links on both cards. D7RLXAN1 must land before the eht cards BLGZTHQ9/DZ1KOGAC/O2FNJ4KW can be re-measured on the final tree.
 - 2026-09-25 13:50 — NEXT ACTION progress: the full suite ran WITHOUT -x on the clean tree at HEAD (52c87cbb, includes SK490HKU): 17540 passed, 2 skipped, 8 subtests passed in 12m27s. Remaining: V3 and V12 of TRDD-DQXMND59 on this commit, then the matrix-gate reconciliation question for the owner. Publish still waits on the owner's explicit yes.
+2026-09-26 — publish authorization status: 3.6.3 shipped on the owner's single-word 'resume' read against the 2026-09-24 delegation; the review flagged it as analogy, not explicit grant; RATIFY/REVERT STILL OPEN with the owner (revert = tag-deletion + corrective release; full disposition in the 'Publish authorization disposition (2026-09-26)' body section).
 
 
 
