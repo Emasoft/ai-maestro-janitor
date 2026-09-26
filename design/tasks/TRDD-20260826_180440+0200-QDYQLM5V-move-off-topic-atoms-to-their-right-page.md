@@ -1,9 +1,9 @@
 ---
 trdd-id: QDYQLM5V
 title: Move an off-topic atom to the page that owns its topic
-column: backburner
+column: dev
 created: 2026-08-26T18:04:40+0200
-updated: 2026-08-26T20:03:23+0200
+updated: 2026-09-26T13:23:24+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -16,6 +16,7 @@ npt: []
 eht: []
 implementation-commits: []
 relevant-rules: []
+status: tasked
 ---
 
 # Duty 14 — detect an OFF-TOPIC atom and MOVE it to the right page
@@ -86,3 +87,7 @@ disguised as a footnote-citation nit.
       move, and asserts a crash mid-move leaves BOTH pages intact (the transaction core's job,
       proven here for the pair case)
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+
+## Approval log
+
+- 2026-09-26T13:23:24+0200 — column → dev by main-agent@ai-maestro-janitor. Machinery audit 2026-09-26: boxes 2-3 (two-page atomic move + LINK-instead-of-MOVE) already met by memgrep migrate-mem-atom with 12 Rust tests (159/0 suite green) — those boxes tick on evidence. Remaining: box 1 (candidate query) + box 4 (off-topic detection test) = a scheduler-level 'relocate' chore wired through memory_settings.INTERVENTIONS, memory-maintenance._MARKERS, content_has_work/migrate_has_work, memory_candidates_cli, the heartbeat-protocol rule, and the skill. Owner keep-going directive drives the pull.
