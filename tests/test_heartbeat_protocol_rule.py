@@ -279,7 +279,8 @@ def test_rule_covers_every_detector_memory_marker():
         if (isinstance(n, ast.AnnAssign) or isinstance(n, ast.Assign))
         and getattr(n.target if isinstance(n, ast.AnnAssign) else n.targets[0], "id", "") == "_MARKERS"
     )
-    src = ast.get_source_segment(det_text, markers_node.value)  # type: ignore[arg-type]
+    assert markers_node.value is not None, "_MARKERS must carry an assigned value"
+    src = ast.get_source_segment(det_text, markers_node.value)
     assert src is not None, "_MARKERS source segment must be extractable"
     markers = _re.findall(r"\[janitor-memory-[a-z-]+\]", src)
 
