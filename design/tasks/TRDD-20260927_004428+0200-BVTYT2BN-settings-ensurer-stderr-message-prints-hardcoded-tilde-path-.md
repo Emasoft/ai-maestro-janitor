@@ -4,7 +4,7 @@ title: settings-ensurer stderr message prints hardcoded tilde path even when HOM
 column: todo
 status: tasked
 created: 2026-09-27T00:44:28+0200
-updated: 2026-09-27T00:44:53+0200
+updated: 2026-09-27T00:51:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,3 +25,4 @@ Verified 2026-09-27 during the V12 matrix run: scripts/hooks/on-session-start.py
 
 - 2026-09-27T00:44:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-27T00:44:53+0200 — column → todo. one-line fix scoped on the card, ready for lean-worker dispatch
+2026-09-27T00:55+0200 — review round 1: stands as carded, ready for dispatch. Two one-line clarifications recorded: (a) the worker report's claim that the ABORTED batch V12 box also had a fake settings.json was NOT reproducible by find (only the retry-v12 box has one) — the card's claims rest on the retry run, which was verified; (b) '9 keys' means 9 recommended settings across 2 top-level entries (env block with 8 + askUserQuestionTimeout), not 9 file keys. Also noted for the release-gate reader: reports_dev evidence files are machine-local (gitignored), not verifiable from a fresh clone.

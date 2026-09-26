@@ -4,7 +4,7 @@ title: jev-verify harness silently no-ops when invoked from nested or background
 column: todo
 status: tasked
 created: 2026-09-27T00:44:14+0200
-updated: 2026-09-27T00:44:52+0200
+updated: 2026-09-27T00:51:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,3 +25,4 @@ Verified 2026-09-27 during the RAEGS1D5 V3/V12 re-stamp: scripts_dev/jev_verify/
 
 - 2026-09-27T00:44:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-27T00:44:52+0200 — column → todo. verified evidence on the card, ready for lean-worker dispatch
+2026-09-27T00:55+0200 — review-fork remediation recorded: the 'ruled out cwd relativity' line in the body is WITHDRAWN (it rested on hd6/hd7 runs with stale sidecar timestamps — consume happens BEFORE the age check, so those runs only proved consume-then-stale-ignore). Re-tested with fresh sidecars: nested-bash + REPO-relative scratch -> v3_pass false (0.05s no-op); nested-bash + /tmp scratch -> v3_pass true (3.96s) — scratch-inside-repo vs outside-repo IS a real variable (review's lead confirmed). BUT not the whole story: direct-shell + repo-scratch PASSED at 00:36 (4.33s) and fails deterministically now (0.05s, twice) — a third time/state-dependent variable is unidentified; the scratch-cmp-A..D deletion at ~00:47 is one candidate event but recreating them did not restore the pass. One config surfaced a real masked error: from repo cwd with /tmp scratch the hook ran but 'jev_compact failed (exit 1): (self, mode, buffering, encoding, errors, newline)' — an open() TypeError signature in the compact subprocess; investigate that FIRST, it may share the root cause. Env correction: 'env vars identical' — SHLVL differed 2 vs 3, all others identical. Shell-nesting per se DISPROVEN as the variable. The harness loud-failure requirement stands: fresh unconsumed sidecar + empty stdout must exit non-zero; jev_compact failures must not be swallowed by the never-raises wrapper.
