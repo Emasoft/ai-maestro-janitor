@@ -1,10 +1,10 @@
 ---
 trdd-id: XI9UYD4E
 title: memgrep update-mem-atom cannot desc-edit a footnote-lesson atom (stdin body mandatory even for empty body spans)
-column: testing
+column: ai_review
 status: tasked
 created: 2026-09-25T17:39:50+0200
-updated: 2026-09-26T05:48:04+0200
+updated: 2026-09-26T09:28:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix

@@ -1,9 +1,9 @@
 ---
 trdd-id: 23QM8H5F
 title: memgrep new-mem-atom truncates a long description mid-word instead of refusing or wrapping
-column: testing
+column: ai_review
 created: 2026-09-22T21:33:27+0200
-updated: 2026-09-25T17:39:39+0200
+updated: 2026-09-26T09:28:38+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: bugfix
