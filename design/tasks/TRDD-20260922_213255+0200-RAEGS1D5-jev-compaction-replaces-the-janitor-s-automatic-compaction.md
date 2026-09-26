@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-25T13:52:57+0200
+updated: 2026-09-26T12:01:18+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -138,3 +138,7 @@ Real-transcript run on 3ff01e50: Jev runs within size and time, the injected cop
 ## Review corrections 2026-09-24
 
 The publish criterion "at least 3 non-owner items inline" is gameable by one-line stubs (BLGZTHQ9). It is replaced by: at least 3 non-owner items whose injected body carries information when read, judged by reading the three injected copies, and no injected tool item is a truncated prefix.
+
+## Publish authorization disposition (2026-09-26)
+
+DQXMND59 reached complete and left this card's eht list — its matrix work is real and terminal. This umbrella card remains in dev. The publish authorization history: 3.6.3 was published on the owner's ambiguous single-word resume read against the 2026-09-24 delegation (i leave the decisions to you and the ai-maestro claude. plan well. always verify.); the adversarial review flagged the reading as analogy, not explicit grant; ratify/revert was left open with the owner (revert path = tag-deletion + corrective release, recorded here so it survives the closed card and compacted context).

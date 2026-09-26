@@ -1,10 +1,10 @@
 ---
 trdd-id: 1Q1S1C65
-title: daemon plugin-update chore re-checks one marketplace 190x a day when nothing changed — today's churn
+title: daemon plugin-update chore re-checks claude-menu-system every ~3min on no-change since 2026-09-24 1311
 column: backburner
 status: tasked
 created: 2026-09-26T11:53:42+0200
-updated: 2026-09-26T11:53:42+0200
+updated: 2026-09-26T12:00:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,3 +27,7 @@ approval-datetime: 2026-09-26T11:53:42+0200
 ## Approval log
 
 - 2026-09-26T11:53:42+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Correction (review round 2)
+
+The original body claimed ZERO plugin-update lines on 09-22..09-25 — WRONG, an artifact of log rotation (daemon.log.1 begins 2026-09-24 13:11; older days not covered by either file). Measured truth: churn began 2026-09-24 13:12 (first no-change fire), continuous since — 09-24 (13h) 185, 09-25 355 (349 no-change), 09-26 199, all claude-menu-system, every ~3 min. Also: the card conflates two costs — the ~3-min no-change subprocess checks (measured, scope b) and the user-visible reloads (only ONE real update today set a reload flag; the user's continuously-reloading report likely includes shrink-chain reloads from the cold-cache lever). Scope (c) — reload markers only on a real version change — is the reload-side fix; measure reload-marker frequency per session before treating (b) as sufficient.
