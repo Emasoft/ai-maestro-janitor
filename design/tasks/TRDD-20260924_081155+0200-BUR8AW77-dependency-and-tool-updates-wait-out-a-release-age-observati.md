@@ -3,7 +3,7 @@ trdd-id: BUR8AW77
 title: Dependency and tool updates wait out a release-age observation period before install
 column: testing
 created: 2026-09-24T08:11:55+0200
-updated: 2026-09-27T14:47:51+0200
+updated: 2026-09-27T14:59:22+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -26,6 +26,7 @@ owner directive (TRDD-WZKFSQ2N): update to latest "but keeping a observation per
 - 2026-09-24T08:11:55+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 OWNER DECISION 2026-09-27 (verbatim, condensed): 'the observation delay for all package installers is a safety rule that must be nudged by the janitor, warning the main claude of package managers that have no safeguards about such early installs. especially 0-days installs must be prevented. but the way the janitor can prevent such things is only by hooks recognizing package installers commands and pre checking if the command to install is installing an early release. but it must be only a warning, not blocking. since there are many exceptions, like libraries developed by the user himself and that it needs to install for testing the deployment. so a OTP code could be the right mechanism to enforce a review and remind the agent of the danger. the hooks for git safety already uses the OTP system, check them out to learn how to implement it.' Shape: a PreToolUse hook recognizing package-installer commands (pip/uv/cargo/npm/yarn/brew...), checking release age of the target version; early/0-day installs get a WARNING (never blocking) with an OTP-confirm escalation path modeled on the existing git-safety hooks; user-authored libraries are the named exception class.
 - 2026-09-27T14:47:51+0200 — column → testing by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); hook landed fd1e39c5 with tests re-verified by main; hooks.json registration is the remaining step and needs the owner's restart consent
+REVIEW ROUND 1 CURES (2026-09-27, adversarial fork on fd1e39c5) — (a) knob default verified OFF in source (RELEASE_AGE_HOOK_ALLOW_USER_OVERRIDE, rotator.py:84-86 of the hook): default is warning-only, faithful to the owner's 'warning not blocking'; 'ask' is the opt-in enforce-a-review mechanism. (b) timeout=2.5s is explicit on every urlopen call (hook :122) — fail-hang not possible; hook budget matches the 10s hooks.json cap. (c) 7200-min window is a PROVISIONAL DEFAULT with env override CLAUDE_PLUGIN_OPTION_RELEASE_AGE_OBSERVATION_MINUTES — the owner's number is still pending; this line records the provenance. (d) pyright findings in the test file fixed (ec079567, gate fails closed); test server binds ephemeral port 0. Remaining: hooks.json registration (owner restart consent).
 
 ## Acceptance
 
