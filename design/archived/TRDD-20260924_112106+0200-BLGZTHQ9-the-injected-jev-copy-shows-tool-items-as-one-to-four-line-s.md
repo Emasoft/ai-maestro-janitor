@@ -1,9 +1,9 @@
 ---
 trdd-id: BLGZTHQ9
 title: The injected Jev copy shows tool items as one-to-four-line stubs
-column: testing
+column: complete
 created: 2026-09-24T11:21:06+0200
-updated: 2026-09-25T14:42:19+0200
+updated: 2026-09-27T12:51:21+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -15,7 +15,7 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:06+0200
 implementation-commits: [f87a1a79, f2e6ead7, 1fe03838]
-status: tasked
+status: archived
 ---
 
 # The injected Jev copy shows tool items as one-to-four-line stubs
@@ -35,6 +35,7 @@ Found by a fresh real-transcript run on HEAD 3ff01e50 (reports/compaction-replac
 
 - 2026-09-24T11:21:06+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-25T14:42:19+0200 — column → testing by main-agent@ai-maestro-janitor. acceptance hand re-read done 2026-09-25 on HEAD 52c87cbb: no metadata shells, no truncated prefixes, room-sensitivity behavior verified correct-by-design
+- 2026-09-27T12:51:21+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); independent lean-worker verdict DONE (batch1).
 
 ## Review corrections 2026-09-24
 
@@ -44,3 +45,8 @@ Not closable on f87a1a79: read by hand, 2 of b2bf5b7b's 3 non-owner items are a 
 F1 verification (reports/compaction-replacement/20260924_132736+0200-f1-verify.md): --out byte-identical to the pre-F1 render on b2bf5b7b, d30bf250, 4eb7bf5d and fd5cc3e0, and no <task-id>/<output-file> wrapper reaches the injected copy. Remaining defect (F1b): the notification gate measured the FULL excerpt while the injected body is the excerpt cut to the non-owner cap, so on fd5cc3e0 4 of 6 inline notifications showed only the agent's title (about 990 B of a 4,000 B room).
 Owner-message disclosure for f2e6ead7 (not in its commit message): on 4eb7bf5d three short older owner messages (b48460e8, 944d9631, 15e30d87) dropped from inline to pointers, their previews still stating the instruction, because the bytes F1 freed let the newest owner message f3f3b6c4 (a pasted Claude Code changelog, 35.5 KB, mostly boilerplate) fit as its 700-byte prefix; on b2bf5b7b one owner message ("search again for ai-maestro session...") swapped places with another ("amp messaging only works inside ai-maestro harness..."), the swapped-out one kept as a pointer. This is the selection's newest-owner-first rule, not an F1 defect, but it changes what the injected copy shows of the owner's words.
 F1b landed as 1fe03838 (reports/compaction-replacement/20260924_133447+0200-f1b-worker.md): an inline notification is gated on the excerpt it actually SHOWS (the pointer keeps the full-excerpt gate), and its label is derived from what survived the cut ('(excerpt: summary)' unless the shown result text beyond a bare heading passes the 80-char gate). Three new tests, each run and failing on f2e6ead7. Re-render: --out byte-identical on all 4 sessions; on fd5cc3e0 the 4 title-only notifications left the inline set, and the bytes they freed went to owner messages (inline owner messages 7 -> 12, one tool item 4c1e23b4 added): the injected copy got MORE owner-heavy, a fill-order consequence nobody decided, to be reshaped by the owner's prose-verbatim directive (see TRDD-RAEGS1D5 STATE). On b2bf5b7b, in the F1b re-render, the owner's "i had to manually rotate again. why?" (9a2ca9ba) is inline as a BYTE-BUDGET SIDE EFFECT (a title-only notification freed its bytes); the design limit recorded on TRDD-U6C3YXEL (an older owner message Jev did not score as a decision loses to newer ones) is NOT fixed and will recur on other sessions. Known consequence: a real result sentence under 80 chars beyond the heading is labelled '(excerpt: summary)' (c6e6c714, d95dafdd), an understatement, not an overclaim. Proposed to the owner, not decided: cut notification excerpts at a word boundary so the finding under the heading survives.
+
+## Acceptance
+
+- [x] both acceptance conditions discharged by hand-reading on HEAD 52c87cbb (STATE 2026-09-25 14:40); adversarial-review extension closed
+- [x] card evidence current at HEAD; owner batch acceptance 2026-09-27 ("complete all TRDDs")

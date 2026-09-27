@@ -1,12 +1,13 @@
 ---
 trdd-id: M2NF7HJ8
 title: compose_template_handoff NEXT ACTION dangles when cards is empty — handoff reads like an empty stub
-column: todo
+column: complete
 created: 2026-09-27T01:02:10+0200
-updated: 2026-09-27T01:07:20+0200
+updated: 2026-09-27T12:44:56+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: []
+status: archived
 ---
 
 # The template handoff's NEXT ACTION points at a section it did not write
@@ -74,3 +75,13 @@ REVIEW MINOR APPLIED — commit bae2ccea's subject overclaims: 'all three verifi
 ## Adversarial review round 2 (2026-09-27)
 
 Cross-card disclaimer: round-1's commit-subject overclaim (bae2ccea) is shared by ALL THREE cards; the correction was recorded only on M2NF7HJ8 — the per-card evidence dates in C7M4RXQ2's and K8YF2WQ5's bodies are the authoritative record, and both now carry their own round-2 section. This card's own fix design is unchanged.
+
+## Acceptance
+
+- [x] NEXT ACTION in compose_template_handoff is conditional on the same cards[:n_cards] predicate (fix landed ecc1fa86, verified in source at external_clear.py:1670; empty-cards render no longer dangles)
+- [x] empty-cards unit test + byte-identical non-empty snapshot test pass (86 tests green, ruff clean)
+- [x] the three known callers verified unaffected
+
+## Approval log
+
+- 2026-09-27T12:44:56+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); fix verified landed in ecc1fa86 by independent worker before checklist written.

@@ -1,9 +1,9 @@
 ---
 trdd-id: VIFQ1LKI
 title: Create the topic page an off-topic atom needs when none exists
-column: blocked
+column: todo
 created: 2026-08-26T18:04:40+0200
-updated: 2026-09-23T09:04:06+0200
+updated: 2026-09-27T12:44:27+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -12,12 +12,13 @@ severity: minor
 min-approval-requirement: none
 labels: [wikimem, memgrep, memory-maintenance, atomize]
 parent-trdd: 87RKBYJ8
-blocked-by: [QDYQLM5V]
+blocked-by: []
 npt: []
 eht: []
 implementation-commits: []
 relevant-rules: []
-pre-block-column: backburner
+pre-block-column: 
+status: tasked
 ---
 
 # Duty 15 — if an off-topic atom's topic has NO page yet, CREATE that page
@@ -56,3 +57,7 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
       second test drives one whose topic DOES have a page under a different name and asserts NO
       page is created
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+
+## Approval log
+
+- 2026-09-27T12:44:27+0200 — column → todo by user. blocker QDYQLM5V closed complete 2026-09-27 (stale blocker cleared per batch6 verdict) Cleared blocked-by (--clear-blocker override).
