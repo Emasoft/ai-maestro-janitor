@@ -299,6 +299,109 @@ def server_owns_every_chore(*, now: Optional[float] = None) -> bool:
     return owns_every_chore_from(server_liveness_probe(now=now))
 
 
+# ---- per-chore ownership lease (ORH-3/ORH-27 of the joint handover spec, TRDD-4XND73XD) ----
+#
+# The AGREED protocol (oauth-rotation-and-chore-handover-spec.md) stores ONE lease per
+# chore at <DATA>/oauth-rotator/owner-lease.json, mapping chore -> {owner, pid, epoch,
+# lease_until}, with lease_until = now + max(150 s, 2.5 x the chore's cadence), renewed
+# ONLY by a COMPLETED run under one dedicated lease lock. The lease decides who owns a
+# chore (ORH-27); the liveness probe above is advisory. The janitor's own write/renew
+# path is card item (c); this reader is the daemon-side half that the residency rule
+# (ORH-30 / R1) consumes.
+
+# This side's owner literal in the shared lease file. Any OTHER owner is the server (or
+# a future side); the daemon must never be stood down from a chore by its OWN lease.
+LEASE_OWNER_JANITOR = "janitor"
+
+# Test/operator override for the shared lease file path (mirrors LIVENESS_FILE_ENV).
+OWNER_LEASE_FILE_ENV = "JANITOR_OWNER_LEASE_FILE"
+
+
+def _owner_lease_path() -> Path:
+    """The shared per-chore lease file: <DATA>/oauth-rotator/owner-lease.json.
+
+    Resolved through global_state's DATA-dir resolver so every override that isolates
+    janitor state in tests isolates the lease file too. Lazy import — the sibling cycle
+    guard (`global_state._server_owns_host`'s docstring carries the long version).
+    """
+    override = os.environ.get(OWNER_LEASE_FILE_ENV, "").strip()
+    if override:
+        return Path(override)
+    import global_state  # noqa: PLC0415  -- sibling import, lazy to keep hb light and cycle-proof
+
+    return global_state.global_state_dir().parent / "oauth-rotator" / "owner-lease.json"
+
+
+@dataclasses.dataclass(frozen=True)
+class ChoreLease:
+    """One chore's ownership lease, as read from the shared file (ORH-3).
+
+    `lease_until` is epoch seconds; the rest is provenance. A LAPSED lease
+    (`lease_until <= now`) is the takeover trigger for ORH-30 / R1."""
+
+    owner: str
+    lease_until: float
+    pid: Optional[int] = None
+    epoch: Optional[float] = None
+
+
+def read_owner_leases() -> dict[str, ChoreLease]:
+    """Read every OTHER side's lease from the shared file. NEVER raises.
+
+    FAILS TOWARD COVERAGE (the ai-maestro#111 doctrine): a missing, unreadable,
+    malformed, or non-object file — and any malformed ENTRY (missing owner or
+    lease_until, wrong types) — contributes NO lease, so the caller falls back to the
+    liveness-claim yield. A corrupt lease must never stand the janitor down from a
+    chore that may have no other runner. Janitor-owned entries are excluded: the
+    daemon never yields a chore to itself.
+
+    ORH-3 guards lease reads AND writes with one dedicated lease lock; that lock lands
+    with the janitor's own renew path (card item (c)). Until then a torn read (the file
+    being rewritten by another process) degrades through the same parse-or-skip path to
+    "no lease" — a wasted co-run guarded by the existing cross-process chore locks,
+    never a silently abandoned chore.
+    """
+    path = _owner_lease_path()
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except Exception:  # noqa: BLE001 -- unreadable file: no lease info, fail toward coverage
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:  # noqa: BLE001 -- e.g. truncated JSON mid-rewrite
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    leases: dict[str, ChoreLease] = {}
+    for chore, entry in data.items():
+        if not isinstance(chore, str) or not isinstance(entry, dict):
+            continue
+        owner = entry.get("owner")
+        lease_until = entry.get("lease_until")
+        if (
+            not isinstance(owner, str)
+            or not owner
+            or isinstance(lease_until, bool)
+            or not isinstance(lease_until, (int, float))
+        ):
+            continue
+        if owner == LEASE_OWNER_JANITOR:
+            continue  # our own lease never stands us down (item (c) writes it)
+        pid = entry.get("pid")
+        epoch = entry.get("epoch")
+        leases[chore] = ChoreLease(
+            owner=owner,
+            lease_until=float(lease_until),
+            pid=pid if isinstance(pid, int) and not isinstance(pid, bool) else None,
+            epoch=float(epoch)
+            if isinstance(epoch, (int, float)) and not isinstance(epoch, bool)
+            else None,
+        )
+    return leases
+
+
 # Staleness window the probe contract mandates: the server rewrites the file every 30 s;
 # consumers treat `now - ts > 90` (or file absent) as "no live capability claim".
 LIVENESS_STALE_AFTER_S = 90

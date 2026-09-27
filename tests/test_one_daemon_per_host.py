@@ -36,7 +36,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+import daemon  # type: ignore[import-not-found]  # noqa: E402
 import global_state as gs  # noqa: E402
 import harness_backend  # noqa: E402
 import state  # noqa: E402
@@ -275,19 +277,43 @@ def test_a_broken_liveness_probe_FAILS_OPEN_and_keeps_the_daemon(iso: dict, monk
 # --------------------------------------------------------------------------- #
 
 
-def test_server_owns_host_exit_drops_the_OS_keepalive() -> None:
-    """launchd `KeepAlive: true` + `ThrottleInterval: 30` and systemd `Restart=always`
-    relaunch a bare exit every 30 s, forever. So "stop" must uninstall the keepalive, or
-    the daemon spawn-exit-thrashes against the live server and floods its own log.
+def test_server_owns_host_is_no_longer_an_exit_and_drops_nothing() -> None:
+    """R1 residency (TRDD-4XND73XD / ORH-30): the daemon STAYS RESIDENT while the server
+    owns every chore — it does not exit, and therefore must not uninstall the OS
+    keepalive. The old behaviour (exit + uninstall) made a lapsed server lease
+    unfixable: once the daemon was gone, takeover had to wait for a session heartbeat
+    to respawn it, leaving the chore ownerless in between.
 
-    Asserted on the source because the alternative is spawning a real supervised daemon in
-    a unit test. The pairing with `kill-switch` is the point: both are deliberate stops,
-    and the same branch must cover both."""
+    Asserted on the source because the alternative is spawning a real supervised daemon
+    in a unit test."""
     body = (ROOT / "scripts" / "daemon.py").read_text(encoding="utf-8")
-    assert 'exit_reason in ("kill-switch", "server-owns-host")' in body, (
-        "the keepalive teardown must cover the server-owns-host exit, not only the kill-switch"
+    assert 'exit_reason = "server-owns-host"' not in body, (
+        "ORH-30 removed the server-owns-host exit; the daemon stands down instead"
     )
-    assert 'exit_reason = "server-owns-host"' in body
+    assert '"server-owns-host"' not in body, (
+        "no exit path may key on server-owns-host any more"
+    )
+    assert 'exit_reason == "kill-switch"' in body, (
+        "the keepalive teardown must survive for the kill-switch alone"
+    )
+
+
+def test_the_daemon_stays_resident_and_idles_on_yielded_chores() -> None:
+    """The positive half of R1: with the exit gone, the loop must still EXCLUDE
+    server-owned chores from both the due-loop and the sleep computation — the yield
+    (`_yielded_task_names` + `_apply_leases`) is now the ONLY mechanism standing between
+    a running server and a double-running daemon, so it must gate everything.
+
+    Asserted on the source: `_run_due_tasks` skips yielded tasks, `_sleep_seconds`
+    excludes them from next-due, and the main loop feeds the lease file into the yield."""
+    body = (ROOT / "scripts" / "daemon.py").read_text(encoding="utf-8")
+    assert "yielded = _apply_leases(" in body, (
+        "the main loop must merge the shared per-chore lease file into the yield (ORH-27)"
+    )
+    assert "harness_backend.read_owner_leases()" in body
+    # The yield must precede both consumers (source order is execution order here).
+    assert body.index("yielded = _apply_leases(") < body.index("bulk_busy = _run_due_tasks(tasks, yielded)")
+    assert body.index("yielded = _apply_leases(") < body.index("sleep_for = _sleep_seconds(tasks, yielded, bulk_busy)")
 
 
 def test_the_daemons_exit_and_the_spawn_gate_are_guarded_by_the_SAME_decision() -> None:
@@ -304,31 +330,21 @@ def test_the_daemons_exit_and_the_spawn_gate_are_guarded_by_the_SAME_decision() 
     while the six unclaimed chores stayed dark for 10-14 days. Two gates answering one question
     differently is the bug; asserting they agree is the only thing that catches it.
 
-    Source-text assertion for the same reason the neighbours use it: the alternative is running
-    a real supervised daemon in a unit test."""
-    body = (ROOT / "scripts" / "daemon.py").read_text(encoding="utf-8")
-    exit_pred = re.search(
-        r"if harness_backend\.(\w+)\((\w*)\):\n\s+exit_reason = \"server-owns-host\"", body
-    )
-    assert exit_pred, "the server-owns-host exit must be guarded by a harness_backend predicate"
+    R1 (ORH-30) retired the EXIT half: the daemon no longer exits on a total claim. The spawn
+    gate stays `server_owns_every_chore()` — a stopped daemon on a fully-claimed host stays
+    stopped (nothing for it to run), and the resident daemon's own takeover duty only exists
+    once it is running. Source-text assertion for the same reason the neighbours use it."""
     gate = (ROOT / "scripts" / "lib" / "global_state.py").read_text(encoding="utf-8")
     spawn_pred = re.search(r"return harness_backend\.(\w+)\(\)", gate)
     assert spawn_pred, "the spawn gate must delegate to a harness_backend predicate"
-    # TRDD-ARTTXA7P: the exit gate derives from the tick's ONE probe (`owns_every_chore_from(
-    # probe)`) while the spawn gate, holding no probe, calls `server_owns_every_chore()`. They
-    # stay the same decision only because the wrapper is a pure delegation to the helper over
-    # one fresh read — so that delegation is asserted here too, not assumed.
-    assert exit_pred.group(1) == "owns_every_chore_from" and exit_pred.group(2) == "probe", (
-        f"exit is gated on {exit_pred.group(1)}({exit_pred.group(2)}) — it must derive from "
-        "the tick's single probe (TRDD-ARTTXA7P)"
-    )
     assert spawn_pred.group(1) == "server_owns_every_chore", (
-        f"spawn is gated on {spawn_pred.group(1)}() — it must be the wrapper of the exit decision"
+        f"spawn is gated on {spawn_pred.group(1)}() — it must stay the wrapper of the "
+        "old exit decision (the veto that keeps a stopped daemon stopped on a fully-claimed host)"
     )
     hb_body = (ROOT / "scripts" / "lib" / "harness_backend.py").read_text(encoding="utf-8")
     assert "return owns_every_chore_from(server_liveness_probe(now=now))" in hb_body, (
         "server_owns_every_chore() must be a pure delegation to owns_every_chore_from() over "
-        "one probe, else exit and spawn answer different questions and the daemon flaps"
+        "one probe, else spawn answers a different question than the residency yield"
     )
 
 
@@ -340,12 +356,17 @@ def test_the_server_check_is_ordered_after_the_kill_switch_and_nothing_idles_aft
     kept the daemon ALIVE and idling — and an idling daemon still holds the singleton flock and
     keeps its OS keepalive armed, which IS the two-owner condition wearing a quiet hat. Both
     branches are gone (owner directive 2026-07-31), which removes that hazard at the root rather
-    than ordering around it: there is no longer any way for this daemon to be resident-but-idle,
-    so the second half of the assertion is now that no such branch exists at all."""
+    than ordering around it.
+
+    R1 (ORH-30) makes resident-and-idling the SANCTIONED state for server-owned chores —
+    sanctioned because the server IS the other owner and the per-chore yield guarantees no
+    double-run — so this test now pins only that the kill-switch is still checked first in
+    main()'s loop."""
     body = (ROOT / "scripts" / "daemon.py").read_text(encoding="utf-8")
-    kill = body.index('exit_reason = "kill-switch"')
-    server = body.index('exit_reason = "server-owns-host"')
-    assert kill < server, "kill-switch → server-owns-host"
+    loop = body.index("while _running:")
+    kill = body.index('exit_reason = "kill-switch"', loop)
+    first_yield = body.index("yielded = _yielded_task_names(", loop)
+    assert kill < first_yield, "kill-switch must short-circuit ahead of the per-chore yield"
     assert "gs.maintenance_mode_present()" not in body, "no idle-in-place branch may return"
     assert "gs.global_pause_present()" not in body
 
@@ -360,3 +381,151 @@ def test_daemon_still_imports_and_compiles() -> None:
         text=True,
     )
     assert proc.returncode == 0, proc.stderr
+
+
+# --------------------------------------------------------------------------- #
+# R1: lease-driven residency (TRDD-4XND73XD / ORH-27, ORH-30)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=True)
+def _reset_lease_transition_state() -> Iterator[None]:
+    """`_chores_leased_last_tick` is per-process daemon state; a leaking entry from one
+    test would suppress the next test's transition log and the tests would pass while
+    proving nothing."""
+    daemon._chores_leased_last_tick.clear()
+    yield
+    daemon._chores_leased_last_tick.clear()
+
+
+def _write_lease(path: Path, chore: str, owner: str, lease_until: float) -> None:
+    """Write one chore's entry into a shared owner-lease file (ORH-3's schema)."""
+    data: dict = {}
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+    data[chore] = {"owner": owner, "pid": 4242, "epoch": time.time(), "lease_until": lease_until}
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _lease_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the lease-file override at an isolated path and return it."""
+    lease = tmp_path / "owner-lease.json"
+    monkeypatch.setenv(harness_backend.OWNER_LEASE_FILE_ENV, str(lease))
+    return lease
+
+
+def test_a_LAPSED_server_lease_is_taken_over_and_the_daemon_continues(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE takeover test. The server's lease for a chore has expired ⇒ the chore leaves
+    the yielded set and the daemon's due-loop runs it again. The daemon itself must
+    still be running (`main()` did not exit — R1 removed the exit this scenario used to
+    hit when the server also claimed everything)."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live)  # server alive, claiming nothing: the claim-yield is empty
+    lease = _lease_env(monkeypatch, iso["tmp"])
+    _write_lease(lease, "memory-guard", "server", lease_until=time.time() - 1)  # LAPSED
+
+    tasks = daemon._build_tasks()
+    yielded = daemon._yielded_task_names(
+        tasks, harness_backend.runs_chores_from(harness_backend.server_liveness_probe()),
+        harness_backend.claimed_chores_from(harness_backend.server_liveness_probe()),
+    )
+    merged = daemon._apply_leases(
+        tasks, yielded, harness_backend.read_owner_leases(), time.time()
+    )
+    assert "memory-guard" not in merged, "a lapsed lease owns nothing — the daemon takes the chore back"
+    assert daemon._server_owned_by_lease("memory-guard", harness_backend.read_owner_leases(), time.time()) is False
+
+
+def test_a_LIVE_server_lease_stands_the_chore_down_without_exiting(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stand-down half of R1: an unexpired server lease yields the chore to the
+    server, and the daemon remains alive to take it back the moment the lease lapses
+    (`main()` has no exit path here — see test_server_owns_host_is_no_longer_an_exit...)."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live)  # alive, claiming nothing — ONLY the lease owns the chore
+    lease = _lease_env(monkeypatch, iso["tmp"])
+    _write_lease(lease, "memory-guard", "server", lease_until=time.time() + 600)  # LIVE
+
+    tasks = daemon._build_tasks()
+    yielded = daemon._yielded_task_names(
+        tasks, harness_backend.runs_chores_from(harness_backend.server_liveness_probe()),
+        harness_backend.claimed_chores_from(harness_backend.server_liveness_probe()),
+    )
+    assert "memory-guard" not in yielded, "precondition: the claim-yield alone owns nothing here"
+    merged = daemon._apply_leases(
+        tasks, yielded, harness_backend.read_owner_leases(), time.time()
+    )
+    assert "memory-guard" in merged, "a live server lease stands the chore down"
+    # The daemon itself continues: the chore is yielded but NO exit was taken, which the
+    # source-text test above pins for main(); here we pin the pure mechanism's contract.
+    assert daemon._chores_leased_last_tick == {"memory-guard"}, (
+        "the transition state records the stand-down, so its lapse next tick logs once"
+    )
+
+
+def test_the_lease_takeover_logs_once_per_transition(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Transition-only logging (TRDD-HXZ8B0IS style): a lapse logs "taking over" once,
+    a re-claim logs "standing down" once, steady state logs nothing."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live)
+    lease = _lease_env(monkeypatch, iso["tmp"])
+    _write_lease(lease, "memory-guard", "server", lease_until=time.time() + 600)
+    tasks = daemon._build_tasks()
+    now = time.time()
+    logged: list[str] = []
+    monkeypatch.setattr(daemon.state, "log_line", lambda _n, m: logged.append(m))
+
+    daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)
+    daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)  # steady
+    _write_lease(lease, "memory-guard", "server", lease_until=now - 1)  # lapse
+    daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)
+    daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)  # steady
+    assert sum("standing down on live server lease(s)" in m for m in logged) == 1
+    assert sum("taking over lapsed server lease(s)" in m for m in logged) == 1
+
+
+def test_the_janitors_OWN_lease_never_stands_it_down(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ORH-3 writes the janitor's renewals into the same shared file; the daemon must
+    never read its own lease as the server's claim (item (c) writes it)."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live)
+    lease = _lease_env(monkeypatch, iso["tmp"])
+    _write_lease(lease, "memory-guard", harness_backend.LEASE_OWNER_JANITOR, lease_until=time.time() + 600)
+
+    assert "memory-guard" not in harness_backend.read_owner_leases()
+
+
+def test_a_corrupt_or_absent_lease_file_fails_toward_coverage(
+    iso: dict, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The ai-maestro#111 doctrine: a chore run twice is wasteful and lock-guarded; a
+    chore run by nobody is invisible. An unreadable lease file must therefore yield
+    NOTHING, not everything — the daemon keeps the chore."""
+    monkeypatch.setenv(harness_backend.OWNER_LEASE_FILE_ENV, str(tmp_path / "absent.json"))
+    assert harness_backend.read_owner_leases() == {}
+
+    corrupt = tmp_path / "corrupt.json"
+    corrupt.write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv(harness_backend.OWNER_LEASE_FILE_ENV, str(corrupt))
+    assert harness_backend.read_owner_leases() == {}
+
+    wrong_shape = tmp_path / "wrong.json"
+    wrong_shape.write_text('["a list"]', encoding="utf-8")
+    monkeypatch.setenv(harness_backend.OWNER_LEASE_FILE_ENV, str(wrong_shape))
+    assert harness_backend.read_owner_leases() == {}
+
+    malformed_entry = tmp_path / "entry.json"
+    malformed_entry.write_text('{"memory-guard": {"owner": 7}}', encoding="utf-8")
+    monkeypatch.setenv(harness_backend.OWNER_LEASE_FILE_ENV, str(malformed_entry))
+    assert harness_backend.read_owner_leases() == {}

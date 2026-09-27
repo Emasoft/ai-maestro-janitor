@@ -2851,10 +2851,11 @@ def _build_tasks() -> list[Task]:
 # granularity: paired with the one-daemon-per-host exit it meant a server claiming 5 of 11
 # chores silenced all 11, and the other 6 ran nowhere for 10-14 days (ai-maestro#111).
 #
-# ORDERING (read main() alongside this): the ONE-DAEMON-PER-HOST exit in main() now fires
-# only when the server has claimed EVERY chore (`server_owns_every_chore`), so while any
-# chore is unclaimed the daemon keeps looping and this per-chore yield is what decides each
-# one. No chore is ever run by both: the daemon yields exactly what the server claims.
+# ORDERING (read main() alongside this): R1 residency (TRDD-4XND73XD/ORH-30) removed the
+# exit entirely — the daemon stays resident and this per-chore yield (now merged with the
+# shared per-chore lease file, see `_apply_leases`) is what decides each one. No chore is
+# ever run by both: the daemon yields exactly what the liveness claim AND an unexpired
+# other-side lease say the server owns.
 def _task_yielded_to_server(
     task_name: str, server_runs_chores: bool, claimed: AbstractSet[str]
 ) -> bool:
@@ -2902,6 +2903,86 @@ def _chore_coordination_message(
     if yielded:
         return f"chore-coordination: yielding to active ai-maestro server: {sorted(yielded)} ({liveness})"
     return f"chore-coordination: server no longer confirmed active — resuming singleton chores ({liveness})"
+
+
+# ---------- R1 residency (TRDD-4XND73XD / ORH-30 of the joint handover spec) ----------
+#
+# ORH-30: the daemon stays resident while the server owns every chore — it idles on
+# leased chores, does NOT exit, does NOT uninstall its OS keepalive, and takes over any
+# chore whose lease lapses. This replaces the old §7.2 exit/uninstall at the
+# owns_every_chore_from() gate and the keepalive teardown that keyed on the retired
+# exit reason. The residency also closes the ai-maestro#111-shaped hole the exit
+# left behind: a daemon that exited had to be resurrected by a session heartbeat before
+# anything could take over a lapsed server lease, so a chore could sit ownerless for as
+# long as no session fired.
+#
+# ORH-27: the lease decides; liveness is advisory. `_task_yielded_to_server` (the
+# liveness-claim yield above) stays the fallback so the daemon keeps yielding to a
+# server that has claimed a chore but not yet written its lease — the two sources
+# combine per chore, and each chore yields if EITHER says the server owns it.
+
+# How long a chore stays in the transition-dedupe set: it holds exactly the chores that
+# had an unexpired lease LAST tick, so each lease→lapse and lapse→lease flip logs once.
+# Bounded by one entry per chore name.
+_chores_leased_last_tick: set[str] = set()
+
+
+def _server_owned_by_lease(
+    task_name: str,
+    leases: dict[str, harness_backend.ChoreLease],
+    now: float,
+) -> bool:
+    """PURE: does an UNEXPIRED lease by another side own `task_name` right now?
+
+    ORH-27: the lease decides — a lapsed lease owns nothing (that is the takeover
+    trigger), and the janitor's own leases are excluded upstream by
+    `read_owner_leases()`, so this never stands the daemon down from a chore it holds
+    itself."""
+    lease = leases.get(task_name)
+    return lease is not None and lease.lease_until > now
+
+
+def _lease_transition_message(taken_over: list[str], stood_down: list[str]) -> str:
+    """PURE: the transition-log line for a lease flip (TRDD-HXZ8B0IS style: name what
+    changed and why, log transitions, never per-tick spam)."""
+    if taken_over:
+        return (
+            f"chore-coordination: taking over lapsed server lease(s) — {sorted(taken_over)}"
+            " (lease_until elapsed; the server re-claims on its next completed run)"
+        )
+    return f"chore-coordination: standing down on live server lease(s) — {sorted(stood_down)}"
+
+
+def _apply_leases(
+    tasks: list[Task],
+    yielded: set[str],
+    leases: dict[str, harness_backend.ChoreLease],
+    now: float,
+) -> set[str]:
+    """Merge the shared lease file into `yielded` for THIS tick and log the flips.
+
+    Returns the EXTENDED yielded set: every task the liveness-claim yield already
+    handed to the server, plus every task an unexpired other-side lease owns (ORH-27 —
+    the lease decides, liveness is advisory, so the two sources combine per chore).
+    A LAPSED lease owns nothing: the task drops out of the returned set and the
+    due-loop picks it up on this or the next pass — that IS the takeover, needing no
+    separate code path, because `_run_due_tasks` and `_sleep_seconds` already run
+    exactly the not-yielded chores.
+
+    Logging is transition-only, keyed on `_chores_leased_last_tick` (per-process): a
+    chore whose lease lapses logs "taking over" once; a chore that gains a live lease
+    logs "standing down" once.
+    """
+    leased = {t.name for t in tasks if _server_owned_by_lease(t.name, leases, now)}
+    taken_over = sorted(_chores_leased_last_tick - leased)
+    stood_down = sorted(leased - _chores_leased_last_tick)
+    if taken_over:
+        state.log_line("daemon", _lease_transition_message(taken_over, []))
+    if stood_down:
+        state.log_line("daemon", _lease_transition_message([], stood_down))
+    _chores_leased_last_tick.clear()
+    _chores_leased_last_tick.update(leased)
+    return leased | yielded
 
 
 def _next_bulk_task(tasks: list[Task], yielded: set[str]) -> Task | None:
@@ -3465,12 +3546,9 @@ def main() -> int:
             # ONE DAEMON PER HOST (TRDD-5ZVS1DDP, ARCHITECTURE §7.2; owner 2026-07-21:
             # "only one daemon can exist at the same time in the host ... otherwise they
             # will conflict and write at the same time in the same files, corrupting
-            # them"). We get out of a server's way ENTIRELY — but ONLY once it has
-            # CLAIMED EVERY chore, which is the condition that makes leaving safe.
-            #
-            # It used to be `server_is_alive()`, and that was a silent 6-chore outage:
-            # the server advertises `family-a` = 5 of our 11, so a merely-ALIVE server
-            # emptied the host of `memory-guard`, `cache-prune`, `rules-cleanup`,
+            # them"). It used to be `server_is_alive()`, and that was a silent 6-chore
+            # outage: the server advertises `family-a` = 5 of our 11, so a merely-ALIVE
+            # server emptied the host of `memory-guard`, `cache-prune`, `rules-cleanup`,
             # `github-config-audit`, `session-liveness` and `fleet-stop` for 10-14 days
             # (ai-maestro#111). Worse, after the spawn gate moved to
             # `server_owns_every_chore()` in d45a843a the two DISAGREED, so
@@ -3478,31 +3556,30 @@ def main() -> int:
             # later — a spawn/exit flap that burned a process per heartbeat and still
             # left the six chores dark.
             #
-            # Exiting is not the only way to avoid two owners, and it is the blunt one:
-            # the per-chore yield below (`_task_yielded_to_server`, claim-aware) already
-            # guarantees we never run a chore the server runs. So while the claim is
-            # PARTIAL we stay up and cover exactly the unclaimed remainder; once the
-            # claim is TOTAL there is nothing left for us to do and §7.2's exit applies
-            # unchanged. Owner ruling 2026-08-05 (janitor#134): the chores must all pass
-            # to the server — until they actually have, someone must still run them.
+            # R1 RESIDENCY (TRDD-4XND73XD / ORH-30, joint handover spec): the old
+            # TOTAL-CLAIM exit is REPLACED by standing down — the
+            # daemon stays resident, holds the singleton flock, keeps the OS keepalive,
+            # and idles on exactly the server-owned chores (the per-chore yield below,
+            # now fed by BOTH the liveness claim AND the shared per-chore lease file).
+            # Exiting was the one thing that made a lapsed lease unfixable: once the
+            # daemon was gone, takeover of a chore the server stopped renewing had to
+            # wait for a session heartbeat to respawn us — a chore ownerless for as
+            # long as no session fired. A resident daemon also cannot spawn/exit-thrash
+            # against the server (the reason the exit uninstalled the keepalive), so
+            # the two-owner hazard §7.2 exists to prevent stays prevented by the
+            # per-chore yield: no chore is ever run by both sides.
             #
             # Checked SECOND, right after the kill-switch: a deliberate human stop still
-            # outranks it, but this must precede maintenance/pause so we never sit
-            # "idling" alongside a server that owns everything — idling still holds the
-            # singleton flock and keeps the OS keepalive armed, which is exactly the
-            # two-owner condition.
+            # outranks everything.
             #
             # Detection is by FILE only. The server is "wherever the user installs
             # ai-maestro" and runs under pm2, so we can neither locate nor stop it; the
             # liveness file is the whole handshake.
-            # TRDD-ARTTXA7P: THE tick's one liveness read. The exit gate, the B2 yield
-            # decision and its transition-log line below all derive from this one object;
+            # TRDD-ARTTXA7P: THE tick's one liveness read. The yield decision and its
+            # transition-log line below derive from this one object;
             # `server_owns_every_chore()` used to take two reads of its own here, ahead of
             # the tick's probe, which made "one read per tick" false at the stale/alive edge.
             probe = harness_backend.server_liveness_probe()
-            if harness_backend.owns_every_chore_from(probe):
-                exit_reason = "server-owns-host"
-                break
 
             # The global-MAINTENANCE and global-PAUSE branches stood here. Both idled the
             # daemon without tearing it down — every task workload skipped, heartbeat still
@@ -3518,8 +3595,8 @@ def main() -> int:
             # chores twice". BINARY since TRDD-LU0C5KAR (owner directive 2026-07-17):
             # a running server owns them ALL; its exit (the probe file goes stale
             # within 90 s) hands them ALL back. Resolved once per loop iteration.
-            # TRDD-ARTTXA7P: ONE liveness read for the whole tick — `probe`, taken above
-            # the exit gate. The old code read the file up to three times per tick
+            # TRDD-ARTTXA7P: ONE liveness read for the whole tick — `probe`, taken above.
+            # The old code read the file up to three times per tick
             # (`server_runs_chores()`, `claimed_chores()` inside `_task_yielded_to_server`,
             # and the transition-log `server_liveness_probe()` call) — three chances for the
             # server's 30 s non-atomic rewrite to land between reads, so the logged reason
@@ -3529,6 +3606,14 @@ def main() -> int:
             server_chores = harness_backend.runs_chores_from(probe)
             claimed = harness_backend.claimed_chores_from(probe)
             yielded = _yielded_task_names(tasks, server_chores, claimed)
+            # R1 (ORH-27/ORH-30): merge the shared per-chore lease file into the yield.
+            # The lease DECIDES (a lapsed lease hands the chore back here, live), while
+            # the liveness claim above stays the fallback for a server that has claimed
+            # a chore but not yet written its lease. Read failure degrades to no leases
+            # (fail toward coverage inside `read_owner_leases`).
+            yielded = _apply_leases(
+                tasks, yielded, harness_backend.read_owner_leases(), time.time()
+            )
             if bool(yielded) != chores_yielded_last_loop:  # log transitions, not every tick
                 chores_yielded_last_loop = bool(yielded)
                 # TRDD-HXZ8B0IS: a flap between "yielded" and "resumed" used to log with no
@@ -3611,19 +3696,15 @@ def main() -> int:
                     break
                 time.sleep(1)
     finally:
-        if exit_reason in ("kill-switch", "server-owns-host"):
-            # Both are DELIBERATE stops, so the OS keepalive must go — launchd
-            # `KeepAlive: true` / `ThrottleInterval: 30` and systemd `Restart=always`
-            # would otherwise relaunch us within 30 s, forever. For the kill-switch that
-            # fights the user's explicit disarm; for server-owns-host it would produce a
-            # permanent spawn→exit thrash AGAINST a live server, i.e. the two-owner
-            # condition §7.2 exists to prevent, plus a log full of 30-second restarts.
-            #
-            # Dropping the keepalive is safe because it is NOT our resurrection path: the
-            # per-session heartbeat calls `ensure_daemon_running()` every fire, so once
-            # the server's liveness goes stale (≤90 s) the next heartbeat spawns a fresh
-            # daemon, which re-installs the keepalive on startup. NOT done on a plain
-            # signal/self-update exit, where an immediate respawn is exactly what we want.
+        if exit_reason == "kill-switch":
+            # A DELIBERATE stop, so the OS keepalive must go — launchd `KeepAlive: true`
+            # / `ThrottleInterval: 30` and systemd `Restart=always` would otherwise
+            # relaunch us within 30 s, forever, fighting the user's explicit disarm.
+            # R1 (ORH-30): the retired total-claim exit reason left this pair — the
+            # daemon no longer exits when the server owns every chore, it stands down
+            # and stays resident, so the spawn→exit thrash the teardown existed to
+            # prevent cannot happen. The other exits (signal, self-update-respawn) keep
+            # the keepalive: an immediate respawn is exactly what they want.
             _uninstall_os_keepalive()
         # janitor#216: record this as a GRACEFUL exit only when the try block above
         # actually completed its own shutdown path — i.e. no exception is currently
