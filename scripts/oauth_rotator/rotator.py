@@ -1653,7 +1653,7 @@ def _janitor_owns_rotator_tick() -> bool:
     decays (the exact bug this exists to fix)."""
     try:
         import harness_backend  # noqa: PLC0415 -- lazy: switch-path-only, mirrors global_state's pattern
-    except Exception:
+    except ImportError:
         return True
     return "oauth-rotator-tick" not in harness_backend.claimed_chores()
 
