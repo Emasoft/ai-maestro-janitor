@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-24T17:35:23+0200
+updated: 2026-09-28T00:19:38+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -104,3 +104,7 @@ Sibling of the 4a2082a7 fix (found 2026-09-24): supersede_atom_lesson_free, behi
 
 skills/janitor-memory-repair/SKILL.md body is 4930/5000 tokens (tests/test_rules_installer.py counter, CPV's cap) after 965d3ce0. CPV --strict also requires every reference .md linked in a SKILL.md list entry to carry its COMPLETE heading TOC right after the link, so the two rules fight: any new heading in references/repair-background.md or references/pre-transaction-verb-fixes.md needs a matching TOC line in SKILL.md in the SAME commit, and every SKILL.md edit must re-measure the token cap. Condensing SKILL.md instructions to make room is forbidden (1854634c silently dropped 'add it if not'); move whole background sections to references instead. History: 1854634c (lossy condense) -> 4fb35291 (lossless restore) -> b5e1983d (verb-fix procedure behind a mandatory read) -> 4f1857cd (guards next to the read) -> 965d3ce0 (links re-pathed, TOCs restored), released in v3.6.0.
 Note: the subject of commit 6f5e6482 cites pre-rewrite id 226b2d97 (= 1854634c); commit messages are not rewritten after the fact.
+
+## Implementation
+
+2026-09-28 A2 first worker pass FAILED CLEANLY (report: reports/board-drain/20260927-XI10BA5D-A2-worker.md): no memgrep edits, cargo check green, 517-line design draft preserved at scripts_dev/pre_write_rs_draft_XI10BA5D-A2.rs. Blockers identified: (1) lint-ERROR refusal breaks ~9+ fixture contracts until lint_page_text extraction + write-floor reconciliation; (2) id-set rule needs per-verb retirement-marker audit (update-mem-atom same-id body rewrite conflicts, ties to A3 --body-file note); (3) 6-step reviewed-commit sequence recorded on the report. A2 remains open; the sequence is the plan of record for the next passes.
