@@ -2923,8 +2923,14 @@ def _chore_coordination_message(
 
 # How long a chore stays in the transition-dedupe set: it holds exactly the chores that
 # had an unexpired lease LAST tick, so each lease→lapse and lapse→lease flip logs once.
-# Bounded by one entry per chore name.
+# Bounded by one entry per chore name. First-call seeding (TRDD-4XND73XD review cure 2):
+# on daemon restart the set starts empty, so an unseeded first tick would log "taking
+# over" for every LIVE-leased chore and then "standing down" for the same chores on
+# tick 2 — two false transition lines per restart, in opposite directions, in exactly
+# the log an outage reader scans. _leases_initialized skips logging on the first call
+# only; the set itself still updates so the second tick compares against reality.
 _chores_leased_last_tick: set[str] = set()
+_leases_initialized: bool = False
 
 
 def _server_owned_by_lease(
@@ -2946,9 +2952,14 @@ def _lease_transition_message(taken_over: list[str], stood_down: list[str]) -> s
     """PURE: the transition-log line for a lease flip (TRDD-HXZ8B0IS style: name what
     changed and why, log transitions, never per-tick spam)."""
     if taken_over:
+        # "runs on its next due pass", not "runs now" (TRDD-4XND73XD review cure 1):
+        # takeover is UNYIELD-only — whether the chore actually runs depends on
+        # is_due(), the foreground budget, and any Pillar-1 quarantine backoff, so a
+        # bare "taking over" would overclaim to the exact reader diagnosing an outage.
         return (
             f"chore-coordination: taking over lapsed server lease(s) — {sorted(taken_over)}"
-            " (lease_until elapsed; the server re-claims on its next completed run)"
+            " (lease_until elapsed; each chore runs on its next due pass; the server"
+            " re-claims on its next completed run)"
         )
     return f"chore-coordination: standing down on live server lease(s) — {sorted(stood_down)}"
 
@@ -2976,10 +2987,13 @@ def _apply_leases(
     leased = {t.name for t in tasks if _server_owned_by_lease(t.name, leases, now)}
     taken_over = sorted(_chores_leased_last_tick - leased)
     stood_down = sorted(leased - _chores_leased_last_tick)
-    if taken_over:
-        state.log_line("daemon", _lease_transition_message(taken_over, []))
-    if stood_down:
-        state.log_line("daemon", _lease_transition_message([], stood_down))
+    global _leases_initialized
+    if _leases_initialized:
+        if taken_over:
+            state.log_line("daemon", _lease_transition_message(taken_over, []))
+        if stood_down:
+            state.log_line("daemon", _lease_transition_message([], stood_down))
+    _leases_initialized = True
     _chores_leased_last_tick.clear()
     _chores_leased_last_tick.update(leased)
     return leased | yielded
