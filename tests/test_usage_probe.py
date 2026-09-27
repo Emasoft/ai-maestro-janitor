@@ -191,6 +191,23 @@ def test_expiring_token_status_is_distinct_from_transport_failure(tmp_path: Path
     assert out2["reason"] == up.HTTP_ERROR
 
 
+def test_usage_request_passes_expiring_status_through_verbatim(tmp_path: Path) -> None:
+    """TRDD-OOZP38MN review cure: rotator.usage_request must pass the probe's tuple through
+    verbatim — an expiring token yields (-1, None), never a synthesized (0, None), so callers
+    keying on `!= 0` see the local-death signal and not a transport failure."""
+    _isolate(tmp_path)
+    import sys
+
+    sys.path.insert(0, "/Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/scripts/oauth_rotator")
+    import rotator
+
+    now = 1_785_000_000.0
+    blob = {"claudeAiOauth": {"accessToken": _TOKEN, "expiresAt": (now + 5) * 1000}}
+    status, data = rotator.usage_request(blob)
+    assert (status, data) == (up.EXPIRING_TOKEN_STATUS, None)
+    assert status != 0
+
+
 def test_probe_fetches_once_then_serves_cache_within_the_ttl(tmp_path: Path) -> None:
     """The second call inside the TTL costs zero requests and returns the same payload."""
     _isolate(tmp_path)
