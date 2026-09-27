@@ -3,7 +3,7 @@ trdd-id: 8P4BNY5J
 title: Route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM
 column: testing
 created: 2026-09-16T23:06:20+0200
-updated: 2026-09-17T08:41:01+0200
+updated: 2026-09-27T05:49:01+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -47,3 +47,4 @@ EHT of TRDD-N954KWUC (its title: ONE screen-state reader drives EVERY keystroke 
 
 
 2026-09-17T08:40:58+0200 — Correction to the 08:33 line: 9c5c8fb2's test change is a pyright type-narrowing assert (`plan is not None` before the channel subscript) on this card's Enter-step test in tests/test_pane_actuate.py — a type fix that also fails loudly if the Enter step regresses to a None plan; not a stricter test.
+2026-09-27T05:45:00+0200 — RE-VERIFY at HEAD 05233298: acceptance (1) still holds (grep on scripts/detectors/model-fallback.py: the only send_verified/send_model_switch_true_error match is the explanatory comment at line 221, zero calls); acceptance (2)+(4) re-proven — pytest tests/test_model_fallback.py tests/test_pane_policy.py tests/test_pane_actuate.py = 115 passed in 0.77s. Acceptance (3) checked live: grep 'pane-policy: no_headroom' across every project's .janitor/logs/pane-policy.log on this machine (ai-maestro, agents-discipline, ANIME2SVG, CLAUDE-PLUGIN-VALIDATION, llm-externalizer, tldr-code) = zero episodes since the code landed 2026-09-17 — the box stays OPEN as designed (unforceable, needs a real spent-model-window); no session action can close it, only time. Card remains testing on that box alone.
