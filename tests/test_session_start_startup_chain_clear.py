@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -34,6 +35,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 HOOK = REPO / "scripts" / "hooks" / "on-session-start.py"
+POST_CLEAR_HOOK = REPO / "scripts" / "hooks" / "on-session-start-post-clear-compact.py"
 
 # Mirrors the dedicated hook's own `_SIDECAR_FRESH_MAX_AGE_S` (a DUPLICATE there too — the
 # filename is hyphenated and unimportable). Used only to write test fixtures at the window's
@@ -252,3 +254,20 @@ def test_a_real_clear_source_still_stamps_via_the_shared_helper(tmp_path: Path) 
         "the shared helper must keep the clear path stamping" + _diagnosis(sd)
     )
     assert (sd / "resume-after-clear.session-id.txt").is_file()
+
+
+def test_duplicated_sidecar_fresh_max_age_constants_match_across_hooks() -> None:
+    """The two hooks carry a DUPLICATE `_SIDECAR_FRESH_MAX_AGE_S` (hyphenated filename is
+    unimportable, so both files are read as text). The two constants gate the SAME sidecar
+    race from two processes; a silent mismatch makes both hooks defer to nothing (review
+    round 6, TRDD-C7M4RXQ2)."""
+    pattern = re.compile(r"^_SIDECAR_FRESH_MAX_AGE_S\s*=\s*(\d+)\s*$", re.MULTILINE)
+    values: dict[str, str] = {}
+    for hook in (HOOK, POST_CLEAR_HOOK):
+        matches = pattern.findall(hook.read_text())
+        assert len(matches) == 1, f"{hook.name} must define _SIDECAR_FRESH_MAX_AGE_S exactly once"
+        values[hook.name] = matches[0]
+    assert values[HOOK.name] == values[POST_CLEAR_HOOK.name], (
+        f"the duplicated constants drifted: {values} — the two hooks gate the same "
+        "sidecar race and a mismatch makes both defer to nothing"
+    )
