@@ -18,7 +18,7 @@ import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Generator, Optional
 
 import pytest
 
@@ -88,12 +88,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-    def log_message(self, *args: Any) -> None:  # silence the test log
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature; silence the test log
         pass
 
 
 @pytest.fixture()
-def registry_base() -> str:
+def registry_base() -> Generator[str, Any, Any]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
