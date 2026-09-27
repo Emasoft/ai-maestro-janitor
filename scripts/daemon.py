@@ -2924,11 +2924,12 @@ def _chore_coordination_message(
 # How long a chore stays in the transition-dedupe set: it holds exactly the chores that
 # had an unexpired lease LAST tick, so each lease→lapse and lapse→lease flip logs once.
 # Bounded by one entry per chore name. First-call seeding (TRDD-4XND73XD review cure 2):
-# on daemon restart the set starts empty, so an unseeded first tick would log "taking
-# over" for every LIVE-leased chore and then "standing down" for the same chores on
-# tick 2 — two false transition lines per restart, in opposite directions, in exactly
-# the log an outage reader scans. _leases_initialized skips logging on the first call
-# only; the set itself still updates so the second tick compares against reality.
+# on daemon restart the set starts empty, so an unseeded first tick computes
+# stood_down = leased − ∅ = leased and logs a spurious "standing down" for every
+# LIVE-leased chore — the daemon never held them, so it "gave up" nothing ("taking over"
+# can never fire on tick 1: ∅ − leased = ∅). One false line per restart, in the log an
+# outage reader scans. _leases_initialized skips logging on the first call only; the set
+# itself still updates so the second tick compares against reality.
 _chores_leased_last_tick: set[str] = set()
 _leases_initialized: bool = False
 

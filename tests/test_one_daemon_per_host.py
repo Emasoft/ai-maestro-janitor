@@ -392,10 +392,13 @@ def test_daemon_still_imports_and_compiles() -> None:
 def _reset_lease_transition_state() -> Iterator[None]:
     """`_chores_leased_last_tick` is per-process daemon state; a leaking entry from one
     test would suppress the next test's transition log and the tests would pass while
-    proving nothing."""
+    proving nothing. `_leases_initialized` resets with it, so every test exercises the
+    fresh-process first-call path the seeding guard exists for."""
     daemon._chores_leased_last_tick.clear()
+    daemon._leases_initialized = False
     yield
     daemon._chores_leased_last_tick.clear()
+    daemon._leases_initialized = False
 
 
 def _write_lease(path: Path, chore: str, owner: str, lease_until: float) -> None:
@@ -472,7 +475,10 @@ def test_the_lease_takeover_logs_once_per_transition(
     iso: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Transition-only logging (TRDD-HXZ8B0IS style): a lapse logs "taking over" once,
-    a re-claim logs "standing down" once, steady state logs nothing."""
+    a re-claim logs "standing down" once, steady state logs nothing. The FIRST call is
+    seeded silent (review cure 2): on a fresh process the empty last-tick set is not a
+    transition, so call 1 with a live lease must log NOTHING — the unseeded bug was one
+    false "standing down" line per daemon restart."""
     live = iso["tmp"] / "server-liveness.json"
     monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
     _write_liveness(live)
@@ -484,12 +490,20 @@ def test_the_lease_takeover_logs_once_per_transition(
     monkeypatch.setattr(daemon.state, "log_line", lambda _n, m: logged.append(m))
 
     daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)
+    assert logged == [], "the seeded first call must be silent even with a live lease"
     daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)  # steady
     _write_lease(lease, "memory-guard", "server", lease_until=now - 1)  # lapse
     daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)
     daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), now)  # steady
-    assert sum("standing down on live server lease(s)" in m for m in logged) == 1
+    assert sum("standing down on live server lease(s)" in m for m in logged) == 0, (
+        "no stand-down exists in this sequence: live from birth, lapsed, never re-claimed — "
+        "the old suite's 1 came from the seeded bug itself (call 1's false positive)"
+    )
     assert sum("taking over lapsed server lease(s)" in m for m in logged) == 1
+    takeover_line = next(m for m in logged if "taking over" in m)
+    assert "next due pass" in takeover_line, (
+        "the takeover line must not overclaim — it unyields only, the run gates on is_due()"
+    )
 
 
 def test_the_janitors_OWN_lease_never_stands_it_down(
