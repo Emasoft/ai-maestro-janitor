@@ -1,9 +1,9 @@
 ---
 trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
-column: design
+column: testing
 created: 2026-09-24T07:42:31+0200
-updated: 2026-09-24T08:37:50+0200
+updated: 2026-09-27T17:43:34+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T07:42:31+0200
+status: tasked
 ---
 
 # The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
@@ -47,9 +48,14 @@ On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 
 - 2026-09-24T07:42:31+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24 — identity correction: issuer fields changed from the host username (a trddgrep default) to the session id before the card was first committed.
+- 2026-09-27T17:43:34+0200 — column → testing by user. steps 1-2 landed (commit f7fb03f6), main-verified; step 3 (fleet install) remains
 
 ## Test cases
 
 - trddgrep new stamps $USER into created-by/approval-judge and the approval log unless --author is passed: the hook must catch a host username in a staged TRDD card (the 2026-09-24 incident on K0PMVRN6, PWIAEW40 and this card).
 - trddgrep writes a `blocker-probe:` field containing the absolute --design-dir path (a home path) when a card is moved to blocked: the hook must catch it (2026-09-24, ADIGRD0T).
 - trddgrep move stamps $USER into the approval-log transition line (for example 'COMPLETE by <user>') unless --approver is passed: the hook must catch it (2026-09-24, AW4XD53Q).
+
+## Implementation
+
+2026-09-27 steps 1-2 landed (commit f7fb03f6) via lean-worker, main-verified: scripts/lib/staged_privacy_scan.py + pre-commit stage 1; reuses G1b/private_path_patterns/privacy_patterns; grandfathering vs HEAD; fail-closed. 7 tests green. Step 3 (fleet install, chaining, per-project opt-out) still open.
