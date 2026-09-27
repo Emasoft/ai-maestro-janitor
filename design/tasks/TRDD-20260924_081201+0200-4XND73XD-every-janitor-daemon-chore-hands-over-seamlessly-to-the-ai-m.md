@@ -3,7 +3,7 @@ trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 column: testing
 created: 2026-09-24T08:12:01+0200
-updated: 2026-09-27T19:28:14+0200
+updated: 2026-09-28T01:28:18+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -89,3 +89,13 @@ Handback condition (from TRDD-IT5GEZDZ): before the ai-maestro server's oauth-ro
 2026-09-27 round-2 cures (commit 82881358): the round-1 'two false lines per restart' claim was wrong set arithmetic — the real bug was ONE false standing-down line per restart (taken_over can never fire on tick 1); comment corrected, guard unchanged. The transition test's old standing-down==1 was satisfied by the bug itself; it now pins the seeded first call as silent and the genuine takeover line's wording. Fixture resets _leases_initialized.
 2026-09-27 round-3 cures (commit 890ba25b): the R1 lease review chain's final cures — docstring no longer claims re-claim coverage it lacks; new positive pin for the genuine lapsed→live stand-down transition (the branch was deletable with the suite green after 82881358 removed the accidental coverage). 23 tests green. Chain closed: rounds 1-3 all cured, no REOPENs remained.
 2026-09-27 round-4 review of 890ba25b: CLEAN — no REOPEN, no CURE. Mutation checks pass (stand-down branch deletion goes red via the new test; always-suppress guard regression goes red via the count). Diff scope verified as exactly docstring+one test. The R1 lease-transition chain (d3d978a6, 185aa01a, 82881358, 890ba25b) is closed with every cure applied and reviewed.
+
+## Acceptance
+
+- [ ] R1 residency: daemon stays resident, idles on leased chores, takes over lapsed lease; per-chore lease read side (harness_backend.read_owner_leases + _apply_leases): landed d3d978a6 + cures 185aa01a/82881358/890ba25b; 23 tests green (run 2026-09-28); review chain rounds 1-4 closed, round-4 CLEAN
+- [ ] (a) instance_is_server_owned requires a live server lease: covered by R1 (landed d3d978a6, main-verified)
+- [ ] (b) rotate_to.py takes the shared lock and respects the lease: OPEN
+- [ ] (c) janitor-side lease WRITE/renew (stand down and take over for every GLOBAL_CHORE): OPEN
+- [ ] (d) honour refresh_dead_fp: OPEN
+- [ ] (e) read one shared threshold table (M6 policy file): OPEN
+- [ ] (f) immediate tick on retry-wedge signal: covered by GXXKAGY6 (landed 4e03e63d, 9 tests green)

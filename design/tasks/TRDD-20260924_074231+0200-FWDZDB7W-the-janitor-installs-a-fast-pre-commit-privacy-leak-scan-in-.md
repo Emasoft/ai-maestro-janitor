@@ -3,7 +3,7 @@ trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
 column: testing
 created: 2026-09-24T07:42:31+0200
-updated: 2026-09-27T17:43:34+0200
+updated: 2026-09-28T01:26:58+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -59,3 +59,10 @@ On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 ## Implementation
 
 2026-09-27 steps 1-2 landed (commit f7fb03f6) via lean-worker, main-verified: scripts/lib/staged_privacy_scan.py + pre-commit stage 1; reuses G1b/private_path_patterns/privacy_patterns; grandfathering vs HEAD; fail-closed. 7 tests green. Step 3 (fleet install, chaining, per-project opt-out) still open.
+
+## Acceptance
+
+- [ ] staged-diff scanner refuses personal e-mail/home-path on ADDED staged lines (outline 1): tests/test_staged_privacy_scan.py 7 tests green (run 2026-09-28 exit 0; landed f7fb03f6, main-verified)
+- [ ] wired into this repo's git-hooks/pre-commit (outline 2): pre-commit stage-1 invocation of scripts/lib/staged_privacy_scan.py verified by source read of git-hooks/pre-commit:24 (landed f7fb03f6)
+- [ ] fleet install chaining existing hooks + per-project opt-out (outline 3): OPEN - remains on the card
+- [ ] real-repo end-to-end: stage e-mail -> refused; stage noreply -> passes; existing hook still runs (outline 4): covered by the 7 staged-scan tests; with-existing-hook case re-verified at integration

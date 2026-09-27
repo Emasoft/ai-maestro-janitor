@@ -3,7 +3,7 @@ trdd-id: GXXKAGY6
 title: A retry-wedge signal schedules an immediate rotator tick
 column: testing
 created: 2026-09-24T11:21:23+0200
-updated: 2026-09-27T17:17:09+0200
+updated: 2026-09-28T01:29:30+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -35,3 +35,9 @@ Open decision, to settle before code: how the wedge signal counts against LIVE_4
 ## Implementation
 
 2026-09-27: landed (commit 4e03e63d) via lean-worker, verified independently by the main agent. Daemon raises rotator-tick-requested.flag on confirmed retry_wedged; main loop consumes clear-before-run; env JANITOR_ROTATOR_WEDGE_TICK=1 crosses to the rotator subprocess; cmd_auto raises the live-429 streak to LIVE_429_DEBOUNCE on a wedge tick (owner heuristic 2026-09-27). D7 guards untouched (usage cache, cooldown, MIN_DWELL_S). 9 new tests + 208 neighbour tests green, ruff clean, pyright clean on touched files.
+
+## Acceptance
+
+- [ ] wedge signal schedules a rotator tick before the next 60s beat: tests/test_wedge_rotator_tick.py 9 tests green (run 2026-09-28 exit 0; landed 4e03e63d, main-verified; 9 new + 208 neighbour green)
+- [ ] a second signal inside MIN_DWELL_S starts none; D7 guards (usage cache, cooldown, dwell) untouched: covered by the 9 tests, verified by source read recorded in Implementation (4e03e63d)
+- [ ] owner heuristic applied: wedge tick raises live-429 streak to LIVE_429_DEBOUNCE in cmd_auto (owner decision 2026-09-27, attribution correction recorded): verified by source read in Implementation
