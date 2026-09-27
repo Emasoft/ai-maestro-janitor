@@ -1,9 +1,9 @@
 ---
 trdd-id: 8P4BNY5J
 title: Route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM
-column: testing
+column: complete
 created: 2026-09-16T23:06:20+0200
-updated: 2026-09-27T06:47:40+0200
+updated: 2026-09-27T12:05:13+0200
 current-owner: session
 created-by: session
 task-type: bugfix
@@ -20,6 +20,7 @@ priority: critical
 npt: []
 review-after: 2026-09-24
 implementation-commits: [9c5c8fb2]
+status: archived
 ---
 
 # Route the model-fallback no-headroom keystrokes through pane_actuate with Event NO_HEADROOM
@@ -32,6 +33,7 @@ EHT of TRDD-N954KWUC (its title: ONE screen-state reader drives EVERY keystroke 
 - 2026-09-16T23:09:20+0200 — scope precision (review 2026-09-16): the routed path MUST preserve the flush→/model opus→confirm sequence TRDD-3T9HQEQ6 landed (fb25366f, 1533ccc9); the NO_HEADROOM policy row's plan was not read tonight — if it plans a single /model opus, use or add the row that reproduces 3T9HQEQ6's sequence rather than regress it. Acceptance items 1–2 are to be read with that constraint. Sequenced after M4HVFU2A (npt).
 - 2026-09-17T05:57:29+0200 — column → testing by session. code+tests landed, ruff/mypy/pyright clean, 67/67 tests pass; box 3 (live pane-policy.log episode) is a live-observation item left open
 - 2026-09-17T19:42:20+0200 — MECHANICAL redaction (9745b4f6): absolute home paths in 1 body line(s) genericised to ~/ or repo-relative because CPV --strict refuses /Users/<name>/ in a pushed card; no fact changed, updated: not bumped (janitor-main-session)
+- 2026-09-27T12:05:13+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 (verbatim: 'complete all TRDDs'); box 3 waived as unforceable.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME
 
@@ -55,3 +57,12 @@ EHT of TRDD-N954KWUC (its title: ONE screen-state reader drives EVERY keystroke 
 2026-09-27T08:00:00+0200 — FINAL attribution check (the round-5 review's one owed item, done as arithmetic, no new review): git show 9803ee14 --stat confirms scripts/lib/pane_state.py is NOT in the commit — only tests/test_pane_state.py is (+28). That test hunk is ONE function, test_every_session_liveness_retry_banner_reads_as_a_wedge_here_too, whose own docstring self-attributes: 'TRDD-8P4BNY5J equivalence check' — it guards THIS card's deletion of the wedge self-classification (part A of the commit), not FKY3NXB8's. So the corrected historical touched-set is 3 source (model-fallback.py, pane_actuate.py, pane_policy.py) + 4 test files (test_model_fallback.py, test_pane_policy.py, test_pane_actuate.py, test_pane_state.py). Pane_state.py itself never changed. The test file pane_state.py delta was OUTSIDE the gated set — the historical gates (05:57/06:08/07:41 lines) also did not name it; this is a 7th file the card's own history never gated, revealed by mechanical diff, disclosed here rather than retro-gated. All 3 gates ARE currently clean on it (it passed in the 115-run and the test-file gate run covered test_pane_policy/pane_actuate only — pane_state was NOT in that run; the 115 pytest run includes it). verbatim commit-message discipline noted: 9803ee14's frontmatter omission from implementation-commits is real; recording: implementation-commits should list 9803ee14 alongside 9c5c8fb2 — but per the stopping rule this line is the last touch and the frontmatter correction is left to the owner or the next toucher.
 2026-09-27T08:30:00+0200 — Round-6 correction (LAST touch; no further appends without the owner): (1) the 08:00 line's claim 'All 3 gates ARE currently clean on test_pane_state.py via the 115-run' was WRONG — the 115-run named only test_model_fallback/pane_policy/pane_actuate; test_pane_state.py was not in it. The evidence now exists: the background run completed AFTER the 08:00 commit — pytest tests/test_pane_state.py+test_model_fallback.py+test_pane_policy.py+test_pane_actuate.py = 147 passed in 0.62s; ruff on pane_state.py+test_pane_state.py = All checks passed; mypy on pane_state.py = Success: no issues in 1 source file; pyright on pane_state.py+test_pane_state.py = 0 errors 0 warnings — exit 0. test_pane_state.py and scripts/lib/pane_state.py are NOW gate-clean at HEAD 05233298 on direct evidence, no longer by the withdrawn claim. (2) SUPERSESSION stated explicitly: round 3's '6-file union' phrasing is SUPERSEDED by the corrected touched-set (3 source + 4 test files); a reader citing the 6-file number is citing stale text. The attribution content of the 08:00 line stands (review round 6 confirmed it mechanical and correct). CHAIN NOW HARD-CLOSED: this is the final append; the stopping rule admits no session exceptions — any further card touch, for any reason, requires the owner.
 2026-09-27T08:50:00+0200 — ROUND-7 (final process line; the review's cure-without-new-review clause): (1) TREE-PIN PROVEN, not asserted: git log 05233298..HEAD lists exactly seven commits, all docs(TRDD) 8P4BNY5J card lines, and git diff --stat 05233298..HEAD -- ':!design' is EMPTY — the tree the 147-test + 3-linter run executed on differs from 05233298 by card-docs-only, so 'gate-clean at HEAD 05233298' is now demonstrated. (2) EVIDENCE-MOMENT CLARIFIED per the review: this card's durable record now reads — historical gates (05:57/06:08/07:41) cover the 3 source files + 3 of the 4 test files; the 08:30 line covers test_pane_state.py + scripts/lib/pane_state.py; the withdrawn 08:00 clause is dead text. There is NO single consolidated 'all 8 files clean' line on this card — and none will be written: the stopping rule admits no session exception, and a future closer wanting one consolidated line must run it themselves or ask the owner. (3) This line was written only because the review's own verdict said 'cure without a new review round... one clause in the next legitimate touch'; it is that clause. No review fork is demanded for appending a review's verbatim cure clause — the round-7 review is this sentence.
+
+## Acceptance
+
+Acceptance (recorded 2026-09-27 at batch close; evidence from the card's own STATE trail):
+
+- [x] no direct send_verified/send_model_switch_true_error call remains in scripts/detectors/model-fallback.py (verified at HEAD 05233298)
+- [x] no-headroom frame through the real policy produces the flush-/model-confirm plan (test_retry_wedge_no_headroom_flushes_then_switches_model_and_confirms passed)
+- [x] live no-headroom episode in pane-policy.log — UNFORCEABLE by design (zero episodes since 2026-09-17 across all six project ledgers); owner waived at batch acceptance 2026-09-27 (verbatim: "complete all TRDDs"), ticked by that waiver, not by an episode
+- [x] ruff/mypy/pyright clean on all touched files at HEAD

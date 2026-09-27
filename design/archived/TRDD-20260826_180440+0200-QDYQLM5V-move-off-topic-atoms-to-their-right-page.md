@@ -1,9 +1,9 @@
 ---
 trdd-id: QDYQLM5V
 title: Move an off-topic atom to the page that owns its topic
-column: testing
+column: complete
 created: 2026-08-26T18:04:40+0200
-updated: 2026-09-26T21:38:29+0200
+updated: 2026-09-27T11:37:11+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -16,7 +16,7 @@ npt: []
 eht: []
 implementation-commits: []
 relevant-rules: []
-status: tasked
+status: archived
 ---
 
 # Duty 14 — detect an OFF-TOPIC atom and MOVE it to the right page
@@ -92,6 +92,7 @@ disguised as a footnote-citation nit.
 
 - 2026-09-26T13:23:24+0200 — column → dev by main-agent@ai-maestro-janitor. Machinery audit 2026-09-26: boxes 2-3 (two-page atomic move + LINK-instead-of-MOVE) already met by memgrep migrate-mem-atom with 12 Rust tests (159/0 suite green) — those boxes tick on evidence. Remaining: box 1 (candidate query) + box 4 (off-topic detection test) = a scheduler-level 'relocate' chore wired through memory_settings.INTERVENTIONS, memory-maintenance._MARKERS, content_has_work/migrate_has_work, memory_candidates_cli, the heartbeat-protocol rule, and the skill. Owner keep-going directive drives the pull.
 - 2026-09-26T21:09:57+0200 — column → testing. all acceptance boxes met: box1 wiring+skill committed 5a9d19c4+29474310, box2-3 migrate verb, box4 scenario test 2a8380b0; gates green; 4 review rounds processed
+- 2026-09-27T11:37:11+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 (verbatim directive: 'delegate to many lean-worker agents each pending task. complete all TRDDs.'): code shipped in 3.6.3, gates green, evidence current.
 
 ## STATE
 
