@@ -81,3 +81,43 @@ def test_hook_survives_and_still_emits_context_when_project_dir_is_read_only(
     # The hook's normal session-start payload (the /janitor-arm nudge) must still reach
     # stdout — a write fault must degrade logging/state, never the context it emits.
     assert "janitor" in proc.stdout.lower(), f"no session-start payload on stdout:\n{proc.stdout}"
+
+
+def test_ensurer_stderr_names_redirected_home_path(tmp_path: Path, monkeypatch) -> None:
+    """TRDD-BVTYT2BN: under a redirected HOME the settings-ensurer stderr message must
+    name the redirected settings.json, never a hardcoded '~/' — an operator or test
+    reading stderr is told which file was actually modified."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)  # no settings.json: ensurer has work to do
+    project = tmp_path / "project"
+    project.mkdir()
+    # A falsey value inherited from the developer's shell would make the ensurer skip
+    # and fail this test spuriously (review finding 3a).
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_ENSURE_SETTINGS_ENABLED", raising=False)
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "CLAUDE_PLUGIN_ROOT": str(REPO),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "global-state"),
+        "CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED": "false",
+        "CLAUDE_PLUGIN_OPTION_OS_KEEPALIVE_ENABLED": "false",
+    }
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOK)],
+        input=json.dumps(_EVENT),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode == 0, f"hook failed:\n{proc.stderr}"
+    assert proc.stderr.strip(), "ensurer wrote keys but printed no stderr notice"
+    assert str(home) in proc.stderr, (
+        f"stderr must name the redirected home, not '~':\n{proc.stderr}"
+    )
+    assert "~/.claude/settings.json" not in proc.stderr, (
+        f"stderr still hardcodes the tilde path:\n{proc.stderr}"
+    )

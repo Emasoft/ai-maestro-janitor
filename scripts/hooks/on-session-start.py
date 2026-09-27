@@ -1208,8 +1208,11 @@ def main() -> int:
         n = len(changed["env_added"]) + len(changed["top_level_set"])
         if n:
             keys = ", ".join(changed["env_added"] + changed["top_level_set"])
+            # TRDD-BVTYT2BN: name the file the ensurer ACTUALLY wrote — the tilde
+            # form lies under a redirected HOME (tests, sandboxes, CI).
             print(
-                f"[ai-maestro-janitor] Updated {n} recommended setting(s) in ~/.claude/settings.json "
+                f"[ai-maestro-janitor] Updated {n} recommended setting(s) in "
+                f"{settings_ensurer._settings_path()} "
                 f"({keys}). They take effect on the NEXT Claude Code launch (settings.json is read "
                 f"at startup).",
                 file=sys.stderr,
