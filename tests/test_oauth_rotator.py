@@ -2661,6 +2661,108 @@ def test_a_successful_switch_records_the_rotation_for_the_fleet(
     assert len(stamps) == 1, "a successful switch must record the rotation exactly once"
 
 
+# ── the at-switch live→slot mirror (TRDD-IT5GEZDZ) ─────────────────────────────────────
+
+def test_switch_files_the_outgoing_live_credential_into_its_slot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-IT5GEZDZ acceptance: at a switch, the OUTGOING account's slot is filed with the
+    live credential AS IT WAS AT SWITCH TIME — the token Claude Code refreshed while that
+    account was live — before the new live is written. Without the mirror the slot twin
+    keeps its stale capture-time token and decays (TRDD-K0PMVRN6 H1)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    # Claude Code refreshed the live token after capture: the slot holds the OLD token, the
+    # live holds a NEWER one (different fp, newer expiresAt). The mirror must close that gap.
+    outgoing_slot = _blob("LIVE-OLD", expires_ms=_ms_in(4))
+    outgoing_live = _blob("LIVE-NEW", expires_ms=_ms_in(9))
+    written_slots: dict[str, dict] = {}
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: outgoing_live)
+    monkeypatch.setattr(rotator, "write_live_blob", lambda b: None)
+    monkeypatch.setattr(rotator, "write_slot",
+                        lambda email, blob: written_slots.__setitem__(email, blob))
+    rotator.save_state({
+        "live_email": "out@x",
+        "slots": {"out@x": {"captured_at": "x", "fp": rotator.fingerprint(outgoing_slot),
+                            "expires_at": _ms_in(4)}},
+    })
+
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+
+    assert written_slots.get("out@x") == outgoing_live, \
+        "the outgoing slot must be filed with the live credential at switch time"
+    meta = rotator.load_state()["slots"]["out@x"]
+    assert meta["fp"] == rotator.fingerprint(outgoing_live)
+    assert meta["expires_at"] == outgoing_live["claudeAiOauth"]["expiresAt"]
+
+
+def test_switch_mirror_skips_when_the_slot_is_already_current(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The common healthy case — the slot twin already holds the exact live token — must not
+    rewrite it (a redundant keychain write per switch is churn, not a fix)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    live = _blob("LIVE", expires_ms=_ms_in(9))
+    wrote: list[str] = []
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: live)
+    monkeypatch.setattr(rotator, "write_slot", lambda email, blob: wrote.append(email))
+    rotator.save_state({
+        "live_email": "out@x",
+        "slots": {"out@x": {"fp": rotator.fingerprint(live), "expires_at": _ms_in(9)}},
+    })
+
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+
+    assert wrote == [], "a current slot must not be rewritten"
+
+
+def test_switch_mirror_never_regresses_a_newer_slot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mirror rules (TRDD-4XND73XD): write ONLY when the fp differs AND expiresAt is newer.
+    A slot already carrying a NEWER token (e.g. keepalive refreshed it) must not be regressed
+    to the older live credential."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    stale_live = _blob("LIVE-OLD", expires_ms=_ms_in(4))
+    wrote: list[str] = []
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: stale_live)
+    monkeypatch.setattr(rotator, "write_slot", lambda email, blob: wrote.append(email))
+    rotator.save_state({
+        "live_email": "out@x",
+        "slots": {"out@x": {"fp": "different", "expires_at": _ms_in(9)}},
+    })
+
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+
+    assert wrote == [], "a newer slot token must not be regressed by the older live credential"
+
+
+def test_switch_mirror_runs_only_while_the_janitor_owns_the_tick(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mirror rules (TRDD-4XND73XD): only the chore's OWNER writes slots. While the ai-maestro
+    server has CLAIMED oauth-rotator-tick, the janitor's switch must not touch slots (the
+    server's own switch path mirrors — the TRDD-IT5GEZDZ handback condition)."""
+    import harness_backend  # tests/conftest already puts scripts/lib on sys.path
+
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    monkeypatch.setenv(harness_backend.SERVER_CHORES_ENV, "up")
+    # Positive control: the override actually registers as a full claim (an unrecognised
+    # value would make the assertion below vacuous).
+    assert harness_backend.claimed_chores() >= frozenset({"oauth-rotator-tick"})
+    live = _blob("LIVE-NEW", expires_ms=_ms_in(9))
+    wrote: list[str] = []
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: live)
+    monkeypatch.setattr(rotator, "write_slot", lambda email, blob: wrote.append(email))
+    rotator.save_state({
+        "live_email": "out@x",
+        "slots": {"out@x": {"fp": "stale", "expires_at": _ms_in(4)}},
+    })
+
+    rotator._switch_blob("in@x", _blob("INCOMING"), "test rotation")
+
+    assert wrote == [], "a server-owned tick must leave slot writes to the server"
+
+
 # ── the setup-token 403 gate (TRDD-BMITQ2MN) ────────────────────────────────────────────
 #
 # A `claude setup-token` key has no refreshToken and 403s on /api/oauth/usage by design.

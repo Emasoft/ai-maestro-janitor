@@ -1639,8 +1639,78 @@ def cmd_switch(email: str) -> int:
     return 0
 
 
+def _janitor_owns_rotator_tick() -> bool:
+    """True iff the janitor still owns oauth-rotator-tick — the at-switch slot mirror
+    (TRDD-IT5GEZDZ) must run ONLY on the chore's owner (TRDD-4XND73XD mirror rules: only
+    the owner writes slots at all; when the ai-maestro server owns the tick, ITS switch
+    path mirrors — the handback condition recorded on TRDD-IT5GEZDZ).
+
+    `claimed_chores()` already encodes the full ownership predicate, including the
+    operator-override rung, and FAILS TOWARD COVERAGE: no probe / no claim ⇒ the janitor
+    keeps the chore ⇒ the mirror runs (the pre-handover default). Any probe failure keeps
+    that same default — the same doctrine as global_state._server_owns_host's fail-open,
+    but toward the janitor: a slot mirrored twice is idempotent, a slot never refreshed
+    decays (the exact bug this exists to fix)."""
+    try:
+        import harness_backend  # noqa: PLC0415 -- lazy: switch-path-only, mirrors global_state's pattern
+    except Exception:
+        return True
+    return "oauth-rotator-tick" not in harness_backend.claimed_chores()
+
+
+def _mirror_live_to_outgoing_slot(state: dict, incoming_email: str) -> None:
+    """TRDD-IT5GEZDZ: at a switch, read the (pre-switch) LIVE credential and file it into
+    the OUTGOING account's slot, so the slot twin carries the token Claude Code refreshed
+    while the account was live (TRDD-K0PMVRN6 hypothesis H1: a switched-away slot otherwise
+    decays to its stale capture-time token).
+
+    Writes only when the live fingerprint DIFFERS from the slot's recorded fp AND the live
+    expiresAt is NEWER than the slot's recorded one — never regress a slot to an older or
+    unattributable token (a mirror-sourced live read in the headless daemon context is
+    exactly the stale case these guards reject). Best-effort: a refused/failed slot write
+    is logged and the switch proceeds with the slot's previous token (the same accepted
+    degradation as _refresh_and_heal_slot) — this NEVER blocks or fails the switch itself.
+    The slot's index meta (fp/expires_at) is updated on the passed-in state, which the
+    caller persists in its own single save."""
+    if not _janitor_owns_rotator_tick():
+        return
+    outgoing = state.get("live_email")
+    if not isinstance(outgoing, str) or not outgoing or outgoing == incoming_email:
+        return
+    live = read_live_blob()
+    if live is None:
+        return
+    fp = fingerprint(live)
+    if not fp:
+        return  # unreadable/degenerate live credential — nothing attributable to file
+    meta = (state.get("slots") or {}).get(outgoing)
+    if isinstance(meta, dict) and meta.get("fp") == fp:
+        return  # the slot already holds this exact token — the common, healthy case
+    live_exp = _oauth(live).get("expiresAt")
+    if not isinstance(live_exp, (int, float)):
+        return  # cannot establish "newer" — never file a token of unknown freshness
+    slot_exp = meta.get("expires_at") if isinstance(meta, dict) else None
+    if isinstance(slot_exp, (int, float)) and live_exp <= slot_exp:
+        return  # the slot's token is already newer — filing would be a regression
+    try:
+        write_slot(outgoing, live)
+    except SlotKeychainWriteError as exc:
+        _log("[switch] %s: keychain refused the at-switch slot mirror (%s) — slot keeps its previous token" % (outgoing, exc))
+        return
+    except OSError as exc:
+        _log("[switch] %s: at-switch slot mirror failed (%r) — slot keeps its previous token" % (outgoing, exc))
+        return
+    _log("[switch] filed the outgoing live credential into %s's slot (TRDD-IT5GEZDZ)" % outgoing)
+    if isinstance(meta, dict):
+        meta["fp"] = fp
+        meta["expires_at"] = live_exp
+
+
 def _switch_blob(email: str, blob: dict, reason: str) -> None:
     """Swap the live account to `blob`'s credential and record the switch in state.
+
+    FIRST files the OUTGOING live credential into its slot (TRDD-IT5GEZDZ, janitor-owned
+    ticks only), then writes the new live.
 
     `blob` is a claudeAiOauth-only slot (TRDD-5539cd6e). MERGE it into the CURRENT live
     blob — replace only `claudeAiOauth`, preserving the user's live `mcpOAuth` (and any
@@ -1648,6 +1718,13 @@ def _switch_blob(email: str, blob: dict, reason: str) -> None:
     rotation would wipe the MCP-server OAuth tokens. fingerprint() keys off the accessToken
     inside claudeAiOauth, so the merged live blob and the slot share the same fp (state
     stays consistent, and _reconcile_live_email won't see false drift)."""
+    state = load_state()
+    # TRDD-IT5GEZDZ: BEFORE the new live is written, file the OUTGOING live credential into
+    # its slot. Claude Code keeps refreshing the live token while an account is live; without
+    # this the switched-away account's slot twin keeps its stale capture-time token and decays
+    # (TRDD-K0PMVRN6 H1). The order is load-bearing: after write_live_blob below,
+    # read_live_blob() would return the NEW credential.
+    _mirror_live_to_outgoing_slot(state, email)
     cred = _oauth(blob)
     if cred:
         live = read_live_blob() or {}
@@ -1656,7 +1733,8 @@ def _switch_blob(email: str, blob: dict, reason: str) -> None:
         write_live_blob(merged)
     else:
         write_live_blob(blob)  # degenerate slot (no claudeAiOauth) — write as-is
-    state = load_state()
+    # ONE load, at entry: it already saw everything the callers saved before calling, and it
+    # carries the at-switch mirror's slot-meta update forward into the single save below.
     state["live_email"] = email
     state["live_fp"] = fingerprint(blob)
     state["last_switch_at"] = time.time()
