@@ -3,7 +3,7 @@ trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 column: testing
 created: 2026-09-24T08:12:01+0200
-updated: 2026-09-27T18:31:39+0200
+updated: 2026-09-27T18:39:52+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -85,3 +85,4 @@ Handback condition (from TRDD-IT5GEZDZ): before the ai-maestro server's oauth-ro
 ## Implementation
 
 2026-09-27 R1 (item a) landed (commit d3d978a6) via lean-worker, main-verified: total-claim exit + keepalive uninstall deleted (ORH-30); per-chore lease read side (harness_backend.read_owner_leases + daemon _apply_leases merge, ORH-27 lease-decides); takeover = the yield mechanism; fail-toward-coverage lease reads. 22 tests green. REMAINING: (b) rotate_to lock+lease, (c) janitor-side lease WRITE/renew, (d) refresh_dead_fp, (e) shared threshold table.
+2026-09-27 R1 review round (commit 185aa01a): takeover log line no longer overclaims (unyield-only, runs on next due pass — quarantine/backoff still defer it); lease transition-dedupe seeded on first call so a daemon restart no longer logs false taking-over/standing-down pairs. Review NOTE for item (c): the spawn-gate/server-owns interaction is now dead-path in the common case (daemon always resident) — whether the spawn gate should also consult leases is item (c)'s to decide; a behavioral keepalive-uninstall pin (force exit_reason=server-owns-host, assert keepalive intact) is a cheap test to add.
