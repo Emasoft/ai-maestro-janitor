@@ -194,13 +194,17 @@ def test_expiring_token_status_is_distinct_from_transport_failure(tmp_path: Path
 def test_usage_request_passes_expiring_status_through_verbatim(tmp_path: Path) -> None:
     """TRDD-OOZP38MN review cure: rotator.usage_request must pass the probe's tuple through
     verbatim — an expiring token yields (-1, None), never a synthesized (0, None), so callers
-    keying on `!= 0` see the local-death signal and not a transport failure."""
+    keying on `!= 0` see the local-death signal and not a transport failure. The (0, None)
+    path is reserved for a token-less blob."""
     _isolate(tmp_path)
     import sys
 
-    sys.path.insert(0, "/Users/emanuelesabetta/Code/AI-MAESTRO-JANITOR/ai-maestro-janitor/scripts/oauth_rotator")
+    _rot = Path(__file__).resolve().parents[1] / "scripts" / "oauth_rotator"
+    if str(_rot) not in sys.path:
+        sys.path.insert(0, str(_rot))
     import rotator
 
+    assert rotator.usage_request({}) == (0, None)  # no token at all -> transport-failure 0
     now = 1_785_000_000.0
     blob = {"claudeAiOauth": {"accessToken": _TOKEN, "expiresAt": (now + 5) * 1000}}
     status, data = rotator.usage_request(blob)
