@@ -3,7 +3,7 @@ trdd-id: 4XND73XD
 title: Every janitor daemon chore hands over seamlessly to the ai-maestro server when it is online and back when it is not (janitor side)
 column: testing
 created: 2026-09-24T08:12:01+0200
-updated: 2026-09-27T19:22:43+0200
+updated: 2026-09-27T19:28:14+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -88,3 +88,4 @@ Handback condition (from TRDD-IT5GEZDZ): before the ai-maestro server's oauth-ro
 2026-09-27 R1 review round (commit 185aa01a): takeover log line no longer overclaims (unyield-only, runs on next due pass — quarantine/backoff still defer it); lease transition-dedupe seeded on first call so a daemon restart no longer logs false taking-over/standing-down pairs. Review NOTE for item (c): the spawn-gate/server-owns interaction is now dead-path in the common case (daemon always resident) — whether the spawn gate should also consult leases is item (c)'s to decide; a behavioral keepalive-uninstall pin (force exit_reason=server-owns-host, assert keepalive intact) is a cheap test to add.
 2026-09-27 round-2 cures (commit 82881358): the round-1 'two false lines per restart' claim was wrong set arithmetic — the real bug was ONE false standing-down line per restart (taken_over can never fire on tick 1); comment corrected, guard unchanged. The transition test's old standing-down==1 was satisfied by the bug itself; it now pins the seeded first call as silent and the genuine takeover line's wording. Fixture resets _leases_initialized.
 2026-09-27 round-3 cures (commit 890ba25b): the R1 lease review chain's final cures — docstring no longer claims re-claim coverage it lacks; new positive pin for the genuine lapsed→live stand-down transition (the branch was deletable with the suite green after 82881358 removed the accidental coverage). 23 tests green. Chain closed: rounds 1-3 all cured, no REOPENs remained.
+2026-09-27 round-4 review of 890ba25b: CLEAN — no REOPEN, no CURE. Mutation checks pass (stand-down branch deletion goes red via the new test; always-suppress guard regression goes red via the count). Diff scope verified as exactly docstring+one test. The R1 lease-transition chain (d3d978a6, 185aa01a, 82881358, 890ba25b) is closed with every cure applied and reviewed.
