@@ -203,7 +203,16 @@ def main() -> int:
 def _main() -> int:
     data = _payload()
     source = str(data.get("source", "") or "").strip()
-    if source != "clear":
+    # "startup" added for TRDD-C7M4RXQ2: a chain-clear (`clear_trigger.py` types /clear) can
+    # re-enter SessionStart as a FRESH `source=startup` process on some platforms. Before this
+    # relaxation that re-entry made BOTH hooks inert: `on-session-start.py`'s startup arm
+    # defers to THIS hook whenever a per-pane sidecar exists, and THIS hook returned 0 on any
+    # non-clear source — so the sidecar-bearing clear injected nothing and the agent sat idle
+    # (restart #1, 2026-09-25). The downstream checks ALREADY bound the startup case: the
+    # per-pane sidecar consume is the evidence gate itself (no sidecar for this pane ⇒ nothing
+    # happens), and `_SIDECAR_FRESH_MAX_AGE_S` (minutes-scale) rejects a sidecar left by an
+    # earlier clear, so a reused pane cannot inherit yesterday's compaction.
+    if source not in ("clear", "startup"):
         return 0
 
     import state  # noqa: PLC0415

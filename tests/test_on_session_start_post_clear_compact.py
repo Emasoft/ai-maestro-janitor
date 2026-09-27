@@ -1040,8 +1040,11 @@ def test_two_panes_do_not_cross(tmp_path, monkeypatch):
 
 
 def test_non_clear_source_does_nothing(tmp_path, monkeypatch):
-    """Only `source == "clear"` may run at all -- `compact`/`resume`/`startup` must be a
-    guaranteed no-op (the loop guard every sibling SessionStart hook in this lane relies on)."""
+    """Only `source in ("clear", "startup")` may run at all -- `compact`/`resume`/`fork` must
+    be a guaranteed no-op (the loop guard every sibling SessionStart hook in this lane relies
+    on). `startup` was removed from this loop by TRDD-C7M4RXQ2: a chain-clear re-entering as a
+    fresh startup process is now a legitimate consumer (its own test below); these three
+    remain hard no-ops."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     plugin_root = tmp_path / "plugin"
@@ -1051,12 +1054,53 @@ def test_non_clear_source_does_nothing(tmp_path, monkeypatch):
     _write_sidecar(sd, {"TMUX_PANE": "%3"}, transcript=str(tmp_path / "cleared.jsonl"))
 
     mod = _import()
-    for source in ("compact", "resume", "startup", "fork"):
+    for source in ("compact", "resume", "fork"):
         monkeypatch.setattr(mod, "_payload", lambda source=source: {"source": source})
         assert mod.main() == 0
     # sidecar untouched -- no rename attempted for a non-clear source
     pane_key = state.terminal_pane_key({"TMUX_PANE": "%3"})
     assert (sd / f"resume-after-clear.{pane_key}.transcript").is_file()
+
+
+def test_startup_source_with_fresh_sidecar_consumes_and_injects(tmp_path, monkeypatch):
+    """TRDD-C7M4RXQ2: a chain-clear that re-enters SessionStart as a FRESH `source=startup`
+    process (the harness re-launches the cleared session instead of reporting source=clear)
+    must proceed past the gate and run the SAME service: consume the per-pane sidecar, run the
+    real (stubbed) Jev compose, inject the compacted context. Before the gate relaxation this
+    hook returned 0 on startup, `on-session-start.py`'s startup arm deferred to THIS hook, and
+    the sidecar-bearing clear injected nothing — the agent sat idle (restart #1, 2026-09-25)."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%6")
+
+    transcript = tmp_path / "cleared.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    sd = project_dir / ".janitor" / "state"
+    sidecar = _write_sidecar(sd, {"TMUX_PANE": "%6"}, transcript=str(transcript))
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=_COMPACTED_DOC)
+
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "startup"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mod.main()
+    out = buf.getvalue()
+
+    assert rc == 0
+    assert "[janitor-handoff] Post-clear handoff, ALREADY IN CONTEXT below" in out, (
+        "a startup-sourced chain re-entry must inject the compacted context"
+    )
+    assert "pointers expand with:" in out
+    assert not sidecar.is_file(), "the pristine sidecar must be renamed away, not left in place"
+    consumed = list(sd.glob("resume-after-clear.*.transcript.consumed-*"))
+    assert consumed, "expected a .consumed-<epoch> sidecar after this run"
 
 
 # --- Review finding, 2026-09-23: reader/writer pane-key parity ------------------------------

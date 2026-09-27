@@ -408,6 +408,131 @@ def _inject_post_clear_handoff(state) -> None:  # noqa: ANN001 - local module ty
         "handoff cannot be safely verified as this session's own in a multi-session project",
     )
 
+# `on-session-start-post-clear-compact.py` is not importable (hyphenated filename), so its
+# minutes-scale sidecar window is duplicated here — same convention as
+# `_PRECOMPACT_CONTINUITY_FILENAME` below. Keep the two in sync: this value gates the startup
+# chain-clear arm's "is there FRESH sidecar evidence for THIS pane" decision, and that hook's
+# own `_SIDECAR_FRESH_MAX_AGE_S` gates the same sidecar's consumption.
+_SIDECAR_FRESH_MAX_AGE_S = 300
+
+
+def _sidecar_fresh(state, path: Path, now: int, max_age_s: int) -> bool:  # noqa: ANN001 - local module type
+    """True when a per-pane clear sidecar still counts as evidence of a JUST-happened clear.
+
+    A `.consumed-<epoch>` rename carries its consume epoch in the NAME — parsed first. mtime
+    is the fallback for both forms (an atomic write's mtime is its write time, and the
+    dedicated hook's rename preserves it), and either way the bound is minutes-scale: a
+    day-old sidecar on a reused pane is yesterday's clear, never this one's.
+    """
+    if ".consumed-" in path.name:
+        try:
+            ts = int(path.name.rsplit(".consumed-", 1)[1])
+        except ValueError:
+            ts = 0
+        if ts > 0:
+            return now - ts <= max_age_s
+    mtime = state.file_mtime(path)
+    return mtime > 0 and now - mtime <= max_age_s
+
+
+def _stamp_clear_observation(state, session_id: str) -> None:  # noqa: ANN001 - local module type
+    """Stamp `clear-observed.ts` + the observing session's id — the ONE unambiguous record
+    that a /clear happened (TRDD-Z582IKIR follow-up), shared by the source=clear branch and
+    the startup chain-clear service (TRDD-C7M4RXQ2) so the two sites can never drift.
+
+    Best-effort throughout: a lost stamp means the post-clear resume never fires and the
+    fresh session sits idle, so each failure is LOGGED, never swallowed silently and never
+    raised into session start. The session-id stamp (TRDD-2MLFZ7DL sub-step 4) lets
+    dispatch.py's `_phase_clear_resume` discard a flag arising from a different session —
+    that check is fail-open there, so an empty `session_id` (older harness, no stdin payload)
+    simply writes nothing, which the phase treats as "skip the check".
+
+    Overwriting a PREVIOUS clear's stamp is expected-harmless: the clear chain's own gate
+    compares against its pre-clear baseline (strictly greater), and dispatch arms on
+    `observed_at >= flag written_at` — a newer stamp can only move both checks forward.
+    """
+    try:
+        state.atomic_write(state.state_dir() / "clear-observed.ts", str(int(time.time())))
+    except Exception as exc:  # noqa: BLE001 -- never break session start
+        # LOG, never swallow silently: a lost stamp means the post-clear resume never
+        # fires and the fresh session sits idle — the exact silent-disable shape this
+        # project treats as a defect. Logging keeps the failure diagnosable without
+        # ever raising into session start.
+        _slog(state, "session-start", f"clear-observed stamp failed: {exc!r}")
+        print(f"[on-session-start] clear-observed stamp failed: {exc!r}", file=sys.stderr)
+    if session_id:
+        try:
+            state.atomic_write(
+                state.state_dir() / "resume-after-clear.session-id.txt", session_id
+            )
+        except Exception as exc:  # noqa: BLE001 -- never break session start
+            _slog(state, "session-start", f"clear session-id stamp failed: {exc!r}")
+
+
+def _startup_chain_clear_service(state, session_id: str) -> None:  # noqa: ANN001 - local module type
+    """The post-clear service for a chain-clear that re-entered SessionStart as STARTUP.
+
+    The janitor's own `clear_trigger.py` types `/clear` into the pane; on some platforms the
+    harness re-enters SessionStart for the cleared session as a FRESH process reporting
+    `source=startup` — indistinguishable, by the source string alone, from "the user opened a
+    new pane". Until TRDD-C7M4RXQ2 that re-entry ran NONE of the clear service: no
+    `clear-observed.ts` stamp (dispatch's `_phase_clear_resume` never armed, the chain's own
+    `_await_fresh_session` gate timed out), no session-id stamp, no handoff — the agent sat
+    idle until the owner typed "resume" by hand (restart #1, 2026-09-25).
+
+    GATED ON EVIDENCE, not the source string: a FRESH `resume-after-clear.flag` (the same
+    `CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S` bound the clear path and dispatch use) says
+    a clear was armed moments ago; a fresh PER-PANE sidecar for THIS pane says it was THIS
+    pane's clear. A startup with no pending flag — a genuinely fresh pane or project — runs
+    none of this, identical to the pre-C7M4RXQ2 behaviour.
+
+    OWNERSHIP, one decision site (this function):
+    - fresh sidecar (unconsumed, or `.consumed-<epoch>` within the minutes-scale window) →
+      stamp and inject NOTHING: the dedicated `on-session-start-post-clear-compact.py` hook
+      owns the body for a sidecar-bearing clear.
+    - nothing fresh matches (no sidecar, or only a STALE consumed one) → stamp, then the
+      honest POINTER directly. Deliberately NOT `_inject_post_clear_handoff`: its own
+      sidecar defer-glob is UNBOUNDED, so a stale `.consumed-*` would match and it would
+      return SILENTLY before reaching the pointer — the exact silence this card kills.
+    - THE FLAG IS NEVER UNLINKED HERE: dispatch.py's `_phase_clear_resume` owns consuming
+      `resume-after-clear.flag`, and the stamp discipline relies on it surviving until the
+      resumed turn consumes it.
+    """
+    sd = state.state_dir()
+    flag = sd / "resume-after-clear.flag"
+    if not flag.is_file():
+        return
+    ts_path = sd / "resume-after-clear.ts"
+    written_at = (
+        state.coerce_int(ts_path.read_text(encoding="utf-8"), 0) if ts_path.is_file() else 0
+    )
+    now = int(time.time())
+    max_age = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_CLEAR_RESUME_MAX_AGE_S"), 86400
+    )
+    if max_age > 0 and now - (written_at or state.file_mtime(flag)) > max_age:
+        return  # dispatch sweeps it; a day-old flag must not arm a fresh pane's clear
+
+    _stamp_clear_observation(state, session_id)
+
+    import terminal_trigger  # noqa: PLC0415 - scripts/lib is on sys.path only inside main()
+
+    pane_key = state.pane_key_from_terminal(terminal_trigger.self_terminal(os.environ))
+    fresh_sidecar = False
+    if pane_key:
+        fresh_sidecar = any(
+            _sidecar_fresh(state, path, now, _SIDECAR_FRESH_MAX_AGE_S)
+            for path in sd.glob(f"resume-after-clear.{pane_key}.transcript*")
+        )
+    if fresh_sidecar:
+        return  # the dedicated post-clear-compact hook owns the body for this clear
+    _emit_manual_clear_pointer(
+        state, sd,
+        reason="a chain-clear re-entered as a fresh startup, but no fresh per-pane sidecar "
+        "named this session's transcript, so the dedicated post-clear compact hook is not "
+        "handling this clear",
+    )
+
 # Card 5 injection-caps review (TRDD-RAEGS1D5, chain-hardening §7): the keyed handoff file
 # `_handoff_body` reads can now be the FULL uncapped Jev document (`on-session-start-post-clear-
 # compact.py`'s own `--out`, since d3364c01 -- tens of KB), but this hook's stdout only reaches
@@ -859,31 +984,25 @@ def main() -> int:
     # than a later flag never arms it, so a spurious stamp is inert, whereas a MISSING
     # one strands the resume forever. Best-effort — a fault here must never break start.
     if source == "clear":
-        try:
-            state.atomic_write(state.state_dir() / "clear-observed.ts", str(int(time.time())))
-        except Exception as exc:  # noqa: BLE001 -- never break session start
-            # LOG, never swallow silently: a lost stamp means the post-clear resume never
-            # fires and the fresh session sits idle — the exact silent-disable shape this
-            # project treats as a defect. Logging keeps the failure diagnosable without
-            # ever raising into session start.
-            _slog(state, "session-start", f"clear-observed stamp failed: {exc!r}")
-            print(f"[on-session-start] clear-observed stamp failed: {exc!r}", file=sys.stderr)
-        # TRDD-2MLFZ7DL sub-step 4: stamp the OBSERVING session's id alongside
-        # clear-observed.ts, so dispatch.py's `_phase_clear_resume` can discard a flag
-        # arising from a different session (a shared/misdirected state dir). Best-effort
-        # and non-fatal — an empty `session_id` (older harness, no stdin payload) simply
-        # writes nothing, which `_phase_clear_resume` treats as "skip the check".
-        if session_id:
-            try:
-                state.atomic_write(
-                    state.state_dir() / "resume-after-clear.session-id.txt", session_id
-                )
-            except Exception as exc:  # noqa: BLE001 -- never break session start
-                _slog(state, "session-start", f"clear session-id stamp failed: {exc!r}")
+        _stamp_clear_observation(state, session_id)
         try:
             _inject_post_clear_handoff(state)
         except Exception as exc:  # noqa: BLE001 -- never break session start
             _slog(state, "session-start", f"post-clear handoff injection failed: {exc!r}")
+
+    # TRDD-C7M4RXQ2 — the SAME service for a chain-clear that re-entered as STARTUP. The
+    # janitor's chain types `/clear` into the pane and on some platforms the harness re-enters
+    # SessionStart as a fresh `source=startup` process: before this branch that re-entry
+    # injected nothing, never stamped `clear-observed.ts` (so dispatch never armed the
+    # `[janitor-resume]` cue and the chain's own fresh-session gate timed out), and the agent
+    # sat idle until the owner typed "resume" by hand. Gated on fresh FLAG + fresh PER-PANE
+    # SIDECAR evidence, never the source string alone — see
+    # `_startup_chain_clear_service` for the full gating and ownership contract.
+    if source == "startup":
+        try:
+            _startup_chain_clear_service(state, session_id)
+        except Exception as exc:  # noqa: BLE001 -- never break session start
+            _slog(state, "session-start", f"startup chain-clear service failed: {exc!r}")
 
     # TRDD-OES0NN3F — the same service for a COMPACTION. `compact` re-enters SessionStart just
     # as `clear` does, so this is the one place the handoff can reach the fresh context without
