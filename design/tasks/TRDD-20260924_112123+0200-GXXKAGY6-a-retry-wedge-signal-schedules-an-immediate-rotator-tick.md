@@ -39,5 +39,5 @@ Open decision, to settle before code: how the wedge signal counts against LIVE_4
 ## Acceptance
 
 - [ ] wedge signal schedules a rotator tick before the next 60s beat: tests/test_wedge_rotator_tick.py 9 tests green (run 2026-09-28 exit 0; landed 4e03e63d, main-verified; 9 new + 208 neighbour green)
-- [ ] a second signal inside MIN_DWELL_S starts none; the 9 tests pin both: wedge-before-beat and second-signal-within-MIN_DWELL_S-starts-none (run 2026-09-28); D7-untouched is a diff property of 4e03e63d, verified by source read recorded in Implementation
+- [ ] the 9 tests pin both required behaviors (tests/test_wedge_rotator_tick.py, run 2026-09-28): a wedge signal starts a tick before the next scheduled 60 s beat, and a second signal inside MIN_DWELL_S starts none; D7 guards (usage cache, cooldown, MIN_DWELL_S) untouched is a diff property of 4e03e63d, verified by source read recorded in Implementation
 - [ ] owner heuristic applied: wedge tick raises live-429 streak to LIVE_429_DEBOUNCE in cmd_auto (owner decision 2026-09-27, attribution correction recorded): verified by source read in Implementation
