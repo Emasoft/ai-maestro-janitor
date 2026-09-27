@@ -92,7 +92,7 @@ Handback condition (from TRDD-IT5GEZDZ): before the ai-maestro server's oauth-ro
 
 ## Acceptance
 
-- [ ] R1 residency: daemon stays resident, idles on leased chores, takes over lapsed lease; per-chore lease read side (harness_backend.read_owner_leases + _apply_leases): landed d3d978a6 + cures 185aa01a/82881358/890ba25b; 23 tests green (run 2026-09-28); review chain rounds 1-4 closed, round-4 CLEAN
+- [ ] R1 residency: daemon stays resident, idles on leased chores, takes over lapsed lease; per-chore lease read side (harness_backend.read_owner_leases + _apply_leases): landed d3d978a6 + cures 185aa01a/82881358/890ba25b; 23 tests green (run 2026-09-28, tests/test_one_daemon_per_host.py, exit 0); review chain rounds 1-4 closed, round-4 CLEAN
 - [ ] (a) instance_is_server_owned requires a live server lease: covered by R1 (landed d3d978a6, main-verified)
 - [ ] (b) rotate_to.py takes the shared lock and respects the lease: OPEN
 - [ ] (c) janitor-side lease WRITE/renew (stand down and take over for every GLOBAL_CHORE): OPEN
