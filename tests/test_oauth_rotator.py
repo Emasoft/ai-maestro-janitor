@@ -837,6 +837,33 @@ def test_cmd_auto_rotates_on_401_token_rejected(tmp_path: Path, monkeypatch: pyt
     assert [s[0] for s in switches] == ["alt@x"]
 
 
+def test_cmd_auto_usage_probes_alternates_when_live_probe_says_expiring(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-OOZP38MN: the live probe refusing as EXPIRING_TOKEN (status -1) is a LOCAL death
+    signal, NOT a network outage — so alternates must still be usage-probed and the rotation
+    must go through the probed DRAIN-FIRST path. On the old behavior (-1 collapsed into 0)
+    the tick read the network as down, skipped probed selection, and degraded-rotated blind."""
+    monkeypatch.setattr(rotator, "EXPIRY_GRACE_H", 0.5)
+    live = _blob("LIVE", expires_ms=_ms_in(0.2))          # within grace → probe returns EXPIRING_TOKEN_STATUS
+    near_alt = _blob("NEAR", expires_ms=_ms_in(3))        # valid, MORE used  → drain-first picks it
+    far_alt = _blob("FAR", expires_ms=_ms_in(80))         # valid, fresh     → held in reserve
+    probes: list = []
+    def _recording_usage(blob: dict) -> tuple[int, dict | None]:
+        tok = blob.get("claudeAiOauth", {}).get("accessToken", "")
+        probes.append(tok)
+        return {  # LIVE → EXPIRING_TOKEN_STATUS; alternates answer 200 with real usage
+            "LIVE": (rotator.usage_probe.EXPIRING_TOKEN_STATUS, None),
+            "NEAR": (200, _usage_ok(60.0)),
+            "FAR": (200, _usage_ok(5.0)),
+        }[tok]
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"near@x": near_alt, "far@x": far_alt}, usage={})
+    monkeypatch.setattr(rotator, "usage_request", _recording_usage)  # replaces _setup_auto's map-backed fake
+    rotator.cmd_auto()
+    assert "NEAR" in probes and "FAR" in probes           # alternates were usage-PROBED (network treated as up)
+    assert [s[0] for s in switches] == ["near@x"]         # probed DRAIN-FIRST target, not a degraded rotate
+
+
 def _scoped_usage(five: float, seven: float, *, fable: float | None = None) -> dict:
     """Account windows, plus an OPTIONAL model-scoped weekly window for `Fable 5` — the shape
     /api/oauth/usage emits since Anthropic moved scoped limits into `limits[]`.

@@ -167,9 +167,28 @@ def test_probe_refuses_a_token_within_30s_of_expiry(tmp_path: Path) -> None:
     out: dict = {}
     now = 1_785_000_000.0
     status, data = up.probe(_TOKEN, expires_at=now + 5, outcome=out, getter=_getter(200, _PAYLOAD, calls=calls), now=now)
-    assert (status, data) == (0, None)
+    assert (status, data) == (up.EXPIRING_TOKEN_STATUS, None)
     assert out["reason"] == up.EXPIRING_TOKEN
     assert calls == []
+
+
+def test_expiring_token_status_is_distinct_from_transport_failure(tmp_path: Path) -> None:
+    """TRDD-OOZP38MN: an EXPIRING token is a LOCAL death signal, not a network outage. It must
+    never share status 0 with a transport failure — cmd_auto keys its network-up/down split
+    (and with it the probed-vs-degraded rotate choice) on that exact comparison. A transport
+    failure still returns 0."""
+    _isolate(tmp_path)
+    out: dict = {}
+    now = 1_785_000_000.0
+    # Token within 30 s of expiry: no request, distinct non-zero status.
+    assert up.probe(_TOKEN, expires_at=now + 5, outcome=out, getter=_getter(200, _PAYLOAD), now=now) == (-1, None)
+    assert up.EXPIRING_TOKEN_STATUS != 0
+    # A transport failure (getter explodes → http_get's except path) is still exactly 0.
+    def _dead_net(token: str) -> tuple[int, dict | None, int | None]:
+        raise OSError("network down")
+    out2: dict = {}
+    assert up.probe(_TOKEN, outcome=out2, getter=_dead_net) == (0, None)
+    assert out2["reason"] == up.HTTP_ERROR
 
 
 def test_probe_fetches_once_then_serves_cache_within_the_ttl(tmp_path: Path) -> None:

@@ -115,6 +115,14 @@ RATE_LIMITED = "429"
 LOCK_CONTENDED = "lock_contended"
 HTTP_ERROR = "http_error"
 
+# Status codes (TRDD-OOZP38MN): 0 has always meant "no HTTP response at all" (transport
+# failure). An EXPIRING token is a LOCAL death signal — the network may be perfectly fine —
+# so collapsing it into 0 made every consumer read local expiry as an outage (the rotator's
+# cmd_auto then declared the network down and rotated blind). -1 is unambiguous: it can
+# never collide with a real HTTP code, and every legacy `status == 0` check keeps meaning
+# exactly "transport failure".
+EXPIRING_TOKEN_STATUS = -1
+
 _NO_LOCK = object()  # sentinel: proceed unlocked (fcntl absent, or the FS refuses locks)
 
 
@@ -531,7 +539,9 @@ def probe(
 
     The status vocabulary is the rotator's existing load-bearing contract and is preserved
     exactly: `200` + payload, `429` == rate-limited, `401/403` == bad token, `0` ==
-    unknown (no HTTP response, no usable token). Callers that already debounce a 429
+    unknown (no HTTP response, no usable token), `-1` == the token is expired or within
+    30 s of expiry (EXPIRING_TOKEN_STATUS — a LOCAL death signal, distinct from 0's
+    transport failure, TRDD-OOZP38MN). Callers that already debounce a 429
     keep working unchanged; the only behavioural change is that a 429 now SUPPRESSES
     further probing for the back-off window instead of being re-provoked every 60 s.
 
@@ -566,9 +576,12 @@ def probe(
 
     if expires_at and expires_at < at + 30:
         # Expired or about to be. Claude Code rotates its own credential; probing with a
-        # token that dies mid-flight would spend a request to learn nothing.
+        # token that dies mid-flight would spend a request to learn nothing. Reported as
+        # EXPIRING_TOKEN_STATUS (-1), NOT 0: 0 means "no HTTP response — the network is
+        # down", but this is a LOCAL death signal observed with no request at all (the
+        # rotator's cmd_auto keys its network-up/down split on that difference, TRDD-OOZP38MN).
         _out(EXPIRING_TOKEN)
-        return 0, None
+        return EXPIRING_TOKEN_STATUS, None
 
     # Serialize the fetch across processes. The 60 s daemon beat and a session detector can
     # both clear the checks above before either fires; without this they double-hit the

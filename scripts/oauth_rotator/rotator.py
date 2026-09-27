@@ -1372,7 +1372,10 @@ def usage_request(blob: dict) -> tuple[int, dict | None]:
              precisely the signal to rotate AWAY; for an alternate it means "not
              a safe target".
       401/403/0 -> bad token / network error -> "unknown, don't act".
-    `status == 0` means a network/parse failure (no HTTP response).
+    `status == 0` means a network/parse failure (no HTTP response). `status == -1`
+    (usage_probe.EXPIRING_TOKEN_STATUS, TRDD-OOZP38MN) means the token is already
+    expired or within 30 s of LOCAL expiry — no request was sent, so it says
+    NOTHING about the network; callers must never fold it into 0.
 
     The request itself lives in `usage_probe` (TRDD-WEBA1RMF), which caches per account,
     honors the endpoint's back-off, and — load-bearing — sends a `claude-code/*`
@@ -1993,6 +1996,12 @@ def cmd_auto() -> int:
     # `network_up` separates a token-specific failure (401/403/429 — the server answered, so
     # alternate tokens CAN still be usage-probed) from a transport failure (status 0 — no HTTP
     # response, so alternates are unreachable too and we fall back to LOCAL expiry signals).
+    # -1 (EXPIRING_TOKEN_STATUS, TRDD-OOZP38MN) is NOT a transport failure: the probe refused
+    # to spend a request on a locally-dying token, and the network may be perfectly fine.
+    # The bug was that the probe returned 0 for it, so this comparison read local expiry as
+    # an outage and the tick rotated blind on the degraded path. With -1 distinct, the
+    # comparison itself is correct as written; the live token's own death is handled by
+    # live_expired below, and alternates are usage-probed normally.
     network_up = live_status != 0
     # Decide whether the LIVE account must be rotated AWAY from. A 429 is the usage-limit signal
     # (debounced — it can be a transient endpoint throttle); 401/403 is the server rejecting a
@@ -2097,6 +2106,13 @@ def cmd_auto() -> int:
     elif live_status in (401, 403):
         near = True  # server REJECTED the token (expired/invalid) — authoritative death signal
         live_desc = "token REJECTED (HTTP %d) — expired/invalid" % live_status
+    elif live_status == usage_probe.EXPIRING_TOKEN_STATUS:
+        # TRDD-OOZP38MN: the probe refused PRE-FLIGHT on LOCAL expiry (<30 s runway) — no HTTP
+        # call was attempted, so this is a death signal about the TOKEN, not the network
+        # (network_up is True and alternates are usage-probed below). The old flow collapsed
+        # this into status 0, read it as an outage, and degraded-rotated blind.
+        near = True
+        live_desc = "LOCALLY EXPIRED (probe refused: <30s runway)"
     elif live_expired:
         near = True  # no HTTP response, but the local expiresAt says the token is already dead
         live_desc = "LOCALLY EXPIRED + API unreachable (status %s)" % live_status
