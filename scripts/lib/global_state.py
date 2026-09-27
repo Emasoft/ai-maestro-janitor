@@ -902,6 +902,48 @@ def clear_version_update_request() -> None:
     _flag_clear_dual("version-update-requested.flag")
 
 
+# ---------- retry-wedge → immediate rotator tick (TRDD-GXXKAGY6) ---------------------
+#
+# Same shape as the version-update request above: a trigger RAISES this request flag and
+# the daemon CONSUMES it on its next loop, running the oauth-rotator-tick Task NOW instead
+# of on its 60 s beat. TRDD-GXXKAGY6 / D7 of TRDD-4XND73XD: a trigger (retry wedge) only
+# SCHEDULES a tick — the tick still respects the usage cache, the cooldown and at most one
+# per MIN_DWELL_S, all enforced inside rotator.py's cmd_auto. Clear-before-run with the
+# same never-lost contract: a run that fails is re-signalled by the wedged pane persisting,
+# which re-triggers on the next detection pass.
+
+def _rotator_tick_request_path() -> Path:
+    return _control_path("rotator-tick-requested.flag")
+
+
+def rotator_tick_requested_present() -> bool:
+    """True iff a wedge trigger (the daemon's own session-liveness beat) has requested an
+    immediate rotator tick (TRDD-GXXKAGY6). The daemon checks this each loop and, when
+    set, runs the oauth-rotator-tick task NOW rather than waiting for the 60 s beat.
+    Dual-read across control_dir() and the pre-control-dir global_state_dir() location,
+    same as every other control-plane flag."""
+    return _flag_present_dual("rotator-tick-requested.flag")
+
+
+def request_rotator_tick(reason: str = "") -> None:
+    """Raise the wedge-triggered immediate-tick request at control_dir(). Idempotent
+    (re-writing the flag is harmless; the daemon clears it on consume). Atomic provenance
+    body, best-effort — a write failure just falls back to the 60 s beat (fail-open), so
+    this never crashes the recovery beat that calls it."""
+    try:
+        _write_flag_provenance(_rotator_tick_request_path(), reason or "retry-wedge")
+    except OSError:
+        pass
+
+
+def clear_rotator_tick_request() -> None:
+    """Clear the wedge-triggered immediate-tick request from every location it may live.
+    The daemon calls this BEFORE running the tick (clear-before-run: a tick that fails is
+    re-signalled by the wedged pane persisting, never lost to a clear-after-run crash).
+    Idempotent."""
+    _flag_clear_dual("rotator-tick-requested.flag")
+
+
 # ---------- per-plugin update QUEUE (universal auto-update, TRDD-YMTUPQER) -----------
 #
 # Generalizes the version-update self flag above from "update the janitor" to "update ANY

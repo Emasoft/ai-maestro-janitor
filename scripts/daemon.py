@@ -799,6 +799,11 @@ def task_oauth_rotator_tick() -> None:
     only block the daemon's OWN subprocess (the manual run never checks it), so it
     could not prevent the daemon-vs-manual race. The daemon is already a singleton,
     so there is no daemon-vs-daemon race for a wrapper lock to guard anyway.
+
+    TRDD-GXXKAGY6: when this run was SCHEDULED by a wedge trigger (`_consume_rotator_tick_request`
+    sets `JANITOR_ROTATOR_WEDGE_TICK=1` around `task.run()`), the subprocess env carries it so
+    cmd_auto treats the live 429 as already debounced (see rotator.wedge_tick_requested for the
+    heuristic). A beat-scheduled run leaves it unset, so the ordinary path is byte-identical.
     """
     if not oauth_supervisor.opt_in_present():
         return  # rotator not activated on this machine -> silent no-op
@@ -1901,6 +1906,17 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # and the session then just sits idle, strictly worse than the wedge (which at
             # least made the stall visible).
             fleet_scan.write_rate_limited_flag(inst.project_root, now)
+            # TRDD-GXXKAGY6 — a confirmed retry wedge is a 429-shaped wall the ROTATOR is the
+            # remedy for, so schedule its tick NOW (the main loop consumes ≤ ~60 s) instead of
+            # letting the rotation wait for the next 60 s beat. HEURISTIC (owner decision
+            # 2026-09-27, "it depends on the context. use heuristic."): this site counts as a
+            # debounced 429 because `retry_wedged` already IS a debounce — the diagnosis only
+            # fires after the wedge's attempt number ADVANCED across polls (a multi-observation
+            # confirmation), which is the same repeated-evidence bar the rotator's own
+            # LIVE_429_DEBOUNCE applies to a raw 429. Scheduling is idempotent + fail-open and
+            # the tick still runs every existing guard, so a spurious raise costs at most one
+            # early tick.
+            gs.request_rotator_tick("retry-wedged-esc")
         # TRDD-N954KWUC P3 — the rung's keystrokes now go through the policy table. The
         # caller-supplied payload is what this pure table cannot see: the command the rung
         # resolved and the hard/soft law its DIAGNOSIS dictates (a 15-minute-stale transcript
@@ -3118,6 +3134,36 @@ def _consume_version_update_request(tasks: list[Task]) -> bool:
     return True
 
 
+def _consume_rotator_tick_request(tasks: list[Task]) -> bool:
+    """Wedge-triggered immediate rotator tick consume (TRDD-GXXKAGY6).
+
+    The session-liveness beat RAISES `rotator-tick-requested.flag` when a confirmed retry
+    wedge is on screen (the 429-shaped wall the rotator is the remedy for); this runs the
+    oauth-rotator-tick task NOW (≤ ~60 s, one loop pass) instead of waiting for the next
+    60 s beat — same clear-before-run shape as `_consume_version_update_request` (TRDD-
+    Y9KM5RCJ): the flag is cleared first, a wedged pane that persists re-signals on the
+    next detection pass, and going through the Task's `.run()` keeps the failcount/backoff
+    bookkeeping while forcing the run past its cadence. The wedge context rides to the
+    rotator SUBPROCESS as `JANITOR_ROTATOR_WEDGE_TICK=1` (the env var is the only channel
+    that crosses the subprocess boundary — the JANITOR_ROTATOR_HEADLESS precedent), set
+    around `task.run()` and popped after so a beat-scheduled run never inherits it; cmd_auto
+    then treats the live 429 as already debounced (rotator.wedge_tick_requested). Gated on
+    the task NOT being yielded to the ai-maestro server — a tick we must not run must not be
+    scheduled into running either. Returns True iff a request was consumed."""
+    if not gs.rotator_tick_requested_present():
+        return False
+    gs.clear_rotator_tick_request()
+    for task in tasks:
+        if task.name == "oauth-rotator-tick":
+            os.environ["JANITOR_ROTATOR_WEDGE_TICK"] = "1"
+            try:
+                task.run()
+            finally:
+                os.environ.pop("JANITOR_ROTATOR_WEDGE_TICK", None)
+            break
+    return True
+
+
 def _consume_plugin_update_requests() -> int:
     """Universal per-plugin update consume (TRDD-YMTUPQER) — the single-writer half.
 
@@ -3510,6 +3556,15 @@ def main() -> int:
             # old `not in yielded` gate had become a dead always-true condition. The
             # consumer itself is daemon-owned by design; the server never reads our queue.
             _consume_plugin_update_requests()
+            if "oauth-rotator-tick" not in yielded:
+                # Wedge-triggered immediate rotator tick (TRDD-GXXKAGY6): consume any pending
+                # request from the session-liveness beat's wedge detection and run the tick
+                # NOW (≤ ~60 s) instead of on its 60 s beat. Same placement rationale as the
+                # version-update consume above — AFTER the stop/pause branches (reaching here
+                # means the daemon is actively working) and BEFORE the due-loop. While the
+                # server owns the tick the request stays QUEUED, so the moment the server
+                # drops, the wedge's tick runs.
+                _consume_rotator_tick_request(tasks)
 
             bulk_busy = _run_due_tasks(tasks, yielded)
 
@@ -3537,6 +3592,12 @@ def main() -> int:
             sleep_for = _sleep_seconds(tasks, yielded, bulk_busy)
             for _ in range(sleep_for):
                 if not _running or gs.kill_switch_present():
+                    break
+                # A wedge request raised by THIS daemon's own session-liveness beat (or a
+                # future external writer) must not wait out a full sleep window: break to
+                # the top, where the consume above runs the tick. Cost: one extra loop
+                # pass; the check is the same one-stat class as the kill-switch probe above.
+                if gs.rotator_tick_requested_present():
                     break
                 time.sleep(1)
     finally:

@@ -584,6 +584,26 @@ def _primary_secret_read_permitted() -> bool:
     return raw in ("", "0", "false", "no", "off")
 
 
+def wedge_tick_requested() -> bool:
+    """True when THIS tick was scheduled by a retry-wedge trigger (TRDD-GXXKAGY6), not by the
+    ordinary 60 s beat. The daemon sets ``JANITOR_ROTATOR_WEDGE_TICK=1`` for the tick
+    subprocess it runs on consuming a wedge request — the same transport as
+    ``JANITOR_ROTATOR_HEADLESS`` above, because the rotator runs as a SUBPROCESS and cannot
+    read the daemon's control-plane flag itself.
+
+    HEURISTIC (owner decision 2026-09-27, "it depends on the context. use heuristic."):
+    the wedge trigger counts as a DEBOUNCED 429 at the live-account check — a confirmed
+    wedge means the account's wall is already days/hours old on screen (the daemon only
+    raises after the wedge's attempt number advanced across polls, i.e. repeated
+    observation, the same repeated-evidence bar LIVE_429_DEBOUNCE applies to a raw 429),
+    so making the tick wait out the streak a second time would save nothing. Every other
+    guard (usage cache, cooldown, MIN_DWELL_S) is untouched: the wedge only buys an EARLY
+    tick, never a bypassed one.
+    Unset (any other caller — manual tick, statusline, keepalive) → False → the standard
+    LIVE_429_DEBOUNCE behaviour, byte-identical to before."""
+    return os.environ.get("JANITOR_ROTATOR_WEDGE_TICK", "").strip() == "1"
+
+
 def _read_primary_macos_keychain(acct: str) -> dict | None:
     """The macOS `security -w` read of the primary live item, or None if absent / unreadable /
     SKIPPED because headless (FIX B2).
@@ -2113,6 +2133,14 @@ def cmd_auto() -> int:
     if live_status == 429:
         streak = int(state.get("live_429_streak", 0)) + 1
         state["live_429_streak"] = streak
+        # TRDD-GXXKAGY6 heuristic (see wedge_tick_requested): a WEDGE-scheduled tick treats the
+        # live 429 as already debounced — the daemon only raises after the wedge's attempt
+        # number advanced across polls (repeated observation), so the streak gate has
+        # effectively been satisfied on screen; waiting it out again would only defer the
+        # rotation a beat for no new information. A normal-beat tick keeps the streak gate.
+        _wedge_debounced = wedge_tick_requested()
+        if _wedge_debounced:
+            streak = max(streak, LIVE_429_DEBOUNCE)
         if streak >= LIVE_429_DEBOUNCE and live_email:
             # A DEBOUNCED 429 is a real limit — record where the wall actually was as an
             # effective-cap sample (TRDD-FQXBURNR). The 61%-then-hard-429 incident means the
@@ -2124,7 +2152,7 @@ def cmd_auto() -> int:
             _decide("auto: live %s returned 429 (streak %d/%d) — likely a transient usage-endpoint throttle, not a real limit; deferring rotation" % (live_email or "(live)", streak, LIVE_429_DEBOUNCE))
             return 0
         near = True
-        live_desc = "RATE-LIMITED (429 x%d)" % streak
+        live_desc = "RATE-LIMITED (429 x%d%s)" % (streak, ", wedge-debounced" if _wedge_debounced else "")
     elif live_status == 200:
         if state.get("live_429_streak"):
             state["live_429_streak"] = 0
