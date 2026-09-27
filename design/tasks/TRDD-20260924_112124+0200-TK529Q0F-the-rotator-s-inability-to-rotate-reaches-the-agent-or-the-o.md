@@ -3,7 +3,7 @@ trdd-id: TK529Q0F
 title: The rotator's inability to rotate reaches the agent or the owner at once
 column: testing
 created: 2026-09-24T11:21:24+0200
-updated: 2026-09-27T15:52:08+0200
+updated: 2026-09-27T15:57:54+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -25,6 +25,7 @@ Release 1 of TRDD-RAEGS1D5. On 2026-09-24 the rotator logged "no usable slot twi
 
 - 2026-09-24T11:21:24+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-27T15:52:08+0200 — column → testing by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); escalation path landed 01f3ddb5 re-verified by main; live dead-end observation remains as testing evidence
+REVIEW ROUND 1 (2026-09-27, adversarial fork on 01f3ddb5) — verdict: no code changes required; card correctly in testing. Routing framing resolved: the owner-facing CRITICAL push is OUTSIDE the 6ESS2MGE/WZKFSQ2N-decision-3 agent-facing invisibility rule's scope (that rule governs what reaches the main agent; a stuck rotator needs owner-only action — reauth/minted credentials — so this is not an exception to it at all; the card's commit-message 'explicit exception' phrasing overstated it). Watch items for the live observation: (1) dedupe key verified per-state in source (oauth-login-needed.py:408: state_key = f"stuck-{kind}-{detail}") — the A/B flip behavior the review flagged as unverified is machine-pinned; (2) staleness threshold absorbing transient flips is the parameter to watch live; (3) forget-on-resolve clearing all keys accepted as designed — failure direction is over-alarming, the safe direction for a silence-is-the-failure condition.
 
 ## Review corrections 2026-09-24
 
