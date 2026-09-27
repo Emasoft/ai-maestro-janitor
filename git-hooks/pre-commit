@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Pre-commit hook — refuses a commit that would drop a tracked script's
-# executable bit (TRDD-3JBPW12E). A fastedit/Write rewrite recreates a file
-# at mode 644; tests/test_detector_executable_bits.py already detects this
-# from the git index in 0.2s, so run it at commit time instead of catching
-# it later at CI or the publish gate.
+# Pre-commit hook — two stages:
+#   1. Privacy-leak scan (TRDD-FWDZDB7W): the staged diff is scanned for
+#      personal e-mails, home paths, machine identity and PII shapes by
+#      scripts/lib/staged_privacy_scan.py (reuses the G1b lint and the
+#      private_path_patterns / privacy_patterns libraries). Any hit BLOCKS
+#      the commit with a MASKED value; a scanner failure also blocks —
+#      no silent bypass. Values the file already holds at HEAD are not
+#      re-flagged, so editing an owner-accepted card is not re-blocked.
+#   2. Executable-bit check (TRDD-3JBPW12E): refuses a commit that would
+#      drop a tracked script's executable bit. A fastedit/Write rewrite
+#      recreates a file at mode 644; tests/test_detector_executable_bits.py
+#      detects this from the git index in 0.2s.
 #
 # THIS FILE IS THE SOURCE — edit it here. `publish.py::install_hook` copies
 # it to .git/hooks/pre-commit and sets core.hooksPath=git-hooks (see
@@ -11,7 +18,15 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-# Capture output (instead of letting pytest stream straight to the
+# Stage 1 — staged-diff privacy scan. Fail toward BLOCKING: exit 2 from the
+# scanner (git failure, no toplevel) blocks the commit too, never waves it
+# through with a warning.
+uv run python scripts/lib/staged_privacy_scan.py || {
+  echo "pre-commit: privacy scan blocked the commit (see BLOCKED output above)."
+  exit 1
+}
+
+# Stage 2 — capture output (instead of letting pytest stream straight to the
 # terminal) so the failure message below can tell an exec-bit violation
 # apart from an unrelated pytest failure. WHY: on 2026-09-24 a concurrent
 # worker edited a tracked file mid-run, tripping the suite's real-state
