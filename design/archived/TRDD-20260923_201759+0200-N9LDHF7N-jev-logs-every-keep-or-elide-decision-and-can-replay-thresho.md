@@ -1,9 +1,9 @@
 ---
 trdd-id: N9LDHF7N
 title: Jev logs every keep or elide decision and can replay thresholds to tune them
-column: testing
+column: complete
 created: 2026-09-23T20:17:59+0200
-updated: 2026-09-24T11:30:17+0200
+updated: 2026-09-27T13:07:04+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -16,6 +16,7 @@ approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T20:17:59+0200
 implementation-commits: [a9b338c6, e904477d, a07473b2, 59e782e5]
 review-after: 2026-10-01
+status: archived
 ---
 
 # Jev logs every keep or elide decision and can replay thresholds to tune them
@@ -26,7 +27,13 @@ Card 7 of the Jev reference gap analysis (2026-09-23). The relevance and decisio
 
 - 2026-09-23T20:17:59+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T11:21:40+0200 — column → testing by janitor-main-session. decision log and replay landed; threshold tuning needs about a week of logged decisions after the release
+- 2026-09-27T13:07:04+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); independent lean-worker verdict DONE (batch2), evidence named per box.
 
 ## Review corrections 2026-09-24
 
 No usable data exists until the release plus about 7 days: the installed v3.5.7 has no Jev. A harness run on 2026-09-24 exercised the writer, the .seen dedupe and the lock on real input (13 MB, 3 sessions, kept in reports_dev/jev-harness-shadow-20260924/); it is excluded from tuning because no resumed session can ever expand those items.
+
+## Acceptance
+
+- [x] implementation DONE: Jev logs every keep/elide decision with threshold replay; the tuning box is time-gated observation, not human-blocked
+- [x] worker re-ran the card's named tests on HEAD 2026-09-27 (batch2 report carries commands + results); owner batch acceptance 2026-09-27 ("complete all TRDDs")

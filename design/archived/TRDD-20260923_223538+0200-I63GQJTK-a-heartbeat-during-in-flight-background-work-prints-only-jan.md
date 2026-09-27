@@ -1,9 +1,9 @@
 ---
 trdd-id: I63GQJTK
 title: A heartbeat during in-flight background work prints only janitor heartbeat, so a working session looks stalled to the owner
-column: testing
+column: complete
 created: 2026-09-23T22:35:38+0200
-updated: 2026-09-25T15:08:10+0200
+updated: 2026-09-27T13:07:02+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: bugfix
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: Emasoft
 approval-datetime: 2026-09-23T22:35:38+0200
-status: tasked
+status: archived
 ---
 
 # A heartbeat during in-flight background work prints only janitor heartbeat, so a working session looks stalled to the owner
@@ -25,6 +25,7 @@ Owner, 2026-09-23 22:35 (verbatim): "you stopped again? and the janitor is the o
 
 - 2026-09-23T22:35:38+0200 — MANDATE issued by Emasoft (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-25T15:08:10+0200 — column → testing by main-agent@ai-maestro-janitor. fix ac751f1d + 4 tests landed; acceptance shapes pinned
+- 2026-09-27T13:07:02+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); independent lean-worker verdict DONE (batch2), evidence named per box.
 
 ## Cause and threshold (review 2026-09-23)
 
@@ -34,3 +35,8 @@ Owner, 2026-09-23 22:35 (verbatim): "you stopped again? and the janitor is the o
 ## STATE
 
 2026-09-25 15:05 — RECONCILIATION: the fix landed in ac751f1d (fix(heartbeat): a quiet fire says how many background workers are running, and flags one that stalled) with its tests in tests/test_dispatch_phases.py (4 pass on HEAD; _phase_background_worker_progress in scripts/dispatch.py). All three acceptance shapes are pinned: progress line when workers run, plain quiet when idle, stall finding past the threshold. Acceptance met; column -> testing.
+
+## Acceptance
+
+- [x] fix ac751f1d landed (_phase_background_worker_progress in scripts/dispatch.py); 203 passed on the combined run
+- [x] worker re-ran the card's named tests on HEAD 2026-09-27 (batch2 report carries commands + results); owner batch acceptance 2026-09-27 ("complete all TRDDs")

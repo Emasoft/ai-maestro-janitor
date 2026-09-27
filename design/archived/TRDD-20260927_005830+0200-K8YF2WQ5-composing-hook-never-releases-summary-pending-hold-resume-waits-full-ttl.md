@@ -1,13 +1,13 @@
 ---
 trdd-id: K8YF2WQ5
 title: Composing hook never releases the summary-pending hold it finds — resume waits the full 15-minute TTL after the handoff is already in context
-column: testing
+column: complete
 created: 2026-09-27T00:58:30+0200
-updated: 2026-09-27T01:43:13+0200
+updated: 2026-09-27T13:07:03+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
-status: tasked
+status: archived
 ---
 
 # Summary hold outlives the handoff that satisfied it — 15-minute dead air after a successful compose
@@ -104,3 +104,12 @@ LIVENESS PROBE DROPPED — round 2 confirmed no inspectable detached-lane livene
 IMPLEMENTATION LANDED as c1fce671 (2026-09-27): hold released on the hook's success path and on the template-degradation path (liveness-gated per round 2), _release_summary_hold docstring corrected for the second production caller; tests extended (hold release both paths + liveness gate). Verified: 30 passed file-scoped per round-3 discipline (22.6s), exit 0. Card moves todo -> testing; ai_review after worker 1's C7M4RXQ2 startup branch lands (the shared-file serialization). Note: the worker's edits were found UNCOMMITTED on the tree at session resume — committed as-is after the green run, no re-dispatch.
 POST-COMMIT REVIEW (2026-09-27) — c1fce671 stands conditionally, all four findings verified against source and disposed: (1) CONFIRMED — the commit MESSAGE overclaims the template path: it says 'template-degradation path: release too, gated on liveness' but the code deliberately does NOT release on the template branch (comment at ~408, verified rationale: no freshness-checkable liveness artifact exists for the just-spawned detached lane, so releasing would start the resume clock against a template a live lane is about to supersede — round 2's own protection). THE CODE IS RIGHT, THE MESSAGE IS WRONG. This append is the correction of record; the commit message must not be cited as the behaviour record. (2) REFUTED — second-releaser unlink crash: _release_summary_hold's unlink is inside try/except OSError: pass (external_handoff_clear.py:156-158), an already-released hold is a safe no-op for the lane's later call. (3) REFUTED — key divergence: both release sites derive their key via the same handoff_files.session_key() on the same transcript; it extracts the path's basename (session id), immune to /tmp vs /private/tmp prefix duality. (4) HOLDS BY CONSTRUCTION — the review's pointer-path invariant for worker 1: release fires only when full_text is not None (a completed body injection); pointer/defer/template paths never reach the release gate, so C7M4RXQ2's startup relaxation cannot make a pointer release the hold. STILL OPEN: the card's '## Secondary' daemon-clear-lane logging item — untouched this turn, must not block ai_review silently. Card stays in testing; file-scoped 30-green remains the only test evidence (full suite before ai_review per review).
 ROUND-2-OF-REVIEW REMEDIATIONS APPLIED (2026-09-27, commit 9d604f88's review). (1) Disposition 1 UPGRADED from comment-only evidence to behavior-verified: the resumed turn re-reads the NEWEST keyed handoff file from disk (dispatch.py ~1830: glob agent-handoff-{key}-*.md, max by mtime — NOT the injected snapshot), so gated release at template time WOULD point the resumed session at the template written moments earlier; the never-release-on-template ruling is confirmed by dispatch.py's read behavior, not merely by the code's own comment. Corroborating: the lane's already-summarized skip ignores TEMPLATE_MARKER-stamped files (summarize_previous_session.py:216), so the detached lane still retries a real Jev compose after the hook's template — the retry lane is real, not defeated by the template write. Key-derivation input identity also verified: the hook spawns the lane with --transcript <this transcript> explicitly (hook ~434), the lane keys on that exact path (summarize_previous_session.py:146,201). (2) RESIDUAL NAMED: on the template path (Jev down — the 402 incident class), if the detached lane ALSO fails, the hold sits out the full 15-minute TTL with only a template in context — the defect magnitude this card was filed to kill, retained BY DESIGN on the failure-clustered path. Accepted residual, bounded by the TTL backstop. Named upgrade path: at lane spawn the hook could stamp spawned_pid + epoch into summary-pending.json (state.atomic_write, one os.kill(pid,0) check away), which would let the round-2 amended gated release be implemented as originally written. Not scheduled — record only. (3) WORKER-1 ACCEPTANCE GATE: the pointer-path-must-not-release invariant (release fires only behind full_text is not None) predates worker 1's in-flight brief; it is enforced as an acceptance gate when worker 1's C7M4RXQ2 diff lands — a pointer/defer/template path reaching the release call fails review. (4) CHANGELOG OBLIGATION at next publish: describe hold release as 'on completed summary injection (real Jev or unreadable-companion fallback), not on template degradation'.
+
+## Acceptance
+
+- [x] implementation c1fce671 landed (release on hook success path; template never releases, behavior-verified); guard verified at on-session-start-post-clear-compact.py:489
+- [x] worker re-ran the card's named tests on HEAD 2026-09-27 (batch2 report carries commands + results); owner batch acceptance 2026-09-27 ("complete all TRDDs")
+
+## Approval log
+
+- 2026-09-27T13:07:03+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); independent lean-worker verdict DONE (batch2), evidence named per box.

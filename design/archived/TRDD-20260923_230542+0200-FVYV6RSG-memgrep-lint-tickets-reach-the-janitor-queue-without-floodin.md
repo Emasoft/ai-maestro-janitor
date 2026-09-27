@@ -1,9 +1,9 @@
 ---
 trdd-id: FVYV6RSG
 title: memgrep lint tickets reach the janitor queue without flooding it
-column: testing
+column: complete
 created: 2026-09-23T23:05:42+0200
-updated: 2026-09-25T17:46:33+0200
+updated: 2026-09-27T13:07:00+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T23:05:42+0200
-status: tasked
+status: archived
 ---
 
 # memgrep lint tickets reach the janitor queue without flooding it
@@ -26,6 +26,7 @@ the owner removed the per-call cap on OPENING tickets (TRDD-XI10BA5D), so dispat
 - 2026-09-23T23:05:42+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-25T15:52:33+0200 — column → testing by main-agent@ai-maestro-janitor. wired lint->ticket with verb map + held-page filter; 4 tests green; all gates clean
 - 2026-09-25T15:56:12+0200 — column → testing by main-agent@ai-maestro-janitor. wired lint->ticket with verb map + held-page filter; 4 tests green; all gates clean
+- 2026-09-27T13:07:00+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); independent lean-worker verdict DONE (batch2), evidence named per box.
 
 ## Re-scope 2026-09-23
 
@@ -37,3 +38,8 @@ the owner removed the per-call cap on OPENING tickets (TRDD-XI10BA5D), so dispat
 2026-09-25 15:30 — implemented: wikimem-syntax.py raises MEMCORP-001 per new finding (raise_issue dedupe makes it idempotent); body = path:line + rule code + mapped chore (atom-oversized -> /janitor-memory-atomize, link-one-sided -> /janitor-memory-update, cross-scope -> agent's own decision), never page text; held agentlenspro/ghbook pages skipped; dispatch bound min(per_fire, budget, inflight) confirmed shared for memory-corpus via KIND_REGISTRY. 4 new tests (tests/test_wikimem_syntax_tickets.py); ruff/mypy/pyright clean. Column -> testing.
 2026-09-25 16:20 — review fix: dedupe key = code + page basename (line dropped). A line-sensitive key re-filed a durable ticket for the SAME defect after any edit above the atom shifted the line; where= still carries the newest line. Per-project ledger locality (N projects could each file one ticket for a machine-global corpus defect) accepted as a documented bound: the dispatch cap bounds agents, and the ERROR filter currently passes zero live findings.
 2026-09-25 17:10 — second review round: dedupe-key trade ruled right (same-chore collisions recoverable via memgrep lint; the alternative re-filed per line shift). Notes: (1) _held substring matching could silently skip a janitor-owned page whose PATH merely contains agentlenspro — tighten to root-segment match when next touched; (2) the key migration landed at zero live tickets (ERROR filter passes none), so no orphaned old keys exist; (3) per-project ledger locality confirmed accepted.
+
+## Acceptance
+
+- [x] MEMCORP-001 wired in scripts/lib/wikimem-syntax.py; body = path:line + rule code + chore, never page text; held pages skipped; all re-scoped conditions discharged in STATE with passing tests
+- [x] worker re-ran the card's named tests on HEAD 2026-09-27 (batch2 report carries commands + results); owner batch acceptance 2026-09-27 ("complete all TRDDs")

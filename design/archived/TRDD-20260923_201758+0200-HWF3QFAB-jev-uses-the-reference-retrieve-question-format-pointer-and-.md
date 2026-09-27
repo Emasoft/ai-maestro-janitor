@@ -1,9 +1,9 @@
 ---
 trdd-id: HWF3QFAB
 title: Jev uses the reference RETRIEVE_QUESTION, format_pointer and asks the decision question only of the user's own messages
-column: testing
+column: complete
 created: 2026-09-23T20:17:58+0200
-updated: 2026-09-23T23:23:37+0200
+updated: 2026-09-27T13:07:01+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: refactor
@@ -16,6 +16,7 @@ approval-judge: janitor-main-session
 approval-datetime: 2026-09-23T20:17:58+0200
 derived: true
 parent-trdd: RAEGS1D5
+status: archived
 ---
 
 # Jev uses the reference RETRIEVE_QUESTION, format_pointer and asks the decision question only of the user's own messages
@@ -26,3 +27,9 @@ Card 5 of the Jev reference gap analysis (2026-09-23, owner: most reference func
 
 - 2026-09-23T20:17:58+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-23T21:10:50+0200 — column → testing. code landed and committed 2026-09-23 with tests; awaiting the real-transcript compaction on the final tree and the release
+- 2026-09-27T13:07:01+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); independent lean-worker verdict DONE (batch2), evidence named per box.
+
+## Acceptance
+
+- [x] scripts/lib/jev_compaction.py:38 imports RETRIEVE_QUESTION/format_pointer from jevctx.pipeline; VENDORED.md documents the vendor rule; code+tests+real-transcript acceptance recorded
+- [x] worker re-ran the card's named tests on HEAD 2026-09-27 (batch2 report carries commands + results); owner batch acceptance 2026-09-27 ("complete all TRDDs")
