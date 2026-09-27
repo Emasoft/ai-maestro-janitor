@@ -1,9 +1,9 @@
 ---
 trdd-id: TK529Q0F
 title: The rotator's inability to rotate reaches the agent or the owner at once
-column: todo
+column: testing
 created: 2026-09-24T11:21:24+0200
-updated: 2026-09-24T11:29:24+0200
+updated: 2026-09-27T15:52:08+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -14,6 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:24+0200
+status: tasked
 ---
 
 # The rotator's inability to rotate reaches the agent or the owner at once
@@ -23,7 +24,15 @@ Release 1 of TRDD-RAEGS1D5. On 2026-09-24 the rotator logged "no usable slot twi
 ## Approval log
 
 - 2026-09-24T11:21:24+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-27T15:52:08+0200 — column → testing by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); escalation path landed 01f3ddb5 re-verified by main; live dead-end observation remains as testing evidence
 
 ## Review corrections 2026-09-24
 
 Routing: this goes to the OWNER-facing heartbeat, an explicit exception to decision 3 on TRDD-WZKFSQ2N (findings go to the agent): a can't-rotate state needs a human re-login, which only the owner can do.
+
+## Acceptance
+
+- [x] can-t-rotate states (no-usable-twin, identity-unknowable, all-maxed et al.) mark rotation-stuck.json, cleared on resolution (forget-on-resolve so a recurring dead end re-alarms)
+- [x] a live stuck marker escalates to a CRITICAL OAUTH-ROTATION-STUCK notify.push via the oauth-login-needed heartbeat, with per-state-change dedupe (staleness gate clears markers from a dead rotator)
+- [x] 5 new tests fail on the pre-change behavior and pass now; worker ran the full suite (17606 passed) plus gates clean
+- [x] live-rotation observation at the next real dead end — runtime evidence, not needed for the code change to close
