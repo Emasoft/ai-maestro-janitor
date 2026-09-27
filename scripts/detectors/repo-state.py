@@ -115,25 +115,36 @@ def _last_release_tag(repo: Path) -> str | None:
     creatordate and git's refname tiebreak is ASCENDING, so the OLDER tag
     wins and the detector reports already-released commits as unreleased.
 
-    Peel with `^{commit}` like publish.py does (`_rev_parse_commit`): an
-    annotated tag's own sha is the tag OBJECT's, not the commit's, and
-    comparing it into rev-list ranges silently excludes the released commit.
+    One for-each-ref pass, never a per-tag `rev-parse` peel (TRDD-GXXKAGY6
+    review cure 4): a 2000-tag repo would pay 2000 subprocess spawns per
+    heartbeat. `%(*objectname)` carries the peeled commit for an annotated
+    tag, `%(objectname)` the commit for a lightweight one.
     """
-    proc = _git(repo, "for-each-ref", "--format=%(refname:short)", "refs/tags/")
+    proc = _git(
+        repo,
+        "for-each-ref",
+        "--format=%(refname:short) %(objectname) %(*objectname)",
+        "refs/tags/",
+    )
     if proc is None or proc.returncode != 0:
         return None
     best: tuple[tuple[int, int, int], str] | None = None
-    for name in proc.stdout.splitlines():
-        name = name.strip()
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name, obj = parts[0], parts[1]
+        # %(*objectname) is EMPTY for a lightweight tag — the line then has two
+        # fields, and the peel falls back to %(objectname), which IS the commit.
+        peeled = parts[2] if len(parts) > 2 else ""
         m = _TAG_NAME.match(name)
         if not m:
             continue
-        peel = _git(repo, "rev-parse", "--verify", f"{name}^{{commit}}")
-        if peel is None or peel.returncode != 0:
-            continue
-        ver = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        if best is None or ver > best[0]:
-            best = (ver, name)
+        commit = peeled or obj
+        if commit:
+            ver = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            if best is None or ver > best[0]:
+                best = (ver, name)
     return best[1] if best else None
 
 

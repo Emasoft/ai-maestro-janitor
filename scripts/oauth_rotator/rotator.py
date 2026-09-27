@@ -2132,6 +2132,10 @@ def cmd_auto() -> int:
     burn_only = False    # True ⇒ `near` tripped SOLELY on a burn-gate PROJECTION, not a wall
     if live_status == 429:
         streak = int(state.get("live_429_streak", 0)) + 1
+        # The PRE-RAISE streak is persisted on purpose (TRDD-GXXKAGY6 review cure 1): the
+        # wedge-debounced max() below must NOT leak into state["live_429_streak"], or the
+        # NEXT ordinary beat would inherit an already-satisfied debounce it never earned.
+        # Persist-before-raise is load-bearing — do not hoist the max above this write.
         state["live_429_streak"] = streak
         # TRDD-GXXKAGY6 heuristic (see wedge_tick_requested): a WEDGE-scheduled tick treats the
         # live 429 as already debounced — the daemon only raises after the wedge's attempt

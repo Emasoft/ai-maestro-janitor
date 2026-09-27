@@ -1915,7 +1915,13 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # confirmation), which is the same repeated-evidence bar the rotator's own
             # LIVE_429_DEBOUNCE applies to a raw 429. Scheduling is idempotent + fail-open and
             # the tick still runs every existing guard, so a spurious raise costs at most one
-            # early tick.
+            # early tick. ACCEPTED BEHAVIOR (TRDD-GXXKAGY6 review cure 3, disclosure not a
+            # gate): a wedge that outlives the rotation re-raises each liveness beat, and each
+            # consume runs a no-op tick (MIN_DWELL_S blocks the switch) that still spawns the
+            # rotator subprocess and one usage probe against the rate-limited account — one
+            # probe per ~60 s for as long as the wedge persists. Bounded and small; a
+            # daemon-side raise-throttle would add state for a cost the dwell guard already
+            # caps.
             gs.request_rotator_tick("retry-wedged-esc")
         # TRDD-N954KWUC P3 — the rung's keystrokes now go through the policy table. The
         # caller-supplied payload is what this pure table cannot see: the command the rung
@@ -3155,6 +3161,10 @@ def _consume_rotator_tick_request(tasks: list[Task]) -> bool:
     gs.clear_rotator_tick_request()
     for task in tasks:
         if task.name == "oauth-rotator-tick":
+            # TRDD-GXXKAGY6 review cure 2: the env is set/popped around task.run() in the
+            # SINGLE-THREADED main loop (the bulk lane runs in detached children whose Popen
+            # snapshots os.environ only at spawn, itself sequential after this), so no other
+            # task can read the wedge context mid-window today — the pop is belt, not armor.
             os.environ["JANITOR_ROTATOR_WEDGE_TICK"] = "1"
             try:
                 task.run()
