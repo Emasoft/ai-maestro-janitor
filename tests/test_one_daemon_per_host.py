@@ -475,10 +475,10 @@ def test_the_lease_takeover_logs_once_per_transition(
     iso: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Transition-only logging (TRDD-HXZ8B0IS style): a lapse logs "taking over" once,
-    a re-claim logs "standing down" once, steady state logs nothing. The FIRST call is
-    seeded silent (review cure 2): on a fresh process the empty last-tick set is not a
-    transition, so call 1 with a live lease must log NOTHING — the unseeded bug was one
-    false "standing down" line per daemon restart."""
+    steady state logs nothing, and the FIRST call is seeded silent (review cure 2): on
+    a fresh process the empty last-tick set is not a transition, so call 1 with a live
+    lease must log NOTHING — the unseeded bug was one false "standing down" line per
+    daemon restart. The genuine stand-down direction has its own sibling test below."""
     live = iso["tmp"] / "server-liveness.json"
     monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
     _write_liveness(live)
@@ -503,6 +503,30 @@ def test_the_lease_takeover_logs_once_per_transition(
     takeover_line = next(m for m in logged if "taking over" in m)
     assert "next due pass" in takeover_line, (
         "the takeover line must not overclaim — it unyields only, the run gates on is_due()"
+    )
+
+
+def test_a_genuine_RECLAIM_logs_standing_down_once(
+    iso: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stand-down direction's positive pin (review round-3 cure 2): after the daemon
+    takes a lapsed chore back, the server RE-CLAIMS it (writes a fresh live lease) —
+    that flip must log "standing down" exactly once. Without this test the stand-down
+    branch could be deleted and the suite would stay green."""
+    live = iso["tmp"] / "server-liveness.json"
+    monkeypatch.setenv("JANITOR_AIMAESTRO_LIVENESS_FILE", str(live))
+    _write_liveness(live)
+    lease = _lease_env(monkeypatch, iso["tmp"])
+    tasks = daemon._build_tasks()
+    logged: list[str] = []
+    monkeypatch.setattr(daemon.state, "log_line", lambda _n, m: logged.append(m))
+
+    _write_lease(lease, "memory-guard", "server", lease_until=time.time() - 1)  # lapsed
+    daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), time.time())  # seed
+    _write_lease(lease, "memory-guard", "server", lease_until=time.time() + 600)  # RE-CLAIM
+    daemon._apply_leases(tasks, set(), harness_backend.read_owner_leases(), time.time())
+    assert sum("standing down on live server lease(s)" in m for m in logged) == 1, (
+        "a genuine lapsed→live flip is exactly the stand-down transition the branch logs"
     )
 
 
