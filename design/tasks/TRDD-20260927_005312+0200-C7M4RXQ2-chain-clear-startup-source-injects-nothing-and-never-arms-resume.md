@@ -1,12 +1,13 @@
 ---
 trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
-column: todo
+column: testing
 created: 2026-09-27T00:53:12+0200
-updated: 2026-09-27T01:15:18+0200
+updated: 2026-09-27T02:20:35+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
+status: tasked
 ---
 
 # Chain-clear births a `source=startup` process — nothing injected, resume never armed
@@ -112,3 +113,7 @@ CONSUMED-ARM GLOB VERIFIED IN SOURCE. _consume_sidecar (on-session-start-post-cl
 ## Adversarial review round 4 (2026-09-27)
 
 MECHANICAL SCOPE CONFIRMED with one precision defect, now corrected. Round 4 verified the _consume_sidecar read was sound (writer-side read + docstring corroboration) and that every new instruction traces to rounds 2-3. Its surviving finding, VERIFIED against source before amending: _inject_post_clear_handoff's internal defer-glob (resume-after-clear.{pane_key}.transcript*, on-session-start.py:369) is UNBOUNDED — in the stale-consumed case the new freshness gate says 'fall through to the keyed-pointer path', but the fall-through target matches the stale .consumed-<epoch> and returns SILENTLY: stale-consumed + startup -> silence, the exact failure class this card kills. Correction for worker 1: the startup branch must NOT route the stale-consumed case through _inject_post_clear_handoff's early return. Either (a) stale-consumed matches -> call _emit_manual_clear_pointer(state, sd, reason=<freshness>) DIRECTLY, or (b) compute the startup branch's arm check as: fresh-unconsumed present -> stamp + inject nothing; freshness-bounded-consumed present -> stamp + inject nothing; nothing-fresh -> stamp + _emit_manual_clear_pointer directly (bypassing the unbounded defer-glob). Option (b) keeps one decision site — preferred. The epoch test must assert the POINTER IS EMITTED (not merely 'no stamp + no body' — that assertion passes while the silence hole ships). Two rounds' residual nits recorded here: the second-clear-same-pane case is safe by construction (fresh unconsumed sidecar dominates the glob; the dedicated hook consumes it) and hook-order is moot under order-independent arms — closed. The round-3 'no round 4' clause meant no round on the DESIGN; a mechanical-scope check is exempt (this round was one).
+
+## Implementation record (2026-09-27)
+
+IMPLEMENTATION LANDED 14431416 (phase 1 by worker after [W1-PHASE1-DONE], phase 2 gate relaxation [W1-PHASE2-DONE]; both diffs verified by the orchestrator against this card's amended design before commit). Full suite serial on the final tree: 17574 passed, 2 skipped, 8 subtests in 11m11s, exit 0. All review rounds' gates satisfied: epoch-freshness bound, silence-hole bypass, pointer-emitted assertion, file-scoped tests, flag-never-unlinked. Remaining for done: none in code; card moves todo -> testing per board discipline.
