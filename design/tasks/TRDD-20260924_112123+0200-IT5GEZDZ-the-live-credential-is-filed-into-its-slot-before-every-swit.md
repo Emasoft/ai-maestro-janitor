@@ -3,7 +3,7 @@ trdd-id: IT5GEZDZ
 title: The live credential is filed into its slot before every switch away from it
 column: testing
 created: 2026-09-24T11:21:23+0200
-updated: 2026-09-27T16:11:04+0200
+updated: 2026-09-27T16:28:30+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -25,6 +25,7 @@ Release 1 of TRDD-RAEGS1D5; mirror rules on TRDD-4XND73XD. Depends on the daemon
 
 - 2026-09-24T11:21:23+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-27T16:11:04+0200 — column → testing by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); mirror landed e00e2c7c re-verified by main; live-switch observation remains as testing evidence
+REVIEW ROUND 1 (2026-09-27, adversarial fork on e00e2c7c) — 4 findings resolved: (a) race: mirror reads pre-switch live by construction (same-thread sequential before the new live write); the cross-process refresh window is bounded by the attribution guards, and the blob-identity guard is parked as a live-observation cure only if a misattributed slot is ever observed. (b) fp material VERIFIED in source: fingerprint() hashes the accessToken (rotator.py:1028-1030), so a Claude Code refresh changes the fp and the mirror fires — the silent-never-fire risk is closed. (c) ms-vs-s VERIFIED in source: slot meta stores raw expiresAt ms at every capture site (1598, 2047, 2558; token mint at 1526 is *1000), matching the live blob — the newer-guard compares like units; the review's 'decorative guard' scenario is impossible. (d) except Exception narrowed to ImportError (44c86ca8) — a broken harness_backend now crashes loudly instead of silently meaning 'janitor owns'. Live-switch observation remains the testing evidence.
 
 ## Review corrections 2026-09-24
 
