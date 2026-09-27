@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: dev
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-27T13:52:33+0200
+updated: 2026-09-27T13:56:43+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -110,6 +110,7 @@ commits per card with the WHY in the message.
 - 2026-09-23T06:09:10+0200 — column → todo by claude-main. revert: orchestrator correction — 541CBN36 still owns an open defect, do not unblock RAEGS1D5 yet
 - 2026-09-23T11:22:14+0200 — column → dev. NPT 541CBN36 closed; remaining scope: compaction-lane concurrency guard
 OWNER DECISION 2026-09-27 (verbatim, condensed, decision 7): 'except for plugins, that must pass the strict cpv validation of the canon, there should be no quality gate enforced by default. the user decides (or the MANAGER if inside the ai-maestro harness). of course the janitor must continue warning the main agent of any problem or issue detected in the code at all time, so those cases are prevented.' Resolution of the matrix-gate reconciliation: the DQXMND59 matrix-gate condition ('release only after BLGZTHQ9+U6C3YXEL re-measure') does NOT bind by default — no enforced quality gate beyond the plugin CPV-strict canon; the janitor's warning lane stays on. Publish still waits on the owner's explicit yes (unchanged).
+AGENT-NOTE 2026-09-27 (review round — restores a clause dropped in condensation, NOT owner words from this message): decision 7's owner text includes the decision-authority grant 'the user decides (or the MANAGER if inside the ai-maestro harness)' — load-bearing for every future gate proposal on this card. The publish-waits-on-explicit-yes clause is a restatement of the card's own standing 2026-09-25 rule, not new owner words.
 
 ## Design
 

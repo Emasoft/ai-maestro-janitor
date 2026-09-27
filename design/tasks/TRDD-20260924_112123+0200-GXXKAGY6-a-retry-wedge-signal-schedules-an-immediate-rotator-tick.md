@@ -3,7 +3,7 @@ trdd-id: GXXKAGY6
 title: A retry-wedge signal schedules an immediate rotator tick
 column: todo
 created: 2026-09-24T11:21:23+0200
-updated: 2026-09-27T13:52:22+0200
+updated: 2026-09-27T13:56:43+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -24,6 +24,7 @@ Release 1 of TRDD-RAEGS1D5; item (f) and term D7 on TRDD-4XND73XD. When the 429 
 
 - 2026-09-24T11:21:23+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 OWNER DECISION 2026-09-27 (verbatim: 'it depends on the context. use heuristic.'): the D7 debounce question is settled as a HEURISTIC, not a fixed rule — the implementation decides per-context whether a retry-wedge signal counts as a debounced 429; record the chosen heuristic in the implementation and let live behavior tune it.
+ATTRIBUTION CORRECTION 2026-09-27 (review round on the decision recording): the sentence 'record the chosen heuristic in the implementation and let live behavior tune it' is the RECORDING AGENT'S implementation suggestion, NOT owner words. The owner's decision 6 is exactly: 'it depends on the context. use heuristic.'
 
 ## Review corrections 2026-09-24
 
