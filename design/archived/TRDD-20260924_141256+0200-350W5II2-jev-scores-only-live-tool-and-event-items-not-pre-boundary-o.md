@@ -1,9 +1,9 @@
 ---
 trdd-id: 350W5II2
 title: Jev scores only live tool and event items, not pre-boundary ones
-column: human_review
+column: complete
 created: 2026-09-24T14:12:56+0200
-updated: 2026-09-25T00:30:51+0200
+updated: 2026-09-27T13:48:28+0200
 current-owner: emanuelesabetta
 created-by: emanuelesabetta
 task-type: refactor
@@ -18,7 +18,7 @@ pre-block-column:
 blocked-by: []
 blocker-probe: [trddgrep, --porcelain, show, D7RLXAN1]
 blocker-holds-if: not-match:\t(complete|completed|cancelled|superseded)\t
-status: tasked
+status: archived
 implementation-commits: [71c7f66a]
 ---
 
@@ -40,6 +40,7 @@ Related: TRDD-D7RLXAN1 (builds on its window/boundary machinery; the advisor nam
 - 2026-09-24T14:24:55+0200 — column → blocked by emanuelesabetta. reuses D7RLXAN1's window/is_live machinery; cannot start until D7RLXAN1 lands
 - 2026-09-24T18:14:56+0200 — column → todo by emanuelesabetta. D7RLXAN1 landed (implementation-commits: c7779d84); its window/is_live machinery is now available to build on Cleared blocked-by (--clear-blocker override).
 - 2026-09-25T00:30:51+0200 — column → human_review by main-agent@ai-maestro-janitor. implemented in 71c7f66a; an acceptance condition is unmet and was accepted under a delegated-authority quote from a previous session's handoff while an owner question was open; owner to confirm or reject
+- 2026-09-27T13:48:28+0200 — COMPLETE by user. owner ratification 2026-09-27 (verbatim: '1 - accept'); SK490HKU owns the moved condition.
 
 ## Timing evidence
 
@@ -51,8 +52,11 @@ split_conversation (scripts/lib/jev_compaction.py) now returns (conversation, sc
 
 ## Acceptance
 
-Wall time and cost, real OpenRouter calls, same transcript. Before = exact HEAD 8a5f3852 scripts/jev_compact.py + scripts/lib/jev_compaction.py (byte-identical to git show) swapped into the tree; after = this change. 4eb7bf5d (258 MB, 22754 items, boundary_turn=22603): before ms=30417 items=5305/14972 cost=$0.249; after ms=5455 items=47/125 cost=$0.00185; pre_boundary=14847 (99.2% of the old scored set). accccb8b (7.5 MB, no compact_boundary): pre_boundary=0, so the scored set is identical by construction; after ms=2038. Injected copy (re-render of the 4 cached sessions with cached Jev scores, no new Jev call; before = scripts_dev/350w-scratch/rerender_head.py on HEAD jev_compaction.py, after = scripts_dev/d7-scratch/rerender_d7.py, run back to back, the after run repeated with identical output): inline tool/event blocks before -> after: 4eb7bf5d 8->1, b2bf5b7b 7->7 (no boundary, identical), d30bf250 8->0, fd5cc3e0 10->0. unexplained_count=0 and summary_ok=true on every run, so no live prose is lost. Cause of the drop, traced through _select_injected: every inline block HEAD showed was a pre-boundary item (agent notifications, small tool segments). The new code inlines every inline-eligible live candidate (4eb7bf5d 1 of 1, d30bf250 0 of 0, fd5cc3e0 0 of 0) with room to spare (2.4-3.4 KB unused), but the live items Jev kept are almost all tool results over the per-item cap, which compose already makes pointer-only (TRDD-BLGZTHQ9). So the injected copy's tool/event section is empty on 2 of 3 boundary sessions and its room goes unused: the spec condition that live-only scoring must not starve the injected copy is NOT met as measured. Decision pending: accept (pre-boundary content is covered by the compaction summary and by expand) or follow up on the over-cap tool rule and the unused room. An earlier version of this paragraph compared against scripts_dev/d7-scratch/old-lib, which differs from HEAD by about 200 diff lines, and misattributed the b2bf5b7b and fd5cc3e0 numbers; this paragraph supersedes it.
+- [x] live-only scoring implemented (71c7f66a); 313 Jev tests + gates green (recorded in Decision)
+- [x] unmet live-over-cap condition explicitly moved to TRDD-SK490HKU (follow-up card owns it)
+- [x] delegated-authority accept ratified by the owner 2026-09-27 (verbatim: "1 - accept"), recorded in Decision
 
 ## Decision
 
 2026-09-25 (main session, under the owner's delegated authority, verbatim 2026-09-24: "i've given full authority to decide by yourself, just made the decisions on the base of verified facts and tests. thats it. but go on and deliver the plugin that implements the jev-compaction! we are late!"): ACCEPT the injected-copy drop and commit. Every inline block HEAD showed was a pre-boundary item, which the compaction summary covers and `expand <id>` still reaches; no live prose is lost (unexplained_count=0, summary_ok=true on every run); and the change drops 99.2% of the scored set on 4eb7bf5d (30.4 s to 5.5 s, $0.249 to $0.00185). CORRECTION 2026-09-25 (review of 71c7f66a): this is NOT the root fix for the 46 s against 60 s post-clear hook bound, although this line and the Timing evidence section said so: that 46 s was measured on accccb8b, which has no compaction boundary (pre_boundary=0, scored set identical by construction), so this change does not speed that session up and its load-driven overrun stays unaddressed. Disclosure: the owner quote above comes from the previous session's handoff file, not a fresh answer, and it was applied while a question to the owner about this exact choice was still open in this session; so this card goes to human_review for the owner, not to complete. Verified 2026-09-25 before commit: 313 Jev tests pass, ruff, mypy and pyright clean, every split_conversation caller unpacks 3 values (docs_dev/20260925_000512+0200-trdd-350w5ii2-verify.md). The unmet condition (live over-cap tool results pointer-only while the injected room goes unused) moves to TRDD-SK490HKU.
+RATIFIED by the owner 2026-09-27 (verbatim: '1 - accept'): the delegated-authority accept of 2026-09-25 stands; the unmet live-over-cap acceptance condition remains owned by TRDD-SK490HKU.

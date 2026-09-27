@@ -3,7 +3,7 @@ trdd-id: VT332PJG
 title: Run /effort once in a live session and record whether the model-switch stamp advanced
 column: human_review
 created: 2026-09-16T22:21:39+0200
-updated: 2026-09-16T22:21:39+0200
+updated: 2026-09-27T13:50:04+0200
 current-owner: session
 created-by: session
 task-type: spike
@@ -24,3 +24,4 @@ Owner keystroke wanted by TRDD-GK35MOXU box 3: in any live Claude Code session o
 ## Approval log
 
 - 2026-09-16T22:21:39+0200 — MANDATE issued by session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+PARKED by the owner 2026-09-27 (verbatim: 'we are currently using a gateway with gomodel that does not allow to change effort. we will do it when we will be back to use the anthropic server.'): the /effort live observation waits until the account is back on the Anthropic server; the card stays human_review and keeps blocking GK35MOXU until then.
