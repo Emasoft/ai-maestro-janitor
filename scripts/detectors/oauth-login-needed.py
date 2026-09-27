@@ -212,6 +212,19 @@ def _topup_due(home: Path, now: float, every_days: float) -> bool:
     return (now - last) >= every_days * 86400
 
 
+def _forget_resolved_stuck(home: Path) -> None:
+    """Forget the per-state stuck dedupe keys when no LIVE marker exists (TRDD-TK529Q0F),
+    so an identical dead end recurring later re-alarms instead of staying silent behind an
+    old key. Best-effort; never raises."""
+    seen = home / ".oauth-rotation-stuck-seen.txt"
+    try:
+        keys = [ln.strip() for ln in seen.read_text().splitlines() if ln.strip()]
+    except OSError:
+        return
+    for k in keys:
+        dedupe.emit_forget(seen, k)
+
+
 def main() -> int:
     state.init_state()
 
@@ -234,6 +247,10 @@ def main() -> int:
     # metadata: (email, has_refresh, expires_days). Exactly what the classifier needs.
     facts = supervisor._slot_facts(home, now)
     if not facts:
+        # No slots at all → no rotation is possible either, but the STUCK marker branch
+        # below never runs from here; the key-forget must still happen so a resolved
+        # dead end is forgotten on a machine whose slots were removed (TK529Q0F).
+        _forget_resolved_stuck(home)
         state.rotate_log_if_big("oauth-login-needed")
         return 0
 
@@ -341,35 +358,72 @@ def main() -> int:
         stuck = json.loads((home / "rotation-stuck.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 -- absent (the healthy case) or corrupt: stay silent
         stuck = None
-    if isinstance(stuck, dict) and stuck.get("kind"):
+    seen3 = home / ".oauth-rotation-stuck-seen.txt"
+    # STALENESS GATE. The marker is cleared on a successful rotation, but a host whose
+    # rotator stopped running entirely would leave one behind forever. Only report while
+    # the condition is still being OBSERVED (last_seen within the hour), so this can never
+    # nag about a dead end that ended when the rotator did — and anything NOT live here
+    # (absent, corrupt, stale) falls to the forget arm below.
+    stuck_live = (
+        isinstance(stuck, dict) and stuck.get("kind")
+        and (now - int(stuck.get("last_seen_epoch") or 0)) <= 3600
+    )
+    if stuck_live:
+        assert stuck is not None  # narrows Optional for pyright; stuck_live just proved it
         first = int(stuck.get("first_seen_epoch") or now)
-        last = int(stuck.get("last_seen_epoch") or first)
-        # STALENESS GATE. The marker is cleared on a successful rotation, but a host whose
-        # rotator stopped running entirely would leave one behind forever. Only report while
-        # the condition is still being OBSERVED, so this can never nag about a dead end that
-        # ended when the rotator did.
-        if now - last <= 3600:
-            kind = str(stuck.get("kind"))
-            hours = max(0.0, (now - first) / 3600.0)
-            remedy = {
-                "all-accounts-maxed":
-                    "every paid account is over its usage window — nothing to do but wait for "
-                    "a window to reset, or add another paid account",
-                "no-alternates-configured":
-                    f"there is no second account to rotate to — add one with `{login_sh} <email>`",
-                "expired-and-offline":
-                    "the live credential is expired and the API is unreachable — check the "
-                    "network, then re-auth manually",
-            }.get(kind, "see the rotator log for the decision")
-            msg3 = (
-                f"[oauth-rotation-stuck] rotation has been IMPOSSIBLE for {hours:.1f}h "
-                f"({kind}): {remedy}. Until it clears, a rate-limited session cannot be "
-                f"rescued by rotating — it will stall. Detail: {stuck.get('detail') or 'n/a'}"
-            )
-            seen3 = home / ".oauth-rotation-stuck-seen.txt"
-            line3 = dedupe.emit_once(seen3, f"stuck-{day}-{kind}", msg3)
-            if line3 is not None:
-                print(line3)
+        kind = str(stuck.get("kind"))
+        hours = max(0.0, (now - first) / 3600.0)
+        remedy = {
+            "all-accounts-maxed":
+                "every paid account is over its usage window — nothing to do but wait for "
+                "a window to reset, or add another paid account",
+            "no-alternates-configured":
+                f"there is no second account to rotate to — add one with `{login_sh} <email>`",
+            "expired-and-offline":
+                "the live credential is expired and the API is unreachable — check the "
+                "network, then re-auth manually",
+            "no-usable-slot-twin":
+                "the live credential is unreadable and its slot twin is unusable — the "
+                "rotator refuses to act on an untrusted identity; re-auth manually or "
+                f"re-run `{login_sh} <email>` for the live account",
+            "identity-unknowable":
+                "the live credential is unreadable and no fresh beacon names it — the "
+                "rotator will not decide on an untrusted identity; run one Claude session "
+                "interactively (it restamps the beacon) or re-auth manually",
+        }.get(kind, "see the rotator log for the decision")
+        msg3 = (
+            f"[oauth-rotation-stuck] rotation has been IMPOSSIBLE for {hours:.1f}h "
+            f"({kind}): {remedy}. Until it clears, a rate-limited session cannot be "
+            f"rescued by rotating — it will stall. Detail: {stuck.get('detail') or 'n/a'}"
+        )
+        # TK529Q0F — owner-facing escalation. The heartbeat line below used to dedupe per
+        # DAY, which left the 2026-09-24 dead end unheard for hours: an unattended session
+        # never reads stdout, and the condition is a genuine exception to the
+        # findings-go-to-the-agent routing (TRDD-WZKFSQ2N decision 3) because only a human
+        # can re-login. Dedupe is PER STATE CHANGE, not per day: the key carries kind +
+        # detail, so a worsening dead end (a new kind or detail) re-alarms the same day,
+        # while an unchanged one stays silent; keys are forgotten when the marker clears or
+        # goes stale (the `not stuck_live` arm) so an identical recurrence re-alarms too.
+        # notify.push's own content-hash + 24h-cap gates bound the actual push volume.
+        state_key = f"stuck-{kind}-{stuck.get('detail') or 'n/a'}"
+        line3 = dedupe.emit_once(seen3, state_key, msg3)
+        if line3 is not None:
+            print(line3)
+            try:
+                notify.push(
+                    sev="CRITICAL",
+                    code="OAUTH-ROTATION-STUCK",
+                    project="oauth-rotator",
+                    summary=f"rotation IMPOSSIBLE {hours:.1f}h ({kind}) — {remedy}",
+                    hint="/janitor-findings",
+                )
+            except Exception:  # noqa: BLE001 -- a notify fault must never break the heartbeat
+                pass
+    else:
+        # No marker, a corrupt one, or a STALE one (the rotator stopped observing): forget
+        # the keys so an identical dead end coming back later re-alarms instead of staying
+        # silent behind an old key.
+        _forget_resolved_stuck(home)
 
     # QUATERNARY nudge (P3c) — proactive "top up ALL your logins" on a flat calendar
     # cadence, independent of whether any single account is currently flagged above.

@@ -2038,6 +2038,68 @@ def test_resolve_untrusted_live_stays_put_without_beacon(
     assert blob is None
 
 
+# ---------------------------------------------------------------------------
+# TRDD-TK529Q0F — the untrusted-live fail-safe paths are CAN'T-ROTATE states and
+# must write the machine-readable marker (`rotation-stuck.json`) the
+# oauth-login-needed heartbeat surfaces to the owner. Before this they only
+# _decide()'d to stdout + rotator.log, which nothing parses — the tick refused to
+# act every 60s in total silence (no usage probe ever ran, so the exhausted/
+# dead branches that DO write the marker never fired).
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_untrusted_live_no_usable_twin_marks_stuck(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Beacon names the live account but its slot twin is unusable (absent, expired,
+    refresh-dead) → the fail-safe None ALSO writes the no-usable-slot-twin marker."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "stale@x", "live_fp": "f" * 16,
+                        "slots": {"real@x": {}}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": "f" * 16, "email": "real@x", "ts": 1.0})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: None)  # no twin at all
+    monkeypatch.setattr(rotator, "_refresh_and_heal_slot", lambda *_a, **_k: (None, False))
+    blob, _state = rotator._resolve_untrusted_live(_blob("M"), rotator.load_state())
+    assert blob is None
+    marker = json.loads((tmp_path / "rotation-stuck.json").read_text())
+    assert marker["kind"] == "no-usable-slot-twin"
+    assert marker["detail"] == "real@x"
+    assert marker["last_seen_epoch"] >= marker["first_seen_epoch"]
+
+
+def test_resolve_untrusted_live_unknowable_identity_marks_stuck(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No beacon at all → identity unknowable → the fail-safe None ALSO writes the
+    identity-unknowable marker (the mirror resolves to SOME account, recorded as detail)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "x@x", "live_fp": "a" * 16, "slots": {}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: None)
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: "whoever@x")
+    blob, _state = rotator._resolve_untrusted_live(_blob("M"), rotator.load_state())
+    assert blob is None
+    marker = json.loads((tmp_path / "rotation-stuck.json").read_text())
+    assert marker["kind"] == "identity-unknowable"
+    assert marker["detail"] == "whoever@x"
+
+
+def test_resolve_untrusted_live_clears_stale_stuck_marker_on_success(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dead end ENDED (a usable twin appeared) → the marker a previous tick wrote is
+    cleared, so the heartbeat never nags about a resolved problem."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "stale@x", "live_fp": "f" * 16,
+                        "slots": {"real@x": {}}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": "f" * 16, "email": "real@x", "ts": 1.0})
+    twin = _blob("REAL-LIVE-TWIN", expires_ms=_ms_in(8))
+    monkeypatch.setattr(rotator, "read_slot", lambda e: twin if e == "real@x" else None)
+    rotator._mark_stuck("no-usable-slot-twin", "real@x")  # yesterday's dead end
+    assert (tmp_path / "rotation-stuck.json").is_file()
+    blob, _state = rotator._resolve_untrusted_live(_blob("M"), rotator.load_state())
+    assert blob is twin
+    assert not (tmp_path / "rotation-stuck.json").is_file(), "cleared on success"
+
+
 def test_cmd_auto_incident_regression_mirror_blind_spot(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """THE 2026-07-08 INCIDENT, replayed: primary unreadable (mirror-sourced blob = the

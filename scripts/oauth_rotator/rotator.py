@@ -260,7 +260,13 @@ _LOG_MAX_BYTES = 256 * 1024  # rotate at this size — bounds the unattended 60s
 #: `scripts/` reads that log for these lines. So an unattended run that exhausts every
 #: account leaves a durable, correct, and completely unread record while the session stalls —
 #: the failure the owner reports as "projects stall after a while".
-STUCK_FILE = ROOT / "rotation-stuck.json"
+def _stuck_file() -> Path:
+    # Resolved at call time off the module-global ROOT (same pattern as _live_identity_path):
+    # an import-time STUCK_FILE constant binds the REAL operational root before any test can
+    # monkeypatch ROOT, so every _mark_stuck/_clear_stuck in the suite would have written and
+    # deleted a rotation-stuck.json in the production rotator home (the LOG_FILE trap,
+    # TRDD-14IY6MAD — see the test fixture's docstring).
+    return ROOT / "rotation-stuck.json"
 
 
 def _mark_stuck(kind: str, detail: str) -> None:
@@ -275,7 +281,7 @@ def _mark_stuck(kind: str, detail: str) -> None:
     now = int(time.time())
     first = now
     try:
-        prior = json.loads(STUCK_FILE.read_text(encoding="utf-8"))
+        prior = json.loads(_stuck_file().read_text(encoding="utf-8"))
         if isinstance(prior, dict) and prior.get("kind") == kind:
             first = int(prior.get("first_seen_epoch") or now)
     except Exception:  # noqa: BLE001 -- absent/corrupt marker: start a fresh window
@@ -287,10 +293,11 @@ def _mark_stuck(kind: str, detail: str) -> None:
         "last_seen_epoch": now,
     }
     try:
-        STUCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = STUCK_FILE.with_suffix(".json.tmp")
+        target = _stuck_file()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(tmp, STUCK_FILE)
+        os.replace(tmp, target)
     except OSError:
         pass  # a marker write must never break a rotation tick
 
@@ -303,7 +310,7 @@ def _clear_stuck() -> None:
     go quiet while the host is still stuck.
     """
     try:
-        STUCK_FILE.unlink()
+        _stuck_file().unlink()
     except OSError:
         pass
 
@@ -1875,6 +1882,9 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
                 state["live_429_streak"] = 0
                 save_state(state)
                 _decide("auto: live identity confirmed via session beacon: %s (mirror == live credential)" % b_email)
+            # Identity resolved → the untrusted-live dead end is over; drop any marker a
+            # previous tick's fail-safe wrote (TK529Q0F).
+            _clear_stuck()
             return mirror_blob, state
         if isinstance(b_email, str) and b_email:
             # The mirror holds a DIFFERENT credential than the true live. Correct the
@@ -1891,17 +1901,26 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
             )
             twin = read_slot(b_email)
             if twin is not None and not _blob_locally_expired(twin):
+                # A usable twin disproves the no-usable-twin marker a previous tick wrote.
+                _clear_stuck()
                 return twin, state
             if twin is not None and _oauth(twin).get("refreshToken"):
                 refreshed, healed = _refresh_and_heal_slot(b_email, twin, state)
                 if refreshed is not None and not _blob_locally_expired(refreshed):
                     if healed:
                         save_state(state)
+                    _clear_stuck()  # same disproof as the fresh-twin path above
                     return refreshed, state
             _decide(
                 "auto: live account %s has no usable slot twin to probe — staying put "
                 "this tick (fail-safe; TRDD-7PYTX4E9)" % b_email
             )
+            # TK529Q0F: a mirror-sourced live with no usable twin is a can't-rotate state —
+            # the tick refuses to act on an untrusted identity every 60s and NOTHING else
+            # surfaces it (no usage probe runs, so the exhausted/dead branches never fire).
+            # Write the same machine-readable marker the exhausted branches write, so the
+            # oauth-login-needed heartbeat's rotation-stuck nudge reaches the owner.
+            _mark_stuck("no-usable-slot-twin", b_email)
             return None, state
         # beacon carries a fp but no email, and the fp differs from the mirror → the
         # true live account is a credential we cannot name or probe. Fall through.
@@ -1911,6 +1930,10 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
         "but its relation to the account in use is unknown) — staying put rather than "
         "deciding on an untrusted identity (TRDD-7PYTX4E9 F1)" % (m_email or "unresolvable")
     )
+    # TK529Q0F: same can't-rotate reasoning as the no-usable-twin branch above — the tick
+    # will refuse to act every 60s until the beacon is restamped, so surface it via the
+    # marker the heartbeat reads rather than only the decision log nobody parses.
+    _mark_stuck("identity-unknowable", m_email or "unresolvable")
     return None, state
 
 

@@ -611,3 +611,109 @@ def test_escalation_sig_re_notifies_same_day_when_bucket_worsens(tmp_path, monke
     )
     assert rc3 == 0
     assert "[oauth-login-needed]" in third  # worsened to "expired" -> re-notifies same day
+
+
+# ---------------------------------------------------------------------------
+# TRDD-TK529Q0F — a can't-rotate dead end reaches the OWNER (notify.push), not
+# only the ledger. The tertiary nudge used to print a day-deduped heartbeat line:
+# an unattended session never reads stdout, and the dedupe key was `stuck-<day>-
+# <kind>` so the condition never re-alarmed on a state change and nothing reached
+# the human channel at all. Dedupe is now PER STATE CHANGE (kind+detail key) with
+# a CRITICAL notify.push, forgotten when the marker clears.
+# ---------------------------------------------------------------------------
+
+
+def _write_stuck_detail(home: Path, kind: str, detail: str) -> None:
+    """A FRESH (still-observed) stuck marker with an explicit detail — the detail is part
+    of the dedupe key, so tests that change it prove the state-change re-alarm. Also seeds
+    one healthy refreshable slot file: `_slot_facts` (which main() reads BEFORE the stuck
+    branch) falls back to plaintext slot files and returns () on an index-only home, which
+    would end main() before the tertiary nudge ever runs."""
+    now = int(time.time())
+    _write_login_slot(home, "healthy@x.com", expires_in_days=30.0)
+    (home / "rotation-stuck.json").write_text(json.dumps({
+        "kind": kind,
+        "detail": detail,
+        "first_seen_epoch": now - 7200,
+        "last_seen_epoch": now - 30,
+    }), encoding="utf-8")
+
+
+def test_stuck_marker_pushes_critical_to_the_owner(tmp_path, monkeypatch, capsys) -> None:
+    """THE acceptance: a can't-rotate state reaches notify.push (the owner channel) as
+    CRITICAL — the heartbeat print alone was invisible to an unattended session, which is
+    exactly how the 2026-09-24 dead end went unheard for hours."""
+    calls = []
+    monkeypatch.setattr(det.notify, "push", lambda **kw: calls.append(kw) or "pushed")
+    out, rc = _run_inprocess(
+        tmp_path, "rotator", monkeypatch, capsys,
+        before=lambda home: _write_stuck_detail(home, "all-accounts-maxed", "a@x 5h=99%"),
+    )
+    assert rc == 0
+    assert "[oauth-rotation-stuck]" in out, "the in-context heartbeat line stays"
+    stuck_calls = [c for c in calls if c["code"] == "OAUTH-ROTATION-STUCK"]
+    assert len(stuck_calls) == 1, f"expected exactly one owner push, got {calls}"
+    assert stuck_calls[0]["sev"] == "CRITICAL"
+    assert "all-accounts-maxed" in stuck_calls[0]["summary"]
+
+
+def test_stuck_dedupe_is_per_state_change_not_per_day(tmp_path, monkeypatch, capsys) -> None:
+    """The old key was `stuck-<day>-<kind>`: one nudge per day, never re-alarmed when the
+    dead end CHANGED shape, and still keyed after the condition resolved. Now: unchanged
+    state -> silent; changed detail (a genuinely new situation) -> re-alarms the same day;
+    resolved -> key forgotten so an identical recurrence re-alarms.
+
+    The home is seeded ONCE and then mutated in place (marker rewritten / removed between
+    runs) — recreating it per run would wipe `.oauth-rotation-stuck-seen.txt` and destroy
+    the very dedupe continuity under test."""
+    monkeypatch.setattr(det.notify, "push", lambda **kw: "pushed")
+    home = tmp_path / "rotator"
+
+    def base_home() -> None:
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "slots").mkdir(parents=True, exist_ok=True)
+        (home / "state.json").write_text(json.dumps({"slots": {"healthy@x.com": {}}}))
+        (home / "opt-in.flag").touch()
+        (home / "slots" / "healthy@x.com.json").write_text(json.dumps(
+            {"claudeAiOauth": {"accessToken": "x",
+                               "expiresAt": int((time.time() + 30 * 86400) * 1000)}}))
+
+    def set_marker(detail: str) -> None:
+        base_home()  # idempotent: refreshes state files, never touches the seen-file
+        now = int(time.time())
+        (home / "rotation-stuck.json").write_text(json.dumps({
+            "kind": "all-accounts-maxed", "detail": detail,
+            "first_seen_epoch": now - 7200, "last_seen_epoch": now - 30,
+        }), encoding="utf-8")
+
+    def clear_marker() -> None:
+        base_home()
+        (home / "rotation-stuck.json").unlink(missing_ok=True)
+
+    def run() -> str:
+        # The home (and its seen-file) persists across runs; `before` is a no-op because
+        # set_marker/clear_marker already staged the state for this run.
+        out, rc = _run_inprocess(tmp_path, "rotator", monkeypatch, capsys,
+                                 before=lambda _h: None)
+        assert rc == 0
+        return out
+
+    set_marker("a@x 5h=99%")
+    out1 = run()
+    assert "[oauth-rotation-stuck]" in out1
+
+    set_marker("a@x 5h=99%")  # unchanged state
+    out2 = run()
+    assert "[oauth-rotation-stuck]" not in out2, "unchanged state must stay silent"
+
+    set_marker("b@x 7d=100%")  # the dead end CHANGED shape
+    out3 = run()
+    assert "[oauth-rotation-stuck]" in out3, "a changed detail re-alarms the same day"
+
+    clear_marker()  # resolved
+    out4 = run()
+    assert "[oauth-rotation-stuck]" not in out4
+
+    set_marker("a@x 5h=99%")  # the SAME dead end recurs
+    out5 = run()
+    assert "[oauth-rotation-stuck]" in out5, "keys were forgotten on resolve: recurrence re-alarms"
