@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=fa319deef4c4 generated=2026-09-23T22:56:47+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=31c800b52189 generated=2026-09-27T17:00:33+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -161,6 +161,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
   - [janitor-compaction-floor-gate-hooks](.claude/project/memory/janitor-compaction-floor-gate-hooks.md) — the hook says compact but I just compacted
   - [janitor-compaction-floor-gate-triggers](.claude/project/memory/janitor-compaction-floor-gate-triggers.md) — the janitor compacted my context over and over
   - [janitor-compaction-floor-gate-clear-lever](.claude/project/memory/janitor-compaction-floor-gate-clear-lever.md) — the cache-expired trigger never fires
+  - [jev-compaction](.claude/project/memory/jev-compaction.md) — the post-clear summary is missing tool results
   - [janitor-tool-call-cost-law](.claude/project/memory/janitor-tool-call-cost-law.md) — why did the re-arm/arm cost so many tokens
   - [janitor-hooks-two-import-conventions](.claude/project/memory/janitor-hooks-two-import-conventions.md) — writing a new janitor hook
 

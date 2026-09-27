@@ -2,7 +2,7 @@
 name: janitor-architecture-detectors-and-resilience
 description: "which detector finds X / where are the pattern libs / full detector roster by function / what skills does the janitor ship / what are the resilience pillars / how does the janitor survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / why did the fleet sit idle overnight with keep-going off / why did the self-trigger refuse while the user was judged present in another pane / does a machine-global presence signal wrongly gate a per-session action / is marketplace-refresh still a detector / why is marketplace-refresh missing"
 ocd: 2026-06-13
-lmd: 2026-09-17
+lmd: 2026-09-27
 metadata:
   node_type: memory
   type: project
@@ -182,7 +182,7 @@ test, confirm it fails, restore. Here it failed with
 itself. Two Edits and two seconds, and it is the difference between a test and a decoration.
 
 
-^ATOM-PLJ6-NM0P [desc: "marketplace-refresh cap-kills are fixed but the close rests on 2 single-window samples — a post-fix plugin-update wait over the bound is a NEW card, not a reopen", keywords: marketplace-refresh_cap_killed plugin-update_deferred_marketplace_lock_held daemon_workload_cap_1920 plugin_update_waits_behind_refresh marketplace_lock_contention refreshed_N_of_M_marketplaces is_the_marketplace-refresh_fix_verified multi-window_deferral_miss 5EHBPH6G_closed post-fix_request_wait_over_the_bound, trdd: TRDD-5EHBPH6G, ocd: 2026-09-04, lmd: 2026-09-04]
+^ATOM-PLJ6-NM0P [desc: "marketplace-refresh cap-kills are fixed but the close rests on 2 single-window samples — a post-fix plugin-update wait over the bound is a NEW card, not a reopen", keywords: marketplace-refresh_cap_killed plugin-update_deferred_marketplace_lock_held daemon_workload_cap_1920 plugin_update_waits_behind_refresh marketplace_lock_contention refreshed_N_of_M_marketplaces is_the_marketplace-refresh_fix_verified multi-window_deferral_miss 5EHBPH6G_closed post-fix_request_wait_over_the_bound, trdd: TRDD-5EHBPH6G, ocd: 2026-09-04, lmd: 2026-09-27]
 **`marketplace-refresh`'s cap-kill defect is FIXED and TRDD-5EHBPH6G is closed — but the
 closure rests on two samples, and the untested case is named here because the card is
 archived where no board query looks.**
@@ -200,7 +200,10 @@ five clean runs at 95–104 s logging `refreshed 31/32 marketplaces`.
 **The PLAN SIZE in that log line is what identifies which code ran** — a timing improvement
 alone could be an environment recovery, but a small installed-backing plan replacing a
 whole-registry sweep cannot be. That discriminator is machine-independent even though the
-counts are not.
+counts are not. [^14]
+
+
+^ATOM-8Z53-T1LK [desc: "the untested closure case — no post-fix wait missing MULTIPLE refresh windows was seen — and the ≤600 s total-wait bound with no recorded derivation; over the bound files a NEW card, never a reopen", keywords: marketplace-refresh_cap_killed plugin-update_deferred_marketplace_lock_held daemon_workload_cap_1920 plugin_update_waits_behind_refresh marketplace_lock_contention refreshed_N_of_M_marketplaces is_the_marketplace-refresh_fix_verified multi-window_deferral_miss 5EHBPH6G_closed post-fix_request_wait_over_the_bound, trdd: TRDD-5EHBPH6G, ocd: 2026-09-27, lmd: 2026-09-27]
 
 **THE UNTESTED CASE.** Box 4 closed on **two** post-fix deferral episodes, both
 SINGLE-window: one `plugin-update` fire hits one refresh hold, waits under a minute,
@@ -217,7 +220,7 @@ number works as a trigger without a pedigree.
 
 **DO NOT reopen 5EHBPH6G if a post-fix wait exceeds that bound — it is terminal and frozen.
 DO file a NEW card, BECAUSE the bound it closed against was met by the evidence available,
-and new contradicting evidence is new work rather than a defect in that closure.** [^14]
+and new contradicting evidence is new work rather than a defect in that closure.**
 
 ## Governed by
 
