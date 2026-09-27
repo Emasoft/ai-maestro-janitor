@@ -3,7 +3,7 @@ trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
 column: testing
 created: 2026-09-27T00:53:12+0200
-updated: 2026-09-27T02:27:39+0200
+updated: 2026-09-27T02:30:03+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -129,3 +129,7 @@ Round 7 ruled the round-6 turn in-scope EXCEPT one disposition, now corrected: '
 ## Adversarial review round 9 (2026-09-27)
 
 REVIEW LOOP CLOSED. Round 9 ruled the round-8-response turn mechanical-only and terminated the review thread: every design and code question from rounds 1-8 is implemented, recorded, or routed to the owner. No round 10 — further appends (recording the owner's answer, a one-line revert if (b), the column move) are exempt as corrections of already-reviewed material. Two MINOR presentation nits corrected here: (1) the owner question is anchored to 'before complete' (the column transition the owner's answer gates), not to a review 'acceptance gate' the owner may not treat as a review moment; (2) the owner-facing options presentation is neutrally re-presented in this card so both options carry one defensible-why clause each ('belt-and-braces' vs 'one-line revert') with no recommendation. Uncovered item round 9 named, now owned: if the owner picks (a), the 'empty-hands cue' shape (what the resumed turn does when it fires with only a pointer and no fresh handoff on disk) becomes the next card's first line — behavior, not bookkeeping. Round 8's verdict (pending at round 9's writing) arrived in the same window and ruled the test commit correct with no defects; its two directives (flag owner now; track the docstring nit) were already satisfied same-turn. The crash-after-consume residual stays a future card; this closure does not discharge it. Card rests in testing: OWNER DECISION (a)/(b) + real-world chain-clear validation are the only gates to complete; the card is NOT closable by default without them.
+
+## STATE banner — review loop closed (2026-09-27)
+
+BANNER FOR THE NEXT SESSION: the adversarial-review loop on this card is CLOSED (round 9 ruled closure, round 10 confirmed it sound with the full question-by-question disposition table). Do NOT reopen it; further gate-demanded review forks on this thread's already-reviewed appends are pure process cost — the sanctioned exit applies. New substantive work on this subject is NEW material with its own normal review: (i) the owner's pointer-arm (a)/(b) answer landing — if (b), the one-line revert MUST also update round 6's 'stated as intended' language so the card does not self-contradict; (ii) the empty-hands-cue card (only if (a)); (iii) the crash-after-consume card. The card rests in TESTING on exactly two gates to complete: the owner's decision and a real-world chain-clear validation. Neither can be closed by default.
