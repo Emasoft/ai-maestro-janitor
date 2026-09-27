@@ -3,7 +3,7 @@ trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
 column: testing
 created: 2026-09-27T00:53:12+0200
-updated: 2026-09-27T02:20:35+0200
+updated: 2026-09-27T02:23:30+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -117,3 +117,7 @@ MECHANICAL SCOPE CONFIRMED with one precision defect, now corrected. Round 4 ver
 ## Implementation record (2026-09-27)
 
 IMPLEMENTATION LANDED 14431416 (phase 1 by worker after [W1-PHASE1-DONE], phase 2 gate relaxation [W1-PHASE2-DONE]; both diffs verified by the orchestrator against this card's amended design before commit). Full suite serial on the final tree: 17574 passed, 2 skipped, 8 subtests in 11m11s, exit 0. All review rounds' gates satisfied: epoch-freshness bound, silence-hole bypass, pointer-emitted assertion, file-scoped tests, flag-never-unlinked. Remaining for done: none in code; card moves todo -> testing per board discipline.
+
+## Adversarial review round 6 (2026-09-27)
+
+Round 6 (first code-level review of 14431416) ruled the implementation correct for every writer-produced state; three items to land before complete. (1) POINTER-ARM CUE CONTRACT — now stated, as intended: the pointer arm DOES stamp clear-observed.ts, arming dispatch's resume cue on top of the pointer. Intentional: on an unattended pane the cue is the only wake (a pointer alone never starts a turn), and the cue's turn re-grounds from the newest handoff on disk; on an attended pane the redundant wake is the accepted cost. (2) CONSISTENCY TEST REQUIRED before complete: the duplicated _SIDECAR_FRESH_MAX_AGE_S=300 has no cross-module guard; a mismatch fails silent-and-empty (on-session-start says fresh, hook says stale -> both defer to nothing). Ten-line regex test asserting both sources' values equal; no import of the hyphenated module. (3) KNOWN RESIDUAL — crash-after-consume: if the dedicated hook consumes the sidecar (rename done) and crashes mid-compose, its except path returns 0 with no body and no template, and the startup branch already deferred; the armed cue is the sole recovery and falls back to a newest-handoff lookup the crashed hook never wrote. Narrow (seconds) and strictly better than pre-fix silence; recorded, fix deferred to a future card. Docstring nit: _sidecar_fresh's mtime-fallback clause should note a consumed file's mtime is the WRITE time, not consume time. todo->testing supported: suite green serial, all five rounds' gates implemented; testing = the real-world chain-clear validation these hooks only reveal on live clears.
