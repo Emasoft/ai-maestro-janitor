@@ -1,10 +1,10 @@
 ---
 trdd-id: BVTYT2BN
 title: settings-ensurer stderr message prints hardcoded tilde path even when HOME is redirected
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-09-27T00:44:28+0200
-updated: 2026-09-27T03:35:07+0200
+updated: 2026-09-27T12:10:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,3 +30,9 @@ Verified 2026-09-27 during the V12 matrix run: scripts/hooks/on-session-start.py
 2026-09-27T01:20+0200 — review round 3: stands; one cross-link clause added by that round: the batch box's doubly-nested settings.json path is corroborating evidence for TRDD-SWSNQAZF's path-form defect (the batch's relative scratch arg nested its box inside the repo tree) — the two cards corroborate each other.
 2026-09-27T04:35+0200 — IMPLEMENTED, commit 9c163aca: the message now prints settings_ensurer._settings_path() (the resolved absolute path); one-test assertion added (redirected HOME stderr names the redirected path, tilde literal forbidden, opt-out flag delenv'd per review finding 3a). Verified: 22/22 across the two affected test files, ruff + mypy clean on changed files. Two review rounds on the implementation (round 1: MAJOR dead-branch finding was on SWSNQAZF's guard, this card's fix stood; round 2: delenv stands). Message-shape residual accepted: the normal case shows the absolute path, not '~/'. Card ready to move to testing.
 2026-09-27T04:55+0200 — round-3 review (landed-record round): both commits stand conditionally; evidence debts closed — pyright on scripts/hooks/on-session-start.py: 0 errors 0 warnings (the private-symbol _settings_path() access does NOT trip reportPrivateUsage in this repo's config); post-remediation rerun of BOTH affected files: 22/22 (the earlier '22/22' claim predated the round-1 remediation edits — the wide claim is now true as stated). Round-3 minors recorded, no action: the negative tilde assertion is globally coupled (false-fails if another stderr line ever prints that literal — currently no other emitter does); thin_harness flake class accepted with sibling precedent.
+- 2026-09-27T12:10:40+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 (verbatim: 'complete all TRDDs').
+
+## Acceptance
+
+- [x] gates clean on the touched files at release (147 tests + ruff/mypy/pyright green on the release commit)
+- [x] card evidence current at HEAD (re-verified this session)

@@ -1,9 +1,9 @@
 ---
 trdd-id: O2FNJ4KW
 title: The compacted context lists in-flight cards by column instead of the cards the session worked
-column: testing
+column: complete
 created: 2026-09-24T11:21:12+0200
-updated: 2026-09-24T13:39:35+0200
+updated: 2026-09-27T12:10:44+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -15,6 +15,7 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:12+0200
 implementation-commits: [873a103b, fdf2de09, 687d3dd0, ad8a82b6]
+status: archived
 ---
 
 # The compacted context lists in-flight cards by column instead of the cards the session worked
@@ -31,6 +32,7 @@ Same run (E4). The fact record's in-flight list is every card in a work column: 
 - 2026-09-24T11:21:12+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-24T13:29:18+0200 — column → dev by janitor-main-session. 873a103b and fdf2de09 landed; the assistant-text cap (F3) is uncommitted, so the card is in dev, not todo
 - 2026-09-24T13:37:27+0200 — column → testing. all three commits landed (873a103b, fdf2de09, 687d3dd0); verification is V11 of TRDD-DQXMND59 on the final tree plus the full suite
+- 2026-09-27T12:10:44+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 (verbatim: 'complete all TRDDs').
 
 ## Review corrections 2026-09-24
 
@@ -39,3 +41,8 @@ Measured on b2bf5b7b: the top 6 are the cards that session worked (K0PMVRN6, WZK
 Correction to the O2FNJ4KW worker's "in-flight fallback fill" explanation (review of fdf2de09): BLGZTHQ9 and U6C3YXEL appeared in the listed cards because they are todo cards the transcript mentions (likely in prose), not because a fallback filled empty slots. Verified 2026-09-24 in the source: all 4 HandoffInputs constructors (summarize_previous_session.py x3, on-session-start-post-clear-compact.py x1) pass other_open_ids, and the template renders it.
 The follow-up above landed in fdf2de09 (a tool_use input naming more than 3 open ids does not count, bare ids are matched against the open-card set, the other-cards line is its own section). The same >3-distinct-open-ids cap for ASSISTANT text blocks (owner messages stay uncapped) is F3: scripts/lib/jev_compaction_lane.py + tests/test_summarize_previous_session.py, verified by its worker (reports/compaction-replacement/20260924_130950+0200-F3-lane-worker.md) and landed as 687d3dd0 on 2026-09-24 (its comment's line citations into jev_compaction.py and jev_compact.py were replaced by symbol names first, because two were already wrong).
 ad8a82b6 adds 4 cap-boundary tests, each mutant-proven (reports/compaction-replacement/20260924_133757+0200-f3-tests.md). 687d3dd0 measured on real sessions b2bf5b7b and accccb8b: it drops one 8-card assistant block, but the top 6 cards are unchanged, so no ranking effect was observed on the sessions measured; the fix is harmless but its benefit is unproven on real data. The 3-counts / 4-counts-none cliff is the CURRENT rule (a disclosed limitation), not a requirement.
+
+## Acceptance
+
+- [x] full suite green on the matrix commit (2026-09-24)
+- [x] verification condition discharged; card STATE updated this session

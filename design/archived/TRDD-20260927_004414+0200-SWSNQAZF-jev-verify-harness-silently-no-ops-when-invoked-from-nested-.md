@@ -1,10 +1,10 @@
 ---
 trdd-id: SWSNQAZF
 title: jev-verify harness silently no-ops when invoked from nested or backgrounded shells
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-09-27T00:44:14+0200
-updated: 2026-09-27T03:35:17+0200
+updated: 2026-09-27T12:10:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,3 +30,9 @@ Verified 2026-09-27 during the RAEGS1D5 V3/V12 re-stamp: scripts_dev/jev_verify/
 2026-09-27T01:20+0200 — review round 3 verdict: appends stand, loop CLOSED by ceiling (further rounds would review prose about prose; the next review belongs to the implementing worker's diff). Two refinements recorded for the implementing touch, not another review round: (1) LAYER UNPROVEN - the round-2 'hook exits early before _consume_sidecar' mechanism sentence is inference, not evidence: subprocess cwd=relative resolves fine against the parent, and the hook's never-raises wrapper makes EVERY layer (hook / hook-run.sh / run_hook's own exception handling) fail silently, so the honest state is 'failure tracks argument form; failing layer unknown'. Revised worker step order: FIRST test the cheap falsifiable fix candidate - add scratch_root.resolve() in run_hook, re-run the relative-arg case, predict pass (two minutes); instrument only if that fails. (2) The loud-failure check belongs in run_hook, not the hook: post-subprocess, a fresh sidecar still unconsumed + empty stdout -> non-zero exit. Cross-card corroboration note (applies to BVTYT2BN too): the batch V12 box's doubly-nested settings.json path is itself evidence FOR this form defect - the batch's relative scratch arg nested its box inside the repo tree.
 2026-09-27T04:35+0200 — IMPLEMENTED in scripts_dev (gitignored): scratch_root .resolve() in run_hook main (the confirmed fix), plus a loud-failure guard — empty stdout -> stderr line + exit 1. PREDICATE NOTE (round-2 review): the guard is a deliberate SUPERSET of the round-3 predicate — it fails ALL empty-stdout runs, not only unconsumed-sidecar ones; in this harness an empty-stdout-with-consumed-sidecar run is itself a failure state, so the superset is correct. Round-1 review MAJOR (a sidecar-consumed sub-check looked in the wrong directory — dead branch, lying wording) resolved by DELETING the branch per round-1's own suggestion. Verified: relative-arg invocation now v3_pass=true 8/8 (fresh /tmp scratch); guard exercised directly — empty stdout exits 1 with stderr, non-empty exits 0; ruff clean. Worker note: both lean-worker dispatches died on the fleet's model 404 (claude-sonnet-5), so the orchestrator implemented directly.
 2026-09-27T04:55+0200 — round-3 review: stands conditionally; GUARD SCOPE CLARIFICATION (round-3 finding 2): the loud-failure guard is a NO-OP DETECTOR, not a correctness gate — empty stdout -> exit 1, but non-empty stdout exits 0 EVEN WHEN v3 assertions fail (e.g. a template fallback). Batch consumers must read v3_pass from the JSON, not the exit code alone. Evidence note: the post-fix relative-arg verification is n=1 (vs the pre-fix defect's n>=6) — acceptable because .resolve() reduces the fix to the already-verified absolute-arg form.
+- 2026-09-27T12:10:41+0200 — COMPLETE by user. owner batch acceptance 2026-09-27 (verbatim: 'complete all TRDDs').
+
+## Acceptance
+
+- [x] loud-failure guard: empty stdout now exits non-zero with a stderr line (no-op detector, correct superset per round-3 review)
+- [x] relative-arg failure case passes after the fix; review loop closed by ceiling (round 3, 04:55)
