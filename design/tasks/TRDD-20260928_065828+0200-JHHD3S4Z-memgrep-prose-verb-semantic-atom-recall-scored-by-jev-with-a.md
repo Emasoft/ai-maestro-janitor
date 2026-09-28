@@ -4,7 +4,7 @@ title: memgrep prose verb — semantic atom recall scored by Jev with a persiste
 column: testing
 status: tasked
 created: 2026-09-28T06:58:28+0200
-updated: 2026-09-28T14:06:09+0200
+updated: 2026-09-28T14:07:54+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -48,3 +48,8 @@ PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first;
 - 2026-09-28T06:58:28+0200 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-28T06:58:35+0200 — column → todo by user.
 - 2026-09-28T14:04:41+0200 — column → testing by user.
+
+## Acceptance
+
+- [ ] the shipped rule markdown-memory-recall.md mentions the prose verb (one sentence, on next touch of that rule) — commit-4 review residual (a)
+- [ ] live e2e replayed by the main agent (TYPESAFE_API_KEY=... cargo test -- --ignored prose_live) or owner waiver recorded — commit-4 review residual (b)
