@@ -2,7 +2,7 @@
 name: oauth-rotation-renew-reauth-cascade
 description: "How the ROTATE / RENEW / REAUTHENTICATE cascade actually falls back — where rotation runs (daemon tick vs launchd), drain-first target selection, window-asymmetric switch thresholds (7d vs 5h), the RENEW_REFRESH keepalive vs RENEW_COOKIE browser-capture sub-legs, why REAUTH needs a human (passkey/2FA is OS-level), and the ~monthly reauth nudge. Symptoms: 'rotator failed to keep the session alive', '429 landed instead of rotating', 'renew shows the login page not Authorize', 'accounts won't switch', 'is the reauth step ever fully hands-free'."
 ocd: 2026-06-13
-lmd: 2026-09-24
+lmd: 2026-09-28
 metadata:
   node_type: memory
   type: project
@@ -87,7 +87,7 @@ switch TO — its whole job depends on the RENEW leg keeping the alternate slots
   maxed simultaneously, no software fix exists — only a window reset, a fresh login, or a
   3rd account helps.)
 
-^53KFOJEI [desc:"RENEW has two sub-legs: silent keepalive refresh of a near-expiry slot, and cookie-driven browser capture when no refresh token works, plus a refresh-on-err recovery net.", keywords:"renew_refresh_keepalive_ahead_h renew_cookie_agent_browser_or_slot_capture_browser why_does_renew_show_the_login_page_not_authorize cmd_auto_refresh_on_err_recovery_net renew_falls_back_to_reauth_when_cookie_dead live_account_never_keepalive_refreshed", type: project, ocd: 2026-06-13, lmd: 2026-09-01]
+^53KFOJEI [desc: "RENEW_REFRESH: a slot with a refresh token within KEEPALIVE_AHEAD_H of expiry is silently refreshed every tick to prevent expiry; the live account is never keepalive-refreshed.", keywords: renew_refresh_keepalive_ahead_h live_account_never_keepalive_refreshed keepalive_refresh_runs_every_tick overnight_rotation_idle_alternate_stays_valid rotator_keepalive_refresh_exchanges_refresh_token silent_http_refresh_no_browser live_account_refresh_would_race_claude_code_grant why_keepalive_skips_the_live_account keepalive_prevents_expiry_proactive refresh_token_within_two_hours_of_expiry, type: project, ocd: 2026-06-13, lmd: 2026-09-28]
 **2. RENEW — bring a degraded slot back, behind the scenes (fallback when there is
 nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
 - `RENEW_REFRESH`: the slot carries a **refresh token** and is within `KEEPALIVE_AHEAD_H`
@@ -97,6 +97,9 @@ nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
   to recovering from it. The LIVE account is deliberately NOT keepalive-refreshed — Claude
   Code owns its own single-use rotating refresh grant, and refreshing it underneath would
   race that grant.
+
+^ATOM-H1HP-3XTQ [desc: "No usable refresh token but a live claude.ai cookie: rotator CDP-attaches to its seeded Chrome via agent-browser CLI or slot_capture_browser.py, detached, PID-locked, dead last in the tick.", keywords: renew_cookie_agent_browser_or_slot_capture_browser why_does_renew_show_the_login_page_not_authorize agent_browser_cli_capture_driver slot_capture_detached_dead_last_in_tick log_me_in_once_rotator_manages_the_rest cdp_attach_seeded_real_chrome_capture slot_capture_browser_playwright_cdp cookie_banner_dismissed_before_authorize capture_pid_lock_skip_if_running per_email_pid_lock_capture_once consent_page_poll_300s, type: project, ocd: 2026-09-28, lmd: 2026-09-28]
+
 - `RENEW_COOKIE`: the slot has no USABLE refresh token — either NONE, or one whose exchange
   is persistently FAILING (`refresh_failures` ≥ max) — but DOES have a live claude.ai
   **session cookie** for its seeded Chrome profile → `rotator._bootstrap_seeded_slots` /
@@ -111,6 +114,9 @@ nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
   would starve real rotation), with a per-email PID lock (skip-if-running, so a slow capture
   spanning several ticks is launched once), and DEAD LAST in the tick (after `cmd_auto`) so
   usage-based rotation is never starved.
+
+^ATOM-O7Z0-YWWA [desc: "cmd_auto refresh-on-err recovery net heals a stale alternate token before exclusion; 429 alternates are never refreshed; a dead cookie too sends RENEW down to the REAUTH layer.", keywords: cmd_auto_refresh_on_err_recovery_net one_stale_access_token_never_deadlocks_rotation 429_alternate_deliberately_not_refreshed renew_falls_back_to_reauth_when_cookie_dead slot_token_healed_back_into_keychain_before_exclusion why_is_rotation_stuck_on_a_stale_token refresh_on_err_recovery_net rotation_probe_returned_non_200 alternates_refreshed_before_exclusion_retry stale_token_healed_then_reprobed, type: project, ocd: 2026-09-28, lmd: 2026-09-28]
+
 - Recovery net (`cmd_auto` refresh-on-err): when an alternate's usage probe returns
   non-200 AND non-429, its slot token is `refresh_oauth_token`'d, healed back into the
   keychain, and re-probed BEFORE exclusion — so one stale access token can never deadlock
