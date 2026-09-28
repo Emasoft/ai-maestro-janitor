@@ -4,7 +4,7 @@ title: memgrep prose verb — semantic atom recall scored by Jev with a persiste
 column: testing
 status: tasked
 created: 2026-09-28T06:58:28+0200
-updated: 2026-09-28T15:45:52+0200
+updated: 2026-09-28T21:14:11+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -29,6 +29,7 @@ Owner directive 2026-09-28: add a memgrep verb that searches atoms by natural-la
 - View modes must include "all notes, superseded versions and lessons learned, and references". Superseded atoms are SCORED by default (status is not a relevance gate; the threshold is).
 - Scored text per atom: body + resolved [^N] lessons (owner AskUserQuestion choice), plus desc+keywords in the chunk.
 - Privacy: bodies leave the machine — --help warning + stderr notice; gateway mode for in-infrastructure.
+OWNER DIRECTIVES 2026-09-28 (verbatim, responding to the acceptance boxes): (b) 'i have no idea what are you doing, you should just make the memgrep use the TYPESAFE_API_KEY or the OPENROUTER_API_KEY, depending on what it found in the environment. if there are both, it should use typesafe first, then once the credit of typesafe is exhausted or typesafe server its offline/unreacheable, it should switch to OPENROUTER as fallback.' — a provider FALLBACK CHAIN in jev.rs (env-resolved: typesafe preferred, openrouter fallback on credit-exhaustion/offline), NOT just first-key-found. Queued behind the in-flight A2 step-3 worker (owns scripts/memgrep/src/*). (a) 'are you crazy? recall by grep (keywords, key-phrases) and recall by prose are two completely different recalling methods, and they should be explained clearly. also it must bewritten in the skill and in the rules of recalling that the first method is free, while the second (by prose) consumes money, even if it is very cheap. so it must be used only when there is no pattern/keyword to use.' — resolves box (a): the rule touch is owner-ORDERED with this content; executing now. The owner saw the box-(b) substitution disclosure and answered with the provider design they want; the tick confirm/revert question is superseded in practice once the fallback chain lands (this machine runs OpenRouter-only until a TYPESAFE key exists).
 
 ## Approved plan
 
