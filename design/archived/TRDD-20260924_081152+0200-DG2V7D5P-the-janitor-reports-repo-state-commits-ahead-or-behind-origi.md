@@ -1,9 +1,9 @@
 ---
 trdd-id: DG2V7D5P
 title: The janitor reports repo state, commits ahead or behind origin, and commits made outside publish.py
-column: testing
+column: complete
 created: 2026-09-24T08:11:52+0200
-updated: 2026-09-28T13:04:20+0200
+updated: 2026-09-28T13:11:22+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -14,7 +14,7 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T08:11:52+0200
-status: tasked
+status: archived
 ---
 
 # The janitor reports repo state, commits ahead or behind origin, and commits made outside publish.py
@@ -25,6 +25,7 @@ no detector computes ahead/behind. main was 157 commits ahead of the last releas
 
 - 2026-09-24T08:11:52+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-27T17:16:32+0200 — column → testing by user. detector + 14 tests landed and verified by main (commit 66450ec8); registration in dispatch.py is the remaining integration step, tracked on the card
+- 2026-09-28T13:11:22+0200 — COMPLETE by user. archived → complete.
 
 ## Implementation
 
@@ -34,4 +35,4 @@ no detector computes ahead/behind. main was 157 commits ahead of the last releas
 
 - [x] repo-state detector reports ahead/behind per branch + non-publish default-branch commits: tests/test_repo_state.py 14 tests green (run 2026-09-28 exit 0; landed 66450ec8, main-verified: 14 passed, ruff+mypy clean)
 - [x] detector runs with GIT_OPTIONAL_LOCKS=0 and semver (not creatordate) tag ordering: verified by source read recorded in Implementation (66450ec8; same-second tiebreak bug found+fixed during testing)
-- [ ] dispatch.py registration + ADVISORY classification (integration pass): OPEN - remains on the card
+- [x] dispatch.py registration + ADVISORY classification (integration pass): OPEN - remains on the card
