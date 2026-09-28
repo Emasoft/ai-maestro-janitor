@@ -2,7 +2,7 @@
 name: memory-system-scopes-and-format
 description: "how does the wiki-memory 3-scope model work / LOCAL vs PROJECT vs USER scope precedence / where do memories live / what fields does a wikimem note frontmatter carry / why did my PROJECT memory page get flagged for a leak / what is the load-bearing recall field / does memgrep recall rank on the body or the description / why is MEMORY.md a deprecation stub / where does the harvest chore file stray memories / what is the note format for a memory page / index by the question not the answer"
 ocd: 2026-06-13
-lmd: 2026-09-09
+lmd: 2026-09-28
 metadata:
   node_type: memory
   type: project
@@ -23,7 +23,7 @@ detectors, the wikimem layer, and the editor's operational gotchas.
 
 ## The 3-scope model (LOCAL / PROJECT / USER)
 
-^FJ48CT7Q [desc:"The wiki-memory 3-scope model: LOCAL/PROJECT/USER roots, git status, precedence (LOCAL>PROJECT>USER), write-scope routing rules, and the ROOTS compose snippet.", keywords:"how_does_the_wiki_memory_3_scope_model_work local_vs_project_vs_user_scope_precedence where_do_memories_live which_scope_should_i_write_to unsure_scope_defaults_to_local memory_scope_leak_detector_polices_project scope_is_determined_by_the_notes_path compose_local_project_user_roots_once"]
+^FJ48CT7Q [desc: "The wiki-memory 3-scope model: LOCAL/PROJECT/USER roots, their git status, and what each scope holds; three roots, one recall surface.", keywords: how_does_the_wiki_memory_3_scope_model_work local_vs_project_vs_user_scope_roots where_do_memories_live which_scope_holds_machine_private_notes which_scope_is_git_tracked_and_pushed what_does_the_user_scope_hold corpus_layered_like_claude_code_memory three_roots_one_recall_surface memory_scope_table_roots_git_status_holds user_mem_private_store_sibling_inside_local, lmd: 2026-09-28]
 The corpus is layered exactly like Claude Code's own memory (the user CLAUDE.md,
 the project CLAUDE.md, and the git-ignored project-local CLAUDE override file).
 Three roots, ONE recall surface — recall
@@ -37,6 +37,9 @@ written here.
 | **LOCAL** | `$HOME/.claude/projects/<project-slug>/memory/` (`<project-slug>` = the project's absolute path with every separator dashed) | OUTSIDE any repo — **never pushed** | machine-private notes: local paths, usernames, hostnames, credential hints, per-instance facts. The harness `# Memory` directive writes here; the user's PRIVATE store `user-mem/` is a sibling inside it |
 | **PROJECT** | `<repo-root>/memory/` (`<repo-root>` = `git rev-parse --show-toplevel`) | **git-tracked + PUSHED** — shared by every contributor | project knowledge any dev needs: architecture facts, codebase gotchas, project lessons. **Sensitive/local data FORBIDDEN** — the `memory-scope-leak` detector polices this scope |
 | **USER** | `$HOME/.claude/memory/` | never in any repo | cross-project knowledge: user preferences, machine-independent lessons |
+
+
+^ATOM-KR9K-0JVL [desc: "Scope precedence LOCAL > PROJECT > USER: the more specific scope wins, a note's scope IS its path, write routing rules, unsure defaults to LOCAL.", keywords: which_scope_should_i_write_to scope_precedence_local_beats_project more_specific_scope_wins_when_scopes_conflict a_notes_scope_is_its_path contains_a_local_path_or_hostname_write_local project_knowledge_any_dev_needs_write_project about_the_user_across_projects_write_user unsure_scope_defaults_to_local promotion_to_project_is_a_deliberate_act scope_leak_detector_flags_sensitive_data_in_project compose_local_project_user_roots_once roots_compose_snippet_for_the_three_skills, ocd: 2026-09-28, lmd: 2026-09-28]
 
 **Precedence — LOCAL > PROJECT > USER.** When two scopes state conflicting facts,
 the MORE SPECIFIC scope wins (LOCAL beats PROJECT beats USER). A note's scope IS
