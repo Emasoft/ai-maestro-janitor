@@ -125,3 +125,120 @@ def test_cli_clean_exits_zero(repo: Path) -> None:
         cwd=str(repo), capture_output=True, text=True, timeout=120,
     )
     assert r.returncode == 0
+
+
+# ---- Machine-generated-line suppression (issues #316/#314) ----------------
+
+
+def test_cargo_lock_checksum_does_not_block(repo: Path) -> None:
+    """Issue #316 main body: a Cargo.lock `checksum = "…"` hex line reads as
+    an SSN (the regex's separators are optional) — machine-generated lines
+    must not block a dependency bump. The EXACT repro from the issue."""
+    _stage(repo, "Cargo.lock", (
+        '[[package]]\nname = "libc"\n'
+        'version = "0.2.169"\n'
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+        'checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"\n'
+    ))
+    assert sps.scan_staged(repo) == []
+    # The suppression is disclosed, never silent.
+    assert sps._LAST_SUPPRESSED == 5
+
+
+def test_checksum_key_assignment_in_other_file_suppressed(repo: Path) -> None:
+    """The line-shape fallback is KEY-NAME-GATED: outside a lockfile, only
+    exact generated-manifest keys (checksum/integrity/resolved) suppress."""
+    _stage(repo, "notes.md", (
+        'integrity = "sha512-cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf=="\n'
+    ))
+    assert sps.scan_staged(repo) == []
+
+
+def test_bare_hex_run_outside_lockfile_still_blocks(repo: Path) -> None:
+    """A hand-pasted hex-looking token in an ordinary file is NOT suppressed
+    by the bare-hex shape (only named lockfiles get that) — it still reads
+    as an SSN shape and blocks."""
+    _stage(repo, "handwritten.md", "token cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf end\n")
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "pii-us_ssn"]
+    assert len(hits) == 1
+
+
+def test_trdd_governance_author_token_does_not_block(repo: Path) -> None:
+    """Issue #314: trddgrep's `<role>@<project-id>` governance author token
+    matches the ssh user-at-host shape but names no machine — must not block
+    every new TRDD card."""
+    _stage(repo, "TRDD-card.md", (
+        "---\ntrdd-id: ABCD1234\ncurrent-owner: main-agent@ai-maestro-janitor\n---\n"
+    ))
+    assert [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"] == []
+
+
+def test_chief_of_staff_token_suppressed(repo: Path) -> None:
+    """Other vocabulary roles from the closed set are suppressed too."""
+    _stage(repo, "card2.md", "assignee: chief-of-staff@my-project-x\n")
+    assert [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"] == []
+
+
+def test_role_agent_suffix_token_suppressed(repo: Path) -> None:
+    """`<anything>-agent@<dotless-host>` — the `agent` suffix convention —
+    is suppressed."""
+    _stage(repo, "card3.md", "owner: reviewer-agent@some-project\n")
+    assert [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"] == []
+
+
+def test_real_ssh_target_still_blocks(repo: Path) -> None:
+    """Negative control: a real ssh-shaped target is NOT suppressed by the
+    governance allow (dotless host, non-role user) — fail toward blocking."""
+    _stage(repo, "deploy.md", "ssh deploy@web-1\n")
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"]
+    assert len(hits) == 1
+
+
+def test_real_lowercase_user_dotless_host_still_blocks(repo: Path) -> None:
+    """Negative control: `dev-alice@web-1` is a lowercase-hyphenated PERSON,
+    not a role token — never swallowed by a general regex."""
+    _stage(repo, "deploy2.md", "ssh dev-alice@web-1\n")
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"]
+    assert len(hits) == 1
+
+
+def test_real_ssn_still_blocks(repo: Path) -> None:
+    """Negative control: a real-looking SSN outside a checksum line blocks."""
+    _stage(repo, "form.txt", "SSN: 123-45-6789\n")
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "pii-us_ssn"]
+    assert len(hits) == 1
+
+
+def test_personal_home_and_email_still_block(repo: Path) -> None:
+    """Negative control: tilde home, dotted ssh host, personal e-mail all
+    still fire (only the governance shape is suppressed)."""
+    _stage(repo, "mixed.md", (
+        f"home {_mac_home('someone_else')}\n"
+        "ssh alice@some-real-host.local\n"
+        f"mail {LEAK}\n"
+    ))
+    rules = {h.rule for h in sps.scan_staged(repo)}
+    assert "private-path.macos-user-home" in rules
+    assert "private-path.ssh-user-host" in rules
+    assert "personal-email" in rules
+
+
+def test_tilde_typesafe_still_suppressed(repo: Path) -> None:
+    """The already-committed tilde fix (d0f3d53e): `~typesafe/jev-latest` is
+    a model id, not a home — still suppressed."""
+    _stage(repo, "model.md", "route to ~typesafe/jev-latest for prose\n")
+    assert [h for h in sps.scan_staged(repo) if h.rule == "private-path.tilde-user-home"] == []
+
+
+def test_host_identity_token_still_checked_on_generated_lines(repo: Path) -> None:
+    """A machine-generated file is not human-written, but a human COULD have
+    typed a secret/username into one — the host-identity token check is a
+    real-token check, not a shape guess, so it STAYS ON for suppressed
+    lines. (The token is the host's real username, assembled at runtime.)"""
+    import getpass
+    user = getpass.getuser()
+    if not user or user in ("root", "runner", "user"):  # generic/CI — no signal
+        pytest.skip("generic host username carries no identity signal")
+    _stage(repo, "Cargo.lock", f'checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf" owner={user}\n')
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "host-identity"]
+    assert len(hits) == 1
