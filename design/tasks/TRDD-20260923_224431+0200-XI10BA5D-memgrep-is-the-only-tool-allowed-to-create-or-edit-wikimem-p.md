@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-28T00:19:38+0200
+updated: 2026-09-28T07:44:08+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -108,3 +108,4 @@ Note: the subject of commit 6f5e6482 cites pre-rewrite id 226b2d97 (= 1854634c);
 ## Implementation
 
 2026-09-28 A2 first worker pass FAILED CLEANLY (report: reports/board-drain/20260927-XI10BA5D-A2-worker.md): no memgrep edits, cargo check green, 517-line design draft preserved at scripts_dev/pre_write_rs_draft_XI10BA5D-A2.rs. Blockers identified: (1) lint-ERROR refusal breaks ~9+ fixture contracts until lint_page_text extraction + write-floor reconciliation; (2) id-set rule needs per-verb retirement-marker audit (update-mem-atom same-id body rewrite conflicts, ties to A3 --body-file note); (3) 6-step reviewed-commit sequence recorded on the report. A2 remains open; the sequence is the WORKING PLAN for the next passes (candidate from one worker's single-pass recon, ZERO review rounds — each step lands as its own reviewed commit per the card's Implementation plan; review before dispatching against it). Cost data point: the pass spent 7.7 h / 413 k tokens / 0 code landed — A2 is a 6-reviewed-commit sequence, never a one-pass task; size the next dispatch accordingly.
+2026-09-28 A2 step 1 LANDED (commit 66cd2f8e): lint_page_text extracted from lint_paths_with verbatim; atom_ids hoisted to caller (order-neutral, Check 8 sorts); 159 tests + lint fixture byte-identical (fix=false path). Review round 1: no REOPEN/no CURE; its fix=true-path segmentation-drift hazard was INDEPENDENTLY CLOSED by main: default lint (autofix on) run on a fixture page against the pre-commit code — output identical, resulting file bytes identical (md5 equal). Note for step 3 dispatch: lint_page_text's fix param is reserved/currently-unused (doc comment owed before the gate wires per-page fixing).
