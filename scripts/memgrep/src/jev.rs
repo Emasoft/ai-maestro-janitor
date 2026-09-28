@@ -312,7 +312,8 @@ struct WireResponse {
 }
 
 /// Extract the probability from one answer value: bare number or object with a probability
-/// field (`probability` / `prob` / `p` / `score`).
+/// field (`probability` / `prob` / `p` / `score`), or the OpenRouter decision shape where the
+/// probability rides under the verdict-type key (`{"noul": 0.06, "type": "noul"}`).
 fn parse_answer(v: &serde_json::Value) -> Result<f64, String> {
     match v {
         serde_json::Value::Number(n) => n.as_f64().ok_or_else(|| "non-finite number".into()),
@@ -322,8 +323,14 @@ fn parse_answer(v: &serde_json::Value) -> Result<f64, String> {
                     return n.as_f64().ok_or_else(|| format!("non-finite {key}"));
                 }
             }
+            // OpenRouter decision API: probability keyed by the decision type itself.
+            if let Some(serde_json::Value::String(t)) = map.get("type") {
+                if let Some(serde_json::Value::Number(n)) = map.get(t.as_str()) {
+                    return n.as_f64().ok_or_else(|| format!("non-finite {t}"));
+                }
+            }
             Err(format!(
-                "answer object lacks a probability field (tried probability/prob/p/score): {v}"
+                "answer object lacks a probability field (tried probability/prob/p/score and type-keyed): {v}"
             ))
         }
         other => Err(format!("answer is {other}, expected number or object")),
@@ -1279,6 +1286,26 @@ mod tests {
     fn privacy_notice_names_backend_and_count() {
         assert_eq!(privacy_notice(7, Provider::Openrouter), "[prose] sending 7 atoms to openrouter");
         assert_eq!(privacy_notice(1, Provider::Gateway), "[prose] sending 1 atoms to gateway");
+    }
+
+    // ---- answer parsing: the real OpenRouter decision shape ----
+
+    #[test]
+    fn parse_answer_accepts_type_keyed_probability() {
+        // The OpenRouter decision API answers `{"noul":0.06,"type":"noul"}` — the
+        // probability rides under the verdict-type key. Without this arm every real
+        // OpenRouter response parsed as Malformed (found in prose-verb live smoke).
+        let v: serde_json::Value = serde_json::from_str(r#"{"noul":0.06,"type":"noul"}"#).unwrap();
+        assert_eq!(parse_answer(&v).unwrap(), 0.06);
+        // Other shapes still parse.
+        let bare: serde_json::Value = serde_json::from_str("0.5").unwrap();
+        assert_eq!(parse_answer(&bare).unwrap(), 0.5);
+        let obj: serde_json::Value =
+            serde_json::from_str(r#"{"probability":0.9}"#).unwrap();
+        assert_eq!(parse_answer(&obj).unwrap(), 0.9);
+        // A genuinely malformed object still errors.
+        let bad: serde_json::Value = serde_json::from_str(r#"{"type":"noul"}"#).unwrap();
+        assert!(parse_answer(&bad).is_err());
     }
 
     // ---- cache key normalization ----
