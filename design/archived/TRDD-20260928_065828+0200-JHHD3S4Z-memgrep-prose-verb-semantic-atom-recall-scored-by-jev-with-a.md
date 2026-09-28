@@ -1,10 +1,10 @@
 ---
 trdd-id: JHHD3S4Z
 title: memgrep prose verb — semantic atom recall scored by Jev with a persistent query-atom score cache
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-09-28T06:58:28+0200
-updated: 2026-09-28T22:11:25+0200
+updated: 2026-09-28T22:11:36+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -57,6 +57,7 @@ PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first;
 - 2026-09-28T06:58:28+0200 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-28T06:58:35+0200 — column → todo by user.
 - 2026-09-28T14:04:41+0200 — column → testing by user.
+- 2026-09-28T22:11:36+0200 — COMPLETE by main-agent@ai-maestro-janitor. Both acceptance boxes ticked with evidence: (a) rule+SKILL touch executed under owner directive 2026-09-28 (owner-supplied content, the waiver itself); (b) provider resolution resolved by the owner's own fallback-chain directive, landed 1daced30, review-confirmed. 4-commit sequence landed; review chains closed..
 
 ## Acceptance
 
