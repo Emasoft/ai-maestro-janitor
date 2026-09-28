@@ -6393,701 +6393,19 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
         };
         let p = rel(&path);
 
-        // Check — a raw control byte (TRDD-XI10BA5D A1). This is the retroactive half of
-        // `reject_control_bytes`: the write gate refuses a NEW control byte, but the two
-        // already-corrupted pages the owner reported predate the guard, so a whole-store
-        // `memgrep lint` must be able to find them too. ERROR uniformly (no looser lint-time
-        // floor, unlike the phrase-count checks below) — no corpus vintage legitimately
-        // contains a raw backspace byte. Never auto-fixed: stripping it would guess at intent
-        // the byte gives no way to recover, so this is report-only even under `fix = true`.
-        // The message carries only the location and the byte's hex value, NEVER a content
-        // snippet — a wikimem page can hold private material, and a lint finding is printed to
-        // plain stdout.
-        if let Some((line, _col, _offset, cp)) = find_control_byte(&text) {
-            violations.push((
-                Severity::Error,
-                p.clone(),
-                line,
-                format!(
-                    "raw control byte 0x{cp:02X} — not tab/newline/CR; cannot be auto-fixed \
-                     without guessing intent, must be removed by hand"
-                ),
-                "control-byte-in-page",
-            ));
-        }
-
-        // Check 3 — required frontmatter fields. Read RAW frontmatter so a missing `lmd:` is NOT
-        // masked by read_note's fs-mtime fallback. Accept the model's documented aliases
-        // (created/updated/summary) so a valid note using them is not falsely flagged.
-        let fm = md::parse_frontmatter(&text);
-        let has = |keys: &[&str]| {
-            keys.iter()
-                .any(|k| fm.get(*k).map(|v| !v.trim().is_empty()).unwrap_or(false))
-        };
-        if !has(&["ocd", "created"]) {
-            violations.push((
-                Severity::Error,
-                p.clone(),
-                0,
-                "missing required frontmatter field `ocd`".into(),
-                "page-no-ocd",
-            ));
-        }
-        if !has(&["lmd", "updated"]) {
-            violations.push((
-                Severity::Error,
-                p.clone(),
-                0,
-                "missing required frontmatter field `lmd`".into(),
-                "page-no-lmd",
-            ));
-        }
-        if !has(&["description", "summary"]) {
-            violations.push((
-                Severity::Error,
-                p.clone(),
-                0,
-                "missing required frontmatter field `description`".into(),
-                "page-no-description",
-            ));
-        } else {
-            // The PAGE recall surface, held to a HIGHER bar than an atom's (owner, 2026-08-23:
-            // 15 vs 10). An atom answers one question; a page has to be reachable from any
-            // question its atoms answer, so its description needs the UNION of their symptom
-            // vocabularies. ERROR for the same reason as the atom rules: a page nobody can reach
-            // takes every fact on it down too, and no later pass can reconstruct the phrasings.
-            let desc = fm
-                .get("description")
-                .or_else(|| fm.get("summary"))
-                .map(String::as_str)
-                .unwrap_or("");
-            let phrases = page_description_phrases(desc);
-            // The LINT floor, not the write floor — see `min_lint_page_phrases`.
-            let min_p = min_lint_page_phrases();
-            if min_p > 0 && unique_phrases(&phrases).len() < min_p {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    0,
-                    format!(
-                        "page `description:` carries {} `/`-separated phrase(s), below the \
-                         {min_p} minimum — it is the recall surface for EVERY fact on this page, \
-                         so add the alternative phrasings a future session will arrive with",
-                        unique_phrases(&phrases).len()
-                    ),
-                    "page-description-too-few-phrases",
-                ));
-            }
-            let d_dupes = duplicate_phrases(&phrases);
-            if !d_dupes.is_empty() {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    0,
-                    format!(
-                        "page `description:` repeats {} phrase(s): {d_dupes:?} — a repeat raises \
-                         the count without widening the set of searches that can find this page",
-                        d_dupes.len()
-                    ),
-                    "page-description-duplicated-phrases",
-                ));
-            }
-        }
-
-        // Check — `publish-globally:` reconciliation state (read-only report; the fix itself is
-        // unconditional at every write's `atomic_write_page`, never performed by lint). Shares
-        // `classify_publish_globally` with the write path so a finding here and a normalization
-        // there can never disagree.
-        if let Some(state) = publish_globally_state(&path, &text)
-            && let Some(issue) = classify_publish_globally(state.has_field, state.is_true, state.has_symlink)
-        {
-            let (sev, code, msg) = issue.lint_line();
-            violations.push((sev, p.clone(), 0, msg.to_string(), code));
-        }
-
-        let lines: Vec<&str> = text.lines().collect();
-        let ctx = md::build_context(&text, lines.len());
-
-        // Check 0 — AN UNCLOSED CODE FENCE, reported FIRST because it invalidates every other
-        // structural conclusion on the page (janitor#279).
-        //
-        // Every structural walker here toggles `in_fence` on any line starting with ``` or ~~~ and
-        // suppresses parsing while it is true. An ODD number of such lines therefore leaves the
-        // walker inside a fence for the whole REST of the page: atoms after it stop existing,
-        // headings after it stop existing, and each consumer then reports its own confident wrong
-        // answer. Measured on the reproduction: `add-lesson` said "no BODY atom answering to <id>"
-        // for an atom plainly present, and this very lint said "missing `## Notes and lessons
-        // learned` section" for a heading plainly present — two different lies from one cause.
-        //
-        // That is what makes it worth its own check. The peer who filed #279 induced and FALSIFIED
-        // two source-derived mechanisms (footer placement, marker grammar) before handing over the
-        // reproduction — the wasted effort was not carelessness, it was that no error message ever
-        // named the actual fault. This one does.
-        //
-        // Same predicate the walkers use (`unclosed_fence_line` → `fence_step`), not a second
-        // copy of the rule: this lint exists to fire exactly when a walker is confused, so it
-        // must be confused by exactly the same things. A cleverer detector that disagreed with
-        // the consumers would flag pages they parse fine and stay silent on pages they mangle.
-        let fence_open: Option<usize> = unclosed_fence_line(&text);
-        if let Some(open_at) = fence_open.as_ref() {
-            violations.push((
-                Severity::Error,
-                p.clone(),
-                open_at + 1,
-                "unclosed code fence opened here — every atom and heading BELOW it is \
-                 invisible to the structural walkers, so other findings on this page \
-                 (and `add-atom` / `add-lesson` refusals) are unreliable until it is closed"
-                    .to_string(),
-                "page-unclosed-fence",
-            ));
-        }
-
-        // Check 3 (cont.) — the `## Notes and lessons learned` section must be present. The section
-        // is MANDATORY on every page (it is the standing landing zone for a `[^N]` correction
-        // lesson) even when empty, per the memory model. Match the heading text leniently.
-        let has_notes_section = ctx.headings.iter().any(|h| {
-            h.text
-                .trim()
-                .eq_ignore_ascii_case("Notes and lessons learned")
-        });
-        if !has_notes_section {
-            violations.push((
-                Severity::Error,
-                p.clone(),
-                0,
-                "missing `## Notes and lessons learned` section".into(),
-                "page-no-notes-section",
-            ));
-        }
-
-        // Check 1 — footnote integrity. We must scan the RAW markdown ourselves rather than reuse
-        // `ctx.footnote_refs`/`footnote_defs`: comrak's footnote extension only materializes a
-        // footnote NODE when the ref AND the def are BOTH present (a balanced pair) — an orphan ref
-        // renders as literal text and an orphan def is dropped — so the parsed lists can never
-        // surface the very imbalance this check exists to catch (the issue-#47 lived bug). The raw
-        // scan still skips lines inside fenced code (`ctx.in_code`, which IS populated) so a `[^N]`
-        // in a code sample is never falsely flagged — keeping the check deterministic and FP-free.
-        let mut ref_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first ref line
-        let mut def_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first def line
-        // label → first line carrying a `[^N]` that markdown does NOT treat as a reference
-        // because it sits inside a code span or a fence. Collected purely to EXPLAIN a
-        // `lesson-uncited` finding (janitor#152): the author wrote the citation, it just does
-        // not function, and the two states are visually identical in the source. Without this
-        // the message sends them to look at an atom body where they can SEE `[^3]` — so they
-        // conclude the linter is wrong and move on, and the lesson stays orphaned. Measured on
-        // the USER corpus when the issue was filed: 9 of 101 findings were this.
-        let mut hidden_ref_lines: BTreeMap<String, usize> = BTreeMap::new();
-        // Cross-line HTML-comment state (janitor#173) — fed EVERY line below, including a fenced
-        // one we are about to skip, so a comment spanning around a fence cannot desync it.
-        let mut in_html_comment = false;
-        for (i, raw) in lines.iter().enumerate() {
-            let line_no = i + 1; // 1-based, matching ctx.in_code's indexing
-            let in_fence = *ctx.in_code.get(i).unwrap_or(&false);
-            // Mask HTML comments (janitor#173: the mandatory `## Notes and lessons learned`
-            // landing-zone comment `<!-- … [^N] … -->` was scanned as body prose — an HTML comment
-            // is not rendered content, exactly like a fence or an inline-code span, but it was the
-            // one mask missing from the set) and INLINE-code spans, so a literal `[^N]` in a
-            // comment or example prose is not a false ref.
-            let comment_masked = mask_html_comment(raw, &mut in_html_comment);
-            let visible = if in_fence {
-                Vec::new() // inside a fenced code block — not real footnote syntax
-            } else {
-                scan_footnotes(&mask_inline_code(&comment_masked))
-            };
-            for (label, is_def) in &visible {
-                let table = if *is_def {
-                    &mut def_lines
-                } else {
-                    &mut ref_lines
-                };
-                table.entry(label.clone()).or_insert(line_no);
-            }
-            // Anything the RAW line carries that the masked/fenced view dropped is a citation
-            // the author wrote and markdown will not honour. Defs are excluded: a definition
-            // shown inside a fence is documentation, not a miswritten citation.
-            for (label, is_def) in scan_footnotes(raw) {
-                if is_def {
-                    continue;
-                }
-                let shown = visible.iter().any(|(l, d)| !*d && *l == label);
-                if !shown {
-                    hidden_ref_lines.entry(label).or_insert(line_no);
-                }
-            }
-        }
-        // Dangling reference: `[^N]` in the body with no `[^N]:` definition (report once, at first ref).
-        for (label, &line) in &ref_lines {
-            if !def_lines.contains_key(label) {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    line,
-                    format!("footnote reference `[^{label}]` has no `[^{label}]:` definition"),
-                    "footnote-dangling-ref",
-                ));
-            }
-        }
-        // Unreferenced definition: `[^N]:` that nothing in the body cites (report once, at first def).
-        //
-        // INFO, not a defect. The memory model makes `## Notes and lessons learned` MANDATORY on
-        // every page even when empty — it is the standing landing zone for a correction lesson —
-        // so a PAGE-level lesson has no inline referrer BY DESIGN. Rated as an error this check
-        // alone produced 150 of 262 findings across the live corpus (57%), i.e. the gate failed
-        // everywhere and the genuine errors were unreadable underneath it. The message says what
-        // the reader can DO instead of implying something is broken: citing a lesson from an atom
-        // is what makes it TRAVEL with that atom on `migrate`, which is the real reason to bother.
-        for (label, &line) in &def_lines {
-            if !ref_lines.contains_key(label) {
-                // If the citation EXISTS but is inert, say so and point at it. Telling an
-                // author to "cite it from an atom" when they already did is how a correct
-                // finding gets dismissed as a linter bug (janitor#152).
-                let msg = match hidden_ref_lines.get(label) {
-                    Some(&hidden) => format!(
-                        "page-level lesson `[^{label}]:` — a `[^{label}]` is present at line \
-                         {hidden} but sits INSIDE a code span/fence, so markdown renders it as \
-                         literal text, not a reference; move the closing backtick so the \
-                         citation falls outside the code span"
-                    ),
-                    None => format!(
-                        "page-level lesson `[^{label}]:` — cite it from an atom (`[^{label}]` in \
-                         the atom body) if it should travel with one"
-                    ),
-                };
-                violations.push((Severity::Info, p.clone(), line, msg, "lesson-uncited"));
-            }
-        }
-
-        // ── Checks 4-7 (TRDD-DOJ2LE1G) — atom/lesson AUTHORING integrity, deterministic + FP-free. ──
-        //
-        // A marker shape that never PARSES has to be found in the raw lines: an atom the parser
-        // cannot see is exactly what `atoms_for_lint` — which uses that same parser — can never
-        // report. Fenced code is skipped (`ctx.in_code`) and inline code is masked, so prose that
-        // SHOWS the broken form (this repo's own docs do) is never flagged.
-        for (i, raw) in lines.iter().enumerate() {
-            if *ctx.in_code.get(i).unwrap_or(&false) {
-                continue;
-            }
-            let masked = mask_inline_code(raw);
-            if let Some((id, bad)) = mangled_atom_marker(&masked) {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    i + 1,
-                    format!(
-                        "atom `^{id}` opens its props with `{bad}`, not ASCII `[` — the parser scans \
-                         for the byte `[` (0x5B), so this is not an atom at all and is INVISIBLE to \
-                         recall"
-                    ),
-                    "atom-bad-bracket",
-                ));
-            } else if let Some(id) = unclosed_atom_marker(&masked) {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    i + 1,
-                    format!(
-                        "atom `^{id}` props `[` is never closed on its line — unparseable, so the \
-                         atom does not exist"
-                    ),
-                    "atom-unclosed-props",
-                ));
-            } else if masked.contains('⟦') || masked.contains('⟧') {
-                // INFO: in PROSE these are harmless (and this corpus documents the escaping), but
-                // they are the fingerprint of text pasted out of recall's display output — which is
-                // how a marker acquires them, and there the same paste is fatal.
-                violations.push((
-                    Severity::Info,
-                    p.clone(),
-                    i + 1,
-                    "line carries `⟦`/`⟧` — recall's DISPLAY escaping of `[`/`]`; a SOURCE page \
-                     holds the literal brackets"
-                        .into(),
-                    "stray-display-bracket",
-                ));
-            }
-        }
-
-        // Atom-level: an unquoted-prose `desc:` (breaks grep / the in-body filter), props the parser
-        // silently DROPS, a missing recall surface, non-ISO dates, and an oversized body (must be
-        // decomposed). `atoms_for_lint` segments exactly as the recall resolver does.
-        let atom_budget = atom_max_chars();
-        // The page's `## Superseded` delimiter (TRDD-57WJL5L2), and every `status: superseded` atom
-        // line found below — used by the two delimiter checks after this loop. memgrep's default
-        // SEARCH exclude is keyed on the `status:` prop, never on position; this pair of checks is
-        // the READABILITY layer that keeps the delimiter honest about what the metadata already says.
-        let superseded_heading = superseded_heading_line(&text);
-        let mut superseded_atom_lines: Vec<usize> = Vec::new();
-        // The page's TRAILING footer region (janitor#260 endgame — see `footer_section_trailing_line`'s
-        // own docstring for why this is NOT `footer_section_line`, which anchors `add-atom` instead).
-        // Computed once per page, outside the loop, so every atom on the page is judged against the
-        // same boundary.
-        let footer_trailing = footer_section_trailing_line(&text);
+        // The per-page lint body moved to `lint_page_text` below (TRDD-XI10BA5D A2 step 1):
+        // every check that examines ONE page's text lives there now, and the caller keeps only
+        // the CROSS-page work. The atom-id declarations feed Check 8 (corpus-unique ids), so
+        // the map is still built HERE while the per-page checks run in lint_page_text.
+        // atoms_for_lint is deterministic on `text` and Check 8 sorts its locations before
+        // reporting, so segmenting twice changes no emitted finding — only the traversal shape.
         for a in atoms_for_lint(&text) {
             atom_ids
                 .entry(a.id.clone())
                 .or_default()
                 .push((p.clone(), a.line));
-            if desc_unquoted_prose(&a.props_raw) {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    a.line,
-                    "atom `desc:` value is unquoted prose — quote it (`desc:\"…\"`) or grep and the \
-                     in-body filter break"
-                        .into(),
-                    "atom-unquoted-desc",
-                ));
-            }
-            let dropped = dropped_prop_segments(&a.props_raw);
-            if !dropped.is_empty() {
-                let shown = dropped
-                    .iter()
-                    .take(3)
-                    .map(|s| format!("`{}`", s.chars().take(32).collect::<String>()))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let more = if dropped.len() > 3 { ", …" } else { "" };
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    a.line,
-                    format!(
-                        "atom `^{}`: {} props segment(s) are DISCARDED by the parser ({shown}{more}) \
-                         — a comma separates FIELDS, a space separates KEYWORDS; join each key-phrase \
-                         with `_` (`keywords: a_phrase another_phrase`)",
-                        a.id,
-                        dropped.len()
-                    ),
-                    "atom-dropped-props",
-                ));
-            }
-            let props = parse_block_props(&a.props_raw);
-            // TRDD-3K8SVX2H. The BODY of a superseded atom is frozen history: the supersession
-            // protocol preserves it verbatim precisely so a reader can see what the fact used to
-            // say, and editing it to satisfy a linter destroys the only thing supersession exists
-            // to keep. So BODY-SHAPE findings must not be raised against it — they would be
-            // unsatisfiable by construction, and a permanent finding nobody may act on teaches
-            // readers to skip findings, which costs more than the debt it reports.
-            //
-            // THE BOUNDARY, stated once so the next rule added here inherits it: the frozen thing
-            // is the BODY. The PROPS block is metadata, not the historical claim, so integrity
-            // rules over props (`atom-bad-ocd`, `atom-bad-lmd`, `atom-dropped-props`) still apply
-            // to superseded atoms — those are repairable without rewriting what the atom asserted.
-            // KEYWORD FLOOR + DUPLICATES — ERROR tier (owner, 2026-08-23).
-            //
-            // ERROR, not WARN, and the Severity doc is the argument: Error is "corruption or
-            // invisibility: … a lost recall surface". That is precisely this. Unlike
-            // `atom-oversized` (INFO — an oversized atom is still FOUND, still readable, and
-            // its repair is semantic work needing a chore), a thin or repetitive keyword list
-            // makes the atom UNREACHABLE by `recall`, which ranks on keywords and never reads
-            // the body. Nothing downstream can recover it, because only the author ever knew
-            // the phrasings a future session would arrive with.
-            //
-            // Superseded atoms are checked too, deliberately: they remain searchable with
-            // `--include-superseded`, so an unfindable one is still a hole.
-            // Keywords come out of `props_raw` via the SAME parser the rest of the file uses
-            // (`parse_block_props`), never a second ad-hoc split — two parsers for one
-            // grammar is how a lint and a write verb start disagreeing about what a page says.
-            let atom_kw: Vec<String> = parse_block_props(&a.props_raw)
-                .get("keywords")
-                .cloned()
-                .unwrap_or_default();
-            // The LINT floor, not the write floor — see `min_lint_keywords`.
-            let kw_min = min_lint_keywords();
-            if kw_min > 0 && unique_phrases(&atom_kw).len() < kw_min {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    a.line,
-                    format!(
-                        "atom `^{}` has {} keyphrase(s), below the {kw_min} minimum — `recall` \
-                         ranks on keywords and never reads the body, so this atom is close to \
-                         unfindable. Add the phrasings a future session will search with.",
-                        a.id,
-                        unique_phrases(&atom_kw).len()
-                    ),
-                    "atom-keywords-too-few",
-                ));
-            }
-            let kw_dupes = duplicate_phrases(&atom_kw);
-            if !kw_dupes.is_empty() {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    a.line,
-                    format!(
-                        "atom `^{}` repeats {} keyphrase(s): {kw_dupes:?} — a repeat inflates \
-                         the count without adding a way to REACH the atom, which is the only \
-                         thing the count stands for",
-                        a.id,
-                        kw_dupes.len()
-                    ),
-                    "atom-keywords-duplicated",
-                ));
-            }
-            let atom_is_superseded = status_from_props(&props) == "superseded";
-            if atom_is_superseded {
-                superseded_atom_lines.push(a.line);
-                // WARN: memgrep already excludes this atom from search by its `status:` prop, so
-                // nothing is lost or unresolvable — this is purely the READABILITY convention (atoms
-                // above the delimiter should be current) drifting out of sync with the metadata.
-                if let Some(h) = superseded_heading
-                    && a.line < h
-                {
-                    violations.push((
-                        Severity::Warn,
-                        p.clone(),
-                        a.line,
-                        format!(
-                            "atom `^{}` is `status: superseded` but sits ABOVE the `## Superseded` \
-                             delimiter (line {h}) — move it below so the page's READABILITY order \
-                             matches the `status:` metadata memgrep already filters search on",
-                            a.id
-                        ),
-                        "superseded-atom-above-delimiter",
-                    ));
-                }
-            }
-            // `a.line` is 1-based, `footer_trailing` is 0-based — so `a.line > footer_start` is
-            // exactly "this marker's 0-based line (`a.line - 1`) is at or after the trailing
-            // footer's start", i.e. `memory_content_precheck._footer_heading_line`'s own
-            // `i >= footer_idx` (janitor#260), just re-expressed to avoid an unsigned `- 1`.
-            // WARN, matching the sibling superseded-delimiter checks above: nothing is lost or
-            // unresolvable (the atom still parses and still ranks), it is purely the splice-anchor
-            // convention (`insert_atom_block` / `add-atom`) drifting out of sync with where the
-            // atom actually landed — `--in "Governed by"`/`"See also"`/Notes then misreads it as
-            // belonging to that footer section instead of standing on its own.
-            if let Some(footer_start) = footer_trailing
-                && a.line > footer_start
-            {
-                violations.push((
-                    Severity::Warn,
-                    p.clone(),
-                    a.line,
-                    format!(
-                        "atom `^{}` sits AT OR AFTER the page's trailing footer region (starts \
-                         line {}) — a link-section lookup like `--in \"Governed by\"` misreads it \
-                         as part of that section; move it back above the footer",
-                        a.id,
-                        footer_start + 1
-                    ),
-                    "atom-after-footer",
-                ));
-            }
-            let missing = |key: &str| props.get(key).map(|v| v.is_empty()).unwrap_or(true);
-            if missing("keywords") {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    a.line,
-                    format!(
-                        "atom `^{}` has no `keywords:` — that is its RECALL SURFACE; without it the \
-                         atom is un-findable by symptom, i.e. the memory does not exist",
-                        a.id
-                    ),
-                    "atom-no-keywords",
-                ));
-            }
-            for key in ["ocd", "lmd"] {
-                // WARN: the atom still parses and still ranks — only its date-sort and `--since`
-                // filtering are wrong, and a missing date cannot be reconstructed mechanically.
-                match props.get(key).and_then(|v| v.first()) {
-                    None => violations.push((
-                        Severity::Warn,
-                        p.clone(),
-                        a.line,
-                        format!("atom `^{}` has no `{key}:` date", a.id),
-                        if key == "ocd" { "atom-no-ocd" } else { "atom-no-lmd" },
-                    )),
-                    Some(v) if !is_iso_date(v) => violations.push((
-                        Severity::Warn,
-                        p.clone(),
-                        a.line,
-                        format!("atom `^{}` `{key}:` = `{v}` is not ISO `YYYY-MM-DD`", a.id),
-                        if key == "ocd" { "atom-bad-ocd" } else { "atom-bad-lmd" },
-                    )),
-                    Some(_) => {}
-                }
-            }
-            let (marker_line, body_chars) = (a.line, a.body_chars);
-            // `!atom_is_superseded` — a body-shape rule, see the boundary note above.
-            if atom_budget > 0 && body_chars > atom_budget && !atom_is_superseded {
-                // INFO (demoted from Warn, janitor#200): nothing is lost or unresolvable — the
-                // atom works, it is just doing the job of several. Fixing it needs SEMANTIC
-                // decomposition (which facts split where), which is never mechanical, and no
-                // memory-editor pass owns it: SPLIT fragments a PAGE into multiple pages (a
-                // different operation), ATOMIZE only adds markers to free prose that has none
-                // yet, and REPAIR's own rules explicitly forbid splitting a fact. A WARN here
-                // asserted actionable work that nothing in the scheduler could ever detect or
-                // dispatch on — an un-actionable finding is, by definition, informational, not
-                // a defect to gate a write on.
-                violations.push((
-                    Severity::Info,
-                    p.clone(),
-                    marker_line,
-                    format!(
-                        "atom body is {body_chars} chars (> {atom_budget}) — decompose it into \
-                         smaller atoms (one fact each)"
-                    ),
-                    "atom-oversized",
-                ));
-            }
         }
-        // A page carrying `status: superseded` atoms but NO `## Superseded` heading at all — the
-        // delimiter convention was never adopted here, so a human reader has no signal that the
-        // page mixes current and retired facts (memgrep's search-side exclude still applies
-        // regardless — this is readability-only, hence WARN). Anchored on the FIRST superseded
-        // atom's line, since there is no heading line to anchor on.
-        if superseded_heading.is_none()
-            && let Some(&first_line) = superseded_atom_lines.first()
-        {
-            violations.push((
-                Severity::Warn,
-                p.clone(),
-                first_line,
-                format!(
-                    "page has {} `status: superseded` atom(s) but no `## Superseded` heading — \
-                     add the canonical delimiter so a human reader sees current facts first",
-                    superseded_atom_lines.len()
-                ),
-                "superseded-atom-no-delimiter-heading",
-            ));
-        }
-        // Lesson-level: a body-less lesson (invisible to `find --only-notes`), a supersession missing
-        // its `SUPERSEDED BODY:` (the never-delete violation), an unquoted-prose `desc:`, and the
-        // metadata a lesson needs to be recallable and stably addressable.
-        //
-        // Scanned from the RAW definitions, NOT `ctx.footnote_defs`: comrak only materializes a
-        // footnote node for a BALANCED ref+def pair, so the parsed list omits every UNCITED
-        // page-level lesson — and the model makes those the normal case (the Notes section is
-        // mandatory even when empty). Linting only the balanced ones left the majority of the
-        // corpus's lessons unchecked, which is the same silent-omission bug as issue #47 one layer
-        // down. `def_lines` (built above) supplies the line number AND filters a `[^N]:` inside
-        // fenced code, so this stays FP-free.
-        for (label, body) in raw_footnote_defs(&lines) {
-            let Some(&def_line) = def_lines.get(&label) else {
-                continue; // inside fenced code — not a real definition
-            };
-            let (meta, rest) = split_note_metadata(&body);
-            let Some(meta) = meta else {
-                if body.trim_start().starts_with(&MANGLED_ATOM_BRACKETS[..]) {
-                    violations.push((
-                        Severity::Error,
-                        p.clone(),
-                        def_line,
-                        format!(
-                            "lesson `[^{label}]` metadata uses `⟦…⟧`, not ASCII `[…]` — its \
-                             `keywords:` and `status:` cannot be parsed, so recall and supersession \
-                             both break"
-                        ),
-                        "lesson-bad-bracket",
-                    ));
-                } else {
-                    // WARN: a plain markdown footnote is legal markdown, and a lesson without
-                    // metadata still READS correctly to a human — it is only un-findable and
-                    // un-addressable, and the fix is authoring, not mechanical.
-                    violations.push((
-                        Severity::Warn,
-                        p.clone(),
-                        def_line,
-                        format!(
-                            "lesson `[^{label}]` has no leading `[id:… status:… keywords:… ocd:… \
-                             lmd:…]` metadata — no recall keywords and no stable id"
-                        ),
-                        "lesson-no-meta",
-                    ));
-                }
-                continue;
-            };
-            if rest.trim().is_empty() {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    def_line,
-                    format!(
-                        "lesson `[^{label}]` has metadata but no body — a body-less lesson is \
-                         invisible to `find --only-notes`; add the DO-NOT/BECAUSE/DO text"
-                    ),
-                    "lesson-empty-body",
-                ));
-            }
-            if meta.contains("supersedes:") && !rest.contains("SUPERSEDED BODY:") {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    def_line,
-                    format!(
-                        "lesson `[^{label}]` supersedes an atom but omits `SUPERSEDED BODY: <old \
-                         body>` — the never-delete rule requires embedding the original"
-                    ),
-                    "lesson-superseded-no-body",
-                ));
-            }
-            if desc_unquoted_prose(&meta) {
-                violations.push((
-                    Severity::Error,
-                    p.clone(),
-                    def_line,
-                    format!("lesson `[^{label}]` `desc:` value is unquoted prose — quote it"),
-                    "lesson-unquoted-desc",
-                ));
-            }
-            let lesson_props = parse_block_props(&meta);
-            let lesson_missing = |key: &str| {
-                lesson_props
-                    .get(key)
-                    .map(|v| v.is_empty())
-                    .unwrap_or(true)
-            };
-            if lesson_missing("keywords") {
-                violations.push((
-                    Severity::Warn,
-                    p.clone(),
-                    def_line,
-                    format!(
-                        "lesson `[^{label}]` metadata has no `keywords:` — not recallable by symptom"
-                    ),
-                    "lesson-no-keywords",
-                ));
-            }
-            if lesson_missing("id") {
-                // WARN not ERROR: the lesson still resolves and still ranks TODAY. What it loses is
-                // durable identity — `[^N]` is page-local and renumbers on every edit, so only the
-                // `id:` survives a split/merge/migrate, and a citation of the label alone rots.
-                violations.push((
-                    Severity::Warn,
-                    p.clone(),
-                    def_line,
-                    format!(
-                        "lesson `[^{label}]` has no `id:ATOM-…` — the `[^N]` label renumbers, so only \
-                         a stable id survives an edit"
-                    ),
-                    "lesson-no-id",
-                ));
-            }
-            // The `superseeded` misspelling is accepted on BOTH the status and the pointer because
-            // the parser accepts it: flagging a doubled `e` as "no pointer" would be a false alarm.
-            let status = lesson_props
-                .get("status")
-                .and_then(|v| v.first())
-                .map(String::as_str)
-                .unwrap_or("valid");
-            if matches!(status, "superseded" | "superseeded")
-                && lesson_missing("superseded-by")
-                && lesson_missing("superseeded-by")
-            {
-                violations.push((
-                    Severity::Warn,
-                    p.clone(),
-                    def_line,
-                    format!(
-                        "lesson `[^{label}]` is `status:superseded` but carries no \
-                         `superseded-by:ATOM-…` forward pointer — the chain dead-ends"
-                    ),
-                    "lesson-superseded-no-pointer",
-                ));
-            }
-        }
+        violations.extend(lint_page_text(&path, &text, fix));
     }
 
     // ── Check 8 — atom ids are CORPUS-unique. The one atom property no single file can decide: a
@@ -7230,6 +6548,717 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
 
     // Deterministic, stable order across runs.
     violations.sort();
+    violations
+}
+
+/// The PER-PAGE half of `lint_paths_with`, extracted mechanically (TRDD-XI10BA5D A2 step 1):
+/// every check that examines ONE page's text. `lint_paths_with` keeps the path filtering, the
+/// fix-gated normalize pass, file reading, and the cross-page passes (corpus-unique atom ids,
+/// link law) — everything that needs the whole path SET.
+///
+/// `fix` is currently UNUSED here: every autofix lint performs happens in `lint_paths_with`'s
+/// normalize pass BEFORE this runs (the per-page checks are report-only — see the
+/// `publish-globally` check below). The parameter is kept so the A2 write-gate step can make
+/// per-page fixing page-local without another signature change.
+fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violation> {
+    let _ = fix; // see doc comment — report-only today; the A2 gate owns per-page fixing.
+    let p = rel(path);
+    let mut violations: Vec<Violation> = Vec::new();
+
+    // Check — a raw control byte (TRDD-XI10BA5D A1). This is the retroactive half of
+    // `reject_control_bytes`: the write gate refuses a NEW control byte, but the two
+    // already-corrupted pages the owner reported predate the guard, so a whole-store
+    // `memgrep lint` must be able to find them too. ERROR uniformly (no looser lint-time
+    // floor, unlike the phrase-count checks below) — no corpus vintage legitimately
+    // contains a raw backspace byte. Never auto-fixed: stripping it would guess at intent
+    // the byte gives no way to recover, so this is report-only even under `fix = true`.
+    // The message carries only the location and the byte's hex value, NEVER a content
+    // snippet — a wikimem page can hold private material, and a lint finding is printed to
+    // plain stdout.
+    if let Some((line, _col, _offset, cp)) = find_control_byte(&text) {
+        violations.push((
+            Severity::Error,
+            p.clone(),
+            line,
+            format!(
+                "raw control byte 0x{cp:02X} — not tab/newline/CR; cannot be auto-fixed \
+                 without guessing intent, must be removed by hand"
+            ),
+            "control-byte-in-page",
+        ));
+    }
+
+    // Check 3 — required frontmatter fields. Read RAW frontmatter so a missing `lmd:` is NOT
+    // masked by read_note's fs-mtime fallback. Accept the model's documented aliases
+    // (created/updated/summary) so a valid note using them is not falsely flagged.
+    let fm = md::parse_frontmatter(&text);
+    let has = |keys: &[&str]| {
+        keys.iter()
+            .any(|k| fm.get(*k).map(|v| !v.trim().is_empty()).unwrap_or(false))
+    };
+    if !has(&["ocd", "created"]) {
+        violations.push((
+            Severity::Error,
+            p.clone(),
+            0,
+            "missing required frontmatter field `ocd`".into(),
+            "page-no-ocd",
+        ));
+    }
+    if !has(&["lmd", "updated"]) {
+        violations.push((
+            Severity::Error,
+            p.clone(),
+            0,
+            "missing required frontmatter field `lmd`".into(),
+            "page-no-lmd",
+        ));
+    }
+    if !has(&["description", "summary"]) {
+        violations.push((
+            Severity::Error,
+            p.clone(),
+            0,
+            "missing required frontmatter field `description`".into(),
+            "page-no-description",
+        ));
+    } else {
+        // The PAGE recall surface, held to a HIGHER bar than an atom's (owner, 2026-08-23:
+        // 15 vs 10). An atom answers one question; a page has to be reachable from any
+        // question its atoms answer, so its description needs the UNION of their symptom
+        // vocabularies. ERROR for the same reason as the atom rules: a page nobody can reach
+        // takes every fact on it down too, and no later pass can reconstruct the phrasings.
+        let desc = fm
+            .get("description")
+            .or_else(|| fm.get("summary"))
+            .map(String::as_str)
+            .unwrap_or("");
+        let phrases = page_description_phrases(desc);
+        // The LINT floor, not the write floor — see `min_lint_page_phrases`.
+        let min_p = min_lint_page_phrases();
+        if min_p > 0 && unique_phrases(&phrases).len() < min_p {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                0,
+                format!(
+                    "page `description:` carries {} `/`-separated phrase(s), below the \
+                     {min_p} minimum — it is the recall surface for EVERY fact on this page, \
+                     so add the alternative phrasings a future session will arrive with",
+                    unique_phrases(&phrases).len()
+                ),
+                "page-description-too-few-phrases",
+            ));
+        }
+        let d_dupes = duplicate_phrases(&phrases);
+        if !d_dupes.is_empty() {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                0,
+                format!(
+                    "page `description:` repeats {} phrase(s): {d_dupes:?} — a repeat raises \
+                     the count without widening the set of searches that can find this page",
+                    d_dupes.len()
+                ),
+                "page-description-duplicated-phrases",
+            ));
+        }
+    }
+
+    // Check — `publish-globally:` reconciliation state (read-only report; the fix itself is
+    // unconditional at every write's `atomic_write_page`, never performed by lint). Shares
+    // `classify_publish_globally` with the write path so a finding here and a normalization
+    // there can never disagree.
+    if let Some(state) = publish_globally_state(path, &text)
+        && let Some(issue) = classify_publish_globally(state.has_field, state.is_true, state.has_symlink)
+    {
+        let (sev, code, msg) = issue.lint_line();
+        violations.push((sev, p.clone(), 0, msg.to_string(), code));
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    let ctx = md::build_context(&text, lines.len());
+
+    // Check 0 — AN UNCLOSED CODE FENCE, reported FIRST because it invalidates every other
+    // structural conclusion on the page (janitor#279).
+    //
+    // Every structural walker here toggles `in_fence` on any line starting with ``` or ~~~ and
+    // suppresses parsing while it is true. An ODD number of such lines therefore leaves the
+    // walker inside a fence for the whole REST of the page: atoms after it stop existing,
+    // headings after it stop existing, and each consumer then reports its own confident wrong
+    // answer. Measured on the reproduction: `add-lesson` said "no BODY atom answering to <id>"
+    // for an atom plainly present, and this very lint said "missing `## Notes and lessons
+    // learned` section" for a heading plainly present — two different lies from one cause.
+    //
+    // That is what makes it worth its own check. The peer who filed #279 induced and FALSIFIED
+    // two source-derived mechanisms (footer placement, marker grammar) before handing over the
+    // reproduction — the wasted effort was not carelessness, it was that no error message ever
+    // named the actual fault. This one does.
+    //
+    // Same predicate the walkers use (`unclosed_fence_line` → `fence_step`), not a second
+    // copy of the rule: this lint exists to fire exactly when a walker is confused, so it
+    // must be confused by exactly the same things. A cleverer detector that disagreed with
+    // the consumers would flag pages they parse fine and stay silent on pages they mangle.
+    let fence_open: Option<usize> = unclosed_fence_line(&text);
+    if let Some(open_at) = fence_open.as_ref() {
+        violations.push((
+            Severity::Error,
+            p.clone(),
+            open_at + 1,
+            "unclosed code fence opened here — every atom and heading BELOW it is \
+             invisible to the structural walkers, so other findings on this page \
+             (and `add-atom` / `add-lesson` refusals) are unreliable until it is closed"
+                .to_string(),
+            "page-unclosed-fence",
+        ));
+    }
+
+    // Check 3 (cont.) — the `## Notes and lessons learned` section must be present. The section
+    // is MANDATORY on every page (it is the standing landing zone for a `[^N]` correction
+    // lesson) even when empty, per the memory model. Match the heading text leniently.
+    let has_notes_section = ctx.headings.iter().any(|h| {
+        h.text
+            .trim()
+            .eq_ignore_ascii_case("Notes and lessons learned")
+    });
+    if !has_notes_section {
+        violations.push((
+            Severity::Error,
+            p.clone(),
+            0,
+            "missing `## Notes and lessons learned` section".into(),
+            "page-no-notes-section",
+        ));
+    }
+
+    // Check 1 — footnote integrity. We must scan the RAW markdown ourselves rather than reuse
+    // `ctx.footnote_refs`/`footnote_defs`: comrak's footnote extension only materializes a
+    // footnote NODE when the ref AND the def are BOTH present (a balanced pair) — an orphan ref
+    // renders as literal text and an orphan def is dropped — so the parsed lists can never
+    // surface the very imbalance this check exists to catch (the issue-#47 lived bug). The raw
+    // scan still skips lines inside fenced code (`ctx.in_code`, which IS populated) so a `[^N]`
+    // in a code sample is never falsely flagged — keeping the check deterministic and FP-free.
+    let mut ref_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first ref line
+    let mut def_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first def line
+    // label → first line carrying a `[^N]` that markdown does NOT treat as a reference
+    // because it sits inside a code span or a fence. Collected purely to EXPLAIN a
+    // `lesson-uncited` finding (janitor#152): the author wrote the citation, it just does
+    // not function, and the two states are visually identical in the source. Without this
+    // the message sends them to look at an atom body where they can SEE `[^3]` — so they
+    // conclude the linter is wrong and move on, and the lesson stays orphaned. Measured on
+    // the USER corpus when the issue was filed: 9 of 101 findings were this.
+    let mut hidden_ref_lines: BTreeMap<String, usize> = BTreeMap::new();
+    // Cross-line HTML-comment state (janitor#173) — fed EVERY line below, including a fenced
+    // one we are about to skip, so a comment spanning around a fence cannot desync it.
+    let mut in_html_comment = false;
+    for (i, raw) in lines.iter().enumerate() {
+        let line_no = i + 1; // 1-based, matching ctx.in_code's indexing
+        let in_fence = *ctx.in_code.get(i).unwrap_or(&false);
+        // Mask HTML comments (janitor#173: the mandatory `## Notes and lessons learned`
+        // landing-zone comment `<!-- … [^N] … -->` was scanned as body prose — an HTML comment
+        // is not rendered content, exactly like a fence or an inline-code span, but it was the
+        // one mask missing from the set) and INLINE-code spans, so a literal `[^N]` in a
+        // comment or example prose is not a false ref.
+        let comment_masked = mask_html_comment(raw, &mut in_html_comment);
+        let visible = if in_fence {
+            Vec::new() // inside a fenced code block — not real footnote syntax
+        } else {
+            scan_footnotes(&mask_inline_code(&comment_masked))
+        };
+        for (label, is_def) in &visible {
+            let table = if *is_def {
+                &mut def_lines
+            } else {
+                &mut ref_lines
+            };
+            table.entry(label.clone()).or_insert(line_no);
+        }
+        // Anything the RAW line carries that the masked/fenced view dropped is a citation
+        // the author wrote and markdown will not honour. Defs are excluded: a definition
+        // shown inside a fence is documentation, not a miswritten citation.
+        for (label, is_def) in scan_footnotes(raw) {
+            if is_def {
+                continue;
+            }
+            let shown = visible.iter().any(|(l, d)| !*d && *l == label);
+            if !shown {
+                hidden_ref_lines.entry(label).or_insert(line_no);
+            }
+        }
+    }
+    // Dangling reference: `[^N]` in the body with no `[^N]:` definition (report once, at first ref).
+    for (label, &line) in &ref_lines {
+        if !def_lines.contains_key(label) {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                line,
+                format!("footnote reference `[^{label}]` has no `[^{label}]:` definition"),
+                "footnote-dangling-ref",
+            ));
+        }
+    }
+    // Unreferenced definition: `[^N]:` that nothing in the body cites (report once, at first def).
+    //
+    // INFO, not a defect. The memory model makes `## Notes and lessons learned` MANDATORY on
+    // every page even when empty — it is the standing landing zone for a correction lesson —
+    // so a PAGE-level lesson has no inline referrer BY DESIGN. Rated as an error this check
+    // alone produced 150 of 262 findings across the live corpus (57%), i.e. the gate failed
+    // everywhere and the genuine errors were unreadable underneath it. The message says what
+    // the reader can DO instead of implying something is broken: citing a lesson from an atom
+    // is what makes it TRAVEL with that atom on `migrate`, which is the real reason to bother.
+    for (label, &line) in &def_lines {
+        if !ref_lines.contains_key(label) {
+            // If the citation EXISTS but is inert, say so and point at it. Telling an
+            // author to "cite it from an atom" when they already did is how a correct
+            // finding gets dismissed as a linter bug (janitor#152).
+            let msg = match hidden_ref_lines.get(label) {
+                Some(&hidden) => format!(
+                    "page-level lesson `[^{label}]:` — a `[^{label}]` is present at line \
+                     {hidden} but sits INSIDE a code span/fence, so markdown renders it as \
+                     literal text, not a reference; move the closing backtick so the \
+                     citation falls outside the code span"
+                ),
+                None => format!(
+                    "page-level lesson `[^{label}]:` — cite it from an atom (`[^{label}]` in \
+                     the atom body) if it should travel with one"
+                ),
+            };
+            violations.push((Severity::Info, p.clone(), line, msg, "lesson-uncited"));
+        }
+    }
+
+    // ── Checks 4-7 (TRDD-DOJ2LE1G) — atom/lesson AUTHORING integrity, deterministic + FP-free. ──
+    //
+    // A marker shape that never PARSES has to be found in the raw lines: an atom the parser
+    // cannot see is exactly what `atoms_for_lint` — which uses that same parser — can never
+    // report. Fenced code is skipped (`ctx.in_code`) and inline code is masked, so prose that
+    // SHOWS the broken form (this repo's own docs do) is never flagged.
+    for (i, raw) in lines.iter().enumerate() {
+        if *ctx.in_code.get(i).unwrap_or(&false) {
+            continue;
+        }
+        let masked = mask_inline_code(raw);
+        if let Some((id, bad)) = mangled_atom_marker(&masked) {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                i + 1,
+                format!(
+                    "atom `^{id}` opens its props with `{bad}`, not ASCII `[` — the parser scans \
+                     for the byte `[` (0x5B), so this is not an atom at all and is INVISIBLE to \
+                     recall"
+                ),
+                "atom-bad-bracket",
+            ));
+        } else if let Some(id) = unclosed_atom_marker(&masked) {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                i + 1,
+                format!(
+                    "atom `^{id}` props `[` is never closed on its line — unparseable, so the \
+                     atom does not exist"
+                ),
+                "atom-unclosed-props",
+            ));
+        } else if masked.contains('⟦') || masked.contains('⟧') {
+            // INFO: in PROSE these are harmless (and this corpus documents the escaping), but
+            // they are the fingerprint of text pasted out of recall's display output — which is
+            // how a marker acquires them, and there the same paste is fatal.
+            violations.push((
+                Severity::Info,
+                p.clone(),
+                i + 1,
+                "line carries `⟦`/`⟧` — recall's DISPLAY escaping of `[`/`]`; a SOURCE page \
+                 holds the literal brackets"
+                    .into(),
+                "stray-display-bracket",
+            ));
+        }
+    }
+
+    // Atom-level: an unquoted-prose `desc:` (breaks grep / the in-body filter), props the parser
+    // silently DROPS, a missing recall surface, non-ISO dates, and an oversized body (must be
+    // decomposed). `atoms_for_lint` segments exactly as the recall resolver does.
+    let atom_budget = atom_max_chars();
+    // The page's `## Superseded` delimiter (TRDD-57WJL5L2), and every `status: superseded` atom
+    // line found below — used by the two delimiter checks after this loop. memgrep's default
+    // SEARCH exclude is keyed on the `status:` prop, never on position; this pair of checks is
+    // the READABILITY layer that keeps the delimiter honest about what the metadata already says.
+    let superseded_heading = superseded_heading_line(&text);
+    let mut superseded_atom_lines: Vec<usize> = Vec::new();
+    // The page's TRAILING footer region (janitor#260 endgame — see `footer_section_trailing_line`'s
+    // own docstring for why this is NOT `footer_section_line`, which anchors `add-atom` instead).
+    // Computed once per page, outside the loop, so every atom on the page is judged against the
+    // same boundary.
+    let footer_trailing = footer_section_trailing_line(&text);
+    for a in atoms_for_lint(&text) {
+        // The atom-id declarations feed Check 8 (corpus-unique ids) — collected by the
+        // caller, `lint_paths_with`, because uniqueness is a corpus property, not a page one.
+        if desc_unquoted_prose(&a.props_raw) {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                a.line,
+                "atom `desc:` value is unquoted prose — quote it (`desc:\"…\"`) or grep and the \
+                 in-body filter break"
+                    .into(),
+                "atom-unquoted-desc",
+            ));
+        }
+        let dropped = dropped_prop_segments(&a.props_raw);
+        if !dropped.is_empty() {
+            let shown = dropped
+                .iter()
+                .take(3)
+                .map(|s| format!("`{}`", s.chars().take(32).collect::<String>()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = if dropped.len() > 3 { ", …" } else { "" };
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                a.line,
+                format!(
+                    "atom `^{}`: {} props segment(s) are DISCARDED by the parser ({shown}{more}) \
+                     — a comma separates FIELDS, a space separates KEYWORDS; join each key-phrase \
+                     with `_` (`keywords: a_phrase another_phrase`)",
+                    a.id,
+                    dropped.len()
+                ),
+                "atom-dropped-props",
+            ));
+        }
+        let props = parse_block_props(&a.props_raw);
+        // TRDD-3K8SVX2H. The BODY of a superseded atom is frozen history: the supersession
+        // protocol preserves it verbatim precisely so a reader can see what the fact used to
+        // say, and editing it to satisfy a linter destroys the only thing supersession exists
+        // to keep. So BODY-SHAPE findings must not be raised against it — they would be
+        // unsatisfiable by construction, and a permanent finding nobody may act on teaches
+        // readers to skip findings, which costs more than the debt it reports.
+        //
+        // THE BOUNDARY, stated once so the next rule added here inherits it: the frozen thing
+        // is the BODY. The PROPS block is metadata, not the historical claim, so integrity
+        // rules over props (`atom-bad-ocd`, `atom-bad-lmd`, `atom-dropped-props`) still apply
+        // to superseded atoms — those are repairable without rewriting what the atom asserted.
+        // KEYWORD FLOOR + DUPLICATES — ERROR tier (owner, 2026-08-23).
+        //
+        // ERROR, not WARN, and the Severity doc is the argument: Error is "corruption or
+        // invisibility: … a lost recall surface". That is precisely this. Unlike
+        // `atom-oversized` (INFO — an oversized atom is still FOUND, still readable, and
+        // its repair is semantic work needing a chore), a thin or repetitive keyword list
+        // makes the atom UNREACHABLE by `recall`, which ranks on keywords and never reads
+        // the body. Nothing downstream can recover it, because only the author ever knew
+        // the phrasings a future session would arrive with.
+        //
+        // Superseded atoms are checked too, deliberately: they remain searchable with
+        // `--include-superseded`, so an unfindable one is still a hole.
+        // Keywords come out of `props_raw` via the SAME parser the rest of the file uses
+        // (`parse_block_props`), never a second ad-hoc split — two parsers for one
+        // grammar is how a lint and a write verb start disagreeing about what a page says.
+        let atom_kw: Vec<String> = parse_block_props(&a.props_raw)
+            .get("keywords")
+            .cloned()
+            .unwrap_or_default();
+        // The LINT floor, not the write floor — see `min_lint_keywords`.
+        let kw_min = min_lint_keywords();
+        if kw_min > 0 && unique_phrases(&atom_kw).len() < kw_min {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                a.line,
+                format!(
+                    "atom `^{}` has {} keyphrase(s), below the {kw_min} minimum — `recall` \
+                     ranks on keywords and never reads the body, so this atom is close to \
+                     unfindable. Add the phrasings a future session will search with.",
+                    a.id,
+                    unique_phrases(&atom_kw).len()
+                ),
+                "atom-keywords-too-few",
+            ));
+        }
+        let kw_dupes = duplicate_phrases(&atom_kw);
+        if !kw_dupes.is_empty() {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                a.line,
+                format!(
+                    "atom `^{}` repeats {} keyphrase(s): {kw_dupes:?} — a repeat inflates \
+                     the count without adding a way to REACH the atom, which is the only \
+                     thing the count stands for",
+                    a.id,
+                    kw_dupes.len()
+                ),
+                "atom-keywords-duplicated",
+            ));
+        }
+        let atom_is_superseded = status_from_props(&props) == "superseded";
+        if atom_is_superseded {
+            superseded_atom_lines.push(a.line);
+            // WARN: memgrep already excludes this atom from search by its `status:` prop, so
+            // nothing is lost or unresolvable — this is purely the READABILITY convention (atoms
+            // above the delimiter should be current) drifting out of sync with the metadata.
+            if let Some(h) = superseded_heading
+                && a.line < h
+            {
+                violations.push((
+                    Severity::Warn,
+                    p.clone(),
+                    a.line,
+                    format!(
+                        "atom `^{}` is `status: superseded` but sits ABOVE the `## Superseded` \
+                         delimiter (line {h}) — move it below so the page's READABILITY order \
+                         matches the `status:` metadata memgrep already filters search on",
+                        a.id
+                    ),
+                    "superseded-atom-above-delimiter",
+                ));
+            }
+        }
+        // `a.line` is 1-based, `footer_trailing` is 0-based — so `a.line > footer_start` is
+        // exactly "this marker's 0-based line (`a.line - 1`) is at or after the trailing
+        // footer's start", i.e. `memory_content_precheck._footer_heading_line`'s own
+        // `i >= footer_idx` (janitor#260), just re-expressed to avoid an unsigned `- 1`.
+        // WARN, matching the sibling superseded-delimiter checks above: nothing is lost or
+        // unresolvable (the atom still parses and still ranks), it is purely the splice-anchor
+        // convention (`insert_atom_block` / `add-atom`) drifting out of sync with where the
+        // atom actually landed — `--in "Governed by"`/`"See also"`/Notes then misreads it as
+        // belonging to that footer section instead of standing on its own.
+        if let Some(footer_start) = footer_trailing
+            && a.line > footer_start
+        {
+            violations.push((
+                Severity::Warn,
+                p.clone(),
+                a.line,
+                format!(
+                    "atom `^{}` sits AT OR AFTER the page's trailing footer region (starts \
+                     line {}) — a link-section lookup like `--in \"Governed by\"` misreads it \
+                     as part of that section; move it back above the footer",
+                    a.id,
+                    footer_start + 1
+                ),
+                "atom-after-footer",
+            ));
+        }
+        let missing = |key: &str| props.get(key).map(|v| v.is_empty()).unwrap_or(true);
+        if missing("keywords") {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                a.line,
+                format!(
+                    "atom `^{}` has no `keywords:` — that is its RECALL SURFACE; without it the \
+                     atom is un-findable by symptom, i.e. the memory does not exist",
+                    a.id
+                ),
+                "atom-no-keywords",
+            ));
+        }
+        for key in ["ocd", "lmd"] {
+            // WARN: the atom still parses and still ranks — only its date-sort and `--since`
+            // filtering are wrong, and a missing date cannot be reconstructed mechanically.
+            match props.get(key).and_then(|v| v.first()) {
+                None => violations.push((
+                    Severity::Warn,
+                    p.clone(),
+                    a.line,
+                    format!("atom `^{}` has no `{key}:` date", a.id),
+                    if key == "ocd" { "atom-no-ocd" } else { "atom-no-lmd" },
+                )),
+                Some(v) if !is_iso_date(v) => violations.push((
+                    Severity::Warn,
+                    p.clone(),
+                    a.line,
+                    format!("atom `^{}` `{key}:` = `{v}` is not ISO `YYYY-MM-DD`", a.id),
+                    if key == "ocd" { "atom-bad-ocd" } else { "atom-bad-lmd" },
+                )),
+                Some(_) => {}
+            }
+        }
+        let (marker_line, body_chars) = (a.line, a.body_chars);
+        // `!atom_is_superseded` — a body-shape rule, see the boundary note above.
+        if atom_budget > 0 && body_chars > atom_budget && !atom_is_superseded {
+            // INFO (demoted from Warn, janitor#200): nothing is lost or unresolvable — the
+            // atom works, it is just doing the job of several. Fixing it needs SEMANTIC
+            // decomposition (which facts split where), which is never mechanical, and no
+            // memory-editor pass owns it: SPLIT fragments a PAGE into multiple pages (a
+            // different operation), ATOMIZE only adds markers to free prose that has none
+            // yet, and REPAIR's own rules explicitly forbid splitting a fact. A WARN here
+            // asserted actionable work that nothing in the scheduler could ever detect or
+            // dispatch on — an un-actionable finding is, by definition, informational, not
+            // a defect to gate a write on.
+            violations.push((
+                Severity::Info,
+                p.clone(),
+                marker_line,
+                format!(
+                    "atom body is {body_chars} chars (> {atom_budget}) — decompose it into \
+                     smaller atoms (one fact each)"
+                ),
+                "atom-oversized",
+            ));
+        }
+    }
+    // A page carrying `status: superseded` atoms but NO `## Superseded` heading at all — the
+    // delimiter convention was never adopted here, so a human reader has no signal that the
+    // page mixes current and retired facts (memgrep's search-side exclude still applies
+    // regardless — this is readability-only, hence WARN). Anchored on the FIRST superseded
+    // atom's line, since there is no heading line to anchor on.
+    if superseded_heading.is_none()
+        && let Some(&first_line) = superseded_atom_lines.first()
+    {
+        violations.push((
+            Severity::Warn,
+            p.clone(),
+            first_line,
+            format!(
+                "page has {} `status: superseded` atom(s) but no `## Superseded` heading — \
+                 add the canonical delimiter so a human reader sees current facts first",
+                superseded_atom_lines.len()
+            ),
+            "superseded-atom-no-delimiter-heading",
+        ));
+    }
+    // Lesson-level: a body-less lesson (invisible to `find --only-notes`), a supersession missing
+    // its `SUPERSEDED BODY:` (the never-delete violation), an unquoted-prose `desc:`, and the
+    // metadata a lesson needs to be recallable and stably addressable.
+    //
+    // Scanned from the RAW definitions, NOT `ctx.footnote_defs`: comrak only materializes a
+    // footnote node for a BALANCED ref+def pair, so the parsed list omits every UNCITED
+    // page-level lesson — and the model makes those the normal case (the Notes section is
+    // mandatory even when empty). Linting only the balanced ones left the majority of the
+    // corpus's lessons unchecked, which is the same silent-omission bug as issue #47 one layer
+    // down. `def_lines` (built above) supplies the line number AND filters a `[^N]:` inside
+    // fenced code, so this stays FP-free.
+    for (label, body) in raw_footnote_defs(&lines) {
+        let Some(&def_line) = def_lines.get(&label) else {
+            continue; // inside fenced code — not a real definition
+        };
+        let (meta, rest) = split_note_metadata(&body);
+        let Some(meta) = meta else {
+            if body.trim_start().starts_with(&MANGLED_ATOM_BRACKETS[..]) {
+                violations.push((
+                    Severity::Error,
+                    p.clone(),
+                    def_line,
+                    format!(
+                        "lesson `[^{label}]` metadata uses `⟦…⟧`, not ASCII `[…]` — its \
+                         `keywords:` and `status:` cannot be parsed, so recall and supersession \
+                         both break"
+                    ),
+                    "lesson-bad-bracket",
+                ));
+            } else {
+                // WARN: a plain markdown footnote is legal markdown, and a lesson without
+                // metadata still READS correctly to a human — it is only un-findable and
+                // un-addressable, and the fix is authoring, not mechanical.
+                violations.push((
+                    Severity::Warn,
+                    p.clone(),
+                    def_line,
+                    format!(
+                        "lesson `[^{label}]` has no leading `[id:… status:… keywords:… ocd:… \
+                         lmd:…]` metadata — no recall keywords and no stable id"
+                    ),
+                    "lesson-no-meta",
+                ));
+            }
+            continue;
+        };
+        if rest.trim().is_empty() {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                def_line,
+                format!(
+                    "lesson `[^{label}]` has metadata but no body — a body-less lesson is \
+                     invisible to `find --only-notes`; add the DO-NOT/BECAUSE/DO text"
+                ),
+                "lesson-empty-body",
+            ));
+        }
+        if meta.contains("supersedes:") && !rest.contains("SUPERSEDED BODY:") {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                def_line,
+                format!(
+                    "lesson `[^{label}]` supersedes an atom but omits `SUPERSEDED BODY: <old \
+                     body>` — the never-delete rule requires embedding the original"
+                ),
+                "lesson-superseded-no-body",
+            ));
+        }
+        if desc_unquoted_prose(&meta) {
+            violations.push((
+                Severity::Error,
+                p.clone(),
+                def_line,
+                format!("lesson `[^{label}]` `desc:` value is unquoted prose — quote it"),
+                "lesson-unquoted-desc",
+            ));
+        }
+        let lesson_props = parse_block_props(&meta);
+        let lesson_missing = |key: &str| {
+            lesson_props
+                .get(key)
+                .map(|v| v.is_empty())
+                .unwrap_or(true)
+        };
+        if lesson_missing("keywords") {
+            violations.push((
+                Severity::Warn,
+                p.clone(),
+                def_line,
+                format!(
+                    "lesson `[^{label}]` metadata has no `keywords:` — not recallable by symptom"
+                ),
+                "lesson-no-keywords",
+            ));
+        }
+        if lesson_missing("id") {
+            // WARN not ERROR: the lesson still resolves and still ranks TODAY. What it loses is
+            // durable identity — `[^N]` is page-local and renumbers on every edit, so only the
+            // `id:` survives a split/merge/migrate, and a citation of the label alone rots.
+            violations.push((
+                Severity::Warn,
+                p.clone(),
+                def_line,
+                format!(
+                    "lesson `[^{label}]` has no `id:ATOM-…` — the `[^N]` label renumbers, so only \
+                     a stable id survives an edit"
+                ),
+                "lesson-no-id",
+            ));
+        }
+        // The `superseeded` misspelling is accepted on BOTH the status and the pointer because
+        // the parser accepts it: flagging a doubled `e` as "no pointer" would be a false alarm.
+        let status = lesson_props
+            .get("status")
+            .and_then(|v| v.first())
+            .map(String::as_str)
+            .unwrap_or("valid");
+        if matches!(status, "superseded" | "superseeded")
+            && lesson_missing("superseded-by")
+            && lesson_missing("superseeded-by")
+        {
+            violations.push((
+                Severity::Warn,
+                p.clone(),
+                def_line,
+                format!(
+                    "lesson `[^{label}]` is `status:superseded` but carries no \
+                     `superseded-by:ATOM-…` forward pointer — the chain dead-ends"
+                ),
+                "lesson-superseded-no-pointer",
+            ));
+        }
+    }
+
     violations
 }
 
