@@ -12,6 +12,7 @@ mod md;
 // The topic/atom verb families (TRDD-VJL1YTCG Part B). Each lives in its OWN module rather than
 // in `memory.rs` for a mechanical reason: that file is ~12k lines, so two agents editing it
 // collide on staleness checks and neither can land. One family per file keeps them independent.
+mod jev;
 mod mem_delete;
 mod mem_merge;
 mod mem_reference;
