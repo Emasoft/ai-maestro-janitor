@@ -7263,6 +7263,101 @@ fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violation> {
     violations
 }
 
+// ─────────────────────────── A2 write-gate floors (TRDD-XI10BA5D step 2) ───────────────────────────
+
+/// The write-time floor decision: does THIS lint finding refuse a write?
+///
+/// The owner's default gate rule (card TRDD-XI10BA5D, "Owner questions asked …": "strict, refuse
+/// any write whose result has an error-level finding") applied verbatim to all 22 ERROR codes
+/// `lint_page_text` can emit would strand the crate's own legacy-shaped test fixtures on their
+/// first edit and would enforce the LINT phrase floors, which the card explicitly takes away from
+/// the gate ("the gate needs the write floors, which `min_page_phrases`/`min_keywords` already
+/// model, NOT the lint floors"). The reconciliation, code by code:
+///
+/// BLOCKED (in `write_gate_floors()`) — corruption or a lost recall surface, exactly what the
+/// owner's "memgrep is a writing gate ensuring that no malformed memory file is ever written"
+/// refuses: the page, atom or lesson does not parse, or content is silently lost
+/// (`atom-bad-bracket`, `atom-unclosed-props`, `atom-dropped-props`, `lesson-bad-bracket`,
+/// `footnote-dangling-ref`), an unclosed code fence (janitor#279: every structural conclusion
+/// below it is a confident lie), a raw control byte (the A1 contract, belt-and-braces beside
+/// `write_page_bytes`'s own refusal), the zero-keyword extreme of the atom recall surface
+/// (`atom-no-keywords`), supersession that omits the superseded body
+/// (`lesson-superseded-no-body`), the two unquoted-`desc:` codes (they break grep and the
+/// in-body filter), an empty lesson body (invisible to `find --only-notes`), and the two
+/// duplicate-phrase codes (a repeat inflates a floor count while adding no way to reach the
+/// memory — owner: "10 keywords are useless if they are all the same"; the per-verb floors
+/// already refuse duplicates on what a write touches, and the live corpus measured zero ERROR
+/// findings across 345 pages on 2026-09-23, so gating on them blocks nothing legitimate today).
+///
+/// GRANDFATHERED (in `WRITE_GATE_GRANDFATHERED_CODES`) — and why each stays out:
+/// - `page-no-ocd` / `page-no-lmd` / `page-no-description` / `page-no-notes-section`: LEGACY
+///   frontmatter/section debt. Every page-creating verb scaffolds all four by construction
+///   (`cmd_new_page_cli`, merge's tombstone, split's destination), so a write never INTRODUCES
+///   their absence; refusing on them strands every legacy-shaped page (this crate's
+///   `edit_test_scope` fixtures, `PUBGLOBAL_PAGE_MISSING`) on its first edit. They stay lint
+///   findings and, once step B's ticket plumbing lands, they ticket. CONSEQUENCE an A3
+///   whole-page replace must heed: dropping the Notes section is NOT gate-refused — the A3 verb
+///   enforces it itself.
+/// - `page-description-too-few-phrases` / `atom-keywords-too-few`: the LINT floors (4 / 3),
+///   deliberately below the write floors (15 / 10). The write floors are DIFFERENTIAL — a new
+///   page, a new atom, a keywords/description change — and already live at the verbs
+///   (`cmd_new_page_cli`, split's `check_page_description`, `check_keyword_floor`); a
+///   whole-result lint cannot express "only what the write touched", so wiring the lint floors
+///   here would re-refuse the legacy corpus the lint floors exist to tolerate.
+/// - `publish-globally-not-symlinked` / `publish-globally-conflict`: the write path's own
+///   `normalize_page_until_clean` fixed point owns these (TRDD-RY0IJBJI: every state autofixes),
+///   and `TrueNoSymlink`'s fix is commit-time symlink creation — a gate refusing on it would
+///   refuse a page the very next step of the same write repairs, a false refusal by construction.
+///
+/// Not in scope here: `atom-dup-id` and `link-one-sided` are CROSS-page findings owned by
+/// `lint_paths_with`'s corpus passes — step 3's prepare_batch handles them at batch level.
+///
+/// Per-page FIXING stays `lint_page_text`'s reserved `fix` parameter (see its doc comment) —
+/// this function is only the REFUSE decision. Step 3 (pre_write.rs) wires `write_gate_blocks`
+/// into the prepare pass; the completeness test in `mod tests` fails when an ERROR code is added
+/// to `lint_page_text` without being classified into one of the two sets.
+#[allow(dead_code)] // step 3 wires the production caller; the floor tests cover the decision meanwhile
+fn write_gate_blocks(v: &Violation) -> bool {
+    v.0 == Severity::Error && write_gate_floors().contains(&v.4)
+}
+
+/// The floor codes proper — see `write_gate_blocks` for the per-code rationale.
+#[allow(dead_code)] // read by write_gate_blocks (step 3) and the floor tests
+fn write_gate_floors() -> &'static [&'static str] {
+    &[
+        "control-byte-in-page",
+        "page-unclosed-fence",
+        "page-description-duplicated-phrases",
+        "footnote-dangling-ref",
+        "atom-bad-bracket",
+        "atom-unclosed-props",
+        "atom-unquoted-desc",
+        "atom-dropped-props",
+        "atom-keywords-duplicated",
+        "atom-no-keywords",
+        "lesson-bad-bracket",
+        "lesson-empty-body",
+        "lesson-unquoted-desc",
+        "lesson-superseded-no-body",
+    ]
+}
+
+/// The grandfather set: ERROR codes `lint_page_text` emits that the write gate deliberately does
+/// NOT refuse. Named beside `write_gate_floors` (not derived from it) so the completeness test
+/// in `mod tests` can assert the two sets are disjoint and together classify every ERROR code the
+/// linter can emit. Rationales: `write_gate_blocks`'s doc comment.
+#[allow(dead_code)] // read by the floor tests; step 3's refusal message names it
+const WRITE_GATE_GRANDFATHERED_CODES: &[&str] = &[
+    "page-no-ocd",
+    "page-no-lmd",
+    "page-no-description",
+    "page-no-notes-section",
+    "page-description-too-few-phrases",
+    "atom-keywords-too-few",
+    "publish-globally-not-symlinked",
+    "publish-globally-conflict",
+];
+
 // ─────────────────────────── `memgrep recall` ───────────────────────────
 
 /// How to order the ranked recall results. `Score` is the existing precision-first relevance order
@@ -13915,6 +14010,232 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         );
         // ...while a small replacement body sails through the gate the CLI applies to it.
         assert!(check_new_body_budget("the decomposed replacement fact", 1500, "atom").is_ok());
+    }
+
+    // ── TRDD-XI10BA5D A2 step 2: the write-gate floor decision ────────────────────────────────
+    //
+    // Every test here runs `lint_page_text` on a hand-built fixture and asserts the floor
+    // classifier's answer. `lint_page_text` takes (path, text, fix); `fix` is report-only today,
+    // so `false` throughout. `rel()` is the identity display, so the path is a stand-in.
+
+    /// The (code) list `lint_page_text` emits for one fixture — the only field the floor
+    /// decision reads.
+    fn lint_codes(path: &Path, text: &str) -> Vec<&'static str> {
+        lint_page_text(path, text, false)
+            .iter()
+            .map(|v| v.4)
+            .collect()
+    }
+
+    /// A fully conformant page: every frontmatter field, a 15-phrase description, the mandatory
+    /// Notes section, one atom with a quoted desc and 3 keywords (exactly the LINT floor of 3 —
+    /// present but grandfathered, proving its presence never reaches the gate), one cited lesson
+    /// with full metadata.
+    const FLOOR_CONFORMANT_PAGE: &str = "---\nname: p\ndescription: \"symptom one / symptom two / symptom three / symptom four / symptom five / symptom six / symptom seven / symptom eight / symptom nine / symptom ten / symptom eleven / symptom twelve / symptom thirteen / symptom fourteen / symptom fifteen\"\nocd: 2026-01-01\nlmd: 2026-01-02\n---\n\
+        ^ATOM-TEST-0001 [keywords: keyword_one keyword_two keyword_three, desc: \"a quoted description\", ocd: 2026-01-01, lmd: 2026-01-02]\n\
+        atom body citing its lesson[^1]\n\n\
+        ## Notes and lessons learned\n\n\
+        [^1]: [id: ATOM-TEST-L001, status: valid, keywords: lesson_kw, ocd: 2026-01-01, lmd: 2026-01-01] DO NOT drop this, BECAUSE it anchors the fixture. DO keep it.\n";
+
+    /// The fixture enumerated by the working plan as the first naive-gate casualty:
+    /// `edit_test_scope`'s bare page — no Notes section, no ocd/lmd/description.
+    const FLOOR_EDIT_TEST_SCOPE_PAGE: &str =
+        "---\nname: p\n---\nhello world\nunrelated atom untouched\n";
+
+    #[test]
+    fn write_gate_classifies_a_conformant_page_as_all_clear() {
+        let path = Path::new("fixture/conformant.md");
+        let codes = lint_codes(path, FLOOR_CONFORMANT_PAGE);
+        assert!(
+            codes.is_empty(),
+            "conformant fixture must lint fully clean, got: {codes:?}"
+        );
+    }
+
+    #[test]
+    fn every_error_code_lint_page_text_emits_is_classified() {
+        // The classifier is total iff floors ∪ grandfathered covers every ERROR code
+        // `lint_page_text` can emit. The codes are enumerated FROM the function itself (run over
+        // fixtures that trigger each check), not from a hand-list, so a new ERROR check added
+        // later fails here until it is classified into one of the two sets. Fixture notes: the
+        // mangled-marker check needs the id to end before the mangled bracket (`^id ⟦`),
+        // supersession needs the `supersedes:` substring in the metadata, and only ERROR-tier
+        // codes are classified (INFO/WARN codes need no gate classification by definition).
+        let path = Path::new("fixture/coverage.md");
+        let mut emitted: Vec<&'static str> = Vec::new();
+        for text in [
+            FLOOR_CONFORMANT_PAGE, // baseline: nothing
+            // control-byte-in-page (+ the grandfathered page-frontmatter codes)
+            "---\nname: p\n---\nhello\x08world\n",
+            // page-unclosed-fence (odd fence count)
+            "---\nname: p\n---\n```\nunclosed\n",
+            // footnote-dangling-ref
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^9]\n\n## Notes and lessons learned\n",
+            // atom-bad-bracket (mangled bracket OPENS the marker: `^ATOM-X ⟦…`)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-X ⟦keywords: k⟧\nbody\n\n## Notes and lessons learned\n",
+            // atom-unclosed-props
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-U [keywords: k\nopen\n\n## Notes and lessons learned\n",
+            // atom-unquoted-desc (mixed-case prose is not a legacy slug)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-Q [desc: Unquoted Prose Here, keywords: k]\nbody\n\n## Notes and lessons learned\n",
+            // atom-dropped-props (comma segment with no `key:`)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-D [keywords: k, oops no colon]\nbody\n\n## Notes and lessons learned\n",
+            // atom-keywords-duplicated (kw repeated 3x)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-K [keywords: kw kw kw]\nbody\n\n## Notes and lessons learned\n",
+            // atom-no-keywords
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-N [ocd: 2026-01-01]\nbody\n\n## Notes and lessons learned\n",
+            // atom-keywords-too-few (1 distinct < 3)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-F [keywords: only_kw]\nbody\n\n## Notes and lessons learned\n",
+            // lesson-bad-bracket (metadata OPENS with the mangled bracket)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: ⟦broken⟧\n",
+            // lesson-no-meta (WARN — a non-ERROR code passing through unclassified, by design)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: plain prose lesson\n",
+            // lesson-empty-body (metadata present, body blank)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: [id: L status: valid keywords: k] \n",
+            // lesson-unquoted-desc
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: [id: L status: valid keywords: k, desc: Unquoted]\nbody text\n",
+            // lesson-superseded-no-body (`supersedes:` present, no SUPERSEDED BODY:)
+            "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: [id: L status: superseded, supersedes: ATOM-X, keywords: k] corrected fact\n",
+            // page-description-too-few-phrases (1 phrase < the lint floor 4)
+            "---\nname: p\ndescription: \"only one phrase\"\nocd: c\nlmd: l\n---\nbody\n\n## Notes and lessons learned\n",
+        ] {
+            for (sev, _, _, _, code) in lint_page_text(path, text, false) {
+                if sev != Severity::Error || emitted.contains(&code) {
+                    continue;
+                }
+                emitted.push(code);
+            }
+        }
+        // The publish-globally pair is scope-gated (SCOPE_PROJECT + a real frontmatter block +
+        // USER-root symlink state), so no bare fixture path can fire it. Assert the two codes as
+        // known members instead of building the full env harness — their classification decision
+        // is documented at `write_gate_blocks`, not re-derived here.
+        emitted.retain(|c| {
+            *c != "publish-globally-not-symlinked" && *c != "publish-globally-conflict"
+        });
+        emitted.push("publish-globally-not-symlinked");
+        emitted.push("publish-globally-conflict");
+        assert!(
+            emitted.contains(&"page-description-too-few-phrases"),
+            "the fixture set must actually exercise the thin-description check: {emitted:?}"
+        );
+        assert!(
+            emitted.contains(&"lesson-superseded-no-body"),
+            "the fixture set must actually exercise the supersession-body check: {emitted:?}"
+        );
+        for code in emitted {
+            let classified = write_gate_floors().contains(&code)
+                || WRITE_GATE_GRANDFATHERED_CODES.contains(&code);
+            assert!(
+                classified,
+                "ERROR code `{code}` is emitted by lint_page_text but classified into NEITHER \
+                 write_gate_floors() nor WRITE_GATE_GRANDFATHERED_CODES — the A2 write gate would \
+                 silently ignore (or silently refuse) it. Classify it with a rationale."
+            );
+        }
+    }
+
+    #[test]
+    fn floor_and_grandfather_sets_are_disjoint() {
+        for f in write_gate_floors() {
+            assert!(
+                !WRITE_GATE_GRANDFATHERED_CODES.contains(&f),
+                "`{f}` appears in BOTH the floor set and the grandfather set — the classifier \
+                 would be order-dependent"
+            );
+        }
+    }
+
+    #[test]
+    fn floors_block_and_grandfathered_do_not() {
+        let path = Path::new("fixture/floors.md");
+        let mk = |code: &'static str| -> Violation {
+            (Severity::Error, rel(path), 0, "msg".into(), code)
+        };
+        for f in write_gate_floors() {
+            assert!(write_gate_blocks(&mk(f)), "floor code `{f}` must block a write");
+        }
+        for g in WRITE_GATE_GRANDFATHERED_CODES {
+            assert!(
+                !write_gate_blocks(&mk(g)),
+                "grandfathered code `{g}` must NOT block a write"
+            );
+        }
+        // Severity is part of the decision: only an ERROR-tier finding can refuse. If a floor
+        // code is ever DEMOTED to Warn/Info in the linter, it stops blocking — the demotion is
+        // the owner-visible decision; this only pins the classifier's shape.
+        let warn_floor = (Severity::Warn, rel(path), 0, "m".into(), "atom-no-keywords");
+        assert!(!write_gate_blocks(&warn_floor));
+        let info_floor = (Severity::Info, rel(path), 0, "m".into(), "page-unclosed-fence");
+        assert!(!write_gate_blocks(&info_floor));
+    }
+
+    #[test]
+    fn edit_test_scope_fixture_collides_only_with_grandfathered_codes() {
+        // THE collision the working plan names: a naive any-ERROR gate refuses this page shape,
+        // shared by the in-process cmd_edit_cli tests above and the sibling-module fixtures. The
+        // floor decision stands only while this holds: the page trips ONLY grandfathered codes —
+        // no floor code — so step 3's gate lets the verbs' edits through.
+        let path = Path::new("fixture/edit_scope/p.md");
+        let codes = lint_codes(path, FLOOR_EDIT_TEST_SCOPE_PAGE);
+        assert!(
+            codes.contains(&"page-no-notes-section"),
+            "the fixture's headline collision must be present: {codes:?}"
+        );
+        for code in codes {
+            assert!(
+                WRITE_GATE_GRANDFATHERED_CODES.contains(&code)
+                    && !write_gate_floors().contains(&code),
+                "fixture code `{code}` is a FLOOR code — the write gate would refuse \
+                 edit_test_scope-style pages and break the verb test surface it scaffolds"
+            );
+        }
+    }
+
+    #[test]
+    fn pubglobal_page_missing_fixture_collides_only_with_grandfathered_codes() {
+        // The second fixture family the working plan names. It carries ocd/lmd/description and
+        // the Notes section; on a non-PROJECT path its only findings are the thin-description
+        // (and, on a PROJECT path with a USER root, the publish-globally pair) — all
+        // grandfathered.
+        let path = Path::new("fixture/.claude/project/memory/p.md");
+        let codes = lint_codes(path, PUBGLOBAL_PAGE_MISSING);
+        assert!(!codes.is_empty(), "the fixture must trip at least the description floor");
+        for code in codes {
+            assert!(
+                WRITE_GATE_GRANDFATHERED_CODES.contains(&code),
+                "PUBGLOBAL_PAGE_MISSING code `{code}` is a FLOOR code — the gate would refuse it"
+            );
+        }
+    }
+
+    #[test]
+    fn lint_phrase_floor_is_emitted_but_grandfathered_and_write_floor_is_separate() {
+        // Pins the "the gate needs the WRITE floors, NOT the lint floors" reconciliation on the
+        // exact codes and constants: the lint 4-phrase floor EMITS on this page (1 phrase < 4),
+        // the classifier grandfathers it, and the WRITE floor (min_page_phrases, 15) is never
+        // consulted at the gate — it stays differential at the verbs (`cmd_new_page_cli`,
+        // split's `check_page_description`). The four constants stay distinct, per the card.
+        let path = Path::new("fixture/thin-desc.md");
+        let text = "---\nname: p\ndescription: \"only one phrase\"\nocd: 2026-01-01\nlmd: 2026-01-02\n---\nbody\n\n## Notes and lessons learned\n";
+        let codes = lint_codes(path, text);
+        assert!(
+            codes.contains(&"page-description-too-few-phrases"),
+            "the lint floor must still EMIT (a lint finding, not a gate one): {codes:?}"
+        );
+        assert!(
+            !write_gate_blocks(&(
+                Severity::Error,
+                rel(path),
+                0,
+                "m".into(),
+                "page-description-too-few-phrases"
+            )),
+            "the lint phrase floor must be GRANDFATHERED, not a gate floor"
+        );
+        assert_eq!(min_page_phrases(), 15, "the WRITE page floor is 15 (the card's 15-phrase floor)");
+        assert_eq!(min_lint_page_phrases(), 4, "the LINT page floor stays 4");
+        assert_eq!(min_keywords(), 10, "the atom WRITE floor stays 10");
+        assert_eq!(min_lint_keywords(), 3, "the atom LINT floor stays 3");
     }
 }
 
