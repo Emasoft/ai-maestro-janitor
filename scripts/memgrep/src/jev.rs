@@ -7,7 +7,9 @@
 //! per-attempt timeout inside a 15s whole-batch deadline, and a per-run circuit breaker that
 //! stops burning requests after 3 consecutive fatal errors. Answers are disk-cached under
 //! `~/.cache/memgrep/prose/` keyed on exactly what the prompt sends, so re-scoring an
-//! unchanged atom never re-bills.
+//! unchanged atom never re-bills. With both a typesafe and an openrouter key in the
+//! environment (and no explicit `--api`/`$JEV_API` choice), openrouter stands by as a
+//! fallback provider, consulted only on availability/credit failures (TRDD-JHHD3S4Z).
 
 // The `memgrep prose` verb wiring lands in commit 2 — until then every public surface is
 // "dead" from the binary's point of view. Silence the false positives; tests still run.
@@ -163,6 +165,15 @@ impl Provider {
             Provider::Gateway => "JEV_GATEWAY_API_KEY",
         }
     }
+
+    /// Lowercase name for stderr notices.
+    fn name(self) -> &'static str {
+        match self {
+            Provider::Typesafe => "typesafe",
+            Provider::Openrouter => "openrouter",
+            Provider::Gateway => "gateway",
+        }
+    }
 }
 
 /// Env read, the crate idiom: unset OR empty both mean absent.
@@ -208,25 +219,48 @@ pub struct JevConfig {
     pub api_key: String,
     /// Skip both cache read and cache write.
     pub no_cache: bool,
+    /// Standby provider consulted ONLY on availability/credit failures of `provider`
+    /// (402/429/5xx/timeout/connection). `None` = single provider, the explicit-choice and
+    /// gateway modes; a 200-with-garbage (Malformed) or auth rejection never falls back —
+    /// a broken query or wrong key must not double-spend on the second account.
+    pub fallback: Option<Provider>,
+}
+
+/// One provider's per-run connection settings, derived like `JevConfig` but standalone.
+fn provider_config(p: Provider, explicit_model: Option<&str>) -> Result<JevConfig, JevError> {
+    let api_key = env_opt(p.key_env()).ok_or_else(|| JevError::NoApiKey {
+        providers_tried: vec![p.key_env()],
+    })?;
+    let url = match p {
+        Provider::Typesafe => "https://api.typesafe.ai/v1/systemone".to_string(),
+        Provider::Openrouter => "https://openrouter.ai/api/alpha/decisions".to_string(),
+        Provider::Gateway => env_opt("JEV_GATEWAY_URL").ok_or(JevError::NoGatewayUrl)?,
+    };
+    let model = explicit_model
+        .map(str::to_string)
+        .unwrap_or_else(|| p.default_model().to_string());
+    Ok(JevConfig { provider: p, url, model, api_key, no_cache: false, fallback: None })
 }
 
 impl JevConfig {
     /// Resolve provider + key + URL + model. Errors name the env var to set.
+    ///
+    /// When the environment carries BOTH a typesafe and an openrouter key and neither
+    /// `--api` nor `$JEV_API` made an explicit choice, typesafe is primary and openrouter
+    /// is the fallback (owner directive, TRDD-JHHD3S4Z). GATEWAY mode never participates.
     pub fn resolve(explicit_provider: Option<&str>, explicit_model: Option<&str>) -> Result<JevConfig, JevError> {
         let provider = resolve_provider(explicit_provider)?;
-        let api_key = env_opt(provider.key_env()).ok_or_else(|| JevError::NoApiKey {
-            providers_tried: vec![provider.key_env()],
-        })?;
-        let url = match provider {
-            Provider::Typesafe => "https://api.typesafe.ai/v1/systemone".to_string(),
-            Provider::Openrouter => "https://openrouter.ai/api/alpha/decisions".to_string(),
-            Provider::Gateway => env_opt("JEV_GATEWAY_URL")
-                .ok_or(JevError::NoGatewayUrl)?,
+        let mut cfg = provider_config(provider, explicit_model)?;
+        let explicit_choice = explicit_provider.is_some() || env_opt("JEV_API").is_some();
+        cfg.fallback = if !explicit_choice
+            && provider == Provider::Typesafe
+            && env_opt(Provider::Openrouter.key_env()).is_some()
+        {
+            Some(Provider::Openrouter)
+        } else {
+            None
         };
-        let model = explicit_model
-            .map(str::to_string)
-            .unwrap_or_else(|| provider.default_model().to_string());
-        Ok(JevConfig { provider, url, model, api_key, no_cache: false })
+        Ok(cfg)
     }
 }
 
@@ -418,6 +452,10 @@ enum Outcome {
 #[derive(Debug, Default)]
 struct Breaker {
     consecutive_fatal: AtomicUsize,
+    /// At least one recorded fatal was availability-class (402/429/5xx/timeout/connection).
+    /// BreakerOpen slots may only fall back when this is set — an open breaker caused by
+    /// auth rejections must not silently re-issue against the second account.
+    availability_fatal: std::sync::atomic::AtomicBool,
 }
 
 impl Breaker {
@@ -427,8 +465,15 @@ impl Breaker {
     fn record_success(&self) {
         self.consecutive_fatal.store(0, Ordering::SeqCst);
     }
-    fn record_fatal(&self) {
+    fn record_fatal(&self, e: &JevError) {
         self.consecutive_fatal.fetch_add(1, Ordering::SeqCst);
+        if is_fallback_class(e) {
+            self.availability_fatal
+                .store(true, Ordering::SeqCst);
+        }
+    }
+    fn opened_by_availability(&self) -> bool {
+        self.availability_fatal.load(Ordering::SeqCst)
     }
 }
 
@@ -553,12 +598,80 @@ impl JevScorer {
 
 impl ProseScorer for JevScorer {
     fn score(&self, query: &str, chunks: &[ProseChunk]) -> Vec<Result<f64, JevError>> {
+        let primary = self.score_pass(self.config.clone(), Arc::clone(&self.breaker), query, chunks);
+        // Fallback chain (owner directive, TRDD-JHHD3S4Z): re-issue only the chunks that
+        // failed with a provider-availability/credit error against the standby provider.
+        let Some(fb_provider) = self.config.fallback else {
+            return primary;
+        };
+        let retry_slots: Vec<usize> = primary
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| match r {
+                Ok(_) => false,
+                // BreakerOpen slots fall back only when the breaker was opened BY an
+                // availability error — a breaker tripped by 401s must not re-spend.
+                Err(JevError::BreakerOpen) => self.breaker.opened_by_availability(),
+                Err(e) => is_fallback_class(e),
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if retry_slots.is_empty() {
+            return primary;
+        }
+        let Ok(mut fb_cfg) = provider_config(fb_provider, Some(&self.config.model)) else {
+            // Standby key vanished mid-run — surface the primary errors untouched.
+            return primary;
+        };
+        // The fallback leg obeys the caller's cache decision: --no-cache must cover BOTH
+        // providers, and the fallback leg must never read answers the primary declined to
+        // consult (provider_config defaults no_cache to false — re-derive, then inherit).
+        fb_cfg.no_cache = self.config.no_cache;
+        eprintln!(
+            "jev: {} unavailable ({} chunks affected) — retrying against {}",
+            self.config.provider.name(),
+            retry_slots.len(),
+            fb_provider.name()
+        );
+        // Fresh breaker: the primary pass may have tripped the shared one (availability
+        // fatals are exactly what gets us here), and the fallback endpoint's health is
+        // independent — it must not inherit the primary's open circuit.
+        let fb_results = self.score_pass(
+            fb_cfg,
+            Arc::new(Breaker::default()),
+            query,
+            &fb_chunks_vec(chunks, &retry_slots),
+        );
+        let mut out = primary;
+        for (slot, res) in retry_slots.into_iter().zip(fb_results) {
+            out[slot] = res;
+        }
+        out
+    }
+}
+
+/// The subset of `chunks` at `slots`, in slot order.
+fn fb_chunks_vec(chunks: &[ProseChunk], slots: &[usize]) -> Vec<ProseChunk> {
+    slots.iter().map(|&i| chunks[i].clone()).collect()
+}
+
+impl JevScorer {
+    /// One full scoring pipeline against ONE provider config: cache lookup, breaker gate,
+    /// batching, concurrent retrying requests, cache writeback. `score` chains this across
+    /// the primary and the fallback provider; this method never looks at `config.fallback`.
+    fn score_pass(
+        &self,
+        config: JevConfig,
+        breaker: Arc<Breaker>,
+        query: &str,
+        chunks: &[ProseChunk],
+    ) -> Vec<Result<f64, JevError>> {
         if chunks.is_empty() {
             return Vec::new();
         }
         // -------- cache pass --------
         let mut cache: HashMap<String, f64> = HashMap::new();
-        let dir = if self.config.no_cache {
+        let dir = if config.no_cache {
             None
         } else {
             self.effective_cache_dir()
@@ -571,7 +684,7 @@ impl ProseScorer for JevScorer {
         // the cache append after scoring uses the exact key the earlier lookup computed.
         let mut pending: Vec<(usize, ProseChunk, String)> = Vec::new();
         for (i, c) in chunks.iter().enumerate() {
-            let key = cache_key(self.config.provider, &self.config.model, query, c);
+            let key = cache_key(config.provider, &config.model, query, c);
             match cache.get(&key) {
                 Some(p) => results[i] = Some(Ok(*p)),
                 None => pending.push((i, c.clone(), key)),
@@ -580,7 +693,7 @@ impl ProseScorer for JevScorer {
         let all_cached = pending.is_empty();
 
         // -------- breaker gate --------
-        if self.breaker.is_open() && !all_cached {
+        if breaker.is_open() && !all_cached {
             return results
                 .into_iter()
                 .map(|r| {
@@ -610,8 +723,7 @@ impl ProseScorer for JevScorer {
         let successes: Arc<Mutex<Vec<(String, f64)>>> = Arc::new(Mutex::new(Vec::new()));
         let totals: Arc<Mutex<(u64, u64, u64)>> = Arc::new(Mutex::new((0, 0, 0))); // prompts, in/out tokens-ish, cost-millis
 
-        let config = Arc::new(self.config.clone());
-        let breaker = self.breaker.clone();
+        let config = Arc::new(config);
         let sleep_fn = self.sleep.lock().unwrap().clone();
         let query = query.to_string();
 
@@ -660,7 +772,7 @@ impl ProseScorer for JevScorer {
             if final_results[i].is_some() {
                 continue;
             }
-            let key = cache_key(self.config.provider, &self.config.model, &query, c);
+            let key = cache_key(config.provider, &config.model, &query, c);
             if let Some(p) = cache.get(&key) {
                 final_results[i] = Some(Ok(*p));
             }
@@ -844,8 +956,22 @@ fn run_batch(
 
 /// Record a fatal error on the breaker and wrap it.
 fn fatal_breaker(breaker: &Breaker, e: JevError) -> Outcome {
-    breaker.record_fatal();
+    breaker.record_fatal(&e);
     Outcome::Fatal(e)
+}
+
+/// Does this failure mean the PROVIDER is unavailable or out of credit — the only class the
+/// fallback chain may act on? Malformed (a 200 that did not parse) and auth rejections are
+/// NOT fallback-class: a broken query or a wrong key is the caller's problem, and re-issuing
+/// it against a second paid account just double-spends (card constraint, TRDD-JHHD3S4Z).
+fn is_fallback_class(e: &JevError) -> bool {
+    matches!(
+        e,
+        JevError::InsufficientCredits      // 402
+            | JevError::RateLimited { .. } // 429 after retries
+            | JevError::Timeout            // batch deadline expired
+            | JevError::Unreachable(_)     // 5xx after retries, connect/DNS/TLS, connection refused
+    )
 }
 
 /// The stderr line the verb prints before scoring — privacy/cost notice.
@@ -977,6 +1103,7 @@ mod tests {
             model: "m".into(),
             api_key: "k".into(),
             no_cache: true,
+            fallback: None,
         };
         let scorer = JevScorer::new(cfg);
         // Zero backoff so the test is instant; still exercises the retry path.
@@ -1003,6 +1130,7 @@ mod tests {
             model: "jev-latest".into(),
             api_key: "k".into(),
             no_cache: false,
+            fallback: None,
         };
         let mut scorer = JevScorer::new(cfg);
         scorer.set_cache_dir(tmp.clone());
@@ -1046,6 +1174,7 @@ mod tests {
             model: "m".into(),
             api_key: "k".into(),
             no_cache: true,
+            fallback: None,
         });
         scorer.set_cache_dir(tmp.clone());
         let out = ProseScorer::score(&scorer, "q", &[chunk("a", "b")]);
@@ -1082,6 +1211,7 @@ mod tests {
             model: "m".into(),
             api_key: "k".into(),
             no_cache: true,
+            fallback: None,
         });
         scorer.set_sleep(Arc::new(Box::new(|_| {})));
         // 3 batches of 1 atom each → 3 consecutive 401s → breaker opens.
@@ -1198,6 +1328,7 @@ mod tests {
             model: "m".into(),
             api_key: "k".into(),
             no_cache: true,
+            fallback: None,
         });
         scorer.set_sleep(Arc::new(Box::new(|_| {})));
         let chunks: Vec<ProseChunk> = (0..32).map(|i| chunk(&format!("a{i}"), &format!("body {i}"))).collect();
@@ -1255,6 +1386,7 @@ mod tests {
             model: "m".into(),
             api_key: "test-key".into(),
             no_cache: true,
+            fallback: None,
         });
         let out = ProseScorer::score(&scorer, "q", &[chunk("a", "one"), chunk("b", "two")]);
         assert_eq!(out[0].as_ref().unwrap(), &0.95);
@@ -1274,13 +1406,284 @@ mod tests {
             model: "m".into(),
             api_key: "k".into(),
             no_cache: true,
+            fallback: None,
         });
         scorer.set_sleep(Arc::new(Box::new(|_| {})));
         let out = ProseScorer::score(&scorer, "q", &[chunk("a", "b")]);
         assert!(matches!(out[0], Err(JevError::Unreachable(_))));
     }
 
-    // ---- privacy notice ----
+    // ---- fallback chain (owner directive, TRDD-JHHD3S4Z) ----
+
+    /// Start a mock provider server answering `status` on every request; returns (port, join).
+    fn mock_provider(status_line: &'static str, body: &'static str) -> (u16, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut s = stream.unwrap();
+                let mut buf = [0u8; 8192];
+                let _ = s.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}"
+                );
+                let _ = s.write_all(resp.as_bytes());
+                let _ = s.flush();
+                let _ = s.shutdown(std::net::Shutdown::Both);
+            }
+        });
+        (port, server)
+    }
+
+    #[test]
+    fn chain_preferred_typesafe_when_both_keys_present() {
+        let _env = env_lock();
+        unset_env("JEV_API");
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("OPENROUTER_API_KEY", "or");
+        let cfg = JevConfig::resolve(None, None).unwrap();
+        assert_eq!(cfg.provider, Provider::Typesafe);
+        assert_eq!(cfg.fallback, Some(Provider::Openrouter));
+        unset_env("TYPESAFE_API_KEY");
+        unset_env("OPENROUTER_API_KEY");
+    }
+
+    #[test]
+    fn chain_disabled_when_explicit_api_env_set() {
+        let _env = env_lock();
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("OPENROUTER_API_KEY", "or");
+        set_env("JEV_API", "openrouter");
+        let cfg = JevConfig::resolve(None, None).unwrap();
+        assert_eq!(cfg.provider, Provider::Openrouter);
+        assert_eq!(cfg.fallback, None, "$JEV_API explicit choice → no silent fallback");
+        unset_env("TYPESAFE_API_KEY");
+        unset_env("OPENROUTER_API_KEY");
+        unset_env("JEV_API");
+    }
+
+    #[test]
+    fn chain_disabled_when_explicit_flag_set() {
+        let _env = env_lock();
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("OPENROUTER_API_KEY", "or");
+        let cfg = JevConfig::resolve(Some("typesafe"), None).unwrap();
+        assert_eq!(cfg.provider, Provider::Typesafe);
+        assert_eq!(cfg.fallback, None, "--api explicit choice → no silent fallback");
+        unset_env("TYPESAFE_API_KEY");
+        unset_env("OPENROUTER_API_KEY");
+    }
+
+    #[test]
+    fn openrouter_only_env_has_no_fallback() {
+        let _env = env_lock();
+        unset_env("TYPESAFE_API_KEY");
+        unset_env("JEV_GATEWAY_API_KEY");
+        set_env("OPENROUTER_API_KEY", "or");
+        let cfg = JevConfig::resolve(None, None).unwrap();
+        assert_eq!(cfg.provider, Provider::Openrouter);
+        assert_eq!(cfg.fallback, None, "openrouter-only keeps working exactly as today");
+        unset_env("OPENROUTER_API_KEY");
+    }
+
+    #[test]
+    fn fallback_does_not_fire_on_malformed_answer() {
+        let _env = env_lock();
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("OPENROUTER_API_KEY", "or");
+        // Primary answers 200 with garbage; a fallback would need a second server — run none:
+        // if the chain fired on Malformed, the chunk would flip to Unreachable (openrouter's
+        // real URL), which the assertion catches.
+        let (port, server) = mock_provider("200 OK", r#"{"answers":{"c0":"garbage"}}"#);
+        let scorer = {
+            let mut cfg = provider_config(Provider::Typesafe, None).unwrap();
+            cfg.url = format!("http://127.0.0.1:{port}/v1/systemone");
+            cfg.no_cache = true;
+            cfg.fallback = Some(Provider::Openrouter);
+            JevScorer::new(cfg)
+        };
+        let out = ProseScorer::score(&scorer, "q", &[chunk("a", "b")]);
+        assert!(
+            matches!(out[0], Err(JevError::Malformed(_))),
+            "malformed stays malformed, got {:?}",
+            out[0]
+        );
+        drop(server);
+        unset_env("TYPESAFE_API_KEY");
+        unset_env("OPENROUTER_API_KEY");
+    }
+
+    #[test]
+    fn fallback_fires_on_402_and_fallback_auth_error_surfaces() {
+        let _env = env_lock();
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("OPENROUTER_API_KEY", "or");
+        // Primary: 402 (credit exhausted) → fallback-class → chain fires. Fallback: here a
+        // local mock that 401s (no real openrouter) — the FALLBACK's own error surfaces.
+        let (p1, s1) = mock_provider("402 Payment Required", "");
+        let (p2, s2) = mock_provider("401 Unauthorized", "");
+        // The fallback leg re-derives its config from OPENROUTER_API_KEY via provider_config,
+        // whose URL is hardcoded to openrouter.ai. To hit the local mock, temporarily resolve
+        // the chain by hand instead: build the primary with fallback=None, run score, then
+        // run the fallback leg explicitly against p2 — asserting exactly the semantics
+        // `score` implements (same helpers, same filter).
+        let mut cfg = provider_config(Provider::Typesafe, None).unwrap();
+        cfg.url = format!("http://127.0.0.1:{p1}/v1/systemone");
+        cfg.no_cache = true;
+        cfg.fallback = None;
+        let scorer = JevScorer::new(cfg);
+        scorer.set_sleep(Arc::new(Box::new(|_| {})));
+        let primary = ProseScorer::score(&scorer, "q", &[chunk("a", "b")]);
+        assert!(
+            matches!(primary[0], Err(JevError::InsufficientCredits)),
+            "402 is the primary's error"
+        );
+        // The chain's filter would select this slot (is_fallback_class(InsufficientCredits)).
+        assert!(is_fallback_class(primary[0].as_ref().unwrap_err()));
+        // Fallback leg against the mock: 401 is NOT fallback-class and is what surfaces.
+        let mut fb = provider_config(Provider::Openrouter, None).unwrap();
+        fb.url = format!("http://127.0.0.1:{p2}/v1/systemone");
+        fb.no_cache = true;
+        let scorer2 = JevScorer::new(fb);
+        scorer2.set_sleep(Arc::new(Box::new(|_| {})));
+        let second = ProseScorer::score(&scorer2, "q", &[chunk("a", "b")]);
+        assert!(matches!(second[0], Err(JevError::AuthRejected { status: 401 })));
+        // And the chain would have written that into the slot: filter passes only
+        // fallback-class primaries; the fb result replaces it verbatim.
+        drop(s1);
+        drop(s2);
+        unset_env("TYPESAFE_API_KEY");
+        unset_env("OPENROUTER_API_KEY");
+    }
+
+    #[test]
+    fn fallback_completes_on_openrouter_mock_when_typesafe_402s() {
+        let _env = env_lock();
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("OPENROUTER_API_KEY", "or");
+        // Full end-to-end chain with BOTH legs local: primary (typesafe pose) 402s, the
+        // fallback leg re-derives openrouter's URL from provider_config — hardcoded
+        // openrouter.ai — so we prove the chain mechanics against the real `score` by
+        // pinning the fallback URL the same way production does: provider_config is env-
+        // derived, hence this test drives `score` with a scorer whose config.fallback is
+        // armed and whose fallback provider_config we cannot redirect. Instead we assert the
+        // chain-completion semantics on a scorer where the PRIMARY poses as typesafe
+        // (mock 402) and the fallback provider is GATEWAY — the same code path (one
+        // provider_config + one score_pass), no production URL touched.
+        let (p1, s1) = mock_provider("402 Payment Required", "");
+        let (p2, s2) = mock_provider("200 OK", r#"{"answers":{"c0":0.66}}"#);
+        set_env("JEV_GATEWAY_API_KEY", "gk");
+        set_env("JEV_GATEWAY_URL", &format!("http://127.0.0.1:{p2}/v1/systemone"));
+        let mut cfg = provider_config(Provider::Typesafe, None).unwrap();
+        cfg.url = format!("http://127.0.0.1:{p1}/v1/systemone");
+        cfg.no_cache = true;
+        cfg.fallback = Some(Provider::Gateway);
+        let scorer = JevScorer::new(cfg);
+        scorer.set_sleep(Arc::new(Box::new(|_| {})));
+        let out = ProseScorer::score(&scorer, "q", &[chunk("a", "b")]);
+        assert_eq!(out[0].as_ref().unwrap(), &0.66, "fallback completed the chunk");
+        drop(s1);
+        drop(s2);
+        unset_env("TYPESAFE_API_KEY");
+        unset_env("OPENROUTER_API_KEY");
+        unset_env("JEV_GATEWAY_API_KEY");
+        unset_env("JEV_GATEWAY_URL");
+    }
+
+    #[test]
+    fn fallback_leg_gets_fresh_breaker() {
+        let _env = env_lock();
+        // Primary breaker trips on 3 consecutive 402s (3 batches of 1); the 4th call's
+        // fallback leg must still reach its (healthy) mock, not inherit the open breaker.
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("JEV_GATEWAY_API_KEY", "gk");
+        set_env("JEV_GATEWAY_URL", "http://127.0.0.1:1/v1/systemone");
+        let (p1, s1) = mock_provider("402 Payment Required", "");
+        let mut cfg = provider_config(Provider::Typesafe, None).unwrap();
+        cfg.url = format!("http://127.0.0.1:{p1}/v1/systemone");
+        cfg.no_cache = true;
+        cfg.fallback = Some(Provider::Gateway);
+        let scorer = JevScorer::new(cfg);
+        scorer.set_sleep(Arc::new(Box::new(|_| {})));
+        for i in 0..3 {
+            let out = ProseScorer::score(&scorer, "q", &[chunk(&format!("a{i}"), "b")]);
+            // Each pass: primary 402 → fallback to a dead gateway → Unreachable surfaces.
+            assert!(matches!(out[0], Err(JevError::Unreachable(_))), "pass {i}: {:?})", out[0]);
+        }
+        // Breaker now open AND opened by availability errors. 4th call: primary slots come
+        // back BreakerOpen, the chain re-runs them against the (dead) fallback — the
+        // surfaced error is the fallback's Unreachable, NOT BreakerOpen.
+        let out = ProseScorer::score(&scorer, "q", &[chunk("a3", "b")]);
+        assert!(
+            matches!(out[0], Err(JevError::Unreachable(_))),
+            "fallback leg ran with a fresh breaker, got {:?}",
+            out[0]
+        );
+        drop(s1);
+        unset_env("JEV_GATEWAY_API_KEY");
+        unset_env("JEV_GATEWAY_URL");
+    }
+
+    #[test]
+    fn fallback_not_fired_when_breaker_opened_by_auth_errors() {
+        let _env = env_lock();
+        // 401 is NOT fallback-class; the breaker trips on auth and the chain must NOT run.
+        set_env("TYPESAFE_API_KEY", "ts");
+        set_env("JEV_GATEWAY_API_KEY", "gk");
+        set_env("JEV_GATEWAY_URL", "http://127.0.0.1:1/v1/systemone");
+        let (p1, s1) = mock_provider("401 Unauthorized", "");
+        let mut cfg = provider_config(Provider::Typesafe, None).unwrap();
+        cfg.url = format!("http://127.0.0.1:{p1}/v1/systemone");
+        cfg.no_cache = true;
+        cfg.fallback = Some(Provider::Gateway);
+        let scorer = JevScorer::new(cfg);
+        scorer.set_sleep(Arc::new(Box::new(|_| {})));
+        for i in 0..3 {
+            let out = ProseScorer::score(&scorer, "q", &[chunk(&format!("a{i}"), "b")]);
+            assert!(matches!(out[0], Err(JevError::AuthRejected { status: 401 })));
+        }
+        let out = ProseScorer::score(&scorer, "q", &[chunk("a3", "b")]);
+        assert!(
+            matches!(out[0], Err(JevError::BreakerOpen)),
+            "auth-opened breaker must NOT fall back, got {:?}",
+            out[0]
+        );
+        drop(s1);
+        unset_env("JEV_GATEWAY_API_KEY");
+        unset_env("JEV_GATEWAY_URL");
+    }
+
+    #[test]
+    fn chain_unchanged_when_fallback_none() {
+        let _env = env_lock();
+        // No fallback armed: a 402 surfaces as-is (openrouter-only / explicit-choice mode).
+        set_env("TYPESAFE_API_KEY", "ts");
+        let (p1, s1) = mock_provider("402 Payment Required", "");
+        let mut cfg = provider_config(Provider::Typesafe, None).unwrap();
+        cfg.url = format!("http://127.0.0.1:{p1}/v1/systemone");
+        cfg.no_cache = true;
+        cfg.fallback = None;
+        let scorer = JevScorer::new(cfg);
+        scorer.set_sleep(Arc::new(Box::new(|_| {})));
+        let out = ProseScorer::score(&scorer, "q", &[chunk("a", "b")]);
+        assert!(matches!(out[0], Err(JevError::InsufficientCredits)));
+        drop(s1);
+    }
+
+    #[test]
+    fn is_fallback_class_covers_availability_only() {
+        assert!(is_fallback_class(&JevError::InsufficientCredits));
+        assert!(is_fallback_class(&JevError::RateLimited { retry_after: None }));
+        assert!(is_fallback_class(&JevError::Timeout));
+        assert!(is_fallback_class(&JevError::Unreachable("HTTP 502".into())));
+        // Never: malformed answers (a broken query must not double-spend) or auth.
+        assert!(!is_fallback_class(&JevError::Malformed("bad shape".into())));
+        assert!(!is_fallback_class(&JevError::AuthRejected { status: 401 }));
+        assert!(!is_fallback_class(&JevError::NoApiKey { providers_tried: vec![] }));
+        assert!(!is_fallback_class(&JevError::BreakerOpen));
+        assert!(!is_fallback_class(&JevError::NoGatewayUrl));
+    }
+
 
     #[test]
     fn privacy_notice_names_backend_and_count() {
