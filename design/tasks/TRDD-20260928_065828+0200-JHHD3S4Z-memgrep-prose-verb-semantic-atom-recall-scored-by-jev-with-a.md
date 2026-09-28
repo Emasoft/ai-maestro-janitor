@@ -4,7 +4,7 @@ title: memgrep prose verb — semantic atom recall scored by Jev with a persiste
 column: todo
 status: tasked
 created: 2026-09-28T06:58:28+0200
-updated: 2026-09-28T06:58:35+0200
+updated: 2026-09-28T13:42:36+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -39,6 +39,7 @@ Review chain: the plan went through two adversarial review rounds; CUREs applied
 ## Implementation
 
 PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first; prose commits follow).
+2026-09-28 commit 3 landed (b803ad99) via lean-worker, main-verified: cargo check clean, 306+159 tests green (2 new offline prose_tests), live smoke via fake Jev gateway (cache-hit-against-dead-server, no-cap default, threshold/sort/--top/json). Commit 3b (88dfc7eb): jev.rs parse_answer now accepts the OpenRouter type-keyed probability shape ({"noul":0.06,"type":"noul"}) — every real OpenRouter response previously parsed as Malformed; found by the worker's live smoke; +1 test. Remaining: commit 4 (polish — --help privacy warning, live e2e #[ignore] test, README/rule touch-up).
 
 ## Approval log
 
