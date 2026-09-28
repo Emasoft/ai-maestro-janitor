@@ -4,7 +4,7 @@ title: memgrep prose verb — semantic atom recall scored by Jev with a persiste
 column: testing
 status: tasked
 created: 2026-09-28T06:58:28+0200
-updated: 2026-09-28T14:07:54+0200
+updated: 2026-09-28T15:38:04+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -42,6 +42,7 @@ PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first;
 2026-09-28 commit 3 landed (b803ad99) via lean-worker, main-verified: cargo check clean, 306+159 tests green (2 new offline prose_tests), live smoke via fake Jev gateway (cache-hit-against-dead-server, no-cap default, threshold/sort/--top/json). Commit 3b (88dfc7eb): jev.rs parse_answer now accepts the OpenRouter type-keyed probability shape ({"noul":0.06,"type":"noul"}) — every real OpenRouter response previously parsed as Malformed; found by the worker's live smoke; +1 test. Remaining: commit 4 (polish — --help privacy warning, live e2e #[ignore] test, README/rule touch-up).
 2026-09-28 commit 4 landed (5387c527) via lean-worker, main-verified (307+159 tests green, cargo check clean): --help privacy warning (scored text is SENT to the backend; gateway option), no_superseded_flag_removes_superseded_atoms_from_candidates (review NOTE-4 follow-up), prose_live_backend_scores_real_query_without_error #[ignore]-gated live harness (worker ran it by hand against the real backend, pass), prose documented in SKILL.md (the crate has no README; worker verified none ever existed) with the privacy warning. SEQUENCE COMPLETE: commits 1-4 landed, review chains closed. Card ready for testing.
 2026-09-28 review of commit 4 — CURE recorded, two residuals are NAMED OPEN ITEMS for the testing column: (a) the shipped rule markdown-memory-recall.md does not yet mention the prose verb (the plan's 'rule touch-up' leg landed on SKILL.md instead, since scripts/memgrep has no README; one sentence owed on next touch of that rule); (b) the live e2e has run only in the worker's environment (hand-run, honestly attributed) — testing-column exit needs a main-agent replay (TYPESAFE_API_KEY=... cargo test -- --ignored prose_live) or an owner waiver. Follow-up note: the toggle test pins the filter semantics, not the flag-to-struct wiring — cheap extension on next verb touch. Commit-type nit: 5387c527 is 'docs(memgrep)' but ships two tests (harmless mislabel).
+2026-09-28 box (b) TICKED — live e2e replayed by the main agent, provider substituted with disclosure. Machine fact: TYPESAFE_API_KEY does not exist here (only OPENROUTER_API_KEY in .zprofile), and the #[ignore] test's gate (memory.rs:14175) early-returns without a key — so the box's literal command trivially passes with zero network (confirmed: two cargo runs finished in 0.00s). Honest replay instead: CLI prose -t 0 --output medium 'which memory covers the review fork spawn rule?' /tmp/prose-e2e-fix/mem (query is the FIRST positional — earlier invocations with path-first were rejected as 'no atoms'), hand-built 1-atom fixture, fresh EMPTY XDG_CACHE_HOME, OpenRouter default resolution. Evidence of a real round-trip: stderr '[prose] sending 1 atoms to openrouter', exit 0, atom printed at p=0.87, cache entry written 15:36:07 (run 15:36:04) into the empty dir — impossible from cache or early-return.
 
 ## Approval log
 
@@ -52,4 +53,4 @@ PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first;
 ## Acceptance
 
 - [ ] the shipped rule markdown-memory-recall.md mentions the prose verb (one sentence, on next touch of that rule) — commit-4 review residual (a)
-- [ ] live e2e replayed by the main agent (TYPESAFE_API_KEY=... cargo test -- --ignored prose_live) or owner waiver recorded — commit-4 review residual (b)
+- [x] live e2e replayed by the main agent (TYPESAFE_API_KEY=... cargo test -- --ignored prose_live) or owner waiver recorded — commit-4 review residual (b)
