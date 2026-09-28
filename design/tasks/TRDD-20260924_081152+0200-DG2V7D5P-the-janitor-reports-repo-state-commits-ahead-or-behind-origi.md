@@ -3,7 +3,7 @@ trdd-id: DG2V7D5P
 title: The janitor reports repo state, commits ahead or behind origin, and commits made outside publish.py
 column: testing
 created: 2026-09-24T08:11:52+0200
-updated: 2026-09-28T01:27:28+0200
+updated: 2026-09-28T13:04:20+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -32,6 +32,6 @@ no detector computes ahead/behind. main was 157 commits ahead of the last releas
 
 ## Acceptance
 
-- [ ] repo-state detector reports ahead/behind per branch + non-publish default-branch commits: tests/test_repo_state.py 14 tests green (run 2026-09-28 exit 0; landed 66450ec8, main-verified: 14 passed, ruff+mypy clean)
-- [ ] detector runs with GIT_OPTIONAL_LOCKS=0 and semver (not creatordate) tag ordering: verified by source read recorded in Implementation (66450ec8; same-second tiebreak bug found+fixed during testing)
+- [x] repo-state detector reports ahead/behind per branch + non-publish default-branch commits: tests/test_repo_state.py 14 tests green (run 2026-09-28 exit 0; landed 66450ec8, main-verified: 14 passed, ruff+mypy clean)
+- [x] detector runs with GIT_OPTIONAL_LOCKS=0 and semver (not creatordate) tag ordering: verified by source read recorded in Implementation (66450ec8; same-second tiebreak bug found+fixed during testing)
 - [ ] dispatch.py registration + ADVISORY classification (integration pass): OPEN - remains on the card
