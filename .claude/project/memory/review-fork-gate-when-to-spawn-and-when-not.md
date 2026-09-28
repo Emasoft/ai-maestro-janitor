@@ -2,7 +2,7 @@
 name: review-fork-gate-when-to-spawn-and-when-not
 description: "the review-fork gate fires on every turn / should I spawn a fork for a docs-only commit / the adversarial review loop is eating the session / forks keep finding smaller and smaller things / when is a review fork worth it / prose-only turn still triggered the gate / how do I stop reviewing my own prose / the gate blocks my turn and I have nothing to review / review-supervisor says N changes unreviewed / diminishing returns on adversarial review / should I fork after every commit / stopping criterion for review forks / the fork found a defect in the fix for the last fork's defect / agentlenspro review-gate keeps firing / is a card closure worth a review fork"
 ocd: 2026-09-05
-lmd: 2026-09-23
+lmd: 2026-09-28
 publish-globally: true
 metadata:
   node_type: memory
@@ -13,7 +13,7 @@ metadata:
 # review-fork-gate-when-to-spawn-and-when-not
 
 
-^ATOM-0GLJ-EK3A [desc: "Fork when the turn changed EXECUTABLE BEHAVIOUR, asserted a VERDICT, or CHARACTERISED WHAT EVIDENCE ESTABLISHES — that third clause is load-bearing; the gate also fires again after I commit, because a", keywords: should_I_spawn_a_fork_for_a_docs-only_commit review-fork_gate_fires_on_every_turn prose-only_turn_triggered_the_gate when_is_a_review_fork_worth_it stopping_criterion_for_review_forks the_adversarial_review_loop_is_eating_the_session forks_finding_smaller_and_smaller_things diminishing_returns_on_adversarial_review is_a_card_closure_worth_a_fork gate_blocks_the_turn_with_nothing_to_review how_to_decline_the_review_gate_honestly review-supervisor_says_changes_unreviewed, ocd: 2026-09-05, lmd: 2026-09-23]
+^ATOM-0GLJ-EK3A [desc: "Fork when the turn changed EXECUTABLE BEHAVIOUR, asserted a VERDICT, or CHARACTERISED WHAT EVIDENCE ESTABLISHES — clause (c) is load-bearing; the first version omitted it and the rule was unsound.", keywords: should_I_spawn_a_fork_for_a_docs-only_commit when_is_a_review_fork_worth_it prose-only_turn_triggered_the_gate review-fork_gate_fires_on_every_turn is_a_card_closure_worth_a_fork how_to_decline_the_review_gate_honestly what_counts_as_executable_behaviour what_counts_as_a_verdict what_counts_as_evidence_characterisation clause_c_load_bearing_evidence_claims spawn_criterion_three_clauses review_fork_spawn_rule, ocd: 2026-09-05, lmd: 2026-09-28]
 **SPAWN a review fork when the turn (a) changed EXECUTABLE BEHAVIOUR — code, a test, a script, a
 config the machine reads; (b) asserted a VERDICT — closing a card, claiming a fix works, a rules
 interpretation, a memory write; or (c) CHARACTERISED WHAT EVIDENCE ESTABLISHES — "this shows X",
@@ -32,6 +32,9 @@ with:
 A third caught a memory atom citing **another agent's measurement of a different operation** as
 evidence for mine. **A claim about what evidence shows is not a "verdict" by the (b) definition,
 and it is exactly where the errors were.** The rule caught decisions and missed inferences.
+
+
+^ATOM-J2L0-SMXK [desc: "Operating the spawn rule in practice: findings shrink in scope not materiality; the gate fires even on exempt turns — decline in one line; a fork's STOP is scoped; commit first, fork last.", keywords: stopping_criterion_for_review_forks the_adversarial_review_loop_is_eating_the_session forks_finding_smaller_and_smaller_things diminishing_returns_on_adversarial_review gate_blocks_the_turn_with_nothing_to_review review-supervisor_says_changes_unreviewed review_gate_fires_again_after_commit commit_then_review_order gate_fires_on_genuinely_exempt_turns fork_says_stop_is_a_finding rescope_after_a_stop_finding git_diff_check_for_executable_changes, ocd: 2026-09-28, lmd: 2026-09-28]
 
 **The honest cost curve:** findings shrank in SCOPE but not reliably in MATERIALITY, and the ones
 that stayed material were about evidence claims. That is the shape to prune by — not "early forks
