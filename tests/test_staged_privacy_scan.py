@@ -202,6 +202,16 @@ def test_real_lowercase_user_dotless_host_still_blocks(repo: Path) -> None:
     assert len(hits) == 1
 
 
+def test_agent_suffix_with_digit_host_still_blocks(repo: Path) -> None:
+    """Negative control: `deploy-agent@web-1` is a REAL service-account ssh
+    convention (review round on the suppress layer): the *-agent suffix only
+    suppresses when the host is digit-free (project-id shape); a numbered
+    hostname is a machine."""
+    _stage(repo, "deploy3.md", "ssh deploy-agent@web-1\n")
+    hits = [h for h in sps.scan_staged(repo) if h.rule == "private-path.ssh-user-host"]
+    assert len(hits) == 1
+
+
 def test_real_ssn_still_blocks(repo: Path) -> None:
     """Negative control: a real-looking SSN outside a checksum line blocks."""
     _stage(repo, "form.txt", "SSN: 123-45-6789\n")

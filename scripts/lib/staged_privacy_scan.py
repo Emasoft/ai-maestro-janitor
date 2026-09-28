@@ -162,18 +162,24 @@ _ROLE_TOKENS = frozenset({
 def _is_governance_author_token(matched: str) -> bool:
     """Suppress `user-at-host` ssh-shape matches that are trddgrep governance
     author tokens `<role> at <project-id>`. Conservative: suppress ONLY the
-    closed role set (plus `*-agent` suffix tokens), with a dotless host —
-    anything ambiguous blocks."""
+    closed role set (plus `*-agent` suffix tokens whose HOST is digit-free —
+    a service-account convention like deploy-agent at web-1 is a REAL ssh
+    target, and web-1/runner-1 style hostnames carry digits; project-ids
+    like ai-maestro-janitor do not), with a dotless host — anything
+    ambiguous blocks."""
     if matched.count("@") != 1:
         return False
     user, host = matched.split("@", 1)
-    is_role = user in _ROLE_TOKENS or (
+    if user in _ROLE_TOKENS:
+        return "." not in host and host != ""
+    is_agent_token = (
         user.endswith("-agent") and user[:-len("-agent")].isalnum()
         and "_" not in user and user != "-agent"
     )
-    if not is_role:
+    if not is_agent_token:
         return False
-    return "." not in host and host != ""
+    host_has_digit = any(c.isdigit() for c in host)
+    return "." not in host and host != "" and not host_has_digit
 
 
 def _staged_added_lines(root: Path) -> list[tuple[str, int, str]]:
