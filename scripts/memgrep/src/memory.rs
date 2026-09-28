@@ -14283,6 +14283,127 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         }
     }
 
+    // ── TRDD-XI10BA5D A2 step 4, named test 4: the USER-side symlink survives a gated write ────
+    //
+    // Env overrides are process-wide: both fns hold EDIT_ENV_MUTEX for the whole body (same
+    // reasoning as `scope_derives_the_path_and_the_env_override_relocates_the_root`). The symlink
+    // assertions are unix-only (create_user_symlink is a no-op elsewhere, mirroring
+    // pubglobal_make_symlink), so the fns are whole-body #[cfg(unix)] — on a Windows runner they
+    // must SKIP VISIBLY, not run and assert nothing.
+
+    /// A gated write through a `publish-globally: true` PROJECT page must leave the USER-side
+    /// symlink pointing at the real page: prepare validates the proposed bytes (no symlink side
+    /// effect there), commit's normalize loop creates/heals the link, and the junk-sweep at the
+    /// end of `atomic_write_page` must NOT mistake the legitimate link for junk. Pins the card's
+    /// "tmp+rename replaces a USER-side symlink with a regular file" measurement: the write
+    /// lands on the REAL page, never on/through the link path.
+    #[test]
+    #[cfg(unix)]
+    fn gated_write_preserves_the_user_symlink() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let scope = edit_test_tmpdir("symlink-preserve");
+        let memory_dir = scope.join(".claude/project/memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let page = memory_dir.join("p.md");
+        let user_root = edit_test_tmpdir("symlink-preserve-user");
+        unsafe {
+            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &scope);
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+
+        // The proposed bytes: publish-globally: true → commit's normalize loop owns creating the
+        // USER-side link. Everything else matches the step-3 gate's passing surface (thin
+        // description etc. are grandfathered — no floor finding on this shape).
+        let proposed = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\npublish-globally: true\n\
+                        description: \"d\"\n---\nbody\n\n## Notes and lessons learned\n";
+        let link = user_root.join("p.md");
+
+        let res = crate::pre_write::write_gated(&page, proposed);
+
+        // Capture EVERY path-derived fact BEFORE cleanup — the assertions below name files
+        // inside `scope`/`user_root`, and a removed path reports NotFound, not "not a symlink".
+        let real_after = std::fs::read_to_string(&page).unwrap();
+        let link_is_symlink = link.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink());
+        let link_resolves = link
+            .canonicalize()
+            .ok()
+            .zip(page.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
+        let page_is_regular = page.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink());
+
+        unsafe {
+            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert!(res.is_ok(), "proposed bytes must pass the gate and write: {res:?}");
+        assert!(real_after.contains("publish-globally: true"));
+        assert!(link_is_symlink, "commit must create the USER-side symlink");
+        assert!(link_resolves, "the link must resolve to the REAL page, not to a copy");
+        // The real page is a regular file — the tmp+rename hazard the card measured.
+        assert!(
+            page_is_regular,
+            "the write must land on the real page, never replace it with/through a link"
+        );
+    }
+
+    /// prepare alone has NO side effects: the symlink a prior write created survives a REFUSED
+    /// gated write untouched (nothing written, nothing linked, nothing swept).
+    #[test]
+    #[cfg(unix)]
+    fn a_refused_gated_write_leaves_the_user_symlink_untouched() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let scope = edit_test_tmpdir("symlink-refused");
+        let memory_dir = scope.join(".claude/project/memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let page = memory_dir.join("p.md");
+        // Pre-existing REAL page, already symlinked (the post-first-write state): publish-globally
+        // true + link present, so the gate's publish-globally pair is quiet on both sides.
+        let page_text = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\npublish-globally: true\n\
+                         description: \"d\"\n---\nbody\n\n## Notes and lessons learned\n";
+        std::fs::write(&page, page_text).unwrap();
+        let user_root = edit_test_tmpdir("symlink-refused-user");
+        unsafe {
+            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &scope);
+            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+        }
+        let link = user_root.join("p.md");
+        std::os::unix::fs::symlink(page.canonicalize().unwrap(), &link).unwrap();
+
+        // A write that MUST refuse: the proposed bytes carry a raw control byte — the A1 floor
+        // (also the gate's: control-byte-in-page blocks). Refusal fires in prepare, before commit.
+        let poisoned = page_text.replace("body\n", "bo\x08dy\n");
+        let err = crate::pre_write::write_gated(&page, &poisoned).unwrap_err();
+
+        // Capture the path-derived facts BEFORE cleanup (see the sibling test above).
+        let link_is_symlink = link.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink());
+        let link_resolves = link
+            .canonicalize()
+            .ok()
+            .zip(page.canonicalize().ok())
+            .is_some_and(|(a, b)| a == b);
+        let after = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&scope);
+        let _ = std::fs::remove_dir_all(&user_root);
+
+        assert!(
+            err.to_string().contains("write gate refused"),
+            "the gate must refuse before commit: {err}"
+        );
+        // The link is still a symlink, still resolving to the page; the page is byte-identical
+        // (zero side effects).
+        assert!(link_is_symlink, "a refused write must not have touched the USER-side link");
+        assert!(link_resolves);
+        assert_eq!(after, page_text, "a refused write leaves the page byte-identical");
+    }
+
     #[test]
     fn lint_phrase_floor_is_emitted_but_grandfathered_and_write_floor_is_separate() {
         // Pins the "the gate needs the WRITE floors, NOT the lint floors" reconciliation on the

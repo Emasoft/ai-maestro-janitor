@@ -636,6 +636,7 @@ impl ProseScorer for JevScorer {
         // Fresh breaker: the primary pass may have tripped the shared one (availability
         // fatals are exactly what gets us here), and the fallback endpoint's health is
         // independent — it must not inherit the primary's open circuit.
+        // TODO(test): timeout-straggler re-spend + chain-flip stderr note — review of 1daced30
         let fb_results = self.score_pass(
             fb_cfg,
             Arc::new(Breaker::default()),

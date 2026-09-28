@@ -110,4 +110,96 @@ mod tests {
         let proposed = "---\nname: p\n---\nbody text\n";
         prepare(path, proposed).expect("grandfathered-only findings must not refuse");
     }
+
+    // ── TRDD-XI10BA5D A2 step 4: the two step-3 review tests (binding) ─────────────────────────
+
+    /// Step-3 review NOTE 1 (binding): the gate's verdict is a function of the PROPOSED bytes
+    /// alone — `lint_page_text` must read the text it is PASSED, never the disk at `dest`. The
+    /// fixture makes the two hypotheses predict OPPOSITE refusals, so the evidence discriminates:
+    /// the bytes ON DISK carry only an unclosed fence, the PROPOSED bytes carry only a
+    /// keyword-less atom. A text-reading lint refuses `atom-no-keywords`; a disk-reading one
+    /// refuses `page-unclosed-fence`. The second half pins the other direction of the same
+    /// property: the identical verdict is reachable by writing the proposed bytes and linting
+    /// what actually landed — "verdict on proposed == verdict on written", byte-for-byte.
+    #[test]
+    fn gate_verdict_tracks_the_proposed_bytes_not_the_disk_state() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_gate_dest-purity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let page = dir.join("p.md");
+        let on_disk = "---\nname: p\n---\n```\nunclosed fence on disk\n";
+        std::fs::write(&page, on_disk).unwrap();
+        let proposed = "---\nname: p\n---\n^ATOM-N [ocd: 2026-01-01]\nbody\n\n## Notes and lessons learned\n";
+
+        let err = prepare(&page, proposed).expect_err("the proposed bytes must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("[atom-no-keywords]"),
+            "the refusal must name the PROPOSED bytes' violation: {msg}"
+        );
+        assert!(
+            !msg.contains("page-unclosed-fence"),
+            "the disk page's own violation must be invisible to the gate — prepare reads the \
+             passed text, never `dest`: {msg}"
+        );
+
+        // The same verdict from the written side: the proposed bytes, once written, lint to the
+        // identical blocking set the refusal named.
+        let written = dir.join("written.md");
+        std::fs::write(&written, proposed).unwrap();
+        let landed = std::fs::read_to_string(&written).unwrap();
+        let blocking_written: Vec<&str> = lint_page_text(&written, &landed, false)
+            .into_iter()
+            .filter(|v| write_gate_blocks(v))
+            .map(|v| v.4)
+            .collect();
+        let refused: Vec<&str> = crate::memory::write_gate_floors()
+            .iter()
+            .copied()
+            .filter(|c| msg.contains(&format!("[{c}]")))
+            .collect();
+        assert_eq!(
+            refused, blocking_written,
+            "the gate's verdict on the proposed bytes must equal a lint of those same bytes \
+             once written"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Step-3 review NOTE 2 (binding): a refusal must never carry page CONTENT. Every lint check
+    /// is content-snippet-free by construction; this pins the refusal END-TO-END so the first
+    /// helpful lint message that starts quoting a fragment fails here instead of leaking page
+    /// prose to whatever stderr a verb's refusal reaches. The canaries sit where page text lives
+    /// — body prose, atom props, inside a fenced block. The atom ID is deliberately canary-free:
+    /// naming ids in refusals IS the design (the step-5 id-set rule is required to name them).
+    #[test]
+    fn refusal_message_carries_no_page_body_content() {
+        let path = Path::new("/nonexistent/fixture/no-leak.md");
+        let prose_canary = "quarantine ledger ninebyte sealed envelope";
+        let desc_canary = "hexdump manifesto 9f2a";
+        let fenced_canary = "fenced vault notebook";
+        let proposed = format!(
+            "---\nname: p\n---\n^ATOM-LEAKPROBE [desc: \"{desc_canary}\"]\n\
+             body cites {prose_canary}\n\n```\n{fenced_canary}\n"
+        );
+        let err = prepare(path, &proposed).expect_err("the fixture must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("write gate refused"),
+            "a real refusal, so the leak assertions are not vacuously true: {msg}"
+        );
+        assert!(
+            !msg.contains(prose_canary),
+            "body prose leaked into the refusal: {msg}"
+        );
+        assert!(
+            !msg.contains(desc_canary),
+            "atom props leaked into the refusal: {msg}"
+        );
+        assert!(
+            !msg.contains(fenced_canary),
+            "fenced content leaked into the refusal: {msg}"
+        );
+    }
 }
