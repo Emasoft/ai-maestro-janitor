@@ -163,6 +163,11 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # covered at all? (TRDD-6WM4BFKF). Hourly, because the answer only changes when .gitignore
     # or the index does, and the finding is preventive rather than urgent.
     ("gitignore-coverage", 3600, "CLAUDE_PLUGIN_OPTION_GITIGNORE_COVERAGE_INTERVAL"),
+    # repo-state (TRDD-DG2V7D5P): branch ahead/behind origin + default-branch commits not
+    # covered by a release tag. Hourly — a few git subprocess calls per fire, the condition
+    # moves on the scale of hours, and the detector dedupes on (tag, count) so the same
+    # state does not re-nag; a tighter cadence buys nothing.
+    ("repo-state", 3600, "CLAUDE_PLUGIN_OPTION_REPO_STATE_INTERVAL"),
     # marketplace-refresh (per-session detector) RETIRED 2026-09-17: it ran
     # `claude plugin marketplace update` across every registered marketplace
     # and generated the file-churn that grew fseventsd to 27 GB.
@@ -620,6 +625,9 @@ _ADVISORY_DETECTORS = frozenset({
     # deferral lasts. That is the janitor#276 shape exactly, and this list is where it is cured.
     "claudemd-migration-queue",
     "runaway-file-growth",
+    # repo-state (TRDD-DG2V7D5P) is informational: ahead/behind counts and unreleased-commit
+    # tallies are "consider pushing / consider publishing", never an incident.
+    "repo-state",
     "github-issues-watch", "gh-reply-watch", "task-pr-mismatch", "pr-reconciler",
     "oauth-cookie-reminder", "oauth-beacon-refresh",
 })
