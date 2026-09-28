@@ -8355,8 +8355,8 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
         \x20 # ask in plain PROSE (the question you have, not keywords): every atom is scored, the\n\
         \x20 # ones the model answers YES (p >= 0.9) print as the same triage rows `recall` uses\n\
         \x20 memgrep prose \"which memory contains decisions about the settings panel design style?\"\n\
-        \x20 # PRICING/PRIVACY: every atom BODY + its lessons leave the machine to the provider —\n\
-        \x20 # an account of every atom is billed per query (the (query, atom) cache makes reruns free)\n\
+        \x20 # PRIVACY WARNING: every atom's full scored text (desc + keywords + body + its lessons)\n\
+        \x20 # is SENT to the scoring backend per query — billed per atom (the cache makes reruns free)\n\
         \x20 # a gateway backend ($JEV_GATEWAY_URL) keeps the traffic in your own infrastructure\n"
 )]
 struct ProseArgs {
@@ -14123,5 +14123,94 @@ mod prose_tests {
             .map(|(r, _)| (*r.as_ref().unwrap() * 1000.0).round() as i64)
             .collect();
         assert_eq!(kept, vec![970], "0.97 → 970, 0.5 dropped");
+    }
+
+    /// Pins the `--no-superseded` toggle OFFLINE: the flag must drop `status: superseded` atoms
+    /// from the scored candidates (the same filter `cmd_prose_cli` applies), while the DEFAULT
+    /// keeps them — status is history, not relevance, and the threshold decides what prints.
+    #[test]
+    fn no_superseded_flag_removes_superseded_atoms_from_candidates() {
+        let dir = std::env::temp_dir().join(format!("prose-nosup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let page = dir.join("p.md");
+        std::fs::write(
+            &page,
+            "---\nname: p\ndescription: \"d\"\nocd: 2026-01-01\nlmd: 2026-01-02\n---\n\
+             ^ATOM-AAAA-0001 [keywords: alpha, status: superseded, ocd: 2026-01-01, lmd: 2026-01-02]\nretired fact\n\n\
+             ^ATOM-BBBB-0002 [keywords: beta, ocd: 2026-01-01, lmd: 2026-01-02]\nlive fact\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let atoms = prose_all_atoms(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(atoms.len(), 2, "enumeration sees both atoms before any filter");
+        let sup = atoms.iter().find(|(_, a, _, _)| a.id == "ATOM-AAAA-0001").unwrap();
+        assert_eq!(sup.1.status, "superseded", "status prop parsed off the marker");
+        // The exact filter cmd_prose_cli applies (include_superseded = !no_superseded).
+        let without: Vec<&str> = atoms
+            .iter()
+            .filter(|(_, atom, _, _)| atom.status != "superseded")
+            .map(|(_, a, _, _)| a.id.as_str())
+            .collect();
+        assert_eq!(
+            without,
+            vec!["ATOM-BBBB-0002"],
+            "--no-superseded drops the retired atom from the scored candidates"
+        );
+        let default: Vec<&str> = atoms.iter().map(|(_, a, _, _)| a.id.as_str()).collect();
+        assert!(
+            default.contains(&"ATOM-AAAA-0001"),
+            "default keeps the superseded atom scored (status is history, not relevance)"
+        );
+    }
+
+    /// LIVE e2e harness — #[ignore]-gated, run by hand:
+    ///   TYPESAFE_API_KEY=… cargo test -p memgrep -- --ignored prose_live
+    /// Drives the real scorer path (enumeration → chunk build → Jev over the network) and
+    /// asserts only that the backend answers every chunk without erroring — a runnable live
+    /// harness, not CI coverage (cmd_prose_cli itself is unusable here: it process::exit()s).
+    #[test]
+    #[ignore]
+    fn prose_live_backend_scores_real_query_without_error() {
+        if std::env::var("TYPESAFE_API_KEY").map(|v| v.is_empty()).unwrap_or(true) {
+            return; // gate: no key on this machine — nothing live to exercise
+        }
+        let dir = std::env::temp_dir().join(format!("prose-live-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(
+            dir.join("p.md"),
+            "---\nname: p\ndescription: \"live e2e\"\nocd: 2026-01-01\nlmd: 2026-01-02\n---\n\
+             ^ATOM-AAAA-0001 [keywords: review, fork, spawn]\nThe review fork runs synchronously and must never run in the background.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let candidates = prose_all_atoms(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!candidates.is_empty(), "fixture atom enumerated");
+        let chunks: Vec<jev::ProseChunk> = candidates
+            .iter()
+            .map(|(path, atom, _, _)| {
+                // Same chunk build cmd_prose_cli does: body + the atom's resolved lessons.
+                let lessons = render_atom_notes(path, &atom.body, false);
+                let text = if lessons.trim().is_empty() {
+                    atom.body.clone()
+                } else {
+                    format!("{}\n{lessons}", atom.body)
+                };
+                jev::ProseChunk {
+                    id: atom.id.clone(),
+                    title: atom.desc.clone(),
+                    keywords: Some(atom.keywords.join(" ")),
+                    text,
+                }
+            })
+            .collect();
+        let config = jev::JevConfig::resolve(Some("typesafe"), None).expect("config resolves with TYPESAFE_API_KEY set");
+        let scorer = jev::JevScorer::new(config);
+        let results = scorer.score("which memory covers the review fork spawn rule?", &chunks);
+        assert_eq!(results.len(), chunks.len(), "one answer per chunk");
+        for r in &results {
+            assert!(r.is_ok(), "live backend errored: {:?}", r.as_ref().err());
+        }
     }
 }

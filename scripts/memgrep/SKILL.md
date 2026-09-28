@@ -19,6 +19,7 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 | `recall <ATOM-ID> <memdir>` | the **second hop**: exact-id lookup returning that ONE atom in full (body + its `[^N]` lessons + see-also). This is what makes the lean listing cheap — scan ids, then pay for exactly one atom. A whitespace-free query that matches no atom id falls through to an ordinary symptom search |
 | `recall-mem-topic "SYMPTOM" <memdir>` | non-deprecated named spelling of `recall`'s hop 1 (same code path) — say the hop instead of relying on the query's shape to imply it |
 | `recall-mem-atom <ATOM-ID> <memdir>` | non-deprecated named spelling of `recall`'s hop 2 (same code path) |
+| `prose "<question in prose>" <memdir>` | semantic atom recall — EVERY atom in scope is scored by the Jev decision model; atoms answering YES at/above the threshold (default `--threshold 0.9`) print as the same triage rows `recall` uses. PRIVACY: each atom's full scored text (desc + keywords + body + its lessons) is SENT to the scoring backend per query — a gateway backend (`$JEV_GATEWAY_URL`) keeps the traffic in your own infrastructure |
 | `find "<query>" <memdir>` | note-level `+`/`-`/wildcard/phrase keyword search (see below); `--only-notes` searches the lessons instead of pages |
 | `find-claude-mem-ref <buffer.md> <wikidir>` | list every wiki ATOM harvested FROM a Claude-memory buffer file → `path#atom-id\t<source-hash>` (the harvest provenance back-reference; see Atoms below) |
 | `find-trdd <TRDD-ID> <wikidir>` | the reverse provenance hop: list every ATOM whose `trdd:` cites that card → `path#atom-id\t<stored-citation>`. `TRDD-M7BZ4X1Q`, `#M7BZ4X1Q` and the bare 8 chars all resolve. Use it when a decision CHANGES — it enumerates the atoms still asserting the old answer, instead of recalling by symptom and hoping they surface |
@@ -129,6 +130,7 @@ The rotator drains the live account first when near a limit, then rotates to a s
 
 ```bash
 memgrep recall "oauth rotator failed had to log in" <memdir>     # symptom recall + lessons + atoms
+memgrep prose "which memory covers the review fork spawn rule?" <memdir>  # semantic recall — every atom scored by the model (⚠ atom bodies leave the machine; gateway keeps them in-infrastructure)
 memgrep recall "rotator" <memdir> --since 2026-06-01 --sort lmd  # recent, newest-modified first
 memgrep find "+rotator +keychain -widget" <memdir>               # AND two terms, exclude one
 memgrep find '+"old approach" retry' <memdir>                    # mandatory phrase + optional ranker
