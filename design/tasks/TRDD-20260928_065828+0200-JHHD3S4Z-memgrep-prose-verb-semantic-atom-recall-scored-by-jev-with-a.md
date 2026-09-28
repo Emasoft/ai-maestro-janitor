@@ -52,5 +52,5 @@ PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first;
 
 ## Acceptance
 
-- [ ] the shipped rule markdown-memory-recall.md mentions the prose verb (one sentence, on next touch of that rule) — commit-4 review residual (a)
+- [ ] the shipped rule markdown-memory-recall.md mentions the prose verb (one sentence, on next touch of that rule) — commit-4 review residual (a). Close-time note (2026-09-28 review): may need an owner waiver rather than a direct rule edit — owner decides at close time.
 - [x] live e2e replayed by the main agent (TYPESAFE_API_KEY=... cargo test -- --ignored prose_live) or owner waiver recorded — commit-4 review residual (b)
