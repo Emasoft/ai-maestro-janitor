@@ -4996,7 +4996,12 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
         text.replacen(old.as_str(), new.as_str(), 1)
     };
     let out = bump_page_lmd(&out, &today_date());
-    atomic_write_page(&a.page, &out)?;
+    // A2 step 3 (TRDD-XI10BA5D): this is the FIRST verb wired through the shared pre-write gate —
+    // the proposed bytes are linted against the write floor and the write is refused (nothing
+    // lands, every blocking violation named) before `atomic_write_page`'s commit pass ever runs.
+    // Every other verb still calls `atomic_write_page` directly and is UNGATED until its own
+    // reviewed commit wires it (`pre_write::write_gated` is the only gated entry).
+    crate::pre_write::write_gated(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{}\tedited ({count} replacement(s))", rel(&a.page));
     Ok(())
@@ -5701,7 +5706,7 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
 /// design). A gate that fails on all 262 fails always, and a gate that always fails is one people
 /// route around; the real ERRORs were already drowning in the noise.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
-enum Severity {
+pub(crate) enum Severity {
     /// Structurally broken: the page or atom will not parse, resolve, or be findable as written.
     Info,
     /// Real, worth fixing, but nothing is silently lost — the corpus still works.
@@ -5711,7 +5716,7 @@ enum Severity {
 }
 
 impl Severity {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Severity::Error => "ERROR",
             Severity::Warn => "WARN",
@@ -6561,7 +6566,7 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
 /// normalize pass BEFORE this runs (the per-page checks are report-only — see the
 /// `publish-globally` check below). The parameter is kept so the A2 write-gate step can make
 /// per-page fixing page-local without another signature change.
-fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violation> {
+pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violation> {
     let _ = fix; // see doc comment — report-only today; the A2 gate owns per-page fixing.
     let p = rel(path);
     let mut violations: Vec<Violation> = Vec::new();
@@ -7316,14 +7321,12 @@ fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violation> {
 /// this function is only the REFUSE decision. Step 3 (pre_write.rs) wires `write_gate_blocks`
 /// into the prepare pass; the completeness test in `mod tests` fails when an ERROR code is added
 /// to `lint_page_text` without being classified into one of the two sets.
-#[allow(dead_code)] // step 3 wires the production caller; the floor tests cover the decision meanwhile
-fn write_gate_blocks(v: &Violation) -> bool {
+pub(crate) fn write_gate_blocks(v: &Violation) -> bool {
     v.0 == Severity::Error && write_gate_floors().contains(&v.4)
 }
 
 /// The floor codes proper — see `write_gate_blocks` for the per-code rationale.
-#[allow(dead_code)] // read by write_gate_blocks (step 3) and the floor tests
-fn write_gate_floors() -> &'static [&'static str] {
+pub(crate) fn write_gate_floors() -> &'static [&'static str] {
     &[
         "control-byte-in-page",
         "page-unclosed-fence",
@@ -13202,6 +13205,78 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "must not wildly overshoot the 1s MEMGREP_LOCK_TIMEOUT_S"
         );
         assert_eq!(content_after, "hello world\n", "page byte-identical after a lock-timeout refusal");
+    }
+
+    /// A2 step 3 (TRDD-XI10BA5D): `cmd_edit_cli` is the first verb wired through the pre-write
+    /// gate. An edit whose PROPOSED bytes carry a floor code (an unclosed fence —
+    /// `edit_test_scope`'s legacy page shape trips only grandfathered codes, which is exactly why
+    /// the gate lets every other test here through) must be REFUSED: nothing written, non-zero
+    /// error, the violation named. Proves the WIRING, not just `prepare`'s decision — a refusal
+    /// that fired after the write would pass every unit test above and still corrupt the page.
+    #[test]
+    fn edit_refuses_a_write_whose_proposed_bytes_trip_a_floor_code() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-gate-floor");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope("scope-gate-floor", "body under a fine page\n");
+        let old = edit_test_file(&scope, "old.txt", "body under a fine page");
+        // The replacement opens a code fence it never closes — a floor code the proposed bytes
+        // would carry. `before`/`after` capture the page BYTES around the call: the invariant is
+        // "nothing lands", and a test that only checked the message would still pass if the
+        // write happened and the refusal came after it.
+        let new = edit_test_file(&scope, "new.txt", "```\nbody under an unclosed fence");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        let before = std::fs::read(&page).unwrap();
+        let res = cmd_edit_cli(&args);
+        let after = std::fs::read(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        let err = res.expect_err("a proposed page carrying a floor code must refuse");
+        let msg = err.to_string();
+        assert!(msg.contains("write gate refused"), "the gate must name itself: {msg}");
+        assert!(
+            msg.contains("page-unclosed-fence"),
+            "the blocking violation must be named: {msg}"
+        );
+        assert_eq!(before, after, "the page was written despite the gate refusal");
+    }
+
+    /// The conformant half of the wiring: an edit of a page whose proposed bytes carry NO floor
+    /// code writes through the gate unchanged — the gate must never wedge a clean edit (the
+    /// strict table is the card's default, and this fixture's grandfathered debt stays welcome).
+    #[test]
+    fn edit_writes_through_the_gate_when_the_proposed_bytes_are_clean() {
+        let _env = EDIT_ENV_MUTEX.lock().unwrap();
+        let state_dir = edit_test_tmpdir("state-gate-clean");
+        unsafe {
+            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+        }
+
+        let (scope, page) = edit_test_scope("scope-gate-clean", "hello world\n");
+        let old = edit_test_file(&scope, "old.txt", "hello world");
+        let new = edit_test_file(&scope, "new.txt", "goodbye world");
+        let args = edit_args(&page, &old, &new, &[]);
+
+        let res = cmd_edit_cli(&args);
+        let content = std::fs::read_to_string(&page).unwrap();
+
+        unsafe {
+            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&state_dir);
+        let _ = std::fs::remove_dir_all(&scope);
+
+        assert!(res.is_ok(), "a clean edit must write through the gate: {res:?}");
+        assert!(content.contains("goodbye world"), "the edit landed: {content}");
     }
 
     // ── `publish-globally:` reconciliation ──────────────────────────────────────────────────
