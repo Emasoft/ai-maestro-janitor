@@ -3,7 +3,7 @@ trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
 column: testing
 created: 2026-09-24T07:42:31+0200
-updated: 2026-09-28T01:26:58+0200
+updated: 2026-09-28T13:13:37+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -65,4 +65,5 @@ On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 - [ ] staged-diff scanner refuses personal e-mail/home-path on ADDED staged lines (outline 1): tests/test_staged_privacy_scan.py 7 tests green (run 2026-09-28 exit 0; landed f7fb03f6, main-verified)
 - [ ] wired into this repo's git-hooks/pre-commit (outline 2): pre-commit stage-1 invocation of scripts/lib/staged_privacy_scan.py verified by source read of git-hooks/pre-commit:24 (landed f7fb03f6)
 - [ ] fleet install chaining existing hooks + per-project opt-out (outline 3): OPEN - remains on the card
-- [ ] real-repo end-to-end: stage e-mail -> refused; stage noreply -> passes; existing hook still runs (outline 4): recorded-evidence pending a real staged-commit exercise (the 7 tests are pattern-level, not temp-repo commit-refusal e2e); with-existing-hook case re-verified at integration
+- [x] real-repo end-to-end: stage e-mail -> refused; stage noreply -> passes; existing hook still runs (outline 4): e2e run 2026-09-28 (lean-worker, temp repo, main-read) — personal e-mail REFUSED exit 1 (masked, chained hook not run), noreply PASSES exit 0 (chained hook ran; 2nd commit proves per-commit chaining); evidence docs_dev/20260928-fwdzdb7w-e2e.md
+2026-09-28 e2e evidence (lean-worker, main-read): outline 4 discharged — real temp-repo commits: personal e-mail REFUSED exit 1 (BLOCKED, masked, chained hook correctly not run), noreply PASSES exit 0 (chained hook ran, 2nd commit proves per-commit chaining), home-path bonus caught 2 rules. Load-bearing Finding 0 for outline 3: copy-modules layout fails-closed at import (publish.py:312 reads .cpv-version at module load) — fleet install must invoke the scanner by absolute path from the janitor tree. Full evidence: docs_dev/20260928-fwdzdb7w-e2e.md. Outline 3 stays OPEN as a design proposal (default-on for mandated repos + opt-out sentinel, or ask-once — owner question).
