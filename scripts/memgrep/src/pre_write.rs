@@ -121,6 +121,7 @@ mod tests {
     /// refuses `page-unclosed-fence`. The second half pins the other direction of the same
     /// property: the identical verdict is reachable by writing the proposed bytes and linting
     /// what actually landed — "verdict on proposed == verdict on written", byte-for-byte.
+    // keep contrastive: disk and proposed must classify DIFFERENTLY or the test degenerates.
     #[test]
     fn gate_verdict_tracks_the_proposed_bytes_not_the_disk_state() {
         let dir = std::env::temp_dir()
@@ -200,6 +201,135 @@ mod tests {
         assert!(
             !msg.contains(fenced_canary),
             "fenced content leaked into the refusal: {msg}"
+        );
+    }
+
+    // ── TRDD-XI10BA5D A2 step 5, wave 1 (binding): the PER-FLOOR-CODE no-leak sweep ─────────────
+
+    /// The step-3 review carry-forward: "widen the no-leak test to a per-floor-code sweep when
+    /// the batch verbs' refusal paths land". One BLOCKING fixture per floor code
+    /// (`write_gate_floors()`, enumerated from the classifier itself so a code added later joins
+    /// the sweep automatically), each refused, each refusal asserted to share NO substring with
+    /// the page body. The substring oracle is deliberately fragment-based — each fixture's body
+    /// carries one distinctive fragment (a word a snippet-quoting message would echo), plus the
+    /// canary-bearing prop values — because a WHOLE-body containment check would pass a message
+    /// that quotes one sentence. On its first run the sweep caught THREE quoting emitters
+    /// (`page-description-duplicated-phrases` and `atom-keywords-duplicated` echoed the repeated
+    /// phrase, `atom-dropped-props` echoed the dropped segment) — all three now report counts
+    /// only; a future emitter that starts quoting page content fails here.
+    #[test]
+    fn every_floor_code_refuses_without_quoting_page_content() {
+        // Per-code fixture: `(code, proposed_page, leak_fragments)`. The fragments are the page
+        // content the message must NOT echo — the body prose canary (every fixture) plus the
+        // code-specific prop values. Fixture shapes mirror the completeness test's fixtures
+        // (memory.rs `every_error_code_lint_page_text_emits_is_classified`), each verified to
+        // fire its code and ONLY grandfathered findings beside it.
+        let fixtures: Vec<(&str, String, Vec<String>)> = vec![
+            (
+                "control-byte-in-page",
+                "---\nname: p\n---\nbackspace\x08canary\n".into(),
+                vec!["backspace".into(), "canary".into()],
+            ),
+            (
+                "page-unclosed-fence",
+                // The body canary must not reuse the message's own fixed vocabulary (the message
+                // legitimately says "unclosed code fence") — a canary that collides with it would
+                // false-positive on prose, so the fragment tests a WORD a quoter would echo.
+                "---\nname: p\n---\n```\nfencecanary\n".into(),
+                vec!["fencecanary".into()],
+            ),
+            (
+                "page-description-duplicated-phrases",
+                "---\nname: p\ndescription: \"dupcanary / other phrase / dupcanary\"\nocd: c\nlmd: l\n---\nbodyb\n\n## Notes and lessons learned\n".into(),
+                vec!["dupcanary".into(), "other phrase".into()],
+            ),
+            (
+                "footnote-dangling-ref",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\ndanglingcanary[^9]\n\n## Notes and lessons learned\n".into(),
+                vec!["danglingcanary".into()],
+            ),
+            (
+                "atom-bad-bracket",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-X ⟦keywords: manglecanary⟧\nbody\n\n## Notes and lessons learned\n".into(),
+                vec!["manglecanary".into()],
+            ),
+            (
+                "atom-unclosed-props",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-U [keywords: opencanary\nopen\n\n## Notes and lessons learned\n".into(),
+                vec!["opencanary".into()],
+            ),
+            (
+                "atom-unquoted-desc",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-Q [desc: Unquoted canaryprop, keywords: k]\nbody\n\n## Notes and lessons learned\n".into(),
+                vec!["canaryprop".into()],
+            ),
+            (
+                "atom-dropped-props",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-D [keywords: k, dropper canary]\nbody\n\n## Notes and lessons learned\n".into(),
+                vec!["dropper".into()],
+            ),
+            (
+                "atom-keywords-duplicated",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-K [keywords: kwcanary kwcanary kwcanary]\nbody\n\n## Notes and lessons learned\n".into(),
+                vec!["kwcanary".into()],
+            ),
+            (
+                "atom-no-keywords",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-N [ocd: 2026-01-01]\nnocankb\n\n## Notes and lessons learned\n".into(),
+                vec!["nocankb".into()],
+            ),
+            (
+                "lesson-bad-bracket",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: ⟦broken⟧\n".into(),
+                vec!["broken".into()],
+            ),
+            (
+                "lesson-empty-body",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: [id: L status: valid keywords: k] \n".into(),
+                vec![], // the body is whitespace — nothing content-bearing to leak
+            ),
+            (
+                "lesson-unquoted-desc",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: [id: L status: valid keywords: k, desc: Unquoted]\nunqucanary\n".into(),
+                vec!["unqucanary".into()],
+            ),
+            (
+                "lesson-superseded-no-body",
+                "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\nbody[^1]\n\n## Notes and lessons learned\n\n[^1]: [id: L status: superseded, supersedes: ATOM-X, keywords: k] supcanary\n".into(),
+                vec!["supcanary".into()],
+            ),
+        ];
+        let path = Path::new("/nonexistent/fixture/sweep.md");
+        let mut covered: Vec<&str> = Vec::new();
+        for (code, proposed, fragments) in &fixtures {
+            let msg = match prepare(path, proposed) {
+                Err(e) => e.to_string(),
+                Ok(()) => panic!(
+                    "fixture for `{code}` must actually REFUSE (a sweep row whose fixture \
+                     stopped firing is a dead sweep row)"
+                ),
+            };
+            assert!(
+                msg.contains(&format!("[{code}]")),
+                "the refusal must name `{code}` (fixture drift — the fixture fired a \
+                 different code first): {msg}"
+            );
+            for frag in fragments {
+                assert!(
+                    !msg.contains(frag.as_str()),
+                    "the `{code}` refusal leaked the page fragment `{frag}`: {msg}"
+                );
+            }
+            covered.push(code);
+        }
+        // The sweep is TOTAL: every floor code in `write_gate_floors()` was exercised. A code
+        // added to the floors later joins the sweep or the sweep fails — no silent gap.
+        let mut expected: Vec<&str> = crate::memory::write_gate_floors().to_vec();
+        expected.sort_unstable();
+        covered.sort_unstable();
+        assert_eq!(
+            covered, expected,
+            "the sweep's fixture set and write_gate_floors() have drifted apart"
         );
     }
 }

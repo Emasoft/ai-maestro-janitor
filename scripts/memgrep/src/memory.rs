@@ -3140,7 +3140,9 @@ pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
     }
 
     let out = bump_page_lmd(&insert_atom_block_before(&text, &marker, &body, boundary), &today);
-    atomic_write_page(&a.page, &out)?;
+    // A2 step 5 wave 1 (TRDD-XI10BA5D): add-atom's page write is gated — the proposed bytes
+    // (existing page + the new atom) are refused on ANY floor code before anything lands.
+    crate::pre_write::write_gated(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{id}\t{}", rel(&a.page));
     Ok(())
@@ -3484,7 +3486,10 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     fm.push_str(&format!("# {name}\n\n"));
     fm.push_str("## Notes and lessons learned\n");
 
-    atomic_write_page(&path, &fm)?;
+    // A2 step 5 wave 1 (TRDD-XI10BA5D): new-page's CREATE write is gated like every other
+    // page write — the scaffold cannot carry a floor code (the verb pre-validates description
+    // phrases at the frontmatter level), and the gate certifies that invariant for free.
+    crate::pre_write::write_gated(&path, &fm)?;
     reindex_owning_scope(&path, false)?;
     println!("wrote {}", rel(&path));
     Ok(())
@@ -3824,7 +3829,9 @@ fn add_lesson_impl(
     out.push('\n');
     let out = bump_page_lmd(&out, &today);
 
-    atomic_write_page(page, &out)?;
+    // A2 step 5 wave 1 (TRDD-XI10BA5D): add-lesson / update-mem-atom --lesson share THIS write
+    // (one impl, one gate call — they can never drift apart), so both verbs are gated here.
+    crate::pre_write::write_gated(page, &out)?;
     reindex_owning_scope(page, hidden)?;
     println!("{lesson_id}\t^{label}\t{}", rel(page));
     Ok(())
@@ -4165,7 +4172,9 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
     out.push('\n');
     let out = bump_page_lmd(&out, &today);
 
-    atomic_write_page(&a.page, &out)?;
+    // A2 step 5 wave 1 (TRDD-XI10BA5D): update-mem-atom's BODY-REWRITE path is gated (the
+    // --lesson mode shares add_lesson_impl's own gated write above, not this one).
+    crate::pre_write::write_gated(&a.page, &out)?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{}\tupdated atom `{}`", rel(&a.page), a.atom);
     Ok(())
@@ -6662,8 +6671,11 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
                 Severity::Error,
                 p.clone(),
                 0,
+                // The count only, never the phrases: a lint finding is printed anywhere (logs,
+                // gate refusals to stderr) and a wikimem page may hold private material — the
+                // A2 no-leak sweep (TRDD-XI10BA5D step 5) fails on any emitter that echoes it.
                 format!(
-                    "page `description:` repeats {} phrase(s): {d_dupes:?} — a repeat raises \
+                    "page `description:` repeats {} phrase(s) — a repeat raises \
                      the count without widening the set of searches that can find this page",
                     d_dupes.len()
                 ),
@@ -6916,19 +6928,15 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         }
         let dropped = dropped_prop_segments(&a.props_raw);
         if !dropped.is_empty() {
-            let shown = dropped
-                .iter()
-                .take(3)
-                .map(|s| format!("`{}`", s.chars().take(32).collect::<String>()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let more = if dropped.len() > 3 { ", …" } else { "" };
             violations.push((
                 Severity::Error,
                 p.clone(),
                 a.line,
+                // The count only, never the segments: a lint finding is printed anywhere (logs,
+                // gate refusals to stderr) and a wikimem page may hold private material — the
+                // A2 no-leak sweep (TRDD-XI10BA5D step 5) fails on any emitter that echoes it.
                 format!(
-                    "atom `^{}`: {} props segment(s) are DISCARDED by the parser ({shown}{more}) \
+                    "atom `^{}`: {} props segment(s) are DISCARDED by the parser \
                      — a comma separates FIELDS, a space separates KEYWORDS; join each key-phrase \
                      with `_` (`keywords: a_phrase another_phrase`)",
                     a.id,
@@ -6991,8 +6999,12 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
                 Severity::Error,
                 p.clone(),
                 a.line,
+                // The count only, never the keyphrases: a lint finding is printed anywhere
+                // (logs, gate refusals to stderr) and a wikimem page may hold private material
+                // — the A2 no-leak sweep (TRDD-XI10BA5D step 5) fails on any emitter that
+                // echoes it.
                 format!(
-                    "atom `^{}` repeats {} keyphrase(s): {kw_dupes:?} — a repeat inflates \
+                    "atom `^{}` repeats {} keyphrase(s) — a repeat inflates \
                      the count without adding a way to REACH the atom, which is the only \
                      thing the count stands for",
                     a.id,
@@ -14510,10 +14522,14 @@ mod xi9_cli_tests {
     fn update_lesson_desc_round_trips_props_only_footnote() {
         // A footnote with NO inline body must round-trip props-only — the re-attach path must
         // not fabricate a trailing space or leak the next footnote's text.
+        // A2 step 5 wave 1: the two sibling footnotes carry a MINIMAL one-word body each so the
+        // page passes the write gate (a body-less lesson is `lesson-empty-body`, a floor code —
+        // fixtures come to floor, never gate exemptions); the assertions below are on the
+        // REBUILT `[^28]` line's props, which a one-word body does not disturb.
         let dir = std::env::temp_dir().join(format!("xi9-bare-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir");
         let page = dir.join("p.md");
-        std::fs::write(&page, "## Notes and lessons learned\n[^28]: [id:ATOM-60ZD-6UGR, status:valid, desc:\"old\", keywords:\"k1,k2\", ocd: 2026-09-25, lmd: 2026-09-25]\n[^29]: [id:ATOM-BBBB-2222, status:valid, desc:\"next\", keywords:\"k3,k4\", ocd: 2026-09-25, lmd: 2026-09-25]\n").expect("write");
+        std::fs::write(&page, "## Notes and lessons learned\n[^28]: [id:ATOM-60ZD-6UGR, status:valid, desc:\"old\", keywords:\"k1,k2\", ocd: 2026-09-25, lmd: 2026-09-25] body28\n[^29]: [id:ATOM-BBBB-2222, status:valid, desc:\"next\", keywords:\"k3,k4\", ocd: 2026-09-25, lmd: 2026-09-25] body29\n").expect("write");
         let args: Vec<String> = ["--page", page.to_str().unwrap(),
             "--atom", "ATOM-60ZD-6UGR",
             "--desc", "a split pass declared a lesson pool permanently unsplittable from inside its own byte-preservation gates"]

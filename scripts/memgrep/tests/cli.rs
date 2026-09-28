@@ -166,6 +166,23 @@ fn run_fail_env(args: &[&str], env_key: &str, env_val: &str) {
     );
 }
 
+/// Like `run_full` but sets an extra env var on the child — `new-page`'s gate-refusal test needs
+/// BOTH the exit code and the stderr (to assert the violation is NAMED), plus the scope override
+/// that points the derived destination at the test's own temp dir.
+fn run_full_env(args: &[&str], env_key: &str, env_val: &str) -> (String, String, i32) {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .env(env_key, env_val)
+        .output()
+        .expect("failed to run memgrep");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
 /// Run memgrep expecting a *clean* non-zero exit — a normal exit code, NEVER a signal kill.
 /// `status.code()` is `Some(n)` for an `exit(n)` and `None` when the process died from a signal
 /// (SIGSEGV/SIGABRT on a stack-overflow abort). Asserting `code().is_some()` is what distinguishes
@@ -2970,6 +2987,39 @@ fn run_stdin_full(args: &[&str], input: &str) -> (String, String, i32) {
     )
 }
 
+/// Like `run_stdin_full` but sets an extra env var on the child — the gate-refusal tests need
+/// the exit code and stderr of a stdin-fed write verb AND the keyword-floor opt-out some
+/// fixtures pin to a literal stored-marker string.
+fn run_stdin_full_env(
+    args: &[&str],
+    input: &str,
+    env_key: &str,
+    env_val: &str,
+) -> (String, String, i32) {
+    use std::io::Write;
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let mut child = Command::new(bin)
+        .args(args)
+        .env(env_key, env_val)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn memgrep");
+    child
+        .stdin
+        .take()
+        .expect("stdin handle")
+        .write_all(input.as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait memgrep");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
 /// Like `run_stdin` but sets an extra env var on the child. `add-atom`/`add-lesson` now REFUSE
 /// under `MEMGREP_MIN_KEYWORDS` (default 10) when handed fewer keyphrases — a fixture written
 /// before that floor and pinned to a LITERAL 3-keyword stored-marker string (a round-trip proof
@@ -3060,6 +3110,44 @@ fn new_page_scaffolds_a_valid_parseable_page() {
     );
 }
 
+/// A2 step 5 wave 1 (TRDD-XI10BA5D): new-page's CREATE write goes through the pre-write gate.
+/// The verb pre-validates description phrases at the frontmatter level, so the realistic way to
+/// hand it gate-blocking bytes is a NAME carrying a raw control byte (the A1 contract — the same
+/// paste corruption `add-atom`'s stdin check reports at its own surface): it lands verbatim in
+/// the `# {name}` heading, and `control-byte-in-page` is a floor code the scaffold cannot shed.
+/// Asserts the full refusal contract: non-zero exit, the violation NAMED, and NOTHING written
+/// (the refused path must not leave even a partial page).
+#[test]
+fn new_page_refuses_a_scaffold_whose_bytes_trip_a_floor_code_and_writes_nothing() {
+    let d = TempDir::new("newpage-gate");
+    let page = d.join("comp.md");
+    let (_, err, code) = run_full_env(
+        &[
+            "new-page",
+            "--tier",
+            "component",
+            "--name",
+            "comp \u{08} name",
+            "--description",
+            FIXTURE_PAGE_DESC,
+            "--type",
+            "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_ne!(code, 0, "a floor-carrying scaffold must refuse: stderr={err}");
+    assert!(err.contains("write gate refused"), "the gate must name itself: {err}");
+    assert!(
+        err.contains("control-byte-in-page"),
+        "the blocking violation must be named: {err}"
+    );
+    assert!(
+        !page.exists(),
+        "a refused create must leave NO page on disk (not even partial bytes)"
+    );
+}
+
 #[test]
 fn add_atom_round_trips_through_the_parser_and_index() {
     let d = TempDir::new("addatom");
@@ -3134,10 +3222,160 @@ fn add_atom_refuses_a_missing_page_and_empty_body() {
     );
 }
 
+/// A2 step 5 wave 1 (TRDD-XI10BA5D): add-atom's page write goes through the pre-write gate —
+/// the PROPOSED bytes are the page AS IT WOULD BE, so a page whose EXISTING content carries a
+/// floor code (here: a props segment the parser drops) refuses even a perfectly clean append,
+/// and the refusal contract is end-to-end: non-zero, the violation named, and the page
+/// BYTE-IDENTICAL after (the new atom never lands — the gate fires before commit).
+#[test]
+fn add_atom_refuses_when_the_resulting_page_would_trip_a_floor_code() {
+    let d = TempDir::new("addatom-gate");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    // Poison the page directly (the gate's contract is about the RESULTING bytes, wherever the
+    // floor code came from): an atom whose props carry a comma-separated segment with no `key:`.
+    let poisoned = format!(
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\n\
+         ^ATOM-POIS-0001 [keywords: k, oops no colon]\nbody.\n\n## Notes and lessons learned\n"
+    );
+    std::fs::write(&page, &poisoned).unwrap();
+    let before = std::fs::read(&page).unwrap();
+
+    let (_, err, code) = run_stdin_full_env(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+        ],
+        "A perfectly clean atom body.",
+        "MEMGREP_MIN_KEYWORDS", "0",
+    );
+    let after = std::fs::read(&page).unwrap();
+    assert_ne!(code, 0, "the append onto a floor-carrying page must refuse: stderr={err}");
+    assert!(err.contains("write gate refused"), "the gate must name itself: {err}");
+    assert!(
+        err.contains("atom-dropped-props"),
+        "the blocking violation must be named: {err}"
+    );
+    assert_eq!(before, after, "the page must be byte-identical — the atom never lands");
+}
+
 /// `add-atom --supersedes` (TRDD-3PWQK8NM, WM-CLI-13): the target atom is retired in place and
 /// moved verbatim below a fresh `## Superseded` heading, the new atom carries the current truth,
 /// no lesson is authored, and `recall`/`validate`/`lint` all treat the result exactly like the
 /// lesson-bearing supersession path.
+/// A2 step 5 wave 1 (TRDD-XI10BA5D): `add-lesson` and `update-mem-atom --lesson` share ONE
+/// implementation (`add_lesson_impl`), so ONE test covers both entry points: a page whose
+/// existing lesson is body-less (`lesson-empty-body`, a floor code) refuses a new lesson
+/// authoring through EITHER verb, and the page is byte-identical after both refusals.
+#[test]
+fn lesson_authoring_refuses_when_the_resulting_page_would_trip_a_floor_code() {
+    let d = TempDir::new("lesson-gate");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "Creds live in the macOS keychain, never plaintext.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+    // Poison the page: a lesson def with metadata but NO body (the exact fixture shape the
+    // classification test uses for `lesson-empty-body`).
+    let poisoned = format!(
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\n\
+         ^{atom_id} [keywords: k]\nbody.\n\n## Notes and lessons learned\n\n\
+         [^1]: [id: ATOM-POIS-0002, status: valid, keywords: k] \n"
+    );
+    std::fs::write(&page, &poisoned).unwrap();
+
+    let lesson_body = "DO NOT trust the old value, BECAUSE it changed. DO read the new value instead.";
+    // Entry point 1: add-lesson.
+    let before = std::fs::read(&page).unwrap();
+    let (_, err, code) = run_stdin_full(
+        &[
+            "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--keywords", FIXTURE_KEYWORDS,
+        ],
+        lesson_body,
+    );
+    assert_ne!(code, 0, "add-lesson onto a floor-carrying page must refuse: stderr={err}");
+    assert!(err.contains("write gate refused"), "the gate must name itself: {err}");
+    assert!(err.contains("lesson-empty-body"), "the violation must be named: {err}");
+    assert_eq!(before, std::fs::read(&page).unwrap(), "nothing landed via add-lesson");
+
+    // Entry point 2: update-mem-atom --lesson (the shared impl — same gate, same refusal).
+    let (_, err2, code2) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--lesson", "--keywords", FIXTURE_KEYWORDS,
+        ],
+        lesson_body,
+    );
+    assert_ne!(code2, 0, "--lesson mode must refuse identically: stderr={err2}");
+    assert!(err2.contains("write gate refused"), "the gate must name itself: {err2}");
+    assert!(err2.contains("lesson-empty-body"), "the violation must be named: {err2}");
+    assert_eq!(before, std::fs::read(&page).unwrap(), "nothing landed via --lesson");
+}
+
+/// A2 step 5 wave 1 (TRDD-XI10BA5D): update-mem-atom's BODY-REWRITE path (the non-`--lesson`
+/// half) is gated too — a rewrite that would leave a floor code on the page refuses with the
+/// violation named and the atom's body untouched on disk.
+#[test]
+fn update_atom_body_rewrite_refuses_a_result_that_would_trip_a_floor_code() {
+    let d = TempDir::new("updateatom-gate");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "The original clean body.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+    let before = std::fs::read(&page).unwrap();
+
+    // The replacement body opens a code fence it never closes — a floor code on the PROPOSED
+    // bytes (the page as the rewrite would leave it). `add-lesson` anchors off the atom, so the
+    // stdin body is exactly what lands under the marker.
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+        ],
+        "```\nbody under an unclosed fence",
+    );
+    let after = std::fs::read(&page).unwrap();
+    assert_ne!(code, 0, "a floor-carrying rewrite must refuse: stderr={err}");
+    assert!(err.contains("write gate refused"), "the gate must name itself: {err}");
+    assert!(
+        err.contains("page-unclosed-fence"),
+        "the blocking violation must be named: {err}"
+    );
+    assert_eq!(before, after, "the rewrite never lands — the page is byte-identical");
+}
+
 #[test]
 fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
     let d = TempDir::new("addatom-supersedes");
