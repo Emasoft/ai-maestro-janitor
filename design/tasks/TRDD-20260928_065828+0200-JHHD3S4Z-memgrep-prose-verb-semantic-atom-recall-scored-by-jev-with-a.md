@@ -4,7 +4,7 @@ title: memgrep prose verb — semantic atom recall scored by Jev with a persiste
 column: testing
 status: tasked
 created: 2026-09-28T06:58:28+0200
-updated: 2026-09-28T14:04:41+0200
+updated: 2026-09-28T14:06:09+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -41,6 +41,7 @@ Review chain: the plan went through two adversarial review rounds; CUREs applied
 PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first; prose commits follow).
 2026-09-28 commit 3 landed (b803ad99) via lean-worker, main-verified: cargo check clean, 306+159 tests green (2 new offline prose_tests), live smoke via fake Jev gateway (cache-hit-against-dead-server, no-cap default, threshold/sort/--top/json). Commit 3b (88dfc7eb): jev.rs parse_answer now accepts the OpenRouter type-keyed probability shape ({"noul":0.06,"type":"noul"}) — every real OpenRouter response previously parsed as Malformed; found by the worker's live smoke; +1 test. Remaining: commit 4 (polish — --help privacy warning, live e2e #[ignore] test, README/rule touch-up).
 2026-09-28 commit 4 landed (5387c527) via lean-worker, main-verified (307+159 tests green, cargo check clean): --help privacy warning (scored text is SENT to the backend; gateway option), no_superseded_flag_removes_superseded_atoms_from_candidates (review NOTE-4 follow-up), prose_live_backend_scores_real_query_without_error #[ignore]-gated live harness (worker ran it by hand against the real backend, pass), prose documented in SKILL.md (the crate has no README; worker verified none ever existed) with the privacy warning. SEQUENCE COMPLETE: commits 1-4 landed, review chains closed. Card ready for testing.
+2026-09-28 review of commit 4 — CURE recorded, two residuals are NAMED OPEN ITEMS for the testing column: (a) the shipped rule markdown-memory-recall.md does not yet mention the prose verb (the plan's 'rule touch-up' leg landed on SKILL.md instead, since scripts/memgrep has no README; one sentence owed on next touch of that rule); (b) the live e2e has run only in the worker's environment (hand-run, honestly attributed) — testing-column exit needs a main-agent replay (TYPESAFE_API_KEY=... cargo test -- --ignored prose_live) or an owner waiver. Follow-up note: the toggle test pins the filter semantics, not the flag-to-struct wiring — cheap extension on next verb touch. Commit-type nit: 5387c527 is 'docs(memgrep)' but ships two tests (harmless mislabel).
 
 ## Approval log
 
