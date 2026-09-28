@@ -113,6 +113,21 @@ def _user_segment_is_generic(seg: str) -> bool:
     return seg.strip().lower() in _GENERIC_USER_SEGMENTS
 
 
+# A `~<name>/` match whose name segment is a KNOWN NON-USER identifier. These are
+# tooling identifier conventions, not home directories: an OpenRouter model id
+# (`~typesafe/jev-latest`, jgrep/memgrep provider routing) names a MODEL, never a
+# person, and flagging it blocks unrelated commits (janitor issue #316). Extend
+# with other tool identifier namespaces as they surface — evidence first.
+_KNOWN_TILDE_IDENTIFIERS = frozenset({"typesafe"})
+
+
+def _allow_tilde_home(matched: str) -> bool:
+    """Suppress a `~<name>/` match whose name segment is a known tooling
+    identifier rather than a user name."""
+    seg = matched.lstrip("~").rstrip("/")
+    return seg.lower() in _KNOWN_TILDE_IDENTIFIERS
+
+
 def _hostname_is_generic(host: str) -> bool:
     """True iff a hostname is a documentation/loopback/reserved name (no real
     machine identity). Compared case-insensitively."""
@@ -272,7 +287,7 @@ RULES: tuple[Rule, ...] = (
         description="another user's home by name (~<name>/) — carries a username; bare ~/ is fine",
         pattern=_TILDE_HOME,
         kind="local-path",
-        allow=None,
+        allow=_allow_tilde_home,
     ),
     Rule(
         id="private-path.ssh-user-host",
