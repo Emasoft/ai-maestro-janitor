@@ -1,10 +1,10 @@
 ---
 trdd-id: JHHD3S4Z
 title: memgrep prose verb — semantic atom recall scored by Jev with a persistent query-atom score cache
-column: todo
+column: testing
 status: tasked
 created: 2026-09-28T06:58:28+0200
-updated: 2026-09-28T13:42:36+0200
+updated: 2026-09-28T14:04:41+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -40,8 +40,10 @@ Review chain: the plan went through two adversarial review rounds; CUREs applied
 
 PENDING — dispatch per plan sequencing (A2 step-1 worker owns memory.rs first; prose commits follow).
 2026-09-28 commit 3 landed (b803ad99) via lean-worker, main-verified: cargo check clean, 306+159 tests green (2 new offline prose_tests), live smoke via fake Jev gateway (cache-hit-against-dead-server, no-cap default, threshold/sort/--top/json). Commit 3b (88dfc7eb): jev.rs parse_answer now accepts the OpenRouter type-keyed probability shape ({"noul":0.06,"type":"noul"}) — every real OpenRouter response previously parsed as Malformed; found by the worker's live smoke; +1 test. Remaining: commit 4 (polish — --help privacy warning, live e2e #[ignore] test, README/rule touch-up).
+2026-09-28 commit 4 landed (5387c527) via lean-worker, main-verified (307+159 tests green, cargo check clean): --help privacy warning (scored text is SENT to the backend; gateway option), no_superseded_flag_removes_superseded_atoms_from_candidates (review NOTE-4 follow-up), prose_live_backend_scores_real_query_without_error #[ignore]-gated live harness (worker ran it by hand against the real backend, pass), prose documented in SKILL.md (the crate has no README; worker verified none ever existed) with the privacy warning. SEQUENCE COMPLETE: commits 1-4 landed, review chains closed. Card ready for testing.
 
 ## Approval log
 
 - 2026-09-28T06:58:28+0200 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-28T06:58:35+0200 — column → todo by user.
+- 2026-09-28T14:04:41+0200 — column → testing by user.
