@@ -440,6 +440,7 @@ const VERB_TABLE: &[(&str, &str, &str, &str)] = &[
     ("add-lesson", "", "", ""),
     // ---- READ / SEARCH — never mutate anything ----
     ("recall", "read", "rank pages by a SYMPTOM phrase, or print ONE atom in full by its id", ""),
+    ("prose", "read", "recall atoms by natural-language PROSE — Jev scores every atom (sends bodies to the provider)", ""),
     ("recall-mem-topic", "read", "alias of `recall` — rank PAGES by a symptom phrase (hop 1)", ""),
     ("recall-mem-atom", "read", "alias of `recall <ATOM-ID>` — print ONE atom in full (hop 2)", ""),
     ("find", "read", "note-level search with the +mandatory / -exclude / wildcard / \"phrase\" DSL", ""),
@@ -651,6 +652,10 @@ fn main() -> Result<()> {
         Some("recall") | Some("recall-mem-topic") | Some("recall-mem-atom") => {
             return memory::cmd_recall_cli(&raw[2..]);
         }
+        // PROSE recall (TRDD-JHHD3S4Z) — semantic atom search via the Jev decision model. Sends
+        // atom bodies to the scoring provider (the verb's --help and stderr say so); the (query,
+        // atom) score cache keeps every later re-run of the same query free.
+        Some("prose") => return memory::cmd_prose_cli(&raw[2..]),
         Some("find") => return memory::cmd_find_cli(&raw[2..]),
         Some("find-claude-mem-ref") => return memory::cmd_find_claude_mem_ref_cli(&raw[2..]),
         Some("find-trdd") => return memory::cmd_find_trdd_cli(&raw[2..]),

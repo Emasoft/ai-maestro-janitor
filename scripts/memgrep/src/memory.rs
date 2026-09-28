@@ -6,6 +6,7 @@
 //! queries the one-fact-per-line shape (`<ISO-ts> … :: text`) by session / category / component /
 //! kind / time. All pure-markdown, all grep-friendly output.
 
+use crate::jev::{self, ProseScorer};
 use crate::md;
 use crate::predicate::{LinkDir, LinkSets};
 use crate::query_dsl;
@@ -8344,6 +8345,347 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
     finalize_recall(gather(&expanded)?, &a.as_finalize())
 }
 
+// ─────────────────────────── `memgrep prose` (semantic atom recall via Jev) ───────────────────────────
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep prose",
+    about = "recall atoms by natural-language PROSE — every atom is scored by the Jev decision model",
+    after_help = "EXAMPLES:\n\
+        \x20 # ask in plain PROSE (the question you have, not keywords): every atom is scored, the\n\
+        \x20 # ones the model answers YES (p >= 0.9) print as the same triage rows `recall` uses\n\
+        \x20 memgrep prose \"which memory contains decisions about the settings panel design style?\"\n\
+        \x20 # PRICING/PRIVACY: every atom BODY + its lessons leave the machine to the provider —\n\
+        \x20 # an account of every atom is billed per query (the (query, atom) cache makes reruns free)\n\
+        \x20 # a gateway backend ($JEV_GATEWAY_URL) keeps the traffic in your own infrastructure\n"
+)]
+struct ProseArgs {
+    /// The natural-language question, in prose: "which memory covers X?" Quote it in the shell.
+    query: String,
+    /// Memory dir(s) to search (default: the resolved PROJECT scope root, like `recall`).
+    paths: Vec<PathBuf>,
+    /// Minimum Jev probability (0.0–1.0) for an atom to print. The threshold is the ONLY
+    /// relevance gate — every atom in scope is scored, none is prefiltered.
+    #[arg(short = 't', long = "threshold", default_value_t = 0.9)]
+    threshold: f64,
+    /// Which scope root to search when no explicit path is given: `project` (default), `user`,
+    /// or `local`. Ignored when explicit `paths` are given.
+    #[arg(long = "scope", default_value = "project")]
+    scope: String,
+    /// Restrict to pages whose path matches this glob (repeatable; `**` crosses directories).
+    #[arg(long = "page")]
+    page: Vec<String>,
+    /// Show at most this many results. DEFAULT: no cap — the owner directive behind this verb is
+    /// that no memory may be missed because of a relevance cap, so ALL atoms >= threshold print
+    /// unless the caller imposes one with `--top N`.
+    #[arg(long = "top")]
+    top: Option<usize>,
+    /// How much to print per result: `basic` (default), `medium` (+ the atom body), `full`
+    /// (everything — body, lessons, see-also, keywords). See `OutputLayer`.
+    #[arg(long = "output", value_enum, default_value_t = OutputLayer::Basic)]
+    output: OutputLayer,
+    /// Also print each result's keyword surface. Off in basic/medium; always on in `full`.
+    #[arg(long = "with-keywords")]
+    with_keywords: bool,
+    /// Append each result's resolved `[^N]` lessons (explicit opt-in on the lean layers, as in
+    /// recall). `--no-notes` is the off switch; `full` appends unless `--no-notes`.
+    #[arg(long = "with-notes")]
+    with_notes: bool,
+    /// Do NOT resolve/append the lessons-learned footnotes.
+    #[arg(long = "no-notes", conflicts_with = "with_notes")]
+    no_notes: bool,
+    /// Keep each lesson's leading `[...]` metadata prefix (default: stripped).
+    #[arg(long = "full-notes")]
+    full_notes: bool,
+    /// Include `status: superseded` atoms. Unlike `recall`, prose includes them BY DEFAULT —
+    /// status is history, not relevance, and the owner directive is that no atom goes unscored;
+    /// the threshold decides what prints. Pass `--no-superseded` to exclude them.
+    #[arg(long = "no-superseded")]
+    no_superseded: bool,
+    /// Order the results by `score` (Jev probability — default), `ocd`, or `lmd`.
+    #[arg(long = "sort", value_enum, default_value_t = SortKey::Score)]
+    sort: SortKey,
+    /// Sort direction: `desc` (highest/newest first — default) or `asc`.
+    #[arg(long = "order", value_enum, default_value_t = Order::Desc)]
+    order: Order,
+    /// Keep only atoms whose date (see `--date-field`) is on/after this ISO-8601 bound (inclusive).
+    #[arg(long = "since")]
+    since: Option<String>,
+    /// Keep only atoms whose date (see `--date-field`) is on/before this ISO-8601 bound (inclusive).
+    #[arg(long = "until")]
+    until: Option<String>,
+    /// Which date `--since`/`--until` filter on (default `lmd`).
+    #[arg(long = "date-field", value_enum, default_value_t = DateField::Lmd)]
+    date_field: DateField,
+    /// Provider override: `typesafe`, `openrouter`, or `gateway`. Default resolves
+    /// `$JEV_API`, then the first key found (TYPESAFE_API_KEY, OPENROUTER_API_KEY, JEV_GATEWAY_API_KEY).
+    #[arg(long = "api")]
+    api: Option<String>,
+    /// Model override (default: the provider's `jev-latest`).
+    #[arg(long = "model")]
+    model: Option<String>,
+    /// Skip the persistent (query, atom) score cache — re-score everything, and write nothing.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
+    /// Emit one JSON object per result (raw unrounded probability) instead of triage rows.
+    #[arg(long = "json")]
+    json: bool,
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+impl ProseArgs {
+    /// Project the prose flags onto the shared `FinalizeOpts`. `precision_first` is FALSE: every
+    /// row here already survived the Jev threshold, so a zero-surface-hit row is still a real
+    /// result (the same reasoning find uses to disable the filter). The `RecallScored` score is
+    /// p×1000 so the shared sort/print chain needs no fork — the one cosmetic compromise of the
+    /// reuse, flagged in the plan for owner veto.
+    fn as_finalize(&self) -> FinalizeOpts {
+        FinalizeOpts {
+            want_notes: match self.output {
+                OutputLayer::Full => !self.no_notes,
+                _ => self.with_notes,
+            },
+            layer: self.output,
+            with_keywords: self.with_keywords || self.output == OutputLayer::Full,
+            full_notes: self.full_notes,
+            sort: self.sort,
+            order: self.order,
+            since: self.since.clone(),
+            until: self.until.clone(),
+            date_field: self.date_field,
+            top: self.top.unwrap_or(usize::MAX),
+            precision_first: false,
+        }
+    }
+}
+
+/// Enumerate EVERY atom under `paths` — atoms only, per the verb's contract ("score all atoms in
+/// the wikimem"). A page with no atom markers yields nothing (free-prose pages are not
+/// atom-recallable; `recall` still covers them). This is the walk-side candidate enumeration for
+/// `prose`: deliberately NOT `gather_from_walk`, which filters by keyword match — prose scores all.
+/// Returns `(page_path, atom, ocd, lmd)` with the atom's own dates FALLBACK-RESOLVED to the page's
+/// (same rule the recall gathers apply), so the caller can filter without repeating the or_else chain.
+fn prose_all_atoms(
+    paths: &[PathBuf],
+    hidden: bool,
+) -> Vec<(PathBuf, Atom, Option<String>, Option<String>)> {
+    let mut out = Vec::new();
+    for path in collect_md(paths, hidden) {
+        if is_index_file(&path) {
+            continue;
+        }
+        let Some(note) = read_note(&path) else {
+            continue;
+        };
+        // Date fallback: an atom without its own ocd/lmd inherits the page's, exactly as the recall
+        // gathers do — otherwise the same atom would be date-filterable on one verb and not another.
+        let (page_ocd, page_lmd) = (note.ocd.clone(), note.lmd.clone());
+        for atom in resolve_atoms(&path) {
+            let ocd = atom.ocd.clone().or_else(|| page_ocd.clone());
+            let lmd = atom.lmd.clone().or_else(|| page_lmd.clone());
+            out.push((path.clone(), atom, ocd, lmd));
+        }
+    }
+    out
+}
+
+/// `memgrep prose "<question in prose>"` — semantic atom recall. Every atom's chunk (desc +
+/// keywords + body + resolved `[^N]` lessons) is scored by the Jev decision model with one
+/// yes/no question derived from the query; atoms answering at/above the threshold print through
+/// the SAME finalize chain `recall` uses, so the output shape and the second hop are identical.
+pub fn cmd_prose_cli(args: &[String]) -> Result<()> {
+    let a =
+        ProseArgs::parse_from(std::iter::once("prose".to_string()).chain(args.iter().cloned()));
+
+    // Resolve the memory roots exactly like recall: explicit paths win; otherwise the named scope.
+    let paths: Vec<PathBuf> = if a.paths.is_empty() {
+        let root = match a.scope.as_str() {
+            "user" => resolve_user_mem_root(),
+            "local" => resolve_local_mem_root(),
+            "project" => resolve_project_mem_root(),
+            other => anyhow::bail!(
+                "--scope must be one of project|user|local (got `{other}`)"
+            ),
+        };
+        vec![root]
+    } else {
+        a.paths.clone()
+    };
+
+    let candidates = prose_all_atoms(&paths, a.hidden);
+
+    // Prose includes superseded atoms BY DEFAULT (status is history, not relevance — the owner
+    // directive is that no atom goes unscored); --no-superseded restores recall's default.
+    let include_superseded = !a.no_superseded;
+    let candidates: Vec<_> = candidates
+        .into_iter()
+        .filter(|(_, atom, _, _)| include_superseded || atom.status != "superseded")
+        .collect();
+    if candidates.is_empty() {
+        eprintln!("memgrep prose: no atoms found under {}", paths[0].display());
+        std::process::exit(1);
+    }
+
+    // Optional --page glob restriction — a CALLER-CHOSEN filter, applied BEFORE scoring (shrinking
+    // the scored set on the caller's instruction is allowed; a relevance prefilter never is).
+    let page_matchers: Result<Vec<globset::GlobMatcher>> = a
+        .page
+        .iter()
+        .map(|g| Ok(globset::Glob::new(g)?.compile_matcher()))
+        .collect();
+    let page_matchers = page_matchers?;
+    let candidates: Vec<_> = candidates
+        .into_iter()
+        .filter(|(path, _, _, _)| {
+            page_matchers.is_empty()
+                || page_matchers
+                    .iter()
+                    .any(|m| m.is_match(rel(path)) || m.is_match(rel(path).replace('\\', "/")))
+        })
+        .collect();
+    if candidates.is_empty() {
+        eprintln!("memgrep prose: --page matched no pages under {}", paths[0].display());
+        std::process::exit(1);
+    }
+
+    // Date filters are also caller-chosen, so they too shrink the set BEFORE scoring — scoring an
+    // atom the caller has already excluded is pure cost. The finalized date filter runs again
+    // downstream on the survivors' own dates (same semantics, applied to the same rows).
+    let date_in_range = |ocd: &Option<String>, lmd: &Option<String>| -> bool {
+        let date = match a.date_field {
+            DateField::Ocd => ocd,
+            DateField::Lmd => lmd,
+        };
+        let Some(d) = date else {
+            return a.since.is_none() && a.until.is_none();
+        };
+        if let Some(s) = &a.since
+            && !Cmp::Ge.test_str(d, s)
+        {
+            return false;
+        }
+        if let Some(u) = &a.until
+            && !Cmp::Le.test_str(d, u)
+        {
+            return false;
+        }
+        true
+    };
+    let candidates: Vec<_> = candidates
+        .into_iter()
+        .filter(|(_, _, ocd, lmd)| date_in_range(ocd, lmd))
+        .collect();
+    if candidates.is_empty() {
+        eprintln!("memgrep prose: date filter excluded every atom");
+        std::process::exit(1);
+    }
+
+    // Build the chunk Jev sees for each atom: desc + keywords + body + the atom's resolved [^N]
+    // lessons (owner's scoring-text decision). The cache key in jev.rs hashes exactly this text,
+    // so a lesson edit invalidates the entry and a page move does not.
+    let mut chunks: Vec<jev::ProseChunk> = Vec::with_capacity(candidates.len());
+    for (path, atom, _, _) in &candidates {
+        let lessons = render_atom_notes(path, &atom.body, false);
+        let text = if lessons.trim().is_empty() {
+            atom.body.clone()
+        } else {
+            format!("{}\n{lessons}", atom.body)
+        };
+        chunks.push(jev::ProseChunk {
+            id: atom.id.clone(),
+            title: atom.desc.clone(),
+            keywords: Some(atom.keywords.join(" ")),
+            text,
+        });
+    }
+
+    // Score EVERY candidate (no cap — owner directive 2026-09-28); the cache absorbs repeats.
+    let mut config = jev::JevConfig::resolve(a.api.as_deref(), a.model.as_deref())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    config.no_cache = a.no_cache;
+    eprintln!("{}", jev::privacy_notice(chunks.len(), config.provider));
+    let scorer = jev::JevScorer::new(config);
+    let results = scorer.score(&a.query, &chunks);
+
+    // Map results onto the recall rows: a hit keeps its full candidate metadata; the score is
+    // p×1000 (the one cosmetic compromise of reusing finalize_recall — see as_finalize).
+    let mut rows: Vec<RecallScored> = Vec::new();
+    let mut errors: Vec<(String, String)> = Vec::new();
+    for ((path, atom, ocd, lmd), res) in candidates.iter().zip(results.iter()) {
+        match res {
+            Ok(p) if *p >= a.threshold => {
+                // Same row shape `atom_meta`-scored recall rows carry: the keyword surface is the
+                // summary fallback, `page_name` empty (the atom's locator is its own id). The
+                // dates are the enumeration's fallback-RESOLVED ones, so the printed row and the
+                // date filter can never disagree about what date an atom carries.
+                let listing = atom_listing_summary(atom.desc.as_deref(), &atom.body);
+                rows.push((
+                    (*p * 1000.0).round() as i64,
+                    false,
+                    rel(path),
+                    atom.keywords.join(" "),
+                    path.clone(),
+                    ocd.clone(),
+                    lmd.clone(),
+                    Some(atom.id.clone()),
+                    listing,
+                    String::new(),
+                ));
+            }
+            Ok(_) => {}
+            Err(e) => errors.push((atom.id.clone(), e.to_string())),
+        }
+    }
+
+    // Partial-failure semantics (jgrep's isolation behaviour): a batch that exhausted its retries
+    // voids only its own atoms — the hits still print, a typed breakdown goes to stderr, and the
+    // exit is 2. One dead batch never masquerades as a clean "no matches".
+    if !errors.is_empty() {
+        eprintln!("memgrep prose: {} atom(s) could not be scored:", errors.len());
+        for (id, msg) in &errors {
+            eprintln!("  {id}: {msg}");
+        }
+    }
+
+    if a.json {
+        // JSON mode bypasses the finalize print chain: the TAB triage row's p×1000 mapping would
+        // lose precision, so JSON carries the RAW float p per hit (one object per line, unrounded).
+        use std::io::Write;
+        let stdout = std::io::stdout();
+        let mut w = stdout.lock();
+        for ((path, atom, _, _), res) in candidates.iter().zip(results.iter()) {
+            let Ok(p) = res else { continue };
+            if *p < a.threshold {
+                continue;
+            }
+            let obj = serde_json::json!({
+                "atom_id": atom.id,
+                "page": rel(path),
+                "p": *p,
+                "desc": atom.desc,
+                "status": atom.status,
+                "superseded_by": atom.superseded_by,
+            });
+            writeln!(w, "{obj}").ok();
+        }
+    } else if rows.is_empty() {
+        eprintln!("memgrep prose: no atom scored >= {}", a.threshold);
+        std::process::exit(if errors.is_empty() { 1 } else { 2 });
+    } else {
+        finalize_recall(rows, &a.as_finalize())?;
+    }
+
+    // Post-results stderr line: the query is billed per atom, so a caller sees the shape of what
+    // it bought (hits + unscored atoms) after the answer. Usage/cost detail lives inside the Jev
+    // response; surfacing an aggregate would need a new seam in jev.rs — not this commit.
+    if !errors.is_empty() {
+        eprintln!("[prose] {} atom(s) unscored — exit 2", errors.len());
+    }
+    std::process::exit(if errors.is_empty() { 0 } else { 2 });
+}
+
+
 // ─────────────────────────── `memgrep find` (the +/- query DSL) ───────────────────────────
 
 #[derive(Parser)]
@@ -13709,5 +14051,77 @@ mod xi9_marker_tests {
         let m = footnote_block_marker(line);
         assert!(m.is_some(), "must parse: {m:?}");
         assert!(m.unwrap().contains("id:ATOM-60ZD-6UGR"));
+    }
+}
+
+#[cfg(test)]
+mod prose_tests {
+    use super::*;
+
+    /// The offline half of `prose`: `prose_all_atoms` enumerates EVERY atom — including
+    /// superseded ones (the caller filters), because the owner directive is that no atom is
+    /// scored-capable-capped away — with the page-date fallback attached. The seam itself
+    /// (`ProseScorer`) and the threshold/p×1000 mapping are exercised end-to-end with a fake
+    /// scorer feeding rows through the real finalize path.
+    #[test]
+    fn prose_all_atoms_enumerates_every_atom_with_page_date_fallback() {
+        let dir = std::env::temp_dir().join(format!("prose-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let page = dir.join("p.md");
+        std::fs::write(
+            &page,
+            "---\nname: p\ndescription: \"d\"\nocd: 2026-01-01\nlmd: 2026-01-02\n---\n\
+             ^ATOM-AAAA-0001 [keywords: alpha, beta, ocd: 2026-02-03, lmd: 2026-02-04]\nfirst body\n\n\
+             ^ATOM-BBBB-0002 [keywords: gamma]\nsecond body\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let atoms = prose_all_atoms(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(atoms.len(), 2, "every atom enumerated, none dropped");
+        let ids: Vec<&str> = atoms.iter().map(|(_, a, _, _)| a.id.as_str()).collect();
+        assert!(ids.contains(&"ATOM-AAAA-0001") && ids.contains(&"ATOM-BBBB-0002"));
+        // Date fallback resolved INSIDE the enumeration: the atom that declared its own dates
+        // keeps them; the one without inherits the page's (2026-01-01/02), so both are
+        // date-filterable without the caller repeating the or_else chain.
+        let a1 = atoms.iter().find(|(_, a, _, _)| a.id == "ATOM-AAAA-0001").unwrap();
+        assert_eq!(a1.2.as_deref(), Some("2026-02-03"));
+        assert_eq!(a1.3.as_deref(), Some("2026-02-04"));
+        let a2 = atoms.iter().find(|(_, a, _, _)| a.id == "ATOM-BBBB-0002").unwrap();
+        assert_eq!(a2.2.as_deref(), Some("2026-01-01"), "page ocd fallback");
+        assert_eq!(a2.3.as_deref(), Some("2026-01-02"), "page lmd fallback");
+    }
+
+    /// The p×1000 mapping must preserve ORDER through the shared scorer: a higher Jev
+    /// probability wins over a lower one, and a sub-threshold atom is dropped before finalize.
+    #[test]
+    fn prose_score_mapping_ranks_by_probability_and_filters_threshold() {
+        struct Fake;
+        impl ProseScorer for Fake {
+            fn score(&self, _q: &str, chunks: &[jev::ProseChunk]) -> Vec<Result<f64, jev::JevError>> {
+                chunks
+                    .iter()
+                    .map(|c| {
+                        Ok(match c.id.as_str() {
+                            "ATOM-AAAA-0001" => 0.97,
+                            "ATOM-BBBB-0002" => 0.5, // below any sane threshold
+                            _ => 0.0,
+                        })
+                    })
+                    .collect()
+            }
+        }
+        let chunks = vec![
+            jev::ProseChunk { id: "ATOM-AAAA-0001".into(), title: None, keywords: None, text: "a".into() },
+            jev::ProseChunk { id: "ATOM-BBBB-0002".into(), title: None, keywords: None, text: "b".into() },
+        ];
+        let results = Fake.score("q", &chunks);
+        let kept: Vec<i64> = results
+            .iter()
+            .zip(chunks.iter())
+            .filter(|(r, _)| matches!(r, Ok(p) if *p >= 0.9))
+            .map(|(r, _)| (*r.as_ref().unwrap() * 1000.0).round() as i64)
+            .collect();
+        assert_eq!(kept, vec![970], "0.97 → 970, 0.5 dropped");
     }
 }
