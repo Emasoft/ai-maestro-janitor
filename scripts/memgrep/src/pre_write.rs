@@ -22,8 +22,12 @@
 //!     refuses what commit is about to repair. When a per-page fix pass is added (the reserved
 //!     `fix` parameter of `lint_page_text`), it slots into `prepare`; nothing else moves.
 
-use crate::memory::{atomic_write_page, lint_page_text, write_gate_blocks};
+use crate::memory::{
+    atomic_write_page, collapse_strip_anchors, lint_page_text, parse_block_props,
+    raw_footnote_defs, resolve_atoms_from_text, split_note_metadata, write_gate_blocks,
+};
 use anyhow::Result;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Validate the PROPOSED final bytes of ONE page write against the write-gate floor.
@@ -63,16 +67,163 @@ pub(crate) fn prepare(dest: &Path, proposed: &str) -> Result<()> {
     anyhow::bail!(msg)
 }
 
+/// The per-call policy of a gated write — what the id-set rule may treat as retired by the
+/// verb itself. Data-shaped on purpose (no verb names, no allowlists): a caller declares WHICH
+/// ids its own write retires; the gate still refuses every other disappearance.
+#[derive(Default)]
+pub(crate) struct GatePolicy {
+    /// Atom/lesson ids this write legitimately removes (only `delete-mem-atom` and
+    /// `merge-mem-atom` today — the card's retirement audit: these are the verbs whose
+    /// contract IS dropping an id).
+    pub retired_ids: BTreeSet<String>,
+    /// Skip the id-REUSE (changed-body) check while still enforcing the DROP check. Only
+    /// `update-mem-atom`'s body-rewrite path sets it: rewriting a body under a SURVIVING id is
+    /// that verb's own contract (the brief's reconciliation of the reuse rule with wave 1).
+    pub allow_body_rewrite: bool,
+}
+
+/// One id's content identity: the whitespace-collapsed body with `[^N]` anchors AND `See also:`
+/// lines stripped. Anchors renumber on every move (migrate/split/merge/add-lesson) and
+/// reference-mem-atom appends a `See also: [[…]]` line INSIDE the atom's body span — neither is
+/// a content change, so neither may fire the id-reuse refusal.
+fn body_fingerprint(text: &str) -> String {
+    let prose: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.trim_start().to_ascii_lowercase().starts_with("see also:"))
+        .map(|l| l.trim_start())
+        .collect();
+    collapse_strip_anchors(&prose.join("\n"))
+}
+
+/// Every atom/lesson id a page's text carries, keyed by id, with each id's body fingerprint.
+/// Atoms key on the `^id` marker; lessons on the `id:` prop inside the `[^N]:` metadata — NEVER
+/// the `[^N]` label, which renumbers freely (the card: a renumbering is not a loss).
+///
+/// ponytail: `raw_footnote_defs` is fence-blind (a `[^N]:` line inside a fenced example counts),
+/// same as the verb computes that produce the proposed bytes; a corpus that fences lesson-shaped
+/// lines would need the comrak-backed def scan here.
+fn id_inventory(text: &str) -> BTreeMap<String, String> {
+    let mut ids: BTreeMap<String, String> = BTreeMap::new();
+    for a in resolve_atoms_from_text(text) {
+        ids.insert(a.id, body_fingerprint(&a.body));
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    for (_label, raw) in raw_footnote_defs(&lines) {
+        let (meta, rest) = split_note_metadata(&raw);
+        let Some(meta) = meta else { continue };
+        let Some(id) = parse_block_props(&meta).get("id").and_then(|v| v.first()).cloned() else {
+            continue; // no stable id — nothing for the rule to pin (lint warns separately)
+        };
+        ids.insert(id, body_fingerprint(&rest));
+    }
+    ids
+}
+
+/// The id-set rule over a write batch (TRDD-XI10BA5D A2, card rules block):
+///
+/// - an id present on disk (union of the pages being written) but absent from EVERY proposed
+///   page refuses, unless the caller's `policy.retired_ids` claims it — a write may not
+///   silently drop a memory;
+/// - an id that survives with a CHANGED collapsed body refuses: same id must mean same memory.
+///
+/// The compare is over the batch UNION (the coordinator's shape note: id PERSISTENCE, never
+/// verb identity), so migrate/split/merge — which move ids between pages of the same batch —
+/// pass with no carve-out. Refusals name ids and counts only, never page content.
+fn enforce_id_rules(
+    old: &[BTreeMap<String, String>],
+    proposed: &[BTreeMap<String, String>],
+    policy: &GatePolicy,
+) -> Result<()> {
+    let mut old_union: BTreeMap<&str, &str> = BTreeMap::new();
+    for inv in old {
+        for (id, fp) in inv {
+            old_union.entry(id).or_insert(fp);
+        }
+    }
+    let mut new_union: BTreeMap<&str, &str> = BTreeMap::new();
+    for inv in proposed {
+        for (id, fp) in inv {
+            new_union.entry(id).or_insert(fp);
+        }
+    }
+    let mut refusals: Vec<String> = Vec::new();
+    for (id, _fp) in &old_union {
+        if !new_union.contains_key(*id) && !policy.retired_ids.contains(*id) {
+            refusals.push(format!(
+                "id-set rule: `{id}` is present on disk but absent from the proposed bytes and \
+                 this write does not retire it — a write may not silently drop a memory; use the \
+                 verb that owns the removal"
+            ));
+        }
+    }
+    if !policy.allow_body_rewrite {
+        for (id, fp) in &new_union {
+            if let Some(old_fp) = old_union.get(id)
+                && fp != old_fp
+            {
+                refusals.push(format!(
+                    "id-set rule: `{id}` survives this write with a CHANGED body — an id reused \
+                     for new content breaks every citation of it; retire it and mint a new id \
+                     instead"
+                ));
+            }
+        }
+    }
+    if refusals.is_empty() {
+        return Ok(());
+    }
+    refusals.sort();
+    refusals.dedup();
+    anyhow::bail!(
+        "write gate refused (id-set rule; nothing was written; {} violation(s)):\n{}",
+        refusals.len(),
+        refusals.iter().map(|r| format!("  - {r}")).collect::<Vec<_>>().join("\n")
+    )
+}
+
+/// The batch half of the gate (TRDD-XI10BA5D A2 step 5 wave 2): prepare EVERY page's proposed
+/// bytes (lint floor per page, `prepare`) and run the id-set rule over the batch, BEFORE the
+/// caller commits anything. A refusal anywhere means zero bytes written anywhere. The caller
+/// then commits each page through `atomic_write_page` in ITS OWN order (merge/split/migrate own
+/// recoverable-duplicate orderings and partial-failure messages), so the bytes each commit writes
+/// are exactly the bytes this function certified.
+pub(crate) fn prepare_batch_gated(writes: &[(&Path, &str)], policy: &GatePolicy) -> Result<()> {
+    for (dest, proposed) in writes {
+        prepare(dest, proposed)?;
+    }
+    let old: Vec<BTreeMap<String, String>> =
+        writes.iter().map(|(p, _)| id_inventory(&read_for_inventory(p))).collect();
+    let proposed_inv: Vec<BTreeMap<String, String>> =
+        writes.iter().map(|(_, t)| id_inventory(t)).collect();
+    enforce_id_rules(&old, &proposed_inv, policy)
+}
+
+/// A page's current on-disk text for inventory purposes. A page that does not exist yet
+/// (`split-mem-topic`'s destination, `new-page`) inventories as EMPTY — the gate judges the
+/// write's own blast radius, and a page not yet on disk cannot lose an id in it.
+fn read_for_inventory(page: &Path) -> String {
+    std::fs::read_to_string(page).unwrap_or_default()
+}
+
+/// The single-page gated write WITH the id-set rule (the gated form of `delete-mem-atom`'s
+/// write), for callers whose batch is one page but whose verb legitimately retires ids.
+pub(crate) fn write_gated_with(dest: &Path, proposed: &str, policy: &GatePolicy) -> Result<()> {
+    prepare_batch_gated(&[(dest, proposed)], policy)?;
+    // commit — `atomic_write_page` keeps its own control-byte refusal as the last line of
+    // defence and owns the publish-globally convergence + symlink reconciliation exactly as it
+    // does for every ungated caller today.
+    atomic_write_page(dest, proposed)
+}
+
 /// The gated write: `prepare` the proposed bytes, then — and only then — commit them through the
 /// existing atomic primitive. This is the ONE entry a wired verb calls in place of a bare
 /// `atomic_write_page`; every verb not yet wired keeps calling `atomic_write_page` directly and
 /// is therefore UNGATED, which is the reviewed sequencing (one verb per commit), not an oversight.
 pub(crate) fn write_gated(dest: &Path, proposed: &str) -> Result<()> {
-    prepare(dest, proposed)?;
-    // commit — `atomic_write_page` keeps its own control-byte refusal as the last line of
-    // defence and owns the publish-globally convergence + symlink reconciliation exactly as it
-    // does for every ungated caller today.
-    atomic_write_page(dest, proposed)
+    // The id-set rule is a property of ANY gated write (the card: "over a batch (or a single
+    // write)"), so every gated verb gets it by construction — no policy, no retires, no
+    // rewrite exemption.
+    write_gated_with(dest, proposed, &GatePolicy::default())
 }
 
 #[cfg(test)]

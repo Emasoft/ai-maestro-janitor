@@ -266,14 +266,20 @@ fn merge_topic_compute(
         dest_text = insert_atom_block_before(&dest_text, &rewritten_marker, &rewritten_body, boundary);
     }
 
-    // Carry every referenced def over, renumbered.
+    // Carry every def over — referenced ones renumbered to their free label on --into, uncited
+    // ones verbatim. The def enumeration is the RAW scanner (`raw_footnote_defs`), not comrak's
+    // `ctx.footnote_defs`: comrak only registers a def that at least one reference cites, so an
+    // uncited (GitHub #304-legal) def was invisible here and the tombstone silently DROPPED it —
+    // exactly the lesson loss the id-set rule (A2 step 5 wave 2) now refuses.
+    let raw_defs = crate::memory::raw_footnote_defs(&from_lines);
     let mut moved_defs: Vec<String> = Vec::new();
-    for d in &ctx.footnote_defs {
-        if !label_map.contains_key(&d.label) {
-            continue;
-        }
-        let raw = from_lines[d.start - 1..=(d.end - 1).min(from_lines.len() - 1)].join("\n");
-        moved_defs.push(rewrite_footnote_labels(&raw, &label_map));
+    for (label, body) in &raw_defs {
+        let raw = if label_map.contains_key(label) {
+            rewrite_footnote_labels(&format!("[^{label}]: {body}"), &label_map)
+        } else {
+            format!("[^{label}]: {body}")
+        };
+        moved_defs.push(raw);
     }
     if !moved_defs.is_empty() {
         dest_text = append_footnote_defs(&dest_text, &moved_defs);
@@ -377,6 +383,15 @@ pub fn cmd_merge_topic_cli(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated. The batch (tombstone + destination) is prepared
+    // and the id-set rule runs over its UNION before either page commits — every atom moves
+    // `--from` → `--into`, so persistence is judged across the pair. The ordered commits below
+    // keep the existing PARTIAL MERGE recovery message (the recorded partial-write window: a
+    // crash between the two writes duplicates, never loses).
+    crate::pre_write::prepare_batch_gated(
+        &[(&a.into, r.dest_text.as_str()), (&a.from, r.tombstone_text.as_str())],
+        &crate::pre_write::GatePolicy::default(),
+    )?;
     atomic_write_page(&a.into, &r.dest_text)?;
     // The pair is NOT atomic. Each write is (temp+rename) and both texts were computed before
     // either landed, so only I/O can fail here — but if THIS one does, `--into` already holds the
@@ -448,6 +463,9 @@ struct MergeAtomArgs {
 
 struct MergeAtomResult {
     new_text: String,
+    /// The canonical marker id of the atom folded away (SRC) — the id THIS verb retires, handed
+    /// to the gate's `retired_ids` (A2 step 5 wave 2).
+    retired_id: Option<String>,
 }
 
 /// The PURE core of `merge-mem-atom` (no IO / no locking).
@@ -543,7 +561,18 @@ fn merge_atom_compute(text: &str, atom_query: &str, into_query: &str, today: &st
     }
 
     let new_text = bump_page_lmd(&new_text, today);
-    Ok(MergeAtomResult { new_text })
+    // SRC's canonical marker id (what the marker line carries, not the query spelling) — the
+    // id THIS verb retires (A2 step 5 wave 2).
+    let retired_id = src_marker
+        .trim_start()
+        .strip_prefix('^')
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect::<String>()
+        })
+        .filter(|s| !s.is_empty());
+    Ok(MergeAtomResult { new_text, retired_id })
 }
 
 /// `memgrep merge-mem-atom --page P --atom SRC --into DST [--dry-run] [--base-sha256 H]
@@ -568,7 +597,18 @@ pub fn cmd_merge_atom_cli(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    atomic_write_page(&a.page, &r.new_text)?;
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated. Folding SRC into DST retires SRC's id BY THIS
+    // VERB (the card: "unless … merged … by its own verb"), and DST's id legitimately GROWS by
+    // the same contract — so the policy declares SRC retired and allows the surviving id's
+    // body rewrite; any OTHER id's disappearance still refuses.
+    crate::pre_write::write_gated_with(
+        &a.page,
+        &r.new_text,
+        &crate::pre_write::GatePolicy {
+            retired_ids: r.retired_id.into_iter().collect(),
+            allow_body_rewrite: true,
+        },
+    )?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("merged atom {} into {} on {}", a.atom, a.into, rel(&a.page));
     Ok(())

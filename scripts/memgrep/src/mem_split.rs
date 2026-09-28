@@ -369,6 +369,15 @@ pub fn cmd_split_topic_cli(args: &[String]) -> Result<()> {
     if let Some(parent) = a.into.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated. The batch (new dest + rewritten source) is
+    // prepared and the id-set rule runs over its UNION before either commits — the moved atoms
+    // vanish from the source only to appear on the new page, so persistence is judged across
+    // the pair (the dest does not exist yet and inventories as empty). The ordered commits keep
+    // the existing PARTIAL SPLIT recovery message (the recorded partial-write window).
+    crate::pre_write::prepare_batch_gated(
+        &[(&a.into, dest_text.as_str()), (&a.page, source_text.as_str())],
+        &crate::pre_write::GatePolicy::default(),
+    )?;
     // NEW page first, then the source: a crash between the two atomic writes leaves a
     // recoverable duplicate (the atoms exist on both pages) rather than a loss.
     atomic_write_page(&a.into, &dest_text)?;
@@ -756,7 +765,14 @@ pub fn cmd_split_atom_cli(args: &[String]) -> Result<()> {
     }
 
     let out = bump_page_lmd(&out, &today);
-    atomic_write_page(&a.page, &out)?;
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated. The old id is KEPT (the kept half) and the new
+    // half mints a fresh id — no drops. allow_body_rewrite: halving the kept atom's body IS
+    // this verb's contract; the DROP half still refuses (both ids must survive).
+    crate::pre_write::write_gated_with(
+        &a.page,
+        &out,
+        &crate::pre_write::GatePolicy { allow_body_rewrite: true, ..Default::default() },
+    )?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("split `{}` into `{}` (kept) and `{new_id}` (new) on {}", a.atom, a.atom, rel(&a.page));
     Ok(())

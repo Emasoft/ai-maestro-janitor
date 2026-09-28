@@ -3376,6 +3376,278 @@ fn update_atom_body_rewrite_refuses_a_result_that_would_trip_a_floor_code() {
     assert_eq!(before, after, "the rewrite never lands — the page is byte-identical");
 }
 
+// ─────────────── A2 step 5 WAVE 2 (TRDD-XI10BA5D): the id-set rule + batch-verb gating ───────────────
+
+/// A two-atom page that passes the lint floor: both atoms carry the fixture keywords/desc, the
+/// lesson def is body-complete. `loser` is the id a DROP test removes; `keeper` proves the
+/// refusal is per-id.
+fn wave2_page_with(loser_id: &str) -> String {
+    format!(
+        "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\n\
+         ^ATOM-KEEPER-0001 [desc: \"{FIXTURE_DESC}\", keywords: k1 k2 k3 k4 k5 k6 k7 k8 k9 k10]\n\
+         keeper body.\n\n\
+         ^{loser_id} [desc: \"{FIXTURE_DESC}\", keywords: k1 k2 k3 k4 k5 k6 k7 k8 k9 k10]\n\
+         loser body.\n\n\
+         ## Notes and lessons learned\n"
+    )
+}
+
+/// A `update-mem-topic --old-file/--new-file` edit that deletes `^ATOM-LOSER-0001` but no verb
+/// retired it: the id-set rule refuses, names the id, and the page is byte-identical. This is
+/// the raw page-text shape the rule exists for — no delete verb in the loop, just an edit that
+/// silently drops a memory.
+#[test]
+fn the_id_set_rule_refuses_an_edit_that_drops_an_atom_nobody_retired() {
+    let d = TempDir::new("idset-drop");
+    let page = d.join("p.md");
+    std::fs::write(&page, wave2_page_with("ATOM-LOSER-0001")).unwrap();
+    let before = std::fs::read(&page).unwrap();
+
+    let old_fixture = TempFixture::new(
+        "old.txt",
+        "^ATOM-LOSER-0001 [desc: \"what makes the widget hang and how to clear it\", keywords: k1 k2 k3 k4 k5 k6 k7 k8 k9 k10]\nloser body.\n\n",
+    );
+    let new_fixture = TempFixture::new("new.txt", "\n");
+    let (_, err, code) = run_full(&[
+        "update-mem-topic",
+        "--page", page.to_str().unwrap(),
+        "--old-file", old_fixture.as_str(),
+        "--new-file", new_fixture.as_str(),
+    ]);
+    assert_ne!(code, 0, "a silent drop must refuse: stderr={err}");
+    assert!(err.contains("id-set rule"), "the rule must name itself: {err}");
+    assert!(err.contains("ATOM-LOSER-0001"), "the dropped id must be named: {err}");
+    assert!(
+        !err.contains("loser body"),
+        "a refusal must never quote page content: {err}"
+    );
+    assert_eq!(before, std::fs::read(&page).unwrap(), "nothing written");
+}
+
+/// The rule keys on ID PERSISTENCE, not verb identity: a delete that its OWN verb performs is
+/// sanctioned — `delete-mem-atom` (with `--keep-lessons`, so the lesson id survives and only the
+/// atom retires) succeeds where the same textual drop through a raw edit refused above.
+#[test]
+fn delete_mem_atom_retires_its_own_id_and_writes() {
+    let d = TempDir::new("idset-delete");
+    let page = d.join("p.md");
+    std::fs::write(&page, wave2_page_with("ATOM-LOSER-0001")).unwrap();
+
+    let out = run(&[
+        "delete-mem-atom",
+        "--page", page.to_str().unwrap(),
+        "--atom", "ATOM-LOSER-0001",
+        "--keep-lessons",
+    ]);
+    assert!(out.contains("deleted atom"), "the verb succeeds: {out}");
+    let after = std::fs::read_to_string(&page).unwrap();
+    assert!(!after.contains("ATOM-LOSER-0001"), "the atom is gone: {after}");
+    assert!(after.contains("ATOM-KEEPER-0001"), "the keeper survives: {after}");
+}
+
+/// The negative half: delete-mem-atom retires EXACTLY its own target — a page carrying a SECOND
+/// broken id (here a dropped-props atom) still refuses, and the retired target is NOT blamed.
+#[test]
+fn delete_mem_atom_still_refuses_when_an_unrelated_floor_code_would_land() {
+    let d = TempDir::new("idset-delete-floor");
+    let page = d.join("p.md");
+    let mut page_text = wave2_page_with("ATOM-LOSER-0001");
+    // Poison the KEEPER: a props segment with no `key:` (atom-dropped-props, a floor code).
+    page_text = page_text.replace(
+        "keeper body.",
+        "^ATOM-POIS-0009 [keywords: k, oops no colon]\npoison body.\n\nkeeper body.",
+    );
+    std::fs::write(&page, &page_text).unwrap();
+    let before = std::fs::read(&page).unwrap();
+
+    let (_, err, code) = run_full(&[
+        "delete-mem-atom",
+        "--page", page.to_str().unwrap(),
+        "--atom", "ATOM-LOSER-0001",
+        "--keep-lessons",
+    ]);
+    assert_ne!(code, 0, "the gate still judges the RESULTING bytes: stderr={err}");
+    assert!(err.contains("write gate refused"), "the lint floor fires through the gate: {err}");
+    assert!(err.contains("atom-dropped-props"), "the floor code is named: {err}");
+    assert_eq!(before, std::fs::read(&page).unwrap(), "nothing written");
+}
+
+/// migrate moves an atom (and its renumbered lesson) OUT of one page INTO another: per-page
+/// compare would refuse it; the batch-UNION compare passes — ids persist across the pair.
+#[test]
+fn migrate_passes_the_batch_scoped_id_set_rule() {
+    let d = TempDir::new("idset-migrate");
+    let from = d.join("from.md");
+    let to = d.join("to.md");
+    std::fs::write(
+        &from,
+        wave2_page_with("ATOM-LOSER-0001").replace(
+            "## Notes and lessons learned\n",
+            "## Notes and lessons learned\n\n[^1]: [id: ATOM-TEST-L001, status: valid, keywords: k] DO NOT x, BECAUSE y. DO z.\n",
+        ).replace("loser body.", "loser body[^1]."),
+    )
+    .unwrap();
+    std::fs::write(&to, wave2_page_with("ATOM-PLACE-0007")).unwrap();
+
+    let out = run(&[
+        "migrate-mem-atom",
+        "--from", from.to_str().unwrap(),
+        "--to", to.to_str().unwrap(),
+        "ATOM-LOSER-0001",
+        "--leave-link",
+    ]);
+    assert!(out.contains("migrated"), "the move lands: {out}");
+    let from_after = std::fs::read_to_string(&from).unwrap();
+    let to_after = std::fs::read_to_string(&to).unwrap();
+    assert!(!from_after.contains("ATOM-LOSER-0001"), "gone from source: {from_after}");
+    assert!(to_after.contains("ATOM-LOSER-0001"), "present on dest: {to_after}");
+    assert!(
+        to_after.contains("ATOM-TEST-L001"),
+        "the moved lesson's `id:` travels with its renumbered label: {to_after}"
+    );
+}
+
+/// merge-mem-topic retires NO atom id (everything moves to the destination; the tombstone page
+/// carries none), so a merge whose `--from` page held an uncited lesson passes — the uncited
+/// def travels (GitHub #304's legal shape) rather than being dropped by the tombstone.
+#[test]
+fn merge_topic_passes_and_carries_an_uncited_lesson_def() {
+    let d = TempDir::new("idset-merge");
+    let from = d.join("from.md");
+    let into = d.join("into.md");
+    // The --from page holds ONLY the mover: a shared keeper id across both pages is the
+    // collision the verb itself refuses, independent of the gate.
+    let from_text = wave2_page_with("ATOM-LOSER-0001")
+        .replace(
+            "## Notes and lessons learned\n",
+            "## Notes and lessons learned\n\n[^9]: [id: ATOM-ORPH-L009, status: valid, keywords: k] DO NOT drop, BECAUSE uncited. DO carry.\n",
+        )
+        .lines()
+        .filter(|l| !l.starts_with("^ATOM-KEEPER-0001") && l.trim() != "keeper body.")
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&from, &from_text).unwrap();
+    std::fs::write(&into, wave2_page_with("ATOM-PLACE-0007")).unwrap();
+
+    let out = run(&[
+        "merge-mem-topic",
+        "--from", from.to_str().unwrap(),
+        "--into", into.to_str().unwrap(),
+    ]);
+    assert!(out.contains("merge"), "the merge lands: {out}");
+    let into_after = std::fs::read_to_string(&into).unwrap();
+    assert!(
+        into_after.contains("ATOM-ORPH-L009"),
+        "the uncited lesson def TRAVELS (the id-set rule forbids the old tombstone drop):\n{into_after}"
+    );
+    assert!(into_after.contains("ATOM-LOSER-0001"), "atoms arrive: {into_after}");
+}
+
+/// split-mem-topic: moved atoms vanish from the source and appear on the NEW page (which does
+/// not exist yet — it inventories as empty), so the union compare is what makes this pass.
+#[test]
+fn split_topic_passes_the_batch_scoped_id_set_rule() {
+    let d = TempDir::new("idset-split");
+    let src = d.join("src.md");
+    let dest = d.join("dest.md");
+    std::fs::write(&src, wave2_page_with("ATOM-LOSER-0001")).unwrap();
+
+    let out = run(&[
+        "split-mem-topic",
+        "--page", src.to_str().unwrap(),
+        "--atoms", "ATOM-LOSER-0001",
+        "--into", dest.to_str().unwrap(),
+        "--name", "loser",
+        "--description", FIXTURE_PAGE_DESC,
+    ]);
+    assert!(out.contains("moved"), "the split lands: {out}");
+    let src_after = std::fs::read_to_string(&src).unwrap();
+    let dest_after = std::fs::read_to_string(&dest).unwrap();
+    assert!(!src_after.contains("ATOM-LOSER-0001"), "moved off source: {src_after}");
+    assert!(dest_after.contains("ATOM-LOSER-0001"), "arrived on the new page: {dest_after}");
+}
+
+/// merge-mem-atom folds SRC into DST on one page: SRC's id disappears — sanctioned ONLY because
+/// the verb itself declares it (the card's "merged … by its own verb" carve-out).
+#[test]
+fn merge_atom_retires_the_folded_id_and_writes() {
+    let d = TempDir::new("idset-mergeatom");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+        ],
+        "the source half of a same-page fold.",
+    );
+    let src_id = out.split_whitespace().next().unwrap().to_string();
+    let dst_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", FIXTURE_KEYWORDS, "--desc", FIXTURE_DESC,
+        ],
+        "the destination half.",
+    );
+    let dst_id = dst_out.split_whitespace().next().unwrap().to_string();
+
+    let merged = run(&[
+        "merge-mem-atom",
+        "--page", page.to_str().unwrap(),
+        "--atom", &src_id,
+        "--into", &dst_id,
+    ]);
+    assert!(merged.contains("merged"), "the fold lands: {merged}");
+    let after = std::fs::read_to_string(&page).unwrap();
+    assert!(!after.contains(&src_id), "SRC retired: {after}");
+    assert!(after.contains(&dst_id), "DST survives: {after}");
+    assert!(
+        after.contains("the source half of a same-page fold."),
+        "SRC's body travelled into DST: {after}"
+    );
+}
+
+/// reference-mem-* writes land through the gate: a link edit onto a page that would carry a
+/// floor code refuses with the code named (links touch no ids — this pins the LINT half of the
+/// gate on the reference verbs).
+#[test]
+fn reference_topic_refuses_when_the_result_would_trip_a_floor_code() {
+    let d = TempDir::new("ref-gate");
+    let a = d.join("a.md");
+    let b = d.join("b.md");
+    std::fs::write(&a, wave2_page_with("ATOM-LOSER-0001")).unwrap();
+    std::fs::write(&b, wave2_page_with("ATOM-PLACE-0007")).unwrap();
+    // Poison a's notes section: a body-less lesson (lesson-empty-body, a floor code).
+    let poisoned = std::fs::read_to_string(&a).unwrap().replace(
+        "## Notes and lessons learned\n",
+        "## Notes and lessons learned\n\n[^3]: [id: ATOM-POIS-0003, status: valid, keywords: k] \n",
+    );
+    std::fs::write(&a, &poisoned).unwrap();
+    let before = std::fs::read(&a).unwrap();
+
+    let (_, err, code) = run_full(&[
+        "reference-mem-topic",
+        "--page", a.to_str().unwrap(),
+        "--to", b.to_str().unwrap(),
+    ]);
+    assert_ne!(code, 0, "the link edit onto a floor-carrying page must refuse: stderr={err}");
+    assert!(err.contains("write gate refused"), "the gate must name itself: {err}");
+    assert!(err.contains("lesson-empty-body"), "the violation must be named: {err}");
+    assert_eq!(before, std::fs::read(&a).unwrap(), "nothing landed on --page");
+    assert_eq!(
+        wave2_page_with("ATOM-PLACE-0007"),
+        std::fs::read_to_string(&b).unwrap(),
+        "nothing landed on --to either (batch prepare refuses before ANY commit)"
+    );
+}
+
 #[test]
 fn add_atom_supersedes_moves_the_old_body_below_a_fresh_superseded_heading() {
     let d = TempDir::new("addatom-supersedes");

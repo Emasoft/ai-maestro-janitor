@@ -594,7 +594,7 @@ fn footnote_def_text(lines: &[&str], label: &str, start: usize, end: usize) -> S
 /// not immediately followed by `(` and the bracket is not an image `![...]`. This keeps a lesson
 /// that legitimately STARTS with a link (`[issue](url) …`) fully intact while stripping a true
 /// `[ocd:… class:…]` metadata head. Returns `(metadata_without_brackets, rest_text)`.
-fn split_note_metadata(body: &str) -> (Option<String>, String) {
+pub(crate) fn split_note_metadata(body: &str) -> (Option<String>, String) {
     let bytes = body.as_bytes();
     if bytes.first() != Some(&b'[') {
         return (None, body.to_string());
@@ -753,7 +753,7 @@ fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
 ///
 /// A definition runs until the next definition, the next ATX heading, or EOF. Deliberately dumb: it
 /// is a safety net under the real parser, not a second markdown implementation.
-fn raw_footnote_defs(lines: &[&str]) -> BTreeMap<String, String> {
+pub(crate) fn raw_footnote_defs(lines: &[&str]) -> BTreeMap<String, String> {
     let mut out: BTreeMap<String, String> = BTreeMap::new();
     let mut cur: Option<(String, String)> = None;
     for raw in lines {
@@ -1545,7 +1545,7 @@ pub fn cmd_links_cli(args: &[String]) -> Result<()> {
 ///     quotes first — they mark the value's extent, they are not part of it;
 ///   • split on WHITESPACE → the value array (no internal space → 1 element).
 /// Keys are trimmed; an empty key is dropped. Pure; markdown is data, never executed.
-fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
+pub(crate) fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
     let mut map = BTreeMap::new();
     for item in split_top_level_commas(props) {
         if let Some((k, v)) = item.split_once(':') {
@@ -1812,7 +1812,7 @@ fn make_atom(id: String, p: BTreeMap<String, Vec<String>>, acc: &[String]) -> At
 }
 
 /// The text-level core of `resolve_atoms` (split out so it is unit-testable without a file).
-fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
+pub(crate) fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
     let mut atoms = Vec::new();
     // The currently-OPEN atom (its id + parsed props) and the body lines accumulated since its marker.
     // `None` = no atom open → non-marker lines are ignored (pre-first-marker / post-heading content).
@@ -4173,8 +4173,17 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
     let out = bump_page_lmd(&out, &today);
 
     // A2 step 5 wave 1 (TRDD-XI10BA5D): update-mem-atom's BODY-REWRITE path is gated (the
-    // --lesson mode shares add_lesson_impl's own gated write above, not this one).
-    crate::pre_write::write_gated(&a.page, &out)?;
+    // --lesson mode shares add_lesson_impl's own gated write above, not this one). Wave 2: the
+    // id-set rule runs too, with allow_body_rewrite — rewriting a body under a SURVIVING id is
+    // this verb's own contract; the DROP half still refuses (the id must survive the rewrite).
+    crate::pre_write::write_gated_with(
+        &a.page,
+        &out,
+        &crate::pre_write::GatePolicy {
+            allow_body_rewrite: true,
+            ..Default::default()
+        },
+    )?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{}\tupdated atom `{}`", rel(&a.page), a.atom);
     Ok(())
@@ -4420,7 +4429,7 @@ pub(crate) fn locate_atom_body_matching(
 /// Collapse `s` to one line with `[^N]` footnote ANCHORS stripped (they are pointers, not content)
 /// and internal whitespace normalised. Shared by `atom_verbatim_body` (SUPERSEDED BODY capture) and
 /// the `oversized-atom` lint (which measures body SIZE, not its anchors).
-fn collapse_strip_anchors(s: &str) -> String {
+pub(crate) fn collapse_strip_anchors(s: &str) -> String {
     static ANCHOR_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = ANCHOR_RE.get_or_init(|| Regex::new(r"\[\^[^\]\s]+\]").expect("static regex"));
     re.replace_all(s, " ")
@@ -4866,7 +4875,15 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
     let dest_text = bump_page_lmd(&dest_text, &today);
     let source_text = bump_page_lmd(&source_text, &today);
 
-    // Write B FIRST, then A (contract 5): a crash between leaves a recoverable duplicate, never a loss.
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated. BOTH pages' proposed bytes are prepared and the
+    // id-set rule runs over the batch UNION before either commits — an atom+its lessons vanish
+    // from `--from` only to appear on `--to`, so persistence is judged across the pair. The
+    // two ordered commits keep migrate's B-then-A recoverable-duplicate contract (the brief's
+    // recorded partial-write window: a crash between them duplicates, never loses).
+    crate::pre_write::prepare_batch_gated(
+        &[(&a.to, dest_text.as_str()), (&a.from, source_text.as_str())],
+        &crate::pre_write::GatePolicy::default(),
+    )?;
     atomic_write_page(&a.to, &dest_text)?;
     atomic_write_page(&a.from, &source_text)?;
     reindex_owning_scope(&a.to, a.hidden)?;

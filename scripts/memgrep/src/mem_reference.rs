@@ -204,9 +204,19 @@ pub fn cmd_reference_topic_cli(args: &[String]) -> Result<()> {
     }
 
     let today = today_date();
-    // Idempotent by construction, unlike `migrate`'s move: a crash between the two writes below
-    // self-heals on retry (the already-written side is detected as `already_links_to` and skipped,
-    // the other side is written), so there is no B-before-A ordering discipline to preserve here.
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated. Both sides' proposed bytes are prepared and the
+    // id-set rule runs over the pair before either commits (links touch no ids — default
+    // policy). Idempotent by construction, unlike `migrate`'s move: a crash between the two
+    // writes below self-heals on retry (the already-written side is detected as
+    // `already_links_to` and skipped, the other side is written), so there is no B-before-A
+    // ordering discipline to preserve here.
+    crate::pre_write::prepare_batch_gated(
+        &[
+            (&a.page, bump_page_lmd(&new_page, &today).as_str()),
+            (&a.to, bump_page_lmd(&new_to, &today).as_str()),
+        ],
+        &crate::pre_write::GatePolicy::default(),
+    )?;
     if page_changed {
         atomic_write_page(&a.page, &bump_page_lmd(&new_page, &today))?;
         reindex_owning_scope(&a.page, a.hidden)?;
@@ -325,8 +335,17 @@ pub fn cmd_reference_atom_cli(args: &[String]) -> Result<()> {
     }
 
     let today = today_date();
-    // Same idempotent-retry reasoning as `reference-mem-topic`: order doesn't matter for
-    // correctness, only for which side a mid-crash leaves already-done.
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated — same batch-prepare-then-commit shape as
+    // `reference-mem-topic` above (links touch no ids; default policy). Same idempotent-retry
+    // reasoning: order doesn't matter for correctness, only for which side a mid-crash leaves
+    // already-done.
+    crate::pre_write::prepare_batch_gated(
+        &[
+            (&a.to, bump_page_lmd(&new_to, &today).as_str()),
+            (&a.page, bump_page_lmd(&new_page, &today).as_str()),
+        ],
+        &crate::pre_write::GatePolicy::default(),
+    )?;
     if to_changed {
         atomic_write_page(&a.to, &bump_page_lmd(&new_to, &today))?;
         reindex_owning_scope(&a.to, a.hidden)?;

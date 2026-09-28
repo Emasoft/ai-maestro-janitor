@@ -5,7 +5,7 @@
 
 use crate::md;
 use crate::memory::{
-    atom_id_matches, atomic_write_page, bump_page_lmd, footnote_integrity_violations,
+    atom_id_matches, bump_page_lmd, footnote_integrity_violations,
     locate_atom_body_matching, now_iso_utc, read_page_for_write, reindex_owning_scope, rel,
     rewrite_footnote_labels, today_date,
 };
@@ -275,6 +275,10 @@ fn renumber_footnotes_contiguous(text: &str) -> String {
 struct AtomDeleteResult {
     text: String,
     touched_labels: usize,
+    /// Every id this deletion removes — the atom itself, plus (under `--with-lessons`) the
+    /// `id:` props of the dropped lesson defs. Passed to the gate's `retired_ids` (A2 step 5
+    /// wave 2): the ONLY sanctioned disappearance path.
+    retired_ids: std::collections::BTreeSet<String>,
 }
 
 /// The pure compute step behind `delete-mem-atom`: locate the atom, decide what happens to the
@@ -314,9 +318,31 @@ fn compute_atom_delete(
     }
 
     let mut drop: BTreeSet<usize> = (marker_idx..seg_end).collect();
+    // The atom's own id (from its marker, canonical) retires with the segment.
+    let marker_id = lines[marker_idx]
+        .trim_start()
+        .strip_prefix('^')
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    let mut retired_ids: BTreeSet<String> = BTreeSet::new();
+    if !marker_id.is_empty() {
+        retired_ids.insert(marker_id);
+    }
     if with_lessons {
         for lbl in &labels {
             if let Some(&(s, e)) = def_range.get(lbl) {
+                // The dropped def's stable `id:` prop retires with it (never the `[^N]` label —
+                // the card: lessons key on id:, labels renumber).
+                let def_text = lines[(s - 1)..=(e - 1).min(lines.len() - 1)].join("\n");
+                if let Some(meta) = md_split_note_meta(&def_text)
+                    && let Some(id) = parse_meta_id(&meta)
+                {
+                    retired_ids.insert(id);
+                }
                 for i in (s - 1)..=(e - 1).min(lines.len() - 1) {
                     drop.insert(i);
                 }
@@ -374,7 +400,27 @@ fn compute_atom_delete(
         );
     }
 
-    Ok(AtomDeleteResult { text: out_text, touched_labels: labels.len() })
+    Ok(AtomDeleteResult { text: out_text, touched_labels: labels.len(), retired_ids })
+}
+
+/// The lesson-def metadata bracket `[id: …, …]` of a def's raw text, via the shared quote-aware
+/// splitter (`md::`-layer behaviour lives in `memory::split_note_metadata`).
+fn md_split_note_meta(def_text: &str) -> Option<String> {
+    let body = def_text
+        .lines()
+        .next()
+        .and_then(|l| l.split_once("]:"))
+        .map(|(_, rest)| rest.trim_start().to_string())
+        .unwrap_or_default();
+    crate::memory::split_note_metadata(&body).0
+}
+
+/// The `id:` prop value from a lesson metadata string.
+fn parse_meta_id(meta: &str) -> Option<String> {
+    crate::memory::parse_block_props(meta)
+        .get("id")
+        .and_then(|v| v.first())
+        .cloned()
 }
 
 #[derive(clap::Parser)]
@@ -453,7 +499,17 @@ pub fn cmd_delete_atom_cli(args: &[String]) -> Result<()> {
     }
 
     let out = bump_page_lmd(&r.text, &today_date());
-    atomic_write_page(&a.page, &out)?;
+    // A2 step 5 wave 2 (TRDD-XI10BA5D): gated. delete-mem-atom is the card's ONE verb whose
+    // contract is dropping an id, so it declares exactly the ids its own compute step removed —
+    // the retired_ids mechanism; the gate still refuses any OTHER id's disappearance.
+    crate::pre_write::write_gated_with(
+        &a.page,
+        &out,
+        &crate::pre_write::GatePolicy {
+            retired_ids: r.retired_ids,
+            ..Default::default()
+        },
+    )?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!(
         "{}\tdeleted atom `{}` ({} footnote label(s) touched)",
