@@ -3,7 +3,7 @@ trdd-id: CGOV2XO4
 title: Write the context-integrity file the ai-maestro wake gate reads
 column: cancelled
 created: 2026-08-02T21:26:43+0200
-updated: 2026-09-29T19:34:58+0200
+updated: 2026-09-29T19:36:31+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
@@ -13,7 +13,7 @@ external-refs: [167, ai-maestro#151]
 blocked-by: []
 pre-block-column: 
 implementation-commits: []
-superseded-by: NONE
+cancelled-datetime: 2026-09-29T19:34:58+0200
 status: archived
 ---
 
@@ -127,3 +127,4 @@ keying is agreed.
 
 - 2026-09-29T19:22:23+0200 — SUPERSEDED by main-agent@ai-maestro. Owner decision 2026-09-29 on ai-maestro#151: defer/archive, no need — the schema question is closed; superseded by the #163 batch-design-cycle re-examination. Blocker ai-maestro#151 was the schema decision itself; the owner closed the question, so the blocker is resolved-by-refusal, not cleared.. Cleared blocked-by (--clear-blocker override).
 - 2026-09-29T19:34:58+0200 — CANCELLED by main-agent@ai-maestro. Correction of the 2026-09-29 supersede: the owner's 'archive it. no need' (ai-maestro#151 closed) is a refusal-without-successor, not a replacement — the #163 re-examination is not this card's successor. cancelled is the honest terminal state; also removes the written non-value superseded-by: NONE (R1)..
+- 2026-09-29T19:36:31+0200 — CANCELLED by main-agent@ai-maestro. Re-archive after the R1 field fix (superseded-by: NONE -> cancelled-datetime). Same owner ruling 2026-09-29..
