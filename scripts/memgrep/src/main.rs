@@ -16,6 +16,7 @@ mod jev;
 mod mem_delete;
 mod mem_merge;
 mod mem_reference;
+mod mem_replace;
 mod mem_split;
 mod memory;
 mod predicate;
@@ -460,6 +461,7 @@ const VERB_TABLE: &[(&str, &str, &str, &str)] = &[
     // atom's fact was superseded by an updated version — that is an update to knowledge, not the
     // authoring of a new fact. `--supersedes` embeds the old body; `--retire-atom` retires it.
     ("update-mem-atom", "write", "rewrite ONE atom in place; --lesson records a [^N] correction instead", ""),
+    ("replace-mem-topic", "write", "replace a page's COMPLETE content in one gated write (--content-file/--content -; --retire-atom declares dissolved ids)", ""),
     ("delete-mem-topic", "write", "retire a PAGE to .trashcan/ (never unlinks; refuses if linked-to)", ""),
     ("delete-mem-atom", "write", "remove one atom and renumber its [^N] footnotes", ""),
     ("merge-mem-topic", "write", "fold one page into another, tombstoning the source", ""),
@@ -686,6 +688,10 @@ fn main() -> Result<()> {
         // The ATOM counterpart of update-mem-topic: rewrite ONE atom's body/props in place,
         // keeping its id (so every citation pointing at it still resolves) and its [^N] refs.
         Some("update-mem-atom") => return memory::cmd_update_atom_cli(&raw[2..]),
+        // WHOLE-PAGE REPLACE (TRDD-XI10BA5D A3 step 1) — the caller's content IS the new page,
+        // through one full shared-gate write; a rewrite that dissolves atoms declares each
+        // dropped id via --retire-atom. stdin is never implicitly the content.
+        Some("replace-mem-topic") => return mem_replace::cmd_replace_topic_cli(&raw[2..]),
         // REFERENCE verbs (TRDD-VJL1YTCG Part B) — wikilink two elements. Both ends are wired in
         // ONE edit: the LINK LAW is bidirectional, so a verb that wrote only the near end would
         // manufacture exactly the one-sided-link violation `lint` grades the corpus on.

@@ -5032,3 +5032,320 @@ fn lint_finding_line_matches_the_five_field_shape_the_python_precheck_regexes_pa
     // Field 5 — the message, carrying the byte's hex value.
     assert!(line.contains("0x08"), "the message names the byte's hex value: {line}");
 }
+
+// ─────────────── replace-mem-topic (TRDD-XI10BA5D A3 step 1) — whole-page replace ───────────────
+
+/// The valid OLD page every replace test starts from: frontmatter, one atom carrying
+/// `REPLACE-ME`, and the mandatory notes section — a page the per-page lint calls clean.
+/// `lmd:` carries a date the fixture's OWN test asserts moves (or not), so it is spelled here
+/// once and pinned by the assertions below rather than by today's wall clock.
+const REPLACE_OLD_PAGE: &str = "---\nname: replaceme\nocd: 2026-01-01\nlmd: 2026-01-01\n\
+     description: \"the widget stopped responding / why does the widget hang / widget freezes \
+     on load / the panel never finishes rendering / clicking does nothing / spinner spins \
+     forever / how do I reset the widget / widget state is stuck / what makes the widget hang / \
+     is the widget deadlocked / widget unresponsive after resize / the component stops updating \
+     / no error but nothing happens / widget needs a restart / where is the widget state stored\"\n\
+     ---\n^ATOM-OLDA1 [ocd: 2026-01-01, keywords: k1 k2 k3 k4 k5 k6 k7 k8 k9 k10]\nold body\n\n\
+     ## Notes and lessons learned\n";
+
+/// The valid COMPLETE replacement page — frontmatter included (the caller's content IS the page:
+/// no preservation, no regeneration). Keeps `ATOM-OLDA1` with an unchanged body plus a NEW atom,
+/// so every gate rule has something real to judge.
+const REPLACE_NEW_PAGE: &str = "---\nname: replaceme\nocd: 2026-01-01\nlmd: 2026-09-29\n\
+     description: \"the widget stopped responding / why does the widget hang / widget freezes \
+     on load / the panel never finishes rendering / clicking does nothing / spinner spins \
+     forever / how do I reset the widget / widget state is stuck / what makes the widget hang / \
+     is the widget deadlocked / widget unresponsive after resize / the component stops updating \
+     / no error but nothing happens / widget needs a restart / where is the widget state stored\"\n\
+     ---\n^ATOM-OLDA1 [ocd: 2026-01-01, keywords: k1 k2 k3 k4 k5 k6 k7 k8 k9 k10]\nold body\n\n\
+     ^ATOM-NEWB2 [ocd: 2026-09-29, keywords: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10]\nnew body\n\n\
+     ## Notes and lessons learned\n";
+
+/// Test 1 — happy path: a valid full-page replacement lands; the FIRST stdout token is the
+/// page identity (the family's first-token contract); the disk bytes are the proposed bytes.
+#[test]
+fn replace_mem_topic_lands_a_valid_full_page_with_identity_first_token() {
+    let d = TempDir::new("replace-happy");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    let content = TempFixture::new("replace-new.md", REPLACE_NEW_PAGE);
+    let page = d.join("replaceme.md");
+    let out = run(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content.as_str(),
+    ]);
+    // First stdout token: the page path (never a metadata line — the sha256 goes to stderr).
+    let first = out.lines().next().unwrap_or("");
+    assert!(
+        first.starts_with(page.to_str().unwrap()),
+        "first stdout line must be the page identity: {out}"
+    );
+    assert!(
+        first.contains("replaced"),
+        "the identity line names the verb's effect: {out}"
+    );
+    let landed = std::fs::read_to_string(&page).unwrap();
+    assert_eq!(
+        landed, REPLACE_NEW_PAGE,
+        "the disk bytes must be EXACTLY the proposed bytes (no lmd bump, no rewrite)"
+    );
+}
+
+/// Test 2 — refusal: the proposed page drops an existing atom id with no --retire-atom. The
+/// gate's ID-PERSISTENCE rule must fire through the new verb: non-zero exit, the id NAMED,
+/// nothing written.
+#[test]
+fn replace_mem_topic_refuses_a_dropped_atom_id_and_writes_nothing() {
+    let d = TempDir::new("replace-drop");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    // Same frontmatter, NO atom at all — ATOM-OLDA1 vanishes.
+    let bare = "---\nname: replaceme\nocd: 2026-01-01\nlmd: 2026-09-29\n\
+         description: \"the widget stopped responding / why does the widget hang / widget \
+         freezes on load / the panel never finishes rendering / clicking does nothing / \
+         spinner spins forever / how do I reset the widget / widget state is stuck / what makes \
+         the widget hang / is the widget deadlocked / widget unresponsive after resize / the \
+         component stops updating / no error but nothing happens / widget needs a restart / \
+         where is the widget state stored\"\n\
+         ---\nplain body only\n\n## Notes and lessons learned\n";
+    let content = TempFixture::new("replace-bare.md", bare);
+    let page = d.join("replaceme.md");
+    let (_, err, code) = run_full(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content.as_str(),
+    ]);
+    assert_ne!(code, 0, "a dropped id must refuse");
+    assert!(err.contains("ATOM-OLDA1"), "the refusal must name the id: {err}");
+    assert!(err.contains("nothing was written"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        REPLACE_OLD_PAGE,
+        "a refused replace leaves the page byte-identical"
+    );
+}
+
+/// Test 3 — the same dropped-id case WITH --retire-atom: the rewrite legitimately dissolves the
+/// atom, so the replacement lands.
+#[test]
+fn replace_mem_topic_lands_when_the_dropped_id_is_retired() {
+    let d = TempDir::new("replace-retire");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    let bare = "---\nname: replaceme\nocd: 2026-01-01\nlmd: 2026-09-29\n\
+         description: \"the widget stopped responding / why does the widget hang / widget \
+         freezes on load / the panel never finishes rendering / clicking does nothing / \
+         spinner spins forever / how do I reset the widget / widget state is stuck / what makes \
+         the widget hang / is the widget deadlocked / widget unresponsive after resize / the \
+         component stops updating / no error but nothing happens / widget needs a restart / \
+         where is the widget state stored\"\n\
+         ---\nplain body only\n\n## Notes and lessons learned\n";
+    let content = TempFixture::new("replace-bare.md", bare);
+    let page = d.join("replaceme.md");
+    run(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content.as_str(),
+        "--retire-atom",
+        "ATOM-OLDA1",
+    ]);
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        bare,
+        "the retired-id replace lands the proposed bytes exactly"
+    );
+}
+
+/// Test 4 — refusal: the proposed page introduces a one-sided [[wikilink]]. The step-6 rule
+/// fires through the new verb, naming BOTH pages and the verb that wires both ends.
+#[test]
+fn replace_mem_topic_refuses_an_introduced_one_sided_link() {
+    let d = TempDir::new("replace-link");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    d.write(
+        "neighbor.md",
+        "---\nname: neighbor\nocd: 2026-01-01\nlmd: 2026-01-01\n\
+         description: \"n1 / n2 / n3 / n4 / n5 / n6 / n7 / n8 / n9 / n10 / n11 / n12 / n13 / n14 / n15\"\n\
+         ---\nneighbor body with no backlink\n\n## Notes and lessons learned\n",
+    );
+    let mut linked = REPLACE_NEW_PAGE.to_string();
+    linked.push_str("\nsee [[neighbor]] for the rule\n");
+    let content = TempFixture::new("replace-linked.md", &linked);
+    let page = d.join("replaceme.md");
+    let (_, err, code) = run_full(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content.as_str(),
+    ]);
+    assert_ne!(code, 0, "a minted one-sided link must refuse");
+    assert!(err.contains("one-sided-link rule"), "{err}");
+    assert!(
+        err.contains("replaceme.md") && err.contains("neighbor.md"),
+        "BOTH ends must be named: {err}"
+    );
+    assert!(
+        err.contains("reference-mem-topic"),
+        "the refusal must name the wire-both-ends verb: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        REPLACE_OLD_PAGE,
+        "nothing was written"
+    );
+}
+
+/// Test 5 — the explicit-channel contract: piped stdin with NO content flag refuses. stdin is
+/// NEVER implicitly the content (the e6b42169 rule), so the pipe is ignored and the verb fails
+/// naming the channel requirement — without hanging on a terminal read.
+#[test]
+fn replace_mem_topic_refuses_piped_stdin_without_a_content_flag() {
+    let d = TempDir::new("replace-stdin");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    let page = d.join("replaceme.md");
+    let (out, err, code) = run_stdin_full(
+        &["replace-mem-topic", "--page", page.to_str().unwrap()],
+        REPLACE_NEW_PAGE,
+    );
+    assert_ne!(code, 0, "a piped stdin with no content flag must refuse");
+    assert!(
+        err.contains("--content-file") || err.contains("--content"),
+        "the refusal must name the channel flags: {err}"
+    );
+    assert!(
+        err.contains("NEVER") || err.contains("never"),
+        "the refusal must state the stdin contract: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        REPLACE_OLD_PAGE,
+        "nothing was written"
+    );
+    let _ = out;
+}
+
+/// Test 6 — the A1 contract through the new verb: a raw control byte in the proposed content
+/// refuses, and the page is untouched.
+#[test]
+fn replace_mem_topic_refuses_a_control_byte_in_the_proposed_content() {
+    let d = TempDir::new("replace-ctrl");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    let corrupted = REPLACE_NEW_PAGE.replacen(
+        "new body",
+        "new bo\u{0008}dy",
+        1,
+    );
+    let content = TempFixture::new("replace-ctrl.md", &corrupted);
+    let page = d.join("replaceme.md");
+    let (_, err, code) = run_full(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content.as_str(),
+    ]);
+    assert_ne!(code, 0, "a control byte must refuse");
+    assert!(
+        err.contains("control byte") || err.contains("control-byte"),
+        "the refusal must name the control byte: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        REPLACE_OLD_PAGE,
+        "nothing was written"
+    );
+}
+
+/// Test 7 (spec amendment iii-a) — the re-mint contract in BOTH directions: with
+/// `--retire-atom ATOM-OLDA1`, a proposed page re-minting that SAME id ONCE with a new body
+/// PASSES (that is the feature's point — the id's fate is the caller's declaration); the same
+/// page carrying the id TWICE REFUSES (retirement exempts the id from persistence, never from
+/// within-page uniqueness — the verb-level duplicate check the gate cannot see).
+#[test]
+fn replace_mem_topic_re_minted_retired_id_passes_once_and_refuses_twice() {
+    let d = TempDir::new("replace-remint");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    // ONCE: the retired id survives with a REWRITTEN body (a legal re-mint).
+    let once = REPLACE_NEW_PAGE.replacen("old body", "rewritten re-minted body", 1);
+    let content = TempFixture::new("remint-once.md", &once);
+    let page = d.join("replaceme.md");
+    run(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content.as_str(),
+        "--retire-atom",
+        "ATOM-OLDA1",
+    ]);
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        once,
+        "a retired id re-minted ONCE lands (the feature's point)"
+    );
+
+    // TWICE: the same id as a body atom AND a lesson id — refuse, naming the id, writing
+    // nothing. Reset the page to the old state first.
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    let twice = format!(
+        "{}\n[^1]: [id: ATOM-OLDA1 status: valid keywords: q1 q2 q3 q4 q5 q6 q7 q8 q9 q10] \
+         lesson body\n",
+        REPLACE_NEW_PAGE.trim_end()
+    );
+    let content2 = TempFixture::new("remint-twice.md", &twice);
+    let (_, err, code) = run_full(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content2.as_str(),
+        "--retire-atom",
+        "ATOM-OLDA1",
+    ]);
+    assert_ne!(code, 0, "an id carried TWICE must refuse even when retired");
+    assert!(
+        err.contains("ATOM-OLDA1") && err.contains("duplicate"),
+        "the refusal must name the id and the duplication: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        REPLACE_OLD_PAGE,
+        "nothing was written"
+    );
+}
+
+/// Test 8 (spec amendment iii-b) — a PRE-EXISTING defect on a NEIGHBOR must never block: the
+/// neighbor one-sidedly links INTO the page being replaced (a defect already on disk), and the
+/// replace PASSES. Reverse direction of test 4; the gate refuses only what the WRITE introduces.
+#[test]
+fn replace_mem_topic_passes_when_a_pre_existing_neighbor_link_is_one_sided() {
+    let d = TempDir::new("replace-preexisting");
+    d.write("replaceme.md", REPLACE_OLD_PAGE);
+    // The NEIGHBOR carries the one-sided edge on disk — a pre-existing defect this write does
+    // not own and must not freeze.
+    d.write(
+        "neighbor.md",
+        "---\nname: neighbor\nocd: 2026-01-01\nlmd: 2026-01-01\n\
+         description: \"n1 / n2 / n3 / n4 / n5 / n6 / n7 / n8 / n9 / n10 / n11 / n12 / n13 / n14 / n15\"\n\
+         ---\nsee [[replaceme]] with no return link\n\n## Notes and lessons learned\n",
+    );
+    let content = TempFixture::new("replace-plain.md", REPLACE_NEW_PAGE);
+    let page = d.join("replaceme.md");
+    run(&[
+        "replace-mem-topic",
+        "--page",
+        page.to_str().unwrap(),
+        "--content-file",
+        content.as_str(),
+    ]);
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        REPLACE_NEW_PAGE,
+        "a pre-existing neighbor defect must not block the replace"
+    );
+}
