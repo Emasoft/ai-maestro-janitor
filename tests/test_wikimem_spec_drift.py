@@ -41,6 +41,7 @@ SKILL = REPO / "scripts" / "memgrep" / "SKILL.md"
 VERBS = (
     # ---- READ / SEARCH ----
     "recall",
+    "prose",
     "recall-mem-topic",
     "recall-mem-atom",
     "find",
@@ -57,6 +58,7 @@ VERBS = (
     "add-lesson",
     "update-mem-topic",
     "update-mem-atom",
+    "replace-mem-topic",
     "delete-mem-topic",
     "delete-mem-atom",
     "merge-mem-topic",

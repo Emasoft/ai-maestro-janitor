@@ -1,9 +1,9 @@
 ---
 spec: wikimem-memgrep
-spec-version: 2.4.0
+spec-version: 2.5.0
 status: normative
 created: 2026-07-23T15:03:35+0200
-updated: 2026-09-17T08:53:11+0200
+updated: 2026-09-29T21:16:08+0200
 maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner request, 2026-07-23)
@@ -932,6 +932,7 @@ USER scope), not scattered into a case page.
 <!-- @spec:memgrep-verbs v1 — authoritative; the conformance test extracts the block below verbatim -->
 ```text
 recall
+prose
 recall-mem-topic
 recall-mem-atom
 find
@@ -947,6 +948,7 @@ new-mem-atom
 add-lesson
 update-mem-topic
 update-mem-atom
+replace-mem-topic
 delete-mem-topic
 delete-mem-atom
 merge-mem-topic
@@ -1071,7 +1073,13 @@ Their flags, which WM-CLI-10 holds them to:
   necessarily the same string. That is a deliberate narrowing, not an oversight: the
   two used to be separable, and wikilinks still resolve through `name:`, so keeping them equal by
   construction removes the class of page whose file is named differently from its slug rather than
-  leaving `[[link]]` resolution to depend on an author's care.
+  leaving `[[link]]` resolution to depend on an author's care. **Content-CREATE mode**
+  (TRDD-XI10BA5D A3 step 2): supplying `--content-file <PATH>` or `--content <TEXT>`/`--content -`
+  (stdin, the only stdin path) replaces scaffolding entirely — the caller's bytes ARE the complete
+  page (frontmatter and `## Notes and lessons learned` included), routed through the ONE shared
+  write gate (`write_gated_with`); it still refuses when the page already exists, naming both this
+  verb and `replace-mem-topic` as the alternative. Content flags and scaffold flags combined are
+  not accepted in the same call.
 - `new-mem-topic --scope <local|private-project|public-project|user>` — PUBLICATION reach, and
   deliberately NOT `--type` (that is the CONTENT class `user|feedback|project|reference`, which is
   independent of where a page lives: a PROJECT page may legitimately be `type: reference`).
@@ -1099,6 +1107,38 @@ atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>
 `--retire-atom` sets the atom marker `status: superseded, superseded-by:<lesson-id>`
 (idempotent). Default correction is in-place same-id (WM-LES-05), never a duplicate.
 
+`WM-CLI-24` **prose** (TRDD-JHHD3S4Z) — `memgrep prose "<QUERY>" [PATHS]` recalls atoms by
+natural-language PROSE: every atom in scope is scored by the Jev decision model (one yes/no
+question per atom), and all atoms scoring at/above `--threshold <0.0–1.0>` (default `0.9`) print
+as the same triage rows `recall` uses. The threshold is the ONLY relevance gate — none is
+prefiltered, and there is NO result cap unless the caller passes `--top N` (the owner directive
+behind the verb is that no memory may be missed because of a cap). `status: superseded` atoms are
+scored BY DEFAULT (status is history, not relevance); `--no-superseded` excludes them. Output
+layers follow `--output <basic|medium|full>` with the same lesson/keyword resolution switches as
+`recall`. COST + PRIVACY are part of the contract: every scored atom's full text (desc + keywords
++ body + resolved lessons) is SENT to the scoring backend per query — billed per atom, with the
+persistent `(query, atom)` score cache making reruns free; `--no-cache` re-scores and writes
+nothing. The backend resolves via `$JEV_API`, overridable per call with `--api
+<typesafe|openrouter|gateway>` and `--model <MODEL>`; a gateway backend (`$JEV_GATEWAY_URL`)
+keeps scored traffic inside the caller's own infrastructure. It is a READ verb: it never mutates
+the corpus, never touches the score cache's own files beyond the cache itself.
+
+`WM-CLI-25` **replace-mem-topic** (TRDD-XI10BA5D A3 step 1) — `memgrep replace-mem-topic --page
+<PAGE> (--content-file <PATH> | --content <TEXT> | --content -)` replaces a page's COMPLETE
+content in one gated write: the caller's bytes ARE the page, frontmatter included — the verb does
+NO preservation, NO regeneration, NO `lmd` bump (missing/stale `lmd:` stays a grandfathered lint
+finding), exactly one `write_gated_with` call on the whole proposed page. It refuses when the
+page does not exist (create through `new-mem-topic`'s content mode instead); `--base-sha256
+<HASH>` is the CAS staleness guard (refuses with the WM-CLI-11 message when the page vanished or
+changed under the caller). `--retire-atom <ID>` (repeatable) exempts a dissolved atom id from the
+id-persistence rule — re-minting it is legal ONCE (a retire-then-re-mint), refusing a second
+time via the verb-level within-page duplicate check that runs before the lock. `allow_body_rewrite`
+is unconditionally true on this verb: a whole-page rewrite mutates every surviving atom's body by
+contract (the same per-call blast radius as `update-mem-topic`'s accepted ceiling). The
+one-sided-link removal ceiling applies: dropping the page's half of a reciprocal link pair, or
+dissolving an id other pages still `[[link]]`, creates edges no rule polices — `--retire-atom`
+declares the intent, the caller owns the holders.
+
 `WM-CLI-13` **new-mem-atom-supersedes** — `new-mem-atom --supersedes <ID>` (was `add-atom
 --supersedes`) `MUST`, in one transaction: mark the target atom `status: superseded,
 superseded-by:<new-atom-id>`, move its marker + body verbatim below the page's `## Superseded`
@@ -1111,11 +1151,17 @@ a supersession that records a mistake.
 `WM-CLI-17` **update-mem-atom** — `memgrep update-mem-atom --page <PAGE> --atom <ID>` rewrites ONE
 atom's body/`desc`/`keywords` in place: the id, `ocd`, and `type` are untouched, and every `[^N]`
 reference into the atom stays valid because the marker never moves or renumbers. The new body
-comes from stdin; `--desc`/`--keywords` are each optional and, when omitted, the current value is
-kept unchanged (this is a targeted rewrite, not `new-mem-atom`'s all-fields-required authoring).
-`--dry-run` prints the rewritten marker + body and writes nothing — the preview every mutating
-verb below also carries, because a corpus-mutating command that changes structure (not just one
-field) earns a look-before-you-leap.
+reaches the verb ONLY through an explicit channel — `--body <TEXT>`, `--body -` (stdin, the one
+stdin path), or `--body-file <PATH>`; `--body` and `--body-file` are mutually exclusive, and a
+metadata-only call (no body flag) leaves the body byte-identical even when stdin carries bytes —
+never implicitly from stdin (TRDD-XI10BA5D A3, the 2026-09-24 data-loss near-miss where a
+placeholder heredoc beside `--desc` silently replaced an atom body; the id-set rule cannot see a
+body rewrite because the id survives). A body channel aimed at an empty-body footnote-lesson
+refuses BEFORE reading stdin, so `--body -` cannot hang. `--desc`/`--keywords` are each optional
+and, when omitted, the current value is kept unchanged (this is a targeted rewrite, not
+`new-mem-atom`'s all-fields-required authoring). `--dry-run` prints the rewritten marker + body
+and writes nothing — the preview every mutating verb below also carries, because a corpus-mutating
+command that changes structure (not just one field) earns a look-before-you-leap.
 
 `WM-CLI-18` **delete-mem-topic** — `memgrep delete-mem-topic --page <PAGE> --force` retires a page
 to `.trashcan/`; it `MUST NOT` ever unlink the file (RULE 0 — knowledge is relocated, never
