@@ -4,7 +4,7 @@ title: Claude Code 2.1.248-2.1.284 alignment — BREAK-1 heartbeat survival unde
 column: todo
 status: tasked
 created: 2026-09-29T02:22:14+0200
-updated: 2026-09-29T02:39:23+0200
+updated: 2026-09-29T02:43:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-09-29T02:22:14+0200
+review-after: 2026-10-02
 ---
 
 # Claude Code 2.1.248-2.1.284 alignment — BREAK-1 heartbeat survival under auto-mode classifier plus the top ADOPTS

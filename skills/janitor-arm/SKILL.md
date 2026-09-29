@@ -172,7 +172,8 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
   - [Responsibility split and safety](references/janitor-architecture.md#responsibility-split-and-safety)
   - [Known limitations](references/janitor-architecture.md#known-limitations)
 - Recommended settings allow rules (auto-mode classifier, CC 2.1.281+ — add to
-  `.claude/settings.local.json` or user `settings.json` where no installer owns them):
+  `.claude/settings.local.json` or user `settings.json` where no installer owns them;
+  match semantics unverified — see the auto-mode note above):
   `Bash(uv run --script */dispatcher-stub.py*)`, `Bash(uv run --script */arm_prepare.py*)`,
   `Bash(uv run --script */arm_record.py*)`.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/arm_prepare.py` · `arm_record.py` — steps 1 and 4.
