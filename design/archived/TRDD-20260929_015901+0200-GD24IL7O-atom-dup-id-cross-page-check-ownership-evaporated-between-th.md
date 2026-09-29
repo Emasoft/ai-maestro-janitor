@@ -1,10 +1,10 @@
 ---
 trdd-id: GD24IL7O
 title: atom-dup-id cross-page check — ownership evaporated between the step-2 floor table and the batch layer
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-09-29T01:59:01+0200
-updated: 2026-09-30T00:19:44+0200
+updated: 2026-09-30T00:22:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,7 @@ Found by BOTH wave-2 review forks (2026-09-29). Step-2's landing record excluded
 
 - 2026-09-29T01:59:01+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-29T09:11:14+0200 — column → todo. content verification (XI10BA5D check-box): part (a) landed e559e25c, part (b) + 3 landing-review obligations open, no active worker — WORK-column claim untrue; todo is the honest state
+- 2026-09-30T00:22:37+0200 — COMPLETE by main-agent@ai-maestro-janitor. archived → complete.
 
 ## Implementation
 
@@ -37,3 +38,11 @@ Found by BOTH wave-2 review forks (2026-09-29). Step-2's landing record excluded
 True state (2026-09-29, added per the heading-fix review): part (a) LANDED e559e25c per the Implementation section below (landing review HOLDS, 3 next-touch obligations recorded there — spread-rule CURE, batch-internal-only qualifier, cosmetic mypy rider); part (b) cross-batch boundary OPEN; card in testing; the coordination note below concerns XI10BA5D gating only.
 2026-09-30 dispatch: spread-rule CURE test (inherited_dup_spread_to_a_second_page_refuses) in flight — lean-worker, test-only, filter at pre_write.rs:226 verified already refusing 1→2 growth (byte-identical to e559e25c); obligations 2 (batch-internal qualifier) rides the same test's message assertion; obligation 3 (mypy rider) is record-only, discharged at commit time. Card moved todo→dev (WORK column now true).
 2026-09-30 dispatch-review (fork, HOLDS-with-findings) + landing verification: the spread test LANDED and was independently verified (main ran it; old inventory confirmed non-vacuous — the atom is on disk page A before the batch, so old=1→2 refuses, the review's exact CURE case). Review fixes applied: (1) test renamed inherited_dup_spread_to_a_second_page_refuses → spread_from_one_page_to_two_refuses (the old name mislabeled 1→2 as 'inherited dup'); the doc comment now names the unpinned old=2 pair (2→3 growth refuse / preserve-pass) as a recorded test debt — the filter's same max-floor arithmetic, one future test when touched. (2) Record correction: obligation 2 was ALREADY discharged by e559e25c itself (message qualifier + doc comment); the new test only PINS it against regression — the earlier dispatch line's 'rides the same test's assertion' overstated. (3) Obligation 3 (mypy rider, VIFQ1LKI cosmetic) is record-only and is discharged BY THIS LINE's record + the commit message at commit time — the committer is this session (parent), not the worker. (4) Post-worker column hygiene: dev→testing in the same turn as the worker's completion report. 'byte-identical to e559e25c' method: whole-file diff attributed the 419-line delta to later commits plus the filter line's exact match.
+2026-09-30 CLOSED: commit 8414ce87 (spread test + rename + obligation-3 record; fix-round review HOLDS). Part (a) complete; the 3 landing-review obligations are all discharged (1 = the test, 2 = already e559e25c + pinned, 3 = this record + 8414ce87's message). Part (b) cross-BATCH boundary remains the structured item on XI10BA5D — NOT discharged by this closure; it was never this card's part (a) scope. Test debt recorded: the old=2→3 growth / preserve-pass pair unpinned (doc comment names it).
+
+## Acceptance checklist
+
+- [x] Part (a): batch-internal duplicate-id check refuses an id minted on two pages of one batch (e559e25c) and the CURE test pins count-growth on an existing id (8414ce87, spread_from_one_page_to_two_refuses, coordinator-verified)
+- [x] Landing-review obligation 2: refusal message + doc comment carry the batch-internal qualifier (e559e25c; pinned by the test's 'of this batch' assertion)
+- [x] Landing-review obligation 3: the mypy rider (VIFQ1LKI cosmetic) recorded on the card + named in 8414ce87's message
+- [x] Suites green: coordinator ran the new test (1 passed) and the full bin suite (342 passed, 0 failed after one mem_split lock-flake rerun, documented environmental)
