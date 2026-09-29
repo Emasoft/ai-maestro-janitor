@@ -49,7 +49,7 @@ fn under_excluded_subdir(path: &std::path::Path, root: &std::path::Path) -> bool
         .any(|c| EXCLUDED_SUBDIRS.iter().any(|x| c.as_os_str() == *x))
 }
 
-fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
+pub(crate) fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let paths = if paths.is_empty() {
         vec![PathBuf::from(".")]
@@ -150,7 +150,8 @@ pub(crate) struct Note {
     /// set. The canonical `[[name]]` wikilink target (issue #49: the protocol links by the `name:`
     /// slug, often hyphenated, while the harness names files with underscores). Mirrors index.rs
     /// `topic_of` so the link graph keys on the same identity as the SQLite index.
-    name: Option<String>,
+    /// `pub(crate)`: the A2 write gate's link resolver (pre_write.rs) registers the same keys.
+    pub(crate) name: Option<String>,
     pub(crate) title: String,
     pub(crate) summary: String,
     pub(crate) tags: Vec<String>,
@@ -452,7 +453,7 @@ fn parse_tags(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn read_note(path: &Path) -> Option<Note> {
+pub(crate) fn read_note(path: &Path) -> Option<Note> {
     let text = md::read_text(path)?;
     let lines: Vec<&str> = text.lines().collect();
     let ctx = md::build_context(&text, lines.len());
@@ -1001,14 +1002,13 @@ fn render_atom_notes(path: &Path, atom_body: &str, full_notes: bool) -> String {
 /// law (LOCAL → PROJECT → USER) forbids. Preferring the source's own root fixes both: the pair
 /// resolves within itself whenever a same-scope candidate exists, and only a name with NO candidate
 /// in the source's own root ever falls through to another scope.
-fn resolve(
+pub(crate) fn resolve(
     url: &str,
     from: &Path,
     home_root: Option<usize>,
     per_root: &[BTreeMap<String, PathBuf>],
     global: &BTreeMap<String, PathBuf>,
-) -> (Option<PathBuf>, bool) {
-    let url = url.split('#').next().unwrap_or(url).trim(); // drop in-page anchor
+) -> (Option<PathBuf>, bool) {    let url = url.split('#').next().unwrap_or(url).trim(); // drop in-page anchor
     if url.is_empty() {
         return (None, false); // pure anchor, internal
     }
@@ -1033,21 +1033,24 @@ fn resolve(
     (global.get(&key).cloned(), false)
 }
 
-struct Edge {
-    from: PathBuf,
-    line: usize,
-    raw: String,
-    target: Option<PathBuf>,
-    external: bool,
+// `pub(crate)`: the A2 write gate (pre_write.rs) reuses the graph, the resolver and the scope
+// classifier for the introduced-one-sided-link refusal — same extraction, same resolution, same
+// scope rule, so the gate's verdict can never disagree with the lint's (TRDD-XI10BA5D step 6).
+pub(crate) struct Edge {
+    pub(crate) from: PathBuf,
+    pub(crate) line: usize,
+    pub(crate) raw: String,
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) external: bool,
 }
 
-struct Graph {
-    notes: Vec<Note>,
-    edges: Vec<Edge>,
-    backlinks: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+pub(crate) struct Graph {
+    pub(crate) notes: Vec<Note>,
+    pub(crate) edges: Vec<Edge>,
+    pub(crate) backlinks: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
 }
 
-fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
+pub(crate) fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
     let files = collect_md(paths, hidden);
     let notes: Vec<Note> = files.iter().filter_map(|p| read_note(p)).collect();
 
@@ -1455,7 +1458,7 @@ fn note_matches(p: &Path, needle: &str) -> bool {
 }
 
 /// The `TRDD-<ts>-<id8>-<slug>` filename pattern, capturing the 8-char base36 id8. Compiled once.
-fn trdd_id8_re() -> &'static Regex {
+pub(crate) fn trdd_id8_re() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     // L5 (wikimem audit): TRDD ids are 8-char base36 (A-Z0-9), not hex — a hex-only
     // class missed every id containing letters G-Z.
@@ -2944,6 +2947,12 @@ pub(crate) fn reindex_owning_scope(page: &Path, hidden: bool) -> Result<()> {
 /// - the FIRST `.memgrep/` ancestor wins, so a nested scope beats an enclosing one. That is the
 ///   more specific owner, matching how the three-scope model resolves everything else.
 fn owning_scope_root(page: &Path) -> PathBuf {
+    owning_scope_root_pub(page)
+}
+
+/// `pub(crate)` twin of `owning_scope_root` — the A2 write gate's `batch_roots_for` widens each
+/// write to its owning scope root with the SAME walk the lint and reindex use.
+pub(crate) fn owning_scope_root_pub(page: &Path) -> PathBuf {
     let start = page
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -5777,11 +5786,13 @@ impl Severity {
 type Violation = (Severity, String, usize, String, &'static str);
 
 /// One of the three memory SCOPE layers, and its rank in the strictly-upward reference order.
+/// `pub(crate)`: the A2 write gate's one-sided-link rule classifies an edge's two ends with the
+/// same `scope_layer` call the lint uses (pre_write.rs).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct ScopeLayer {
-    name: &'static str,
+pub(crate) struct ScopeLayer {
+    pub(crate) name: &'static str,
     /// LOCAL 0 < PROJECT 1 < USER 2. A reference may only go to an EQUAL or HIGHER rank.
-    rank: u8,
+    pub(crate) rank: u8,
 }
 
 const SCOPE_LOCAL: ScopeLayer = ScopeLayer { name: "LOCAL", rank: 0 };
@@ -5894,7 +5905,7 @@ fn resolve_scope_pattern(raw: &str, layer: ScopeLayer) -> PathBuf {
     PathBuf::from(s)
 }
 
-fn scope_layer(path: &Path) -> Option<ScopeLayer> {
+pub(crate) fn scope_layer(path: &Path) -> Option<ScopeLayer> {
     // THE OVERRIDES MUST BE CONSULTED FIRST, and this is load-bearing rather than cosmetic. Every
     // check below matches a HARDCODED substring (`/.claude/project/memory`), so a relocated root
     // would classify as `None` — and `None` is not a loud failure here: `publish_globally_state`
@@ -5947,7 +5958,7 @@ fn scope_layer(path: &Path) -> Option<ScopeLayer> {
 /// Cost is bounded by the scope, not the corpus: the widened root is the ONE scope containing the
 /// named page (~150 small files at the largest live scope), parsed by the same walk a scope-level
 /// lint already runs, well inside the PostToolUse hook's timeout.
-fn link_graph_roots(paths: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn link_graph_roots(paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for p in paths {
         let root = if p.is_file() { owning_scope_root(p) } else { p.clone() };

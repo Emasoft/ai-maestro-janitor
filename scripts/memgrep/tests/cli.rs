@@ -3148,6 +3148,72 @@ fn new_page_refuses_a_scaffold_whose_bytes_trip_a_floor_code_and_writes_nothing(
     );
 }
 
+/// A2 step 6 (TRDD-XI10BA5D), part 1 — the sha256 print: every gated write prints the NEW page's
+/// sha256 on STDERR as `sha256\t<hash>\t<path>`, hashable straight into the next call's
+/// `--base-sha256`. STDERR, not stdout: `add-atom`/`add-lesson`'s first stdout line IS the fresh
+/// id (ten first-token parsers depend on it), so the metadata line must not lead stdout.
+#[test]
+fn gated_write_prints_the_new_sha256_on_stderr_and_it_verifies_as_a_base_hash() {
+    let d = TempDir::new("step6-sha");
+    let page = d.join("p.md");
+    let (_, err, code) = run_full_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_eq!(code, 0, "the create must land: {err}");
+    let line = err
+        .lines()
+        .find(|l| l.starts_with("sha256\t"))
+        .expect("the gated write must print the sha256 line on stderr");
+    let mut parts = line.split('\t');
+    let _tag = parts.next();
+    let hash = parts.next().expect("hash field").to_string();
+    let path = parts.next().expect("path field").to_string();
+    assert!(path.ends_with("p.md"), "the line names the written page: {line}");
+    // The printed hash IS the on-disk bytes' sha256 — the same value the next write's
+    // --base-sha256 flows through check_base with.
+    let bytes = std::fs::read(&path).unwrap();
+    use sha2::Digest as _;
+    let disk_hex = {
+        let mut h = sha2::Sha256::default();
+        h.update(&bytes);
+        h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+    };
+    assert_eq!(hash, disk_hex, "the printed hash must equal the landed bytes: {line}");
+}
+
+/// A2 step 6 (TRDD-XI10BA5D) — the one-sided-link refusal, end to end: an `update-mem-topic`
+/// edit that ADDS a `[[target]]` wikilink to a page that never links back refuses at the gate,
+/// names BOTH pages and the verb to use, and writes NOTHING.
+#[test]
+fn edit_minting_a_one_sided_wikilink_refuses_and_writes_nothing() {
+    let d = TempDir::new("step6-link");
+    let page = d.join("editor.md");
+    let target = d.join("target.md");
+    std::fs::write(&page, "---\nname: editor\n---\nplain body\n").unwrap();
+    std::fs::write(&target, "---\nname: target\n---\ntarget body\n").unwrap();
+    let old = TempFixture::new("xi10-old", "plain body");
+    let new = TempFixture::new("xi10-new", "see [[target]] for the rule");
+    let (_, err, code) = run_full(&[
+        "update-mem-topic",
+        "--page", page.to_str().unwrap(),
+        "--old-file", old.as_str(),
+        "--new-file", new.as_str(),
+    ]);
+    assert_ne!(code, 0, "a minted one-sided link must refuse");
+    assert!(err.contains("one-sided-link rule"), "the link arm must fire: {err}");
+    assert!(err.contains("editor.md") && err.contains("target.md"), "both ends named: {err}");
+    assert!(err.contains("reference-mem-topic"), "the wiring verb named: {err}");
+    assert!(
+        std::fs::read_to_string(&page).unwrap().contains("plain body"),
+        "nothing was written: the page keeps its original body"
+    );
+}
+
 #[test]
 fn add_atom_round_trips_through_the_parser_and_index() {
     let d = TempDir::new("addatom");
@@ -3479,15 +3545,24 @@ fn migrate_passes_the_batch_scoped_id_set_rule() {
     let d = TempDir::new("idset-migrate");
     let from = d.join("from.md");
     let to = d.join("to.md");
-    std::fs::write(
-        &from,
-        wave2_page_with("ATOM-LOSER-0001").replace(
+    // DISTINCT frontmatter names: the fixture used to carry `name: p` on BOTH pages, which made
+    // `--leave-link`'s backlink `[[p]]` resolve to the SOURCE page itself (first-wins on the
+    // shared slug) — a self-link, not a real reciprocation, and the step-6 one-sided-link gate
+    // (correctly) refused the write. The shared name was fixture shorthand, not a shape the
+    // corpus allows (duplicate `name:` slugs are their own defect), so the fixture is what moved.
+    let from_text = wave2_page_with("ATOM-LOSER-0001")
+        .replace(
             "## Notes and lessons learned\n",
             "## Notes and lessons learned\n\n[^1]: [id: ATOM-TEST-L001, status: valid, keywords: k] DO NOT x, BECAUSE y. DO z.\n",
-        ).replace("loser body.", "loser body[^1]."),
+        )
+        .replace("loser body.", "loser body[^1].")
+        .replace("name: p\n", "name: idset-from\n");
+    std::fs::write(&from, from_text).unwrap();
+    std::fs::write(
+        &to,
+        wave2_page_with("ATOM-PLACE-0007").replace("name: p\n", "name: idset-to\n"),
     )
     .unwrap();
-    std::fs::write(&to, wave2_page_with("ATOM-PLACE-0007")).unwrap();
 
     let out = run(&[
         "migrate-mem-atom",
@@ -3525,9 +3600,16 @@ fn merge_topic_passes_and_carries_an_uncited_lesson_def() {
         .lines()
         .filter(|l| !l.starts_with("^ATOM-KEEPER-0001") && l.trim() != "keeper body.")
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+        // DISTINCT names — the shared `name: p` fixture shorthand made the tombstone's
+        // `Merged into [[p]]` (and the destination's new reciprocal) resolve to the wrong page.
+        .replace("name: p\n", "name: idset-merge-from\n");
     std::fs::write(&from, &from_text).unwrap();
-    std::fs::write(&into, wave2_page_with("ATOM-PLACE-0007")).unwrap();
+    std::fs::write(
+        &into,
+        wave2_page_with("ATOM-PLACE-0007").replace("name: p\n", "name: idset-merge-into\n"),
+    )
+    .unwrap();
 
     let out = run(&[
         "merge-mem-topic",

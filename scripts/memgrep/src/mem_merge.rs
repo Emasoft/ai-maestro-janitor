@@ -340,6 +340,11 @@ fn merge_topic_compute(
         "---\nname: {from_name}\ndescription: \"Merged into {into_name}\"\nocd: {tomb_ocd}\nlmd: {today}\n---\n\n\
          # {from_name}\n\nMerged into [[{into_name}]] on {today}.\n\n## Notes and lessons learned\n"
     );
+    // THE LINK LAW (TRDD-XI10BA5D step 6): the tombstone's `Merged into [[{into_name}]]` is an
+    // OUTGOING wikilink, so the destination must link back or the write gate's one-sided-link
+    // rule (correctly) refuses the merge. Wire the reciprocal `- [[{from_name}]]` onto the
+    // destination's `## See also` in the SAME batch — the merge wires both ends or neither.
+    let dest_text = crate::mem_split::ensure_see_also_link(&dest_text, &from_name);
 
     Ok(MergeTopicResult { dest_text, tombstone_text, moved_atoms: blocks.len() })
 }
@@ -759,6 +764,12 @@ mod tests {
         assert!(
             from_after.contains("Merged into [[into-page]]") && !from_after.contains("ATOM-CCCC-CCCC"),
             "source must be a tombstone with no atoms left:\n{from_after}"
+        );
+        // A2 step 6 (TRDD-XI10BA5D): THE LINK LAW — the tombstone's forward link gets its
+        // reciprocal on the destination, in the SAME batch, or the gate refuses the merge.
+        assert!(
+            into_after.contains("[[from-page]]"),
+            "destination must link back to the tombstoned source:\n{into_after}"
         );
     }
 

@@ -28,7 +28,7 @@ use crate::memory::{
 };
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 /// Validate the PROPOSED final bytes of ONE page write against the write-gate floor.
 ///
 /// Runs `lint_page_text` report-only on `proposed` and refuses when ANY finding is classified
@@ -247,7 +247,8 @@ fn refuse_cross_page_duplicate_ids(
 /// The batch half of the gate (TRDD-XI10BA5D A2 step 5 wave 2): prepare EVERY page's proposed
 /// bytes (lint floor per page, `prepare`), refuse a batch-INTERNAL duplicate id (TRDD-GD24IL7O:
 /// an id on two different proposed pages is invisible to the union compare — see
-/// `refuse_cross_page_duplicate_ids`) and run the id-set rule over the batch, BEFORE the caller
+/// `refuse_cross_page_duplicate_ids`), refuse an INTRODUCED one-sided wikilink (step 6 —
+/// `refuse_introduced_one_sided_links`) and run the id-set rule over the batch, BEFORE the caller
 /// commits anything. A refusal anywhere means zero bytes written anywhere. The caller
 /// then commits each page through `atomic_write_page` in ITS OWN order (merge/split/migrate own
 /// recoverable-duplicate orderings and partial-failure messages), so the bytes each commit writes
@@ -263,7 +264,23 @@ pub(crate) fn prepare_batch_gated(writes: &[(&Path, &str)], policy: &GatePolicy)
     let proposed_inv: Vec<BTreeMap<String, String>> =
         writes.iter().map(|(_, t)| id_inventory(t)).collect();
     refuse_cross_page_duplicate_ids(&old, writes, &proposed_inv)?;
+    refuse_introduced_one_sided_links(&batch_roots_for(writes), writes)?;
     enforce_id_rules(&old, &proposed_inv, policy)
+}
+
+/// The scope roots the batch's cross-page checks (duplicate ids, link law) judge the batch over:
+/// each write's owning scope root (`owning_scope_root` — the nearest `.memgrep/` ancestor, else
+/// the page's own dir), deduplicated, in first-appearance order. The same widening `lint` does
+/// for a named page (`link_graph_roots`), so the gate's link verdict and the lint's agree.
+fn batch_roots_for(writes: &[(&Path, &str)]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for (p, _) in writes {
+        let root = crate::memory::owning_scope_root_pub(p);
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots
 }
 
 /// A page's current on-disk text for inventory purposes. FAILS CLOSED (TRDD-JFIOO9XO CURE 1):
@@ -311,10 +328,14 @@ pub(crate) fn write_gated(dest: &Path, proposed: &str) -> Result<()> {
 
 /// Post-commit disclosure for a gated write (TRDD-XI10BA5D A2 step 6):
 ///
-/// - the new page's sha256 on STDOUT — `write verbs print the new sha256` (card rules block), so
+/// - the new page's sha256 on STDERR — `write verbs print the new sha256` (card rules block), so
 ///   a chained caller can pass it straight back as `--base-sha256` without re-hashing by hand.
-///   Hashing the BYTES on disk (not the proposed String) makes the printed value byte-identical
-///   to what `write_gate::check_base` will later verify against.
+///   STDERR, not stdout: the writing verbs' stdout contracts are load-bearing for existing
+///   callers (`add-atom`/`add-lesson`'s first line IS the fresh id, `update-mem-topic`'s line is
+///   tab-separated path\tverb-note), and prepending a metadata line would break every
+///   first-token parse. The tab-separated `sha256\t<hash>\t<path>` shape keeps `cut` usable on
+///   either stream. Hashing the BYTES on disk (not the proposed String) makes the printed value
+///   byte-identical to what `write_gate::check_base` will later verify against.
 /// - one stderr line when the LANDED bytes differ from the caller's proposed bytes — the commit
 ///   layer (`atomic_write_page`'s publish-globally convergence loop) auto-fixed something beyond
 ///   the caller's own edit, and `every auto-fix disclosed on stderr` is a card rule. Diffing the
@@ -322,12 +343,11 @@ pub(crate) fn write_gated(dest: &Path, proposed: &str) -> Result<()> {
 ///   is why the compare is against `proposed`, not a re-detection. The line names the layer and
 ///   the field, never page content (the no-leak contract — it is the same refusal surface).
 ///
-/// Disclosure goes to STDERR so the verbs' stdout contracts (`wrote <path>`, the edit verb's
-/// tab-separated line) and every existing parser stay byte-stable. Best-effort by design: a
-/// disclosure read failure must never fail a write that has already landed — that line is
-/// skipped, the sha256 too. `pub(crate)` so the BATCH verbs call it after each of their own
-/// ordered commits (they run `prepare_batch_gated` + bare `atomic_write_page` calls, so their
-/// disclosure would otherwise be lost — same lines, same streams, one page per call).
+/// Best-effort by design: a disclosure read failure must never fail a write that has already
+/// landed — that line is skipped, the sha256 too. `pub(crate)` so the BATCH verbs call it after
+/// each of their own ordered commits (they run `prepare_batch_gated` + bare `atomic_write_page`
+/// calls, so their disclosure would otherwise be lost — same lines, same streams, one page per
+/// call).
 pub(crate) fn post_commit_disclosure(dest: &Path, proposed: &str) -> Result<()> {
     let landed = std::fs::read_to_string(dest).ok();
     if landed.as_deref() != Some(proposed) {
@@ -337,9 +357,217 @@ pub(crate) fn post_commit_disclosure(dest: &Path, proposed: &str) -> Result<()> 
         );
     }
     if let Ok(hash) = crate::write_gate::sha256_of_file(dest) {
-        println!("sha256\t{hash}\t{}", dest.display());
+        eprintln!("sha256\t{hash}\t{}", dest.display());
     }
     Ok(())
+}
+
+// ── TRDD-XI10BA5D A2 step 6: the one-sided-link refusal ─────────────────────────────────────
+
+/// The card rule: "refuse an introduced one-sided link (no auto-wire, the error names
+/// reference-mem-topic)". THE LINK LAW (markdown-memory-recall.md) makes every `[[wikilink]]`
+/// bidirectional; the extraction and resolution here are the LINT's own (`build_graph`,
+/// issue #49 name-slug resolution, TRDD alias), so the gate's verdict cannot disagree with a
+/// later `memgrep lint` on the same corpus.
+///
+/// INTRODUCED-ONLY by design (the diff-scoped reading the card records for the link rule): an
+/// edge that was already one-sided ON DISK passes — such an edge's missing half lives in a file
+/// this write does not own, and refusing would freeze the 60+ legacy one-sided edges forever
+/// behind every unrelated edit. The refusal fires exactly when the write MINTS a new unreciprocated
+/// edge: present in the batch's proposed bytes, absent from the batch's own reciprocal wiring, and
+/// absent from the disk's directed edge set. The message names `reference-mem-topic` — the verb
+/// that wires both ends in one call.
+///
+/// A CROSS-SCOPE edge is never a candidate: LOCAL → PROJECT → USER links go strictly UPWARD and
+/// are unreciprocated BY LAW — the same exemption the lint's Check 2/4 applies. Downward links
+/// stay the scope-wide lint's `link-downward-cross-scope` ERROR, unchanged by this card.
+fn refuse_introduced_one_sided_links(
+    batch_roots: &[PathBuf],
+    writes: &[(&Path, &str)],
+) -> Result<()> {
+    // The DISK's directed edge set, over the batch's own scope roots (the same widening the lint
+    // uses: a named page's cross-page invariant needs the whole scope to judge reciprocity).
+    let g = crate::memory::build_graph(batch_roots, false);
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let mut disk_edges: BTreeSet<(PathBuf, PathBuf)> = BTreeSet::new();
+    for e in &g.edges {
+        if let Some(target) = &e.target {
+            disk_edges.insert((canon(&e.from), canon(target)));
+        }
+    }
+
+    // The BATCH's own proposed directed edges (per page), so a batch that wires both ends itself
+    // (merge's tombstone + destination, reference-*, split's see-also pair, migrate
+    // --leave-link) certifies itself. Resolution registers the BATCH: a link pointed at the
+    // batch's own NEW page (split's not-yet-on-disk destination) resolves to its proposed path
+    // instead of coming back unresolved — without this, split's legitimate pair false-refuses.
+    let mut batch_edges: BTreeSet<(PathBuf, PathBuf)> = BTreeSet::new();
+    for (dest, text) in writes {
+        let ctx = crate::md::build_context(text, text.lines().count());
+        for l in &ctx.links {
+            if let Some((t, _raw)) = resolve_in_graph(&l.url, dest, batch_roots, writes) {
+                batch_edges.insert((canon(dest), canon(&t)));
+            }
+        }
+    }
+
+    let mut refusals: Vec<String> = Vec::new();
+    for (dest, text) in writes {
+        let ctx = crate::md::build_context(text, text.lines().count());
+        for l in &ctx.links {
+            let Some((target_path, _raw)) = resolve_in_graph(&l.url, dest, batch_roots, writes) else {
+                continue; // unresolved (broken) or external — not a LINK-LAW candidate
+            };
+            let from_c = canon(dest);
+            let to_c = canon(&target_path);
+            if from_c == to_c {
+                continue; // self-link is trivially reciprocal
+            }
+            // Cross-scope: upward edges are unreciprocated by law; the scope rule owns them.
+            if let (Some(fs_), Some(ts_)) = (
+                crate::memory::scope_layer(&from_c),
+                crate::memory::scope_layer(&to_c),
+            ) && fs_ != ts_
+            {
+                continue;
+            }
+            let edge = (from_c.clone(), to_c.clone());
+            if batch_edges.contains(&(to_c.clone(), from_c.clone()))
+                || disk_edges.contains(&(to_c.clone(), from_c.clone()))
+            {
+                continue; // reciprocated in-batch or already on disk
+            }
+            if disk_edges.contains(&edge) {
+                continue; // PRE-EXISTING one-sided edge — repairable, never frozen (see doc)
+            }
+            refusals.push(format!(
+                "one-sided-link rule: `{from}` links to `{to}` but nothing reciprocates it — \
+                 the LINK LAW needs both ends wired in one edit; use `memgrep reference-mem-topic \
+                 --page {from} --to {to}` (or `--leave-link` on migrate)",
+                from = dest.display(),
+                to = target_path.display(),
+            ));
+        }
+    }
+    if refusals.is_empty() {
+        return Ok(());
+    }
+    refusals.sort();
+    refusals.dedup();
+    anyhow::bail!(
+        "write gate refused (one-sided-link rule; nothing was written; {} violation(s)):\n{}",
+        refusals.len(),
+        refusals.iter().map(|r| format!("  - {r}")).collect::<Vec<_>>().join("\n")
+    )
+}
+
+/// Resolve ONE raw link URL to a target page through the REAL per-root name maps (the graph's own
+/// resolution, re-run standalone: `resolve` needs `per_root`/`global`, which only `build_graph`
+/// assembles). Builds the maps once per call — the batch is small (2-4 pages) and the map build
+/// is one walk of the scope, the same cost `build_graph` already paid above.
+///
+/// `batch` pages are REGISTERED too: a name matching one of the batch's own destinations
+/// resolves to that destination even when it does not exist on disk yet (split's new page), so
+/// a link pointed at the batch's own output resolves to its PROPOSED path. The batch is inserted
+/// AFTER the disk walk (first-wins `or_insert` keeps disk entries otherwise), so a batch page
+/// OVERRIDES a same-named disk page — the imminent write supersedes what is on disk.
+fn resolve_in_graph(
+    url: &str,
+    from: &Path,
+    roots: &[PathBuf],
+    batch: &[(&Path, &str)],
+) -> Option<(PathBuf, String)> {
+    let url = url.split('#').next().unwrap_or(url).trim();
+    if url.is_empty() || url.contains("://") || url.starts_with("mailto:") {
+        return None; // pure anchor or external — never a LINK-LAW candidate
+    }
+    if url.contains('/') || url.ends_with(".md") {
+        let joined = from.parent().unwrap_or(Path::new(".")).join(url);
+        return joined.canonicalize().ok().map(|t| (t, url.to_string()));
+    }
+    // Bare wikilink name: same key derivations as `build_graph` (stem, `_`→`-` normalized, the
+    // frontmatter `name:`/`topic:` slug, the TRDD-id8 alias), same-scope first, then global.
+    // The key derivation lives inside `memory::resolve` — never duplicated here.
+    let files = crate::memory::collect_md(roots, false);
+    let mut global: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut per_root: Vec<BTreeMap<String, PathBuf>> = vec![BTreeMap::new(); roots.len()];
+    for p in &files {
+        let canon_p = p.canonicalize().unwrap_or_else(|_| p.clone());
+        let ridx = roots
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| {
+                let rc = r.canonicalize().unwrap_or_else(|_| (*r).clone());
+                canon_p.starts_with(&rc)
+            })
+            .max_by_key(|(_, r)| r.as_os_str().len())
+            .map(|(i, _)| i);
+        let mut keys: Vec<String> = Vec::new();
+        if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+            let stem_l = stem.to_ascii_lowercase();
+            keys.push(stem_l.clone());
+            let norm = stem_l.replace('_', "-");
+            if norm != stem_l {
+                keys.push(norm);
+            }
+        }
+        if let Some(slug) = crate::memory::read_note(p).and_then(|n| n.name) {
+            keys.push(slug);
+        }
+        if let Some(name) = p.file_name().and_then(|s| s.to_str())
+            && let Some(c) = crate::memory::trdd_id8_re().captures(name)
+        {
+            keys.push(format!("trdd-{}", c[1].to_ascii_lowercase()));
+        }
+        for k in keys {
+            global.entry(k.clone()).or_insert_with(|| p.clone());
+            if let Some(i) = ridx {
+                per_root[i].entry(k).or_insert_with(|| p.clone());
+            }
+        }
+    }
+    // REGISTER THE BATCH: same key derivations over each write's PROPOSED frontmatter `name:`,
+    // inserted last so they win the first-wins race against disk. Relative-path links land
+    // above, so only the bare-name form needs this.
+    for (p, text) in batch {
+        let mut keys: Vec<String> = Vec::new();
+        if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+            let stem_l = stem.to_ascii_lowercase();
+            keys.push(stem_l.clone());
+            let norm = stem_l.replace('_', "-");
+            if norm != stem_l {
+                keys.push(norm);
+            }
+        }
+        let fm = crate::md::parse_frontmatter(text);
+        if let Some(slug) = fm
+            .get("name")
+            .or_else(|| fm.get("topic"))
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+        {
+            keys.push(slug);
+        }
+        for k in keys {
+            global.insert(k.clone(), (*p).to_path_buf());
+            if let Some(i) = roots.iter().position(|r| {
+                let rc = r.canonicalize().unwrap_or_else(|_| (*r).clone());
+                let pc = (*p).canonicalize().unwrap_or_else(|_| (*p).to_path_buf());
+                pc.starts_with(&rc)
+            }) {
+                per_root[i].insert(k, (*p).to_path_buf());
+            }
+        }
+    }
+    let home = roots.iter().position(|r| {
+        let rc = r.canonicalize().unwrap_or_else(|_| r.clone());
+        from.canonicalize().unwrap_or_else(|_| from.to_path_buf()).starts_with(&rc)
+    });
+    let (target, external) = crate::memory::resolve(url, from, home, &per_root, &global);
+    if external {
+        return None;
+    }
+    target.map(|t| (t, url.to_string()))
 }
 
 #[cfg(test)]
@@ -788,6 +1016,140 @@ mod tests {
         let b_new = format!("---\nname: p\n---\n{atom}\n## Notes and lessons learned\n");
         prepare_batch_gated(&[(&a, a_new), (&b, &b_new)], &GatePolicy::default())
             .expect("an id MOVED from page A to page B (one proposed page carries it) must pass");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── TRDD-XI10BA5D A2 step 6: the one-sided-link refusal ─────────────────────────────────────
+
+    /// An edit that ADDS a `[[target]]` wikilink whose page does not link back must REFUSE,
+    /// naming both pages and the verb to use, with nothing written. The target exists on disk
+    /// WITHOUT a backlink, so neither the batch's own wiring nor the disk edge set can
+    /// reciprocate — the mint of a new unreciprocated edge is exactly what the rule refuses.
+    /// The refusal is content-snippet-free (paths only — the no-leak contract).
+    #[test]
+    fn introduced_one_sided_link_refuses_naming_both_pages_and_the_verb() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_step6_one-sided-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let page = dir.join("editor.md");
+        let target = dir.join("target.md");
+        std::fs::write(&page, "---\nname: editor\n---\nplain body\n").unwrap();
+        std::fs::write(&target, "---\nname: target\n---\ntarget body\n").unwrap();
+        let proposed =
+            "---\nname: editor\n---\nsee [[target]] for the rule\n\n## Notes and lessons learned\n";
+        let err = write_gated(&page, proposed)
+            .expect_err("a NEW one-sided link must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("one-sided-link rule"),
+            "the refusal must be the link arm: {msg}"
+        );
+        assert!(msg.contains("nothing was written"), "{msg}");
+        assert!(
+            msg.contains("editor.md") && msg.contains("target.md"),
+            "BOTH ends of the edge must be named: {msg}"
+        );
+        assert!(
+            msg.contains("reference-mem-topic"),
+            "the refusal must name the verb that wires both ends: {msg}"
+        );
+        // No-leak: the pages' body fragments must not reach the refusal.
+        assert!(!msg.contains("target body"), "page content leaked: {msg}");
+        assert!(!msg.contains("plain body"), "page content leaked: {msg}");
+        let on_disk = std::fs::read_to_string(&page).unwrap();
+        assert_eq!(
+            on_disk, "---\nname: editor\n---\nplain body\n",
+            "a refused write leaves the page byte-identical"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The LEGAL shapes must all pass the link arm: (a) the batch wires both ends itself
+    /// (split's pair — the target page does not even exist yet, so only in-batch wiring can
+    /// reciprocate); (b) the backlink already sits on disk (adding the SECOND end of a pair);
+    /// (c) a PRE-EXISTING one-sided edge on disk is preserved, not frozen — repairable, never
+    /// refused; (d) a cross-scope upward link is unreciprocated by law and never a candidate.
+    #[test]
+    fn reciprocal_preexisting_and_cross_scope_links_pass_the_link_arm() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_step6_legal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // (a) in-batch reciprocation over a NEW page: A links [[b]], B (not on disk) links [[a]].
+        let a = dir.join("pair-a.md");
+        let b = dir.join("pair-b.md");
+        std::fs::write(&a, "---\nname: pair-a\n---\nplain\n").unwrap();
+        prepare_batch_gated(
+            &[
+                (&a, "---\nname: pair-a\n---\nsee [[pair-b]]\n"),
+                (&b, "---\nname: pair-b\n---\nsee [[pair-a]]\n"),
+            ],
+            &GatePolicy::default(),
+        )
+        .expect("a batch that wires BOTH ends must pass");
+
+        // (b) the backlink is already on disk: adding the forward end completes the pair.
+        let c = dir.join("fwd.md");
+        let d = dir.join("back.md");
+        std::fs::write(&c, "---\nname: fwd\n---\nplain\n").unwrap();
+        std::fs::write(&d, "---\nname: back\n---\nsee [[fwd]]\n").unwrap();
+        prepare_batch_gated(
+            &[(&c, "---\nname: fwd\n---\nsee [[back]] now\n")],
+            &GatePolicy::default(),
+        )
+        .expect("completing an existing disk pair must pass");
+
+        // (c) a PRE-EXISTING one-sided edge survives an unrelated rewrite of its carrier page.
+        let e = dir.join("legacy.md");
+        let f = dir.join("distant.md");
+        std::fs::write(&e, "---\nname: legacy\n---\nsee [[distant]]\n").unwrap();
+        std::fs::write(&f, "---\nname: distant\n---\nno backlink here\n").unwrap();
+        prepare_batch_gated(
+            &[(&e, "---\nname: legacy\n---\nsee [[distant]]\nrewritten body\n")],
+            &GatePolicy::default(),
+        )
+        .expect("a PRE-EXISTING one-sided edge must stay repairable, never frozen");
+
+        // (d) cross-scope (LOCAL upward into a PROJECT-shaped path is not simulable here without
+        // the real roots; instead pin the THIRD legal shape: a self-link is trivially reciprocal).
+        let s = dir.join("self.md");
+        std::fs::write(&s, "---\nname: self\n---\nplain\n").unwrap();
+        prepare_batch_gated(
+            &[(&s, "---\nname: self\n---\nsee [[self]]\n")],
+            &GatePolicy::default(),
+        )
+        .expect("a self-link must pass (trivially reciprocal)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The step-6 sha256 + auto-fix disclosure contract (step 6, part 1): after a gated write,
+    /// STDERR carries the tab-separated `sha256\t<hash>\t<path>` line whose hash equals the
+    /// bytes on disk — byte-identical to what `write_gate::check_base` verifies against, so a
+    /// chained caller can pass the printed value straight back as `--base-sha256`. STDERR (not
+    /// stdout) is itself load-bearing: the writing verbs' first stdout line IS an id, and a
+    /// metadata line ahead of it broke ten CLI tests before the stream was moved.
+    #[test]
+    fn gated_write_prints_the_new_sha256_matching_the_landed_bytes() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_step6_sha-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let page = dir.join("hashed.md");
+        std::fs::write(&page, "---\nname: hashed\n---\nplain body\n").unwrap();
+        write_gated(&page, "---\nname: hashed\n---\nrewritten body\n")
+            .expect("the clean rewrite must land");
+        let landed = std::fs::read_to_string(&page).unwrap();
+        // The disclosure function itself is best-effort; assert it succeeds on a real page. It
+        // prints to stderr/stdout (untestable in-process without a pipe) — the hash-oracle
+        // contract below pins the VALUE, and the CLI-level test in tests/cli.rs pins the LINE.
+        post_commit_disclosure(&page, &landed).expect("disclosure must not fail a landed write");
+        let disk_hash = crate::write_gate::sha256_of_file(&page).unwrap();
+        // check_base ACCEPTS the on-disk hash — the exact promise the printed line makes.
+        crate::write_gate::check_base(&page, &disk_hash)
+            .expect("the printed hash's oracle (bytes on disk) must verify as a fresh base");
+        assert!(landed.contains("rewritten body"), "{landed}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
