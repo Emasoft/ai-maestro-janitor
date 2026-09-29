@@ -3,7 +3,7 @@ trdd-id: ZKXQXHBI
 title: The janitor daemon reads the live credential's primary item behind its own latch
 column: todo
 created: 2026-09-24T11:21:18+0200
-updated: 2026-09-24T11:29:16+0200
+updated: 2026-09-29T07:51:35+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -28,3 +28,7 @@ Release 1 of TRDD-RAEGS1D5; design on TRDD-4XND73XD (decision 2 of TRDD-WZKFSQ2N
 
 The prerequisite read test must itself be safe: one bounded read with a timeout and no prompt allowed (may_prompt=False), outside the shared keychain-latch path, from the daemon's own context. A careless test can raise a dialog or trip the machine-wide denied latch, which stops rotation.
 Logging that becomes live once the daemon reads the primary: (1) the F1 "primary live credential UNREADABLE" line must say whether the read was skipped by policy or refused; (2) since 88b10297, cmd_capture's unresolved-account branch and the F5 UNRESOLVABLE line in _reconcile_live_email can both fire every tick during a /roles outage: make both durable rotator.log lines, deduplicated per fingerprint. Two /roles calls per tick (capture plus reconcile) during such an outage are the accepted cost.
+
+## Implementation log
+
+2026-09-29: implemented in commit 3c48d054 — latch (denial-at-once, 3-timeout threshold, 600 s cooldown, latch FILE for cross-tick streak) in rotator._read_primary_macos_keychain + helpers; run_security latch_denial knob (safe_storage); per-tick read memo invalidated by write_live_blob; daemon no longer forces JANITOR_ROTATOR_HEADLESS (stays an operator lever); F1 capture line names skip-policy vs latch-refusal; capture+F5 UNRESOLVABLE lines durable and deduplicated per fp. Gates: pytest 194 passed (both touched files), ruff clean, mypy clean, pyright 0 errors. OPEN: the prerequisite LaunchAgent-context read probe (the 2026-09-24 test ran interactive) still to run before this ships in a publish; a test per latch rule exists (7 new tests).
