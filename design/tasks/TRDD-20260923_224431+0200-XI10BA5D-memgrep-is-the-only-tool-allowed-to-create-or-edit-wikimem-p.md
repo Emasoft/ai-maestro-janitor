@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-29T23:04:39+0200
+updated: 2026-09-29T23:08:39+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -51,6 +51,7 @@ CHAIN CLOSE (final-review verdict, HOLDS): same-day STATE entries are chronologi
 2026-09-29 commit-record review correction (fork HOLDS-with-fixes, discharged inline): (1) the STEP D line's NEXT ACTION under-counted the eht set — the card's eht is FVYV6RSG, IFILAUV5, JFIOO9XO, GD24IL7O (IFILAUV5 still in todo); the close gate reads the frontmatter, not this prose. (2) Test-count arithmetic: 61 = 36 new (35 worker + look-alike-mirror test) + 25 pre-existing, not 35+25=60. (3) Leftover-LOW list gains the wiring-test's schema-coupling finding (hardcoded hooks["hooks"]["PreToolUse"] envelope path). Suite claim precise form: 17697 passed, 2 skipped, 0 failed.
 2026-09-29 step-C close-out verification (coordinator, post-step-D): the SKILL.md/protocol layer is clean (the step-C report's flagged follow-ups in consolidate/enrich/conflict files LANDED — grep for live staged-copy instructions returns nothing; verdict recipes verb-shaped). RESIDUE: 3 background reference files still name the txn CLI as THE mutation path (repair-background.md:177 'IN PLACE through memory_txn_cli.py --op repair'; conflict-background.md:39 'ALL mutation goes through memory_txn_cli.py... only staged COPIES' — the inverse of the ratified design; :46; merge-background.md:28). These are background-history files an agent reads when loading the chore; fixing the 4 lines next.
 2026-09-29 step-C residue FIXED (commit 1fb561d2): the 4 background-reference lines + 3 description-frontmatter mentions of the txn core now route through the memgrep write gate; residue grep across skills/ + agents/ zero; token caps 38 passed. Step C is now closed end-to-end (f051bb2b + review chain 329bf57d/23314b3a/030b6e13 + this residue fix). Card close gated on: the CURE-4 verifier-subsumption owner confirmation (STEP-C CLOSE CHECKLIST line) + the four eht cards (FVYV6RSG, IFILAUV5, JFIOO9XO, GD24IL7O).
+2026-09-29 residue-fix review (fork KEEP-with-fixes) discharged in commit 9e63365b: MEDIUM (invented lossy-re-apply idempotency claim) fixed — text now names the real behavior (retired page gone → re-run refuses on missing source); MEDIUM-LOW (CURE-4-unproven claim migrated into the agent description) fixed — neutral loss-oracle phrasing; sibling staging/--op bullets migrated; hash-guarded→version-skew; consolidate desc 'never editing'→'never hand-editing'; repair verb named. Residue grep zero, caps 38 passed. Step C now FULLY closed (f051bb2b → 329bf57d → 23314b3a → 030b6e13 → 1fb561d2 → 9e63365b). Card close still gated on: CURE-4 owner confirmation + the four eht cards.
 
 ## Approval log
 
