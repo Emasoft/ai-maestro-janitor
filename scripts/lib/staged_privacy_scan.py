@@ -46,10 +46,10 @@ for _p in (_LIB_DIR, _SCRIPTS_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import git_utils  # noqa: E402
 import privacy_patterns as privacy  # noqa: E402
 import private_path_patterns as ppp  # noqa: E402
 import publish  # noqa: E402
-import git_utils  # noqa: E402
 
 
 class ScannerError(RuntimeError):
