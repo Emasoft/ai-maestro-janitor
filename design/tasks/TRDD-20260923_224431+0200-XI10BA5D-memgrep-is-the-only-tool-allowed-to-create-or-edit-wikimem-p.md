@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-29T19:44:15+0200
+updated: 2026-09-29T19:48:07+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -15,6 +15,7 @@ approved: true
 approval-judge: Emasoft
 approval-datetime: 2026-09-23T22:44:31+0200
 eht: FVYV6RSG, IFILAUV5, JFIOO9XO, GD24IL7O
+implementation-commits: 1e30b72c, a731144b, 98a3eee6
 ---
 
 # memgrep is the only tool allowed to create or edit wikimem pages
