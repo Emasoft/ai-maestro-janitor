@@ -1,10 +1,10 @@
 ---
 trdd-id: GD24IL7O
 title: atom-dup-id cross-page check — ownership evaporated between the step-2 floor table and the batch layer
-column: testing
+column: todo
 status: tasked
 created: 2026-09-29T01:59:01+0200
-updated: 2026-09-29T09:09:39+0200
+updated: 2026-09-29T09:11:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,6 +24,7 @@ Found by BOTH wave-2 review forks (2026-09-29). Step-2's landing record excluded
 ## Approval log
 
 - 2026-09-29T01:59:01+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-29T09:11:14+0200 — column → todo. content verification (XI10BA5D check-box): part (a) landed e559e25c, part (b) + 3 landing-review obligations open, no active worker — WORK-column claim untrue; todo is the honest state
 
 ## Implementation
 

@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-29T09:02:52+0200
+updated: 2026-09-29T09:11:37+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -133,6 +133,7 @@ A2-CLOSE CHECKLIST line 2 (structured, not prose — 2026-09-29 review): the two
 
 ## Open items before A3 dispatch and card close (structured, greppable)
 
-- [ ] stdin-implies-body fix landed (update-mem-atom: body replaced only via explicit --body-file or --body -, never implicitly from non-empty stdin) as its own reviewed commit BEFORE A3 step-1 dispatch — data-loss-class bug, carrier per the correction-review fork (a check-box, not prose).
+- [x] stdin-implies-body fix landed (update-mem-atom: body replaced only via explicit --body-file or --body -, never implicitly from non-empty stdin) as its own reviewed commit BEFORE A3 step-1 dispatch — data-loss-class bug, carrier per the correction-review fork (a check-box, not prose).
 Board-integrity flag (correction-review fork, MEDIUM): JFIOO9XO and GD24IL7O sit in column 'testing' with no worker or dispatch recorded this session — a WORK column asserting activity that may not be happening; and JFIOO9XO's CURE list may be PARTIALLY stale (the wave-2 landing already fixed the uncited-lesson-def carry and made the merge See-also change). Both cards were wired as close-gates on this card by column only, without opening them. Next look (main or owner): read both cards, verify their actual CURE content against what the wave-2 landing fixed, update their columns to the true state, and discharge or re-scope their CUREs. Until then the eht wiring is correct in form but the gate content is unverified.
 - [ ] JFIOO9XO and GD24IL7O content verified against the wave-2 fixes, columns trued to the real state (discharge-round review: the flag paragraph lacked its own carrier — same asymmetry this round corrected for the stdin fix; also per universal-kanban, an untrue WORK column is a recorded known lie with no owner until this box is ticked). Carries the 'next look' from the board-integrity flag above.
+Verification result (2026-09-29, box 1 ticked): JFIOO9XO — all four CUREs already LANDED in its own commit bd445c71 (fail-closed inventory read with retryable-refusal message, update-mem-topic allow_body_rewrite with the tradeoff comment, REUSE falsifiability test, GatePolicy doc comment); its STATE records main-verified cargo check 0/0, 336 unit + 171 cli; column testing is TRUE (awaits the release's live pass). The step-6-inherits-fail-open concern is discharged by that same commit — the inventory fix is in. GD24IL7O — part (a) landed e559e25c, part (b) + 3 landing-review obligations OPEN with no active worker; testing column was UNTRUE, card moved to todo (the honest state). One noted procedural incident on JFIOO9XO (5fa4c57b whitespace edit via the Edit tool on a governed card) — mitigation recorded on that card, no action here.
