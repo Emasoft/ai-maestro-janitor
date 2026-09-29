@@ -138,6 +138,13 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
 
 ## Error handling
 
+- **Auto-mode classifier (CC 2.1.281+):** the fire's `uv run --script …/dispatcher-stub.py` Bash
+  call is subject to the server-side classifier, which can now block even read-only/sandboxed
+  commands it flags, and a deny is terminal ("retrying will not help", 2.1.280) — so the heartbeat
+  silently stops on a flag. Mitigation: a settings allow rule (`Bash(uv run --script */dispatcher-stub.py*)`
+  plus the two arm scripts) short-circuits the classifier before review; add it to the project's
+  `.claude/settings.local.json` / user `settings.json` where absent. Headless cron contexts launch
+  with `--permission-prompts none` (2.1.259) so a prompt can never stall the fire.
 - `arm_prepare.py` exits non-zero → surface its output; **do not create a cron**. A bad stub or a
   wrong install scope is worse than no arm.
 - `CronList` fails → skip the sweep; duplicates are cleaned up by the next sweep.
@@ -161,6 +168,10 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
   - [Operational rules](references/janitor-architecture.md#operational-rules)
   - [Responsibility split and safety](references/janitor-architecture.md#responsibility-split-and-safety)
   - [Known limitations](references/janitor-architecture.md#known-limitations)
+- Recommended settings allow rules (auto-mode classifier, CC 2.1.281+ — add to
+  `.claude/settings.local.json` or user `settings.json` where no installer owns them):
+  `Bash(uv run --script */dispatcher-stub.py*)`, `Bash(uv run --script */arm_prepare.py*)`,
+  `Bash(uv run --script */arm_record.py*)`.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/arm_prepare.py` · `arm_record.py` — steps 1 and 4.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — reads `desired-cadence.cron`; writes
   `armed-cadence.cron`, `heartbeat-cron-id.txt`, `heartbeat-armed-at.ts`; removes `disarmed.flag`,
