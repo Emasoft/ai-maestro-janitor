@@ -141,10 +141,13 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
 - **Auto-mode classifier (CC 2.1.281+):** the fire's `uv run --script …/dispatcher-stub.py` Bash
   call is subject to the server-side classifier, which can now block even read-only/sandboxed
   commands it flags, and a deny is terminal ("retrying will not help", 2.1.280) — so the heartbeat
-  silently stops on a flag. Mitigation: a settings allow rule (`Bash(uv run --script */dispatcher-stub.py*)`
-  plus the two arm scripts) short-circuits the classifier before review; add it to the project's
-  `.claude/settings.local.json` / user `settings.json` where absent. Headless cron contexts launch
-  with `--permission-prompts none` (2.1.259) so a prompt can never stall the fire.
+  silently stops on a flag. MEASURED: 12 live fires succeeded under 2.1.284 on the dev host
+  (2026-09-29), so the classifier is not blocking this shape there. Mitigation ATTEMPT (match
+  semantics unverified — see TRDD-5Q24T9SO's Review follow-ups; falls or stands as one): settings
+  allow rules `Bash(uv run --script */dispatcher-stub.py*)` plus the same for the two arm
+  scripts; add them to the project's `.claude/settings.local.json` / user `settings.json` where
+  absent. Headless cron contexts launch with `--permission-prompts none` (2.1.259) so a prompt
+  can never stall the fire.
 - `arm_prepare.py` exits non-zero → surface its output; **do not create a cron**. A bad stub or a
   wrong install scope is worse than no arm.
 - `CronList` fails → skip the sweep; duplicates are cleaned up by the next sweep.
