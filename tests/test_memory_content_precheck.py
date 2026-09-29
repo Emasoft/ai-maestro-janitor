@@ -2215,10 +2215,14 @@ def test_relocate_offtopic_atom_scenario(tmp_path, monkeypatch):
     dst = tmp_path / "test-isolation.md"
     atom = (
         "^ATOM-BLKL-TEST [desc: \"test isolation lesson parked off-topic\", "
-        "keywords: \"monkeypatched CLAUDE_PROJECT_DIR lru cache state isolation / "
-        "test wrote real state dir / test isolation janitor / why did my test write "
-        "the real state / shared cache between tests / isolated state dir / test "
-        "polluted machine state / lru cached project root / state project root cache\", "
+        # Key-phrases are _-joined per the wikimem grammar (`keywords: a_phrase another_phrase`) —
+        # the write gate (wave-2, TRDD-XI10BA5D) refuses space-separated multi-word phrases because
+        # parse_block_props tokenises on whitespace and the dupe rule then counts shared words
+        # like `state`/`test` as duplicates.
+        "keywords: \"monkeypatched_CLAUDE_PROJECT_DIR test_wrote_real_state_dir "
+        "test_isolation_janitor why_did_my_test_write_the_real_state "
+        "shared_cache_between_tests isolated_state_dir test_polluted_machine_state "
+        "lru_cached_project_root state_project_root_cache\", "
         "ocd: 2026-01-01, lmd: 2026-01-01]\n\n"
         "DO NOT assume a monkeypatched CLAUDE_PROJECT_DIR isolates janitor state in tests, "
         "BECAUSE state.project_root/janitor_root/state_dir/log_dir are lru-cached "
