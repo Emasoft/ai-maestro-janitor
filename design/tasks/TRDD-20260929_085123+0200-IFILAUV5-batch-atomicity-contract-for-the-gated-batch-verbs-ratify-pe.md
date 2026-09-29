@@ -4,7 +4,7 @@ title: batch atomicity contract for the gated batch verbs — ratify per-page co
 column: todo
 status: tasked
 created: 2026-09-29T08:51:23+0200
-updated: 2026-09-29T08:52:45+0200
+updated: 2026-09-29T08:57:26+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -29,3 +29,4 @@ Derived from TRDD-XI10BA5D A2-CLOSE checklist (eht — XI10BA5D cannot reach com
 ## Scope and accepted ceilings (from the XI10BA5D A2-CLOSE checklist)
 
 This card owns the disposition of the two notarized fail-safe observations from the wave-2 landing review (2026-09-29): (a) the gate's inventory read happens BEFORE the scope lock — a plan-vs-impl deviation from the A2 design's 'prepare locks the real scope'; (b) ids moving across two separate gate calls false-refuse — the batch-union id-set rule only sees ids that move within ONE gate call. Both were judged fail-safe under the one-writer convention (janitor's single-curator discipline), never silent: a false refusal names the id and the verb, recoverable by re-running the verb. Disposition: ACCEPTED CEILING pending the owner decision this card exists to get — if the owner ratifies per-page gating, (a) and (b) are named ceilings of that contract; if they choose true batch atomicity, both get redesigned away in that work. They are recorded here so the XI10BA5D close gate reads them as dispositioned, not dropped.
+ALSO a named ceiling of the batch contract (added 2026-09-29, per the step-6 bookkeeping review): the introduced-one-sided-link refusal cannot police a minted RELATIVE link — resolve_in_graph resolves URLs containing '/' or ending .md via bare canonicalize, which fails on a not-yet-existing batch destination, so only bare-name wikilinks are policed. The corpus links by bare name, so the gap is latent; if the owner ratifies per-page gating this ceiling is named and accepted alongside (a) and (b); if true batch atomicity lands, the link pass gets rewritten there anyway.
