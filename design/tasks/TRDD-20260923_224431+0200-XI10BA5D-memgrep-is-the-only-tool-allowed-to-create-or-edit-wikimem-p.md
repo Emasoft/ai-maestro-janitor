@@ -3,7 +3,7 @@ trdd-id: XI10BA5D
 title: memgrep is the only tool allowed to create or edit wikimem pages
 column: verify_assumptions
 created: 2026-09-23T22:44:31+0200
-updated: 2026-09-29T19:48:07+0200
+updated: 2026-09-29T22:51:01+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -15,7 +15,7 @@ approved: true
 approval-judge: Emasoft
 approval-datetime: 2026-09-23T22:44:31+0200
 eht: FVYV6RSG, IFILAUV5, JFIOO9XO, GD24IL7O
-implementation-commits: 1e30b72c, a731144b, 98a3eee6
+implementation-commits: d20574f0, 8476be90, 4a2082a7, 846c0413, 1afce8bc, e6b42169, 98a3eee6, 1e30b72c, 61cb7e78
 ---
 
 # memgrep is the only tool allowed to create or edit wikimem pages
@@ -47,6 +47,7 @@ Correction to the discharge line just above: the verdict-C owning card minted as
 2026-09-29 second-discharge-review verdict (fork): 2 MEDIUM + 1 LOW-M discharged inline, NITs no-action. (1) F1 — the 'this line is the gate' claim is corrected: a STATE line has no reader when a fresh session mints a retirement card; the OPERATIVE location for the npt-MUST obligation is CN5BQCM1 itself (its own trdd-drift resurfacing is the live mechanism), where it is now recorded; the line below remains as history, not as the gate. (2) F2 — the step-B amendment's 'dispatch in flight' is a stale-claim magnet; restated honestly: grandfather codes currently pass with NO tickets (window open as of 2026-09-29); ticketing is PROMISED by step B (spec drafted, worker dispatch pending) and if step B's scope changes the promise reverts to an open owner question, NOT to coverage. (3) F3 — IKZROIE5's kill-switch-yields-first fallback is PROVISIONAL assistant-default, not owner-settled policy; recorded on IKZROIE5: owner confirmation owed before any further kill-switch demotion if the cap still bites. NO-ACTION: F4 (checked — no discharge contradicts its parent), F6/F7 (cosmetic).
 CHAIN CLOSE (final-review verdict, HOLDS): same-day STATE entries are chronological — the LAST line on a subject wins; a cold reader quoting an earlier line without reaching its amendment is misquoting. Two one-line discharges applied: (a) drift = eventually-visible, not mint-time-gating (on CN5BQCM1); (b) this ordering rule. Chain closed at this verdict; further records on this line are ONE line, new content only.
 2026-09-29 STEP B LANDED — commit 1e30b72c: Rust Violation struct + stable anchors (30 sites, trailing ⟦anchor:⟧ token), WARN atom-oversized-critical (>2x env budget, exactly-2x silent), CLI tests A4 (boundary/env/placement), Python feed+detector (scope-stamped dedupe MEMCORP-00X:<scope>:<relpath>:<code>:<anchor>, ticketing before ERROR early-return, USER machine-wide claim flock+TTL fail-open), MEMCORP-002 catalog + ISSUE-CODES regen. Landing review: COMMITTABLE-as-is (no HIGH/MED). Post-edit review: KEEP both (dead all_severities kwarg removed; dict[str,Any] for pyright fail-closed gate — 4 errors proven landing-introduced by stash test). Gates re-run by coordinator: cargo 341+196 green, pytest 25 green, ruff/mypy/repo-wide-pyright clean. NEXT ACTION: step D (PreToolUse tripwire) dispatch spec. Leftover LOWs for next touch: claim flock no-timeout NIT; _error_signatures/_error_findings possibly-dead pair; raise_issue **-unpack contract is repo-hostile (root fix on catalog side); A2 dedupe migration = one transient duplicate burst on first fire.
+2026-09-29 STEP D LANDED — commit 61cb7e78: Bash-branch tripwire in pre-tool-wikimem-write-path.py (shell writes into wikimem denied: redirects/tee/sed-perl-inplace/cp-rsync-install-dd-truncate-mv/rm-class/touch; A1-A8 per the amended spec; 35 new tests; hooks.json matcher widened to include Bash — the landing review caught the Bash branch was DEAD CODE as wired). A6 exemption is a SEGMENT match not substring (same review). Gates re-run by coordinator: 61/61 guard tests, full suite 17697 passed 0 failed, ruff/mypy/pyright clean. Landing review COMMITTABLE-with-one-fix; post-edit review KEEP all 4 edits; wiring-test review KEEP. NEXT ACTION: step C close-out checks then the card's remaining eht cards (JFIOO9XO, GD24IL7O) — step D was the last implementation step of scope item 4. Leftover LOWs for next touch: _COVERED_TOOLS coupling comment; quoted-string splitting over-deny (disclosed in code); matcherless-entry wiring semantics.
 
 ## Approval log
 
