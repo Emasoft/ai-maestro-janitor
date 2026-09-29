@@ -55,9 +55,9 @@ the PROJECT-scope opt-in:
   standalone, rides `publish.py`).
 - **Retry ≤3 then abort** (ABSTAIN and report, one-line finding); other pairs are
   independent.
-- **Idempotent + crash-safe:** once a verdict applies, the retired page no longer
-  exists — a re-run of `merge-mem-topic --from <retired>` refuses on the missing
-  source (ABSTAIN per the protocol); a `rate_limited` return re-enqueues, never double-applies.
+- **Idempotent + crash-safe:** a re-run after a verdict applied is refused at the
+  gate (the retired page is a tombstone, not a mergeable source) — retry ≤3 then
+  abort per the protocol; a `rate_limited` return re-enqueues, never double-applies.
 - **Bounded + disable-able:** one scope/pass, top-K pairs, pool cap 6–15;
   `conflict_per_day=0` or the kill-switch / `WIKIMEM_EDITOR_ENABLED=off` stops it.
 
