@@ -64,7 +64,6 @@ review-after: 2026-10-05
 OWNER DECISION 2026-09-27 (verbatim, condensed): 'ok for enforcing the replacement of emails with the github user name, or if not found, simply User. exception: no-reply emails from github are fine.' Redaction rule settled: personal e-mails/account names -> github username (or literal 'User' when none); @users.noreply.github.com addresses are exempt.
 REDACTED 2026-09-27 per the owner's redaction rule: 3 account-name redactions + privacy-status line; 2 @users.noreply.github.com mentions exempt and kept; zero personal identifiers remain (reports/board-drain/20260927-K0PMVRN6-redaction.md).
 
-
 ## Owner decisions 2026-09-24 (verbatim)
 
 > no need, now it is ok. but remember: the long lived tokens are not working, so you can remove that code. the current method you just used is the right one, so save it in memory. but still you must check that the rotation will actually happen in time, just before the api/time-limit error appear. otherwise continuity is broken. you must ensure rotate is executed without broken continuity of the agents jobs across all claude code, in or outside of the ai-maestro harness. i suggest to message the ai-maestro claude to inform it of the right procedures to rotate and renew you just used.
