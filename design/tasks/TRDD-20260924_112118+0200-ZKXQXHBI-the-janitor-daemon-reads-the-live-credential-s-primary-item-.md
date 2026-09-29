@@ -3,7 +3,7 @@ trdd-id: ZKXQXHBI
 title: The janitor daemon reads the live credential's primary item behind its own latch
 column: todo
 created: 2026-09-24T11:21:18+0200
-updated: 2026-09-29T07:51:35+0200
+updated: 2026-09-29T07:54:11+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -32,3 +32,4 @@ Logging that becomes live once the daemon reads the primary: (1) the F1 "primary
 ## Implementation log
 
 2026-09-29: implemented in commit 3c48d054 — latch (denial-at-once, 3-timeout threshold, 600 s cooldown, latch FILE for cross-tick streak) in rotator._read_primary_macos_keychain + helpers; run_security latch_denial knob (safe_storage); per-tick read memo invalidated by write_live_blob; daemon no longer forces JANITOR_ROTATOR_HEADLESS (stays an operator lever); F1 capture line names skip-policy vs latch-refusal; capture+F5 UNRESOLVABLE lines durable and deduplicated per fp. Gates: pytest 194 passed (both touched files), ruff clean, mypy clean, pyright 0 errors. OPEN: the prerequisite LaunchAgent-context read probe (the 2026-09-24 test ran interactive) still to run before this ships in a publish; a test per latch rule exists (7 new tests).
+2026-09-29 LANDED+MAIN-VERIFIED: 3c48d054 (latch implementation; file set: daemon.py 18, rotator.py 243, safe_storage.py 15, test_oauth_rotator.py 268, test_safe_storage.py 32) + 2fbdc17d (this card's log). Main's independent verification: 194 tests pass on the two touched suites (3.81s), ruff clean on all 5 files, mypy clean on rotator.py, pyright 0/0/0 on rotator.py. The mid-flight pyright diagnostics the session saw (ModuleType attribute assignments in tests, _slot_keychain_delete unused) all clear at HEAD — they were working-set noise, not landed-state findings. OPEN before publish: the LaunchAgent-context read probe (prerequisite on this card) — the code fail-safes correctly either way (unreadable read falls back to the mirror exactly as the old HEADLESS skip did).
