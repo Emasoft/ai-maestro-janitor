@@ -24,8 +24,11 @@ each stage does and how the verdict is committed.
 Run these gates first; if any fails, emit a one-line finding and stop (mutate
 nothing):
 
-1. **memgrep present.** `command -v memgrep` must resolve; a missing binary or a
-   verb the installed build does not know (unknown-command / usage refusal) means
+1. **Editor kill-switch + memgrep present.** If `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`
+   or the janitor kill-switch is present, stop — that is the user's emergency stop for
+   ALL automated wikimem edits, and the memgrep verbs do not consult it, so this check
+   is where it still bites. Also `command -v memgrep` must resolve; a missing binary or
+   a verb the installed build does not know (unknown-command / usage refusal) means
    ABSTAIN and report the gap — never fall back to Edit/Write or the txn core.
 2. **Due-check + scope selection.** This pass is cadence-limited
    (`conflict_per_day`, off by default (opt-in)). Use the settings lib:
@@ -196,6 +199,12 @@ into the survivor as a compounding `[^N]`. Nothing is lost — only the slug mer
 
 ```bash
 # sources = the conflict PAIR: <obsolete.md> (to retire) + <current.md> (survivor)
+# 0. HOLDERS FIRST — every THIRD page still linking [[<obsolete_slug>]] must be
+#    repointed BEFORE the merge (`memgrep links --from <obsolete>` finds them):
+#    memgrep reference-mem-topic --page <holder> --to <current>
+#    The merge verb wires only the survivor↔tombstone See-also; it does NOT
+#    retarget third pages, and the gate's one-sided-link rule sees only the
+#    bytes IN the write — a holder left behind rots as a one-sided link (LINK LAW).
 # 1. Fold the obsolete page's knowledge into the survivor as a compounding [^N]:
 #    - body = the CURRENT truth (unchanged or clarified), linking the fact to [^N]
 #    - a NEW compounding [^N] under "## Notes and lessons learned", in THE LESSON
@@ -222,6 +231,7 @@ lost even on a "delete":
 
 ```bash
 # sources = the conflict PAIR: <false.md> (to retire) + <survivor.md>
+# Step 0 (HOLDERS FIRST, third-party `reference-mem-topic` redirects) as in DEMOTE.
 # Same three steps as DEMOTE with the [^N] framing below — the fold carries the
 # false page's OWN [^N] lessons verbatim too:
 #   "[keywords: <the retired page's recall words>, ocd: <the false page's ocd>, lmd:
@@ -300,9 +310,11 @@ root, now)` so the cadence is respected and the next heartbeat doesn't re-fire.
 The write gate refuses a whole-page write that silently drops an atom id or lesson
 (id-set rule), and a verdict's fold REQUIRES the retired page's `ocd` and lessons to
 ride into the survivor — `merge-mem-topic` enforces exactly that (one gated batch:
-survivor write + source tombstone, refusing a dangling link to the retired slug). So a
-verdict MUST retire one page of the pair — never keep both, never edit one page in
-place with no fold. The recipes above satisfy exactly that.
+survivor write + source tombstone). It does NOT police a REMOVAL-created one-sided
+link: a third page left pointing at the retired slug is invisible to every rule
+(the step-1 ceiling) — that is why HOLDERS FIRST (step 0) is mandatory in both
+recipes. So a verdict MUST retire one page of the pair — never keep both, never
+edit one page in place with no fold. The recipes above satisfy exactly that.
 
 ## Security and scope
 

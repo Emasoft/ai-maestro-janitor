@@ -7,14 +7,14 @@ description: CONSOLIDATE (MERGE) executor — fuses two duplicate memory notes a
 
 You run as a dedicated background Sonnet agent — the whole pass runs in your own
 context, and you return only a one-line result + the report path. It fuses two
-same-subject, same-type/tier memory notes into one page through the transaction
-core, never losing a fact. Full execution-context rationale and the MERGE
+same-subject, same-type/tier memory notes into one page through the memgrep write
+verbs, never losing a fact. Full execution-context rationale and the MERGE
 overview: [merge-background § Execution context and what this is](references/merge-background.md#execution-context-and-what-this-is).
 
-**THE ONE HARD RULE: never edit a live memory page directly.** Every change is
-made to *copies* inside a staging dir that the CLI hands you; the CLI verifies the
-result lost nothing and applies it atomically. If you `Edit` a file under a memory
-root directly, you have broken the contract — undo it.
+**THE ONE HARD RULE: never edit a live memory page directly.** Every change goes
+through a gated memgrep verb (the merge verb, or a whole-page replace of a survivor
+you build); the gate verifies the result lost nothing and writes atomically. If you
+`Edit` a file under a memory root directly, you have broken the contract — undo it.
 
 ## Default posture — ABSTAIN unless certain
 
@@ -29,7 +29,6 @@ Full framing + why over-merging is worse than a missed merge:
 
 ```bash
 JANITOR_ROOT="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$CLAUDE_PLUGIN_ROOT")"
-CLI="$JANITOR_ROOT/scripts/memory_txn_cli.py"
 uv run --quiet - <<PY || { echo "wikimem editor disabled — abstain"; exit 0; }
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_txn
@@ -37,7 +36,10 @@ sys.exit(0 if memory_txn.editor_enabled() else 1)
 PY
 ```
 
-Run this kill-gate BEFORE claiming. Heredoc is UNQUOTED (`<<PY`) so `$JANITOR_ROOT`
+Run this kill-gate BEFORE claiming — `editor_enabled` is the user's emergency
+stop for ALL automated wikimem edits, so honor it even though the writes now go
+through memgrep verbs (the verbs do not consult it; this preflight is where the
+control still bites). Heredoc is UNQUOTED (`<<PY`) so `$JANITOR_ROOT`
 expands — a quoted `<<'PY'` false-abstains even when enabled.
 
 Process exactly **ONE scope this run**, and CLAIM it before touching anything —
@@ -116,7 +118,7 @@ error. Procedure: [merge-protocol § Candidate selection details](references/mer
 
 `is_legal_merge` is **your** pre-flight check, refused on `False` (cross-tier,
 non-mergeable tier, cross-type). Run it and the refusal catalog:
-[merge-protocol § is_legal_merge](references/merge-protocol.md#what-is_legal_merge-checks-your-pre-flight-not-the-clis).
+[merge-protocol § is_legal_merge](references/merge-protocol.md#what-is_legal_merge-checks-your-pre-flight-not-the-verbs).
 
 ### 4. No-third-page check (pre-merge)
 
@@ -148,9 +150,10 @@ The non-negotiables you must uphold:
 - **Then `merge-mem-topic --from <B> --into <A>`** — the survivor keeps A's slug; the verb
   folds every `[^N]` lesson byte-identical, keeps `ocd = min(A,B)`, advances `lmd`, wires the
   reciprocal See-both-ways link, and tombstones B in place (one gated write, batch-atomic).
-- **Build per [merge-page-rules](references/merge-page-rules.md)** — no duplicate lines, no
-  link to a retired slug, edge sections merged + deduped. Where the verb's fold falls short
-  of the rules, build the complete survivor page yourself and `replace-mem-topic` it.
+  This is a MERGE-then-polish shape, never a substitute: the merge runs FIRST (it is what
+  tombstones B); `replace-mem-topic` on the survivor is a POST-merge polish only, when the
+  verb's fold needs hand-adjustment to meet [merge-page-rules](references/merge-page-rules.md)
+  — never an instead-of (a bare replace leaves B live and doubles the subject).
 - **A refusal names every violation** — fix the input and retry ≤3, then abandon with a
   `[janitor-memory] … abandoned` finding. If the merge shape needed has no path through a
   memgrep verb, ABSTAIN and report the gap — never hand-edit the live page.
@@ -205,19 +208,19 @@ uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" c
   - [Default posture — ABSTAIN unless certain](references/merge-background.md#default-posture-abstain-unless-certain)
   - [Idempotency & bounds](references/merge-background.md#idempotency-bounds)
   - [Scope of this skill](references/merge-background.md#scope-of-this-skill)
-- [merge-protocol](references/merge-protocol.md) — claim exit codes, the two-phase txn
-  contract, `is_legal_merge`/`verify_merge`, backlink redirect (Step 5), the executable
-  sequence (Steps 6-10), slug rules, worked + failure-path walkthroughs, bounds/safety,
-  recording an abstain.
+- [merge-protocol](references/merge-protocol.md) — claim exit codes, the memgrep verb
+  contract, `is_legal_merge`/the write-gate refusal catalog, backlink redirect (Step 5),
+  the executable sequence (Steps 6-10), slug rules, worked + failure-path walkthroughs,
+  bounds/safety, recording an abstain.
   - [No-third-page check (pre-merge)](references/merge-protocol.md#no-third-page-check-pre-merge)
   - [Claim exit codes](references/merge-protocol.md#claim-exit-codes)
-  - [The two-phase transaction contract](references/merge-protocol.md#the-two-phase-transaction-contract-scriptsmemory_txn_clipy)
-  - [What is_legal_merge checks](references/merge-protocol.md#what-is_legal_merge-checks-your-pre-flight-not-the-clis)
-  - [What verify_merge enforces at commit](references/merge-protocol.md#what-verify_merge-enforces-at-commit-the-failure-catalog)
+  - [The two-phase transaction contract](references/merge-protocol.md#the-memgrep-verb-contract-no-staged-copies-no-hand-edits)
+  - [What is_legal_merge checks](references/merge-protocol.md#what-is_legal_merge-checks-your-pre-flight-not-the-verbs)
+  - [What the merge write gate refuses](references/merge-protocol.md#what-the-merge-write-gate-refuses-the-failure-catalog)
   - [Why backlink redirect is the load-bearing step](references/merge-protocol.md#why-backlink-redirect-is-the-load-bearing-step)
   - [Slug rules](references/merge-protocol.md#slug-rules)
   - [Worked walkthrough](references/merge-protocol.md#worked-walkthrough-local-scope-two-project-component-notes)
-  - [Failure-path walkthrough](references/merge-protocol.md#failure-path-walkthrough-verify-fail-bounded-retry)
+  - [Failure-path walkthrough](references/merge-protocol.md#failure-path-walkthrough-gate-refusal--bounded-retry)
   - [Bounds & safety recap](references/merge-protocol.md#bounds-safety-recap)
   - [Steps 6-10 — the executable sequence (moved from the SKILL body)](references/merge-protocol.md#steps-6-10-the-executable-sequence-moved-from-the-skill-body)
   - [Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)](references/merge-protocol.md#step-5-discover-the-backlinks-to-redirect-the-link-law-mandatory)

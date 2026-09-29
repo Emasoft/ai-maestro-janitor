@@ -26,12 +26,13 @@ changes `ocd`, never merges/splits/deletes.
 
 1. **No knowledge lost.** Every `[^N]` lesson and every fact survives byte-for-byte — the
    verifier proves it.
-2. **Never edit a page by hand.** Every page write goes through a memgrep write verb
-   (single-page: `update-mem-atom --keywords/--desc` for the keyword/description shapes
-   enrich makes; whole-page: `replace-mem-topic --page P --content-file F`). The gate
-   lints, formats, validates and writes atomically — or refuses naming every violation.
-   If the installed memgrep does not know a verb (unknown-command / usage refusal),
-   ABSTAIN and report the gap — never fall back to Edit/Write or the txn core.
+2. **Never edit a page by hand.** Every page write goes through a memgrep write verb:
+   atom `keywords:` → `update-mem-atom --keywords` (NEVER `--desc`: rule 3 below forbids
+   the atom's `desc:`); page `description:` → `replace-mem-topic --page P --content-file F`
+   (whole page). The gate lints, formats, validates and writes atomically — or refuses
+   naming every violation. If the installed memgrep does not know a verb
+   (unknown-command / usage refusal), ABSTAIN and report the gap — never fall back to
+   Edit/Write or the txn core.
 
    > There is deliberately **no `--op enrich`** in the txn core. An enrich edit has the
    > identical shape to a repair — exactly ONE write at the page's own path, zero deletes —
@@ -50,7 +51,12 @@ changes `ocd`, never merges/splits/deletes.
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Scope — CLAIM it, never self-select or re-check `is_due`.**
+1. **Editor kill-switch.** If `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off` or the
+   janitor kill-switch is present, do not mutate anything — that is your hard stop
+   (the memgrep verbs do not consult the switch, so this check is where the user's
+   emergency stop still bites). Then:
+
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
 
    Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
    `export` below before running the claim — the guard on the next line refuses to run
