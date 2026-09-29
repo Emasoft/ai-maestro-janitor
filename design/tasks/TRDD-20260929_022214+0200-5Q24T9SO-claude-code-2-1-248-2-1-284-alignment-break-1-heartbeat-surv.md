@@ -4,7 +4,7 @@ title: Claude Code 2.1.248-2.1.284 alignment — BREAK-1 heartbeat survival unde
 column: todo
 status: tasked
 created: 2026-09-29T02:22:14+0200
-updated: 2026-09-29T02:22:19+0200
+updated: 2026-09-29T02:26:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -24,3 +24,8 @@ Source triage: reports/changelog-align/20260929_022045+0200-code_task-cc-changel
 ## Approval log
 
 - 2026-09-29T02:22:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+
+## Verification ledger
+
+STANDING CAVEAT (mint review, HOLDS): the source triage ran on a free-tier model (deepseek-v4-flash) which misreported its own window bounds (claimed 2.1.250 start vs the file's 2.1.248) — treat EVERY item below as model-word-only until its own work item verifies it. Main has verified verbatim: BREAK-1's two lines + ADOPT-4's line. NOT yet verified: BREAK-2 (Jev/RC ordering), BREAK-3 (agent-hook PermissionRequest), and ADOPTs 1-3,5-11. Item (4)'s grep must run BEFORE any dispatch on it. The BREAK-1 worker was dispatched WITH its measurement folded in — its measurement is not independent; the landing review must judge the evidence, not the conclusion. Settings-drift failure mode (item 1): allow rules added to the project's machine-local settings override file is unversioned; the no-installer fallback (docs-only) leaves the fix unversioned — the landing record must state that gap explicitly. MANIFEST PROVENANCE (verified 2026-09-29 post-review): git diff b399693c^..HEAD -- CLAUDE.md is exactly 3 lines, ALL inside the JANITOR-WIKIMEM-INDEX markers (digest line + the jev-compaction entry); the re-hash certified nothing outside the index block. Improvement recorded: the self-integrity pass should refresh the manifest in the SAME commit that regenerates the index.
