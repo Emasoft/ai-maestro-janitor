@@ -1025,6 +1025,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The 1→2 SPREAD of an id the disk already carries on ONE page: the atom exists on page A
+    /// on disk (old count ONE) and the batch proposes it on A AND B — count growth must REFUSE
+    /// even though the id was not minted by this batch (the filter compares against the old page
+    /// count with a floor of one). Also pins the message shape: the id is named and the count
+    /// phrased as "… pages of this batch", the landing-review obligation 2 wording. (The
+    /// inherited-dup old=2→3 growth and its preserve-passes twin are the filter's same max-floor
+    /// arithmetic, still unpinned by a test — named on the card.)
+    #[test]
+    fn spread_from_one_page_to_two_refuses() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_gd24il7o_spread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("spread-a.md");
+        let b = dir.join("spread-b.md");
+        let atom = "^ATOM-SPREAD-1 [ocd: 2026-01-01, keywords: spreadkey]\nspread body\n";
+        std::fs::write(&a, format!("---\nname: p\n---\n{atom}")).unwrap();
+        std::fs::write(&b, "---\nname: p\n---\nplain body\n").unwrap();
+        let a_new = format!("---\nname: p\n---\n{atom}");
+        let b_new = format!("---\nname: p\n---\n{atom}\n## Notes and lessons learned\n");
+        let err = prepare_batch_gated(&[(&a, &a_new), (&b, &b_new)], &GatePolicy::default())
+            .expect_err("spreading an existing id from one page to TWO must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("duplicate-id rule") && msg.contains("nothing was written"),
+            "the refusal must be the zero-write DUPLICATE arm: {msg}"
+        );
+        assert!(
+            msg.contains("ATOM-SPREAD-1"),
+            "the spread id must be named: {msg}"
+        );
+        assert!(
+            msg.contains("of this batch"),
+            "the refusal must use the batch-internal qualifier phrase: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // ── TRDD-XI10BA5D A2 step 6: the one-sided-link refusal ─────────────────────────────────────
 
     /// An edit that ADDS a `[[target]]` wikilink whose page does not link back must REFUSE,

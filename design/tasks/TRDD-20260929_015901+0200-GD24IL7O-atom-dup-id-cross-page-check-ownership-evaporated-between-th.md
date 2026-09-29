@@ -1,10 +1,10 @@
 ---
 trdd-id: GD24IL7O
 title: atom-dup-id cross-page check — ownership evaporated between the step-2 floor table and the batch layer
-column: todo
+column: testing
 status: tasked
 created: 2026-09-29T01:59:01+0200
-updated: 2026-09-29T09:11:14+0200
+updated: 2026-09-30T00:19:44+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,3 +35,5 @@ Found by BOTH wave-2 review forks (2026-09-29). Step-2's landing record excluded
 
 2026-09-29: this card now gates TRDD-XI10BA5D's close — XI10BA5D's eht lists it (correction round 2026-09-29). Directional signal added per the close-out review (the gate was one-directional until now). XI10BA5D's verification check-box requires reading this card's content and truing the column; step 6's link check resolves names not ids so the id-collapse defect does not directly corrupt it, but both run inside one prepare whose inventory is the contested object.
 True state (2026-09-29, added per the heading-fix review): part (a) LANDED e559e25c per the Implementation section below (landing review HOLDS, 3 next-touch obligations recorded there — spread-rule CURE, batch-internal-only qualifier, cosmetic mypy rider); part (b) cross-batch boundary OPEN; card in testing; the coordination note below concerns XI10BA5D gating only.
+2026-09-30 dispatch: spread-rule CURE test (inherited_dup_spread_to_a_second_page_refuses) in flight — lean-worker, test-only, filter at pre_write.rs:226 verified already refusing 1→2 growth (byte-identical to e559e25c); obligations 2 (batch-internal qualifier) rides the same test's message assertion; obligation 3 (mypy rider) is record-only, discharged at commit time. Card moved todo→dev (WORK column now true).
+2026-09-30 dispatch-review (fork, HOLDS-with-findings) + landing verification: the spread test LANDED and was independently verified (main ran it; old inventory confirmed non-vacuous — the atom is on disk page A before the batch, so old=1→2 refuses, the review's exact CURE case). Review fixes applied: (1) test renamed inherited_dup_spread_to_a_second_page_refuses → spread_from_one_page_to_two_refuses (the old name mislabeled 1→2 as 'inherited dup'); the doc comment now names the unpinned old=2 pair (2→3 growth refuse / preserve-pass) as a recorded test debt — the filter's same max-floor arithmetic, one future test when touched. (2) Record correction: obligation 2 was ALREADY discharged by e559e25c itself (message qualifier + doc comment); the new test only PINS it against regression — the earlier dispatch line's 'rides the same test's assertion' overstated. (3) Obligation 3 (mypy rider, VIFQ1LKI cosmetic) is record-only and is discharged BY THIS LINE's record + the commit message at commit time — the committer is this session (parent), not the worker. (4) Post-worker column hygiene: dev→testing in the same turn as the worker's completion report. 'byte-identical to e559e25c' method: whole-file diff attributed the 419-line delta to later commits plus the filter line's exact match.
