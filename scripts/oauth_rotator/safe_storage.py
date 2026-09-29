@@ -322,8 +322,18 @@ def _log_if_slow(elapsed_ms: float, timeout: float, argv: list[str], *, half_ope
         pass
 
 
-def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S, may_prompt: bool) -> SecurityRun:
+def run_security(
+    argv: list[str], *, timeout: float = _CLI_TIMEOUT_S, may_prompt: bool,
+    latch_denial: bool = True,
+) -> SecurityRun:
     """THE single gate EVERY `security` invocation (safe_storage AND rotator) routes through.
+
+    ``latch_denial=False`` (TRDD-ZKXQXHBI): the denial branch below RETURNS ``denied=True``
+    but does NOT set the SHARED machine-wide latch — for the daemon's primary-read attempt,
+    whose ACL denial is a NORMAL, EXPECTED outcome (Claude owns that item) and must never
+    blind the unrelated slot reads/writes the shared latch protects. Timeouts are already
+    caller-owned via ``may_prompt``; this knob gives the denial path the same isolation.
+    Default ``True`` = byte-identical to every pre-existing caller.
 
     Enforces the protocol in order: (b) denied-latch short-circuit BEFORE spawning →
     (a) hard timeout → (d) latch-on-denial. Never raises. When the latch is unset and no
@@ -400,7 +410,8 @@ def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S, may_prompt
         # NOT resetting `_consecutive_timeouts` here is deliberate (mirrors the TS port): a
         # denial is the keychain refusing, not answering, so it is no evidence a run of
         # timeouts is over.
-        set_keychain_denied("`security` returned an ACL/auth/user-canceled denial")
+        if latch_denial:
+            set_keychain_denied("`security` returned an ACL/auth/user-canceled denial")
         return SecurityRun(ok=False, stdout=proc.stdout or "", stderr=stderr, spawned=True, denied=True, returncode=proc.returncode)
     # Spawned and NOT denied → the keychain answered without prompting. The keychain answered,
     # so any run of timeouts is broken — reset the counter (a benign not-found counts too).

@@ -244,6 +244,38 @@ def test_run_security_latch_short_circuits_without_spawning(monkeypatch: pytest.
 
 
 # ---------------------------------------------------------------------------
+# TRDD-ZKXQXHBI — latch_denial=False: report the denial WITHOUT setting the
+# SHARED machine-wide latch (the daemon's primary read is denied by design).
+# ---------------------------------------------------------------------------
+def test_run_security_latch_denial_false_reports_denial_without_latching(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`latch_denial=False` returns denied=True for a denial-shaped `security` result but
+    leaves `keychain-denied.latch` ABSENT — so the isolated caller's expected denial (the
+    daemon reading Claude's own primary item, TRDD-ZKXQXHBI) never blinds the unrelated
+    slot ops the shared latch protects. The default (`latch_denial=True`) still latches."""
+    ss.clear_keychain_denied()
+    _reset_consecutive_timeouts()
+
+    def _denied(*a, **k):  # type: ignore[no-untyped-def]
+        class _P:
+            returncode = 45
+            stdout = ""
+            stderr = "security: SecKeychainItemCopyFromAttribute: User interaction is not allowed."
+        return _P()
+
+    monkeypatch.setattr(ss.subprocess, "run", _denied)
+    argv = ["security", "find-generic-password", "-s", "x", "-a", "y", "-w"]
+
+    run = ss.run_security(argv, may_prompt=True, latch_denial=False)
+    assert run.denied is True and run.ok is False and run.spawned is True
+    assert ss.keychain_denied_latched() is False, "an isolated denial must NOT set the shared latch"
+
+    run = ss.run_security(argv, may_prompt=True)  # default: byte-identical to pre-ZKXQXHBI
+    assert run.denied is True
+    assert ss.keychain_denied_latched() is True, "the default must still latch (unchanged)"
+    assert ss.clear_keychain_denied() is True
+
+
+# ---------------------------------------------------------------------------
 # TRDD-3VIXO8FA — a `security` TIMEOUT is not a denial: a `may_prompt=False` (attribute-only)
 # timeout must never touch the latch, and a `may_prompt=True` timeout latches only on the
 # 3rd CONSECUTIVE occurrence (an answered op resets the count).

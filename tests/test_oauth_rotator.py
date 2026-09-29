@@ -50,9 +50,15 @@ def _isolate_rotator_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     `_log` reads BOTH globals at call time (`ROOT.mkdir`, the trim tmp under ROOT, and `LOG_FILE`),
     so both are redirected. `_log` stays fully functional (it writes into the tmp ROOT), so the
     dedicated `_log` tests — which re-patch `LOG_FILE` to their own tmp INSIDE the test body, AFTER
-    this fixture runs — are unaffected and still assert on real log content."""
+    this fixture runs — are unaffected and still assert on real log content.
+
+    Also resets `_PRIMARY_READ_MEMO` (TRDD-ZKXQXHBI): a module-global that would otherwise leak a
+    blob (or a None "attempted") from one test into the next test's `_read_live_primary`, which
+    under the memo returns the LEAKED result without any read at all. monkeypatch restores the
+    pre-test value on teardown."""
     monkeypatch.setattr(rotator, "ROOT", tmp_path)
     monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
 
 
 def _blob(token: str, *, refresh: str | None = "r", expires_ms: int | None = None) -> dict:
@@ -714,10 +720,270 @@ def test_read_live_primary_skips_prompting_read_when_headless(isolated_keychain,
             rotator.KEYCHAIN_SERVICE, acct, json.dumps(blob, separators=(",", ":")))
         monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
         assert rotator._read_live_primary() == blob            # session context: reads the value
+        monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)  # the per-tick memo (TRDD-ZKXQXHBI) holds phase 1's blob
         monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
         assert rotator._read_live_primary() is None            # headless: skipped → no prompt
     finally:
         rotator._slot_keychain_delete(acct, service=rotator.KEYCHAIN_SERVICE)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TRDD-ZKXQXHBI — the daemon's OWN primary-read latch (separate from the shared
+# keychain latch): one bounded read per tick; a -25308 denial trips at once,
+# timeouts need 3 in a row, 600 s cooldown, mirror fallback, shared latch never
+# tripped, log once per state change, never retries within the tick.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SR = rotator.safe_storage.SecurityRun
+
+
+def _deny_run() -> "object":
+    return _SR(ok=False, stdout="", stderr="security: SecKeychainItemCopyFromAttribute: "
+               "User interaction is not allowed.", spawned=True, denied=True, returncode=45)
+
+
+def _timeout_run() -> "object":
+    return _SR(ok=False, stdout="", stderr="", spawned=True, denied=False, returncode=None)
+
+
+def _notfound_run() -> "object":
+    return _SR(ok=False, stdout="", stderr="security: SecKeychainItemSearchCmd: could not be found",
+               spawned=True, denied=False, returncode=44)
+
+
+def test_primary_read_denial_trips_latch_once_and_falls_back_to_mirror(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE core rule: a -25308 refusal trips the PRIMARY-read latch AT ONCE, the read
+    returns None so read_live_blob falls to the MIRROR, and the SHARED keychain latch
+    stays untouched. Without the change (HEADLESS skip) no read is even attempted and
+    this path is unreachable — the test fails on pre-fix code by construction."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    calls = {"n": 0}
+
+    def _fake_run_security(argv, timeout=None, may_prompt=None, latch_denial=True):  # noqa: ARG001
+        calls["n"] += 1
+        return _deny_run()
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _fake_run_security)
+    monkeypatch.setattr(rotator.safe_storage, "keychain_denied_latched", lambda: False)
+    monkeypatch.setattr(rotator, "_live_backup_read", lambda: _blob("MIRROR"))
+
+    blob, src = rotator.read_live_blob_with_source()
+    assert blob is not None and src == "mirror", "a refused primary must fall back to the mirror"
+    assert calls["n"] == 1, "exactly ONE bounded read per tick"
+    latch = rotator._primary_read_latch_state()
+    assert latch.get("latched_epoch") is not None, "the denial trips the primary-read latch at once"
+
+    # The SECOND call this tick must NOT retry (the memo), and the shared latch was never set.
+    blob2, src2 = rotator.read_live_blob_with_source()
+    assert calls["n"] == 1, "never retries within the tick (the memo)"
+    assert rotator.safe_storage.keychain_denied_latched() is False, \
+        "a primary-read refusal must NEVER trip the SHARED keychain latch"
+
+
+def test_primary_read_latched_within_cooldown_skips_read_silently(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """While latched (< 600 s old) the read is SKIPPED entirely — zero `security` spawns
+    (the mirror still serves) — and no new log line fires (once per STATE CHANGE)."""
+    rotator._primary_read_latch_write({"latched_epoch": time.time(), "timeouts": 0})
+    lines: list = []
+    monkeypatch.setattr(rotator, "_log", lambda m: lines.append(m))
+
+    def _landmine(*a, **k):  # noqa: ARG001
+        raise AssertionError("a latched primary read must not spawn `security`")
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _landmine)
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    monkeypatch.setattr(rotator, "_live_backup_read", lambda: _blob("MIRROR"))
+    blob, src = rotator.read_live_blob_with_source()
+    assert (blob is not None, src) != (None, "none")
+    assert src == "mirror"
+    assert lines == [], "a latched tick must not re-log — once per state CHANGE"
+
+
+def test_primary_read_timeout_latches_only_on_third_consecutive(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timeouts need 3 IN A ROW (a lone timeout is host load — TRDD-3VIXO8FA's calibration);
+    each increment logs once; an answered read resets the streak. Timeout #3 latches."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    runs = [_timeout_run(), _timeout_run(), _timeout_run(), _notfound_run(), _timeout_run()]
+    calls = {"n": 0}
+
+    def _fake_run_security(argv, timeout=None, may_prompt=None, latch_denial=True):  # noqa: ARG001
+        r = runs[min(calls["n"], len(runs) - 1)]
+        calls["n"] += 1
+        return r
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _fake_run_security)
+    monkeypatch.setattr(rotator.safe_storage, "keychain_denied_latched", lambda: False)
+    lines: list = []
+    monkeypatch.setattr(rotator, "_log", lambda m: lines.append(m))
+
+    rotator._read_live_primary()
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+    rotator._read_live_primary()
+    assert rotator._primary_read_latch_state().get("latched_epoch") is None, "2 timeouts: no latch"
+    assert len(lines) == 2, "timeout 1 and 2 each log once"
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+    rotator._read_live_primary()
+    assert rotator._primary_read_latch_state().get("latched_epoch") is not None, "3rd consecutive latches"
+    # (While the latch is FRESH a read is skipped entirely — clearing it happens via the
+    # cooldown's half-open probe, covered by test_primary_read_latch_cooldown_….)
+
+    # Streak reset: unlatched again, an ANSWERED read between timeouts resets the counter.
+    rotator._primary_read_latch_write({})  # simulate a cooled-down/expired latch (no latched_epoch)
+    monkeypatch.setattr(rotator.safe_storage, "run_security",
+                        lambda *a, **k: _notfound_run())
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+    rotator._read_live_primary()  # answered → counter reset to 0
+    monkeypatch.setattr(rotator.safe_storage, "run_security",
+                        lambda *a, **k: _timeout_run())
+    lines.clear()
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+    rotator._read_live_primary()
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+    rotator._read_live_primary()
+    assert rotator._primary_read_latch_state().get("latched_epoch") is None, \
+        "a post-reset timeout streak restarted at 1 — two timeouts cannot latch"
+
+
+def test_primary_read_latch_cooldown_allows_one_half_open_probe(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """After the 600 s cooldown the latch permits exactly ONE probe: probe allowed (re-stamp),
+    immediate re-probe blocked; a failing probe re-stamps WITHOUT a new 'REFUSED' line
+    (state unchanged); a SUCCEEDING probe clears the latch with a RECOVERED line."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    t0 = 1_000_000.0
+    rotator._primary_read_latch_write({"latched_epoch": t0 - rotator.PRIMARY_READ_LATCH_COOLDOWN_S - 1,
+                                       "timeouts": 0})
+    assert rotator._primary_read_probe_allowed(now=t0) is True, "stale latch → one probe"
+    assert rotator._primary_read_probe_allowed(now=t0) is False, "re-stamped → closed again"
+
+    # A denial on the probe: silent re-stamp (state UNCHANGED → no new log line).
+    lines: list = []
+    monkeypatch.setattr(rotator, "_log", lambda m: lines.append(m))
+
+    def _denial(*a, **k):  # noqa: ARG001
+        return _deny_run()
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _denial)
+    monkeypatch.setattr(rotator.safe_storage, "keychain_denied_latched", lambda: False)
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+    rotator._read_live_primary()
+    assert rotator._primary_read_latch_state().get("latched_epoch", 0) >= t0, \
+        "probe failure re-stamps (fresh stamp, still latched)"
+    assert lines == [], "a re-trip on the half-open probe is NOT a state change — silent"
+
+    # A succeeding probe (past the next cooldown) clears the latch and logs the recovery.
+    rotator._primary_read_latch_write(
+        {"latched_epoch": t0 - rotator.PRIMARY_READ_LATCH_COOLDOWN_S - 1, "timeouts": 0})
+    monkeypatch.setattr(rotator.safe_storage, "run_security",
+                        lambda *a, **k: _SR(ok=True, stdout=json.dumps(_blob("FRESH")),
+                                            stderr="", spawned=True, denied=False, returncode=0))
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+    blob = rotator._read_live_primary()
+    assert blob == _blob("FRESH")
+    assert rotator._primary_read_latch_state() == {}, "a successful probe clears the latch"
+    assert any("RECOVERED" in m for m in lines), "recovery is a state change — logged once"
+
+
+def test_primary_read_benign_notfound_is_not_a_denial(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A proven item-not-found (rc 44) is the keychain ANSWERING, not refusing: no latch,
+    no timeout streak — the primary is simply absent (the mirror fallback applies)."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    monkeypatch.setattr(rotator.safe_storage, "run_security",
+                        lambda *a, **k: _notfound_run())
+    monkeypatch.setattr(rotator.safe_storage, "keychain_denied_latched", lambda: False)
+    assert rotator._read_live_primary() is None
+    assert rotator._primary_read_latch_state() == {}, "not-found must never latch"
+
+
+def test_primary_read_memo_never_retries_within_tick_but_write_invalidates(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-tick memo: several _read_live_primary calls in one tick → exactly ONE
+    attempt (the result, None included, is reused); write_live_blob invalidates the
+    memo so an in-process switch re-reads what it just wrote."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    calls = {"n": 0}
+
+    def _fake_run_security(argv, timeout=None, may_prompt=None, latch_denial=True):  # noqa: ARG001
+        calls["n"] += 1
+        return _SR(ok=True, stdout=json.dumps(_blob("READ-ONCE")),
+                   stderr="", spawned=True, denied=False, returncode=0)
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _fake_run_security)
+    monkeypatch.setattr(rotator.safe_storage, "keychain_denied_latched", lambda: False)
+    first = rotator._read_live_primary()
+    assert first == _blob("READ-ONCE")
+    assert rotator._read_live_primary() == first
+    assert rotator._read_live_primary() == first
+    assert calls["n"] == 1, "one bounded attempt per tick regardless of caller count"
+
+    monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)  # reset, then simulate: memoized None, then a write
+    monkeypatch.setattr(rotator.safe_storage, "run_security", lambda *a, **k: _deny_run())
+    assert rotator._read_live_primary() is None        # the memo now holds {blob: None}
+    assert rotator._read_live_primary() is None
+    assert calls["n"] == 1, "a memoized None is reused — no re-attempts this tick"
+
+    monkeypatch.setattr(rotator, "_security_add_password_via_stdin", lambda *a, **k: None)
+    monkeypatch.setattr(rotator, "_keychain_item_exists", lambda *a, **k: True)
+    monkeypatch.setattr(rotator, "_live_backup_write", lambda b: None)
+    rotator.write_live_blob(_blob("NEW-LIVE"))
+    assert rotator._PRIMARY_READ_MEMO is None, "a write invalidates the read memo"
+
+
+def test_capture_f1_line_names_skip_policy_vs_latch_refusal(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """Review correction 1: the durable F1 capture line says WHETHER the read was
+    skipped by policy (HEADLESS) or refused (the primary-read latch)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "healed@x", "live_fp": "h" * 16, "slots": {}})
+    monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    monkeypatch.setattr(rotator, "read_live_blob_with_source", lambda: (_blob("STALE"), "mirror"))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: pytest.fail("must not resolve a mirror blob"))
+
+    monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
+    rotator._primary_read_latch_write({"latched_epoch": time.time(), "timeouts": 0})
+    rotator.cmd_capture(only_if_running=False)
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert "skipped by policy (JANITOR_ROTATOR_HEADLESS)" in log
+    assert "UNREADABLE" in log
+
+    lines: list = []
+    monkeypatch.setattr(rotator, "_log", lambda m: lines.append(m))
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    rotator.cmd_capture(only_if_running=False)
+    assert any("refused by the primary-read latch" in m for m in lines)
+
+
+def test_roles_outage_lines_are_durable_and_deduplicated_per_fp(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """Review correction 2: during a /roles outage BOTH the capture unresolved branch
+    and the F5 UNRESOLVABLE branch leave a DURABLE rotator.log line, deduplicated per
+    fingerprint — one line per distinct fp per tick, not one per call."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    rotator.save_state({"live_email": "old@x", "live_fp": "o" * 16, "slots": {}})
+    monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    new_blob = _blob("NEW-UNRESOLVED", expires_ms=_ms_in(8))
+    monkeypatch.setattr(rotator, "read_live_blob_with_source",
+                        lambda: (new_blob, "primary"))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a, **_k: None)
+    monkeypatch.setattr(rotator, "read_slot", lambda e: None)
+
+    rotator.cmd_capture(only_if_running=False)   # fires the capture branch (fp A)
+    rotator.cmd_capture(only_if_running=False)   # SAME fp → deduped
+    real_fp = rotator.fingerprint(new_blob)
+    state = {"live_email": "old@x", "live_fp": "o" * 16, "slots": {}}
+    rotator._DEDUP_UNRESOLVED_SEEN.clear()
+    rotator._reconcile_live_email(state, new_blob)  # fires the F5 branch (fp A again)
+    rotator._reconcile_live_email(state, new_blob)  # SAME fp → deduped
+
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert log.count("UNRESOLVED (/roles lookup failed)") == 1, "capture: once per fp"
+    assert log.count("F5 UNRESOLVABLE") == 1, "reconcile: once per fp"
+    assert real_fp in log, "the durable lines carry the fingerprint they dedupe on"
 
 
 def test_read_live_blob_prefers_primary_then_livebak(monkeypatch: pytest.MonkeyPatch) -> None:

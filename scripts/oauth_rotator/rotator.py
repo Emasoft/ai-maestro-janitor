@@ -358,6 +358,25 @@ def _decide(msg: str) -> None:
     _log(msg)
 
 
+# TRDD-ZKXQXHBI review correction 2: a /roles outage makes the unresolved-account
+# branches fire EVERY 60 s tick (capture's + _reconcile_live_email's), so their
+# durable lines must be DEDUPLICATED PER FINGERPRINT — one line per distinct
+# credential, not one per tick. Keyed by (branch, fp) in process memory: the tick
+# is a fresh subprocess each beat, so the dedupe window is one tick — the point
+# is to collapse the 2-3 SAME-fp calls a single tick makes, not to remember
+# across ticks (a fresh tick re-reporting once per 60 s is the accepted cadence).
+_DEDUP_UNRESOLVED_SEEN: set[tuple[str, str]] = set()
+
+
+def _log_unresolved_once(branch: str, fp: str, msg: str) -> None:
+    """Append `msg` to the durable rotator.log ONCE per (branch, fp) per process."""
+    key = (branch, fp)
+    if key in _DEDUP_UNRESOLVED_SEEN:
+        return
+    _DEDUP_UNRESOLVED_SEEN.add(key)
+    _log(msg)
+
+
 # Auto-rotation thresholds (percent of a usage window consumed, 0-100). The
 # rotator switches the live credential to an alternate slot once the LIVE
 # account crosses SWITCH_AT on EITHER the 5-hour or the 7-day window —
@@ -604,29 +623,176 @@ def wedge_tick_requested() -> bool:
     return os.environ.get("JANITOR_ROTATOR_WEDGE_TICK", "").strip() == "1"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TRDD-ZKXQXHBI — the daemon's OWN primary-read latch.
+#
+# Until this card the daemon skipped the `-w` primary read by policy
+# (JANITOR_ROTATOR_HEADLESS, FIX B2) and worked from the -livebak mirror — the
+# leading hypothesis (TRDD-K0PMVRN6 H1) for why the live account's slot twin
+# decays. Now the tick ATTEMPTS one bounded read, guarded by a latch that is
+# SEPARATE from safe_storage's machine-wide keychain latch:
+#   - a -25308 refusal (the expected daemon-context outcome — Claude's item is
+#     Claude-only-ACL and the LaunchAgent cannot interact) trips it AT ONCE;
+#   - a timeout trips it only after 3 IN A ROW (a lone timeout is host load —
+#     the same calibration as safe_storage's TRDD-3VIXO8FA threshold);
+#   - a 600 s cooldown makes it self-healing (one half-open probe per cooldown);
+#   - the refusal NEVER touches the SHARED latch (latch_denial=False +
+#     may_prompt=False at the choke-point) — blinding every slot read/write
+#     because CLAUDE'S OWN item refused us would be exactly the over-reach
+#     FIX B2's blunt skip made impossible to even observe.
+# The state FILE (not process memory) is load-bearing: each tick is a FRESH
+# subprocess, so "3 timeouts in a row" and the cooldown can only persist
+# across ticks on disk. Logging is once per STATE CHANGE (trip / recovery /
+# timeout-streak tick), never once per tick.
+# ─────────────────────────────────────────────────────────────────────────────
+PRIMARY_READ_LATCH_COOLDOWN_S = 600.0
+PRIMARY_READ_TIMEOUT_LATCH_THRESHOLD = 3
+
+# Per-process memo: the tick must NEVER retry the primary read within itself
+# (cmd_tick's repair → capture → auto → beacon path calls _read_live_primary
+# several times; one bounded attempt per tick is the contract). None = not yet
+# attempted; {"blob": ...} = attempted (blob may be None). write_live_blob
+# invalidates it so an in-process switch never reads its own stale memo.
+_PRIMARY_READ_MEMO: dict | None = None
+
+
+def _primary_read_latch_path() -> Path:
+    # Resolved at call time off ROOT so test isolation (monkeypatched ROOT) holds.
+    return ROOT / "primary-read.latch"
+
+
+def _primary_read_latch_state() -> dict:
+    try:
+        data = json.loads(_primary_read_latch_path().read_text())
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _primary_read_latch_write(state: dict) -> None:
+    try:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        tmp = _primary_read_latch_path().with_suffix(".tmp.%d" % os.getpid())
+        tmp.write_text(json.dumps(state))
+        os.replace(tmp, _primary_read_latch_path())
+    except OSError:
+        pass  # best-effort — a latch we cannot persist just means the next tick retries
+
+
+def _primary_read_probe_allowed(now: float | None = None) -> bool:
+    """True iff this tick may spend its ONE bounded primary read.
+
+    Latch fresh (< cooldown) → False (silent; the mirror fallback applies).
+    Latch stale (≥ cooldown) → re-stamp FIRST (so concurrent probers stay
+    closed — at most one probe per cooldown machine-wide) and allow it.
+    Unlatched → True."""
+    state = _primary_read_latch_state()
+    latched = state.get("latched_epoch")
+    if not isinstance(latched, (int, float)):
+        return True
+    age = (now if now is not None else time.time()) - latched
+    if age < PRIMARY_READ_LATCH_COOLDOWN_S:
+        return False
+    state["latched_epoch"] = now if now is not None else time.time()
+    _primary_read_latch_write(state)  # quiet re-stamp — state is UNCHANGED, no log
+    return True
+
+
+def _primary_read_latch_trip(reason: str, now: float | None = None) -> None:
+    """Latch the primary read for the cooldown. Logging: once per state CHANGE —
+    an already-latched re-stamp (the half-open probe failing again) is silent."""
+    stamp = now if now is not None else time.time()
+    if _primary_read_latch_state().get("latched_epoch") is not None:
+        _primary_read_latch_write({"latched_epoch": stamp, "timeouts": 0})
+        return
+    _primary_read_latch_write({"latched_epoch": stamp, "timeouts": 0})
+    _log(
+        "primary read: REFUSED (%s) — latching the primary read for %ds; "
+        "rotation falls back to the -livebak mirror (the SHARED keychain latch is "
+        "NOT tripped; TRDD-ZKXQXHBI)" % (reason, int(PRIMARY_READ_LATCH_COOLDOWN_S))
+    )
+
+
+def _primary_read_latch_note_ok(now: float | None = None) -> None:
+    """An answered read (success OR benign not-found) — the keychain spoke without
+    prompting, so any timeout streak is over. Clears a latch (log: recovery)."""
+    state = _primary_read_latch_state()
+    was_latched = state.get("latched_epoch") is not None
+    if not was_latched and not state.get("timeouts"):
+        return  # steady state — nothing to reset, nothing to log
+    try:
+        _primary_read_latch_path().unlink()
+    except OSError:
+        pass
+    if was_latched:
+        _log("primary read: RECOVERED — the live credential read succeeded, latch cleared (TRDD-ZKXQXHBI)")
+
+
+def _primary_read_latch_note_timeout(now: float | None = None) -> None:
+    """One timeout on the primary read. The streak persists across ticks (the
+    file); the 3rd consecutive trip latches. Each increment is a state change
+    and logs once; a latched re-probe timeout re-stamps silently (trip())."""
+    state = _primary_read_latch_state()
+    if state.get("latched_epoch") is not None:
+        _primary_read_latch_trip("timed out again on the half-open probe", now=now)
+        return
+    n = int(state.get("timeouts") or 0) + 1
+    if n >= PRIMARY_READ_TIMEOUT_LATCH_THRESHOLD:
+        _primary_read_latch_trip(
+            "timed out %dx in a row" % n, now=now)
+    else:
+        _primary_read_latch_write({"timeouts": n})
+        _log("primary read: timed out (%d/%d) — a lone timeout is host load; "
+             "latching only after %d in a row (TRDD-ZKXQXHBI)"
+             % (n, PRIMARY_READ_TIMEOUT_LATCH_THRESHOLD, PRIMARY_READ_TIMEOUT_LATCH_THRESHOLD))
+
+
 def _read_primary_macos_keychain(acct: str) -> dict | None:
     """The macOS `security -w` read of the primary live item, or None if absent / unreadable /
-    SKIPPED because headless (FIX B2).
+    SKIPPED because headless (FIX B2) / LATCHED (TRDD-ZKXQXHBI).
 
     TIMEOUT is load-bearing (TRDD-7PYTX4E9): reading the SECRET (`-w`) of an item whose ACL
     excludes us raises a GUI prompt — headless, the call HANGS (the 2026-07-08 daemon tick
-    froze ~30 min on exactly this). When headless (`_primary_secret_read_permitted()` is
-    False), we don't even attempt it — the daemon can never read Claude's Claude-only-ACL
-    primary, so the `-w` read is pure prompt-cost; skipping it returns None and read_live_blob
-    falls to the -livebak mirror (the same resolution, no prompt)."""
+    froze ~30 min on exactly this). TRDD-ZKXQXHBI: the daemon now spends ONE bounded read
+    per tick behind its own latch instead of skipping outright — the -25308 refusal is the
+    EXPECTED daemon-context outcome and trips the primary-read latch at once, while a
+    timeout needs 3 in a row; either way the SHARED keychain latch is untouched
+    (``may_prompt=False`` + ``latch_denial=False``), so slot ops stay live. The skip
+    policy survives as the operator lever: JANITOR_ROTATOR_HEADLESS=1 returns None
+    without any attempt (and the F1 capture line then says "skipped by policy")."""
     if not _primary_secret_read_permitted():
         return None
-    # Choke-point (TRDD-K3WQ7XM9 P1): latch short-circuit → hard timeout → latch-on-denial.
+    if not _primary_read_probe_allowed():
+        return None  # latched within the cooldown — silent, mirror fallback downstream
+    # Choke-point (TRDD-K3WQ7XM9 P1): hard timeout; denial reported WITHOUT the shared latch.
     run = safe_storage.run_security(
         ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w", *safe_storage.keychain_scope_args()],
         timeout=10,
-        may_prompt=True,
+        may_prompt=False,      # TRDD-ZKXQXHBI: a timeout is OUR latch's business (3-in-a-row), never the shared one
+        latch_denial=False,    # a -25308 refusal trips the PRIMARY latch, never the shared one
     )
     if run.ok and run.stdout.strip():
         try:
-            return json.loads(run.stdout.strip())
+            blob = json.loads(run.stdout.strip())
         except json.JSONDecodeError:
-            pass
+            _primary_read_latch_note_ok()  # answered silently — corrupt JSON is ours, not the keychain's
+            return None
+        _primary_read_latch_note_ok()
+        return blob
+    if run.denied:
+        if run.spawned:
+            # A real refusal from `security` (errSecInteractionNotAllowed in the
+            # LaunchAgent context is the expected shape). A latch-CLOSED
+            # short-circuit (spawned=False, denied=True) is NOT a new denial —
+            # re-tripping it would re-stamp every tick and extend the cooldown
+            # forever, the self-perpetuating-latch trap TRDD-EQJPPZ2L fixed.
+            _primary_read_latch_trip("errSecInteractionNotAllowed / ACL denial")
+    elif run.spawned and run.returncode is None:
+        _primary_read_latch_note_timeout()  # timed out (spawned, no rc)
+    else:
+        _primary_read_latch_note_ok()  # benign not-found / answered non-zero — keychain spoke
     return None
 
 
@@ -704,13 +870,24 @@ def _read_live_primary() -> dict | None:
          capture flow relies on keys off this account attribute).
       2. ~/.claude/.credentials.json — the native store on Linux/Windows.
       3. GNOME Keyring via `secret-tool` — the Linux desktop keyring.
-    On macOS the keychain path wins and the others are never reached (unless headless, where
-    it is skipped so the daemon never prompts — FIX B2 — and the ladder falls through).
-    """
+    On macOS the keychain path wins and the others are never reached (unless the
+    primary-read latch is set, where the macOS leg returns None so the ladder falls
+    through — TRDD-ZKXQXHBI).
+
+    TRDD-ZKXQXHBI: the macOS attempt is MEMOIZED per process ("attempted" — the
+    memo holds the result, None included), because one tick calls this several
+    times (repair → capture → auto → beacon) and the contract is ONE bounded
+    primary read per tick. write_live_blob() invalidates the memo, so an
+    in-process switch always re-reads what it just wrote."""
+    global _PRIMARY_READ_MEMO
+    if _PRIMARY_READ_MEMO is not None:
+        return _PRIMARY_READ_MEMO.get("blob")
     acct = _keychain_account()
     macos = _read_primary_macos_keychain(acct)
     if macos is not None:
+        _PRIMARY_READ_MEMO = {"blob": macos}
         return macos
+    _PRIMARY_READ_MEMO = {"blob": None}  # attempted (latched/refused/absent) — do not re-attempt this tick
     # 2. Linux/Windows credentials file
     cf = Path.home() / ".claude" / ".credentials.json"
     if cf.exists():
@@ -997,6 +1174,8 @@ def write_live_blob(blob: dict) -> None:
               Linux/Windows the file's mtime change is itself the re-read trigger.
     GNOME Keyring is updated best-effort when `secret-tool` is present.
     """
+    global _PRIMARY_READ_MEMO
+    _PRIMARY_READ_MEMO = None  # TRDD-ZKXQXHBI: a fresh write invalidates the read memo
     data = json.dumps(blob, separators=(",", ":"))
     keychain_ok = False
     acct = _keychain_account()
@@ -1568,6 +1747,17 @@ def _util(usage: dict | None, window: str) -> float | None:
 # --------------------------------------------------------------------------
 # commands
 # --------------------------------------------------------------------------
+def _primary_read_unreadable_reason() -> str:
+    """WHY the primary is unreadable this tick — for the F1 capture line, which must
+    distinguish a read SKIPPED BY POLICY (the operator lever) from one the latch
+    REFUSED (TRDD-ZKXQXHBI review correction 1)."""
+    if not _primary_secret_read_permitted():
+        return "skipped by policy (JANITOR_ROTATOR_HEADLESS)"
+    if _primary_read_latch_state().get("latched_epoch") is not None:
+        return "refused by the primary-read latch"
+    return "unreadable (no primary item / keychain absent)"
+
+
 def cmd_capture(only_if_running: bool) -> int:
     if only_if_running and not claude_running():
         return 0  # silent no-op
@@ -1575,13 +1765,16 @@ def cmd_capture(only_if_running: bool) -> int:
     if blob is None:
         return 0
     if src != "primary":
-        # F1 (TRDD-7PYTX4E9): NEVER capture the mirror as "the live account". In the
-        # daemon context (primary ACL-unreadable) the mirror can be a STALE credential;
-        # filing it here would rewrite state.live_email/live_fp from that stale blob on
-        # EVERY tick — silently re-poisoning the identity right after any heal (observed
-        # live 2026-07-09 00:57: state reverted to the mirror's account overnight).
+        # A mirror-sourced blob is NEVER captured as "the live account". In the
+        # daemon context the mirror can be a STALE credential; filing it here would
+        # rewrite state.live_email/live_fp from that stale blob on EVERY tick —
+        # silently re-poisoning the identity right after any heal (observed live
+        # 2026-07-09 00:57: state reverted to the mirror's account overnight).
         # A session-context capture (primary readable) is unaffected.
-        _log("capture: primary live credential unreadable — skipping capture (a mirror-sourced blob is never 'the live account'; TRDD-7PYTX4E9 F1)")
+        # TRDD-ZKXQXHBI review correction 1: the durable line says WHY the primary
+        # was unreadable — skipped by policy, or refused by the primary-read latch.
+        _log("capture: primary live credential UNREADABLE (%s) — skipping capture (a mirror-sourced blob is never 'the live account'; TRDD-7PYTX4E9 F1)"
+             % _primary_read_unreadable_reason())
         return 0
     fp = fingerprint(blob)
     if not fp:
@@ -1597,6 +1790,12 @@ def cmd_capture(only_if_running: bool) -> int:
         # sync" forever — the drift becomes permanent and undetectable (TRDD-V6USCGC9, same
         # rule as F5 in TRDD-7PYTX4E9). Leaving state untouched costs one retried /roles
         # lookup per capture while roles is unreachable, which is cheap by comparison.
+        # TRDD-ZKXQXHBI: durable rotator.log line, deduplicated per fingerprint (a /roles
+        # outage otherwise re-fires this every tick with nothing in the log).
+        _log_unresolved_once(
+            "capture", fp,
+            "capture: live credential %s is UNRESOLVED (/roles lookup failed); state left "
+            "unchanged, will retry (TRDD-V6USCGC9, TRDD-ZKXQXHBI)" % fp)
         print("captured: unidentified account (roles lookup failed); state left unchanged, will retry")
         return 0
     write_slot(email, blob)
@@ -1930,12 +2129,20 @@ def _reconcile_live_email(state: dict, live_blob: dict) -> dict:
         # onto the OLD email — after which the fp-equality early-return above saw
         # "no drift" forever and the mislabel became permanent. Leave state UNTOUCHED
         # so the drift stays detectable and the next tick retries the resolution.
+        # TRDD-ZKXQXHBI: _decide fires every tick during a /roles outage (88b10297
+        # made this branch reachable per-tick), so the DURABLE copy is deduplicated
+        # per fingerprint — the stdout decision stays every-tick, the log line does not.
         _decide(
             "auto: live credential CHANGED (fp %s -> %s) but its account is UNRESOLVABLE "
             "(roles unreachable, no slot fp match) — leaving state unreconciled so the "
             "drift stays detectable; will retry next tick (TRDD-7PYTX4E9 F5)"
             % (state.get("live_fp") or "?", real_fp)
         )
+        _log_unresolved_once(
+            "reconcile", real_fp,
+            "auto: F5 UNRESOLVABLE (fp %s): roles unreachable, no slot fp match — state "
+            "unreconciled, will retry (deduplicated per fp; TRDD-7PYTX4E9 F5, TRDD-ZKXQXHBI)"
+            % real_fp)
         return state
     state["live_email"] = real_email
     state["live_fp"] = real_fp
