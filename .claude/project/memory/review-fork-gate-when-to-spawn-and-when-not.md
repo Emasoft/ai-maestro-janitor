@@ -2,7 +2,7 @@
 name: review-fork-gate-when-to-spawn-and-when-not
 description: "the review-fork gate fires on every turn / should I spawn a fork for a docs-only commit / the adversarial review loop is eating the session / forks keep finding smaller and smaller things / when is a review fork worth it / prose-only turn still triggered the gate / how do I stop reviewing my own prose / the gate blocks my turn and I have nothing to review / review-supervisor says N changes unreviewed / diminishing returns on adversarial review / should I fork after every commit / stopping criterion for review forks / the fork found a defect in the fix for the last fork's defect / agentlenspro review-gate keeps firing / is a card closure worth a review fork"
 ocd: 2026-09-05
-lmd: 2026-09-28
+lmd: 2026-09-29
 publish-globally: true
 metadata:
   node_type: memory
@@ -144,6 +144,11 @@ which you did and that it was unilateral — the USER rules on whether it was ac
 governance question this atom says belongs to the USER — and worse here than on a card, because
 memory is recalled by symptom and outlives the case. An atom about not minting resolutions must
 not mint one.)*
+
+
+## See also
+
+- [[yamllint-header-review-cycle-2026-09-29]]
 
 ## Notes and lessons learned
 
