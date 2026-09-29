@@ -1,6 +1,6 @@
 ---
 name: janitor-refresh-cc-logins
-description: Re-stock the rotator with a long-lived OAuth key per account. Walks the user through /login and then the CLI's `setup-token` subcommand per account, has them paste each key into the keys CSV, then imports the file with /janitor-import-oauth-tokens. INTERACTIVE — login and mint need a passkey prompt and a Cloudflare challenge, so it PAUSES for the user; never select it in a cron or headless context. Use on an oauth-login-needed / oauth-cookie-reminder nudge, when a slot's refresh is dead, or when "had to rotate manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-cc-logins, "reauth my accounts".
+description: Re-stock the rotator with a FULL-OAUTH slot per account via the browser capture. Walks each account's claude.ai login (passkey/2FA, human-only) in a dedicated Chrome, then files the slot with slot_capture_browser.py — a ~8h access token the daemon keepalive renews on its own. INTERACTIVE — the login needs a passkey prompt, so it PAUSES for the user; never select it in a cron or headless context. Use on an oauth-login-needed / oauth-cookie-reminder nudge, when a slot's refresh is dead, or when "had to rotate manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-cc-logins, "reauth my accounts".
 ---
 
 # Janitor refresh-cc-logins
@@ -8,25 +8,17 @@ description: Re-stock the rotator with a long-lived OAuth key per account. Walks
 ## Overview
 
 The interactive multi-account credential re-stocker — the **REAUTHENTICATE** leg of the OAuth
-rotator. **TWO** of its steps need a human, for two different reasons: the claude.ai login uses
-a **passkey / Google-2FA** prompt that is **OS-level — outside any browser**, and the
-`setup-token` consent page sits behind a **Cloudflare challenge** a driven browser does not
-clear. The user logs in and mints; you orchestrate, then import. **Never enter credentials or
-log in for the user — only open the browser and check results.**
+rotator. The login step needs a human, for a hard reason: the claude.ai sign-in uses a
+**passkey / Google-2FA** prompt that is **OS-level — outside any browser**. The user logs in;
+you orchestrate, then run the capture and verify it. **Never enter credentials or log in for
+the user — only open the browser and check results.**
 
-**Filing is no longer a human step.** The user writes each key as one `email,token` line in
-`~/.claude/oauth_keys/claude_code_oauth_long_lived_keys.csv`, and `/janitor-import-oauth-tokens`
-imports the whole file in one unattended command. The old per-account paste is gone: it needed
-a terminal, so in a tool call the hidden prompt never opened, stdin was empty, and the script
-fell through to the macOS clipboard — one value for three accounts, silently filing the wrong
-key.
-
-So this skill still **pauses**, but only for the login and the mint. Once the CSV has the keys,
-everything after it is mechanical.
-
-What the rotator ends up holding is a **1-year, no-refresh** key per account. That is the whole
-design: once the three keys are filed, the rotator's only remaining job is to rotate between
-them, for about a year, with nothing to renew or re-capture in between.
+What the rotator ends up holding is a **FULL-OAUTH slot with a refreshToken** per account: an
+access token of roughly 8 hours that the daemon's keepalive renews by itself. After the
+capture, the rotator rotates AND renews unattended; this skill is only the re-seeding step
+when a slot goes credential-dead or an account was never seeded. (This replaced, per owner
+ruling 2026-09-24, the older one-year static-key flow: those keys do not work — the
+owner-ratified procedure lives in the PROJECT memory page below, atom ATOM-VH28-30GK.)
 
 This skill + its helper scripts live IN the plugin (TRDD-3T4DZWXA, completing the
 TRDD-f892e109 fold — they were previously a user-scope `/refresh-claude-logins` command). The
@@ -38,10 +30,11 @@ Scripts (in the plugin, beside the rotator engine):
 
 ```bash
 ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
-#   $ROT/rotator.py            — the engine (read-only subcommands + the RENEW tick)
-#   $ROT/open-login.sh <email> — open a clean REAL Chrome on the account's profile (blocks until Cmd+Q)
-#   $ROT/check-login.sh <email>— verify the profile saved a LIVE session (exit 0 = saved)
-#   $ROT/lifetime-status.sh    — cookie-vs-OAuth lifetime table + what's due
+#   $ROT/rotator.py               — the engine (read-only subcommands + the RENEW tick)
+#   $ROT/open-login.sh <email>    — open a clean REAL Chrome on the account's profile (blocks until Cmd+Q)
+#   $ROT/check-login.sh <email>   — verify the profile saved a LIVE session (exit 0 = saved)
+#   $ROT/slot_capture_browser.py <email> — file the FULL-OAUTH slot from that profile
+#   $ROT/lifetime-status.sh       — cookie-vs-OAuth lifetime table + what's due
 ```
 
 > Run every rotator invocation with `env -u CLAUDE_PLUGIN_DATA` so the engine resolves the
@@ -49,6 +42,8 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
 > context would otherwise mis-route the state — TRDD-7100178d / TRDD-5EUYV08H). Invoke the engine
 > with `python3` (NOT `uv run`) — rotator.py is stdlib-only, so `uv run` would only sync the
 > caller's cwd uv-project for no gain; the helper `.sh` drive it the same way (TRDD-3T4DZWXA).
+> The capture is the one exception — it needs Playwright, so the ratified line uses
+> `uv run --no-project --with playwright python` (step 4).
 
 ## When to use
 
@@ -59,12 +54,12 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
 
 ## Instructions
 
-1. **Preflight.** Confirm the engine + 3 helpers exist and the rotator resolves a roster. If
+1. **Preflight.** Confirm the engine + 4 helpers exist and the rotator resolves a roster. If
    anything is missing, tell the user exactly what and stop.
 
    ```bash
    ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
-   for f in rotator.py open-login.sh check-login.sh lifetime-status.sh; do
+   for f in rotator.py open-login.sh check-login.sh slot_capture_browser.py lifetime-status.sh; do
      [ -f "$ROT/$f" ] || { echo "missing: $ROT/$f"; exit 1; }
    done
    env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" known-emails   # the roster, one email/line
@@ -78,69 +73,50 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
    env -u CLAUDE_PLUGIN_DATA bash "$ROT/lifetime-status.sh"
    ```
 
-3. **For EACH account that needs a refresh, in turn:**
+3. **For EACH account that needs a refresh — alternates first, the LIVE account LAST** (why:
+   step 4c). In turn:
    a. Tell the user, as your own message BEFORE launching:
       `▶ Account k/N — a Chrome window will open. Log in as <email>, tick "stay signed in",
        then QUIT Chrome with Cmd+Q (closing just the window is not enough).`
    b. `env -u CLAUDE_PLUGIN_DATA bash "$ROT/open-login.sh" <email>` with a generous Bash
-      timeout (it blocks while the user logs in, returns when they Cmd+Q).
+      timeout (it blocks while the user logs in, returns when they Cmd+Q). This step has NO
+      Authorize button — it only saves the claude.ai session into that profile.
    c. `env -u CLAUDE_PLUGIN_DATA bash "$ROT/check-login.sh" <email>` and report ✓/✗. If ✗,
-      offer to retry that account (back to 3a) before moving on.
+      offer to retry that account (back to 3a) before moving on. Exit 0 means A session is
+      saved; it cannot tell WHOSE — step 4b is what catches the wrong one.
 
-4. **Mint a long-lived token per account — MANUAL, and tell the user so.** The reauth above
-   only saved COOKIES; a usable credential still has to be minted, and minting is a HUMAN
-   step. There is no automated path and you must not write one: the consent page is behind a
-   Cloudflare challenge that a driven browser does not clear (owner ruling 2026-09-09 — no
-   minting automation ships, and none is to be added). Give the user these steps verbatim, one
-   account at a time:
+4. **File the FULL-OAUTH slot.** Nothing runs the capture automatically: auto-bootstrap is
+   opt-in (`CLAUDE_ROTATOR_AUTO_BOOTSTRAP`, default OFF, TRDD-5OJX3SCF) — this step is run by
+   hand EVERY time a slot goes credential-dead, not once.
 
-   > **For each of your Pro/Max accounts, in turn:**
-   > 1. Open Claude Code in a terminal.
-   > 2. Run `/login`.
-   > 3. Choose the subscription OAuth option.
-   > 4. A browser window opens. Log in as the account you picked.
-   > 5. If the browser was already signed in as somebody else, sign out and sign back in as
-   >    the account you picked. Getting this wrong is the one mistake nothing downstream can
-   >    detect.
-   > 6. Click **Authenticate**. The page confirms you are authenticated.
-   > 7. Go back to Claude Code and press Enter to confirm.
-   > 8. Open a new terminal window (or exit Claude Code first).
-   > 9. Run `claude` with the `setup-token` subcommand — in your own terminal, never through
-   >    the agent (the mint is the human's step; the agent only imports the result).
-   > 10. The browser opens again. Click **Authenticate**.
-   > 11. Back in the terminal, the command finishes and prints a **1-year** OAuth key. It
-   >     prints ONCE — copy it now.
-   > 12. Open `~/.claude/oauth_keys/claude_code_oauth_long_lived_keys.csv` and add or update
-   >     one line: the account's email, a comma, then the key. No spaces, no quotes.
-   > 13. Repeat from step 1 for the next account.
+   a. Run the capture for the account you just logged in (owner-ratified verbatim line):
 
-   `/login` is what decides which account `setup-token` mints for, so it is always
-   login-then-mint, one account at a time. Do NOT echo a key back into the conversation, a
-   log, or a command line — treat it exactly like a password.
+      ```bash
+      env -u CLAUDE_PLUGIN_DATA uv run --no-project --with playwright python \
+        "$ROT/slot_capture_browser.py" <email>
+      ```
 
-   Step 5 of that procedure is the load-bearing one. An inference-scoped key returns 403 on
-   every identity endpoint, so **nothing can verify that a key belongs to the email on its
-   line** — the login-then-mint ordering is the only thing binding them. Mint while the wrong
-   account is signed in and the rotator will believe it has N accounts while spending one
-   subscription under two names.
+      It reopens that profile, clicks Authorize itself, and files a slot WITH a refreshToken.
 
-5. **Import the whole file.** Invoke `/janitor-import-oauth-tokens`. It runs unattended — no
-   prompt, no TTY, no browser — and that skill owns everything downstream: what each output
-   line means, which failures need a re-mint, and how to report them. Follow it rather than
-   duplicating its rules here, or the two copies drift and nothing cross-checks them.
+   b. **Verify the email, not just success.** The final line must read
+      `OK: filed FULL-OAUTH slot for <email>` naming THE SAME email — a profile holding
+      another account's session re-files under THAT account (janitor#179), and nothing
+      downstream can detect the swap. Also confirm
+      `env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" list` shows a fresh `captured=`.
 
-5. **Finish.** The pause is at step 4, not 4b: until the user says they have written the keys
-   into the CSV, an account missing from that file is indistinguishable from one they have not
-   got to yet, so do not read it as a failure. Once they confirm, 4b runs and reports per
-   account. Then run `lifetime-status.sh` once more to confirm. Success is every account
-   holding
-   a filed slot with ~1 year of runway — **do NOT check for a refresh-bearing token**: a
-   `setup-token` slot has `refreshToken: None` by construction, so that check would report
-   failure on a perfectly good run. Confirm instead with
-   `env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" list` that each account has a slot and
-   an expiry far out. Then tell the user plainly: nothing needs renewing until those keys
-   expire; the daemon's remaining job is rotation alone. List any account whose slot stayed
-   empty and what to retry.
+   c. **Redact any output you show.** A capture mints a new OAuth grant, and if the server
+      evicts older grants a capture on the LIVE account can break the running session's own
+      refresh — that is why step 3 captures alternates first and live last. When showing
+      capture output, REDACT (`sed` on `code=`, `state=`, `access_token=`, `refresh_token=`,
+      `sk-ant-…`). Never DROP lines with `grep -v` — that hides the
+      `FAILED: token exchange HTTP 403` reason line.
+
+5. **Finish.** Run `lifetime-status.sh` once more to confirm. Success is every account holding
+   a FULL-OAUTH slot with a fresh `captured=` date; on the next tick `rotator.log` shows
+   `auto: live <email> 5h=… 7d=…` instead of "no usable slot twin" — probing works, and the
+   keepalive renews each slot from there. Then tell the user plainly: the daemon's remaining
+   job is rotate + renew, hands-free, until a slot next goes credential-dead (the heartbeat
+   nudge says when). List any account whose slot stayed empty and what to retry.
 
 ## Notes
 
@@ -150,10 +126,8 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
 - The opener is a clean, normal Chrome (no automation flags) so Cloudflare + Google-2FA treat
   it as a human browser; it never logs in itself. The passkey / 2FA prompt is OS-level — that
   is WHY the login needs a human and cannot be automated.
-- A filed key is **inference-scoped**: measured 2026-09-09, it returns HTTP 403 on
-  `/api/oauth/usage` and on every identity endpoint, while the SAME key is accepted by
-  `/v1/messages`. So a 403 from those endpoints says nothing about the key's health — only a
-  401 does. Do not read one as a dead credential.
+- The capture (step 4a) is the only non-stdlib invocation: Playwright drives the Authorize
+  click. Everything else is stdlib `python3`.
 
 ## Naming
 
@@ -163,12 +137,10 @@ is for stating WHEN to invoke the skill — not for maintainer notes.
 
 ## Scope
 
-ONLY orchestrates the human claude.ai login refresh, the human `setup-token` mint, and the
-import of the resulting keys file. Does NOT change rotator config, does NOT rotate to a
-DIFFERENT account, does NOT enter credentials for the user, and does NOT automate the mint.
-The import step may refresh the live credential in place for the account already live — same
-account, new key — which is what lets a running session keep going. Rotate deliberately with
-`/janitor-rotate-account-to`; toggle daemon-managed rotation with
+ONLY orchestrates the human claude.ai login refresh and the browser capture that files each
+FULL-OAUTH slot. Does NOT change rotator config, does NOT rotate to a DIFFERENT account, does
+NOT enter credentials for the user, and does NOT run unattended (the login needs the human).
+Rotate deliberately with `/janitor-rotate-account-to`; toggle daemon-managed rotation with
 `/janitor-auto-manage-oauth-on` / `-off`.
 
 ## Resources
@@ -177,5 +149,8 @@ account, new key — which is what lets a running session keep going. Rotate del
   `slot_capture_browser.py`, …) + the helpers (`open-login.sh`, `check-login.sh`,
   `lifetime-status.sh`).
 - `/janitor-auto-manage-oauth-on` / `-off` — toggle daemon-managed rotation.
+- `/janitor-capture-all-logins` — the proactive all-accounts sibling (mints from already-saved
+  sessions, no human login).
 - The `oauth-rotation-renew-reauth` PROJECT memory page — the ROTATE → RENEW → REAUTHENTICATE
-  architecture this skill's layer 3 belongs to.
+  architecture this skill's layer 3 belongs to, and the owner-ratified renew procedure
+  (ATOM-VH28-30GK) this skill implements.

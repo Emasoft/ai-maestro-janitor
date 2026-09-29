@@ -54,7 +54,7 @@ risk. Nothing here touches any account that is not yours.
 
 ### Self-healing logins — log in once, the rotator manages the rest
 
-Some accounts can't self-renew on their own: a `setup-token` has no refresh
+Some accounts can't self-renew on their own: a slot may carry no refresh
 token, or a refresh chain is revoked. The rotator closes that gap with two
 heartbeat-driven pieces (TRDD-32acd15f P4c/P4d), so you only ever do the one
 thing a machine can't: the human sign-in.
