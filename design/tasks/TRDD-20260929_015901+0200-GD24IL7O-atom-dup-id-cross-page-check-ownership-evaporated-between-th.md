@@ -1,10 +1,10 @@
 ---
 trdd-id: GD24IL7O
 title: atom-dup-id cross-page check — ownership evaporated between the step-2 floor table and the batch layer
-column: todo
+column: testing
 status: tasked
 created: 2026-09-29T01:59:01+0200
-updated: 2026-09-29T01:59:10+0200
+updated: 2026-09-29T02:44:11+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,7 @@ Found by BOTH wave-2 review forks (2026-09-29). Step-2's landing record excluded
 ## Approval log
 
 - 2026-09-29T01:59:01+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation
+
+2026-09-29 PART (a) LANDED (commit e559e25c, lean-worker, main-verified): refuse_cross_page_duplicate_ids over the PROPOSED batch — id on 2 pages of the batch refuses; an id ALREADY duplicated on disk that the write merely preserves passes (freezing an inherited dup would make it unrepairable); cross-BATCH boundary stays the structured item on XI10BA5D (part b). 2 new tests, 338 unit + 171 cli green (main ran), no-leak intact. Moving to testing.

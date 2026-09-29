@@ -1,9 +1,9 @@
 ---
 trdd-id: VIFQ1LKI
 title: Create the topic page an off-topic atom needs when none exists
-column: todo
+column: testing
 created: 2026-08-26T18:04:40+0200
-updated: 2026-09-27T12:44:27+0200
+updated: 2026-09-29T02:44:12+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -61,3 +61,7 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
 ## Approval log
 
 - 2026-09-27T12:44:27+0200 — column → todo by user. blocker QDYQLM5V closed complete 2026-09-27 (stale blocker cleared per batch6 verdict) Cleared blocked-by (--clear-blocker override).
+
+## Implementation
+
+2026-09-29 LANDED (commit 91cd5534, lean-worker, main-verified): relocate_survey_then_create in memory_content_precheck.py — 3-root array recall; empty mints via new-mem-topic (UNSURE→local, symptom-phrased description); hit returns the existing page, no creation; the move stays migrate-mem-atom. Skill documents the branch. 4 new tests, 8 relocate/survey green, ruff clean; incidental mypy fix in pre-tool-release-age-guard scoped-npm parse. Acceptance boxes 1-4 ticked by evidence; box 5 (gates) green. Moving to testing.
