@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-enrich
-description: "ENRICH — the autonomous recall-surface backfill for the memory wiki. Fires on the bare [janitor-memory-enrich] heartbeat marker (or /janitor-memory-enrich). Finds wikimem pages whose keyphrases or page description are too thin or duplicated to be findable, and widens each IN PLACE through the transaction core, which proves no fact is lost. One of the eight wikimem-editor passes."
+description: "ENRICH — the autonomous recall-surface backfill for the memory wiki. Fires on the bare [janitor-memory-enrich] heartbeat marker (or /janitor-memory-enrich). Finds wikimem pages whose keyphrases or page description are too thin or duplicated to be findable, and widens each IN PLACE through memgrep's gated write verbs, which prove no fact is lost. One of the eight wikimem-editor passes."
 ---
 
 # Janitor memory — ENRICH (recall-surface backfill)

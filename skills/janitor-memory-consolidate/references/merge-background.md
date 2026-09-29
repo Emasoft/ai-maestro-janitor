@@ -24,8 +24,7 @@ The MERGE leg of the autonomous wikimem editor. It fuses two memory notes that
 describe the **same subject** and **same type/tier** into one page, redirects every
 `[[backlink]]`, and preserves all lessons + the oldest origin date — **without
 losing a single fact**. `memory-librarian` only *surfaces* candidates; this skill
-*performs* the merge through the journaled, hash-guarded **transaction core**
-(`scripts/memory_txn_cli.py`).
+*performs* the merge through the memgrep write gate (`merge-mem-topic`).
 
 Know the wiki data model before merging — tiers (hub/aspect/component), the link
 law, page anatomy, lessons. The mechanics + worked walkthrough are in the
@@ -58,7 +57,7 @@ One scope, one merge per pass; re-running on a merged corpus is a no-op. Disable
 
 ## Scope of this skill
 
-ONLY a same-subject, same-type **pair**, in ONE scope, through the transaction core. Not
+ONLY a same-subject, same-type **pair**, in ONE scope, through the memgrep write gate. Not
 page creation (`/janitor-memory-write`), single-page edits (`/janitor-memory-update`),
 splitting (`/janitor-memory-split`), or contradictions (`/janitor-memory-conflict`). Never
 edits a live page directly, never merges cross-scope or cross-type; LOCAL+USER by default

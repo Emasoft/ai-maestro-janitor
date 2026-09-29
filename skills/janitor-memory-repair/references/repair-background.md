@@ -21,7 +21,7 @@ enforced the full frontmatter, pages whose tier is inverted (an `aspect` built
 with `## Governed by` instead of `## Applies to`), pages with no frontmatter at
 all (invisible to ranked recall), or a one-sided `[[link]]`. REPAIR is the
 autonomous pass that completes and corrects ONE page at a time, in place,
-through the transaction core so it can never lose a fact. It is the 4th
+through the memgrep write gate so it can never lose a fact. It is the 4th
 wikimem-editor pass (alongside split / consolidate / conflict) and the executor
 for priority #4 of the memory-curation mission (TRDD-87935f21).
 
@@ -155,14 +155,14 @@ RULE 3 (single-page) working as intended, not a malfunction."
 > never run inline in a main session (it must not burden CPV or any other session's context).
 
 REPAIR autonomously completes/corrects ONE malformed wikimem page at a time, IN
-PLACE, through the transaction core — additive and structural only (backfills
+PLACE, through the memgrep write gate — additive and structural only (backfills
 metadata, adds the Notes section, fixes tier/links); it never rewrites a fact,
 never changes `ocd`, never merges/splits/deletes. See "Why REPAIR exists" and
 "What REPAIR is (and is not)" above for the full additive-vs-editorial distinction.
 
 ## EXIT / SUCCESS / idempotency contract
 
-- **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the txn; PROJECT,
+- **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the write gate; PROJECT,
   if opted-in, staged-not-pushed — rides `publish.py`).
 - **Retry ≤3 then abort** (staging discarded, one-line finding); other pages are
   independent.
@@ -174,7 +174,7 @@ never changes `ocd`, never merges/splits/deletes. See "Why REPAIR exists" and
 ## Scope
 
 ONLY completes/corrects the SHAPE of malformed wikimem pages in ONE memory scope
-per pass, IN PLACE through `memory_txn_cli.py --op repair`. Does NOT create pages
+per pass, IN PLACE through memgrep's gated write verbs. Does NOT create pages
 (`/janitor-memory-write`), merge same-subject pages
 (`/janitor-memory-consolidate`), split oversized pages (`/janitor-memory-split`),
 or resolve contradictions (`/janitor-memory-conflict`). Never moves a page across

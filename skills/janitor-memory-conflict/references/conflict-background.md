@@ -35,28 +35,28 @@ git history, and either:
 
 The skeptic votes fan out as **parallel `Agent` calls** shaped like the ultracode
 `Workflow` pool — this agent's toolset has `Agent`, not `Workflow`, so ramp parallel
-Agent calls and re-enqueue on rate-limit text. ALL mutation goes through
-`scripts/memory_txn_cli.py` (crash-safe, hash-guarded, flock-serialized); the agent
-NEVER edits a live page, only staged COPIES committed atomically. Pool/backoff code
+Agent calls and re-enqueue on rate-limit text. ALL mutation goes through the memgrep
+write verbs (`merge-mem-topic` / `replace-mem-topic` — crash-safe, hash-guarded,
+gate-serialized); the agent NEVER hand-edits a live page. Pool/backoff code
 and the agent prompts live in the references (Resources).
 
 ## Scope
 
 ONLY reconciles contradictory/obsolete wikimem pages in ONE memory scope per pass,
-through `memory_txn_cli.py`; READ-ONLY against project repos. It does NOT create,
+through the memgrep write verbs; READ-ONLY against project repos. It does NOT create,
 consolidate, or split pages — those are their own skills. Full boundary, including
 the PROJECT-scope opt-in:
 [conflict-protocol](conflict-protocol.md#scope).
 
 ## EXIT / SUCCESS / idempotency contract
 
-- **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the txn; PROJECT, if
+- **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the write gate; PROJECT, if
   opted-in, is staged-not-pushed — committed in the working tree, never pushed
   standalone, rides `publish.py`).
 - **Retry ≤3 then abort** (staging discarded, one-line finding); other pairs are
   independent.
-- **Idempotent + crash-safe:** every run starts with `resume`; the completed-txn-id is
-  the idempotency key; a `rate_limited` return re-enqueues, never double-applies.
+- **Idempotent + crash-safe:** the write gate refuses a lossy re-apply (the surviving
+  page already carries the retired facts as lessons); a `rate_limited` return re-enqueues, never double-applies.
 - **Bounded + disable-able:** one scope/pass, top-K pairs, pool cap 6–15;
   `conflict_per_day=0` or the kill-switch / `WIKIMEM_EDITOR_ENABLED=off` stops it.
 

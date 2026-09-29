@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-consolidate
-description: CONSOLIDATE (MERGE) executor — fuses two duplicate memory notes about the SAME subject + same type into one page (dedup lessons, redirect backlinks, keep the oldest origin date), through the crash-safe transaction core, never editing a live page. ABSTAINS on uncertainty, cross-type/cross-scope/two-hub, or a third page sharing the subject. Use on a [janitor-memory-consolidate] marker, or "consolidate / merge / deduplicate the memory", "two notes cover the same thing", "fold these memory pages together".
+description: CONSOLIDATE (MERGE) executor — fuses two duplicate memory notes about the SAME subject + same type into one page (dedup lessons, redirect backlinks, keep the oldest origin date), through the memgrep write gate (merge-mem-topic), never editing a live page. ABSTAINS on uncertainty, cross-type/cross-scope/two-hub, or a third page sharing the subject. Use on a [janitor-memory-consolidate] marker, or "consolidate / merge / deduplicate the memory", "two notes cover the same thing", "fold these memory pages together".
 ---
 
 # Janitor memory — CONSOLIDATE (MERGE executor)
