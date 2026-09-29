@@ -184,9 +184,72 @@ fn enforce_id_rules(
     )
 }
 
+/// Batch-INTERNAL duplicate-id check (TRDD-GD24IL7O part a): refuse an id this write MINTS onto
+/// a second page — the count of pages carrying the id must not GROW. Both `id_inventory` and the
+/// batch unions collapse a duplicate id into one entry (`or_insert`), so a write that leaves the
+/// same atom id on two pages passes DROP (the union still has it) and REUSE (same fingerprint)
+/// invisibly — the gate would certify a malformed cross-page state that leaves every citation
+/// ambiguous. Compared against the OLD page count, not against "at most one proposed page":
+/// an id already duplicated on disk before this write (the batch-union migrate/move contract
+/// keeps such a state passing) must stay REPAIRABLE through normal verbs — refusing every write
+/// that merely preserves an inherited dup would freeze it forever. The scope-wide inherited-dup
+/// question is the cross-BATCH boundary item recorded on TRDD-XI10BA5D, deliberately out of
+/// scope here. The refusal names ids, counts and paths only — never page content.
+fn refuse_cross_page_duplicate_ids(
+    old: &[BTreeMap<String, String>],
+    writes: &[(&Path, &str)],
+    proposed_inv: &[BTreeMap<String, String>],
+) -> Result<()> {
+    let mut old_pages: BTreeMap<&str, usize> = BTreeMap::new();
+    for inv in old {
+        for id in inv.keys() {
+            *old_pages.entry(id.as_str()).or_insert(0) += 1;
+        }
+    }
+    let mut pages_per_id: BTreeMap<&str, Vec<&Path>> = BTreeMap::new();
+    for ((p, _), inv) in writes.iter().zip(proposed_inv) {
+        for id in inv.keys() {
+            pages_per_id.entry(id.as_str()).or_default().push(*p);
+        }
+    }
+    let dups: Vec<(&str, Vec<&Path>)> = pages_per_id
+        .into_iter()
+        // The floor is ONE page: minting a brand-new id onto its first page (0 → 1) is every
+        // atom-creating verb's whole job and must pass; only growth BEYOND one page (0 → 2,
+        // 1 → 2) mints a duplicate. An id already on 2+ pages preserved as 2+ (1 → 1 moves
+        // included) passes — the inherited-dup state stays repairable, per the doc comment.
+        .filter(|(id, ps)| ps.len() > old_pages.get(*id).copied().unwrap_or(0).max(1))
+        .collect();
+    if dups.is_empty() {
+        return Ok(());
+    }
+    let mut msg = format!(
+        "write gate refused (duplicate-id rule; nothing was written; {} violation(s)):",
+        dups.len()
+    );
+    for (id, pages) in dups {
+        let list = pages
+            .iter()
+            .map(|p| format!("`{}`", p.display()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        msg.push_str(&format!(
+            "\n  - duplicate-id rule: `{id}` ends up on {n} pages of this batch ({list}) but \
+             started on {m} — this write mints a duplicate atom id, and an id may live on at \
+             most ONE page; a move between pages is legal (it stays one page), so remove the \
+             new copy and rewrite",
+            n = pages.len(),
+            m = old_pages.get(id).copied().unwrap_or(0)
+        ));
+    }
+    anyhow::bail!(msg)
+}
+
 /// The batch half of the gate (TRDD-XI10BA5D A2 step 5 wave 2): prepare EVERY page's proposed
-/// bytes (lint floor per page, `prepare`) and run the id-set rule over the batch, BEFORE the
-/// caller commits anything. A refusal anywhere means zero bytes written anywhere. The caller
+/// bytes (lint floor per page, `prepare`), refuse a batch-INTERNAL duplicate id (TRDD-GD24IL7O:
+/// an id on two different proposed pages is invisible to the union compare — see
+/// `refuse_cross_page_duplicate_ids`) and run the id-set rule over the batch, BEFORE the caller
+/// commits anything. A refusal anywhere means zero bytes written anywhere. The caller
 /// then commits each page through `atomic_write_page` in ITS OWN order (merge/split/migrate own
 /// recoverable-duplicate orderings and partial-failure messages), so the bytes each commit writes
 /// are exactly the bytes this function certified.
@@ -200,6 +263,7 @@ pub(crate) fn prepare_batch_gated(writes: &[(&Path, &str)], policy: &GatePolicy)
     }
     let proposed_inv: Vec<BTreeMap<String, String>> =
         writes.iter().map(|(_, t)| id_inventory(t)).collect();
+    refuse_cross_page_duplicate_ids(&old, writes, &proposed_inv)?;
     enforce_id_rules(&old, &proposed_inv, policy)
 }
 
@@ -616,6 +680,81 @@ mod tests {
         let same_body_lmd_bumped = "---\nname: p\n---\n^ATOM-R [ocd: 2026-01-01, keywords: cure3] \noriginal body text\n\n## Notes and lessons learned\n";
         write_gated(&page, same_body_lmd_bumped)
             .expect("an unchanged body must pass under DEFAULT policy");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── TRDD-GD24IL7O part (a): the batch-INTERNAL duplicate-id check ─────────────────────────
+
+    /// The same atom id carried by TWO proposed pages of one batch must REFUSE, naming the id
+    /// and BOTH pages. The fixture makes the union compare blind on purpose: neither page holds
+    /// the id on disk (A's old bytes have no id, B does not exist), so DROP and REUSE both PASS
+    /// and only the duplicate check can refuse — the exact hole this closes. Ids and paths are
+    /// the only leakable things by design; the pages' body and prop fragments must not appear.
+    #[test]
+    fn id_on_two_pages_of_one_batch_refuses_naming_both_pages() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_gd24il7o_dup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("dup-a.md");
+        let b = dir.join("dup-b.md");
+        std::fs::write(&a, "---\nname: p\n---\nplain body\n").unwrap();
+        let proposed = |kw: &str, body: &str| {
+            format!(
+                "---\nname: p\n---\n^ATOM-DUPX [ocd: 2026-01-01, keywords: {kw}]\n{body}\n\n## Notes and lessons learned\n"
+            )
+        };
+        let err = prepare_batch_gated(
+            &[
+                (&a, &proposed("kay-one", "frag-a-canary")),
+                (&b, &proposed("kay-two", "frag-b-canary")),
+            ],
+            &GatePolicy::default(),
+        )
+        .expect_err("an id on two proposed pages of one batch must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("nothing was written"),
+            "the refusal must carry the zero-write guarantee: {msg}"
+        );
+        assert!(
+            msg.contains("duplicate-id rule"),
+            "the refusal must be the DUPLICATE arm, not a floor or id-set finding: {msg}"
+        );
+        assert!(
+            msg.contains("ATOM-DUPX"),
+            "the duplicated id must be named: {msg}"
+        );
+        assert!(
+            msg.contains("dup-a.md") && msg.contains("dup-b.md"),
+            "BOTH pages carrying the id must be named: {msg}"
+        );
+        // No-leak: page content (bodies, prop values) must never reach the refusal.
+        assert!(!msg.contains("frag-a-canary"), "page A's body leaked: {msg}");
+        assert!(!msg.contains("frag-b-canary"), "page B's body leaked: {msg}");
+        assert!(!msg.contains("kay-one"), "page A's props leaked: {msg}");
+        assert!(!msg.contains("kay-two"), "page B's props leaked: {msg}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The LEGAL move: the id leaves page A's proposed bytes and lands on page B's — present in
+    /// exactly ONE proposed page — must pass the whole batch gate (lint floors, duplicate check,
+    /// and the DROP/REUSE union compare with an unchanged fingerprint). Guards against the
+    /// duplicate check over-refusing migrate/split/merge, the batch's whole reason to exist.
+    #[test]
+    fn id_moved_between_pages_of_one_batch_passes() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_gd24il7o_move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("mv-a.md");
+        let b = dir.join("mv-b.md");
+        let atom = "^ATOM-MVX [ocd: 2026-01-01, keywords: mvkey]\nmove body\n";
+        std::fs::write(&a, format!("---\nname: p\n---\n{atom}")).unwrap();
+        let a_new = "---\nname: p\n---\nplain body after the move\n";
+        let b_new = format!("---\nname: p\n---\n{atom}\n## Notes and lessons learned\n");
+        prepare_batch_gated(&[(&a, a_new), (&b, &b_new)], &GatePolicy::default())
+            .expect("an id MOVED from page A to page B (one proposed page carries it) must pass");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
