@@ -118,8 +118,9 @@ _GENERATED_FILE_NAMES = frozenset({
 # shapes the negative controls exist to catch (a real SSN line, real ssh
 # targets, real tilde homes). Flagging the TEST that proves the rule fires
 # would make the rule uncommittable — the self-scan false-positives on its
-# own documentation is the known detector-validity trap. Only this file is
-# exempt; a fixture directory is not, so fixtures stay gated.
+# own documentation is the known detector-validity trap. These rule-suite
+# test files are exempt (the local-hostname and privacy-pattern suites joined
+# 2026-09-29); a fixture directory is not, so fixtures stay gated.
 _SELF_TEST_FILES = frozenset({
     "test_staged_privacy_scan.py",
     "test_private_path_patterns.py",

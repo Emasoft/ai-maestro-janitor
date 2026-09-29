@@ -4,7 +4,7 @@ title: Claude Code 2.1.248-2.1.284 alignment — BREAK-1 heartbeat survival unde
 column: todo
 status: tasked
 created: 2026-09-29T02:22:14+0200
-updated: 2026-09-29T02:35:41+0200
+updated: 2026-09-29T02:39:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -33,3 +33,7 @@ STANDING CAVEAT (mint review, HOLDS): the source triage ran on a free-tier model
 ## Implementation
 
 2026-09-29 WORK ITEM 1 LANDED (commits 9e155384 skill + live settings rules; main-verified): MEASURED — 12 live stub fires succeeded under CC 2.1.284 today (heartbeat-fires.log; the classifier is NOT blocking the fire's Bash on this host, so the mitigation is prophylactic); the janitor-arm skill documents the three allow rules (dispatcher-stub + arm_prepare + arm_record) and --permission-prompts none (2.1.259) for headless cron contexts; live .claude/settings.local.json carries the rules on this host. INSTALLER GAP (recorded, tracked): no shipped mechanism owns settings allow rules — the rules are machine-local + docs-only; a fresh host must add them by hand (the card's settings-drift failure mode, accepted for now). 112 tests green. REMAINING work items: (4) BREAK-3 grep, (2) ADOPT-8 reload audit, (3) ADOPT-2 native prompt_cache, (5) ADOPT-9/10 parity check, (6) BREAK-2 Jev/RC timing measure.
+
+## Review follow-ups
+
+2026-09-29 scanner-FP-fix review (HOLDS): (1) CURE pending — the allow-rule match semantics are UNVERIFIED (does Bash(*) cross path separators; does an allow rule reach the server-side classifier); doc lookup dispatched; the skill's 'short-circuits the classifier before review' sentence must be corrected to what survives. (2) RECORD: (?!\.\w) narrows the four non-mDNS suffixes too — multi-label internal-DNS leaks (service.internal.company.com) now suppressed here; accepted, comment updated same commit. (3) RECORD: _SELF_TEST_FILES comment updated same commit (was stale 'only this file'). (4) LOW open: allow-rule * over-match — literal DATA-dir path preferred where portability allows.
