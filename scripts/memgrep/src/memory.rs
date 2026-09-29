@@ -5027,7 +5027,20 @@ pub fn cmd_edit_cli(args: &[String]) -> Result<()> {
     // lands, every blocking violation named) before `atomic_write_page`'s commit pass ever runs.
     // Every other verb still calls `atomic_write_page` directly and is UNGATED until its own
     // reviewed commit wires it (`pre_write::write_gated` is the only gated entry).
-    crate::pre_write::write_gated(&a.page, &out)?;
+    // TRDD-JFIOO9XO CURE 2: allow_body_rewrite so the sanctioned --replace-all control-byte
+    // repair (the AgentlensPro/ghbook 0x08 pages) can land inside an atom body. TRADEOFF, on
+    // record (card Review addenda): this exempts ALL body changes through this verb, not just
+    // repairs — narrower alternatives (a --repair policy flag, fingerprint-compare of the atom
+    // id set) were deliberately not taken; blanket exemption matches update-mem-atom's existing
+    // exemption. The DROP half still enforces — a dropped id still refuses.
+    crate::pre_write::write_gated_with(
+        &a.page,
+        &out,
+        &crate::pre_write::GatePolicy {
+            allow_body_rewrite: true,
+            ..Default::default()
+        },
+    )?;
     reindex_owning_scope(&a.page, a.hidden)?;
     println!("{}\tedited ({count} replacement(s))", rel(&a.page));
     Ok(())

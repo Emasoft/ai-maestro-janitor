@@ -76,9 +76,12 @@ pub(crate) struct GatePolicy {
     /// `merge-mem-atom` today — the card's retirement audit: these are the verbs whose
     /// contract IS dropping an id).
     pub retired_ids: BTreeSet<String>,
-    /// Skip the id-REUSE (changed-body) check while still enforcing the DROP check. Only
-    /// `update-mem-atom`'s body-rewrite path sets it: rewriting a body under a SURVIVING id is
-    /// that verb's own contract (the brief's reconciliation of the reuse rule with wave 1).
+    /// Skip the id-REUSE (changed-body) check while still enforcing the DROP check. Set only by
+    /// the verbs whose contract IS rewriting a body under a SURVIVING id (the brief's
+    /// reconciliation of the reuse rule with wave 1): `update-mem-atom`'s body-rewrite path,
+    /// `merge-mem-atom` and `split-mem-atom` (the kept atom's body legitimately changes), and
+    /// `update-mem-topic` (TRDD-JFIOO9XO CURE 2 — the sanctioned --replace-all control-byte
+    /// repair may land inside an atom body).
     pub allow_body_rewrite: bool,
 }
 
@@ -191,18 +194,34 @@ pub(crate) fn prepare_batch_gated(writes: &[(&Path, &str)], policy: &GatePolicy)
     for (dest, proposed) in writes {
         prepare(dest, proposed)?;
     }
-    let old: Vec<BTreeMap<String, String>> =
-        writes.iter().map(|(p, _)| id_inventory(&read_for_inventory(p))).collect();
+    let mut old: Vec<BTreeMap<String, String>> = Vec::with_capacity(writes.len());
+    for (p, _) in writes {
+        old.push(id_inventory(&read_for_inventory(p)?));
+    }
     let proposed_inv: Vec<BTreeMap<String, String>> =
         writes.iter().map(|(_, t)| id_inventory(t)).collect();
     enforce_id_rules(&old, &proposed_inv, policy)
 }
 
-/// A page's current on-disk text for inventory purposes. A page that does not exist yet
-/// (`split-mem-topic`'s destination, `new-page`) inventories as EMPTY — the gate judges the
-/// write's own blast radius, and a page not yet on disk cannot lose an id in it.
-fn read_for_inventory(page: &Path) -> String {
-    std::fs::read_to_string(page).unwrap_or_default()
+/// A page's current on-disk text for inventory purposes. FAILS CLOSED (TRDD-JFIOO9XO CURE 1):
+/// only a not-yet-existing page (`split-mem-topic`'s destination, `new-page`) inventories as
+/// EMPTY — the gate judges the write's own blast radius, and a page not yet on disk cannot lose
+/// an id in it. Any OTHER read failure (permission error, invalid UTF-8) refuses hard with a
+/// RETRYABLE message: inventorying such a page as EMPTY would certify dropping every id on it —
+/// the exact corruption class the gate exists for. The message is an instruction to reread and
+/// retry (STALE_MSG-style), so a transient EACCES on a race makes the worker retry, not conclude
+/// the gate is broken.
+fn read_for_inventory(page: &Path) -> Result<String> {
+    match std::fs::read_to_string(page) {
+        Ok(text) => Ok(text),
+        // NotFound is the one safe empty: no page on disk, so no id can be lost in it.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => anyhow::bail!(
+            "write gate could not read `{}` for the id-set inventory ({e}) — fail-closed, \
+             nothing was written; please reread the file first and retry",
+            page.display()
+        ),
+    }
 }
 
 /// The single-page gated write WITH the id-set rule (the gated form of `delete-mem-atom`'s
@@ -482,5 +501,121 @@ mod tests {
             covered, expected,
             "the sweep's fixture set and write_gate_floors() have drifted apart"
         );
+    }
+
+    // ── TRDD-JFIOO9XO CURE 1: read_for_inventory fails CLOSED ─────────────────────────────────
+
+    /// CURE 1 (TRDD-JFIOO9XO): an unreadable page must REFUSE, not inventory as EMPTY — the old
+    /// `unwrap_or_default` made the DROP half certify dropping every id on a permission-error or
+    /// invalid-UTF-8 page. Real files, real mode bits: a mode-000 page makes `read_to_string`
+    /// fail for real; the refusal must be RETRYABLE (a reread-and-retry instruction, so a
+    /// transient EACCES makes the worker retry rather than conclude the gate is broken). The
+    /// nonexistent-path half pins the ONE safe empty: NotFound inventories as empty, because
+    /// split-mem-topic's not-yet-existing destination cannot lose an id.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_page_refuses_retryable_and_missing_page_inventories_empty() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_cure1_inventory-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // NotFound: the one EMPTY case — a page not on disk cannot lose an id in it.
+        let missing = dir.join("not-there.md");
+        assert_eq!(read_for_inventory(&missing).unwrap(), String::new());
+
+        // Any other io error refuses hard, with a retryable (reread-and-retry) message.
+        let locked = dir.join("mode-000.md");
+        std::fs::write(&locked, "---\nname: p\n---\n^ATOM-SECRET [ocd: 2026-01-01]\nbody\n").unwrap();
+        let mut perms = std::fs::metadata(&locked).unwrap().permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o000);
+        std::fs::set_permissions(&locked, perms).unwrap();
+        let err = read_for_inventory(&locked)
+            .expect_err("an unreadable page must fail CLOSED, never inventory as EMPTY");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("fail-closed"),
+            "the refusal must name fail-closed: {msg}"
+        );
+        assert!(
+            msg.contains("reread the file first and retry"),
+            "the refusal must be RETRYABLE (STALE_MSG-style instruction): {msg}"
+        );
+
+        // The refusal propagates through the batch entry: a gated batch touching an unreadable
+        // page writes NOTHING (fails before commit), naming the read failure — not certifying
+        // the dropped ids as retired.
+        let dest = dir.join("dest.md");
+        let proposed = "---\nname: p\n---\nbody\n";
+        let err = prepare_batch_gated(&[(&dest, proposed), (&locked, proposed)], &GatePolicy::default())
+            .expect_err("a batch over an unreadable page must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("fail-closed"),
+            "the batch refusal must carry the read failure, not certify drops: {msg}"
+        );
+        assert!(
+            !msg.contains("id-set rule"),
+            "the id-set rule must never run on an EMPTY inventory of an unreadable page: {msg}"
+        );
+
+        // Cleanup: restore readability so remove_dir_all can succeed.
+        let mut perms = std::fs::metadata(&locked).unwrap().permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(&locked, perms).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── TRDD-JFIOO9XO CURE 3: the REUSE half is falsifiable ───────────────────────────────────
+
+    /// CURE 3 (TRDD-JFIOO9XO): a SURVIVING id with a CHANGED body must refuse under DEFAULT
+    /// policy, naming the id; the same write with `allow_body_rewrite: true` must pass (the DROP
+    /// half is untouched); and an UNCHANGED body must pass under default — this last assertion
+    /// guards against the fingerprint collapsing every body to equal, which would silently
+    /// disable the REUSE half while keeping this test's refusal arm green only via the other
+    /// fixture. Exercises the PUBLIC entry (`write_gated_with` end to end, real disk pages) so
+    /// the test discriminates the policy plumbing, not just the pure compare.
+    #[test]
+    fn surviving_id_with_changed_body_refuses_under_default_and_passes_with_allow_body_rewrite() {
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep_cure3_reuse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let page = dir.join("p.md");
+        let old_text =
+            "---\nname: p\n---\n^ATOM-R [ocd: 2026-01-01, keywords: cure3] \noriginal body text\n";
+        std::fs::write(&page, old_text).unwrap();
+
+        // CHANGED body under the SURVIVING id, DEFAULT policy → refuse, naming the id.
+        let changed =
+            "---\nname: p\n---\n^ATOM-R [ocd: 2026-01-01, keywords: cure3] \nrewritten different body\n";
+        let err = write_gated(&page, changed)
+            .expect_err("a surviving id with a changed body must refuse under DEFAULT policy");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("CHANGED body"),
+            "the refusal must be the REUSE (changed-body) arm: {msg}"
+        );
+        assert!(
+            msg.contains("ATOM-R"),
+            "the refusal must name the id: {msg}"
+        );
+
+        // Same write with allow_body_rewrite: true → pass (DROP half still enforced separately).
+        write_gated_with(
+            &page,
+            changed,
+            &GatePolicy { allow_body_rewrite: true, ..Default::default() },
+        )
+        .expect("allow_body_rewrite must exempt the changed body");
+
+        // UNCHANGED body under DEFAULT → pass: guards against the fingerprint collapsing every
+        // body to equal (which would make the refusal arm above vacuous for real changes).
+        std::fs::write(&page, old_text).unwrap();
+        let same_body_lmd_bumped = "---\nname: p\n---\n^ATOM-R [ocd: 2026-01-01, keywords: cure3] \noriginal body text\n\n## Notes and lessons learned\n";
+        write_gated(&page, same_body_lmd_bumped)
+            .expect("an unchanged body must pass under DEFAULT policy");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
