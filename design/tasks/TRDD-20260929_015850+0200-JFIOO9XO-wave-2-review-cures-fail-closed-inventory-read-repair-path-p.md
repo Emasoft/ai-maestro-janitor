@@ -1,10 +1,10 @@
 ---
 trdd-id: JFIOO9XO
 title: wave-2 review CUREs — fail-closed inventory read repair-path policy REUSE falsifiability test and GatePolicy doc fix
-column: todo
+column: dev
 status: tasked
 created: 2026-09-29T01:58:50+0200
-updated: 2026-09-29T01:59:10+0200
+updated: 2026-09-29T02:02:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,8 @@ Four CUREs from the wave-2 landing review (both forks, 2026-09-29; commit 190573
 ## Approval log
 
 - 2026-09-29T01:58:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-09-29 — review-of-record verdict HOLDS; sequenced to dev before any step-6 dispatch.
+
+## Review addenda
+
+Review-of-record addenda (2026-09-29, HOLDS): CURE 2's blanket allow_body_rewrite on update-mem-topic is a SEMANTIC LOOSENING trading against GD24IL7O's stated purpose — it exempts ALL body changes through the verb, not just repairs; named alternatives were a --repair policy flag or fingerprint-compare of the atom id set. The dispatcher must present the tradeoff at implementation, not bury it. CURE 1's fix must make the refusal RETRYABLE in its message (STALE_MSG-style reread-and-retry) — a transient EACCES/ENOENT-on-race refusing a batch is correct fail-closed but must not teach a worker the gate is broken.
