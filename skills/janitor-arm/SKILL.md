@@ -142,12 +142,14 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
   call is subject to the server-side classifier, which can now block even read-only/sandboxed
   commands it flags, and a deny is terminal ("retrying will not help", 2.1.280) — so the heartbeat
   silently stops on a flag. MEASURED: 12 live fires succeeded under 2.1.284 on the dev host
-  (2026-09-29), so the classifier is not blocking this shape there. Mitigation ATTEMPT (match
-  semantics unverified — see TRDD-5Q24T9SO's Review follow-ups; falls or stands as one): settings
-  allow rules `Bash(uv run --script */dispatcher-stub.py*)` plus the same for the two arm
-  scripts; add them to the project's `.claude/settings.local.json` / user `settings.json` where
-  absent. Headless cron contexts launch with `--permission-prompts none` (2.1.259) so a prompt
-  can never stall the fire.
+  (2026-09-29). VERIFIED against the docs (permissions.md, auto-mode-config.md): a Bash rule's
+  `*` matches any text including spaces and crosses `/`; the classifier is a SECOND gate after
+  permissions — narrow script-path allow rules resolve BEFORE it and stay in effect in auto
+  mode (only broad rules like `Bash(*)` are suspended, unless autoMode.classifyAllShell: true).
+  Mitigation: settings allow rules `Bash(uv run --script */dispatcher-stub.py*)` plus the same
+  for the two arm scripts; add them to the project's `.claude/settings.local.json` / user
+  `settings.json` where absent. Headless cron contexts launch with `--permission-prompts none`
+  (2.1.259) so a prompt can never stall the fire.
 - `arm_prepare.py` exits non-zero → surface its output; **do not create a cron**. A bad stub or a
   wrong install scope is worse than no arm.
 - `CronList` fails → skip the sweep; duplicates are cleaned up by the next sweep.
@@ -173,7 +175,7 @@ this skill re-runs on every SessionStart, so it would undo it constantly. Use
   - [Known limitations](references/janitor-architecture.md#known-limitations)
 - Recommended settings allow rules (auto-mode classifier, CC 2.1.281+ — add to
   `.claude/settings.local.json` or user `settings.json` where no installer owns them;
-  match semantics unverified — see the auto-mode note above):
+  verified against the docs — see the auto-mode note above):
   `Bash(uv run --script */dispatcher-stub.py*)`, `Bash(uv run --script */arm_prepare.py*)`,
   `Bash(uv run --script */arm_record.py*)`.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/arm_prepare.py` · `arm_record.py` — steps 1 and 4.
