@@ -4,7 +4,7 @@ title: atom-dup-id cross-page check — ownership evaporated between the step-2 
 column: testing
 status: tasked
 created: 2026-09-29T01:59:01+0200
-updated: 2026-09-29T09:06:07+0200
+updated: 2026-09-29T09:09:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,3 +33,4 @@ Found by BOTH wave-2 review forks (2026-09-29). Step-2's landing record excluded
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-29
 
 2026-09-29: this card now gates TRDD-XI10BA5D's close — XI10BA5D's eht lists it (correction round 2026-09-29). Directional signal added per the close-out review (the gate was one-directional until now). XI10BA5D's verification check-box requires reading this card's content and truing the column; step 6's link check resolves names not ids so the id-collapse defect does not directly corrupt it, but both run inside one prepare whose inventory is the contested object.
+True state (2026-09-29, added per the heading-fix review): part (a) LANDED e559e25c per the Implementation section below (landing review HOLDS, 3 next-touch obligations recorded there — spread-rule CURE, batch-internal-only qualifier, cosmetic mypy rider); part (b) cross-batch boundary OPEN; card in testing; the coordination note below concerns XI10BA5D gating only.
