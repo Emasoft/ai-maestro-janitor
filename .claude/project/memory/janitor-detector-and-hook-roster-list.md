@@ -2,7 +2,7 @@
 name: janitor-detector-and-hook-roster-list
 description: "full list of the janitor detectors by group (71 registered, marketplace-refresh retired 2026-09-17) / how many detectors are there / is marketplace-refresh still a detector / what does the github-issues-watch detector do / what does gh-reply-watch do / boundedness invariants for self-healing loops / what are the 16 janitor hooks / what does pre-tool-context-usage do / what does pre-tool-token-budget do / what does post-mcp-response-sanitizer do / pattern libraries scripts/lib/*_patterns.py / why does the token-spike advisory never fire / TURN_OUTPUT knob has no effect / every tool call is denied after a plugin update or reload / bash and edit fail for ~15 minutes in a live session / a hook that exits 2 blocks the tool call / uv run on a missing script exit code / the plugin cache dir is emptied mid-refetch / which detectors cover supply-chain security / list of detectors for supply chain / which detectors watch for scope drift / the cleanup and observability detector groups / how does the janitor notice a reply to a github thread it opened"
 ocd: 2026-08-02
-lmd: 2026-09-17
+lmd: 2026-09-29
 metadata:
   node_type: memory
   type: reference
@@ -20,7 +20,7 @@ pattern-library conventions the security detectors share. Deep-dive findings abo
 how well specific detectors actually perform live on the sibling page
 [[janitor-detector-and-hook-roster-findings]] instead of here.
 
-^ATOM-UWO2-0TIH [desc:"The COMPLETE grouped detector roster (73 as of 2026-08-16), defended by test_detector_roster_completeness.py, plus the boundedness invariants (S3+S4) and the pattern-library conventions", keywords: all_detectors_grouped_list_git_workflow_hygiene github-issues-watch_always_on_first_fire_silent boundedness_invariants_dedupe_backoff_rotate_trim pattern_libraries_scripts_lib_patterns_naming_convention how_many_janitor_detectors_are_there full_detector_roster_by_group test_detector_roster_completeness.py_defends_the_list registration_tuples_in_dispatch.py_are_the_authority a_.py_file_that_registers_nothing_never_runs project-scoped_never_touch_user-scope groups_are_git_workflow_TRDD_task_cleanup_observability what_does_github-issues-watch_do what_does_gh-reply-watch_do, type: reference, ocd: 2026-08-02, lmd: 2026-08-02] [^2] [^3] [^5]
+^ATOM-UWO2-0TIH [desc: "The COMPLETE grouped detector roster (73; repo-state rostered 2026-09-29), defended by test_detector_roster_completeness.py, plus boundedness invariants and pattern-library conventions", keywords: all_detectors_grouped_list_git_workflow_hygiene github-issues-watch_always_on_first_fire_silent boundedness_invariants_dedupe_backoff_rotate_trim pattern_libraries_scripts_lib_patterns_naming_convention how_many_janitor_detectors_are_there full_detector_roster_by_group test_detector_roster_completeness.py_defends_the_list registration_tuples_in_dispatch.py_are_the_authority a_.py_file_that_registers_nothing_never_runs project-scoped_never_touch_user-scope groups_are_git_workflow_TRDD_task_cleanup_observability what_does_github-issues-watch_do what_does_gh-reply-watch_do, type: reference, ocd: 2026-08-02, lmd: 2026-09-29]
 
 ### Conventions (breadth — list, don't per-symbol-dump)
 
