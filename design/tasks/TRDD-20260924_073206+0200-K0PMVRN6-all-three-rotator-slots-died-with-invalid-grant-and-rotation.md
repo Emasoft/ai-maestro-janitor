@@ -3,7 +3,7 @@ trdd-id: K0PMVRN6
 title: All three rotator slots died with invalid_grant and rotation stayed put for 17 days
 column: todo
 created: 2026-09-24T07:32:06+0200
-updated: 2026-09-27T16:52:14+0200
+updated: 2026-09-29T02:15:25+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -16,6 +16,7 @@ approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T07:32:06+0200
 relevant-rules: []
 labels: [oauth-rotator]
+review-after: 2026-10-05
 ---
 
 # All three rotator slots died with invalid_grant and rotation stayed put for 17 days
