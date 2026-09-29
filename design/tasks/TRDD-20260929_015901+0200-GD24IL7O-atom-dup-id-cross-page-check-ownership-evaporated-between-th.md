@@ -4,7 +4,7 @@ title: atom-dup-id cross-page check — ownership evaporated between the step-2 
 column: testing
 status: tasked
 created: 2026-09-29T01:59:01+0200
-updated: 2026-09-29T02:44:11+0200
+updated: 2026-09-29T02:46:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,4 @@ Found by BOTH wave-2 review forks (2026-09-29). Step-2's landing record excluded
 ## Implementation
 
 2026-09-29 PART (a) LANDED (commit e559e25c, lean-worker, main-verified): refuse_cross_page_duplicate_ids over the PROPOSED batch — id on 2 pages of the batch refuses; an id ALREADY duplicated on disk that the write merely preserves passes (freezing an inherited dup would make it unrepairable); cross-BATCH boundary stays the structured item on XI10BA5D (part b). 2 new tests, 338 unit + 171 cli green (main ran), no-leak intact. Moving to testing.
+2026-09-29 landing review (HOLDS, 3 discharges before terminal): (1) CURE — the inherited-preserve rule licenses SPREAD: 1→2 passes but 1→2 is not preservation, it mints a new dup instance from clean state; refuse count-growth on an inherited id (one test). (2) The refusal message/doc comment must carry the batch-internal-only qualifier (comprehension). (3) LOW: the mypy fix rode the VIFQ1LKI commit (cosmetic). These are next-touch obligations on this card, not new cards — the card cannot go terminal without them.
