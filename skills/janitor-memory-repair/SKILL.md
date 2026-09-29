@@ -24,8 +24,8 @@ distinction: [repair-background § Execution context and what this is](reference
    changed page is a re-read, recompute, retry — never a force). The two verb-covered
    in-place fixes (the one-sided link via `reference-mem-topic`, the atom `desc:` via
    `update-mem-atom`) run live, on the page directly, BEFORE the whole-page replace
-   (see [PRE-TRANSACTION verb
-   fixes](references/pre-transaction-verb-fixes.md#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page)
+   (see [PRE-REPLACE verb
+   fixes](references/pre-transaction-verb-fixes.md#pre-replace-verb-fixes-run-first-live-per-candidate-page)
    — MANDATORY read below). Every other fix still goes through the whole-page replace; nothing
    edits the live page outside a memgrep verb. If a stale memgrep on PATH does not know
    `replace-mem-topic`, ABSTAIN and report the gap — never fall back to Edit/Write.
@@ -42,7 +42,10 @@ distinction: [repair-background § Execution context and what this is](reference
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
+1. **Editor kill-switch.** `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off` or the
+   janitor kill-switch ⇒ hard stop (the memgrep verbs do not consult the switch —
+   this check is where the user's stop still bites).
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
    `STATE_DIR=<path>` value from your spawn prompt into the `export` below.
 
    ```bash
@@ -57,8 +60,8 @@ distinction: [repair-background § Execution context and what this is](reference
    `memory-maint-pending.json` slot (a USER-named scope is the one exception). One
    scope per pass (PROJECT only if `edit_project_scope` is True, staged-not-pushed).
    Exit-code meanings: [repair-background § claim exit codes](references/repair-background.md#claim-exit-codes).
-2. **Candidate set — run the SCHEDULER's own predicate, not `memgrep lint`** (lint-driven
-   discovery can disagree with the scheduler's precheck and re-dispatch forever, issue #227):
+2. **Candidate set — run the SCHEDULER's own predicate, not `memgrep lint`** (lint
+   discovery can disagree with the scheduler's precheck and re-dispatch forever, #227):
 
    ```bash
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_candidates_cli.py" \
@@ -97,8 +100,8 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **Missing `## Notes and lessons learned`** → append the empty section.
 - **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
   search will use (findability — the page stays found by recall).
-- **A page's OWN one-sided link** → a PRE-TRANSACTION fix, run live before `begin`
-  (details + `--base-sha256` and refusal handling in
+- **A page's OWN one-sided link** → a PRE-REPLACE fix, run live before the whole-page
+  write (details + `--base-sha256` and refusal handling in
   [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —
   MANDATORY read): `memgrep
   reference-mem-topic --page <this page> --to <target page>`. It wires both ends of
@@ -113,8 +116,8 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 - **Atom `desc:` incomplete** (`verify_repair` refuses a repair that leaves one): every
   `^id [...]` atom marker needs a `desc:` that is PRESENT, ≤200 chars, QUOTED or an
   unquoted clean legacy slug (`[a-z0-9_]+` only). **Backfill by SUMMARIZING the atom's
-  own body** (rule 5: infer, never invent), then apply it as a PRE-TRANSACTION fix,
-  run live before `begin` (details in
+  own body** (rule 5: infer, never invent), then apply it as a PRE-REPLACE fix,
+  run live before the whole-page replace (details in
   [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —
   MANDATORY read): `memgrep update-mem-atom --page <page>
   --atom <id> --desc "<text>"`. Before trimming a `desc:`, check every cut
@@ -134,21 +137,19 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" re
 It re-arms when the page's bytes change, and after 7 days — a verdict with an expiry,
 not a permanent silence. `--reason` must let the next reader re-check it.
 
-## PRE-TRANSACTION verb fixes — REQUIRED when applicable
+## PRE-REPLACE verb fixes — REQUIRED when applicable
 
-**PRE-TRANSACTION verb fixes — REQUIRED when the checklist finds a page's own one-sided
+**PRE-REPLACE verb fixes — REQUIRED when the checklist finds a page's own one-sided
 link, or an atom `desc:` to backfill or trim:** before the whole-page replace for
 that page, Read
 [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) in
-full and run it exactly. Skip it only when neither defect is present. Control-flow
-summary in case the file is not yet read: re-read and re-diagnose the page after the
-verb fixes, before the replace; a page whose only defects were these two fixes skips
-the replace entirely but still prints its Output line and closes the claim; on a
-refusal from either verb, report it and continue with the rest of the checklist. Their
-guards, missing from the bare `reference-mem-topic`/`update-mem-atom` calls above: dry-run
-the one-sided link first — `to gains a link` means do NOT run it live, report the one-sided
-link as a finding instead — and re-read the page and recompute `--base-sha256` immediately
-before EACH verb call.
+full and run it exactly. Skip only when neither defect is present. Control-flow
+summary if unread: re-diagnose after the verb fixes, before the replace; a page
+whose only defects were these two fixes skips the replace but still prints its
+Output line and closes the claim; on a refusal, report it and continue. Guards the
+bare calls above lack: dry-run the one-sided link first (`to gains a link` ⇒ do NOT
+run live, report the finding), and re-read + recompute `--base-sha256` before EACH
+verb call.
 
 ## EXECUTE the repair through the memgrep whole-page replace
 
@@ -178,7 +179,7 @@ re-read, re-diagnose, recompute. **Retry ≤3**; then surface a finding — the 
 page is untouched by a refused replace, and a pre-transaction verb fix (link/desc)
 already landed and is NOT rolled back; the page is left with that fix applied and
 its remaining defects still open, exactly as
-[references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md#pre-transaction-verb-fixes-run-before-begin-live-per-candidate-page)
+[references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md#pre-replace-verb-fixes-run-first-live-per-candidate-page)
 describes.
 
 Do NOT call `memory_settings.mark_ran` — the scheduler already stamped the cadence.

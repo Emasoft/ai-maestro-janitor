@@ -205,6 +205,10 @@ into the survivor as a compounding `[^N]`. Nothing is lost — only the slug mer
 #    The merge verb wires only the survivor↔tombstone See-also; it does NOT
 #    retarget third pages, and the gate's one-sided-link rule sees only the
 #    bytes IN the write — a holder left behind rots as a one-sided link (LINK LAW).
+#    CAVEAT (janitor#182): `memgrep links` cannot see MEMORY.md's pointer lines —
+#    check it by grep too, and repoint a matched pointer line by hand is FORBIDDEN:
+#    MEMORY.md is the harness buffer, so re-run the mirror instead (or note the
+#    pointer in the pass report if the harness owns the line).
 # 1. Fold the obsolete page's knowledge into the survivor as a compounding [^N]:
 #    - body = the CURRENT truth (unchanged or clarified), linking the fact to [^N]
 #    - a NEW compounding [^N] under "## Notes and lessons learned", in THE LESSON
