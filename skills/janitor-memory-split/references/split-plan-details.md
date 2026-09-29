@@ -51,9 +51,9 @@ sub-page. Then design the outputs:
   ends in the same edit. Each MUST include the mandatory
   `## Notes and lessons learned` section.
 - **Carry every fact and every `[^N]` lesson** from the source into exactly one
-  sub-page (or the overview) — nothing dropped, nothing reworded; copy lesson
-  bodies and their `[ocd:… lmd:…]` prefixes byte-for-byte. `verify_split` FAILS on
-  any dropped or silently-reworded lesson.
+  sub-page (or the overview) — nothing dropped, nothing reworded; the split verb
+  moves lesson bodies and their `[ocd:… lmd:…]` prefixes byte-for-byte. The write
+  gate REFUSES any dropped or silently-reworded lesson (nothing lands).
 - **Hub globs partition (hubs only):** if the source is `tier: hub` with a
   `globs:` list, distribute those patterns across the sub-pages so their union
   equals the parent set with NO overlap (each pattern has exactly one owning
@@ -93,32 +93,30 @@ silently empty — always pass `$(basename "$REL" .md)`, never `$REL`.
 
 ## Backlink-redirect mechanics
 
-**A split transaction has exactly ONE source — the page being split.** Backlink
-holders are NOT listed as sources to `begin` (the split verifier requires
-`len(sources) == 1` and aborts otherwise). Instead you redirect a holder by
-writing its rewritten content as a STAGED FILE at the holder's own rel-path
-(step 5): the commit reconstructs that as a write overwriting the live holder.
-So `begin` takes only `$REL`; the holder edits ride along as extra staged writes.
-The verify gate `no_dangling_refs` only fails on links to a RETIRED slug, and
-keeping the source slug as the overview retires nothing — but redirecting
+**The split verb touches exactly its own pages.** `split-mem-topic --page S --into N`
+rewires the S⇄N pair only (See-also both ways). A backlink HOLDER whose `[[S]]` pointed
+at moved detail is repointed with its OWN `reference-mem-topic --page <holder> --to
+<sub-page>` call (step 5) — one gated write, both ends wired, no staged copy, no hand
+edit. Keeping the source slug as the overview retires nothing, but redirecting
 moved-detail backlinks is still the correct editorial act, so do it.
 
 ## Hard invariants (every SPLIT pass enforces)
 
-- **Transactional** — stage → verify → atomic-swap; crash-resumable; idempotent.
-  Never edit a live page directly; always via `memory_txn_cli.py`.
+- **Verb-gated** — every write goes through the memgrep write verbs' shared gate;
+  a refusal writes nothing. Never edit a live page by hand.
 - **No information lost** — union(overview, sub-pages) ⊇ every fact + every `[^N]`
   lesson of the source, copied verbatim (lessons byte-identical).
 - **Type & tier preserved** — sub-pages keep the source's `metadata.type`; a
   component is never fragmented; one element = one page.
-- **Connected** — overview links DOWN to every sub-page, each sub-page links UP;
-  moved-detail backlinks redirected in the SAME txn; zero dangling/one-sided links.
+- **Connected** — overview links DOWN to every sub-page, each sub-page links UP
+  (the split verb wires each pair both ways); moved-detail backlinks redirected
+  via `reference-mem-topic`; zero dangling/one-sided links.
 - **Bounded & disable-able** — one page, one level per run; recursion across
   heartbeats; honors the kill-switch and `split_per_day: 0`.
 
-Each is mechanically checked by `memory_edit_verify.verify_split` before the
-transaction commits, so a pass that would violate one aborts rather than landing a
-half-split page — the invariants are enforced, not merely documented.
+Each is mechanically checked by the memgrep write gate before the batch lands,
+so a pass that would violate one is refused rather than landing a half-split
+page — the invariants are enforced, not merely documented.
 
 ## Size rule (e) — headroom, and why it is a rule rather than a preference
 
@@ -170,8 +168,7 @@ Never overwrite it — supersession is what keeps the old statement readable as 
 instead of deleting knowledge. (Not needed on the `split-mem-atom` path — see above.)
 
 **No transaction, deliberately.** The memgrep write verbs are already scope-locked and
-CAS-guarded, so they carry the same crash-safety `memory_txn_cli` provides for hand-staged
-page edits. Opening one here would nest two locking schemes for no benefit.
+CAS-guarded, so they carry the full crash-safety themselves.
 
 **Verify before you finish.** Re-run the lint line; an unverified decomposition that left the
 atom over budget re-dispatches this chore forever, which is the failure the write-side gate
@@ -242,18 +239,16 @@ automatically and no expiry bookkeeping is needed.
 
 ## Exit / retry / rollback contract (step 6)
 
-- **SUCCESS** = `commit` exits 0 (`verify_split` passed and the swap applied). Surface one line:
+- **SUCCESS** = the verbs exited 0. Surface one line:
   `[memory-split] split <source-slug> → overview + N sub-page(s) in <scope>.` PROJECT scope (if
-  explicitly enabled) stages into the in-repo root, NOT pushed — note "PROJECT staged; rides the
+  explicitly enabled) writes into the in-repo root, NOT pushed — note "PROJECT staged; rides the
   next publish.py".
-- **verify FAIL or a precondition error** (stale snapshot, lock contention, vanished source): the
-  txn is already aborted (live tree untouched). Read the printed reasons, FIX the staged plan,
-  and retry the whole begin→edit→commit cycle. **Bounded to ≤3 attempts.** After 3 failures:
-  ensure the txn is aborted (`memory_txn_cli.py abort "$SCOPE_ROOT" "$TXN"`), MUTATE NOTHING, and
+- **Gate refusal or a precondition error** (stale `--base-sha256`, lock contention): the verbs
+  wrote NOTHING (live tree untouched). Read the printed reasons, FIX the plan,
+  and retry. **Bounded to ≤3 attempts.** After 3 failures: MUTATE NOTHING, and
   surface: `[memory-split] FAILED <source-slug> after 3 attempts: <reason> — page left intact;
   review manually.`
 - **Lock contention / stale-hash loser** (a concurrent `janitor-memory-write` touched a source
-  between begin and commit): a normal abstain, not a failure — skip and let the next heartbeat
-  retry on fresh content.
-- **Idempotency:** the completed txn-id is the idempotency key; staging dir + journal are cleaned
-  on success. A re-run finds the page now under the cap and does nothing.
+  since you read it): a normal abstain, not a failure — re-read, recompute, and let the next
+  heartbeat retry on fresh content.
+- **Idempotency:** a re-run finds the page now under the cap and does nothing.

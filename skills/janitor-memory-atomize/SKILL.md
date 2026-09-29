@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-atomize
-description: 'ATOMIZE executor — the autonomous pass that migrates a FREE-PROSE wikimem page into first-class ATOMS: inserts a LEADING block-property marker `^<id> [keywords: …]` above each durable fact so memgrep recalls it individually by its keywords and returns its full per-atom record. Purely ADDITIVE + transaction-gated + verified — never drops or rewords a fact. Runs on a [janitor-memory-atomize] marker, or "atomize this page", "give the memory facts their atom markers".'
+description: 'ATOMIZE executor — the autonomous pass that migrates a FREE-PROSE wikimem page into first-class ATOMS: inserts a LEADING block-property marker `^<id> [keywords: …]` above each durable fact so memgrep recalls it individually by its keywords and returns its full per-atom record. Purely ADDITIVE + write-gate-verified — never drops or rewords a fact. Runs on a [janitor-memory-atomize] marker, or "atomize this page", "give the memory facts their atom markers".'
 ---
 
 # Janitor memory — ATOMIZE (migrate a free-prose page into first-class atoms)
@@ -16,7 +16,7 @@ ATOMIZE is the autonomous pass that migrates those pages — **one page per run,
 heartbeats** — by giving each durable fact its leading marker.
 
 It is **purely additive**: it inserts a marker line above each fact and changes NOTHING else —
-no fact reworded, no lesson dropped, no frontmatter touched. The `verify_atomize` gate proves
+no fact reworded, no lesson dropped, no frontmatter touched. The memgrep write gate proves
 it (this mutates the live corpus — RULE 0). It is the 6th wikimem-editor pass, alongside
 split / consolidate / conflict / repair / harvest.
 
@@ -26,8 +26,9 @@ split / consolidate / conflict / repair / harvest.
    The verifier proves it — you never reword a fact while marking it.
 2. **Additive markers ONLY.** The sole change is added `^id [keywords: …]` lines (each on its
    OWN line, LEADING — directly ABOVE the fact it opens). Adding any other line is refused by the gate.
-3. **Never edit a live page.** All edits happen on the STAGED copy; `commit --op atomize`
-   applies atomically under the per-scope flock + stale-snapshot guard.
+3. **Never edit a live page by hand.** The marked page is applied with the memgrep
+   whole-page replace verb (`replace-mem-topic`), whose shared write gate lints +
+   validates and refuses a lossy result — see the EXECUTE block.
 4. **Single page, in place.** ONE write at the page's own path, ZERO deletes.
 5. **Frontmatter untouched** except `lmd` → today (the page was modified). `ocd` never changes.
 6. **One scope per pass, top-K pages, bounded retry.** Stay cheap; disable-able.
@@ -35,10 +36,7 @@ split / consolidate / conflict / repair / harvest.
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Editor enabled + roll forward.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
-   first (rolls forward any interrupted txn). If the editor is kill-switched or
-   `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
-2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
+1. **Scope — CLAIM it, never self-select or re-check `is_due`.**
 
    Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
    `export` below before running the claim — the guard on the next line refuses to run
@@ -66,7 +64,7 @@ split / consolidate / conflict / repair / harvest.
    human naming a scope IS the assignment). Process **one scope per pass** (PROJECT
    only if `edit_project_scope` is True — a PROJECT atomize is staged-not-pushed,
    rides the next `publish.py`).
-3. **Candidate set — run the SCHEDULER's own predicate, not `memgrep -l`.** A `memgrep`-driven
+2. **Candidate set — run the SCHEDULER's own predicate, not `memgrep -l`.** A `memgrep`-driven
    marker scan can disagree with the scheduler's own precheck (the same janitor#227 class of bug
    `memory-repair` hit: a page the scheduler flagged could look "already atomized" to a
    differently-scoped grep), so scanning independently risks finding nothing to work while the
@@ -79,7 +77,7 @@ split / consolidate / conflict / repair / harvest.
    ```
 
    Bound the run to the **top-K least-atomized pages** (K ≈ 5), biggest/most-fact-dense first.
-   `memgrep lint`/`validate` still runs — but only AFTER a pass, as the commit's post-edit
+   `memgrep lint`/`validate` still runs — but only AFTER a pass, as the post-edit
    verifier, never to discover candidates. A line whose reason is `unreadable-page` names a
    page the scheduler dispatches on but nobody can read — do NOT edit or recreate it; report
    it in your result line so a human unbreaks it.
@@ -135,25 +133,33 @@ The refusal re-arms by itself when the page's bytes change, and after 7 days —
 verdict with an expiry, not a permanent silence. `--reason` is the deliverable: the next
 reader has to be able to re-check it.
 
-## EXECUTE through the transaction core
+## EXECUTE through the memgrep whole-page replace
+
+Build the COMPLETE marked page in a scratch file OUTSIDE the memory corpus (the agent's
+Write tool is for scratch, reports and state — never a wikimem page): the page's existing
+bytes with the LEADING `^id [desc:…, keywords:…]` markers inserted above each fact (own
+lines), `lmd` bumped to today, and NOTHING else changed (no reword, no new prose, no
+deletes). Then apply it with ONE gated verb:
 
 ```bash
-uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" begin "<scope_root>" atomize "<page.md>"
-#   → txn_id=<id>  staging=<abs dir>
-# Edit ONLY the staged copy of <page.md>: insert LEADING `^id [desc:…, keywords:…]` markers (own
-# lines) ABOVE each fact; bump lmd; change NOTHING else (no reword, no new prose, no deletes).
-uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" commit "<scope_root>" <txn_id> --op atomize
-#   → committed <id> (atomize): 1 write(s), 0 delete(s)
-#   verify_atomize proves: lessons preserved, every body FACT byte-identical, no frontmatter key
-#   dropped, ocd unchanged, lmd not regressed, ≥1 marker added, and the ONLY new lines are markers.
+memgrep replace-mem-topic --page "<scope_root>/<page.md>" \
+  --content-file "<scratch copy>" \
+  --base-sha256 "$(sha256 -q "<scope_root>/<page.md>")"
+#   → stdout: <page>\treplaced (whole page); sha256 + lint disclosure on stderr.
+#   The shared write gate refuses a lossy result: every body FACT must stay
+#   byte-identical, no frontmatter key dropped, ocd unchanged, lmd not regressed,
+#   ≥1 marker added, and the ONLY new lines markers — any ERROR writes NOTHING
+#   and names the violations content-free.
 ```
 
-No path through `memory_txn_cli.py`/memgrep for the needed edit → ABSTAIN, report the gap.
+No path through a memgrep verb for the needed edit → ABSTAIN, report the gap — never
+fall back to Edit/Write or any shell writer on a wikimem page.
 
-**On verify FAIL or any error:** `commit` exits non-zero with the reasons and the txn self-aborts
-(live tree untouched). Read the reason (a dropped/reworded fact → restore it verbatim; a smuggled
-non-marker line → remove it; no marker → actually add one) and re-commit. **Bounded retry ≤3**;
-after the 3rd failure run `abort "<scope_root>" <txn_id>`, mutate nothing, surface a finding.
+**On a refusal:** the gate wrote nothing. Read the named violations (a dropped/reworded
+fact → restore it verbatim in the scratch copy; a smuggled non-marker line → remove it;
+no marker → actually add one) and re-run. On a `--base-sha256` STALE refusal the page
+changed since you read it: re-read, re-mark, recompute. **Bounded retry ≤3**; after the
+3rd refusal surface a finding, mutate nothing.
 
 After a clean pass: `memgrep reindex "<scope_root>"` (so the new atoms are searchable). Do NOT
 call `memory_settings.mark_ran` here — the SCHEDULER already stamped the cadence at emit
@@ -163,11 +169,11 @@ content work).
 
 ## EXIT / SUCCESS / idempotency contract
 
-- **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the txn; PROJECT, if opted-in,
+- **SUCCESS = gate-pass + applied** (LOCAL/USER written through the verb; PROJECT, if opted-in,
   staged-not-pushed — rides `publish.py`). Then reindex.
-- **Retry ≤3 then abort** (staging discarded, one-line finding); other pages are independent.
-- **Idempotent + crash-safe:** every run starts with `resume`; a fully-atomized page (every fact
-  already marked) is a no-op — skip it, never write a no-change commit.
+- **Retry ≤3 then surface a finding** (a refused gate writes nothing; other pages are independent).
+- **Idempotent + crash-safe:** a fully-atomized page (every fact
+  already marked) is a no-op — skip it, never write a no-change replace.
 - **Bounded + disable-able:** one scope/pass, top-K pages; `atomize_per_day=0` or the kill-switch /
   `WIKIMEM_EDITOR_ENABLED=off` stops it.
 - **Never destructive** — additive markers only; the gate refuses anything else.
@@ -188,7 +194,7 @@ detailed report goes to `$MAIN_ROOT/reports/janitor-memory-atomize/<ts>-<slug>.m
 ## Scope
 
 ONLY adds atom markers to FREE-PROSE wikimem pages in ONE memory scope per pass, IN PLACE through
-`memory_txn_cli.py --op atomize`. Does NOT create pages (`/janitor-memory-write`), merge
+the memgrep whole-page replace verb. Does NOT create pages (`/janitor-memory-write`), merge
 (`/janitor-memory-consolidate`), split (`/janitor-memory-split`), resolve contradictions
 (`/janitor-memory-conflict`), backfill shape/metadata (`/janitor-memory-repair`), or harvest stray
 artifacts (`/janitor-memory-harvest`). Never moves a page across scopes. PROJECT-scope editing is
@@ -227,7 +233,6 @@ MEMPASS-STALE-CLAIM after 6 h and the pass is re-dispatched.
   - Page anatomy
   - Atoms — first-class body elements (block-properties)
 - `scripts/memgrep/SKILL.md` — the atom grammar + the recall-output record shape.
-- `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides (`begin`/`commit --op
-  atomize`/`abort`/`resume`); `verify_atomize` is its gate.
+- `scripts/memgrep` — the write verbs (`replace-mem-topic`, the shared write gate).
 - `scripts/lib/memory_settings.py` — cadence (`is_due`/`mark_ran`, `atomize_per_day`) + the
   `edit_project_scope` gate.

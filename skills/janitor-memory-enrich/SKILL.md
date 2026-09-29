@@ -26,15 +26,18 @@ changes `ocd`, never merges/splits/deletes.
 
 1. **No knowledge lost.** Every `[^N]` lesson and every fact survives byte-for-byte — the
    verifier proves it.
-2. **Never edit a live page.** All edits happen on the STAGED copy; `commit --op repair`
-   applies atomically under the per-scope flock + stale-snapshot guard.
+2. **Never edit a page by hand.** Every page write goes through a memgrep write verb
+   (single-page: `update-mem-atom --keywords/--desc` for the keyword/description shapes
+   enrich makes; whole-page: `replace-mem-topic --page P --content-file F`). The gate
+   lints, formats, validates and writes atomically — or refuses naming every violation.
+   If the installed memgrep does not know a verb (unknown-command / usage refusal),
+   ABSTAIN and report the gap — never fall back to Edit/Write or the txn core.
 
-   > There is deliberately **no `--op enrich`**. An enrich edit has the identical shape to a
-   > repair — exactly ONE write at the page's own path, zero deletes — and `verify_repair`
-   > already proves the four things enrich needs (every `[^N]` lesson survives, no
-   > frontmatter key is dropped, `ocd` is unchanged, `lmd` does not regress). A second op
-   > with the same verifier would be a second name for one guarantee, and the two would
-   > drift.
+   > There is deliberately **no `--op enrich`** in the txn core. An enrich edit has the
+   > identical shape to a repair — exactly ONE write at the page's own path, zero deletes —
+   > and the write gate already proves the four things enrich needs (every `[^N]` lesson
+   > survives, no frontmatter key is dropped, `ocd` is unchanged, `lmd` does not regress).
+   > A second name for one guarantee would only drift.
 3. **`keywords:` and page `description:` ONLY.** Never touch an atom's `desc:` — that field
    has a 200-char cap enforced by `memory_edit_verify`, so padding it hands `repair` a defect
    to undo and the two passes ping-pong on the same page forever.
@@ -47,11 +50,7 @@ changes `ocd`, never merges/splits/deletes.
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Editor enabled.** `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
-   first (rolls forward any interrupted txn). If kill-switched or
-   `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
-
-2. **Scope — CLAIM it, never self-select or re-check `is_due`.**
+1. **Scope — CLAIM it, never self-select or re-check `is_due`.**
 
    Your spawn prompt carries a `STATE_DIR=<path>` line; put that exact value into the
    `export` below before running the claim — the guard on the next line refuses to run
@@ -135,13 +134,12 @@ The refusal re-arms by itself when the page's bytes change, and after 7 days —
 an expiry, not a permanent silence. `--reason` is the deliverable: the next reader has to be
 able to re-check it.
 
-## Verify, then commit
+## Verify, then move on
 
-After each page, the commit's post-edit verifier runs `memgrep lint`/`validate`. The page
-must come back with its enrich-class findings GONE and no new finding of any class. A page
-that still flags is not done — fix it or refuse it; never leave it half-widened. If the
-widening needed has no path through the txn core or a memgrep verb, ABSTAIN and report the
-gap — never hand-edit the live page.
+After each page, the gate's verdict IS the check: a verb refusal names every violation —
+fix the scratch content and re-run (retry ≤3) or record the refusal below. A page that
+still flags its enrich-class finding is not done. If the widening needed has no memgrep
+verb, ABSTAIN and report the gap — never hand-edit the page.
 
 ## Report
 

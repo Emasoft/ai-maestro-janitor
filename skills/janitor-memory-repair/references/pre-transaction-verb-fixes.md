@@ -1,11 +1,11 @@
 # PRE-TRANSACTION verb fixes (moved verbatim from janitor-memory-repair/SKILL.md — TRDD-XI10BA5D)
 
-## PRE-TRANSACTION verb fixes (run BEFORE `begin`, live, per candidate page)
+## PRE-REPLACE verb fixes (run FIRST, live, per candidate page)
 
-Two checklist fixes are already atomic, locked memgrep writes and are never part of the
-staged-copy pass — run whichever apply to the candidate page BEFORE
-`memory_txn_cli.py begin`, never inside the staged copy and never after `commit`. Why a
-stale sha strands the second verb call: [rationale](repair-background.md#pre-transaction-verb-fixes--extended-rationale).
+Two checklist fixes are already atomic, gated memgrep writes in their own right — run
+whichever apply to the candidate page BEFORE the whole-page `replace-mem-topic`, never
+hand-edited into the page content and never after it. Why a stale sha strands the second
+verb call: [rationale](repair-background.md#pre-transaction-verb-fixes--extended-rationale).
 
 **Re-read the page and recompute `--base-sha256` immediately before EACH verb call** —
 never reuse one sha for both.
@@ -51,17 +51,17 @@ continue with whatever other fixes the page still needs — a refused pre-transa
 is not a reason to skip the rest of the checklist, nor to abandon the staged-copy pass
 for this page.
 
-**Re-read the page again after the pre-transaction step, before `begin`.** A verb call
+**Re-read the page again after the pre-replace verb step, before `replace-mem-topic`.** A verb call
 that wrote changed the page's bytes; re-diagnose the checklist against the CURRENT page
-so the candidate set handed to the staged-copy pass reflects what's actually still
-broken, not what was broken before the pre-transaction fixes landed. This re-diagnosis
-happens BEFORE the "does this page still need `begin`/`commit`" decision below, not
+so the candidate set handed to the whole-page pass reflects what's actually still
+broken, not what was broken before the pre-replace fixes landed. This re-diagnosis
+happens BEFORE the "does this page still need the whole-page replace" decision below, not
 after — the decision is made from the post-fix diagnosis, never the stale one that
 selected the page as a candidate.
 
 A page whose ONLY defects were these two verb-covered fixes (and both were applied, or
-correctly skipped/reported) needs no `begin`/`commit` at all — the pre-transaction step
+correctly skipped/reported) needs no whole-page replace at all — the pre-replace step
 alone completed the repair. It still prints the normal per-page Output line and still
-closes the claim (`set-report` + `complete`), exactly as a page that went through the
-transaction core (see [janitor-memory-repair/SKILL.md](../SKILL.md)'s `## Output` and
+closes the claim (`set-report` + `complete`), exactly as a page that went through
+`replace-mem-topic` (see [janitor-memory-repair/SKILL.md](../SKILL.md)'s `## Output` and
 `## Close the claim` sections).

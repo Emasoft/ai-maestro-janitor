@@ -52,16 +52,15 @@ For each candidate, read the lesson and ask the card's own test for off-topic: *
 only of THIS page's subject, or would it still be true of a completely different subject?*
 
 - **LINK and leave** — when the general form of the lesson ALREADY exists on the
-  methodology/owning page (search the owning page for the same rule before deciding). Route
-  the `[[link]]` through the transaction core — a hand edit of a wikimem page is forbidden
-  (only memgrep verbs and the txn core may edit one):
-  `memory_txn_cli begin <scope> repair <page>` → append the `[[owning-page]]` link to the
-  STAGED copy (touch nothing else) → `commit --op repair` (the verify gate proves no loss).
-  Do NOT move.
+  methodology/owning page (search the owning page for the same rule before deciding). Wire
+  the `[[link]]` with the memgrep link verb — a hand edit of a wikimem page is forbidden
+  (only memgrep verbs may edit one, TRDD-XI10BA5D):
+  `memgrep reference-mem-topic --page <page> --to <owning-page>` (wires the wikilink BOTH
+  ways in one gated write; on a refusal or a stale-memgrep unknown-command, ABSTAIN and
+  report the gap — never Edit/Write). Do NOT move.
 - **MOVE** — when the general form does NOT yet exist elsewhere. FIRST resolve the
   destination (duty 15, TRDD-VIFQ1LKI): if the owning page does not exist yet, CREATE it
-  (the section below), then run, through the transaction core per the consolidate skill's
-  shape:
+  (the section below), then run:
 
   ```bash
   memgrep migrate-mem-atom "<ATOM-ID>" --from <src-page.md> --to <dst-page.md> --leave-link

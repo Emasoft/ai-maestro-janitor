@@ -1,8 +1,8 @@
-# CONFLICT executor — preconditions, per-pair stages, and the transaction recipes
+# CONFLICT executor — preconditions, per-pair stages, and the verb recipes
 
 This is the operational detail for the `janitor-memory-conflict` skill: the
 preconditions to verify before any work, the four per-pair stages, and the exact
-`scripts/memory_txn_cli.py` recipes that apply a verdict atomically. The skill
+`memgrep` verb recipes that apply a verdict through the write gate. The skill
 body is the overview + the iron rules; this file is the step-by-step.
 
 The pool/backoff/barrier code and the verbatim agent prompts live in the sibling
@@ -24,10 +24,9 @@ each stage does and how the verdict is committed.
 Run these gates first; if any fails, emit a one-line finding and stop (mutate
 nothing):
 
-1. **Editor enabled.** `uv run scripts/memory_txn_cli.py resume "<scope_root>"`
-   first (rolls forward any interrupted txn). If the editor is kill-switched or
-   `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the txn CLI refuses — honor
-   it and stop.
+1. **memgrep present.** `command -v memgrep` must resolve; a missing binary or a
+   verb the installed build does not know (unknown-command / usage refusal) means
+   ABSTAIN and report the gap — never fall back to Edit/Write or the txn core.
 2. **Due-check + scope selection.** This pass is cadence-limited
    (`conflict_per_day`, off by default (opt-in)). Use the settings lib:
 
@@ -177,17 +176,16 @@ trace), plus one sentence of evidence."* (Full prompt in the sibling
   git-history verify (Stage 2 `history_search_ran && !git_trace_found`). A tie, a
   majority `keep`, or any votes still missing → **DEMOTE** (reversible).
 
-### Stage 4 — EXECUTE the verdict THROUGH the transaction core
+### Stage 4 — EXECUTE the verdict THROUGH the memgrep write gate
 
-Never edit a live page. Always `begin` (copies the sources into staging), edit
-only the STAGED COPIES, then `commit` (re-hashes sources under the per-scope flock,
-applies atomically). The txn CLI's commit gate exposes only `--op merge` /
-`--op split` (no `--op conflict`); **CONFLICT's two verdicts both ride
-`--op merge`** — and both are expressed as a REAL merge of the conflict PAIR: one
-page of the pair is RETIRED (a delete) and its fact + every `[^N]` lesson is FOLDED
-into the surviving page (a write). This is the only commit shape the gate accepts,
-and it loses no knowledge — the retired page's content lives on as a compounding
-`[^N]` on the survivor.
+Never edit a live page by hand. Every verdict is ONE gated batch: **both DEMOTE and
+DELETE route through `memgrep merge-mem-topic --from <retired> --into <survivor>`** —
+the verb folds the retired page's fact + every `[^N]` lesson into the survivor, wires
+the See-also both ways, and tombstones the source in place (keeps its `name:`/`ocd`,
+reads `Merged into [[<survivor>]]`). There is no conflict-specific op; a verdict
+ALWAYS retires one page of the pair as a tombstone and never edits a single page in
+place. If the installed memgrep does not know the verb (unknown-command / usage
+refusal), ABSTAIN and report the gap — never fall back to Edit/Write or the txn core.
 
 **DEMOTE** (the DEFAULT, non-destructive — obsolete-but-true). The pair is two
 pages about ONE subject that contradict because one describes a now-superseded
@@ -198,28 +196,23 @@ into the survivor as a compounding `[^N]`. Nothing is lost — only the slug mer
 
 ```bash
 # sources = the conflict PAIR: <obsolete.md> (to retire) + <current.md> (survivor)
-uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<obsolete.md>" "<current.md>"
-#   → txn_id=<id>  staging=<abs dir>
-# In staging, in ONE txn:
-#   rm staging/<obsolete.md>                     # retire the obsolete page (a DELETE)
-#   edit staging/<current.md> (a WRITE):
-#     - body = the CURRENT truth (unchanged or clarified), linking the fact to [^N]
-#     - a NEW compounding [^N] under "## Notes and lessons learned", in THE LESSON
-#       FORM (below) with the SOURCED WHY, citing commit/TRDD. Its metadata carries the
-#       RETIRED page's recall words, so the folded knowledge stays findable after its
-#       file is gone:
-#       "[keywords: <what someone would search to find the RETIRED page>, ocd: <the
+# 1. Fold the obsolete page's knowledge into the survivor as a compounding [^N]:
+#    - body = the CURRENT truth (unchanged or clarified), linking the fact to [^N]
+#    - a NEW compounding [^N] under "## Notes and lessons learned", in THE LESSON
+#      FORM (below) with the SOURCED WHY, citing commit/TRDD. Its keywords carry the
+#      RETIRED page's recall words, so the folded knowledge stays findable after its
+#      file is tombstoned:
+#      "[keywords: <what someone would search to find the RETIRED page>, ocd: <the
 #         obsolete page's ocd>, lmd: <today>] DO NOT <assert X, as page <obsolete_slug>
 #         did>, BECAUSE <what changed> at <sha> (TRDD-<8hex>) superseded it. DO <the
 #         current truth> instead."
-#     - EVERY pre-existing [^N] from BOTH pages copied verbatim (lessons_preserved
-#       is strict: a dropped or reworded lesson FAILS the commit)
-#     - REDIRECT any surviving [[<obsolete_slug>]] backlink → the survivor's slug
-#     - frontmatter: survivor ocd = MIN(current.ocd, obsolete.ocd); lmd = today
-uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op merge
-#   → survivor = 1 write, obsolete page = 1 delete; verify_merge proves the retired
-#     page's lessons rode into the survivor, ocd==min, no new duplicate line, and no
-#     page still links the retired slug.
+# 2. Write the survivor through the gate — build the COMPLETE page in a scratch file
+#    (frontmatter with ocd = MIN(current.ocd, obsolete.ocd), lmd = today, every
+#    pre-existing [^N] from BOTH pages verbatim, no [[<obsolete_slug>]] link left):
+memgrep replace-mem-topic --page <current.md> --content-file /tmp/current-complete.md
+#    (or, when the fold is exactly the verb's own shape:)
+memgrep merge-mem-topic --from <obsolete.md> --into <current.md>
+# 3. The gate's refusal names every violation — fix the scratch bytes and re-run.
 ```
 
 **DELETE** (RARE — post-vote, provenance + traceless). Structurally identical to a
@@ -229,22 +222,15 @@ lost even on a "delete":
 
 ```bash
 # sources = the conflict PAIR: <false.md> (to retire) + <survivor.md>
-uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<false.md>" "<survivor.md>"
-# In staging:
-#   rm staging/<false.md>                        # retire the false page (a DELETE)
-#   edit staging/<survivor.md> (a WRITE):
-#     - absorb the false fact's history as a compounding [^N], in THE LESSON FORM (below),
-#       its keywords being what someone would search to find the RETIRED page:
-#       "[keywords: <the retired page's recall words>, ocd: <the false page's ocd>, lmd:
-#         <today>] DO NOT <assert X, as page <false_slug> did>, BECAUSE `git log -S` ran
-#         on the reachable repo at <sha> and found NO trace of it (skeptic vote <m>/<n>).
-#         DO <the survivor's truth> instead."  ← plus the retired page's OWN
-#       [^N] lessons, verbatim (lessons_preserved is strict)
-#     - REDIRECT any surviving [[<false_slug>]] backlink → the survivor's slug
-#     - frontmatter: survivor ocd = MIN(survivor.ocd, false.ocd); lmd = today
-uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op merge
-#   → survivor = 1 write, false page = 1 delete; verify_merge proves the retired
-#     page's lessons rode into the survivor and no page links the retired slug.
+# Same three steps as DEMOTE with the [^N] framing below — the fold carries the
+# false page's OWN [^N] lessons verbatim too:
+#   "[keywords: <the retired page's recall words>, ocd: <the false page's ocd>, lmd:
+#     <today>] DO NOT <assert X, as page <false_slug> did>, BECAUSE `git log -S` ran
+#     on the reachable repo at <sha> and found NO trace of it (skeptic vote <m>/<n>).
+#     DO <the survivor's truth> instead."
+# NEVER a bare `delete-mem-topic` — it retires to .trashcan/ with NO fold and
+# loses the retired page's lessons. Both verdicts fold first, via the merge verb
+# or the replace + scratch flow above.
 ```
 
 > Why the merge gate is the right oracle for a destructive verdict: it is a
@@ -300,29 +286,23 @@ CONSOLIDATE. Do not try. An old lesson may only be COMPOUNDED (its body kept int
 history appended). Retro-fitting the corpus's legacy long lessons needs a sanctioned reshape
 op with its own loss oracle — a separate TRDD, never an opportunistic reword here.
 
-**On verify FAIL or any error:** `commit` exits non-zero with the reasons and the
-txn self-aborts (live tree untouched). Read the reason, fix it in the staged copy
-(a dropped lesson → copy it verbatim; `ocd` mismatch → set it to min(sources); a
-missed backlink redirect; a re-introduced duplicate line), and re-commit. **Bounded
-retry ≤3**; after the 3rd failure run `abort "<scope_root>" <txn_id>`, mutate
-nothing, and surface a finding (do NOT keep trying).
+**On gate refusal or any error:** the verb exits non-zero naming every violation and
+nothing is written. Read the reason, fix the scratch bytes (a dropped lesson → copy it
+verbatim; `ocd` mismatch → set it to min(sources); a missed backlink redirect; a
+re-introduced duplicate line), and re-run. **Bounded retry ≤3**; after the 3rd failure
+mutate nothing and surface a finding (do NOT keep trying).
 
 After a successful pass on the scope: `memory_settings.mark_ran("conflict", scope,
 root, now)` so the cadence is respected and the next heartbeat doesn't re-fire.
 
 ## Why a same-slug in-place edit does NOT work
 
-(Verified end-to-end against the real CLI + verifier — get this wrong and `commit`
-aborts, leaving the live tree untouched.) `commit` RECONSTRUCTS its change set by
-diffing staging vs the recorded sources: a staged source you `rm`-then-rewrite at
-the SAME path is seen as a WRITE with **zero deletes** (the path still exists in
-staging). `verify_merge` derives its "source" metadata from the **DELETED** pages
-ONLY; with an empty deleted-set, `ocd_lmd_ok_merge` fails with `missing ocd on a
-source` and the txn aborts. So a verdict MUST retire one page of the pair — never
-keep both, never edit one page in place with 0 deletes. The merge gate requires
-`survivor.ocd == min(deleted page ocds)` and that **every retired page's `[^N]`
-lessons survive verbatim** into the survivor; the recipes above satisfy exactly
-that.
+The write gate refuses a whole-page write that silently drops an atom id or lesson
+(id-set rule), and a verdict's fold REQUIRES the retired page's `ocd` and lessons to
+ride into the survivor — `merge-mem-topic` enforces exactly that (one gated batch:
+survivor write + source tombstone, refusing a dangling link to the retired slug). So a
+verdict MUST retire one page of the pair — never keep both, never edit one page in
+place with no fold. The recipes above satisfy exactly that.
 
 ## Security and scope
 
@@ -343,7 +323,7 @@ prefix, so it binds whether or not this file is read.
 ### Scope
 
 ONLY reconciles contradictory/obsolete wikimem pages in ONE memory scope per pass
-(demote default, or a hard-gated delete) through `memory_txn_cli.py`; READ-ONLY
+(demote default, or a hard-gated delete) through the memgrep write gate; READ-ONLY
 against project repos. Does NOT create pages (`/janitor-memory-write`), merge
 same-subject pages (`/janitor-memory-consolidate`), or split oversized pages
 (`/janitor-memory-split`). PROJECT-scope editing is opt-in, never pushed standalone.

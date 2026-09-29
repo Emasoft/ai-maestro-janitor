@@ -128,34 +128,32 @@ re-dispatches forever. Invocation + why it expires: [merge-protocol](references/
 ### 5. Discover backlinks to redirect (THE LINK LAW — mandatory)
 
 On merge A+B→C, every page linking `[[A]]` or `[[B]]` MUST be repointed to `[[C]]`, each
-in its OWN prior `--op repair` transaction (never inside the merge — why: Resources §
-Why backlink redirect is load-bearing). **Two indexes hold links; `MEMORY.md`'s pointer
-lines are the one `memgrep links` cannot see** — miss it and the merged note reads as
-MISSING (janitor#182).
+holder through its own gated verb write (`reference-mem-topic --page <holder> --to <C>`)
+BEFORE the merge — never inside it (why: Resources § Why backlink redirect is load-bearing).
+**Two indexes hold links; `MEMORY.md`'s pointer lines are the one `memgrep links` cannot
+see** — miss it and the merged note reads as MISSING (janitor#182).
 
-Full procedure (the `memgrep links --from` invocations, holder-repair-first ordering,
+Full procedure (the `memgrep links --from` invocations, holder-first ordering,
 prose-mention surfacing, `MEMORY.md` pointer repair) — read before executing:
 [merge-protocol § Step 5](references/merge-protocol.md).
 
-### 6-9. Execute the merge through the transaction core
+### 6-9. Execute the merge through the memgrep verbs
 
-The executable sequence (begin/staging commands, commit, retry/rollback walkthrough) lives in
+The executable verb sequence (merge call, refusal retry, rollback-free walkthrough) lives in
 [merge-protocol § Steps 6-10](references/merge-protocol.md) (TRDD-82OP4EN9 token-budget move).
 The non-negotiables you must uphold:
 
-- **Holders FIRST — one `--op repair` txn each** (including `MEMORY.md` when step 5 found a
-  match), before touching the merge — why: Resources § Why backlink redirect is load-bearing.
-- **Then `begin` with BOTH sources** (`merge` op); the survivor keeps A's slug. Edit ONLY under
-  `$STAGING`: overwrite A's copy with the merged page `C`, `rm` B's. One write, one-or-more
-  deletes, nothing else.
-- **Build `C` per [merge-page-rules](references/merge-page-rules.md)** — every `[^N]` lesson
-  byte-identical, `ocd = min(A,B)`, `lmd = today`, no duplicate lines, no link to a retired slug,
-  edge sections merged + deduped.
-- **`commit --op merge`** verifies and applies atomically. FAIL = txn auto-aborted, live tree
-  untouched → fix `C` in a FRESH txn, **retry ≤3**, then abandon with a `[janitor-memory] …
-  abandoned` finding. Lock/stale = abstain this cycle (crash-resumable — see Bounds & safety
-  recap above). If the merge shape needed has no path through the txn core or a memgrep verb,
-  ABSTAIN and report the gap — never hand-edit the live page.
+- **Holders FIRST** (including `MEMORY.md` when step 5 found a match), before touching the
+  merge — why: Resources § Why backlink redirect is load-bearing.
+- **Then `merge-mem-topic --from <B> --into <A>`** — the survivor keeps A's slug; the verb
+  folds every `[^N]` lesson byte-identical, keeps `ocd = min(A,B)`, advances `lmd`, wires the
+  reciprocal See-both-ways link, and tombstones B in place (one gated write, batch-atomic).
+- **Build per [merge-page-rules](references/merge-page-rules.md)** — no duplicate lines, no
+  link to a retired slug, edge sections merged + deduped. Where the verb's fold falls short
+  of the rules, build the complete survivor page yourself and `replace-mem-topic` it.
+- **A refusal names every violation** — fix the input and retry ≤3, then abandon with a
+  `[janitor-memory] … abandoned` finding. If the merge shape needed has no path through a
+  memgrep verb, ABSTAIN and report the gap — never hand-edit the live page.
 
 ## Idempotency & bounds
 

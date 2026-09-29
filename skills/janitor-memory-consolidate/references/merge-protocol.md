@@ -1,4 +1,4 @@
-# MERGE protocol — the transaction contract, a worked walkthrough, and the verify catalog
+# MERGE protocol — the verb contract, a worked walkthrough, and the verify catalog
 
 This is the deep reference for `/janitor-memory-consolidate`. The SKILL.md is the
 checklist; this doc is the *why* and the exact mechanics. Read it once; the skill
@@ -8,9 +8,9 @@ has the runnable steps.
 
 - No-third-page check (pre-merge)
 - Claim exit codes
-- The two-phase transaction contract
+- The memgrep verb contract (no staged copies, no hand edits)
 - What is_legal_merge checks
-- What verify_merge enforces at commit
+- What the merge write gate refuses
 - Why backlink redirect is the load-bearing step
 - Slug rules
 - Worked walkthrough
@@ -31,70 +31,53 @@ was refused. Any of these, an unreadable result, or a printed chore name other t
 `consolidate` means STOP and report — never pick a scope yourself, never re-derive
 what is due, and never read the legacy `memory-maint-pending.json` slot.
 
-## The two-phase transaction contract (`scripts/memory_txn_cli.py`)
+## The memgrep verb contract (no staged copies, no hand edits)
 
-You NEVER mutate a live memory page. You mutate **copies** the CLI stages for you,
-and the CLI verifies + applies them atomically. The contract is two-phase so your
-semantic editing happens *between* the phases:
+You NEVER mutate a live memory page by hand — memgrep's write verbs are the ONLY page
+writers (TRDD-XI10BA5D). A consolidation is a TWO-VERB sequence, holder redirects FIRST:
 
 ```
-begin  <scope_root> merge <A-rel> <B-rel>
-    → snapshots + copies A and B into a fresh staging dir.
-    → prints  txn_id=<id>   and   staging=<abs dir>.
-    → you then edit ONLY inside that staging dir:
-        overwrite a copied source .md  → counts as a WRITE (a changed page)
-        add a brand-new .md            → counts as a WRITE (a new page)
-        delete a copied source .md     → counts as a DELETE (a removed page)
+memgrep merge-mem-topic --from <A-rel> --into <B-rel> [--base-sha256 <B's sha256>]
+    → moves EVERY atom (+ its `[^N]` lessons) from A into B, in source order,
+      renumbering moved labels to free ones on B; carries every footnote def,
+      cited or not (GitHub #304).
+    → wires the reciprocal See-also link BOTH ways (the LINK LAW) in the same batch.
+    → TOMBSTONES A in place: the tombstone keeps A's `name:` + `ocd`, reads
+      "Merged into [[<B>]]", and holds NO atoms — the page survives as a pointer,
+      never a deletion (nothing is retired to .trashcan/ by this verb; that is
+      `delete-mem-topic`, which this chore must never use — it folds nothing).
+    → the whole batch (B + the A tombstone) passes ONE shared write gate before
+      any commit: a refusal names every violation content-free and writes NOTHING.
+    → stdout: merged-atom count line; sha256 + disclosure on stderr.
 
-commit <scope_root> <txn_id> --op merge
-    → RECONSTRUCTS the write/delete set by DIFFING staging vs the recorded sources
-      (new-or-changed staged file → write; recorded source whose staged copy was
-      removed → delete).
-    → runs verify_merge as the commit gate.
-    → on PASS: re-hashes sources (stale-snapshot guard), takes the per-scope flock,
-      applies writes-BEFORE-deletes via os.replace, prints
-      `committed <id> (merge): N write(s), M delete(s)`, exits 0.
-    → on FAIL: prints the reasons, ABORTS the txn (live tree untouched), exits 1.
-
-abort  <scope_root> <txn_id>     discard a not-yet-committed txn.
-resume <scope_root>              roll forward / clean an interrupted txn (the next
-                                 heartbeat runs this; you usually don't).
+memgrep reference-mem-topic --page <holder> --to <survivor> [--base-sha256 H]
+    → the HOLDER REDIRECT verb: wires the wikilink both ways in one gated write.
+      Used for a backlink holder whose link must repoint (step 6 below).
 ```
 
-Exit codes: clean `commit`/`abort`/`resume` = 0; verify FAIL = 1; a precondition
-error (editor disabled, lock contention, vanished/stale source, "nothing staged")
-prints `error:`/the reason and exits 2.
+Both verbs take `--dry-run` (print the plan, mutate nothing) and `--base-sha256` (CAS:
+refuses with a STALE message when the target changed since you last read it — re-read,
+recompute, retry, never force). If the installed memgrep does not know the verb
+(unknown-command / usage refusal), ABSTAIN and report the gap (page + operation) — never
+fall back to Edit/Write, a shell writer, or the txn core.
 
-**Merge shape the CLI expects:** exactly **one** surviving write (the merged page
-`C`, written at A's path) and one-or-more deletes (B's copy removed). The check is
-`len(writes) != 1` over EVERY staged write, with no exemption for any of them.
+**Holder-first ordering is NOT a preference.** The batch's one-sided-link rule refuses a
+merge whose reciprocal is not wired in-batch, on disk, or pre-existing — and
+`merge-mem-topic` wires its OWN pair's ends, but a THIRD page still linking the retiring
+name must be repointed first, because a link pointing at a page whose content just left
+is the exact broken graph the LINK LAW forbids. So: repoint every holder (step 6), THEN
+merge (step 9). Between the two the corpus is never left with a link into a hollowed page.
 
-**So a backlink holder canNOT ride along in the merge transaction.** Copying holder
-page `D` into staging to repoint its `[[B]]` makes two writes and the CLI refuses
-with `merge expects exactly ONE surviving page, found 2 write(s)`. (An earlier
-revision of this paragraph claimed holder rewrites were "fine and expected"; that
-was never true of the code, and a CONSOLIDATE pass hit the refusal in practice.)
+**No holder rides inside the merge itself.** `merge-mem-topic` touches exactly its two
+named pages (`--from` tombstone + `--into` survivor); a holder edit is its OWN
+`reference-mem-topic` call. The old one-write-per-transaction rule (janitor#145) exists
+for the same reason the verb split does: an UNVERIFIED holder edit must never ride
+inside a verified merge.
 
-**Do it as TWO transactions, holder FIRST:**
+## What `is_legal_merge` checks (YOUR pre-flight, not the verb's)
 
-1. `--op repair` on `D` alone — an in-place edit whose single source is `D`, so it
-   passes `verify_repair` trivially. Redirect `[[B]]` → `[[C]]`'s slug. Commit.
-2. `--op merge` with ONLY the merge sources. Commit.
-
-The ORDER is not a preference. `verify_merge` runs `no_dangling_refs` and REFUSES a
-merge while any live page still links a retired slug — so holder-first is the only
-sequence that can commit at all, and it also means the corpus is never left, even
-between the two commits, with a link pointing at a page that no longer exists.
-
-Keeping the one-write rule is deliberate rather than a limitation to route around:
-`verify_merge` proves knowledge preservation between the SOURCES and the SURVIVOR.
-It says nothing about an unrelated holder edit, so allowing that write into the
-same transaction would let an UNVERIFIED edit ride inside a verified one.
-
-## What `is_legal_merge` checks (YOUR pre-flight, not the CLI's)
-
-`verify_merge` does NOT re-check legality — it assumes you already gated. So you
-MUST run `is_legal_merge(meta_A, meta_B)` before `begin`. It returns `(False, why)`
+The write gate does NOT re-check legality — it assumes you already gated. So you
+MUST run `is_legal_merge(meta_A, meta_B)` before merging. It returns `(False, why)`
 for:
 
 - **cross-tier** — `meta.tier` differs (e.g. `aspect` vs `component`). An aspect
@@ -109,8 +92,8 @@ two paths under the same root). Same-*subject* is YOUR judgment — neither pred
 nor verifier can decide it; when unsure, **abstain**.
 
 **Run it** on A's and B's frontmatter, refuse on `False` (the CLI's commit gate also
-re-checks — wikimem audit M-2 — but pre-flight refuses EARLY and cheap, before
-opening a transaction):
+re-checks — wikimem audit M-2 — but pre-flight refuses EARLY and cheap, before any
+verb runs):
 
 ```bash
 uv run --quiet - <<PY
@@ -126,61 +109,48 @@ PY
 
 On a refusal, abstain and surface a one-line note.
 
-## What `verify_merge` enforces at commit (the failure catalog)
+## What the merge write gate refuses (the failure catalog)
 
-`commit --op merge` builds the inputs (sources = the DELETED pages read at their
-begin-time content; result = the single WRITE that is C; `others` = every OTHER
-live page in the scope) and calls `verify_merge`. It FAILS — aborting the txn,
-mutating nothing — on any of:
+`merge-mem-topic` prepares the whole batch (survivor + tombstone) through the shared
+write gate before anything touches disk. It FAILS — writing NOTHING anywhere — on any
+of:
 
-| Failure reason (printed) | Cause | The fix in C |
+| Failure reason (printed) | Cause | The fix |
 |---|---|---|
-| `dropped/reworded lesson(s): …` | a `[^N]` lesson body from A or B is missing/changed in C | copy every source lesson body **byte-identical**; you may append (compound) but never reword/drop |
-| `ocd/lmd: result ocd X != min(sources) Y` | C's `ocd` isn't the oldest source ocd | set `ocd: min(A.ocd, B.ocd)` |
-| `ocd/lmd: result lmd X regressed below max(sources)` | C's `lmd` older than a source's | set `lmd:` to today (`date +%F`), ≥ both sources |
-| `ocd/lmd: missing ocd on a source or the result` | a source or C lacks `ocd` | ensure all three have `ocd` |
-| `duplicate content line(s) re-introduced: …` | a substantive line (≥24 chars, not a heading) appears twice in C | intra-page dedup — keep ONE copy (the better-sourced); a merge removes redundancy |
-| `dangling refs to retired slug(s): …` | some live page (C itself OR an `other`) still `[[links]]` a retired slug — you skipped or missed a holder in step 6 | **abort this merge txn**, repoint the missed holder in its OWN `--op repair` transaction (step 6), commit it, THEN retry the merge |
+| a `[^N]` lesson/fact lost in the merge result | the gate's id-set + body rules see a source lesson absent from the survivor | the verb itself moves every lesson; if you pre-edited content (you should not), restore it byte-identical |
+| `--base-sha256` STALE | the `--into` page changed since you read it | re-read, recompute, retry (CAS guard — never force) |
+| atom id collision(s) already on `--into` | the moved ids already exist there | the verb refuses up-front, nothing written; resolve the id conflict first |
+| introduced one-sided link | the batch or a neighbor would gain a link with no reciprocal | wire the other end in-batch (`reference-mem-topic`) or skip the link |
+| an ERROR-level lint finding in the result | the gate's strict rule (recorded default) | fix the defect on the source page first, through a memgrep verb |
 
-The dangling check unions C with EVERY other live page in the scope — so a missed
-redirect *anywhere in the scope* is caught. This is why step 5 (discover backlinks
-via `memgrep links --from`) and step 6 (repair every holder, one `--op repair`
-transaction each, BEFORE the merge) are mandatory, not optional — the merge
-transaction itself has no capacity to fix a missed one (a repair there would be a
-second write, and `commit --op merge` refuses before verify even runs).
+Content violations name COUNTS/IDs only — never page text. This is the same
+knowledge-preservation shape `verify_merge` used to enforce at commit, now enforced by
+the gate BEFORE any write lands (nothing to "abort" — a refusal leaves disk untouched).
 
-**What the catalog does NOT cover — SHORT-form facts + the lead are YOURS.** Every
-failure above is machine-checked, and since issue #48 that INCLUDES body facts:
-`body_facts_preserved` requires every substantive body line of every source to
-survive as a SUBSTRING of the result. The old objection here — that a strict
-body-superset check would false-fail on every legitimate dedup — was solved by
-using substring rather than line-equality matching: a deduped fact still appears
-once, so it still matches, while a DROPPED or PARAPHRASED fact does not. (A fact
-demoted into a `[^N]` lesson also counts as preserved; the haystack is the whole
-page, because demotion is the correction protocol's mandated move, not a loss.)
-
-Two things remain YOURS: (1) the COARSE net's two by-design blind spots — it
-ignores any line under 24 chars and every `#` heading, so a fact carried only in a
-short bullet or a heading can still be dropped or rewritten silently (this is the
-documented issue-#91 shape, where a split condensed prose into shorter, WRONG path
-bullets and nothing caught it); and (2) the one-sentence **lead** that makes C read
-as one topic. Both are enforced only by the agent in step 8. No-information-lost is the editor's
+**What the catalog does NOT cover — SHORT-form facts + the lead are YOURS.** The gate
+machine-checks lesson and body-fact preservation (`body_facts_preserved` requires every
+substantive body line of every source to survive as a SUBSTRING of the result; a fact
+demoted into a `[^N]` lesson also counts as preserved). Two things remain YOURS: (1) the
+COARSE net's two by-design blind spots — it ignores any line under 24 chars and every `#`
+heading, so a fact carried only in a short bullet or a heading can still be dropped or
+rewritten silently (this is the documented issue-#91 shape, where a split condensed prose
+into shorter, WRONG path bullets and nothing caught it); and (2) the one-sentence
+**lead** that makes the survivor read as one topic — the merge verb preserves bodies but
+does not compose prose. Both are enforced only by you in step 8. No-information-lost is the editor's
 first law; for the body, you are its only guardian.
 
 ## Why backlink redirect is the load-bearing step
 
-THE LINK LAW: every `[[link]]` is bidirectional and must resolve. When you retire
-B's slug, every page that linked `[[B]]` now dangles. The verifier treats that as a
-content-loss-class failure (a broken graph), so the merge commit *cannot* pass
-until every holder is already repointed. The redirect happens in each holder's OWN
-PRIOR `--op repair` transaction (step 6) — never inside the merge transaction:
-`verify_merge` proves knowledge preservation between the merge's SOURCES and
-SURVIVOR only, so an unrelated holder edit riding inside the merge txn would be an
-UNVERIFIED write inside a verified one, which is exactly what the one-write rule
-(janitor#145) forbids. Cross-*scope* PROSE mentions (a USER note that says "see
-the LOCAL keychain page" in prose, not as a `[[wikilink]]`) are NOT auto-edited —
-those you grep and **surface** for a human, because rewriting prose across scopes
-is a judgment call the editor doesn't make autonomously.
+THE LINK LAW: every `[[link]]` is bidirectional and must resolve. When B's content
+moves into the survivor, every page that linked `[[B]]` now points at a hollowed
+tombstone. The gate treats an unresolved introduced link as a refusal-class failure, so
+every holder must be repointed BEFORE the merge (step 6) — never inside it:
+`merge-mem-topic` touches exactly its two named pages, and an unrelated holder edit
+inside a verified merge would be an UNVERIFIED write riding a verified one (the reason
+the old one-write rule, janitor#145, existed). Cross-*scope* PROSE mentions (a USER note
+that says "see the LOCAL keychain page" in prose, not as a `[[wikilink]]`) are NOT
+auto-edited — those you grep and **surface** for a human, because rewriting prose across
+scopes is a judgment call the editor doesn't make autonomously.
 
 ## Slug rules
 
@@ -189,7 +159,8 @@ A page's slug is its frontmatter `name:`, falling back to its filename stem
 
 - **Keep the survivor at A's path AND A's `name:`** — that way pages already
   linking `[[A]]` need no redirect; only `[[B]]` holders do. Fewest redirects =
-  fewest chances to miss one.
+  fewest chances to miss one. (The merge moves B's content INTO A; the tombstone
+  sits at B's path keeping B's `name:`.)
 - If you must rename the survivor's `name:`, you also break every `[[A]]` holder —
   redirect those too. Prefer not to rename during a merge.
 
@@ -218,167 +189,142 @@ one page".
    *subject*, confirmed by reading, not raw keyword hits.)
 5. **Backlinks:** `memgrep links --from rotator-version-skew "$LOCAL_MEM"` →
    `oauth-rotator-hub` links `[[rotator-version-skew]]`. That holder must repoint
-   — in its OWN transaction, BEFORE the merge (janitor#145: the CLI enforces
-   exactly one surviving write per merge; a holder cannot ride along).
-6. **Repair the holder FIRST (its own transaction):**
+   — with its OWN `reference-mem-topic` call, BEFORE the merge (janitor#145
+   lineage: a holder edit never rides inside the merge verb's two-page batch).
+6. **Redirect the holder FIRST (its own gated verb call):**
 
    ```bash
-   out=$(uv run "$CLI" begin "$LOCAL_MEM" repair "oauth-rotator-hub.md")
-   TXN=…; STAGING=…
-   # edit $STAGING/oauth-rotator-hub.md: replace [[rotator-version-skew]] -> [[rotator-429-deadlock]]
-   uv run "$CLI" commit "$LOCAL_MEM" "$TXN" --op repair   # committed <id> (repair): 1 write(s), 0 delete(s)
+   memgrep reference-mem-topic --page "oauth-rotator-hub.md" --to "rotator-429-deadlock.md" \
+     --base-sha256 "$(sha256 -q oauth-rotator-hub.md)"
+   # wires the wikilink BOTH ways in one gated write; a refusal writes nothing
    ```
 
-7. **Then begin the merge, sources only:**
+7. **Then the merge itself:**
 
    ```bash
-   out=$(uv run "$CLI" begin "$LOCAL_MEM" merge "rotator-429-deadlock.md" "rotator-version-skew.md")
-   TXN=…; STAGING=…
+   memgrep merge-mem-topic --from "rotator-version-skew.md" --into "rotator-429-deadlock.md" \
+     --base-sha256 "$(sha256 -q rotator-429-deadlock.md)"
    ```
 
-   Edit copies under `$STAGING` — nothing else is staged:
-   - overwrite `rotator-429-deadlock.md` with the merged page C: a one-sentence
-     lead naming the subject, then both facets as `##` sections; both lesson sets
-     unioned + deduped under one `## Notes and lessons learned`; `ocd: min(...)`,
-     `lmd: 2026-06-19`; `name:` stays `rotator-429-deadlock`; no
-     `[[rotator-version-skew]]` link remains.
-   - `rm "$STAGING/rotator-version-skew.md"`.
-8. **commit:** `uv run "$CLI" commit "$LOCAL_MEM" "$TXN" --op merge` → verify
-   passes → `committed <id> (merge): 1 write(s), 1 delete(s)`. (1 write = C;
-   1 delete = the retired source — the holder repair from step 6 already landed.)
-9. **Reindex + report:** `memgrep reindex` if present (the index is memgrep's — do
+   The verb moves every atom + lesson into the survivor (source order, moved
+   labels renumbered, every footnote def carried), unions the lesson sets, wires
+   the reciprocal See-also BOTH ways, and tombstones the source in place — run
+   `--dry-run` first if you want the plan printed before anything lands; the
+   survivor keeps `rotator-429-deadlock` as its `name:`, and no
+   `[[rotator-version-skew]]` link remains anywhere.
+8. **Reindex + report:** `memgrep reindex` if present (the index is memgrep's — do
    NOT touch `MEMORY.md`), report `merged rotator-version-skew → rotator-429-deadlock
    (4 lessons preserved, 1 backlink redirected, ocd=2026-05-30)`.
 
-## Failure-path walkthrough (verify FAIL → bounded retry)
+## Failure-path walkthrough (gate refusal → bounded retry)
 
-If step 8 prints `verify FAILED (merge); transaction aborted:` with
-`dropped/reworded lesson(s): the config key was misread as max_attempts…`, you
-reworded a lesson while folding it. The txn is already aborted (live tree intact).
-Begin a **fresh** txn, copy the offending lesson body byte-identical this time, and
-retry. After **3** such failures, `abort` any open txn, mutate nothing, and surface
+If the merge verb refuses — say a lesson-preservation violation — it wrote NOTHING
+anywhere (the batch is gated before any commit; there is no partial state to clean
+up). Read the named violations, fix at the source (a defect on a page goes through a
+memgrep verb, never a hand edit), and retry. After **3** such failures, mutate nothing,
+and surface
 `[janitor-memory] merge rotator-version-skew+rotator-429-deadlock abandoned after 3
-verify failures: dropped/reworded lesson(s)` for a human.
+gate refusals: <reasons>` for a human.
 
 ## Bounds & safety recap
 
 - ONE scope, ONE merge per pass. Default LOCAL+USER; PROJECT opt-in
   (`edit_project_scope`), staged-not-pushed.
-- Kill-gate: `memory_txn.editor_enabled()` (janitor kill-switch +
-  `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED`). `consolidation_per_day=0`
+- Kill-gate: the janitor kill-switch +
+  `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED`. `consolidation_per_day=0`
   disables the pass entirely.
-- Per-scope flock + SHA-256 stale-snapshot guard live INSIDE `commit` — a
-  concurrent writer either makes you lose the lock (exit 2 → abstain) or trips the
-  stale-hash guard (abort) — you never overwrite a just-written fact.
-- Crash-resumable: `resume <scope_root>` (next heartbeat) heals a half-applied
-  swap; the completed `txn_id` is the idempotency key.
+- The verbs scope-lock and take `--base-sha256` CAS guards — a concurrent writer
+  trips the stale-hash refusal (re-read, recompute, retry); you never overwrite a
+  just-written fact. Lock contention is a normal abstain, not a failure.
 
 ## Steps 6-10 — the executable sequence (moved from the SKILL body)
 
-The exact command sequence for the transaction half of the merge. Moved here
+The exact command sequence for the verb half of the merge. Moved here
 verbatim from the SKILL body (TRDD-82OP4EN9 token-budget move); the body keeps
 only the invariants.
 
-### 6. Repair every holder FIRST — its own transaction, before the merge
+### 6. Redirect every holder FIRST — its own verb call, before the merge
 
-janitor#145: the CLI enforces exactly ONE surviving write per merge, with no
-exemption for a backlink holder — `commit --op merge` refuses outright
-(`merge expects exactly ONE surviving page, found N write(s)`) the instant a
-second write rides along. So each step-5 holder is repointed in its OWN
-`--op repair` transaction, committed, and done BEFORE the merge even begins.
+janitor#145 lineage: a holder edit never rides inside the merge verb's two-page
+batch (`merge-mem-topic` touches exactly `--from` + `--into`; anything else is an
+UNVERIFIED write inside a verified one). So each step-5 holder is repointed with
+its OWN `reference-mem-topic` call, done BEFORE the merge even begins.
 (A step-5 holder here counts the harness index file `MEMORY.md` too, whenever
 it still points at a retired slug.)
 
 ```bash
 for holder in <holder-rel-paths...>; do
-  out=$(uv run "$CLI" begin "$MEMDIR" repair "$holder")
-  TXN=$(echo "$out" | sed -n 's/^txn_id=//p')
-  STAGING=$(echo "$out" | sed -n 's/^staging=//p')
-  # edit $STAGING/$holder: replace [[B]] (and any [[A]] that should now read
-  # [[C]]) with the survivor's slug — the ONLY change in this transaction.
-  uv run "$CLI" commit "$MEMDIR" "$TXN" --op repair   # committed <id> (repair): 1 write(s), 0 delete(s)
+  memgrep reference-mem-topic --page "$MEMDIR/$holder" \
+    --to "$MEMDIR/<survivor>" \
+    --base-sha256 "$(sha256 -q "$MEMDIR/$holder")"
+  # wires the wikilink BOTH ways (holder → survivor, survivor → holder) in one
+  # gated write; the ONLY change this call makes.
 done
 ```
 
-`verify_merge`'s dangling-refs check (step 8) refuses the merge until NO live
-page still links a retired slug, so holder-first is the only sequence that can
-commit at all — and it means the corpus is never left, even between the repair
-and merge commits, with a link pointing at a page that no longer exists.
+The gate's one-sided-link rule refuses a merge whose retiring name is still
+pointed at by an unwired holder, so holder-first is the only sequence that can
+commit at all — and it means the corpus is never left, even between the holder
+redirects and the merge, with a link into a hollowed page.
 
-### 7. Open the merge transaction — sources only
+### 7. Open the merge — the two named pages only
 
-The survivor keeps A's slug by convention (fewest inbound redirects). Pass
-**both sources** to `begin`; you'll overwrite A's staged copy with the merged
-page and delete B's staged copy. Nothing else is staged:
+The survivor keeps A's slug by convention (fewest inbound redirects). The verb
+takes exactly the two page paths:
 
 ```bash
-out=$(uv run "$CLI" begin "$MEMDIR" merge "<A-rel-path>" "<B-rel-path>")
-TXN=$(echo "$out" | sed -n 's/^txn_id=//p')
-STAGING=$(echo "$out" | sed -n 's/^staging=//p')
+memgrep merge-mem-topic --from "$MEMDIR/<B-rel-path>" --into "$MEMDIR/<A-rel-path>" \
+  --base-sha256 "$(sha256 -q "$MEMDIR/<A-rel-path>")"
 ```
 
-Now edit **only files under `$STAGING`**:
+`--dry-run` first prints the plan (survivor text + tombstone) and mutates
+nothing — use it whenever the pair is unusual. No staged copy exists; you never
+hand-build the merged page.
 
-- **Overwrite `$STAGING/<A-rel-path>`** with the merged page `C` (rules below).
-- **Delete `$STAGING/<B-rel-path>`** (`rm` — this becomes the source-removal).
+### 8. What the verb builds (and what stays yours)
 
-### 8. Build the merged page `C`
-
-`verify_merge` (at `commit --op merge`) machine-checks lesson preservation, dedup,
-and ocd/lmd — FAILS on any breach. Body-fact preservation and the opening lead are
-YOUR responsibility; the verifier does not enforce them. Key constraints: every
-`[^N]` lesson from both sources survives byte-identical; `ocd = min(A.ocd, B.ocd)`,
-`lmd = today`; no duplicate content lines; open with a one-sentence lead; no
-`[[link]]` to a retired slug; merge all `## See also` / `## Governed by` /
-`## Applies to` edges (deduped); keep the survivor's slug in `name:`.
+`merge-mem-topic` moves EVERY atom (+ its `[^N]` lessons) from B to A in source
+order, renumbers moved labels, carries every footnote def (cited or not), unions
+the lesson sets, wires the reciprocal See-both-ways link, and tombstones B in
+place (B keeps its `name:` + `ocd`, reads "Merged into [[A]]", holds no atoms).
+The gate machine-checks lesson preservation and the id-set before anything lands.
+STILL YOURS: the one-sentence lead that makes the survivor read as one topic, and
+the short-line/heading blind spots (see the catalog above) — check both in the
+`--dry-run` output.
 
 See [merge-page-rules](merge-page-rules.md) for the full rule breakdown
-(what verify_merge enforces vs. what you must ensure, frontmatter shape).
+(frontmatter shape, what you must ensure).
 
-### 9. Commit — the CLI verifies and applies atomically
+### 9. The gate is the commit point
 
-```bash
-uv run "$CLI" commit "$MEMDIR" "$TXN" --op merge
-```
-
-`commit` reconstructs the write/delete set by diffing staging vs the recorded
-sources, runs `verify_merge` (lesson preservation, ocd/lmd, no-new-duplicates,
-no-dangling-refs across the WHOLE scope — which is why every holder from step 6
-must already be repaired and committed by now), and on PASS re-hashes the
-sources (stale-snapshot guard), takes the per-scope flock, and applies
-writes-before-deletes via `os.replace`. On PASS it prints
-`committed <txn> (merge): 1 write(s), M delete(s)` and exits 0 — **done**. (Exactly
-one write, always — `C`; `commit` REFUSES before any of this if a second write is
-staged, per janitor#145.)
+The batch (survivor + tombstone) passes ONE shared write gate before anything
+touches disk; on a refusal NOTHING is written anywhere and the violations are
+named content-free. On a pass the two atomic writes land (crash between them
+leaves a recoverable duplicate, never a loss) — **done**.
 
 ### 10. EXIT / retry / rollback
 
-- **SUCCESS** = `commit` exited 0 (verify passed; LOCAL/USER applied on disk;
+- **SUCCESS** = the verb exited 0 (LOCAL/USER applied on disk;
   PROJECT, if enabled, staged-not-pushed). `memgrep reindex` if present (the index
   is memgrep's — do NOT touch `MEMORY.md`). Report the one-line result.
-- **verify FAILED** (exit 1) — the CLI already **aborted** the txn and left the
-  live tree untouched. Read the printed reasons, fix C in a **fresh** transaction
-  (begin again), and retry. **Bounded retry ≤ 3.** After 3 failures, `uv run
-  "$CLI" abort "$MEMDIR" "$TXN"` (if a txn is still open), mutate NOTHING, and
-  surface a finding: `[janitor-memory] merge <A>+<B> abandoned after 3 verify
-  failures: <reasons>`.
-- **Lock contention / stale source** (the CLI prints `error:` / exits 2) — another
+- **Gate refusal** — nothing was written anywhere (gated before any commit). Read
+  the printed reasons, fix at the source, and retry. **Bounded retry ≤ 3.** After 3
+  failures, mutate NOTHING, and surface a finding: `[janitor-memory] merge <A>+<B>
+  abandoned after 3 gate refusals: <reasons>`.
+- **Lock contention / stale `--base-sha256`** — another
   pass or a concurrent `/janitor-memory-write` is touching this scope. **Abstain**
   this cycle (the next heartbeat retries); do not force it.
-- A half-applied crash is **self-healing**: the next heartbeat's
-  `uv run "$CLI" resume "$MEMDIR"` rolls forward or discards the interrupted txn.
 
 ## Step 5 — discover the backlinks to redirect (THE LINK LAW, mandatory)
 
 Moved out of `SKILL.md` on 2026-08-04 to keep that body inside the 5000-token skill budget.
 Read this once you have a legal pair; steps 1-4 in the skill decide whether you do.
 
-On merge A+B→C, every page that links `[[A]]` or `[[B]]` MUST be rewritten to
-`[[C]]` — otherwise the corpus is left with dangling links and the commit-time
-verify will FAIL. **Redirect each holder in its OWN prior `--op repair`
-transaction, before the merge begins** (janitor#145 — see step 6: the CLI
-enforces exactly one surviving write per merge, so a holder cannot ride along
-in the merge transaction itself). Find the inbound links with `memgrep links
+On merge A+B→C, every page that links `[[A]]` or `[[B]]` MUST be rewired to
+`[[C]]` — otherwise the corpus is left with links into a hollowed page and the
+gate will refuse. **Redirect each holder with its OWN prior `reference-mem-topic`
+call, before the merge begins** (janitor#145 lineage — see step 6: a holder edit
+cannot ride along in the merge verb's two-page batch). Find the inbound links with `memgrep links
 --from` (`--from NOTE` = NOTE's *backlinks* — who points AT it):
 
 ```bash
@@ -386,8 +332,8 @@ memgrep links --from "$A_SLUG" "$MEMDIR"   # pages linking [[A]]
 memgrep links --from "$B_SLUG" "$MEMDIR"   # pages linking [[B]]
 ```
 
-Note every holder page — you will repoint the link to the survivor `C` inside
-that holder's own `--op repair` transaction (step 6). (Slug = the page's
+Note every holder page — you will repoint the link to the survivor `C` with that
+holder's own `reference-mem-topic` call (step 6). (Slug = the page's
 frontmatter `name:`, else its filename stem.)
 
 Separately, **prose** mentions of the retired names across OTHER scopes are NOT
@@ -413,7 +359,10 @@ text byte-for-byte. This is a POINTER REPAIR, not curation: you are fixing a
 link your own deletion broke. It does not license editing, reordering, or
 pruning any other line in that file, which remains the harness's.
 `memory_edit_verify.redirect_memory_md_links()` performs exactly this rewrite, and
-`no_dangling_memory_md_refs()` is the matching check.
+`no_dangling_memory_md_refs()` is the matching check. (MEMORY.md is the harness's
+file, NOT a wikimem page — the memgrep-verbs-only rule does not forbid fixing a
+pointer here; it is the one sanctioned non-verb edit, and only in this redirect
+shape.)
 
 ## No-third-page check (pre-merge)
 

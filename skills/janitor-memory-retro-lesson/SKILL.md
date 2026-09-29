@@ -46,9 +46,9 @@ already in lesson form; only body ATOM markers count.
    does this for you — run it before touching the atom body).
    Nothing is deleted, ever.
 3. **Never edit a live page by hand.** The conversion uses memgrep's own atomic write
-   verb (`update-mem-atom --lesson`); the pointer completion rides the `memory_txn_cli --op repair`
-   transaction (staged copy → verify → atomic commit). `resume` the scope first. If a needed
-   edit has no path through memgrep or the txn core, ABSTAIN and report the gap.
+   verb (`update-mem-atom --lesson`); its shared write gate refuses a lossy result and
+   writes nothing. If a needed edit has no path through a memgrep verb, ABSTAIN and
+   report the gap — never fall back to Edit/Write, a shell writer, or a hand-edited copy.
 4. **Bounded.** ONE page per pass (all its candidate atoms, capped at
    **5 conversions/run**). The next heartbeat handles the next page — recursion iterates
    across launches, never as nested in-turn work.
@@ -77,7 +77,6 @@ already in lesson form; only body ATOM markers count.
    `$STATE_DIR` is wrong), 4 (`$STATE_DIR` empty), or 5 (dispatch was recorded for a
    different state dir — claim refused) → STOP and report that; never fall back to the legacy
    `memory-maint-pending.json` slot or to "whichever is due" (#150).
-   Then `uv run scripts/memory_txn_cli.py resume <scope-root>`.
 1. **Scan.** Walk the scope's curated pages for the candidate signature above. No
    candidate → return `NOTHING DUE` (one line, no report).
 2. **Pick ONE page** (most candidates first). For each candidate atom, up to the cap:
@@ -92,15 +91,16 @@ already in lesson form; only body ATOM markers count.
         --keywords "<symptom_phrase, another_phrase>" --supersedes --retire-atom
       ```
 
-      Capture the printed `<lesson-id>`.
-   c. **Complete the pointer** — ⚠ the load-bearing gotcha: `--retire-atom` is
-      idempotent-skipped when the marker ALREADY carries a `status:` prop (memory.rs,
-      "skip if a `status:` prop is already present") — which is precisely the retro
-      case. So `update-mem-atom --lesson` created the lesson but did NOT stamp `superseded-by:`.
-      Through `memory_txn_cli begin <scope> repair <page>`: append
-      `, superseded-by:<lesson-id>` inside the atom's props bracket on the STAGED copy
-      (touch nothing else), then `commit --op repair`. The verify gate proves no loss;
-      on FAIL fix the staged copy and retry (≤3 attempts, then `abort` + report).
+      Capture the printed `<lesson-id>`. `--retire-atom` completes the pointer ITSELF:
+      whenever the atom's props lack a `superseded-by:` (the guard keys on that ABSENCE,
+      never on a `status:` value — an unrelated `status:` is replaced in place, verified
+      in the landed code 2026-09-29, TRDD-XI10BA5D), it stamps `status: superseded` +
+      `superseded-by:<lesson-id>` in the same gated write, so the atom no longer matches
+      the candidate signature. (Older guidance told the agent to hand-append the pointer
+      on a staged copy — that transaction no longer exists and hand-editing is forbidden;
+      the verb's own stamp is the only path.) If the atom still matches the signature
+      after 2b, the installed memgrep is stale or the guard missed a shape — ABSTAIN and
+      report the gap; never hand-edit the marker.
 3. **Validate.** `memgrep validate <page> && memgrep lint <page>` — a conversion that
    breaks parsing is a defect, not a completion.
 4. **Report.** Write the detailed report (converted atoms, lesson ids, WHY sources,

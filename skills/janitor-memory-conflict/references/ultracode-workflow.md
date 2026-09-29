@@ -115,14 +115,14 @@ async function resolvePair(pair, idx) {
 
 // Bound the run to the top-K oldest / most-conflicted pairs, then drive the pool.
 const results = await pool(topK(conflictPairs, 5), resolvePair, CONCURRENCY, RAMP_MS)
-// Stage 4 (EXECUTE) runs in the MAIN turn via memory_txn_cli.py — see SKILL.md.
+// Stage 4 (EXECUTE) runs in the MAIN turn via the memgrep write verbs — see SKILL.md.
 ```
 
 **Execution is NOT inside the pool.** The skeptic/verifier agents are read-only
-analysts; the actual `memory_txn_cli.py begin → edit staged copy → commit --op
-merge` runs in the orchestrator's main turn (one pair at a time — the txn takes a
-per-scope flock anyway). This keeps the fan-out flat (≤5 levels) and keeps all
-mutation serialized through the transaction core.
+analysts; the actual `merge-mem-topic` / `replace-mem-topic` write runs in the
+orchestrator's main turn (one pair at a time — the write gate takes a per-scope
+lock anyway). This keeps the fan-out flat (≤5 levels) and keeps all mutation
+serialized through the gate.
 
 ## The agent prompts (verbatim templates)
 
@@ -206,5 +206,5 @@ Reply EXACTLY one line plus one sentence of evidence:
   no-trace) AND a strict majority of N real `obsolete` votes. Anything short →
   DEMOTE.
 - The pool is capped (clamp 6–15), kept at capacity, ramped — no thundering herd.
-- All mutation is OUTSIDE the pool, serialized through `memory_txn_cli.py` (flock +
+- All mutation is OUTSIDE the pool, serialized through the memgrep write gate (flock +
   SHA stale-guard + crash-safe swap). The pool only produces read-only verdicts.

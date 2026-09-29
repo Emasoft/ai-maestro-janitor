@@ -30,16 +30,6 @@ buffer intact, and surface a finding. A missed mirror is recoverable next run.
 
 ## Preconditions (cheap gate, run first)
 
-```bash
-JANITOR_ROOT="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$CLAUDE_PLUGIN_ROOT")"
-CLI="$JANITOR_ROOT/scripts/memory_txn_cli.py"
-uv run --quiet - <<PY || { echo "wikimem editor disabled — abstain"; exit 0; }
-import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
-import memory_txn
-sys.exit(0 if memory_txn.editor_enabled() else 1)
-PY
-```
-
 Process exactly **ONE scope this run**, and CLAIM it before touching anything —
 never self-select:
 
@@ -132,15 +122,21 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
   frontmatter, tier, bidirectional links, scope routing). Full checklist:
   [harvest-background § CREATE-a-new-page discipline](references/harvest-background.md#create-a-new-page-discipline-moved-from-the-skill-body-step-2).
 
-  How to land the edit (H3, wikimem audit 2026-07-07 — the txn CLI has NO
-  harvest/create op, so the two cases route differently):
-  - **CREATE a brand-new `wikimem/<name>.md`** → a direct `Write` of the new file
-    (one atomic file creation; there is no pre-existing content to protect — the
-    step-3 `mirror_preservation_ok` gate below is the loss oracle for this case).
-  - **UPDATE an existing wiki page** → through the transaction core:
-    `memory_txn_cli.py begin <scope> --op repair <rel>` → edit the staged copy →
-    `commit --op repair` (one source, the write at the same path — the shape the
-    repair gate accepts).
+  How to land the edit (memgrep is the ONLY wikimem page writer — TRDD-XI10BA5D; the
+  agent's Write tool never touches a wikimem page):
+  - **CREATE a brand-new `wikimem/<name>.md`** → `memgrep new-mem-topic --scope <scope>
+    --name <slug> --content-file F` (CONTENT-CREATE mode: the caller's bytes ARE the
+    complete page, frontmatter included, through the shared write gate; it REFUSES an
+    existing page — an existing page is the UPDATE branch, never force it). stdout:
+    `wrote <rel>`.
+  - **UPDATE an existing wiki page** → build the complete updated page in a scratch file
+    and apply it with `memgrep replace-mem-topic --page <path> --content-file F
+    --base-sha256 "$(sha256 -q <path>)"` (stdout: `<page>\treplaced (whole page)`; the
+    gate refuses a lossy result and writes nothing; on a STALE refusal re-read, recompute).
+
+  **Version skew:** if the installed memgrep does not know the verb (unknown-command /
+  usage refusal), ABSTAIN and report the gap (page + operation) — never fall back to
+  Edit/Write or any shell writer.
 
   **In BOTH branches, every mirrored atom follows the atom grammar** (TRDD-AP2X9A0H /
   TRDD-0NGYP3IG): a corpus-wide-unique 8-char `[A-Z0-9]` id (collision-checked across all three
@@ -156,10 +152,6 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
   cannot tell which wiki atoms came from which buffer note.
 
   Then `memgrep reindex "$MEMDIR"`.
-  **Capability gap (TRDD-XI10BA5D):** the CREATE branch's `Write` is the one documented
-  exception — no memgrep verb yet scaffolds a page pre-seeded with mirrored atoms +
-  provenance in one call. Any OTHER page edit with no memgrep verb must ABSTAIN and report
-  the gap.
   **The buffer note is left exactly as it was** — you mirror its content into `wikimem/`, you
   do not move, edit, or delete it.
 

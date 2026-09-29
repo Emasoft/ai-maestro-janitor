@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-conflict
-description: CONFLICT + fact-verify executor — reconciles contradictory or obsolete wikimem pages against source + git history. Default is a non-destructive DEMOTE (obsolete page folded into a compounding footnote on the survivor, WHY git-sourced); DELETE only behind an N>=3 skeptic vote WITH provenance + a git verify. Runs as an ultracode Workflow; all mutation via scripts/memory_txn_cli.py. Use on a [janitor-memory-conflict] marker, a memory-reorg-proposed.md Conflict candidate, or "resolve memory conflicts" / "fact-check the memories" / "this memory is obsolete".
+description: CONFLICT + fact-verify executor — reconciles contradictory or obsolete wikimem pages against source + git history. Default is a non-destructive DEMOTE (obsolete page folded into a compounding footnote on the survivor, WHY git-sourced); DELETE only behind an N>=3 skeptic vote WITH provenance + a git verify. Runs as an ultracode Workflow; all mutation via memgrep write verbs (merge-mem-topic). Use on a [janitor-memory-conflict] marker, a memory-reorg-proposed.md Conflict candidate, or "resolve memory conflicts" / "fact-check the memories" / "this memory is obsolete".
 ---
 
 # Janitor memory — CONFLICT + fact-verify executor
@@ -34,17 +34,14 @@ hard-gated). Full execution-context rationale and the DEMOTE/DELETE overview:
    recoverable", never invent one.
 6. **Read-ONLY against project repos** — `show`/`log`/`blame` only, NEVER
    `add`/`commit`/`push`/`checkout`/`stash`; a **dirty** project tree ⇒ SKIP that conflict.
-7. **All mutation through `memory_txn_cli.py`** — only staged COPIES; the txn applies them
-   atomically under a stale-snapshot SHA guard + flock.
+7. **All mutation through memgrep write verbs** — never a hand edit of a wikimem page
+   (TRDD-XI10BA5D); the verbs scope-lock, CAS-guard and write-gate every write.
 8. **Same-timestamp conflict ⇒ exactly one is true** (resolve by git). An OLDER page may
    just describe a prior code version — superseded (demote), not false (delete).
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Editor enabled.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
-   first (rolls forward an interrupted txn). If kill-switched /
-   `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — stop.
-2. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
+1. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
    `STATE_DIR=<path>` value from your spawn prompt into the `export` below — the
    guard on the next line refuses to run without it.
 
@@ -65,8 +62,7 @@ hard-gated). Full execution-context rationale and the DEMOTE/DELETE overview:
    human naming a scope IS the assignment). Process **one scope per pass**; nothing
    due → stop. Exit-code meanings:
    [conflict-protocol § claim exit codes](references/conflict-protocol.md#claim-exit-codes).
-3. **Candidate set.** From the chosen scope's `memory-reorg-proposed.md`, take its
-   `### Conflict candidates` (`- topic \`<tag>\`: <a> vs <b>`); bound to the **top-K
+3. **Candidate set.** From the chosen scope's `memory-reorg-proposed.md`, take its   `### Conflict candidates` (`- topic \`<tag>\`: <a> vs <b>`); bound to the **top-K
    oldest/most-conflicted** (K≈5). Empty/absent → stop.
 
 ## The pipeline (per conflict pair) — the ramped agent pool
@@ -106,33 +102,31 @@ majority `obsolete` AND `history_search_ran && !git_trace_found`; any tie / majo
 `keep` / missing vote → **DEMOTE**. Verbatim skeptic prompt: ultracode-workflow
 (Resources).
 
-### Stage 4 — EXECUTE the verdict THROUGH the transaction core
-Never edit a live page: `begin` copies the sources into staging, you edit only the
-STAGED COPIES, then `commit` re-hashes under the per-scope flock and applies
-atomically. **BOTH conflict verdicts ride `--op merge`** (not `repair`/`atomize` —
-those are in-place single-page ops, structurally wrong for a pair-retirement): one
-page is RETIRED (a delete) and its fact + EVERY `[^N]` lesson is FOLDED into the
-survivor (a write), so even a DELETE loses no knowledge. Why a same-slug in-place
-edit is rejected by `verify_merge`:
-[conflict-protocol § same-slug](references/conflict-protocol.md#why-a-same-slug-in-place-edit-does-not-work).
-If the merge shape needed has no path through the txn core or a memgrep verb, ABSTAIN and
-report the gap — never hand-edit the live page.
+### Stage 4 — EXECUTE the verdict through the memgrep merge verb
+Never edit a wikimem page by hand: **BOTH verdicts route through `memgrep merge-mem-topic
+--from <retired page> --into <survivor> [--base-sha256 H]`** — it moves EVERY atom (+ its
+lessons) from the retired page into the survivor, folds the retired page's fact as a
+`[^N]` lesson, wires the reciprocal See-both-ways link (the LINK LAW), and TOMBSTONES the
+source in place (the tombstone keeps the source's `name:`/`ocd`, reads "Merged into
+[[<survivor>]]", holds NO atoms). So even a DELETE loses no knowledge — "even a DELETE
+loses no knowledge" is the skill's own iron rule 1. NEVER a bare `delete-mem-topic`: it
+retires the page to `.trashcan/` with NO fold and would lose the lessons. If the installed
+memgrep does not know `merge-mem-topic` (unknown-command / usage refusal), ABSTAIN and
+report the gap (page + operation) — never fall back to Edit/Write, a shell writer, or the
+txn core.
 
-- **DEMOTE** (the DEFAULT, non-destructive) — keep the page holding the CURRENT truth
-  as survivor; retire the obsolete page; fold its still-true-of-the-past fact in as a
-  compounding `[^N]` with the SOURCED WHY (cite `<sha>`/`TRDD-<id8>`). `ocd =
-  min(both)`, `lmd = today`; copy every pre-existing `[^N]` verbatim; redirect any
-  `[[<retired_slug>]]` backlink to the survivor.
-- **DELETE** (RARE — post-vote, provenance + traceless) — structurally identical, only
-  the `[^N]` framing differs ("proven FALSE at `<sha>`, `git log -S` ran, no trace;
-  removed, vote m/n"). What `verify_merge` enforces at commit:
-  [conflict-background § What `--op merge` enforces](references/conflict-background.md#what---op-merge-enforces-at-commit).
-
-On verify FAIL the txn self-aborts (live tree intact); read the reason, fix the
-staged copy, re-commit — **bounded retry ≤3**, then `abort` + surface a finding. After
-a clean pass do NOT call `memory_settings.mark_ran` — the scheduler already stamped the cadence
-at emit (scheduler owns cadence, agent owns content). Full `begin → edit-staged →
-commit --op merge` recipes for both verdicts: [conflict-protocol](references/conflict-protocol.md).
+- **DEMOTE** (the DEFAULT, non-destructive) — survivor = the page holding the CURRENT
+  truth; run `merge-mem-topic --from <obsolete page> --into <survivor>`. The verb folds
+  the retired page's atoms + lessons into the survivor; then source the WHY (Stage 2) and
+  add the compounding `[^N]` with it (cite `<sha>`/`TRDD-<id8>`) via
+  `memgrep update-mem-atom --lesson` (the same shared write gate). `ocd = min(both)`,
+  `lmd = today`; the verb already copies every pre-existing `[^N]` verbatim and wires the
+  `[[<retired_slug>]]` redirect both ways.
+- **DELETE** (RARE — post-vote, provenance + traceless) — the SAME `merge-mem-topic`
+  route; only the `[^N]` framing differs ("proven FALSE at `<sha>`, `git log -S` ran, no
+  trace; removed, vote m/n"). On a gate refusal the verb wrote NOTHING anywhere — read the
+  named violations, fix, retry ≤3, then surface a finding; a stale `--base-sha256`
+  refusal is a re-read, recompute, retry.
 
 ## EXIT / SUCCESS / idempotency contract
 
@@ -193,6 +187,7 @@ uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" c
   - [Invariants this Workflow enforces](references/ultracode-workflow.md#invariants-this-workflow-enforces)
 - [janitor-memory-update SKILL](../janitor-memory-update/SKILL.md) — the
   non-destructive correction protocol this pass applies mechanically.
-- `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides.
+- `scripts/memgrep` — the write verbs (`merge-mem-topic`, `update-mem-atom --lesson`) and
+  the shared write gate every one of them runs.
 - `scripts/lib/memory_settings.py` — cadence + the `edit_project_scope` gate.
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lesson conventions.

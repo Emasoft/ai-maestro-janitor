@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-split
-description: SPLIT executor — breaks ONE oversized wikimem page (over split_max_bytes) into a concise overview + type-preserving linked sub-pages, losing no fact or lesson, redirecting inbound [[links]], partitioning hub globs. When no page is over cap, decomposes ONE over-budget ATOM, else splits ONE atom that holds two TOPICS. One unit per run, one level deep. Page splits mutate only through the crash-safe transaction core (scripts/memory_txn_cli.py begin/commit --op split); refuses to fragment a component. Use on a [janitor-memory-split] marker, or "split the big memory page", "the memory wiki page is too large", "the atom is too long".
+description: SPLIT executor — breaks ONE oversized wikimem page (over split_max_bytes) into a concise overview + type-preserving linked sub-pages, losing no fact or lesson, redirecting inbound [[links]], partitioning hub globs. When no page is over cap, decomposes ONE over-budget ATOM, else splits ONE atom that holds two TOPICS. One unit per run, one level deep. Page splits mutate only through memgrep write verbs (split-mem-topic / reference-mem-topic); refuses to fragment a component. Use on a [janitor-memory-split] marker, or "split the big memory page", "the memory wiki page is too large", "the atom is too long".
 ---
 
 # Janitor memory — SPLIT
@@ -23,14 +23,15 @@ page anatomy, file→functionality globs).
 
 Two non-negotiable safety properties shape everything below:
 
-1. **You NEVER edit a live memory page directly.** Every PAGE mutation goes through the
-   crash-safe, hash-guarded, flock-serialized transaction core via
-   `scripts/memory_txn_cli.py`: edit COPIES in a staging dir, then `commit --op split`
-   runs `verify_split` and applies atomically only on PASS. A crash mid-pass leaves a
-   journal a later heartbeat rolls forward — no duplicate pages, no data loss. (An ATOM
-   split instead goes through `memgrep split-mem-atom`, which holds the same scope lock.)
+1. **You NEVER edit a live memory page by hand.** Every PAGE mutation goes through the
+   memgrep write verbs (TRDD-XI10BA5D): `split-mem-topic` moves atoms (with their `[^N]`
+   lessons) onto a brand-new page, wiring the See-also link BOTH ways, and
+   `reference-mem-topic` repoints a backlink holder — both scope-locked, CAS-guarded,
+   write-gated (a refusal names the violations content-free and writes NOTHING). A stale
+   memgrep that does not know the verb ⇒ ABSTAIN and report the gap, never Edit/Write or
+   a shell writer. (An ATOM split instead goes through `memgrep split-mem-atom`.)
 2. **No information is ever lost.** The union of the overview + every sub-page must
-   reproduce every fact and every `[^N]` lesson from the original; `verify_split` proves it.
+   reproduce every fact and every `[^N]` lesson from the original; the write gate proves it.
 
 ## When to use
 
@@ -50,22 +51,20 @@ so SPLIT recursion iterates ACROSS heartbeat cycles, never nested in-turn.
 
 ```bash
 PLUGIN="$CLAUDE_PLUGIN_ROOT"   # this plugin's scripts live here
-# 1. Editor kill-gate. If disabled, STOP — surface nothing, mutate nothing.
-#    `resume` also rolls forward any interrupted prior txn before you begin.
-uv run "$PLUGIN/scripts/memory_txn_cli.py" resume "$SCOPE_ROOT" >/dev/null 2>&1 || true
 ```
 
 If `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off` or the janitor kill-switch
-is present, `memory_txn_cli.py begin` exits non-zero — that is your hard stop.
+is present, do not mutate anything — that is your hard stop (the verbs stay
+available for read-only planning; no page write happens).
 
 ## Scope selection (LOCAL / USER apply; PROJECT is staged-not-pushed)
 
 **Do not compute a scope path.** The claim below PRINTS the absolute root; deriving one
 by hand is how an agent ends up working a scope it was not assigned. LOCAL and USER are
-mutated and applied through the txn; PROJECT is in-repo and pushed only by `publish.py`,
+mutated through the verbs; PROJECT is in-repo and pushed only by `publish.py`,
 so PROJECT split is governed by `edit_project_scope` — **ON by default since 2026-08-27**
 (owner directive: librarians must reach PROJECT scope; a host may set it off) — when on you
-stage+commit into the PROJECT root and it rides the next publish, never pushed by you.
+write into the PROJECT root through the verbs and it rides the next publish, never pushed by you.
 
 Process exactly **ONE scope this run**, and CLAIM it before you touch anything.
 Paste the `STATE_DIR=<path>` value from your spawn prompt into the `export` below —
@@ -82,7 +81,12 @@ marker, and atomically hands that dispatch to you alone. `$SCOPE_ROOT` below is 
 `root` it printed. **The path is ABSOLUTE on purpose** — your cwd as a spawned agent
 is not guaranteed to be the project root. Capture the `CLAIM_ID=<id>` line (it
 follows the `(intervention, scope, root)` line; the CLOSE YOUR CLAIM block after it
-repeats the two close commands).
+repeats the two close commands). LOCAL and USER are mutated through the verbs;
+PROJECT is in-repo and pushed only by `publish.py`, so PROJECT split is governed by
+`edit_project_scope` — **ON by default since 2026-08-27**
+(owner directive: librarians must reach PROJECT scope; a host may set it off) — when on
+you write into the PROJECT root through the verbs and it rides the next publish, never
+pushed by you.
 
 **Any non-zero exit, an unreadable file, or a chore name other than `split`: STOP and
 report that** — do not pick a scope yourself, do not re-derive what is due, and **do
@@ -128,10 +132,10 @@ Empty ⇒ genuinely NOTHING DUE. Else take the FIRST `<page>#<atom>` and follow
 then STOP. The list is a TRIAGE surface, never an assertion — most candidates hold one topic,
 and RECORDING that judgement is a successful pass, not an abstain.
 
-### 2. Decide legality + splittability BEFORE opening a transaction
+### 2. Decide legality + splittability BEFORE any write
 
 Read `$PAGE` and apply the wikimem-model rules (the same predicate
-`is_legal_split` enforces — do it up front so you never open a txn you must abort):
+`is_legal_split` enforces — do it up front so you never plan a split that must be refused):
 
 - **`tier: component` → do NOT fragment; SURFACE for re-tiering.** One element = one page. An
   oversized component is a **mis-tier**, not a split target — surface `[memory-split] re-tier
@@ -153,7 +157,7 @@ shapes, glob partitioning, size rules) are in
 
 Key rules: synthesize seams (never abstain) when fewer than 2 natural `##` seams
 exist; the overview reuses the source slug and links DOWN, each sub-page links UP
-(wire both ends in the same txn); every fact + `[^N]` lesson survives byte-identical
+(the split verb wires both ends); every fact + `[^N]` lesson survives byte-identical
 into exactly one output page; a still-over-cap sub-page is the next heartbeat's job.
 Full mechanics: [split-plan-details.md](references/split-plan-details.md).
 
@@ -171,57 +175,53 @@ memgrep links --from "$(basename "$REL" .md)" "$SCOPE_ROOT"   # pass the SLUG, n
 
 Why the slug and not the rel-path: [split-plan-details § Why memgrep links --from takes the slug](references/split-plan-details.md#why-memgrep-links---from-takes-the-slug-not-the-rel-path).
 
-Rewrite `[[source-slug]]` → `[[the-right-sub-page-slug]]` in each holder that is really about a
-sub-topic. The overview KEEPS the source slug (it is NOT retired), so a backlink about the page
+Rewire `[[source-slug]]` → `[[the-right-sub-page-slug]]` in each holder that is really about a
+sub-topic, with `reference-mem-topic` (step 5). The overview KEEPS the source slug (it is NOT
+retired), so a backlink about the page
 as a whole stays correct unchanged — redirect only the ones pointing at moved detail.
 
-> A split txn has exactly ONE source (`begin` takes only `$REL`); a backlink holder is
-> redirected as an extra STAGED WRITE at its own rel-path in step 5, never a source. Why:
+> The split verb touches exactly the S⇄N pair; a backlink holder is redirected with its
+> OWN `reference-mem-topic` call in step 5, never a hand edit. Why:
 > [split-plan-details § backlink-redirect mechanics](references/split-plan-details.md#backlink-redirect-mechanics).
 
-### 5. Execute THROUGH the transaction core (begin → edit staging → commit)
+### 5. Execute through the memgrep write verbs (split, then holder redirects)
 
 ```bash
-# 5a. BEGIN — copy ONLY the source page into a fresh staging dir (exactly ONE
-#     source; backlink holders ride along as staged writes below, not as sources).
-OUT="$(uv run "$PLUGIN/scripts/memory_txn_cli.py" begin "$SCOPE_ROOT" split "$REL")"
-TXN="$(printf '%s\n' "$OUT" | sed -n 's/^txn_id=//p')"
-STAGING="$(printf '%s\n' "$OUT" | sed -n 's/^staging=//p')"
-# begin exits non-zero iff the editor is disabled → that is your hard stop.
+# 5a. SPLIT — move the chosen seams' atoms onto the NEW sub-pages. One call per
+#     sub-page; the overview KEEPS the source slug (it is NOT retired), so only
+#     the atoms that move out leave the source.
+memgrep split-mem-topic --page "$SCOPE_ROOT/$REL" \
+  --atoms "<atom-id-1>,<atom-id-2>" \
+  --into "$SCOPE_ROOT/<dir>/<source-slug>-<subtopic>.md" \
+  --name "<subtopic-slug>" \
+  --description "<the sub-page's symptom-phrased recall surface>" \
+  --base-sha256 "$(sha256 -q "$SCOPE_ROOT/$REL")"
+#   wires the See-also link BOTH ways (source ⇄ sub-page) in the same batch;
+#   a refusal names the violations content-free and writes NOTHING — fix and retry.
 ```
 
-Now edit ONLY inside `$STAGING` (never the live tree). The commit reconstructs the
-change set by DIFFING staging vs the recorded source, so any `.md` you place in
-staging that is new or differs from its live copy becomes a write:
+The verb moves each named atom WITH the `[^N]` lessons its body cites; a lesson
+needed by BOTH halves is shared, not copied. Plan the seams with `--dry-run`
+first when the partition is unusual. **Do NOT touch `MEMORY.md`** — it is the
+harness's; a split adds no line there (`memgrep reindex` picks the sub-pages up
+after the split).
 
-- **Overwrite** `"$STAGING/$REL"` with the new OVERVIEW content (the map). Keeping
-  the same rel-path makes the overview the survivor at the source's slug.
-- **Create** each sub-page as a new file under `$STAGING/` at its sub-page
-  rel-path (e.g. `"$STAGING/<dir>/<source-slug>-<subtopic>.md"`).
-- **Redirect a backlink holder** by writing its rewritten content to
-  `"$STAGING/<holder-rel>"`. The commit treats it as a write that overwrites the
-  live holder — no need to declare it a begin source.
-- **Do NOT touch `MEMORY.md`.** It is the harness's; a split adds no line there —
-  `memgrep reindex` picks the sub-pages up after the commit.
+Then redirect the moved-detail backlinks (step 4's holder list) — one gated
+`reference-mem-topic` call per holder (as in step 5's block above), never a hand edit.
 
-Then commit — this is the gate:
-
-```bash
-uv run "$PLUGIN/scripts/memory_txn_cli.py" commit "$SCOPE_ROOT" "$TXN" --op split
-```
-
-`commit --op split` diffs staging vs the recorded sources, runs `verify_split`
-(the Hard invariants below), and on PASS applies atomically; on FAIL it prints the
-reasons and aborts the txn (live tree untouched).
+**Version skew:** if the installed memgrep refuses the verb (unknown-command /
+usage refusal), ABSTAIN and report the gap (page + operation) — never fall back
+to Edit/Write, a shell writer, or the txn core.
 
 ### 6. EXIT / retry / rollback contract
 
-SUCCESS = `commit` exits 0. A verify FAIL or precondition error has already aborted the txn
-(live tree untouched): fix the staged plan and retry, **bounded to ≤3 attempts**, then abort and
-surface FAILED. Lock contention is a normal abstain, not a failure. Exact surfacing lines, the
-abort command, and the idempotency rule:
+SUCCESS = the verbs exited 0. A gate refusal or precondition error wrote NOTHING
+(live tree untouched): read the named violations, fix the plan, and retry,
+**bounded to ≤3 attempts**, then surface FAILED. Lock contention / a stale
+`--base-sha256` is a normal abstain, not a failure (re-read, recompute, retry on
+fresh content). Exact surfacing lines and the idempotency rule:
 [split-plan-details.md#exit--retry--rollback-contract-step-6](references/split-plan-details.md#exit--retry--rollback-contract-step-6).
-If the split shape needed has no path through the txn core or a memgrep verb, ABSTAIN and
+If the split shape needed has no path through a memgrep verb, ABSTAIN and
 report the gap — never hand-edit the live page.
 
 ### 7. Close the claim (MANDATORY — a pass that returns without this leaves an orphaned claim)
@@ -240,10 +240,10 @@ If `complete` exits 2 saying more than one claim is in flight, re-run it adding 
 
 ## Hard invariants (every SPLIT pass enforces)
 
-Transactional · no information lost · type & tier preserved · connected (no dangling
+Verb-gated · no information lost · type & tier preserved · connected (no dangling
 or one-sided links) · bounded and disable-able. Each is mechanically checked by
-`memory_edit_verify.verify_split` BEFORE the transaction commits, so a violating pass
-aborts rather than landing a half-split page. Full statement of all five:
+the memgrep write gate BEFORE the batch lands, so a violating pass
+is refused rather than landing a half-split page. Full statement of all five:
 [split-plan-details](references/split-plan-details.md#hard-invariants-every-split-pass-enforces).
 
 ## Done when (terminating conditions)
@@ -256,9 +256,9 @@ STOP on the first outcome (one page, one level, retry ≤ 3):
 - [ ] RE-TIER SURFACED — an over-cap `component` (mis-tier; left intact, flagged —
   step 2). A hub/aspect is NEVER left intact: it splits at natural OR synthesized
   seams (fail-safe, step 3a).
-- [ ] SPLIT — commit exited 0 (step 5/6).
+- [ ] SPLIT — the verbs exited 0 (step 5/6).
 - [ ] TOPIC SPLIT — a candidate atom really held two subjects (step 1).
 - [ ] TOPIC KEEP — it held one; refusal RECORDED, so it is not re-listed until the
   page changes (step 1).
-- [ ] FAILED — verify error 3× (step 6).
+- [ ] FAILED — gate refusals 3× (step 6).
 - [ ] DEFERRED — lock contention / stale-hash loser.
