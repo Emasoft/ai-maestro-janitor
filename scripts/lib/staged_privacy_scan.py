@@ -49,6 +49,7 @@ for _p in (_LIB_DIR, _SCRIPTS_DIR):
 import privacy_patterns as privacy  # noqa: E402
 import private_path_patterns as ppp  # noqa: E402
 import publish  # noqa: E402
+import git_utils  # noqa: E402
 
 
 class ScannerError(RuntimeError):
@@ -196,9 +197,9 @@ def _staged_added_lines(root: Path) -> list[tuple[str, int, str]]:
     failure: an unscannable diff must block, not pass.
     """
     try:
-        r = subprocess.run(
+        r = git_utils.run_git_readonly(
             ["git", "diff", "--cached", "--unified=0", "--no-color"],
-            capture_output=True, text=True, cwd=str(root), timeout=30,
+            cwd=root, timeout=30,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ScannerError(f"git diff --cached failed: {exc}") from exc
@@ -256,9 +257,9 @@ def _head_blob(root: Path, cache: dict[str, str], path: str) -> str:
     """
     if path not in cache:
         try:
-            r = subprocess.run(
+            r = git_utils.run_git_readonly(
                 ["git", "show", f"HEAD:{path}"],
-                capture_output=True, text=True, cwd=str(root), timeout=30,
+                cwd=root, timeout=30,
             )
         except (OSError, subprocess.SubprocessError):
             r = None
@@ -354,9 +355,9 @@ def scan_staged(root: Path) -> list[StagedHit]:
 def _repo_root() -> Path:
     """The enclosing git toplevel, or a ScannerError naming the failure."""
     try:
-        r = subprocess.run(
+        r = git_utils.run_git_readonly(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10,
+            timeout=10,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ScannerError(f"not inside a git repository: {exc}") from exc
