@@ -1,0 +1,26 @@
+---
+trdd-id: 5Q24T9SO
+title: Claude Code 2.1.248-2.1.284 alignment — BREAK-1 heartbeat survival under auto-mode classifier plus the top ADOPTS
+column: todo
+status: tasked
+created: 2026-09-29T02:22:14+0200
+updated: 2026-09-29T02:22:19+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: infra
+min-approval-requirement: none
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: none
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-09-29T02:22:14+0200
+---
+
+# Claude Code 2.1.248-2.1.284 alignment — BREAK-1 heartbeat survival under auto-mode classifier plus the top ADOPTS
+
+Source triage: reports/changelog-align/20260929_022045+0200-code_task-cc-changelog-input-e9fb45.md (llm-ext, deepseek-v4-flash, window 2.1.248-2.1.284; ~1540 items IGNORE, 5 BREAKS, 11 ADOPTS). Main verified the three highest-priority lines verbatim in the changelog: 2.1.281 'Changed auto mode so that, where its classifier review runs server-side, read-only and sandboxed shell commands also wait for that review and are blocked when it flags them'; 2.1.284 'Changed interactive terminal and VS Code sessions to start in auto mode when no permission mode is configured' (this host's ~/.claude/settings.json sets defaultMode: auto with an EMPTY allow list); 2.1.259 'Added --permission-prompts none for unattended headless hosts: anything that would prompt is denied automatically while the active permission mode (including auto mode) keeps deciding'. WORK ITEMS, one reviewed commit each: (1) BREAK-1/ADOPT-4: the heartbeat cron fires run in THIS session (interactive, auto mode) — the stub dispatch is a uv run Bash call the classifier may now flag; mitigation is to add a settings allow rule for the exact dispatcher-stub invocation (uv run --script <DATA>/dispatcher-stub.py) plus document the --permission-prompts none option for headless cron contexts in the janitor-arm skill; VERIFY against the live janitor before shipping: whether 2.1.284's auto default actually gates cron-fired Bash turns (a deny is terminal per 2.1.280 'retrying will not help'). (2) ADOPT-8 (2.1.268 /plugin installs no longer need /reload-plugins): audit every janitor path that types /reload-plugins after a plugin op (janitor-reload-plugins skill, daemon update chore) and gate it on whether the op still needs it — the plugin-update fast path can drop the forced reload, saving the prompt-cache re-bill (TRDD-VHPYSN56's whole point). (3) ADOPT-2 (2.1.251+2.1.260 native prompt_cache status field): the keep-alive reads the native miss-cause instead of blind pinging — a detector change, needs the live /cost schema verified first. (4) BREAK-3 (2.1.269 PermissionRequest agent hooks error): grep the plugin for any agent-type hook on PermissionRequest — likely none, one-line verification. (5) ADOPT-9/10 (2.1.269 subagent framing + 2.1.277 prompt sanitation): retire the corresponding janitor injection-detector workarounds ONLY after verifying the native passes cover what the custom code caught (the janitor's scan_text rules are tested; do not delete coverage without a parity check). (6) BREAK-2 (2.1.265 /clear no longer waits for SessionStart in RC sessions): verify Jev's inject timing in an RC session — measure, do not assume. Each work item lands with its own evidence; nothing is adopted on the triage's word alone. The remaining ADOPTs (1,3,5,6,7,11) are recorded in the report for later batches.
+
+## Approval log
+
+- 2026-09-29T02:22:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
