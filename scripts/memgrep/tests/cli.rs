@@ -3155,7 +3155,6 @@ fn new_page_refuses_a_scaffold_whose_bytes_trip_a_floor_code_and_writes_nothing(
 #[test]
 fn gated_write_prints_the_new_sha256_on_stderr_and_it_verifies_as_a_base_hash() {
     let d = TempDir::new("step6-sha");
-    let page = d.join("p.md");
     let (_, err, code) = run_full_env(
         &[
             "new-page", "--tier", "component",
@@ -3424,11 +3423,13 @@ fn update_atom_body_rewrite_refuses_a_result_that_would_trip_a_floor_code() {
     let before = std::fs::read(&page).unwrap();
 
     // The replacement body opens a code fence it never closes — a floor code on the PROPOSED
-    // bytes (the page as the rewrite would leave it). `add-lesson` anchors off the atom, so the
-    // stdin body is exactly what lands under the marker.
+    // bytes (the page as the rewrite would leave it). The body rewrite is EXPLICIT
+    // (TRDD-XI10BA5D A3): `--body -` pipes the stdin body in, so the stdin body is exactly
+    // what lands under the marker.
     let (_, err, code) = run_stdin_full(
         &[
             "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--body", "-",
         ],
         "```\nbody under an unclosed fence",
     );
@@ -3440,6 +3441,198 @@ fn update_atom_body_rewrite_refuses_a_result_that_would_trip_a_floor_code() {
         "the blocking violation must be named: {err}"
     );
     assert_eq!(before, after, "the rewrite never lands — the page is byte-identical");
+}
+
+/// TRDD-XI10BA5D A3 (data-loss class): `update-mem-atom` must NEVER take a non-empty stdin as
+/// the new body unless the caller opted in with `--body`/`--body-file`. A worker piping a
+/// placeholder heredoc beside a `--desc`/`--keywords` call silently REPLACED the atom body that
+/// way (the id survived, so the id-set rule could not see it; recovered from a pre-edit read).
+/// The body must come only through the explicit flags; here it must stay byte-identical.
+#[test]
+fn update_atom_with_stdin_but_no_body_flag_leaves_the_body_untouched() {
+    let d = TempDir::new("updateatom-no-implicit-body");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "The original clean body.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+    let before = std::fs::read(&page).unwrap();
+
+    // The exact incident shape: placeholder text on stdin, only metadata flags on argv.
+    let (_, _, code) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--desc", "a one-line correction summary that clears the desc floor",
+        ],
+        "PLACEHOLDER HEREDOC — must never become the body",
+    );
+    assert_eq!(code, 0, "a desc-only edit succeeds and ignores stdin: code={code}");
+    let after_text = std::fs::read_to_string(&page).unwrap();
+    assert!(
+        after_text.contains("The original clean body."),
+        "the stdin placeholder must NOT replace the body"
+    );
+    assert!(
+        !after_text.contains("PLACEHOLDER HEREDOC"),
+        "the stdin placeholder must not land anywhere on the page"
+    );
+    assert!(
+        after_text.contains("a one-line correction summary that clears the desc floor"),
+        "the desc DID change"
+    );
+    let same_keywords_call = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "SECOND PLACEHOLDER",
+    );
+    assert_eq!(same_keywords_call.2, 0, "keywords-only edit succeeds too");
+    let final_text = std::fs::read_to_string(&page).unwrap();
+    assert!(
+        final_text.contains("The original clean body."),
+        "the body survives the keywords-only call too"
+    );
+    assert!(!final_text.contains("SECOND PLACEHOLDER"));
+    // Metadata-only edits are still real content changes and re-stamp the marker — assert the
+    // desc changed so the test cannot pass vacuously on a no-op write.
+    assert_ne!(before, std::fs::read(&page).unwrap(), "the desc edit really landed");
+}
+
+/// TRDD-XI10BA5D A3: the EXPLICIT stdin path keeps working — `--body -` replaces the body with
+/// the piped text (and only that text).
+#[test]
+fn update_atom_body_dash_still_replaces_the_body_from_stdin() {
+    let d = TempDir::new("updateatom-body-dash");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "The original clean body.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+
+    run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--body", "-",
+        ],
+        "The rewritten explicit body.",
+    );
+    let text = std::fs::read_to_string(&page).unwrap();
+    assert!(
+        text.contains("The rewritten explicit body."),
+        "--body - must replace the body with the stdin text"
+    );
+    assert!(
+        !text.contains("The original clean body."),
+        "the old body is gone after an explicit rewrite"
+    );
+    let (_, code) = run_with_code(&["validate", page.to_str().unwrap()]);
+    assert_eq!(code, 0, "the rewritten page must still pass validate");
+}
+
+/// TRDD-XI10BA5D A3: `--body-file` is the explicit non-stdin channel — the file's contents
+/// replace the body; stdin (piped here with junk) is ignored for body purposes.
+#[test]
+fn update_atom_body_file_replaces_the_body_and_stdin_is_still_ignored() {
+    let d = TempDir::new("updateatom-body-file");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "The original clean body.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+    let body_file = d.join("new-body.md");
+    std::fs::write(&body_file, "The file-fed replacement body.\n").unwrap();
+
+    run_stdin(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--body-file", body_file.to_str().unwrap(),
+        ],
+        "STDIN JUNK that must be ignored",
+    );
+    let text = std::fs::read_to_string(&page).unwrap();
+    assert!(
+        text.contains("The file-fed replacement body."),
+        "--body-file must replace the body"
+    );
+    assert!(
+        !text.contains("The original clean body.") && !text.contains("STDIN JUNK"),
+        "neither the old body nor the piped stdin may survive"
+    );
+}
+
+/// TRDD-XI10BA5D A3: the two explicit-body flags are mutually exclusive — a caller who passed
+/// both has not said which body they meant.
+#[test]
+fn update_atom_refuses_body_and_body_file_together() {
+    let d = TempDir::new("updateatom-body-conflict");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "The original clean body.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+    let before = std::fs::read(&page).unwrap();
+    let body_file = d.join("new-body.md");
+    std::fs::write(&body_file, "file body").unwrap();
+
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--body", "inline text", "--body-file", body_file.to_str().unwrap(),
+        ],
+        "",
+    );
+    assert_ne!(code, 0, "passing both body flags must refuse: stderr={err}");
+    assert!(err.contains("mutually exclusive"), "the refusal names the conflict: {err}");
+    assert_eq!(before, std::fs::read(&page).unwrap(), "nothing was written");
 }
 
 // ─────────────── A2 step 5 WAVE 2 (TRDD-XI10BA5D): the id-set rule + batch-verb gating ───────────────
@@ -4482,7 +4675,8 @@ fn trdd_backlink_is_stamped_queryable_backfillable_and_optional() {
     );
 
     // 4. BACK-FILL onto the atom that had none — the path by which the existing corpus gains
-    //    coverage without a flag day.
+    //    coverage without a flag day. No body flag (TRDD-XI10BA5D A3): the piped text is
+    //    IGNORED and the body is untouched.
     run_stdin(
         &[
             "update-mem-atom", "--page", page.to_str().unwrap(),

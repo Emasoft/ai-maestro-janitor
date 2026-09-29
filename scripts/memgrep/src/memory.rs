@@ -2992,6 +2992,23 @@ pub(crate) fn read_body_from_stdin() -> Result<String> {
     Ok(body)
 }
 
+/// Validate an EXPLICIT body (`--body TEXT` / `--body-file F`) with the same trailing-trim,
+/// empty-body and control-byte checks `read_body_from_stdin` applies — one standard for a body
+/// no matter which channel carried it (TRDD-XI10BA5D A3).
+fn validated_explicit_body(raw: &str, flag: &str) -> Result<String> {
+    let body = raw.trim_end().to_string();
+    if body.trim().is_empty() {
+        anyhow::bail!(
+            "empty body via {flag} — an atom body rewrite must carry content \
+             (`--body -` reads stdin, `--body-file F` reads a file)"
+        );
+    }
+    if let Err(e) = reject_control_bytes(&body) {
+        anyhow::bail!("{flag}: {e}");
+    }
+    Ok(body)
+}
+
 #[derive(Parser)]
 #[command(
     name = "memgrep new-mem-atom",
@@ -3852,14 +3869,16 @@ fn add_lesson_impl(
     about = "rewrite ONE existing atom's body and/or desc/keywords in place (id preserved; [^N] refs untouched); or, with --lesson, record a [^N] correction against it",
     after_help = "EXAMPLES:\n\
         \x20 # replace the body only — desc/keywords/type/ocd stay exactly as they were\n\
-        \x20 echo \"the cooldown is 300s because min_context is the real guard\" | \\\n  \
-        \x20   memgrep update-mem-atom --page .claude/project/memory/rotator.md --atom ATOM-234P-U35Q\n\
-        \x20 # also replace desc and keywords in the same call\n\
-        \x20 echo \"new body text\" | memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q \\\n    \
+        \x20 memgrep update-mem-atom --page .claude/project/memory/rotator.md --atom ATOM-234P-U35Q \\\n    \
+        \x20   --body - <<'EOF'\n\
+        \x20 the cooldown is 300s because min_context is the real guard\n\
+        \x20 EOF\n\
+        \x20 # --body-file is the long-body form; both are EXPLICIT — stdin is never the body without one\n\
+        \x20 memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q --body-file new-body.md\n\
+        \x20 # desc/keywords only — a piped heredoc is IGNORED, the body is never touched\n\
+        \x20 echo \"unrelated data\" | memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q \\\n    \
         \x20   --desc \"the corrected one-line summary\" \\\n    \
         \x20   --keywords \"a,b,c,d,e,f,g,h,i,j\"\n\
-        \x20 # preview the rewrite without touching the page\n\
-        \x20 echo \"new body\" | memgrep update-mem-atom --page p.md --atom ATOM-234P-U35Q --dry-run\n\
         \x20 # --lesson: a lesson is a CORRECTION, so it lives on update-mem-atom, not new-mem-atom —\n\
         \x20 # DO-NOT/BECAUSE/DO on stdin, anchored onto --atom's body\n\
         \x20 echo \"DO NOT retry on 429 without a cooldown, BECAUSE it re-triggers the limit. DO wait instead.\" | \\\n  \
@@ -3898,6 +3917,17 @@ struct UpdateAtomArgs {
     /// Print the rewritten marker + body and write nothing. Ignored under `--lesson`.
     #[arg(long = "dry-run")]
     dry_run: bool,
+    /// Replace the atom's body with this EXPLICIT text (TRDD-XI10BA5D A3). `-` reads stdin.
+    /// The body is replaced ONLY through this flag or `--body-file` — never implicitly from a
+    /// non-empty stdin, which is how a worker piping an unrelated heredoc beside a `--desc`
+    /// call silently overwrote an atom body (recovered from a pre-edit read, 2026-09-24).
+    /// A call whose stdin carries other data with no body flag simply does not rewrite the body.
+    #[arg(long = "body")]
+    body: Option<String>,
+    /// Replace the atom's body with the contents of this FILE (TRDD-XI10BA5D A3) — the explicit
+    /// path for long/multi-line bodies. Same contract as `--body`: no flag, no body rewrite.
+    #[arg(long = "body-file")]
+    body_file: Option<PathBuf>,
     /// Also descend into hidden files/dirs when reindexing the scope (default off).
     #[arg(long = "hidden")]
     hidden: bool,
@@ -3921,8 +3951,10 @@ struct UpdateAtomArgs {
     retire_atom: bool,
 }
 
-/// `memgrep update-mem-atom --page P --atom A [--desc …] [--keywords …] [--base-sha256 H] [--dry-run]`
-/// (new body on stdin, ALWAYS replaces the current one). Rewrites the atom's marker + body IN
+/// `memgrep update-mem-atom --page P --atom A [--desc …] [--keywords …] [--body T|‑|--body-file F] [--base-sha256 H] [--dry-run]`
+/// (the body is replaced ONLY through `--body`/`--body-file` — with `--body -` reading stdin —
+/// TRDD-XI10BA5D A3; a non-empty stdin with no body flag is ignored, never the new body).
+/// Rewrites the atom's marker + body IN
 // NOTE: the id field is cited WITH its trailing colon below, matching how it actually appears
 // in the stored props block. Without the colon it is a bare two-letter token that CPV's
 // CMD_INJECTION signature reads as the POSIX user-identity command, which blocked the publish
@@ -3996,16 +4028,56 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
                 unclosed_fence_hint(&text)
             )
         })?;
+    // TRDD-XI10BA5D A3: the body is replaced ONLY through an explicit `--body`/`--body-file`
+    // (with `--body -` meaning stdin). It is NEVER implicitly the stdin content: a worker piping
+    // an unrelated heredoc beside a `--desc`/`--keywords` call silently replaced the atom's body
+    // that way (the id survived, so the id-set rule could not see it). No body flag + non-empty
+    // stdin ⇒ stdin is IGNORED for body purposes (other verbs may legitimately pipe data past
+    // this verb); the body is left exactly as it is. `--lesson` keeps its own stdin contract
+    // (the lesson text IS the body it creates) — this path runs only for the marker-rewrite half.
+    if a.body.is_some() && a.body_file.is_some() {
+        anyhow::bail!("--body and --body-file are mutually exclusive — pass one");
+    }
     // TRDD-XI9UYD4E: a one-line footnote-lesson sets body_last_idx == marker_idx — its body
     // span is EMPTY, so there is nothing to replace and a spliced body would INSERT a spurious
-    // line under the `[^N]` marker. A desc-only edit (no --lesson) must not need stdin at all:
-    // read it only when the span is non-empty. --lesson keeps requiring stdin (the lesson text
-    // IS the body it creates).
-    let body = if body_last_idx > marker_idx {
-        read_body_from_stdin()?
-    } else {
-        String::new()
+    // line under the `[^N]` marker (its inline body lives ON the marker line, T-H97PEEQZ).
+    // Refuse an explicit body rewrite there BEFORE reading stdin, so a `--body -` against a
+    // footnote with nothing piped errors instead of blocking on a terminal.
+    let has_body_span = body_last_idx > marker_idx;
+    let body_span_refusal = || {
+        anyhow::bail!(
+            "atom `{}` on {} is a footnote-lesson with an EMPTY body span — there is no body to \
+             replace; edit its inline text directly (TRDD-XI10BA5D A3)",
+            a.atom,
+            a.page.display()
+        )
     };
+    let explicit_body = match (a.body.as_deref(), a.body_file.as_ref()) {
+        (Some("-"), _) => {
+            if !has_body_span {
+                body_span_refusal()?;
+            }
+            // `--body -` is the ONLY stdin path — the explicit opt-in.
+            Some(read_body_from_stdin()?)
+        }
+        (Some(text), _) => {
+            if !has_body_span {
+                body_span_refusal()?;
+            }
+            Some(validated_explicit_body(text, "--body")?)
+        }
+        (_, Some(path)) => {
+            if !has_body_span {
+                body_span_refusal()?;
+            }
+            let raw = std::fs::read_to_string(path)
+                .map_err(|e| anyhow::anyhow!("--body-file {}: {e}", path.display()))?;
+            Some(validated_explicit_body(&raw, "--body-file")?)
+        }
+        _ => None,
+    };
+    let rewrite_body = explicit_body.is_some();
+    let body = explicit_body.unwrap_or_default();
 
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     // TRDD-XI9UYD4E: a footnote-lesson marker (`[^N]: [id:ATOM-…, …]`) is not a leading `^id`
@@ -4172,7 +4244,9 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
     // in Rust, so `splice` inserts the new body right after the marker without removing anything).
     // TRDD-XI9UYD4E: when the span is empty, `body` was never read (empty String) — the splice
     // must NOT insert those zero lines as nothing; guard so a footnote's shape is untouched.
-    if body_last_idx > marker_idx {
+    // TRDD-XI10BA5D A3: the splice runs only on an EXPLICIT body rewrite (`rewrite_body`); a
+    // metadata-only call leaves the body span byte-identical even though `body` is empty.
+    if rewrite_body && body_last_idx > marker_idx {
         let new_body_lines: Vec<String> = body.lines().map(str::to_string).collect();
         lines.splice(marker_idx + 1..=body_last_idx, new_body_lines);
     }
