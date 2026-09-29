@@ -669,10 +669,10 @@ def _primary_read_latch_state() -> dict:
     except (OSError, json.JSONDecodeError):
         # parse failure → {} is ACCEPTED (TRDD-ZKXQXHBI review): the REAL race is a
         # lost update — two ticks read the same base and the second os.replace
-        # clobbers the first's increment (a legacy non-JSON file parses as {} too).
-        # Either way the streak regrows and the latch trips one tick late: degraded
-        # calibration, never a lost trip. (The write path is tmp+os.replace, so the
-        # live path never holds a torn file.)
+        # clobbers the first's increment or re-stamp (a legacy non-JSON file parses
+        # as {} too). Either way the streak regrows and the latch trips one tick
+        # late: degraded calibration, never a lost trip. (The write path is
+        # tmp+os.replace, so the live path never holds a torn file.)
         pass
     return {}
 
