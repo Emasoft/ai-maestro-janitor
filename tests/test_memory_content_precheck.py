@@ -2257,3 +2257,112 @@ def test_relocate_offtopic_atom_scenario(tmp_path, monkeypatch):
         "the atom's body must survive byte-for-byte (whitespace-layout aside) on dst"
     )
     assert "bulk-lane" in dst_after, "source must retain a [[link]] to the move"
+
+
+# ── duty-15 create-path (TRDD-VIFQ1LKI): survey-then-mint acceptance tests ──────────
+
+_DESC_15_PHRASES = (
+    "how does test isolation work / what is test isolation / why did a unit test write "
+    "the real state dir / test isolation janitor / shared cache between tests / "
+    "monkeypatch did not isolate state / state leaked between tests / test polluted "
+    "machine state / isolated state dir for tests / lru cached project root in tests / "
+    "why does my test write real state / per-test state isolation / the test was not "
+    "isolated / cross-test state leak / clean state per test"
+)
+
+
+def _page15(d: Path, name: str, description: str = _DESC_15_PHRASES) -> Path:
+    """A minimal VALID wikimem page (the shape `memgrep lint` accepts) for the
+    duty-15 fixtures; the 15-phrase description clears the verb's own floor."""
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{name}.md"
+    p.write_text(
+        f"---\nname: {name}\ndescription: \"{description}\"\n"
+        "ocd: 2026-01-01\nlmd: 2026-01-01\nmetadata:\n  node_type: memory\n"
+        "  type: reference\n  tier: component\n---\n\n"
+        f"# {name}\n\n## Notes and lessons learned\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def test_duty15_no_page_anywhere_mints_one(tmp_path, monkeypatch):
+    """Acceptance box 4, first half (TRDD-VIFQ1LKI): an off-topic atom whose topic has
+    NO page in ANY of the three scope roots → the survey is genuinely empty → the page
+    is minted through `new-mem-topic` and the returned destination exists on disk."""
+    from conftest import MEMGREP_BIN_PATH
+    if MEMGREP_BIN_PATH is None:
+        pytest.skip("memgrep binary unavailable")
+    local_root, user_root = tmp_path / "local", tmp_path / "user"
+    project_root = tmp_path / "project" / "memory"
+    monkeypatch.setenv("WIKIMEM_LOCAL_SCOPE_PATH", str(tmp_path / "mint-local"))
+    created, destination = mcp.relocate_survey_then_create(
+        "test-isolation", "private-project", [local_root, user_root, project_root],
+        _DESC_15_PHRASES, memgrep_bin=MEMGREP_BIN_PATH,
+    )
+    assert created is True, "an empty 3-root survey must mint the page"
+    assert destination is not None and destination.is_file(), (
+        "the minted page must exist on disk via the write verb"
+    )
+    text = destination.read_text(encoding="utf-8")
+    assert 'name: test-isolation' in text
+    assert "## Notes and lessons learned" in text, (
+        "the verb's scaffold must carry the mandatory section (lint-clean by construction)"
+    )
+    # and nothing landed in the survey roots — the mint went to the SCOPE root
+    # (private-project → WIKIMEM_PROJECT_SCOPE_PATH, never set here), not a survey root.
+    # WIKIMEM_LOCAL_SCOPE_PATH is set only to prove the local root stays empty too.
+    assert not local_root.exists() or not any(local_root.iterdir())
+    assert not (tmp_path / "mint-local" / "test-isolation.md").exists()
+
+
+def test_duty15_topic_owned_under_a_different_name_mints_nothing(tmp_path, monkeypatch):
+    """Acceptance box 4, second half: the topic already has a page under a different
+    name → the survey FINDS it → no page is created and the found page is returned as
+    the destination the MOVE then targets."""
+    from conftest import MEMGREP_BIN_PATH
+    if MEMGREP_BIN_PATH is None:
+        pytest.skip("memgrep binary unavailable")
+    project_root = tmp_path / "project" / "memory"
+    state_reaper = _page15(project_root, "state-reaper")
+    before = sorted(p.name for p in project_root.iterdir())
+    created, destination = mcp.relocate_survey_then_create(
+        "test isolation", "private-project", [project_root],
+        _DESC_15_PHRASES, memgrep_bin=MEMGREP_BIN_PATH,
+    )
+    assert created is False, "a same-subject page under a different name must NOT mint"
+    assert destination == state_reaper, (
+        "the found page IS the destination the move proceeds to"
+    )
+    assert sorted(p.name for p in project_root.iterdir()) == before, "corpus untouched"
+
+
+def test_duty15_fail_closed_without_memgrep(tmp_path, monkeypatch):
+    """No binary → the survey cannot run → nothing is minted, `(False, None)` — the
+    enrich/relocate fail-CLOSED shape (no linter, no verified fix, no mint)."""
+    import user_mem_lib
+    monkeypatch.setattr(user_mem_lib, "find_memgrep", lambda: None)
+    created, destination = mcp.relocate_survey_then_create(
+        "test isolation", "private-project", [tmp_path],
+        _DESC_15_PHRASES, memgrep_bin=None,
+    )
+    assert created is False and destination is None
+
+
+def test_duty15_single_root_hit_still_suppresses_mint(tmp_path, monkeypatch):
+    """The card's WHY for the 3-root rule, inverted: the survey is only as strong as
+    its roots — a topic owned in ONE of several roots is still owned, and the helper
+    must find it there rather than mint the near-synonym duty 10 undoes."""
+    from conftest import MEMGREP_BIN_PATH
+    if MEMGREP_BIN_PATH is None:
+        pytest.skip("memgrep binary unavailable")
+    user_root = tmp_path / "user"
+    user_root.mkdir()
+    existing = _page15(user_root, "state-reaper")
+    created, destination = mcp.relocate_survey_then_create(
+        "test isolation", "private-project",
+        [tmp_path / "empty-local", user_root, tmp_path / "empty-project"],
+        _DESC_15_PHRASES, memgrep_bin=MEMGREP_BIN_PATH,
+    )
+    assert created is False
+    assert destination == existing

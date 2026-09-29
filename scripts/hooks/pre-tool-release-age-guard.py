@@ -250,9 +250,12 @@ def _npm_packages(tail: str) -> Iterator[tuple[str, str | None]]:
         if t.startswith("-") or _is_local(t):
             continue
         if t.startswith("@"):  # @scope/pkg[@ver] — the leading @ is part of the name
-            body, sep, ver = t[1:].rpartition("@")
+            body, sep, scoped_ver = t[1:].rpartition("@")
             name = f"@{body}" if sep else t
-            ver = ver if sep else None
+            # A scoped spec's version is optional (``@scope/pkg`` alone is legal), so the
+            # var must be `str | None` here — reusing the unscoped `ver` (always `str`
+            # from rpartition) made mypy flag the None branch (TRDD-VIFQ1LKI gate run).
+            ver: str | None = scoped_ver if sep else None
         else:
             name, sep, ver = t.rpartition("@")
             if not sep:

@@ -58,8 +58,10 @@ only of THIS page's subject, or would it still be true of a completely different
   `memory_txn_cli begin <scope> repair <page>` → append the `[[owning-page]]` link to the
   STAGED copy (touch nothing else) → `commit --op repair` (the verify gate proves no loss).
   Do NOT move.
-- **MOVE** — when the general form does NOT yet exist elsewhere. Run, through the transaction
-  core per the consolidate skill's shape:
+- **MOVE** — when the general form does NOT yet exist elsewhere. FIRST resolve the
+  destination (duty 15, TRDD-VIFQ1LKI): if the owning page does not exist yet, CREATE it
+  (the section below), then run, through the transaction core per the consolidate skill's
+  shape:
 
   ```bash
   memgrep migrate-mem-atom "<ATOM-ID>" --from <src-page.md> --to <dst-page.md> --leave-link
@@ -67,6 +69,44 @@ only of THIS page's subject, or would it still be true of a completely different
 
   The verb moves the whole atom, renumbers what it must, and leaves a `[[link]]` on the source.
   Never hand-edit the two pages around the verb.
+
+## CREATE the destination page (duty 15, TRDD-VIFQ1LKI) — the MOVE else-branch
+
+When the atom's topic has NO page yet, mint one so the MOVE has a target. Creation is the LAST
+resort — a page whose subject is already covered under a different name is the near-synonym
+failure duty 10 exists to undo.
+
+1. **SURVEY all three roots first** (a single-root recall returns a confident empty
+   indistinguishable from a real absence — measured twice, ATOM-W99A-N60G). Compose the roots
+   into a bash ARRAY, never a joined string (an unquoted joined string is ONE bogus path and
+   silently returns 0 results), then recall the topic by its SYMPTOM words:
+
+   ```bash
+   ROOTS=()
+   ROOTS+=("<project-root>/.claude/project/memory")            # PROJECT — resolve via memory_scopes
+   ROOTS+=("$HOME/.claude/projects/<project-slug>/memory")      # LOCAL — slug = pwd, non-alnum → '-'
+   ROOTS+=("$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory")  # USER
+   memgrep recall "<topic in symptom words>" "${ROOTS[@]}" --output full --no-notes
+   ```
+
+2. **HIT — any row whose line starts with a real `.md` path:** that page IS the destination,
+   whatever its name. Mint nothing. Record in the report that the survey found it.
+3. **GENUINELY EMPTY across all three roots:** mint through the write verb (never a hand
+   scaffold), routing scope by what the ATOM carries — the atom's own scope decides; UNSURE →
+   `local`. The `description:` is the new page's RECALL SURFACE: build it from SYMPTOM
+   phrasings — the words a future session arrives with when the problem recurs (error text, the
+   user's words) — NOT the topic's jargon, `/`-separated, at least 15 DISTINCT phrases:
+
+   ```bash
+   memgrep new-mem-topic --tier component --scope <local|private-project|public-project|user> \
+     --name <kebab-topic-slug> --description "<symptom 1> / <symptom 2> / … / <symptom 15>" \
+     --type reference
+   ```
+
+   The verb refuses to overwrite, validates the description floor, and writes atomically.
+4. Then run the normal MOVE (above) with the minted page as `--to`.
+
+If memgrep is missing, do NEITHER: no survey, no mint, no move — record a refusal instead.
 
 If you cannot judge honestly (the lesson is ambiguous, or the better page is one of several),
 do NOT guess. Record a refusal on that page so it stops re-surfacing:

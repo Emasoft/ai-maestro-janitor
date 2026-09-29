@@ -53,6 +53,7 @@ from __future__ import annotations
 import hashlib
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import memory_edit_verify  # sibling in scripts/lib/ — the SSOT for merge legality
@@ -1657,3 +1658,87 @@ def content_has_work(
         )
     # Unknown chores: fail-open by default.
     return True
+
+
+# ── duty-15 create-path (TRDD-VIFQ1LKI): the survey-then-mint decision the relocate
+#    skill's MOVE branch runs when the owning page does not exist ─────────────────────
+
+# The recall row shapes `--output full` prints at column 0: a PAGE hit
+# (`<path>.md — <summary>`) and an ATOM hit (`<path>.md#<ATOM-ID> — <summary>`). Both
+# carry the owning path as the line prefix, so one regex extracts the destination. The
+# `full` layer is used — not `basic` — because its locator column is the real PATH,
+# which is exactly what the caller needs to return; the lean layers print only the
+# page name / atom id.
+_RECALL_HIT_RE = re.compile(r"^\S+\.md(?:#\S+)?\s")
+
+
+def relocate_survey_then_create(
+    topic: str,
+    scope: str,
+    roots: Sequence[Path],
+    description: str,
+    *,
+    memgrep_bin: str | None = None,
+) -> tuple[bool, Path | None]:
+    """Duty-15 decision (TRDD-VIFQ1LKI), the else-branch of the relocate MOVE: when the
+    off-topic atom's topic has NO page anywhere, MINT one (`memgrep new-mem-topic`) and
+    let the normal MOVE proceed; when the survey finds the topic already owned under a
+    different name, return that page as the destination and mint nothing.
+
+    THE 3-ROOT SURVEY IS LOAD-BEARING (the card's acceptance box 1): a single-root
+    recall returns a confident empty indistinguishable from a real absence — measured
+    twice on 2026-08-26 (ATOM-W99A-N60G). So the recall runs across ALL given roots in
+    ONE invocation (a bash-array shape, never a joined string), and only a genuine
+    zero-hit result across every root reaches the mint.
+
+    Minting goes through the write verb itself (`new-mem-topic`), never a hand-written
+    scaffold: the verb derives the destination from the scope, validates the
+    description's phrase floor, and writes atomically. Scope routing is the CALLER's
+    judgment (UNSURE → local per the memory rule); this function only forwards it.
+
+    Returns `(created, destination)`: `(True, <new page>)` when a page was minted;
+    `(False, <existing page>)` when the survey found the topic already owned; and
+    `(False, None)` when memgrep is missing or fails — fail CLOSED, the same shape as
+    `enrich_pages`/`relocate_lesson_findings`: an agent with no binary can neither
+    verify the survey nor trust a page it could not have validated, so creation must
+    not happen at all.
+    """
+    binary = memgrep_bin
+    if binary is None:
+        try:
+            import user_mem_lib  # noqa: PLC0415 -- optional; the gate must not require it
+
+            binary = user_mem_lib.find_memgrep()
+        except Exception:  # noqa: BLE001
+            binary = None
+    if not binary or not roots:
+        return False, None
+
+    survey = subprocess.run(  # noqa: S603 - resolved binary + explicit paths, no shell
+        [binary, "recall", topic, *[str(r) for r in roots],
+         "--output", "full", "--no-notes"],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    if survey.returncode != 0:
+        return False, None
+    for ln in survey.stdout.splitlines():
+        m = _RECALL_HIT_RE.match(ln)
+        if m:
+            # A hit — under ANY name, in ANY scope — is the destination. Never mint a
+            # near-synonym page: that is the exact failure duty 10 exists to undo.
+            return False, Path(ln.split(" — ", 1)[0].split("#", 1)[0])
+    # Empty across all three roots → genuine absence → mint through the write verb.
+    mint = subprocess.run(  # noqa: S603 - same resolved binary, no shell
+        [binary, "new-mem-topic", "--tier", "component", "--scope", scope,
+         "--name", topic, "--description", description, "--type", "reference"],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    if mint.returncode != 0:
+        return False, None
+    # The verb prints `wrote <path>`; resolve the destination from the scope roots it
+    # derives, mirroring the verb's own derivation (`<scope root>/<name>.md`) so the
+    # caller gets a real path even if the print format ever shifts.
+    printed = mint.stdout.strip()
+    if printed.startswith("wrote "):
+        return True, Path(printed[len("wrote "):])
+    return True, None
