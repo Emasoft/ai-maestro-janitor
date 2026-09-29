@@ -2233,6 +2233,130 @@ fn lint_dangling_reference_fails_the_default_gate() {
     assert!(o.contains("ERROR"), "and be reported as ERROR:\n{o}");
 }
 
+// ── TRDD-XI10BA5D step B — the anchor field + the 2x-size WARN, end to end ───────────────────
+
+/// A4 test 1 — the 2x threshold BOUNDARY: strictly over 2x the atom budget fires
+/// `atom-oversized-critical`; EXACTLY 2x must not (`>`, never `>=` — the budget itself stays the
+/// advisory line). Both fixtures run against the same env-derived budget so the comparison is
+/// apples-to-apples; the body is padded to an exact char count via `body_chars`'s own semantics
+/// (whitespace-joined, `[^N]`-stripped), verified with the collapsed size the lint reports.
+#[test]
+fn lint_atom_over_twice_the_budget_warns_but_exactly_twice_does_not() {
+    // Budget 1000: small enough that the fixtures stay tiny, derived from the same env knob the
+    // linter reads, and reset after each run so no other test inherits it.
+    let run = |budget: usize, body: String| -> String {
+        let d = TempDir::new("lint-2x-boundary");
+        d.write(
+            "n.md",
+            &format!(
+                "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\n\
+                 ^big [keywords: k, ocd: 2026-01-01, lmd: 2026-01-01]\n{body}\n\n## Notes and lessons learned\n"
+            ),
+        );
+        let bin = env!("CARGO_BIN_EXE_memgrep");
+        let out = Command::new(bin)
+            .args(["lint", d.as_str(), "--min-severity", "info"])
+            .env("MEMGREP_ATOM_MAX_CHARS", budget.to_string())
+            .output()
+            .expect("failed to run memgrep");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // body_chars = whitespace-joined collapsed chars. "x ".repeat(n) collapses to exactly n chars
+    // (n x's joined by single spaces minus the trailing join: `collapse_strip_anchors` turns the
+    // run into `x x x … x`, n chars + n-1 spaces). Use all-x's with no separators for an exact
+    // count instead: `x`.repeat(n) is n chars under any collapse.
+    let exactly_2x = "x".repeat(2000);
+    let just_over = "x".repeat(2001);
+    let under = run(1000, just_over);
+    assert!(
+        under.contains("atom-oversized-critical"),
+        "2001 chars > 2×1000 must fire the WARN: {under}"
+    );
+    let at = run(1000, exactly_2x);
+    assert!(
+        !at.contains("atom-oversized-critical"),
+        "exactly 2000 chars == 2×1000 must NOT fire (`>` not `>=`): {at}"
+    );
+    // The 1x INFO tier is untouched (janitor#200): both fixtures are over 1x, both must carry it.
+    assert!(under.contains("atom-oversized"), "1x INFO still reports: {under}");
+    assert!(at.contains("atom-oversized"), "1x INFO still reports at the boundary: {at}");
+}
+
+/// A4 test 2 — the threshold is DERIVED from `MEMGREP_ATOM_MAX_CHARS`, not hard-coded: the same
+/// body fires at one env value and stays silent at a larger one, so the 2x WARN and the 1x INFO
+/// cannot drift apart (they read the ONE `atom_max_chars()` knob).
+#[test]
+fn lint_twice_budget_threshold_follows_the_env_budget() {
+    let body = "x".repeat(1501); // fixed body: over 2×700, under 2×1000
+    let d = TempDir::new("lint-2x-env");
+    d.write(
+        "n.md",
+        &format!(
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\n\
+             ^big [keywords: k, ocd: 2026-01-01, lmd: 2026-01-01]\n{body}\n\n## Notes and lessons learned\n"
+        ),
+    );
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let fire = Command::new(bin)
+        .args(["lint", d.as_str(), "--min-severity", "info"])
+        .env("MEMGREP_ATOM_MAX_CHARS", "700")
+        .output()
+        .expect("failed to run memgrep");
+    let fired = String::from_utf8_lossy(&fire.stdout);
+    assert!(
+        fired.contains("atom-oversized-critical"),
+        "1501 > 2×700 must fire: {fired}"
+    );
+    let quiet = Command::new(bin)
+        .args(["lint", d.as_str(), "--min-severity", "info"])
+        .env("MEMGREP_ATOM_MAX_CHARS", "1000")
+        .output()
+        .expect("failed to run memgrep");
+    let quieted = String::from_utf8_lossy(&quiet.stdout);
+    assert!(
+        !quieted.contains("atom-oversized-critical"),
+        "1501 ≤ 2×1000 must NOT fire — the threshold must FOLLOW the env, not a constant: {quieted}"
+    );
+}
+
+/// A4 test 3 — the ANCHOR MAPPING: a `page-no-ocd` finding (grandfathered ERROR class, the one
+/// step B tickets) carries `⟦anchor:field:ocd⟧` TRAILING at end of line, and an `atom-*` finding
+/// carries the atom's id (`atom:<id>`). The anchor is at END of line only — between `]` and `—`
+/// would break `memory_content_precheck._RELOCATE_LESSON_RE` (spec req 1's placement contract).
+#[test]
+fn lint_finding_lines_carry_a_trailing_anchor_token() {
+    let d = TempDir::new("lint-anchor");
+    d.write(
+        "n.md",
+        // Missing `ocd:` frontmatter (page-no-ocd) + an atom with no keywords (atom-no-keywords).
+        "---\nname: n\nlmd: 2026-01-02\ndescription: \"d\"\n---\n^ATOM-TEST-0009 [ocd: 2026-01-01, lmd: 2026-01-01]\nbody.\n\n## Notes and lessons learned\n",
+    );
+    let (o, _code) = run_with_code(&["lint", d.as_str()]);
+    let ocd_line = o
+        .lines()
+        .find(|l| l.contains("[page-no-ocd]"))
+        .unwrap_or_else(|| panic!("page-no-ocd must be reported:\n{o}"));
+    assert!(
+        ocd_line.ends_with(" ⟦anchor:field:ocd⟧"),
+        "the anchor must be the line's TRAILING token, `field:ocd` for the frontmatter class:\n{o}"
+    );
+    let kw_line = o
+        .lines()
+        .find(|l| l.contains("[atom-no-keywords]"))
+        .unwrap_or_else(|| panic!("atom-no-keywords must be reported:\n{o}"));
+    assert!(
+        kw_line.ends_with(" ⟦anchor:atom:ATOM-TEST-0009⟧"),
+        "an atom-* finding's anchor is the atom id:\n{o}"
+    );
+    // And the em-dash message stays BETWEEN `]` and any trailing content — the placement the
+    // Python relocate regex requires — which the ends_with assertions above already pin, since
+    // an interposed anchor would leave the em-dash message before it.
+    assert!(
+        !ocd_line.contains("⟦anchor:field:ocd⟧ —"),
+        "no anchor may sit between the code token and the em-dash message:\n{ocd_line}"
+    );
+}
+
 /// A PAGE row's locator is the page's `name:` identity, never its path.
 ///
 /// Measured on the two live corpora: page rows are 35-39% of ALL result rows and their paths cost

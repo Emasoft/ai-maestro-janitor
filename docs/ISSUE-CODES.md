@@ -20,12 +20,13 @@ unattended access to your repository.
 
 ## HARNESS — the janitor repairs itself (automatic)
 
-18 code(s).
+19 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
 | `DAEMON-001` | daemon-supervisor | critical | the global janitor daemon has died and respawned {count} times in the guard window |
 | `MEMCORP-001` | memory-librarian | medium | the wikimem corpus in {scope} has structural damage: {detail} |
+| `MEMCORP-002` | wikimem-syntax | medium | an atom is over 2x the size budget: {where} |
 | `MEMGREP-001` | memgrep-validate | high | the FTS index in {scope} does not match its content table |
 | `MEMGREP-002` | memgrep-validate | critical | the memgrep database in {scope} fails SQLite's own integrity check |
 | `MEMGREP-003` | memgrep-validate | critical | an FTS table in {scope} has the wrong column set: {table} |
@@ -56,6 +57,13 @@ unattended access to your repository.
 - **What it is:** Pages are malformed, links dangle, or footnote refs do not resolve.
 - **Why it matters:** A corpus whose links do not resolve cannot be navigated, and the LINK LAW (every link is bidirectional) is what makes recall work at all.
 - **Fix attempted:** Run the memory curator's repair pass under the edit transaction, which proves no knowledge was lost before it commits.
+
+### `MEMCORP-002` — an atom is over 2x the size budget: {where}
+
+- **Scanner:** `wikimem-syntax` · **Severity:** `medium` · **Kind:** `memory-corpus`
+- **What it is:** One atom's body is more than twice the `MEMGREP_ATOM_MAX_CHARS` budget (the 1x INFO advisory fired long ago and was ignored until the atom doubled again). An atom holds ONE fact; one holding several cannot be found, cited, or decomposed safely.
+- **Why it matters:** Size is the corpus's compounding debt: an over-2x atom is several facts fused into one recall result, and every week it grows the split gets harder. The owner ruled the remedy is a scheduled lazy refactor, not a write-time refusal.
+- **Fix attempted:** Run /janitor-memory-atomize: decompose the oversized atom into 2 atoms (one fact each), preserving the superseded body per the never-delete rule.
 
 ### `MEMGREP-001` — the FTS index in {scope} does not match its content table
 

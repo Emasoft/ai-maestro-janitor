@@ -56,11 +56,17 @@ pub(crate) fn prepare(dest: &Path, proposed: &str) -> Result<()> {
         dest.display(),
         blocked.len()
     );
-    for (sev, _p, line, m, code) in &blocked {
+    for v in &blocked {
         msg.push_str(&format!(
-            "\n  {} {}:{line} [{code}] — {m}",
-            sev.label(),
-            dest.display()
+            // Refusal lines reuse lint's `SEV path:line [code] — msg` shape but stay ANCHOR-FREE:
+            // a refused write landed NOTHING, so there is no finding on disk to ticket — the
+            // anchor token would imply a ticketable state that does not exist (spec req 5 / A1).
+            "\n  {} {}:{} [{}] — {}",
+            v.sev.label(),
+            dest.display(),
+            v.line,
+            v.code,
+            v.msg
         ));
     }
     anyhow::bail!(msg)
@@ -648,7 +654,7 @@ mod tests {
         let blocking_written: Vec<&str> = lint_page_text(&written, &landed, false)
             .into_iter()
             .filter(|v| write_gate_blocks(v))
-            .map(|v| v.4)
+            .map(|v| v.code)
             .collect();
         let refused: Vec<&str> = crate::memory::write_gate_floors()
             .iter()

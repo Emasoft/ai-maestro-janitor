@@ -38,14 +38,19 @@ sys.path.insert(0, str(_SCRIPTS / "lib"))
 
 import memory_scopes  # noqa: E402
 
-# `SEVERITY path:line [code] — message` — the output contract memgrep's lint prints (WM-LINT-06:
-# the severity LEADS the line so `| grep '^ERROR'` is exact). The em-dash separator is memgrep's.
-# The `[code]` is optional in the PATTERN so this wrapper still parses output from a memgrep built
-# before codes existed — a parser that hard-required it would report a clean corpus (zero findings
-# parsed) against an older binary, which is the worst possible way to be wrong about a lint.
+# `SEVERITY path:line [code] — message[ ⟦anchor:value⟧]` — the output contract memgrep's lint
+# prints (WM-LINT-06: the severity LEADS the line so `| grep '^ERROR'` is exact). The em-dash
+# separator is memgrep's. The `[code]` is optional in the PATTERN so this wrapper still parses
+# output from a memgrep built before codes existed — a parser that hard-required it would report a
+# clean corpus (zero findings parsed) against an older binary, which is the worst possible way to
+# be wrong about a lint. The ANCHOR (TRDD-XI10BA5D step B) is optional too: a binary predating the
+# anchor prints no token and every Finding degrades to `anchor=""` — the dedupe keys then behave
+# exactly as before this field existed. The anchor is matched ONLY at end of line; memgrep never
+# puts anything between the `]` code token and the em-dash message (that placement would break
+# `memory_content_precheck._RELOCATE_LESSON_RE`), and this regex must not legitimize it.
 _LINE_RE = re.compile(
     r"^(?P<sev>ERROR|WARN|INFO)\s+(?P<path>.+?):(?P<line>\d+)\s+"
-    r"(?:\[(?P<code>[a-z0-9-]+)\]\s+)?—\s+(?P<msg>.*)$"
+    r"(?:\[(?P<code>[a-z0-9-]+)\]\s+)?—\s+(?P<msg>.*?)(?:\s+⟦anchor:(?P<anchor>[^⟧]+)⟧)?$"
 )
 
 SEVERITIES = ("ERROR", "WARN", "INFO")
@@ -59,6 +64,9 @@ class Finding:
     msg: str
     #: The stable check identity (`atom-no-keywords`). Empty only when the binary predates codes.
     code: str = ""
+    #: The finding's stable identity INSIDE the page (`atom:<id>`, `field:ocd`, …) — never a line
+    #: number. Empty when the binary predates anchors or the finding is genuinely page-level.
+    anchor: str = ""
 
 
 class MemgrepMissing(RuntimeError):
@@ -110,7 +118,11 @@ def parse_findings(stdout: str) -> list[Finding]:
     for raw in stdout.splitlines():
         m = _LINE_RE.match(raw)
         if m:
-            out.append(Finding(m["sev"], m["path"], int(m["line"]), m["msg"], m["code"] or ""))
+            out.append(
+                Finding(
+                    m["sev"], m["path"], int(m["line"]), m["msg"], m["code"] or "", m["anchor"] or ""
+                )
+            )
     return out
 
 

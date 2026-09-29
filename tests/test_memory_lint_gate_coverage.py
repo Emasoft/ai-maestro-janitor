@@ -77,15 +77,15 @@ def _pin_memgrep_for_the_gates(monkeypatch):
     if MEMGREP_BIN_PATH:
         monkeypatch.setenv("MEMGREP_BIN", MEMGREP_BIN_PATH)
 
-# Every finding is built as `violations.push((Severity::X, path, line, msg, "code"))` — the
-# call may close with `));` (a plain statement) or `)),` (a match-arm expression, used where
-# the code itself is chosen by a ternary, e.g. `if key == "ocd" { "atom-no-ocd" } else {
-# "atom-no-lmd" }`), so BOTH terminators are matched, non-greedy so one block never swallows
-# the next. Scoping the kebab-literal search to the TEXT INSIDE each push call (not the whole
-# file) is what excludes unrelated literals like `"atom-page"` (a CLI subcommand name) or
-# `"footnote-integrity"` (a string a TEST asserts against, not a code memgrep emits) without
-# needing an explicit denylist — neither ever appears inside a `violations.push(...)` call.
-_PUSH_BLOCK_RE = re.compile(r"violations\.push\(\(.*?\)\)[;,]", re.DOTALL)
+# Every finding is built as `violations.push(Violation { … code: "code", … })` — the struct
+# (TRDD-XI10BA5D step B / A10, which also discharged the tuple-index debt) may close with `}))`
+# (a plain statement) or `})),` (a match-arm expression), so BOTH terminators are matched,
+# non-greedy so one block never swallows the next. Scoping the kebab-literal search to the TEXT
+# INSIDE each push call (not the whole file) is what excludes unrelated literals like
+# `"atom-page"` (a CLI subcommand name) or `"footnote-integrity"` (a string a TEST asserts
+# against, not a code memgrep emits) without needing an explicit denylist — neither ever appears
+# inside a `violations.push(Violation { … })` call.
+_PUSH_BLOCK_RE = re.compile(r"violations\.push\(Violation \{.*?\}\)[;,]", re.DOTALL)
 _KEBAB_LITERAL_RE = re.compile(r'"([a-z][a-z0-9]*(?:-[a-z0-9]+)+)"')
 
 
@@ -181,10 +181,16 @@ _CODE_COVERAGE: dict[str, str | None] = {
     # the write-time guard `reject_control_bytes` — a page already corrupted with a raw C0/C1
     # control byte BEFORE the guard existed. No chore precheck consumes it today: the owner's
     # rule is refuse-and-report, never guess-and-strip (a control byte gives no way to recover
-    # what was meant), so there is nothing a scheduled chore could safely auto-fix. The
-    # ticket-opening pipeline that would eventually drain it (capability audit §10.4) is future
-    # work past this step; this row only has to be honest about today.
+    # what was meant), so there is nothing a scheduled chore could safely auto-fix. The ticket
+    # pipeline that drains it is step B's MEMCORP-001 path (every ERROR findings tickets now);
+    # this row stays honest about the CHORE side: no content_has_work intervention consumes it.
     "control-byte-in-page": None,
+    # TRDD-XI10BA5D step B: the >2x-size WARN. The linter can emit it and the wikimem-syntax
+    # detector tickets it (MEMCORP-002 — the owner's 2026-09-23 "warn but also open a ticket"
+    # rule), but it is NOT a content_has_work intervention: atomize's own gate keys on page
+    # shape and the 1x INFO, and wiring the 2x WARN into `atomize_has_work` would let the same
+    # defect dispatch twice (once via the ticket, once via the chore). Drains through tickets.
+    "atom-oversized-critical": None,
 }
 
 _ALL_INTERVENTIONS = (
@@ -221,7 +227,9 @@ def test_classification_table_matches_the_source_exactly():
     # page-description-too-few-phrases/-duplicated-phrases), classified ORPHANED pending the
     # `enrich` chore (TRDD-437UHNFS, owner's drain-then-install ruling) — see their row comment.
     # 36 -> 37: `control-byte-in-page` (TRDD-XI10BA5D A1), classified ORPHANED — see its row.
-    assert len(_CODE_COVERAGE) == 37
+    # 37 -> 38: `atom-oversized-critical` (TRDD-XI10BA5D step B), classified ORPHANED at the
+    # chore layer — it drains through step B's MEMCORP-002 ticket path instead — see its row.
+    assert len(_CODE_COVERAGE) == 38
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():

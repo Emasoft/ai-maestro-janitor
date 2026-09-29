@@ -244,6 +244,19 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="A corpus whose links do not resolve cannot be navigated, and the LINK LAW (every link is bidirectional) is what makes recall work at all.",
         fix="Run the memory curator's repair pass under the edit transaction, which proves no knowledge was lost before it commits.",
     ),
+    "MEMCORP-002": Issue(
+        # TRDD-XI10BA5D step B: the >2x-size atom. The linter's `atom-oversized-critical` WARN
+        # feeds this code; collection is EXACTLY that code and no other WARN (A3). The ticketing
+        # needs no new ratification — the owner's verbatim 2026-09-23 rule is quoted into every
+        # ticket's advisory (see wikimem-syntax.py::_memcorp_002_comment).
+        scanner="wikimem-syntax",
+        kind="memory-corpus",
+        severity="medium",
+        title="an atom is over 2x the size budget: {where}",
+        what="One atom's body is more than twice the `MEMGREP_ATOM_MAX_CHARS` budget (the 1x INFO advisory fired long ago and was ignored until the atom doubled again). An atom holds ONE fact; one holding several cannot be found, cited, or decomposed safely.",
+        why="Size is the corpus's compounding debt: an over-2x atom is several facts fused into one recall result, and every week it grows the split gets harder. The owner ruled the remedy is a scheduled lazy refactor, not a write-time refusal.",
+        fix="Run /janitor-memory-atomize: decompose the oversized atom into 2 atoms (one fact each), preserving the superseded body per the never-delete rule.",
+    ),
     # ---------------- PROJECT — the USER's repo. PROPOSE ONLY, never unattended. -------------------
     # The six WFSEC codes are grouped by THE FIX, not by the scanner's rule name: the workflow auditor
     # emits 54 rule ids, and two rules belong to the same code exactly when the same repair answers
