@@ -218,11 +218,15 @@ pub fn cmd_reference_topic_cli(args: &[String]) -> Result<()> {
         &crate::pre_write::GatePolicy::default(),
     )?;
     if page_changed {
-        atomic_write_page(&a.page, &bump_page_lmd(&new_page, &today))?;
+        let page_text = bump_page_lmd(&new_page, &today);
+        atomic_write_page(&a.page, &page_text)?;
+        crate::pre_write::post_commit_disclosure(&a.page, &page_text)?;
         reindex_owning_scope(&a.page, a.hidden)?;
     }
     if to_changed {
-        atomic_write_page(&a.to, &bump_page_lmd(&new_to, &today))?;
+        let to_text = bump_page_lmd(&new_to, &today);
+        atomic_write_page(&a.to, &to_text)?;
+        crate::pre_write::post_commit_disclosure(&a.to, &to_text)?;
         reindex_owning_scope(&a.to, a.hidden)?;
     }
     println!(
@@ -347,11 +351,15 @@ pub fn cmd_reference_atom_cli(args: &[String]) -> Result<()> {
         &crate::pre_write::GatePolicy::default(),
     )?;
     if to_changed {
-        atomic_write_page(&a.to, &bump_page_lmd(&new_to, &today))?;
+        let to_text = bump_page_lmd(&new_to, &today);
+        atomic_write_page(&a.to, &to_text)?;
+        crate::pre_write::post_commit_disclosure(&a.to, &to_text)?;
         reindex_owning_scope(&a.to, a.hidden)?;
     }
     if atom_changed {
-        atomic_write_page(&a.page, &bump_page_lmd(&new_page, &today))?;
+        let page_text = bump_page_lmd(&new_page, &today);
+        atomic_write_page(&a.page, &page_text)?;
+        crate::pre_write::post_commit_disclosure(&a.page, &page_text)?;
         reindex_owning_scope(&a.page, a.hidden)?;
     }
     println!(

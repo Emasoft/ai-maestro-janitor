@@ -331,11 +331,12 @@ pub fn check_base(page: &Path, base_sha256: &str) -> Result<()> {
 }
 
 /// sha256-hex of `page`'s current bytes on disk — the value a caller passes back as
-/// `--base-sha256` on a LATER write. Test-only: exercises the same hash `check_base` verifies
-/// against, from the same bytes-on-disk source of truth (never the possibly lossily-decoded
-/// `String` `md::read_text` returns).
-#[cfg(test)]
-fn sha256_of_file(page: &Path) -> Result<String> {
+/// `--base-sha256` on a LATER write. Production callers print it after every gated write
+/// (TRDD-XI10BA5D A2: "write verbs print the new sha256"), so a chained caller can CAS the next
+/// edit without re-hashing by hand; tests exercise the same hash `check_base` verifies against,
+/// from the same bytes-on-disk source of truth (never the possibly lossily-decoded `String`
+/// `md::read_text` returns).
+pub(crate) fn sha256_of_file(page: &Path) -> Result<String> {
     let bytes = std::fs::read(page).with_context(|| format!("read {}", page.display()))?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);

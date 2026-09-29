@@ -29,7 +29,6 @@ use crate::memory::{
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-
 /// Validate the PROPOSED final bytes of ONE page write against the write-gate floor.
 ///
 /// Runs `lint_page_text` report-only on `proposed` and refuses when ANY finding is classified
@@ -295,7 +294,8 @@ pub(crate) fn write_gated_with(dest: &Path, proposed: &str, policy: &GatePolicy)
     // commit — `atomic_write_page` keeps its own control-byte refusal as the last line of
     // defence and owns the publish-globally convergence + symlink reconciliation exactly as it
     // does for every ungated caller today.
-    atomic_write_page(dest, proposed)
+    atomic_write_page(dest, proposed)?;
+    post_commit_disclosure(dest, proposed)
 }
 
 /// The gated write: `prepare` the proposed bytes, then — and only then — commit them through the
@@ -307,6 +307,39 @@ pub(crate) fn write_gated(dest: &Path, proposed: &str) -> Result<()> {
     // write)"), so every gated verb gets it by construction — no policy, no retires, no
     // rewrite exemption.
     write_gated_with(dest, proposed, &GatePolicy::default())
+}
+
+/// Post-commit disclosure for a gated write (TRDD-XI10BA5D A2 step 6):
+///
+/// - the new page's sha256 on STDOUT — `write verbs print the new sha256` (card rules block), so
+///   a chained caller can pass it straight back as `--base-sha256` without re-hashing by hand.
+///   Hashing the BYTES on disk (not the proposed String) makes the printed value byte-identical
+///   to what `write_gate::check_base` will later verify against.
+/// - one stderr line when the LANDED bytes differ from the caller's proposed bytes — the commit
+///   layer (`atomic_write_page`'s publish-globally convergence loop) auto-fixed something beyond
+///   the caller's own edit, and `every auto-fix disclosed on stderr` is a card rule. Diffing the
+///   bytes catches a fix that already converged (the re-classified page would look clean); this
+///   is why the compare is against `proposed`, not a re-detection. The line names the layer and
+///   the field, never page content (the no-leak contract — it is the same refusal surface).
+///
+/// Disclosure goes to STDERR so the verbs' stdout contracts (`wrote <path>`, the edit verb's
+/// tab-separated line) and every existing parser stay byte-stable. Best-effort by design: a
+/// disclosure read failure must never fail a write that has already landed — that line is
+/// skipped, the sha256 too. `pub(crate)` so the BATCH verbs call it after each of their own
+/// ordered commits (they run `prepare_batch_gated` + bare `atomic_write_page` calls, so their
+/// disclosure would otherwise be lost — same lines, same streams, one page per call).
+pub(crate) fn post_commit_disclosure(dest: &Path, proposed: &str) -> Result<()> {
+    let landed = std::fs::read_to_string(dest).ok();
+    if landed.as_deref() != Some(proposed) {
+        eprintln!(
+            "write gate: commit auto-fix applied on {} (publish-globally reconciliation rewrote the landed bytes)",
+            dest.display()
+        );
+    }
+    if let Ok(hash) = crate::write_gate::sha256_of_file(dest) {
+        println!("sha256\t{hash}\t{}", dest.display());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

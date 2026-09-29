@@ -393,6 +393,7 @@ pub fn cmd_merge_topic_cli(args: &[String]) -> Result<()> {
         &crate::pre_write::GatePolicy::default(),
     )?;
     atomic_write_page(&a.into, &r.dest_text)?;
+    crate::pre_write::post_commit_disclosure(&a.into, &r.dest_text)?;
     // The pair is NOT atomic. Each write is (temp+rename) and both texts were computed before
     // either landed, so only I/O can fail here — but if THIS one does, `--into` already holds the
     // atoms while `--from` still holds them too, and a plain retry is BLOCKED: the destination now
@@ -411,6 +412,7 @@ pub fn cmd_merge_topic_cli(args: &[String]) -> Result<()> {
             from = a.from.display(),
         )
     })?;
+    crate::pre_write::post_commit_disclosure(&a.from, &r.tombstone_text)?;
     // BOTH scopes, then the first error — never `?` on the first call. Both pages are already
     // written by this point, so an early return would leave the tombstoned page's index still
     // advertising the atoms that just moved. Reindexing is idempotent, so attempting the second

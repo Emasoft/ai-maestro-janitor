@@ -4885,7 +4885,9 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
         &crate::pre_write::GatePolicy::default(),
     )?;
     atomic_write_page(&a.to, &dest_text)?;
+    crate::pre_write::post_commit_disclosure(&a.to, &dest_text)?;
     atomic_write_page(&a.from, &source_text)?;
+    crate::pre_write::post_commit_disclosure(&a.from, &source_text)?;
     reindex_owning_scope(&a.to, a.hidden)?;
     reindex_owning_scope(&a.from, a.hidden)?;
     println!(

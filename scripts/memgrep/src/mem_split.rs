@@ -381,6 +381,7 @@ pub fn cmd_split_topic_cli(args: &[String]) -> Result<()> {
     // NEW page first, then the source: a crash between the two atomic writes leaves a
     // recoverable duplicate (the atoms exist on both pages) rather than a loss.
     atomic_write_page(&a.into, &dest_text)?;
+    crate::pre_write::post_commit_disclosure(&a.into, &dest_text)?;
     // Ordering above makes a mid-pair failure a DUPLICATE rather than a LOSS. Say so at RUNTIME
     // too: the retry is blocked (the new page now exists, so `split-mem-topic` refuses to
     // overwrite it), so the operator must resolve it by hand and a bare io::Error would not tell
@@ -396,6 +397,7 @@ pub fn cmd_split_topic_cli(args: &[String]) -> Result<()> {
             page = a.page.display(),
         )
     })?;
+    crate::pre_write::post_commit_disclosure(&a.page, &source_text)?;
     // BOTH scopes, then the first error — never `?` on the first call. Both pages are already
     // written by this point, so an early return would leave the second scope's index describing
     // a page that no longer exists that way, and `recall` would keep surfacing atoms that just
