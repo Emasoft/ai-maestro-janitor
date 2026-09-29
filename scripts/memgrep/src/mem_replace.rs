@@ -80,7 +80,10 @@ struct ReplaceTopicArgs {
 /// surface before the lock is taken. Retired ids are NOT exempt here (a re-mint is legal ONCE;
 /// twice is a duplicate, and the retirement exclusion must not become an over-exclusion).
 /// Names ids and counts only — never page content (the no-leak contract).
-fn refuse_duplicate_ids_within_page(text: &str) -> Result<()> {
+///
+/// `pub(crate)` since A3 step 2: `new-mem-topic`'s content-CREATE mode calls it too — the same
+/// blind spot exists on a create (no retires there, so every argument still applies).
+pub(crate) fn refuse_duplicate_ids_within_page(text: &str) -> Result<()> {
     let mut seen: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for a in resolve_atoms_from_text(text) {
         *seen.entry(a.id).or_insert(0) += 1;
@@ -112,6 +115,54 @@ fn refuse_duplicate_ids_within_page(text: &str) -> Result<()> {
     )
 }
 
+/// The EXPLICIT content channel shared by `replace-mem-topic` and `new-mem-topic`'s
+/// content-CREATE mode (A3 step 2) — exactly the e6b42169 contract: `--content-file F` /
+/// `--content T` / `--content -` (stdin). `None` on both flags ⇒ refuse BEFORE reading stdin, so
+/// a terminal-attached caller is never left blocked on a prompt it never agreed to; a
+/// piped-but-undeclared stdin is ignored, never implicitly the content. Both flags ⇒ refuse.
+/// Empty content ⇒ refuse (the page IS the content).
+///
+/// Shared because the two verbs' contracts are byte-identical here (A3 step-2 spec: same
+/// channels, same refusals); one implementation means one contract, not two that can drift.
+pub(crate) fn read_explicit_content(
+    content: Option<&str>,
+    content_file: Option<&std::path::Path>,
+    what: &str,
+) -> Result<String> {
+    if content.is_some() && content_file.is_some() {
+        anyhow::bail!("--content and --content-file are mutually exclusive — pass one");
+    }
+    match (content, content_file) {
+        (Some("-"), _) => {
+            use std::io::Read;
+            let mut text = String::new();
+            std::io::stdin().read_to_string(&mut text)?;
+            if text.trim().is_empty() {
+                anyhow::bail!("empty content on stdin — pipe the COMPLETE page (--content - reads stdin)");
+            }
+            Ok(text)
+        }
+        (Some(text), _) => {
+            if text.trim().is_empty() {
+                anyhow::bail!("empty content via --content — {what}");
+            }
+            Ok(text.to_string())
+        }
+        (_, Some(path)) => {
+            let raw = std::fs::read_to_string(path)
+                .map_err(|e| anyhow::anyhow!("--content-file {}: {e}", path.display()))?;
+            if raw.trim().is_empty() {
+                anyhow::bail!("empty content via --content-file {} — {what}", path.display());
+            }
+            Ok(raw)
+        }
+        (None, None) => anyhow::bail!(
+            "no content channel — pass --content-file F or --content - (stdin is NEVER \
+             implicitly the content; TRDD-XI10BA5D A3)"
+        ),
+    }
+}
+
 /// `memgrep replace-mem-topic --page P (--content-file F | --content T|‑) [--retire-atom ID]…
 /// [--base-sha256 H] [--hidden]` — replace a page's COMPLETE content (TRDD-XI10BA5D A3 step 1).
 ///
@@ -125,46 +176,14 @@ pub fn cmd_replace_topic_cli(args: &[String]) -> Result<()> {
         std::iter::once("memgrep replace-mem-topic".to_string()).chain(args.iter().cloned()),
     );
 
-    // EXPLICIT channels only (the e6b42169 contract): with no content flag the verb refuses —
-    // BEFORE reading stdin, so a terminal-attached caller is not left blocked on a prompt it
-    // never agreed to. A piped-but-undeclared stdin is ignored, never the new page.
-    if a.content.is_some() && a.content_file.is_some() {
-        anyhow::bail!("--content and --content-file are mutually exclusive — pass one");
-    }
-    let proposed = match (a.content.as_deref(), a.content_file.as_ref()) {
-        (Some("-"), _) => {
-            use std::io::Read;
-            let mut text = String::new();
-            std::io::stdin().read_to_string(&mut text)?;
-            if text.trim().is_empty() {
-                anyhow::bail!(
-                    "empty content on stdin — pipe the COMPLETE page (--content - reads stdin)"
-                );
-            }
-            text
-        }
-        (Some(text), _) => {
-            if text.trim().is_empty() {
-                anyhow::bail!("empty content via --content — the replacement IS the whole page");
-            }
-            text.to_string()
-        }
-        (_, Some(path)) => {
-            let raw = std::fs::read_to_string(path)
-                .map_err(|e| anyhow::anyhow!("--content-file {}: {e}", path.display()))?;
-            if raw.trim().is_empty() {
-                anyhow::bail!(
-                    "empty content via --content-file {} — the replacement IS the whole page",
-                    path.display()
-                );
-            }
-            raw
-        }
-        (None, None) => anyhow::bail!(
-            "no content channel — pass --content-file F or --content - (stdin is NEVER \
-             implicitly the content; TRDD-XI10BA5D A3)"
-        ),
-    };
+    // EXPLICIT channels only (the e6b42169 contract) — the shared reader refuses BEFORE reading
+    // stdin when no flag is present (a terminal caller is never left blocked on a prompt it
+    // never agreed to), and ignores a piped-but-undeclared stdin.
+    let proposed = read_explicit_content(
+        a.content.as_deref(),
+        a.content_file.as_deref(),
+        "the replacement IS the whole page",
+    )?;
 
     // Within-page id uniqueness at the verb's own surface (see the fn's doc comment): the gate
     // cannot see a twice-carried id, and the --retire-atom exemption must not become one.

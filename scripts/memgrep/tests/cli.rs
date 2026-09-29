@@ -5349,3 +5349,321 @@ fn replace_mem_topic_passes_when_a_pre_existing_neighbor_link_is_one_sided() {
         "a pre-existing neighbor defect must not block the replace"
     );
 }
+
+// ─────────────── new-mem-topic content-CREATE mode (TRDD-XI10BA5D A3 step 2) ───────────────
+
+/// A valid COMPLETE page for the create tests: frontmatter (name matching the `--name` slug) +
+/// one atom + the mandatory notes section. `lmd:` is deliberately present (the gate would
+/// grandfather its absence — a create carries no verb-side repair either way).
+const CREATE_NEW_PAGE: &str = "---\nname: freshpage\nocd: 2026-09-29\nlmd: 2026-09-29\n\
+     description: \"the gadget won't start / gadget fails to boot / why is the gadget dead / \
+     gadget shows nothing / power light off / no response from the gadget / gadget bricked / \
+     how do I revive the gadget / gadget startup hangs / gadget refuses to power on / gadget \
+     stuck at boot / nothing happens when I press the gadget button / gadget led blinking red / \
+     gadget reset procedure / where is the gadget power switch\"\n\
+     ---\n^ATOM-FRESH1 [ocd: 2026-09-29, keywords: f1 f2 f3 f4 f5 f6 f7 f8 f9 f10]\nfresh body\n\n\
+     ## Notes and lessons learned\n";
+
+/// Same page, frontmatter `name:` CHANGED to a value that disagrees with the `--name` slug —
+/// the amendment-3 name-mismatch fixture.
+const CREATE_MISMATCHED_PAGE: &str = "---\nname: othername\nocd: 2026-09-29\nlmd: 2026-09-29\n\
+     description: \"the gadget won't start / gadget fails to boot / why is the gadget dead / \
+     gadget shows nothing / power light off / no response from the gadget / gadget bricked / \
+     how do I revive the gadget / gadget startup hangs / gadget refuses to power on / gadget \
+     stuck at boot / nothing happens when I press the gadget button / gadget led blinking red / \
+     gadget reset procedure / where is the gadget power switch\"\n\
+     ---\n^ATOM-FRESH1 [ocd: 2026-09-29, keywords: f1 f2 f3 f4 f5 f6 f7 f8 f9 f10]\nfresh body\n\n\
+     ## Notes and lessons learned\n";
+
+/// Create test 1 — happy path: a valid full-page create lands; the FIRST stdout line is the
+/// page identity (sibling-consistent `<path>\t<result>`, replace-mem-topic's shape); the disk
+/// bytes are the proposed bytes, byte for byte.
+#[test]
+fn new_mem_topic_content_lands_a_valid_full_page_with_identity_first_token() {
+    let d = TempDir::new("create-happy");
+    let content = TempFixture::new("create-new.md", CREATE_NEW_PAGE);
+    let page = d.join("freshpage.md");
+    let out = run_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+            "--content-file",
+            content.as_str(),
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    // First stdout line: the page path (never a metadata line — the sha256 goes to stderr),
+    // `<path>\t<result>` — the sibling replace-mem-topic's identity shape, chosen over the
+    // scaffold's `wrote <path>` form because create mints nothing canonical for a first token.
+    let first = out.lines().next().unwrap_or("");
+    assert!(
+        first.starts_with(page.to_str().unwrap()),
+        "first stdout line must be the page identity: {out}"
+    );
+    assert!(
+        first.contains("created"),
+        "the identity line names the verb's effect: {out}"
+    );
+    let landed = std::fs::read_to_string(&page).unwrap();
+    assert_eq!(
+        landed, CREATE_NEW_PAGE,
+        "the disk bytes must be EXACTLY the proposed bytes (no lmd bump, no rewrite)"
+    );
+}
+
+/// Create test 2 — refusal: the page already exists. new-mem-topic never overwrites; the refusal
+/// names BOTH verbs (create + replace) so the caller reroutes, and writes nothing.
+#[test]
+fn new_mem_topic_content_refuses_an_existing_page_and_names_both_verbs() {
+    let d = TempDir::new("create-exists");
+    let existing = "---\nname: freshpage\nocd: 2026-01-01\nlmd: 2026-01-01\n\
+         description: \"the gadget won't start / gadget fails to boot / why is the gadget dead / \
+         gadget shows nothing / power light off / no response from the gadget / gadget bricked / \
+         how do I revive the gadget / gadget startup hangs / gadget refuses to power on / gadget \
+         stuck at boot / nothing happens when I press the gadget button / gadget led blinking red / \
+         gadget reset procedure / where is the gadget power switch\"\n\
+         ---\nexisting body\n\n## Notes and lessons learned\n";
+    d.write("freshpage.md", existing);
+    let content = TempFixture::new("create-new.md", CREATE_NEW_PAGE);
+    let page = d.join("freshpage.md");
+    let (out, err, code) = run_full_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+            "--content-file",
+            content.as_str(),
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_ne!(code, 0, "a create onto an existing page must refuse");
+    assert!(
+        err.contains("new-mem-topic") && err.contains("replace-mem-topic"),
+        "the refusal must name BOTH verbs (create refuses, replace reroutes): {err}"
+    );
+    assert!(
+        err.contains("freshpage.md"),
+        "the refusal must name the path: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&page).unwrap(),
+        existing,
+        "a refused create leaves the existing page byte-identical"
+    );
+    let _ = out;
+}
+
+/// Create test 3 — the explicit-channel contract: piped stdin with NO content flag refuses.
+/// stdin is NEVER implicitly the content (the e6b42169 rule), so the pipe is ignored and the
+/// verb fails naming the channel requirement — without hanging on a terminal read.
+#[test]
+fn new_mem_topic_content_refuses_piped_stdin_without_a_content_flag() {
+    let d = TempDir::new("create-stdin");
+    let page = d.join("freshpage.md");
+    let (_, err, code) = run_stdin_full_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+        ],
+        CREATE_NEW_PAGE,
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_ne!(code, 0, "a piped stdin with no content flag must refuse");
+    assert!(
+        err.contains("--content-file") || err.contains("--content"),
+        "the refusal must name the channel flags: {err}"
+    );
+    assert!(
+        err.contains("NEVER") || err.contains("never"),
+        "the refusal must state the stdin contract: {err}"
+    );
+    assert!(
+        !page.exists(),
+        "nothing was written"
+    );
+}
+
+/// Create test 4 — the A1 contract through the create path: a raw control byte in the proposed
+/// content refuses, and nothing is written.
+#[test]
+fn new_mem_topic_content_refuses_a_control_byte_in_the_proposed_content() {
+    let d = TempDir::new("create-ctrl");
+    let corrupted = CREATE_NEW_PAGE.replacen("fresh body", "fresh bo\u{0008}dy", 1);
+    let content = TempFixture::new("create-ctrl.md", &corrupted);
+    let page = d.join("freshpage.md");
+    let (_, err, code) = run_full_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+            "--content-file",
+            content.as_str(),
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_ne!(code, 0, "a control byte must refuse");
+    assert!(
+        err.contains("control byte") || err.contains("control-byte"),
+        "the refusal must name the control byte: {err}"
+    );
+    assert!(
+        !page.exists(),
+        "nothing was written"
+    );
+}
+
+/// Create test 5 (amendment 1) — a one-sided link to an EXISTING page that does not link back
+/// REFUSES: conditions (a)/(b) of the landed step-6 rule fail, the introduced-link rule fires
+/// through the create path, naming both ends. A link to a NONEXISTENT page is a separate probe:
+/// `create_mem_topic_dangling_link_probe` records the gate's ACTUAL classification.
+#[test]
+fn new_mem_topic_content_refuses_an_introduced_one_sided_link() {
+    let d = TempDir::new("create-link");
+    d.write(
+        "neighbor.md",
+        "---\nname: neighbor\nocd: 2026-01-01\nlmd: 2026-01-01\n\
+         description: \"n1 / n2 / n3 / n4 / n5 / n6 / n7 / n8 / n9 / n10 / n11 / n12 / n13 / n14 / n15\"\n\
+         ---\nneighbor body with no backlink\n\n## Notes and lessons learned\n",
+    );
+    let mut linked = CREATE_NEW_PAGE.to_string();
+    linked.push_str("\nsee [[neighbor]] for the rule\n");
+    let content = TempFixture::new("create-linked.md", &linked);
+    let page = d.join("freshpage.md");
+    let (_, err, code) = run_full_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+            "--content-file",
+            content.as_str(),
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_ne!(code, 0, "a minted one-sided link must refuse");
+    assert!(err.contains("one-sided-link rule"), "{err}");
+    assert!(
+        err.contains("freshpage.md") && err.contains("neighbor.md"),
+        "BOTH ends must be named: {err}"
+    );
+    assert!(
+        !page.exists(),
+        "nothing was written"
+    );
+}
+
+/// Create test 5 PROBE (amendment 1) — a link to a NONEXISTENT page: the amendment forbids
+/// presupposing a refusal and forbids a verb-level dangling-link rule, so this test asserts the
+/// gate's ACTUAL behavior (whichever way it classifies the dangling link) and pins the outcome:
+/// resolution via canonicalize fails for a missing target, so the gate's own machinery treats it
+/// as UNRESOLVED (broken), not a LINK-LAW candidate — the create LANDS. If the gate's
+/// classification ever changes, this test fails and the record updates.
+#[test]
+fn create_mem_topic_dangling_link_probe_pins_the_gates_actual_classification() {
+    let d = TempDir::new("create-dangling");
+    let mut linked = CREATE_NEW_PAGE.to_string();
+    linked.push_str("\nsee [[ghostpage]] for the rule\n");
+    let content = TempFixture::new("create-dangling.md", &linked);
+    let page = d.join("freshpage.md");
+    let (out, err, code) = run_full_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+            "--content-file",
+            content.as_str(),
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let _ = err;
+    assert_eq!(
+        code, 0,
+        "the gate classifies a dangling link as unresolved-broken, not LINK-LAW: {err}"
+    );
+    assert!(
+        std::fs::read_to_string(&page).unwrap() == linked,
+        "the create lands with the dangling link verbatim: {out}"
+    );
+}
+
+/// Create test 6 — empty content refuses (the page IS the content; there is nothing to create).
+#[test]
+fn new_mem_topic_content_refuses_empty_content() {
+    let d = TempDir::new("create-empty");
+    let content = TempFixture::new("create-empty.md", "");
+    let page = d.join("freshpage.md");
+    let (_, err, code) = run_full_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+            "--content-file",
+            content.as_str(),
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_ne!(code, 0, "empty content must refuse");
+    assert!(
+        err.contains("empty content"),
+        "the refusal must name the emptiness: {err}"
+    );
+    assert!(
+        !page.exists(),
+        "nothing was written"
+    );
+}
+
+/// Create test 7 (amendment 3) — NAME-MATCH: proposed content whose frontmatter `name:` differs
+/// from the `--name` destination slug REFUSES, naming both. Policed at the VERB surface (the
+/// gate has no name-vs-stem rule; pre_write.rs must not be widened) — the gate still ran second
+/// here, so this is the verb's refusal, not the gate's.
+#[test]
+fn new_mem_topic_content_refuses_a_frontmatter_name_that_mismatches_the_destination_slug() {
+    let d = TempDir::new("create-namemismatch");
+    let content = TempFixture::new("create-mismatch.md", CREATE_MISMATCHED_PAGE);
+    let page = d.join("freshpage.md");
+    let (_, err, code) = run_full_env(
+        &[
+            "new-mem-topic",
+            "--scope",
+            "local",
+            "--name",
+            "freshpage",
+            "--content-file",
+            content.as_str(),
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    assert_ne!(code, 0, "a mismatched frontmatter name must refuse");
+    assert!(
+        err.contains("othername") && err.contains("freshpage"),
+        "the refusal must name BOTH the frontmatter name and the --name slug: {err}"
+    );
+    assert!(
+        !page.exists(),
+        "nothing was written"
+    );
+}

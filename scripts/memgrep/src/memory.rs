@@ -3335,18 +3335,21 @@ struct NewPageArgs {
     // CONSTRUCTION, so neither case can arise any more. That is the real prize: not one fewer flag,
     // but a class of contradiction that no longer has a way to be expressed.
     /// Wiki tier: `hub` (one functionality's overview, carries `globs:`), `aspect` (a shared rule),
-    /// or `component` (one element's page).
+    /// or `component` (one element's page). SCAFFOLD MODE ONLY — content-create does not consult it.
     #[arg(long = "tier")]
-    tier: String,
-    /// The page's kebab-slug `name:` (the `[[name]]` wikilink target).
+    tier: Option<String>,
+    /// The page's kebab-slug `name:` (the `[[name]]` wikilink target). In content-create mode it
+    /// names the destination file AND the frontmatter identity the content must agree with.
     #[arg(long = "name")]
     name: String,
     /// The page's `description:` — its RECALL SURFACE (the symptom words a future search will carry).
+    /// SCAFFOLD MODE ONLY — content-create does not consult it.
     #[arg(long = "description")]
-    description: String,
+    description: Option<String>,
     /// The page `metadata.type` — `user` / `feedback` / `project` / `reference`.
+    /// SCAFFOLD MODE ONLY — content-create does not consult it.
     #[arg(long = "type")]
-    page_type: String,
+    page_type: Option<String>,
     /// Optional comma-separated `metadata.globs` (the files a HUB owns). Always emitted (as `[]`) for
     /// a hub; for a non-hub, emitted only when given.
     #[arg(long = "globs")]
@@ -3366,22 +3369,62 @@ struct NewPageArgs {
     /// Omitted, the field is left to reconciliation, which defaults a PROJECT page to `false`.
     #[arg(long = "scope")]
     scope: Option<String>,
+    /// Path to a file holding the COMPLETE page content (frontmatter included) — raw bytes, never
+    /// interpreted. Present, the verb runs its CONTENT-CREATE mode (TRDD-XI10BA5D A3 step 2):
+    /// the caller's bytes ARE the page, through the full shared write gate. Absent, the verb
+    /// scaffolds the page from `--tier`/`--name`/`--description`/`--type` exactly as before —
+    /// both modes are first-class (the scaffold path has live callers: the memory-write skill,
+    /// bootstrap, relocate, and the programmatic mint in `memory_content_precheck.py`).
+    #[arg(long = "content-file")]
+    content_file: Option<PathBuf>,
+    /// The COMPLETE page content inline; `-` reads stdin. The content arrives ONLY through this
+    /// flag or `--content-file` — stdin is never implicitly the content (the e6b42169 contract).
+    /// Mutually exclusive with `--content-file`. NOTE: in content mode the tier/description/type
+    /// scaffolding flags are not consulted — the caller's bytes ARE the frontmatter.
+    #[arg(long = "content")]
+    content: Option<String>,
+    /// Also descend into hidden files/dirs when reindexing the scope (default off). Content mode.
+    #[arg(long = "hidden")]
+    hidden: bool,
 }
 
-/// `memgrep new-mem-topic --tier T --name N --description "…" --type … [--scope S]` — scaffold a VALID page:
-/// (no `--path`: it was removed by TRDD-VJL1YTCG Part A — the destination is derived from
-/// `--scope`, defaulting to `local`, so a relocated root moves every caller at once.)
-/// frontmatter (name, description, ocd=lmd=today, metadata.{node_type, type, tier[, functionality][,
-/// globs]}) + a `# <name>` heading + the mandatory `## Notes and lessons learned` landing zone.
-/// Refuses to overwrite. Writes atomically, reindexes. The generated page passes the syntax linter
-/// with zero findings by construction.
+/// `memgrep new-mem-topic` — create a page, in ONE of two first-class modes (TRDD-XI10BA5D A3
+/// step 2): scaffold mode (no content flag — the page is GENERATED from `--tier`/`--name`/
+/// `--description`/`--type`: frontmatter + `# <name>` + the mandatory notes landing zone, exactly
+/// the pre-A3 behaviour its live callers depend on), or CONTENT-CREATE mode (`--content-file`/
+/// `--content` present — the caller's bytes ARE the complete page, frontmatter included, through
+/// the full shared gate; no verb-side preservation/regeneration/lmd-bump: a missing or stale
+/// `lmd:` is grandfathered at the gate, never repaired here). Both refuse to overwrite; both
+/// derive the destination `<scope root>/<name>.md` from `--scope` (no `--path`:
+/// TRDD-VJL1YTCG Part A) and hold the scope write lock from before the existence check through
+/// the write, so two concurrent creates of the same path can never both pass the check and race.
+/// Content mode's refusals name ids/counts/paths only (the no-leak contract); the
+/// already-exists refusal names `replace-mem-topic` so a caller with an existing page reroutes.
 pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     let a = NewPageArgs::parse_from(
         std::iter::once("memgrep new-mem-topic".to_string()).chain(args.iter().cloned()),
     );
-    let tier = a.tier.trim();
-    if !matches!(tier, "hub" | "aspect" | "component") {
-        anyhow::bail!("--tier must be one of hub|aspect|component (got `{}`)", a.tier);
+    // MODE SPLIT (A3 step 2): a content flag selects CONTENT-CREATE — the caller's bytes ARE the
+    // page, validated and landed by the shared gate (shared reader with replace-mem-topic). No
+    // flag keeps the scaffold path below, byte-for-byte the pre-A3 behaviour its live callers
+    // depend on. The content branch consumes `--name` (the destination slug) and `--scope` only;
+    // the scaffolding flags are neither validated nor consulted.
+    if a.content.is_some() || a.content_file.is_some() {
+        return cmd_new_page_content(a);
+    }
+    let tier = a.tier.as_deref().map(str::trim).unwrap_or_default().to_string();
+    if !matches!(tier.as_str(), "hub" | "aspect" | "component") {
+        // An ABSENT --tier on a no-content-flag call is the piped-stdin misuse class the
+        // e6b42169 contract exists for: the caller piped bytes expecting them read. Name the
+        // channel flags in the refusal (never read stdin — a terminal caller must not hang).
+        if a.tier.is_none() {
+            anyhow::bail!(
+                "no content channel and no --tier — scaffold mode needs --tier/--name/--description/--type, \
+                 or pass the COMPLETE page explicitly via --content-file F or --content - \
+                 (stdin is NEVER implicitly the content; TRDD-XI10BA5D A3)"
+            );
+        }
+        anyhow::bail!("--tier must be one of hub|aspect|component (got `{}`)", tier);
     }
     let name = a.name.trim();
     if name.is_empty() {
@@ -3389,7 +3432,8 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     }
     // The page's recall surface, gated exactly like an atom's (owner, 2026-08-23) — and harder,
     // because this one description has to surface every fact the page will ever hold.
-    let phrases = page_description_phrases(&a.description);
+    let description_owned = a.description.clone().unwrap_or_default();
+    let phrases = page_description_phrases(&description_owned);
     let min_p = min_page_phrases();
     if min_p > 0 && unique_phrases(&phrases).len() < min_p {
         anyhow::bail!(
@@ -3411,11 +3455,11 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
             dupes
         );
     }
-    let description = a.description.trim();
+    let description = description_owned.trim();
     if description.is_empty() {
         anyhow::bail!("--description must not be empty — it is the PAGE recall surface memgrep ranks on");
     }
-    let page_type = a.page_type.trim();
+    let page_type = a.page_type.as_deref().map(str::trim).unwrap_or_default();
     if page_type.is_empty() {
         anyhow::bail!("--type must not be empty (metadata.type: user|feedback|project|reference)");
     }
@@ -3518,6 +3562,108 @@ pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
     crate::pre_write::write_gated(&path, &fm)?;
     reindex_owning_scope(&path, false)?;
     println!("wrote {}", rel(&path));
+    Ok(())
+}
+
+/// CONTENT-CREATE mode of `new-mem-topic` (TRDD-XI10BA5D A3 step 2) — the harvest chore's page
+/// CREATE path: the caller's bytes ARE the complete page, through the ONE shared gate
+/// (`pre_write::write_gated_with`, single-page like replace-mem-topic — never a batch). The
+/// destination is the same scope-derived `<scope root>/<name>.md` the scaffold mode mints
+/// (`--name` is the destination slug AND the expected frontmatter identity), and the
+/// already-exists check sits INSIDE the write lock's critical section (amendment 4 — a pre-lock
+/// check races a concurrent create and silently clobbers; the scaffold path has always locked
+/// first and this mode inherits that ordering).
+///
+/// No `--retire-atom` (nothing to retire on a create) and no `--base-sha256` (no prior bytes to
+/// compare-swap) — those are replace-mem-topic's surface; a caller whose page already exists is
+/// refused and named both verbs so it reroutes.
+fn cmd_new_page_content(a: NewPageArgs) -> Result<()> {
+    // EXPLICIT channels only (the e6b42169 contract), shared with replace-mem-topic: no flag on
+    // one side alone cannot reach here (the caller routed on presence), so this is one of
+    // file/content/stdin — and the reader refuses the both-flags and empty-content forms.
+    let proposed = crate::mem_replace::read_explicit_content(
+        a.content.as_deref(),
+        a.content_file.as_deref(),
+        "the created page IS this content",
+    )?;
+    // NAME-MATCH RULE (amendment 3): the frontmatter `name:` must agree with the destination
+    // slug — the wikilink graph keys pages by BOTH (stem + `name:`), so a divergence mints a
+    // page findable under one key and addressed under the other. Checked at the verb surface
+    // (the gate has no name-vs-stem rule and pre_write.rs must not be widened); the raw value is
+    // compared with quotes tolerated (`name: "x"`), slugged like the graph's own key derivation.
+    // `--name` is still REQUIRED in content mode (it names the destination file), so an absent
+    // frontmatter `name:` is the one tolerated divergence — the stem keys the page, same as a
+    // page that has never declared a name.
+    let name = a.name.trim();
+    if name.is_empty() {
+        anyhow::bail!("--name must not be empty (it names the destination file `<name>.md`)");
+    }
+    let fm_name = md::parse_frontmatter(&proposed)
+        .get("name")
+        .map(|s| s.trim().trim_matches('"').trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty());
+    if let Some(fm_name) = fm_name
+        && fm_name != name.to_ascii_lowercase()
+    {
+        anyhow::bail!(
+            "frontmatter name `{fm_name}` does not match --name `{name}` — in content-create \
+             mode the caller's frontmatter IS the page, so pass --name {} (or fix the content's \
+             `name:`); the destination file and the wikilink key must agree",
+            name
+        );
+    }
+
+    // Within-page id uniqueness at the verb's own surface — the same gate blind spot
+    // replace-mem-topic refuses at its surface (mem_replace.rs doc comment); a create has no
+    // --retire-atom, so every duplicate is simply refused.
+    crate::mem_replace::refuse_duplicate_ids_within_page(&proposed)?;
+
+    // PUBLICATION scope: validated exactly like the scaffold path (an unrecognised value must
+    // never silently fall through to "unpublished" — invisible failure), derived BEFORE the lock.
+    let scope_str = a.scope.as_deref().map(str::trim).unwrap_or("local");
+    let path: PathBuf = match scope_str {
+        "public-project" | "private-project" => resolve_project_mem_root().join(format!("{name}.md")),
+        "user" => resolve_user_mem_root().join(format!("{name}.md")),
+        "local" => resolve_local_mem_root().join(format!("{name}.md")),
+        other => anyhow::bail!(
+            "--scope must be one of local|private-project|public-project|user (got `{other}`).\n\
+             This is PUBLICATION reach, not `--type` (the content class)."
+        ),
+    };
+
+    // Lock BEFORE the existence check, held through the write + reindex (the scaffold path's own
+    // family contract — amendment 4: the check is inside the critical section, so a concurrent
+    // create of the same path can never slip past it).
+    let _guard = write_gate::acquire(&write_gate::scope_root_for(&path))?;
+    if path.exists() {
+        anyhow::bail!(
+            "{} already exists — new-mem-topic never overwrites; to replace a page's COMPLETE \
+             content use `memgrep replace-mem-topic --page {} --content-file F`",
+            path.display(),
+            path.display()
+        );
+    }
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // THE gate: one write_gated_with call on the complete proposed page. TRADEOFF on record
+    // (same class as replace-mem-topic's): allow_body_rewrite is unconditional — a create mints
+    // fresh ids, and the DROP half is a no-op by construction (the destination inventories as
+    // EMPTY when absent, the one safe case per read_for_inventory's fail-closed contract).
+    crate::pre_write::write_gated_with(
+        &path,
+        &proposed,
+        &crate::pre_write::GatePolicy {
+            retired_ids: BTreeSet::new(),
+            allow_body_rewrite: true,
+        },
+    )?;
+    reindex_owning_scope(&path, a.hidden)?;
+    // First stdout line is the page's identity line — the family's first-token contract
+    // (`<path>\t<result>`, sibling-consistent with replace-mem-topic; the sha256 + any
+    // auto-fix disclosure go to STDERR via post_commit_disclosure, never ahead of this line).
+    println!("{}\tcreated (whole page)", rel(&path));
     Ok(())
 }
 

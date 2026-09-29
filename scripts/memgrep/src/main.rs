@@ -454,7 +454,7 @@ const VERB_TABLE: &[(&str, &str, &str, &str)] = &[
     ("find-claude-mem-ref", "read", "list atoms harvested FROM a Claude-memory buffer (provenance)", ""),
     ("find-trdd", "read", "list atoms produced BY a given TRDD (provenance, in reverse)", ""),
     // ---- WRITE — the sanctioned authoring surface; never hand-edit a page instead ----
-    ("new-mem-topic", "write", "scaffold a new PAGE with valid frontmatter (refuses to overwrite)", "new-page"),
+    ("new-mem-topic", "write", "create a PAGE: scaffold from --tier/--name/--description/--type, or --content-file/--content supplies the COMPLETE page through the gate (refuses to overwrite)", "new-page"),
     ("new-mem-atom", "write", "append one new ATOM (a fact) to a page; body on stdin", "add-atom"),
     ("update-mem-topic", "write", "replace exact text in a page — locked, CAS-guarded, refuses on ambiguity", "edit"),
     // A lesson lives HERE, not on new-mem-atom (USER, 2026-08-27): it records that an EXISTING
