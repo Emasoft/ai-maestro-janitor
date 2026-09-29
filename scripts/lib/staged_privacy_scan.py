@@ -120,7 +120,11 @@ _GENERATED_FILE_NAMES = frozenset({
 # would make the rule uncommittable — the self-scan false-positives on its
 # own documentation is the known detector-validity trap. Only this file is
 # exempt; a fixture directory is not, so fixtures stay gated.
-_SELF_TEST_FILES = frozenset({"test_staged_privacy_scan.py"})
+_SELF_TEST_FILES = frozenset({
+    "test_staged_privacy_scan.py",
+    "test_private_path_patterns.py",
+    "test_privacy_patterns.py",
+})
 
 
 def _is_generated_file(path: str) -> bool:

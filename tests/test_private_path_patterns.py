@@ -323,3 +323,27 @@ def test_severities_match_class() -> None:
     assert by_id["private-path.windows-user-home"].severity == "HIGH"
     assert by_id["private-path.local-hostname"].severity == "MEDIUM"
     assert by_id["private-path.ssh-user-host"].severity == "MEDIUM"
+
+
+# ---------- local-hostname: config-filename FP (measured 2026-09-29) ------
+
+
+def test_local_hostname_config_filename_negative() -> None:
+    """`settings.local.json` names a FILE scope, not a LAN machine — the FP
+    that blocked a TRDD commit. The regex still matches; the allow layer
+    suppresses it. A real two-label host is NOT suppressed."""
+    assert ppp.scan_text("edit .claude/settings.local.json") == []
+    assert ppp.scan_text("config.local.yaml holds secrets") == []
+    assert ppp._allow_local_hostname("settings.local.json")
+    assert not ppp._allow_local_hostname("mymac.local")
+    assert not ppp._allow_local_hostname("printer.lan")
+
+
+def test_local_hostname_real_machine_positive() -> None:
+    """Real mDNS names still fire (a bare `user@host` is the ssh rule's
+    jurisdiction — the lookbehind excludes it here by design); the bare
+    `settings.local` (no file extension) stays a hostname."""
+    hits = ppp.scan_text("the printer on printer.lan is down")
+    assert any(f.rule_id == "private-path.local-hostname" for f in hits)
+    hits2 = ppp.scan_text("settings.local is the file to edit")
+    assert any(f.rule_id == "private-path.local-hostname" for f in hits2)

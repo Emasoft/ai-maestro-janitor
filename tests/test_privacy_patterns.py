@@ -502,3 +502,4 @@ def test_scan_text_findings_deduped_by_position() -> None:
     # The dedup guarantees no two findings share (rule_id, line, col).
     seen = {(f.rule_id, f.line, f.column) for f in findings}
     assert len(seen) == len(findings)
+

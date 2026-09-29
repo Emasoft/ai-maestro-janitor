@@ -101,6 +101,11 @@ _GENERIC_USER_SEGMENTS = frozenset({
 _GENERIC_HOST_TOKENS = frozenset({
     "localhost", "localhost.localdomain",
 })
+# Stems that, followed by `.local.<ext>`, name a CONFIG FILE (a file scope),
+# never a two-label mDNS machine name. `settings.local.json` measured 2026-09-29.
+_CONFIG_FILENAME_LOCAL_STEMS = frozenset({
+    "settings", "config", "package",
+})
 _GENERIC_HOST_SUFFIXES = (
     ".test", ".example", ".invalid", ".localhost",
     ".example.com", ".example.net", ".example.org",
@@ -195,7 +200,16 @@ def _allow_ssh_host(matched: str) -> bool:
 
 def _allow_local_hostname(matched: str) -> bool:
     """Suppress a `<host>.local` / `<host>.lan` match that is actually a
-    reserved/documentation name (`localhost.localdomain`, `*.example`)."""
+    reserved/documentation name (`localhost.localdomain`, `*.example`), or a
+    CONFIG-FILENAME segment, not a machine: `settings.local.json` and friends
+    name a file scope, never a LAN device (measured FP 2026-09-29: the pre
+    commit privacy scan blocked a TRDD card over that filename)."""
+    if "." in matched:
+        stem, rest = matched.split(".", 1)
+        # `<known-config-stem>.local.<ext>` — a filename like settings.local.json,
+        # not a two-label mDNS name (a real mDNS name ends at .local/.lan).
+        if stem in _CONFIG_FILENAME_LOCAL_STEMS and rest.count(".") >= 1:
+            return True
     return _hostname_is_generic(matched)
 
 
@@ -240,12 +254,16 @@ _SSH_USER_HOST = re.compile(r"(?<![\w.])[A-Za-z0-9_][A-Za-z0-9_.\-]*@[A-Za-z0-9]
 # Sibling gap (short high-entropy ids, `_ENTROPY_MIN_LEN` in
 # `memory-scope-leak.py`) is a MEASURED REFUSAL — see TRDD-UWBXNJ76.
 #
-# The trailing `(?!\()` excludes API method-call syntax (`Path.home()`,
-# `Locale.local()`) — `home`/`local`/`corp` are common Python/JS method names,
-# and a call site is never a hostname (measured FP on this repo's own memory
-# corpus, TRDD-UWBXNJ76: `Path.home()` in prose matched before this guard).
+# The trailing `(?!\()(?!\.\w)` excludes API method-call syntax (`Path.home()`,
+# `Locale.local()`) AND a filename's next dot-label (`settings.local.json` —
+# a real mDNS name ends at the .local/.lan label; a config filename continues
+# `.json`/`.yaml`. Measured FP 2026-09-29: the pre-commit privacy scan blocked
+# a TRDD card over that filename) — a call site or a filename is never a
+# hostname (earlier measured FP on this repo's own memory corpus,
+# TRDD-UWBXNJ76: `Path.home()` in prose matched before that guard).
 _LOCAL_HOSTNAME = re.compile(
-    r"(?<![\w.@])[A-Za-z0-9][A-Za-z0-9\-]*\.(?:local|lan|internal|intranet|corp|home)\b(?!\()"
+    r"(?<![\w.@])[A-Za-z0-9][A-Za-z0-9\-]*\.(?:local|lan|internal|intranet|corp|home)"
+    r"\b(?!\()(?!\.\w)"
 )
 
 
