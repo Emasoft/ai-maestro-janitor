@@ -41,7 +41,10 @@ hard-gated). Full execution-context rationale and the DEMOTE/DELETE overview:
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
+1. **Editor kill-switch.** `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off` or the
+   janitor kill-switch ⇒ hard stop (the memgrep verbs do not consult the switch —
+   this check is where the user's stop still bites).
+2. **Scope — CLAIM it, never self-select or re-check `is_due`.** Paste the
    `STATE_DIR=<path>` value from your spawn prompt into the `export` below — the
    guard on the next line refuses to run without it.
 
