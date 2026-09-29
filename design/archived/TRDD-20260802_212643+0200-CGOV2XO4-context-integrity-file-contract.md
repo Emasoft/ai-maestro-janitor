@@ -1,18 +1,20 @@
 ---
 trdd-id: CGOV2XO4
 title: Write the context-integrity file the ai-maestro wake gate reads
-column: blocked
+column: superseded
 created: 2026-08-02T21:26:43+0200
-updated: 2026-08-22T12:02:05+0200
+updated: 2026-09-29T19:22:23+0200
 current-owner: janitor-session
 task-type: feature
 severity: medium
 scope: project
 release-via: publish
 external-refs: [167, ai-maestro#151]
-blocked-by: [ai-maestro#151]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 implementation-commits: []
+superseded-by: NONE
+status: archived
 ---
 
 # Context-integrity file contract — janitor writes, ai-maestro server reads (janitor#167)
@@ -120,3 +122,7 @@ keying is agreed.
   clears; a stale file past the agreed window is ignorable by the server (ts present).
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-09-29T19:22:23+0200 — SUPERSEDED by main-agent@ai-maestro. Owner decision 2026-09-29 on ai-maestro#151: defer/archive, no need — the schema question is closed; superseded by the #163 batch-design-cycle re-examination. Blocker ai-maestro#151 was the schema decision itself; the owner closed the question, so the blocker is resolved-by-refusal, not cleared.. Cleared blocked-by (--clear-blocker override).
