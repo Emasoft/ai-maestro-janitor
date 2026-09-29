@@ -667,6 +667,10 @@ def _primary_read_latch_state() -> dict:
         if isinstance(data, dict):
             return data
     except (OSError, json.JSONDecodeError):
+        # parse failure → {} is ACCEPTED (TRDD-ZKXQXHBI review LOW): a torn file
+        # under a concurrent tick resets the streak — it regrows, and the latch
+        # then trips one tick late. Worst case is degraded calibration, never a
+        # lost trip.
         pass
     return {}
 
