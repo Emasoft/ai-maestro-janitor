@@ -9,7 +9,7 @@ stay in SKILL.md; this file holds the WHY and the boundary/exit rationale.
 - Execution context and what this is
 - Scope
 - EXIT / SUCCESS / idempotency contract
-- What `--op merge` enforces at commit
+- What `merge-mem-topic` enforces
 
 ## Execution context and what this is
 
@@ -36,7 +36,7 @@ git history, and either:
 The skeptic votes fan out as **parallel `Agent` calls** shaped like the ultracode
 `Workflow` pool — this agent's toolset has `Agent`, not `Workflow`, so ramp parallel
 Agent calls and re-enqueue on rate-limit text. ALL mutation goes through the memgrep
-write verbs (`merge-mem-topic` / `replace-mem-topic` — crash-safe, hash-guarded,
+write verbs (`merge-mem-topic` / `replace-mem-topic` — version-skew-refusing,
 gate-serialized); the agent NEVER hand-edits a live page. Pool/backoff code
 and the agent prompts live in the references (Resources).
 
@@ -53,15 +53,16 @@ the PROJECT-scope opt-in:
 - **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the write gate; PROJECT, if
   opted-in, is staged-not-pushed — committed in the working tree, never pushed
   standalone, rides `publish.py`).
-- **Retry ≤3 then abort** (staging discarded, one-line finding); other pairs are
+- **Retry ≤3 then abort** (ABSTAIN and report, one-line finding); other pairs are
   independent.
-- **Idempotent + crash-safe:** the write gate refuses a lossy re-apply (the surviving
-  page already carries the retired facts as lessons); a `rate_limited` return re-enqueues, never double-applies.
+- **Idempotent + crash-safe:** once a verdict applies, the retired page no longer
+  exists — a re-run of `merge-mem-topic --from <retired>` refuses on the missing
+  source (ABSTAIN per the protocol); a `rate_limited` return re-enqueues, never double-applies.
 - **Bounded + disable-able:** one scope/pass, top-K pairs, pool cap 6–15;
   `conflict_per_day=0` or the kill-switch / `WIKIMEM_EDITOR_ENABLED=off` stops it.
 
-## What `--op merge` enforces at commit
+## What `merge-mem-topic` enforces
 
-The `--op merge` gate is the right structural loss-oracle for a DELETE verdict: it
+The `merge-mem-topic` gate is the right structural loss-oracle for a DELETE verdict: it
 enforces ≥1 real delete, `survivor.ocd == min(retired ocds)`, every retired `[^N]`
 preserved, no new duplicate line, and no page linking the retired slug.

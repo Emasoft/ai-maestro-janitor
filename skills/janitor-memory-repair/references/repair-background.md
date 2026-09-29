@@ -21,7 +21,8 @@ enforced the full frontmatter, pages whose tier is inverted (an `aspect` built
 with `## Governed by` instead of `## Applies to`), pages with no frontmatter at
 all (invisible to ranked recall), or a one-sided `[[link]]`. REPAIR is the
 autonomous pass that completes and corrects ONE page at a time, in place,
-through the memgrep write gate so it can never lose a fact. It is the 4th
+through memgrep's gated write verbs (replace-mem-topic), which refuse a
+lossy fix. It is the 4th
 wikimem-editor pass (alongside split / consolidate / conflict) and the executor
 for priority #4 of the memory-curation mission (TRDD-87935f21).
 
@@ -164,10 +165,10 @@ never changes `ocd`, never merges/splits/deletes. See "Why REPAIR exists" and
 
 - **SUCCESS = verify-pass + applied** (LOCAL/USER atomically via the write gate; PROJECT,
   if opted-in, staged-not-pushed — rides `publish.py`).
-- **Retry ≤3 then abort** (staging discarded, one-line finding); other pages are
+- **Retry ≤3 then abort** (ABSTAIN and report, one-line finding); other pages are
   independent.
-- **Idempotent + crash-safe:** every run starts with `resume`; a well-formed page
-  is a no-op (nothing to fix → skip it, never write a no-change commit).
+- **Idempotent + crash-safe:** the write gate refuses a lossy fix, and a well-formed
+  page is a no-op (nothing to fix → skip it, never write a no-change commit).
 - **Bounded + disable-able:** one scope/pass, top-K pages; `repair_per_day=0` or
   the kill-switch / `WIKIMEM_EDITOR_ENABLED=off` stops it.
 
