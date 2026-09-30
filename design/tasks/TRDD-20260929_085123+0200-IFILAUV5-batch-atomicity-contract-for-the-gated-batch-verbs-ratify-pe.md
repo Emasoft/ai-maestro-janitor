@@ -4,7 +4,7 @@ title: batch atomicity contract for the gated batch verbs — ratify per-page co
 column: todo
 status: tasked
 created: 2026-09-29T08:51:23+0200
-updated: 2026-09-29T08:57:26+0200
+updated: 2026-09-30T23:15:42+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -25,6 +25,7 @@ Derived from TRDD-XI10BA5D A2-CLOSE checklist (eht — XI10BA5D cannot reach com
 ## Approval log
 
 - 2026-09-29T08:51:23+0200 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-09-30 — OWNER DECISION (verbatim answer: "Ratify per-page (Recommended)"): per-page gating is RATIFIED as the batch-verb contract (a refused batch commits nothing; a mid-commit failure leaves a consistent-though-incomplete corpus recovered by each verb's documented PARTIAL path). Ceilings (a) pre-lock inventory read, (b) false refusal of an id moved across two separate gate calls, (c) unpoliced minted RELATIVE links are ACCEPTED CEILINGS of this contract. Upgrade path: staged batch write / two-phase commit in memgrep, if a real partial-commit harm is ever observed.
 
 ## Scope and accepted ceilings (from the XI10BA5D A2-CLOSE checklist)
 
