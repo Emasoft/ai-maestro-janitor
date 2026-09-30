@@ -1,10 +1,10 @@
 ---
 trdd-id: IFILAUV5
 title: batch atomicity contract for the gated batch verbs — ratify per-page commits or build true batch atomicity
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-09-29T08:51:23+0200
-updated: 2026-09-30T23:15:42+0200
+updated: 2026-09-30T23:16:40+0200
 current-owner: user
 created-by: user
 task-type: feature
@@ -26,8 +26,15 @@ Derived from TRDD-XI10BA5D A2-CLOSE checklist (eht — XI10BA5D cannot reach com
 
 - 2026-09-29T08:51:23+0200 — MANDATE issued by user (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-30 — OWNER DECISION (verbatim answer: "Ratify per-page (Recommended)"): per-page gating is RATIFIED as the batch-verb contract (a refused batch commits nothing; a mid-commit failure leaves a consistent-though-incomplete corpus recovered by each verb's documented PARTIAL path). Ceilings (a) pre-lock inventory read, (b) false refusal of an id moved across two separate gate calls, (c) unpoliced minted RELATIVE links are ACCEPTED CEILINGS of this contract. Upgrade path: staged batch write / two-phase commit in memgrep, if a real partial-commit harm is ever observed.
+- 2026-09-30T23:16:40+0200 — COMPLETE by user. owner ratified per-page gating 2026-09-30 ("Ratify per-page (Recommended)"); closes as accepted ceiling.
 
 ## Scope and accepted ceilings (from the XI10BA5D A2-CLOSE checklist)
 
 This card owns the disposition of the two notarized fail-safe observations from the wave-2 landing review (2026-09-29): (a) the gate's inventory read happens BEFORE the scope lock — a plan-vs-impl deviation from the A2 design's 'prepare locks the real scope'; (b) ids moving across two separate gate calls false-refuse — the batch-union id-set rule only sees ids that move within ONE gate call. Both were judged fail-safe under the one-writer convention (janitor's single-curator discipline), never silent: a false refusal names the id and the verb, recoverable by re-running the verb. Disposition: ACCEPTED CEILING pending the owner decision this card exists to get — if the owner ratifies per-page gating, (a) and (b) are named ceilings of that contract; if they choose true batch atomicity, both get redesigned away in that work. They are recorded here so the XI10BA5D close gate reads them as dispositioned, not dropped.
 ALSO a named ceiling of the batch contract (added 2026-09-29, per the step-6 bookkeeping review): the introduced-one-sided-link refusal cannot police a minted RELATIVE link — resolve_in_graph resolves URLs containing '/' or ending .md via bare canonicalize, which fails on a not-yet-existing batch destination, so only bare-name wikilinks are policed. The corpus links by bare name, so the gap is latent; if the owner ratifies per-page gating this ceiling is named and accepted alongside (a) and (b); if true batch atomicity lands, the link pass gets rewritten there anyway.
+
+## Acceptance checklist
+
+- [x] Owner decision recorded verbatim in ## Approval log: "Ratify per-page (Recommended)" (2026-09-30, commit c30cc096)
+- [x] Ceilings (a) pre-lock inventory read, (b) cross-gate-call id-move false refusal, (c) unpoliced minted relative links dispositioned as ACCEPTED CEILINGS of the ratified contract, with the upgrade path (staged batch write / two-phase commit) named
+- [x] No code change owed: the ratified contract is the current behaviour of prepare_batch_gated plus each batch verb's documented PARTIAL recovery path
