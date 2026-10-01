@@ -1,10 +1,10 @@
 ---
 trdd-id: V12ZHM1B
 title: C1D — memgrep recall benchmark
-column: blocked
+column: dev
 status: tasked
 created: 2026-10-01T19:45:11+0200
-updated: 2026-10-01T19:48:09+0200
+updated: 2026-10-01T19:50:11+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -15,8 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:11+0200
-blocked-by: [622ROA5F]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, V12ZHM1B]
 blocker-holds-if: not-match:READY
 ---
@@ -35,3 +35,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:11+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:05+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
+- 2026-10-01T19:50:11+0200 — column → dev by main-agent@ai-maestro-janitor. C1D is a Python/benchmark card with no dependency on the C02 Rust scaffold; blocker was over-broad (minting rule 'W1 depends on C02'); dispatched 2026-10-01 Cleared blocked-by (--clear-blocker override).
