@@ -37,6 +37,16 @@ const MD_EXTS: &[&str] = &[
     "md", "markdown", "mdown", "mkd", "mkdn", "mdx", "qmd", "mdwn", "text",
 ];
 
+
+// Issue-code/autofix scaffold (TRDD-DSN035UN C02): one module per later card.
+mod lint_rules;
+mod rules_gen;
+mod lint_config;
+mod noqa;
+mod fix_engine;
+mod perf_budget;
+mod fixers;
+
 /// memgrep — markdown-aware grep. Every matcher value is a regex (like grep); flags that exist in
 /// grep/rg keep their name and meaning; different flags AND-narrow, comma-lists OR-widen.
 // Build identity (janitor#164): env vars set by build.rs via `cargo:rustc-env=...`, so
