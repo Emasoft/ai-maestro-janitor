@@ -214,3 +214,78 @@ def test_malformed_toml_handled_gracefully(tmp_path: Path, capsys) -> None:
     assert table.entries == []
     captured = capsys.readouterr()
     assert "parse failed" in captured.err
+
+
+
+# ---------- is_suppressed(): ruff-style [lint] table ---------------------
+
+
+def _cfg(tmp_path: Path, body: str) -> Path:
+    p = tmp_path / ".janitor.toml"
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+def test_lint_no_config_is_false(tmp_path: Path) -> None:
+    assert sup.is_suppressed("HOOK-002", str(tmp_path / "a.py"), config_path=None) is False
+
+
+def test_lint_no_lint_table_is_false(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, 'unrelated = 1\n')
+    assert not sup.is_suppressed("HOOK-002", config_path=cfg)
+
+
+def test_lint_ignore_code_family_prefix_name(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, '[lint]\nignore = ["HOOK-002", "WM", "hook-near-timeout"]\n')
+    assert sup.is_suppressed("HOOK-002", config_path=cfg)
+    assert sup.is_suppressed("WM-017", config_path=cfg)
+    assert sup.is_suppressed("HOOK-009", name="hook-near-timeout", config_path=cfg)
+    assert not sup.is_suppressed("HOOK-009", name="other", config_path=cfg)
+    cfg2 = _cfg(tmp_path, '[lint]\nignore = ["HOOK"]\n')
+    assert sup.is_suppressed("HOOK-123", config_path=cfg2)
+
+
+def test_lint_select_limits_and_ignore_wins(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, '[lint]\nselect = ["HOOK"]\nextend-select = ["WM"]\nignore = ["HOOK-002"]\n')
+    assert not sup.is_suppressed("HOOK-001", config_path=cfg)
+    assert not sup.is_suppressed("WM-001", config_path=cfg)
+    assert sup.is_suppressed("HOOK-002", config_path=cfg)
+    assert sup.is_suppressed("SEC-001", config_path=cfg)  # not selected
+
+
+def test_lint_per_file_ignores_glob(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, '[lint.per-file-ignores]\n"tests/*.py" = ["HOOK"]\n')
+    assert sup.is_suppressed("HOOK-001", str(tmp_path / "tests" / "a.py"), config_path=cfg)
+    assert not sup.is_suppressed("HOOK-001", str(tmp_path / "src" / "a.py"), config_path=cfg)
+    assert not sup.is_suppressed("WM-001", str(tmp_path / "tests" / "a.py"), config_path=cfg)
+
+
+def test_lint_nearest_ancestor_discovery(tmp_path: Path) -> None:
+    _cfg(tmp_path, '[lint]\nignore = ["OUTER"]\n')
+    sub = tmp_path / "pkg"
+    sub.mkdir()
+    (sub / ".janitor.toml").write_text('[lint]\nignore = ["INNER"]\n', encoding="utf-8")
+    f = sub / "deep" / "x.py"
+    assert sup.is_suppressed("INNER-1", str(f))
+    assert not sup.is_suppressed("OUTER-1", str(f))
+
+
+def test_lint_suppress_entry_and_expiry(tmp_path: Path) -> None:
+    cfg = _cfg(
+        tmp_path,
+        '[[suppress]]\nrule_id = "HOOK-001"\npaths = ["a/*.py"]\nexpires = "2999-01-01"\n'
+        '[[suppress]]\nrule_id = "HOOK-002"\nexpires = "2000-01-01"\n',
+    )
+    assert sup.is_suppressed("HOOK-001", str(tmp_path / "a" / "x.py"), config_path=cfg)
+    assert not sup.is_suppressed("HOOK-001", str(tmp_path / "b" / "x.py"), config_path=cfg)
+    assert not sup.is_suppressed("HOOK-002", config_path=cfg)
+
+
+def test_lint_malformed_toml_raises(tmp_path: Path) -> None:
+    import tomllib
+
+    import pytest
+
+    cfg = _cfg(tmp_path, '[lint\n')
+    with pytest.raises(tomllib.TOMLDecodeError):
+        sup.is_suppressed("HOOK-001", config_path=cfg)

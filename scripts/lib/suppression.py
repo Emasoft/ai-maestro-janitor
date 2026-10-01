@@ -273,3 +273,81 @@ def load(project_root: Path) -> SuppressionTable:
         return SuppressionTable(entries=_parse_janitorignore(ignore_path))
 
     return SuppressionTable()
+
+
+
+def _selects(selectors: object, code: str, name: str | None) -> bool:
+    """Ruff-style selector match: full code, any code prefix (covers family
+    prefixes like "HOOK" and "WM"), or kebab name."""
+    if not isinstance(selectors, list):
+        raise ValueError(f".janitor.toml [lint]: selectors must be a list, got {selectors!r}")
+    return any(
+        isinstance(s, str) and (code.startswith(s) or (name is not None and s == name))
+        for s in selectors
+    )
+
+
+def _find_config(path: str | None) -> Path | None:
+    start = Path(path).resolve() if path else Path.cwd()
+    for d in (start, *start.parents):
+        cand = d / ".janitor.toml"
+        if cand.is_file():
+            return cand
+    return None
+
+
+def is_suppressed(
+    code: str,
+    path: str | None = None,
+    *,
+    name: str | None = None,
+    config_path: Path | None = None,
+) -> bool:
+    """Ruff-style `[lint]` suppression for an issue `code` (and optional kebab `name`).
+
+    Reads `config_path`, else the nearest `.janitor.toml` walking up from `path`
+    (or cwd). No config or no `[lint]` table and no matching `[[suppress]]`
+    entry => False. `ignore` beats `select`; `[lint.per-file-ignores]` globs are
+    matched against `path` relative to the config's directory; non-expired
+    `[[suppress]]` entries count as per-file ignores. A malformed file raises
+    (fail fast) — unlike `load()`, which only warns.
+    """
+    cfg = config_path or _find_config(path)
+    if cfg is None:
+        return False
+    data = tomllib.loads(cfg.read_text(encoding="utf-8"))
+    rel: PurePath | None = None
+    if path:
+        p = Path(path).resolve()
+        try:
+            rel = p.relative_to(cfg.resolve().parent)
+        except ValueError:
+            rel = PurePath(path)
+
+    def glob_hit(globs: list[str]) -> bool:
+        return rel is not None and any(rel.match(g) for g in globs)
+
+    lint = data.get("lint")
+    if lint is not None:
+        if not isinstance(lint, dict):
+            raise ValueError(".janitor.toml: `lint` must be a table")
+        if _selects(lint.get("ignore", []), code, name):
+            return True
+        pfi = lint.get("per-file-ignores", {})
+        if not isinstance(pfi, dict):
+            raise ValueError(".janitor.toml: `lint.per-file-ignores` must be a table")
+        for glob, sels in pfi.items():
+            if glob_hit([glob]) and _selects(sels, code, name):
+                return True
+        if "select" in lint or "extend-select" in lint:
+            chosen = [*lint.get("select", []), *lint.get("extend-select", [])]
+            if not _selects(chosen, code, name):
+                return True
+
+    active, _expired, _warnings = _parse_toml(cfg)
+    for r in active:
+        if not _selects([r.rule_id], code, name) or r.shas and not r.paths:
+            continue
+        if not r.paths or glob_hit(r.paths):
+            return True
+    return False
