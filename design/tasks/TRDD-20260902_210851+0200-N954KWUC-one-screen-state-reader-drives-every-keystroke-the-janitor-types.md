@@ -1,9 +1,9 @@
 ---
 trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
-column: todo
+column: testing
 created: 2026-09-02T21:08:51+0200
-updated: 2026-09-27T12:44:27+0200
+updated: 2026-10-01T05:03:51+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -157,6 +157,7 @@ to the wrong state.
 - 2026-09-16T23:09:24+0200 — framing precision: 8P4BNY5J is a gap in THIS card's own P3 call-site inventory (box 2's wording covered fleet_inject.fire senders only; terminal_trigger senders were never inventoried), not downstream fallout; the eht link is the tool's relationship, the substance is a scope miss. The blocker-probe field clears the linter and describes a check; nothing runs it — the real unblock is blocked-by going terminal, after which drift restores this card to todo.
 - 2026-09-17T19:42:20+0200 — MECHANICAL redaction (9745b4f6): absolute home paths in 3 body line(s) genericised to ~/ or repo-relative because CPV --strict refuses /Users/<name>/ in a pushed card; no fact changed, updated: not bumped (janitor-main-session)
 - 2026-09-27T12:44:27+0200 — column → todo by user. blocker 8P4BNY5J closed complete 2026-09-27 (stale blocker cleared per batch6 verdict) Cleared blocked-by (--clear-blocker override).
+- 2026-10-01T05:03:51+0200 — column → testing by main-agent@ai-maestro-janitor. no code left: boxes 1-3 done; box 4 rotation half observed 2026-09-16/17; no-headroom half waits only on a live all-accounts-spent episode — its fix 0e8b97c9 (8P4BNY5J) has shipped since v3.5.6, and no NO_HEADROOM line exists yet in this repo or ~/ai-maestro pane-policy.log (checked 2026-10-01); todo implied pullable work
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-03T09:29:00+0200
 
