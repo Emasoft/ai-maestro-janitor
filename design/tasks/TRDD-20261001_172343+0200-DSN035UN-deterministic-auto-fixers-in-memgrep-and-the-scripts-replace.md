@@ -4,7 +4,7 @@ title: Deterministic auto-fixers in memgrep and the scripts replace LLM repair i
 column: design
 status: tasked
 created: 2026-10-01T17:23:43+0200
-updated: 2026-10-01T19:47:05+0200
+updated: 2026-10-01T19:48:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T17:23:43+0200
-eht: [LKOUJC76, 622ROA5F, 2UAEQQ4A, OWGEOJ0D, 7SMPCPNT, I23YCEW7, 4G427D8M, 9SUZ48E8, QBU0HSM9, KSCAFSLD, RLD015QB, RUJQ7WSX, U2VUXGBP, B9YPSF02, UDE86OSZ, V12ZHM1B, BHIS99XE, 3HLI7DMK, JD2QR5SQ, VHFGPCOJ, 8524H5V1, QXG8SRVD, I4MOD020, OLNPXGBC, 1HXEAHY7, QX59MA4H, EMZUVIBK, ZYX8B2RA, RQMJFJGR, MIU9H3ZC, VA35WWWS, RVWJQR8E, PC2ZZR31, 7IPJA0ED]
+eht: [LKOUJC76, 622ROA5F, 2UAEQQ4A, OWGEOJ0D, 7SMPCPNT, I23YCEW7, 4G427D8M, 9SUZ48E8, QBU0HSM9, KSCAFSLD, RLD015QB, RUJQ7WSX, U2VUXGBP, B9YPSF02, UDE86OSZ, V12ZHM1B, BHIS99XE, 3HLI7DMK, JD2QR5SQ, VHFGPCOJ, 8524H5V1, QXG8SRVD, I4MOD020, OLNPXGBC, 1HXEAHY7, QX59MA4H, EMZUVIBK, ZYX8B2RA, RQMJFJGR]
 ---
 
 # Deterministic auto-fixers in memgrep and the scripts replace LLM repair instructions, shrinking the memory skills
@@ -35,6 +35,7 @@ ruff model: every lint rule is classified SAFE-FIX (deterministic, provably loss
 ## Approval log
 
 - 2026-10-01T17:23:43+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-01 — OWNER DIRECTIVE (verbatim): "commit often, so you can revert in case of errors. also enforce the use of tldr-code skill, fastedit skill and jgrep skill by all subagents". Applied: one commit per card by the main agent; every worker prompt carries the TOOLS/GIT/SCOPE preamble (jgrep to locate, tldr to read, fastedit to write; workers never touch git). Later cards C42-C45 and C47 removed from eht (review finding: they are unscheduled/owner-gated and would block this card from ever closing); they stay as related backlog.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 

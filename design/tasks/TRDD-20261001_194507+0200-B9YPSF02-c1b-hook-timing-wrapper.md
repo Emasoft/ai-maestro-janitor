@@ -4,7 +4,7 @@ title: C1B — hook timing wrapper
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:07+0200
-updated: 2026-10-01T19:46:02+0200
+updated: 2026-10-01T19:48:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:07+0200
 blocked-by: [622ROA5F]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, B9YPSF02]
+blocker-holds-if: not-match:READY
 ---
 
 # C1B — hook timing wrapper

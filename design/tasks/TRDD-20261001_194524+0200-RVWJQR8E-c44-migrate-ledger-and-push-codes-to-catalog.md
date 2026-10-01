@@ -4,7 +4,7 @@ title: C44 — migrate ledger and push codes to catalog
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:24+0200
-updated: 2026-10-01T19:46:34+0200
+updated: 2026-10-01T19:48:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:24+0200
 blocked-by: [JD2QR5SQ]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, RVWJQR8E]
+blocker-holds-if: not-match:READY
 ---
 
 # C44 — migrate ledger and push codes to catalog

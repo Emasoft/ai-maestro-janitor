@@ -4,7 +4,7 @@ title: C20 — registry integration
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-01T19:46:08+0200
+updated: 2026-10-01T19:48:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:12+0200
 blocked-by: [2UAEQQ4A]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, BHIS99XE]
+blocker-holds-if: not-match:READY
 ---
 
 # C20 — registry integration

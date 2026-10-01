@@ -4,7 +4,7 @@ title: C10 — issue codes generator
 column: blocked
 status: tasked
 created: 2026-10-01T19:44:42+0200
-updated: 2026-10-01T19:45:41+0200
+updated: 2026-10-01T19:47:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:44:42+0200
 blocked-by: [LKOUJC76, 622ROA5F]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, 2UAEQQ4A]
+blocker-holds-if: not-match:READY
 ---
 
 # C10 — issue codes generator

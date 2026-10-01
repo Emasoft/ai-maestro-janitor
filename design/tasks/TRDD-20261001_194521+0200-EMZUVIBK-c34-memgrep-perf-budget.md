@@ -4,7 +4,7 @@ title: C34 — memgrep perf budget
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:21+0200
-updated: 2026-10-01T19:46:41+0200
+updated: 2026-10-01T19:48:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:21+0200
 blocked-by: [3HLI7DMK]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, EMZUVIBK]
+blocker-holds-if: not-match:READY
 ---
 
 # C34 — memgrep perf budget

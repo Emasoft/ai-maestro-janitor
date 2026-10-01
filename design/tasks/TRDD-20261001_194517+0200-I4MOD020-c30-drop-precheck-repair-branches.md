@@ -4,7 +4,7 @@ title: C30 — drop precheck repair branches
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:17+0200
-updated: 2026-10-01T19:46:15+0200
+updated: 2026-10-01T19:48:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:17+0200
 blocked-by: [JD2QR5SQ]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, I4MOD020]
+blocker-holds-if: not-match:READY
 ---
 
 # C30 — drop precheck repair branches

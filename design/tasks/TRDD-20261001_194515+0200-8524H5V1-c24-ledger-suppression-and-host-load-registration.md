@@ -4,7 +4,7 @@ title: C24 — ledger suppression and host-load registration
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-01T19:46:12+0200
+updated: 2026-10-01T19:48:12+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:15+0200
 blocked-by: [U2VUXGBP, UDE86OSZ]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, 8524H5V1]
+blocker-holds-if: not-match:READY
 ---
 
 # C24 — ledger suppression and host-load registration

@@ -4,7 +4,7 @@ title: C40 — fix dominant recall wait
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:21+0200
-updated: 2026-10-01T19:46:43+0200
+updated: 2026-10-01T19:48:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:21+0200
 blocked-by: [V12ZHM1B]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, ZYX8B2RA]
+blocker-holds-if: not-match:READY
 ---
 
 # C40 — fix dominant recall wait

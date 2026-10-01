@@ -4,7 +4,7 @@ title: C32 — shrink enrich skill
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:19+0200
-updated: 2026-10-01T19:46:22+0200
+updated: 2026-10-01T19:48:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -17,6 +17,8 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:19+0200
 blocked-by: [JD2QR5SQ]
 pre-block-column: todo
+blocker-probe: [trddgrep, why, 1HXEAHY7]
+blocker-holds-if: not-match:READY
 ---
 
 # C32 — shrink enrich skill
