@@ -1,7 +1,7 @@
 # Janitor issue codes
 
-**Generated from `scripts/lib/issue_catalog.py` — do not edit by hand.**
-Regenerate with `uv run scripts/issue_catalog_doc.py --write`; a test fails if this file drifts.
+**Generated from `design/specs/issue-codes.toml` — do not edit by hand.**
+Regenerate with `uv run scripts/build_issue_codes.py --write`; a test fails if this file drifts.
 
 Every issue the janitor's scanners and validators can detect has a stable code, `<SCANNER>-<NNN>`.
 A code is **immutable once shipped** (like a schema version): never renumbered, never reused — so a
@@ -328,6 +328,209 @@ unattended access to your repository.
 - **What it is:** A guard that was supposed to catch failures is absent or neutered: no `timeout-minutes`, an `if:` condition that is always true, `continue-on-error` on a SECURITY step, or a global git config that rewrites what later steps fetch.
 - **Why it matters:** A defeated guard is worse than no guard: the job reports success, the security step's failure is swallowed, and everyone downstream believes the check ran. A hung job with no timeout burns the runner budget until someone notices by hand.
 - **Fix attempted:** Restore the guard — set `timeout-minutes`, make the condition mean something, and let a failing security step FAIL the job. A check whose result is ignored is not a check.
+
+
+## All codes by family
+
+88 code(s) across every emitter.
+
+### AICTX
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `AICTX-002` | LOW | none | janitor:ai-context-poisoning | a dependency can write agent-context files: {path} |
+| `AICTX-003` | HIGH | none | janitor:agent-context-integrity | an auto-loaded agent-context file carries an injection pattern: {path} |
+
+### BRPROT
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `BRPROT-001` | HIGH | none | janitor:branch-protection | the default branch of {slug} is unprotected |
+| `BRPROT-002` | HIGH | none | janitor:branch-protection | the branch-protection baseline on {slug} has drifted: {detail} |
+| `BRPROT-003` | HIGH | none | janitor:branch-protection | the branch-protection applier cannot identify the repo in {where} |
+
+### CRED
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `CRED-001` | CRITICAL | none | janitor:remote-credentials | a credential appears to be exposed in {path} |
+
+### DAEMON
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `DAEMON-001` | CRITICAL | none | janitor:daemon-supervisor | the global janitor daemon has died and respawned {count} times in the guard window |
+
+### DEP
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `DEP-001` | HIGH | none | janitor:supply-chain | {package} {version} carries a known advisory: {advisory} |
+| `DEP-002` | CRITICAL | none | janitor:historical-cache-scan | a KNOWN-MALICIOUS package version is present: {package} {version} |
+| `DEP-003` | HIGH | none | janitor:typosquat-watcher | `{package}` is one edit away from the popular package `{target}` |
+
+### GHCFG
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `GHCFG-001` | MEDIUM | none | janitor:fleet-github-config | the GitHub config of {slug} is off-baseline: {detail} |
+
+### HOOK
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `HOOK-001` | HIGH | none | janitor:hook-timeout-scan | a hook was killed by the harness for exceeding its timeout |
+| `HOOK-002` | MEDIUM | none | janitor:hook-run | a hook used 80% or more of its timeout budget |
+| `HOOK-003` | MEDIUM | none | janitor:autorecall | a hook's own internal limit tripped (e.g. autorecall's 4 s recall) |
+
+### HOST
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `HOST-001` | MEDIUM | none | janitor:host-load | load average is above cores x 4 |
+| `HOST-002` | MEDIUM | none | janitor:system-daemon-runaway | a daemon process is consuming runaway CPU |
+
+### MCPSEC
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `MCPSEC-001` | HIGH | none | janitor:mcp-rugpull | an installed MCP server changed its fingerprint: {server} |
+
+### MEMCORP
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `MEMCORP-001` | MEDIUM | none | janitor:memory-librarian | the wikimem corpus in {scope} has structural damage: {detail} |
+| `MEMCORP-002` | MEDIUM | none | janitor:wikimem-syntax | an atom is over 2x the size budget: {where} |
+
+### MEMGREP
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `MEMGREP-001` | HIGH | none | janitor:memgrep-validate | the FTS index in {scope} does not match its content table |
+| `MEMGREP-002` | CRITICAL | none | janitor:memgrep-validate | the memgrep database in {scope} fails SQLite's own integrity check |
+| `MEMGREP-003` | CRITICAL | none | janitor:memgrep-validate | an FTS table in {scope} has the wrong column set: {table} |
+| `MEMGREP-004` | CRITICAL | none | janitor:memgrep-validate | a migration left `{table}` without column `{column}` in {scope} |
+| `MEMGREP-005` | HIGH | none | janitor:memgrep-validate | orphaned rows in {scope}: {table} references memories that no longer exist |
+| `MEMGREP-006` | HIGH | none | janitor:memgrep-validate | the schema version stamp in {scope} disagrees with the database's actual shape |
+| `MEMGREP-007` | CRITICAL | none | janitor:memgrep-validate | a base table is missing entirely from the memgrep database in {scope} |
+| `MEMGREP-008` | CRITICAL | none | janitor:memgrep-validate | an FTS index is missing entirely from the memgrep database in {scope} |
+| `MEMGREP-009` | HIGH | none | janitor:memgrep-index-health | the memgrep index in {scope} has needed self-repair {count} times in {window} |
+| `MEMGREP-010` | HIGH | none | janitor:memgrep-validate | the memgrep binary is OLDER than the index it opened in {scope} |
+| `MEMGREP-011` | LOW | none | janitor:memgrep-validate | the memgrep index in {scope} is BEHIND this build's schema and has not migrated yet |
+
+### MGPERF
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `MGPERF-001` | WARN | none | memgrep | `memgrep recall` exceeded `[perf] recall-budget-ms` |
+| `MGPERF-002` | WARN | none | memgrep | `memgrep lint` exceeded `[perf] lint-budget-ms` |
+| `MGPERF-003` | INFO | none | memgrep | the memgrep index was stale and rebuilt on the hot path |
+
+### PKGPOL
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `PKGPOL-001` | MEDIUM | none | janitor:package-manager-policy | a package-manager safety knob is disabled in {path}: {detail} |
+
+### SELFINT
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `SELFINT-001` | CRITICAL | none | janitor:janitor-self-integrity | a janitor file failed attestation against the shipped manifest: {path} |
+| `SELFINT-002` | HIGH | none | janitor:janitor-self-integrity | the janitor's audit chain no longer verifies: {detail} |
+| `SELFINT-003` | MEDIUM | none | janitor:janitor-self-integrity | a janitor skill has lost its integrity notice: {path} |
+| `SELFINT-004` | HIGH | none | janitor:integrity-repin | the C3 last-good pin has declined to advance for {declines} consecutive fires |
+
+### STATE
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `STATE-001` | HIGH | none | janitor:state-guard | a janitor state file is unreadable: {path} |
+
+### WFSEC
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `WFSEC-001` | HIGH | none | janitor:workflow-security | a workflow lets attacker-controlled input reach an executable position in {where} |
+| `WFSEC-002` | CRITICAL | none | janitor:workflow-security | a workflow runs fork-controlled code with the base repo's privileges in {where} |
+| `WFSEC-003` | MEDIUM | none | janitor:workflow-security | a workflow's token or permission scope is wider than the job needs in {where} |
+| `WFSEC-004` | MEDIUM | none | janitor:workflow-security | a workflow depends on a MUTABLE reference in {where} |
+| `WFSEC-005` | CRITICAL | none | janitor:workflow-security | a workflow exposes a secret in {where} |
+| `WFSEC-006` | MEDIUM | none | janitor:workflow-security | a workflow's own safety rail is missing or defeated in {where} |
+
+### WMATOM
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `WMATOM-001` | ERROR | none | memgrep | atom id is not corpus-unique |
+| `WMATOM-002` | ERROR | none | memgrep | atom opens its props with a non-ASCII bracket |
+| `WMATOM-003` | ERROR | none | memgrep | atom props `[` is never closed on its line |
+| `WMATOM-004` | ERROR | safe | memgrep | atom `desc:` value is unquoted prose |
+| `WMATOM-005` | ERROR | none | memgrep | atom has props segments the parser discards |
+| `WMATOM-006` | ERROR | none | memgrep | atom has fewer keyphrases than the minimum |
+| `WMATOM-007` | ERROR | safe | memgrep | atom repeats keyphrases |
+| `WMATOM-008` | WARN | safe | memgrep | a `status: superseded` atom sits above the `## Superseded` delimiter |
+| `WMATOM-009` | WARN | none | memgrep | atom sits at or after the page's trailing footer region |
+| `WMATOM-010` | ERROR | none | memgrep | atom has no `keywords:` |
+| `WMATOM-011` | INFO | none | memgrep | atom has no `ocd:` date |
+| `WMATOM-012` | INFO | none | memgrep | atom has no `lmd:` date |
+| `WMATOM-013` | WARN | none | memgrep | atom `ocd:` is not ISO `YYYY-MM-DD` |
+| `WMATOM-014` | WARN | none | memgrep | atom `lmd:` is not ISO `YYYY-MM-DD` |
+| `WMATOM-015` | INFO | none | memgrep | atom body exceeds the atom char budget |
+| `WMATOM-016` | WARN | none | memgrep | atom body is over twice the atom char budget |
+| `WMATOM-017` | WARN | safe | memgrep | page has superseded atoms but no `## Superseded` heading |
+
+### WMENC
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `WMENC-001` | ERROR | none | memgrep | raw control byte in the page (not tab, newline or CR) |
+
+### WMLESS
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `WMLESS-001` | ERROR | none | memgrep | footnote reference has no `[^N]:` definition |
+| `WMLESS-002` | INFO | none | memgrep | lesson is defined but never cited |
+| `WMLESS-003` | ERROR | none | memgrep | lesson metadata uses `⟦…⟧` instead of ASCII `[…]` |
+| `WMLESS-004` | WARN | none | memgrep | lesson has no leading `[id:… status:… keywords:… ocd:… lmd:…]` metadata |
+| `WMLESS-005` | ERROR | none | memgrep | lesson has metadata but no body |
+| `WMLESS-006` | ERROR | none | memgrep | lesson supersedes an atom but omits `SUPERSEDED BODY:` |
+| `WMLESS-007` | ERROR | none | memgrep | lesson `desc:` value is unquoted prose |
+| `WMLESS-008` | WARN | none | memgrep | lesson metadata has no `keywords:` |
+| `WMLESS-009` | WARN | none | memgrep | lesson has no `id:ATOM-…` |
+| `WMLESS-010` | WARN | none | memgrep | lesson is `status:superseded` but carries no pointer to its replacement |
+
+### WMLINK
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `WMLINK-001` | ERROR | none | memgrep | a link points downward across memory scopes |
+| `WMLINK-002` | WARN | none | memgrep | one-sided link: the target does not link back |
+
+### WMPAGE
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `WMPAGE-001` | ERROR | none | memgrep | missing required frontmatter field `ocd` |
+| `WMPAGE-002` | ERROR | none | memgrep | missing required frontmatter field `lmd` |
+| `WMPAGE-003` | ERROR | none | memgrep | missing required frontmatter field `description` |
+| `WMPAGE-004` | ERROR | none | memgrep | page `description:` has fewer `/`-separated phrases than the minimum |
+| `WMPAGE-005` | ERROR | safe | memgrep | page `description:` repeats phrases |
+| `WMPAGE-006` | WARN | none | memgrep | missing `publish-globally:` field on a PROJECT page |
+| `WMPAGE-007` | ERROR | none | memgrep | `publish-globally: true` but no USER-scope symlink exists |
+| `WMPAGE-008` | ERROR | none | memgrep | `publish-globally: false` but a USER-scope symlink still exists |
+| `WMPAGE-009` | ERROR | none | memgrep | unclosed code fence swallows every atom and heading below it |
+| `WMPAGE-010` | ERROR | safe | memgrep | missing `## Notes and lessons learned` section |
+| `WMPAGE-011` | INFO | none | memgrep | line carries `⟦`/`⟧`, recall's display escaping of `[`/`]` |
+
+### WMSUP
+
+| Code | Severity | Fix | Emitter | Summary |
+|---|---|---|---|---|
+| `WMSUP-001` | WARN | safe | memgrep | a suppression comment matches no finding |
+| `WMSUP-002` | WARN | none | memgrep | bare `<!-- noqa -->` with no codes |
 
 
 ## How a finding becomes work

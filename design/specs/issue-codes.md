@@ -15,7 +15,7 @@ governs:
 implementations:
   - "scripts/lib/issue_catalog.py: the janitor runtime-fault catalog (carried over unchanged into the TOML)"
   - "scripts/memgrep/src/memory.rs: the memgrep lint (page defects), registry-driven after card C20"
-  - "scripts/issue_codes_gen.py: the generator (card C10)"
+  - "scripts/build_issue_codes.py: the generator (card C10)"
 ---
 
 # The issue-code SPEC
@@ -30,7 +30,7 @@ the TOML arbiters the facts (which codes exist and their attributes).
 - The TOML is never edited to match generated output. The generator owns every derived file
   listed under `governs:` (the Rust registry, the Python registry, the docs page) and rewrites them.
 - A drift test fails when any derived file differs from what the generator would write
-  (`issue_codes_gen.py --check` exits non-zero).
+  (`build_issue_codes.py --check` exits non-zero).
 - A consumer that needs a code attribute reads the generated registry; it never keeps its own copy.
 
 ## Code grammar, immutability, retirement

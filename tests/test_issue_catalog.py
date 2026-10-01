@@ -417,11 +417,12 @@ def _codes_with_a_producer() -> set[str]:
     """
     cat = ROOT / "scripts" / "lib" / "issue_catalog.py"
     doc = ROOT / "scripts" / "issue_catalog_doc.py"  # generates FROM the catalog; not a producer
+    generated = {ROOT / "scripts" / "lib" / "issue_codes_gen.py", ROOT / "scripts" / "memgrep" / "src" / "rules_gen.rs"}  # mention every code by construction
     texts = [
         f.read_text(encoding="utf-8", errors="replace")
         for pattern in ("*.py", "*.rs")
         for f in (ROOT / "scripts").rglob(pattern)
-        if f not in (cat, doc)
+        if f not in (cat, doc) and f not in generated
     ]
     return {code for code in issue_catalog.ISSUE_CATALOG if any(code in t for t in texts)}
 
