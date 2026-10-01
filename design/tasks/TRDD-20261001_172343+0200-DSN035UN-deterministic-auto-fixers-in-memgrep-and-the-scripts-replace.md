@@ -4,7 +4,7 @@ title: Deterministic auto-fixers in memgrep and the scripts replace LLM repair i
 column: design
 status: tasked
 created: 2026-10-01T17:23:43+0200
-updated: 2026-10-01T20:35:52+0200
+updated: 2026-10-01T20:36:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -42,6 +42,7 @@ ruff model: every lint rule is classified SAFE-FIX (deterministic, provably loss
 - 2026-10-01 — wave 1 batch 2 landed: C10 10293add, C11 59fe8b11, C12 6df88890, C13 5518c66e (separate commits, explicit pathspecs; combined tree: cargo 0 warnings, memgrep 365+196, ruff/mypy/pyright clean, full pytest 17714 passed). Cards archived complete. Open: tools-rule amendment for stubs/non-symbol lines (workers used fastedit create --force on <=2-line stubs and guarded Python replaces on docstrings/constants); main-tree cards to run in worktrees by default; intermediate commits not individually built (bisect check optional).
 - 2026-10-01 — provenance of the C10-C13 checklists (written at closure): aggregates and code claims are main-verified (cargo 0 warnings, memgrep 365+196, ruff/mypy/pyright, full pytest 17714, --check 0, selector/Safe/MAX_ROUNDS/load_lenient read in source); per-module test counts (8/8/7), the oscillation assertion and 'Rule type unchanged' are from the worker reports.
 - 2026-10-01 — BEFORE wave 2 dispatch (C20, C24): (1) put the amended tools rule in the preamble and prompts: fastedit for symbols; fastedit create --force only on card-owned stubs of 2 lines or fewer; the Edit tool for non-symbol lines (mod blocks, constants, docstrings), declared in the report; never sed, heredocs or Python rewrites. (2) every card runs in its own worktree by default. (3) C24 uses lint_config::load_lenient and reports CONFIG-001 rather than crashing. (4) re-run the memgrep cli test target 3x to settle the earlier flake. Optional: bisect-build HEAD~3..HEAD~1. Worktrees /tmp/wt-c11..c13 are kept until wave 2 starts.
+- 2026-10-01 — CORRECTION (review of the previous line): items (1) and (3) are superseded. (1) The main agent may not loosen the owner's tools rule: ~/.claude/rules/code-tools-tldr-fastedit.md forbids the Edit/Write tools, and on a fastedit refusal the worker skips that item and reports the snippet and refusal verbatim. That also voids the earlier 'PREAMBLE AMENDED' permission for Edit on .sh/.lock. Exceptions for stubs and non-symbol lines are an OWNER decision, pending; until then workers follow the rule's own skip-and-report path. (3) Corrected: C21 (memgrep, Rust) uses lint_config::load_lenient and reports CONFIG-001; C24 (Python) catches C1A's is_suppressed config error in the ledger/drift path, emits CONFIG-001 and treats nothing as suppressed.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
