@@ -4,7 +4,7 @@ title: C20 — registry integration
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-01T19:48:10+0200
+updated: 2026-10-01T19:54:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -35,3 +35,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:12+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:08+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 2UAEQQ4A per DSN035UN wave order
+- 2026-10-01 — FACT from C01 (supersedes plan F1 "37 literals"): memory.rs has 34 `code: "` literals; six memgrep codes are emitted without one (atom-no-ocd, atom-no-lmd, atom-bad-ocd, atom-bad-lmd, publish-globally-not-symlinked, publish-globally-conflict). every_emitted_code_is_registered must therefore NOT rely on a `code: "` source scan alone: find how those six are constructed (tldr/jgrep) and cover them, e.g. by asserting the registry against the codes produced by linting a fixture corpus that triggers every rule, or by scanning every string literal passed into a Violation.
