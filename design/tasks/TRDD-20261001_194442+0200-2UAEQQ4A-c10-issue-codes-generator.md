@@ -4,7 +4,7 @@ title: C10 — issue codes generator
 column: blocked
 status: tasked
 created: 2026-10-01T19:44:42+0200
-updated: 2026-10-01T19:47:58+0200
+updated: 2026-10-01T19:52:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,3 +35,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:44:42+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:45:41+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on LKOUJC76, 622ROA5F per DSN035UN wave order
+- 2026-10-01 — DECISION (review of wave 0, finding 1): rules_gen.rs emits ONLY rows whose emitter is "memgrep" (their severity is ERROR/WARN/INFO and fits the frozen Rule.sev: Severity); scripts/lib/issue_codes_gen.py emits EVERY row. The frozen Rule type is not changed. Fix enum variant is NoFix (not None).

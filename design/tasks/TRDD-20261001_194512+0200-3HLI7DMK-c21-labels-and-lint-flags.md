@@ -4,7 +4,7 @@ title: C21 — labels and lint flags
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-01T19:48:09+0200
+updated: 2026-10-01T19:52:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,3 +35,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:12+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:09+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on BHIS99XE, OWGEOJ0D, 7SMPCPNT per DSN035UN wave order
+- 2026-10-01 — DESIGN NOTE (review finding 4): print the safe-fix label on a finding only when the registered fixer would actually change that page (e.g. atom-unquoted-desc over 200 chars has no fix) — a label that promises a fix the engine will not make is a lie.
