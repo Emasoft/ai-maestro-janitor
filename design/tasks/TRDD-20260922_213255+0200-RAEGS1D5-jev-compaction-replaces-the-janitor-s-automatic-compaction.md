@@ -1,9 +1,9 @@
 ---
 trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
-column: dev
+column: human_review
 created: 2026-09-22T21:32:55+0200
-updated: 2026-09-27T13:56:43+0200
+updated: 2026-10-01T04:13:46+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -18,6 +18,7 @@ npt: [541CBN36]
 relevant-rules: []
 implementation-commits: [012b091e, 051625a4, 0b883373, 0cf40380, 1b5ceec8, 1e36e9bc, 2353a88a, 23713d53, 29dd5501, 2c32448a, 2f463d3b, 40cc06d1, 434530ab, 44fdec8c, 49d733b7, 4a65338d, 4b8ba762, 522f1e3c, 54ea73bc, 6eba6f58, 6fd3e531, 82860cc7, 83fae099, 862d30d4, 88aea2d9, 8950ba16, 8c5db5e0, 9dfc409b, 9f7c86fe, aa038127, aabd8b0c, b058292d, b0e3e6a2, b0e94f43, b171d337, b2154831, c406c9b3, c560ca76, c5eac23d, d3364c01, d4fa7685, d67b10c1, d8c80b16, eb49e933, eba1f1ff, ef06432e, f4bc9541, fa6ceedd, fe38e095]
 eht: [CC0CZLMO, HWF3QFAB, 0UQSAFCW, 91D2VHW3, 1ETALGDG, U6C3YXEL, BLGZTHQ9, DZ1KOGAC, O2FNJ4KW, EFA4P42B, 4P4Y2KBR, DQXMND59]
+status: tasked
 ---
 
 # Jev compaction replaces the janitor's automatic compaction
@@ -111,6 +112,7 @@ commits per card with the WHY in the message.
 - 2026-09-23T11:22:14+0200 — column → dev. NPT 541CBN36 closed; remaining scope: compaction-lane concurrency guard
 OWNER DECISION 2026-09-27 (verbatim, condensed, decision 7): 'except for plugins, that must pass the strict cpv validation of the canon, there should be no quality gate enforced by default. the user decides (or the MANAGER if inside the ai-maestro harness). of course the janitor must continue warning the main agent of any problem or issue detected in the code at all time, so those cases are prevented.' Resolution of the matrix-gate reconciliation: the DQXMND59 matrix-gate condition ('release only after BLGZTHQ9+U6C3YXEL re-measure') does NOT bind by default — no enforced quality gate beyond the plugin CPV-strict canon; the janitor's warning lane stays on. Publish still waits on the owner's explicit yes (unchanged).
 AGENT-NOTE 2026-09-27 (review round — restores a clause dropped in condensation, NOT owner words from this message): decision 7's owner text includes the decision-authority grant 'the user decides (or the MANAGER if inside the ai-maestro harness)' — load-bearing for every future gate proposal on this card. The publish-waits-on-explicit-yes clause is a restatement of the card's own standing 2026-09-25 rule, not new owner words.
+- 2026-10-01T04:13:46+0200 — column → human_review by main-agent@ai-maestro-janitor. code landed and verified (full suite + V3/V12 at HEAD); only owner decisions remain: matrix-gate reconciliation and 3.6.3 ratify/revert — dev column was untrue
 
 ## Design
 
