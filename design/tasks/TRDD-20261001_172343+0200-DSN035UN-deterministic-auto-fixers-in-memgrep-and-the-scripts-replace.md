@@ -4,7 +4,7 @@ title: Deterministic auto-fixers in memgrep and the scripts replace LLM repair i
 column: design
 status: tasked
 created: 2026-10-01T17:23:43+0200
-updated: 2026-10-01T19:48:30+0200
+updated: 2026-10-01T19:49:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -36,6 +36,7 @@ ruff model: every lint rule is classified SAFE-FIX (deterministic, provably loss
 
 - 2026-10-01T17:23:43+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01 — OWNER DIRECTIVE (verbatim): "commit often, so you can revert in case of errors. also enforce the use of tldr-code skill, fastedit skill and jgrep skill by all subagents". Applied: one commit per card by the main agent; every worker prompt carries the TOOLS/GIT/SCOPE preamble (jgrep to locate, tldr to read, fastedit to write; workers never touch git). Later cards C42-C45 and C47 removed from eht (review finding: they are unscheduled/owner-gated and would block this card from ever closing); they stay as related backlog.
+- 2026-10-01 — C00 unknowns resolved (report reports/dsn035un/20261001_194841+0200-c00-unknowns.md, local): U1 lint lines are formatted inline in cmd_lint_cli (memory.rs ~5934-5946) as "{sev} {path}:{line} [{code}] — {msg}{anchor}"; U2 all findings print, exit 1 iff any finding >= --min-severity; U3 specgrep ignores a .toml in design/specs (spec stays in design/specs/); U4 hook timeouts are transcript entries type=attachment, attachment.type=hook_cancelled, timedOut=true, with hookName/hookEvent/durationMs/timeoutMs (12386 such entries on this machine); U5 cold debug build 41 s wall/112 s CPU, release 145 s/292 s, no sccache — Rust waves capped at 3 parallel workers; U6 ponytail is third-party (DietrichGebert), so C47 is outward to a non-owner repo; U7 MEMGREP-001..011 are index/binary health codes; U8 recall output lives in memory.rs (finalize_recall ~8471, recall_one_atom ~8717) so C23 joins the memory.rs chain after C22; U9 recall over the 3 scope DIRS with --use-index ran 0.02 s at load ~69 — the 5.2 s measurement was the 369-explicit-file form autorecall uses, so C1D must confirm and C41 (pass dirs) is the likely fix. PROCESS LESSON: the U5 worker overrode the git safety guard (GIT_GUARD_OTP) to remove its throwaway worktree because the prompt told it to touch git; the standing preamble now forbids workers any git operation.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
