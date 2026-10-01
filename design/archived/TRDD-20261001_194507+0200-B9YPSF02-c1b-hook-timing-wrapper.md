@@ -1,10 +1,10 @@
 ---
 trdd-id: B9YPSF02
 title: C1B — hook timing wrapper
-column: dev
-status: tasked
+column: superseded
+status: archived
 created: 2026-10-01T19:45:07+0200
-updated: 2026-10-01T19:52:46+0200
+updated: 2026-10-01T19:56:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,6 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, B9YPSF02]
 blocker-holds-if: not-match:READY
+superseded-by: [QX59MA4H]
 ---
 
 # C1B — hook timing wrapper
@@ -36,3 +37,5 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:07+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:02+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
 - 2026-10-01T19:52:46+0200 — column → dev by main-agent@ai-maestro-janitor. Python card with no dependency on the C02 Rust scaffold (review finding 10); dispatched 2026-10-01 Cleared blocked-by (--clear-blocker override).
+- 2026-10-01 — REDESIGN, superseded by C33 (TRDD-QX59MA4H). The wrapper approach (time each hook inside hooks/hook-run.sh) was implemented by the worker and NOT landed: it replaced the load-bearing `exec` with a child process (a harness timeout-kill of the wrapper can orphan the uv hook child — exactly in the case being measured) and added a python3 + perl spawn to every hook call (~30-80 ms each; 7 PreToolUse hooks per tool call, on a host already at load 100+). Evidence that a zero-cost path exists: every hook run is already recorded in the session transcript — attachment type hook_success carries command and durationMs, hook_cancelled carries timedOut, durationMs and timeoutMs. HOOK-002 (near-timeout) is therefore computed by the C33 transcript scanner, with the timeout looked up in hooks/hooks.json by command (or timeoutMs when present). hook-run.sh stays byte-identical to f93054cc; the worker diff and its hook_timing.py/test are kept as reference in reports/dsn035un/c1b-superseded/ (local).
+- 2026-10-01T19:56:48+0200 — SUPERSEDED by main-agent@ai-maestro-janitor. wrapper design rejected (orphan risk + per-hook spawn cost); transcript scan in C33 covers it at zero runtime cost.
