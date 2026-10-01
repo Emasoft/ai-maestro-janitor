@@ -1,10 +1,10 @@
 ---
 trdd-id: 7SMPCPNT
 title: C12 — noqa parser
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:44:48+0200
-updated: 2026-10-01T19:58:35+0200
+updated: 2026-10-01T20:34:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,6 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, 7SMPCPNT]
 blocker-holds-if: not-match:READY
+implementation-commits: [6df88890]
 ---
 
 # C12 — noqa parser
@@ -36,3 +37,9 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:44:48+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:45:45+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
 - 2026-10-01T19:58:35+0200 — column → dev by main-agent@ai-maestro-janitor. blockers C01/C02 complete; dispatched 2026-10-01 Cleared blocked-by (--clear-blocker override).
+- 2026-10-01T20:34:09+0200 — COMPLETE by main-agent@ai-maestro-janitor. noqa-parser landed 6df88890, verified..
+
+## Acceptance checklist
+
+- [x] line, page and blanket noqa parsed; blanket recorded for WMSUP-002, never honored: 8 noqa tests pass (main-verified 2026-10-01 on the combined tree)
+- [x] cargo build 0 warnings, no Cargo changes (main-verified 2026-10-01 on the combined tree)

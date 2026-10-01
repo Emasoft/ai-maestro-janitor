@@ -1,10 +1,10 @@
 ---
 trdd-id: OWGEOJ0D
 title: C11 — lint config loader
-column: dev
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:44:45+0200
-updated: 2026-10-01T19:58:35+0200
+updated: 2026-10-01T20:34:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,6 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, OWGEOJ0D]
 blocker-holds-if: not-match:READY
+implementation-commits: [59fe8b11]
 ---
 
 # C11 — lint config loader
@@ -36,3 +37,9 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:44:45+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:45:43+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
 - 2026-10-01T19:58:35+0200 — column → dev by main-agent@ai-maestro-janitor. blockers C01/C02 complete; dispatched 2026-10-01 Cleared blocked-by (--clear-blocker override).
+- 2026-10-01T20:34:08+0200 — COMPLETE by main-agent@ai-maestro-janitor. lint-config-loader landed 59fe8b11, verified..
+
+## Acceptance checklist
+
+- [x] discovery, CLI-over-file precedence, prefix/family/ALL/kebab selectors, glob per-file-ignores, load_lenient: 8 lint_config tests pass (main-verified 2026-10-01 on the combined tree)
+- [x] cargo build 0 warnings, no new dependencies (main-verified 2026-10-01 on the combined tree)
