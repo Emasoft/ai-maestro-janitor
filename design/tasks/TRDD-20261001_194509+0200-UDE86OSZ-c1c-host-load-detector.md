@@ -4,7 +4,7 @@ title: C1C — host-load detector
 column: dev
 status: tasked
 created: 2026-10-01T19:45:09+0200
-updated: 2026-10-01T19:52:48+0200
+updated: 2026-10-01T19:57:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -36,3 +36,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:09+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:04+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
 - 2026-10-01T19:52:48+0200 — column → dev by main-agent@ai-maestro-janitor. Python card with no dependency on the C02 Rust scaffold (review finding 10); dispatched 2026-10-01 Cleared blocked-by (--clear-blocker override).
+- 2026-10-01 — FOLLOW-UP (wave-1 review finding 4): on this host load runs 8-13x cores, so cores x 4 fires HOST-001 on nearly every heartbeat. Dedupe lands in C24 (state change or once per hour); multiplier default to be revisited from a week of measured load.

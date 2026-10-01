@@ -4,7 +4,7 @@ title: C24 — ledger suppression and host-load registration
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-01T19:48:12+0200
+updated: 2026-10-01T19:57:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,3 +35,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:15+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:12+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on U2VUXGBP, UDE86OSZ per DSN035UN wave order
+- 2026-10-01 — REQUIREMENT (wave-1 review finding 2, HIGH): the ledger and drift paths MUST NOT crash on a malformed .janitor.toml. Catch the error from suppression.is_suppressed, record ONE finding CONFIG-001 bad-janitor-toml (add the code to design/specs/issue-codes.toml via the generator flow, coordinate with C10) and fall back to "nothing suppressed". Fail-fast stays right for the CLI, wrong for a background observer. Also dedupe HOST-001 (finding 4): emit on state change or at most once per hour, not every heartbeat.
