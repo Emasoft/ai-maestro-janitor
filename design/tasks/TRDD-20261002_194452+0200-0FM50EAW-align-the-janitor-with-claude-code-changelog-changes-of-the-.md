@@ -1,10 +1,10 @@
 ---
 trdd-id: 0FM50EAW
 title: Align the janitor with Claude Code changelog changes of the last 30 days
-column: todo
+column: backburner
 status: tasked
 created: 2026-10-02T19:44:52+0200
-updated: 2026-10-02T19:44:52+0200
+updated: 2026-10-02T19:50:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-02T19:44:52+0200
+project-id: ai-maestro-janitor
 ---
 
 # Align the janitor with Claude Code changelog changes of the last 30 days
@@ -28,10 +29,12 @@ approval-datetime: 2026-10-02T19:44:52+0200
 Window: Claude Code releases from 2026-09-02 to 2026-10-02. For each changelog entry decide: affects janitor (hooks, cron/CronCreate, SessionStart/clear, plugin cache/update, keychain/OAuth, compaction, subagents, settings), opportunity to adopt, or not relevant. Prior knowledge: wikimem page project_janitor_cc_changelog_currency in .claude/project/memory.
 
 ## Execution notes
-Queued behind the OAuth rotator root-cause fix and the open-GitHub-issues fix plan (owner priorities 2026-10-02). Execute as fan-out: one subagent per changelog cluster, scan-then-act, workers use tldr / jgrep / quicksilver (qs.mjs) to locate and fastedit to write.
+Queued behind the OAuth rotator root-cause fix and the open-GitHub-issues fix plan (ordering chosen by the main agent 2026-10-02, not ranked by the owner). Execute as fan-out: one subagent per changelog cluster, scan-then-act, workers use tldr / jgrep / quicksilver (qs.mjs) to locate and fastedit to write.
 
 ## Acceptance
 Every in-window changelog entry classified in a report under reports/cc-changelog/; each adoption/fix lands as its own commit referencing this TRDD; uv run pytest, ruff, mypy, pyright clean.
+The report lists the count of in-window releases and changelog entries, taken from the changelog itself, and classifies exactly that many.
+Each adopted change names one observable check run on this host (a real session, real hooks or a real cron fire), with its output recorded in the report; a passing test suite alone does not satisfy this.
 
 ## Approval log
 
