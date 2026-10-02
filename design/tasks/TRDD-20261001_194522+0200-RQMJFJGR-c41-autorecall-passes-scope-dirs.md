@@ -27,7 +27,7 @@ Derived from TRDD-DSN035UN (approved plan v4, 2026-10-01), card C41, wave W4.
 
 Writes (exclusive): scripts/hooks/on-prompt-submit-autorecall.py (C25's file, so runs after C25)
 Task: Autorecall passes the 3 scope dirs instead of a file list, if C1D shows that's faster
-Verify: Same as C40
+Verify: Same as C40, AND before the switch lands both forms surface the same notes in the same order (the top-N the hook actually injects) on a fixed query set: C1D's two queries ('trddgrep slow', 'memgrep reindex fails') plus at least three more that return hits. See the 2026-10-02 caveat in the Approval log.
 Depends on: C25, C40
 Conflict rule: this card may write ONLY the files listed under Writes.
 
