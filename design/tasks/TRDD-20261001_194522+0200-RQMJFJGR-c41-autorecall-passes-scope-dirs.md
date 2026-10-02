@@ -4,7 +4,7 @@ title: C41 — autorecall passes scope dirs
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:22+0200
-updated: 2026-10-01T19:48:19+0200
+updated: 2026-10-02T03:12:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -35,3 +35,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:45+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on QXG8SRVD, ZYX8B2RA per DSN035UN wave order
+- 2026-10-02 — C1D (TRDD-V12ZHM1B, complete 3db4719f) answers this card's condition: YES, passing the 3 scope dirs is faster. Same load: 349 explicit files 1.4-2.6 s wall / 0.32 s user vs 3 dirs 0.03-0.04 s wall / 0.016 s user; no lock or disk wait. memgrep's per-file cost is measured, its mechanism unconfirmed in source. The 4-8x wall stretch was load-specific (load1 115-170). The user-mem exclusion must be kept another way. Numbers are on C1D's checklist; the report is gitignored.
