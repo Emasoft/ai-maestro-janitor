@@ -153,3 +153,16 @@ def test_an_identical_rewrite_refreshes_the_mtime(tmp_path: Path) -> None:
     second = hf.write(sd, "abcd1234", "synthetic summary")
     assert second == first
     assert first.stat().st_mtime >= time.time() - 5
+
+
+
+def test_a_dedupe_touch_does_not_reorder_other_keys(tmp_path: Path) -> None:
+    """Ordering (`newest`, `newest_group`) follows the timestamp in the FILENAME, never the mtime,
+    so the dedupe touch of key A's old file must not make A outrank key B written after it."""
+    sd = _sd(tmp_path)
+    a = hf.write(sd, "aaaaaaaa", "synthetic A", now=1_800_000_000)
+    b = hf.write(sd, "bbbbbbbb", "synthetic B", now=1_800_000_100)
+    assert hf.write(sd, "aaaaaaaa", "synthetic A", now=1_800_000_200) == a  # deduped + touched
+    assert a.stat().st_mtime > b.stat().st_mtime, "the touch is what this test is about"
+    assert hf.newest(sd) == b
+    assert hf.newest_group(sd) == [b]

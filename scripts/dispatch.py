@@ -1823,6 +1823,10 @@ def _keyed_handoffs(sd: Path) -> list[Path]:
     key = _ehc.pending_summary_key(sd)
     if not key:
         return []
+    return _handoffs_for_key(sd, key)
+
+def _handoffs_for_key(sd: Path, key: str) -> list[Path]:
+    """Every handoff file of one session key."""
     return sorted(Path(sd).glob(f"agent-handoff-{key}-*.md"))
 
 
@@ -1858,6 +1862,14 @@ def _fresh_summary_note(sd: Path) -> str:
         "landed after SessionStart injected the older handoff)."
     )
 
+_LATE_SUMMARY_STAMP_PREFIX = "late-summary-noted-"
+
+
+def _late_summary_stamp(sd: Path, key: str) -> Path:
+    # One stamp per cleared session (key), not per project: two sessions cleared in the same
+    # project must each get their own once-only note.
+    return sd / f"{_LATE_SUMMARY_STAMP_PREFIX}{key}.txt"
+
 
 _LATE_SUMMARY_STAMP = "late-summary-noted.txt"
 
@@ -1868,30 +1880,37 @@ def _stamp_late_summary(sd: Path) -> None:
     The stamp's existence is what arms `_phase_late_summary_drift`: without it every project
     holding an old handoff group would announce one on its first fire.
     """
-    real = [p for p in _keyed_handoffs(sd) if not _is_template_handoff(p)]
+    try:
+        import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
+    except ImportError:
+        return
+    key = _ehc.pending_summary_key(sd)
+    if not key:
+        return
+    real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]
     named = max(real, key=state.file_mtime).resolve() if real else ""
-    state.atomic_write(sd / _LATE_SUMMARY_STAMP, f"{named}\n")
+    state.atomic_write(_late_summary_stamp(sd, key), f"{named}\n")
 
 
 def _phase_late_summary_drift() -> None:
-    """One drift line when a real summary lands AFTER a resume that fired on a template handoff.
+    """One drift line per cleared session when a real summary lands AFTER a resume that fired on
+    a template handoff.
 
     The resume (`_phase_clear_resume`) ends the hold on ANY handoff, template included, so a real
     Jev summary written later by the detached retry lane would otherwise never be shown. Emitted
-    once per path (the stamp), reusing `_fresh_summary_note`'s key and glob logic.
+    once per path per key (each key's own stamp), reusing `_fresh_summary_note`'s glob logic.
     """
     sd = state.state_dir()
-    stamp = sd / _LATE_SUMMARY_STAMP
-    if not stamp.is_file():
-        return
-    real = [p for p in _keyed_handoffs(sd) if not _is_template_handoff(p)]
-    if not real:
-        return
-    path = str(max(real, key=state.file_mtime).resolve())
-    if stamp.read_text(encoding="utf-8").strip() == path:
-        return
-    state.atomic_write(stamp, f"{path}\n")
-    print(state.sanitize_for_drift_line(f"a fuller summary of the cleared session is at {path}"))
+    for stamp in sorted(sd.glob(f"{_LATE_SUMMARY_STAMP_PREFIX}*.txt")):
+        key = stamp.stem[len(_LATE_SUMMARY_STAMP_PREFIX) :]
+        real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]
+        if not real:
+            continue
+        path = str(max(real, key=state.file_mtime).resolve())
+        if stamp.read_text(encoding="utf-8").strip() == path:
+            continue
+        state.atomic_write(stamp, f"{path}\n")
+        print(state.sanitize_for_drift_line(f"a fuller summary of the cleared session is at {path}"))
 
 
 def _resume_flag_expired(

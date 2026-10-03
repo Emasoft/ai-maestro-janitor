@@ -1545,11 +1545,9 @@ def test_a_chain_that_did_not_ask_for_a_hold_takes_none(tmp_path: Path, monkeypa
     assert not (tmp_path / ".janitor" / "state" / "summary-pending.json").exists()
 
 
-def test_a_failed_hold_write_stops_the_chain_before_enter(tmp_path: Path, monkeypatch) -> None:
-    """A clear typed with no hold armed resumes before its summary exists, so a failed hold write
-    must raise out of `pre_submit_first` (never reaching Enter) instead of being swallowed."""
-    import pytest
-
+def test_a_failed_hold_write_does_not_stop_the_chain(tmp_path: Path, monkeypatch) -> None:
+    """C1c: the hold only delays a resume (the first response waits for SessionStart hooks), so a
+    failed hold write must be logged and must NOT raise out of `pre_submit_first` before Enter."""
     mod = _import()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     captured = _capture_still_wanted(mod, monkeypatch)
@@ -1560,9 +1558,13 @@ def test_a_failed_hold_write_stops_the_chain_before_enter(tmp_path: Path, monkey
 
     import external_handoff_clear as ehc
 
+    logged: list[str] = []
+
     def _boom(_target, _value):
         raise OSError("disk full")
 
     monkeypatch.setattr(ehc.state, "atomic_write", _boom)
-    with pytest.raises(OSError):
-        captured["pre_submit_first"]()
+    monkeypatch.setattr(ehc.state, "log_line", lambda _tag, msg: logged.append(msg))
+    captured["pre_submit_first"]()  # must not raise
+    assert any("summary hold write failed" in m and "disk full" in m for m in logged), logged
+    assert not (tmp_path / ".janitor" / "state" / "summary-pending.json").exists()

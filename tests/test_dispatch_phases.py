@@ -1186,6 +1186,32 @@ def test_a_real_summary_landing_after_a_template_resume_is_announced_once(
     assert f"a fuller summary of the cleared session is at {real.resolve()}" in out, out
     assert "fuller summary" not in _run_main(dispatch), "announced once only"
 
+def test_each_cleared_session_gets_its_own_late_summary_note(env_isolation: dict) -> None:
+    """C1c: the once-only stamp is per key, so two cleared sessions of one project each get their
+    own note (a project-wide stamp let the first session's note swallow the second's)."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    now = int(time.time())
+    for n, key in enumerate(("k1k1k1k1", "k2k2k2k2")):
+        _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+        _arm_summary_hold(sd, expires_in_s=900, key=key, captured_ago_s=6)
+        handoff_files.write(
+            sd, key, f"{handoff_files.TEMPLATE_MARKER}\nsynthetic template {key}", now=now + n
+        )
+        assert "[janitor-resume]" in _run_main(dispatch)
+    reals = {
+        key: handoff_files.write(sd, key, f"synthetic real {key}", now=now + 10 + n)
+        for n, key in enumerate(("k1k1k1k1", "k2k2k2k2"))
+    }
+    out = _run_main(dispatch)
+    for real in reals.values():
+        assert out.count(f"is at {real.resolve()}") == 1, out
+    assert "fuller summary" not in _run_main(dispatch), "each announced once only"
+
 
 def test_no_late_summary_line_without_a_prior_resume(env_isolation: dict) -> None:
     """An old handoff group on disk must not be announced by a project that never resumed."""
