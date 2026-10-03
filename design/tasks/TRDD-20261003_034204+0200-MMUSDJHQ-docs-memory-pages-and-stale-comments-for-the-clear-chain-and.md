@@ -4,7 +4,7 @@ title: Docs, memory pages and stale comments for the clear chain and rotator
 column: todo
 status: tasked
 created: 2026-10-03T03:42:04+0200
-updated: 2026-10-03T15:52:33+0200
+updated: 2026-10-03T15:53:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -53,3 +53,14 @@ Also pending an owner-approved plain edit (fastedit cannot target module-level c
 - Also pending the same plain-edit decision: C5 (TRDD-8SC3YEIG) needs a clear-only bootstrap tuple (/janitor-resume) next to the reload tuple (/janitor-arm, /janitor-resume) in scripts/clear_trigger.py lines ~77-90.
 2026-10-03 — C24 (TRDD-8524H5V1, parked in backburner) also waits on this decision: registering host-load needs one new tuple in the module-level _DETECTORS list in scripts/dispatch.py, which fastedit cannot target (verified, reports/board/20261003_155026+0200-fastedit-module-level-test.md). When plain edits are approved, move C24 back to todo.
 2026-10-03 — R4 (TRDD-3OS6AXV3) is the owner of the R4b dead code in scripts/lib/rotator_alert.py listed above; it waits on the same plain-edit decision.
+
+## Waiting on the owner's plain-edit decision
+
+- scripts/clear_trigger.py: delete the four stale comment lines saying a failed hold write must stop the chain (superseded by the fail-open in take_summary_hold, a48d8974).
+- scripts/dispatch.py: delete the unused constant _LATE_SUMMARY_STAMP.
+- scripts/lib/rotator_alert.py: remove the R4b dead-code leftovers.
+- tests/test_release_age_guard_hook.py line 33: _NOWISH hard-codes 2026-09-27T10:00:00Z, outside the hook's 7200-minute window; 9 tests fail and the release gate is blocked. Set it to current UTC minus 10 minutes (import datetime, timedelta, timezone); _AGED stays fixed (TRDD-BUR8AW77).
+- C5 TRDD-8SC3YEIG: add a clear-only bootstrap tuple (/janitor-resume) next to the reload tuple (/janitor-arm, /janitor-resume) in scripts/clear_trigger.py lines ~77-90; the two module-level keystroke lists are not targetable by fastedit.
+- R4 TRDD-3OS6AXV3: cannot complete until the R4b leftovers in scripts/lib/rotator_alert.py are removed.
+- C24 TRDD-8524H5V1: parked in backburner; needs one new tuple (host-load) in the module-level _DETECTORS list in scripts/dispatch.py; move back to todo when plain edits are approved.
+This section is the single list; earlier mentions elsewhere on this card are superseded by it.
