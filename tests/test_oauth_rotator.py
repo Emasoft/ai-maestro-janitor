@@ -3320,3 +3320,100 @@ def test_refresh_failure_log_never_carries_token_text(monkeypatch: pytest.Monkey
     monkeypatch.delenv("JANITOR_OAUTH_TOKEN_URL", raising=False)
     assert rotator.refresh_oauth_token(_blob("T", refresh=secret)) is None
     assert logs and not any(secret in line for line in logs)
+
+
+
+# ─── R2 (TRDD-G9Z8PXCM): the session context mirrors the live token into -livebak ─────────────
+
+def _seed_live_l1_mirror_l0(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[dict, dict]:
+    """Primary holds L1, -livebak holds L0, in the isolated keychain; beacon absent."""
+    _isolate_live_keychain(monkeypatch)
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: "live@x")
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    monkeypatch.setenv("CLAUDE_SESSION_ID", "r2-test-%d" % os.getpid())
+    l0, l1 = _blob("MIRROR-L0"), _blob("LIVE-L1")
+    rotator._live_backup_write(l0)
+    assert rotator._slot_keychain_write(rotator._keychain_account(), l1, service=rotator.KEYCHAIN_SERVICE) is True
+    return l0, l1
+
+
+def test_beacon_refresh_mirrors_live_token_into_livebak_and_daemon_probes_it(
+        isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session-context refresh copies the live primary into -livebak; the headless daemon then
+    resolves the live token from the mirror (no 'no usable slot twin'). 🐌"""
+    if sys.platform != "darwin":
+        pytest.skip("keychain round-trip is macOS-only")
+    _l0, l1 = _seed_live_l1_mirror_l0(monkeypatch, tmp_path)
+    try:
+        assert rotator.refresh_beacon_if_stale() is True
+        mirror = rotator._live_backup_read()
+        assert mirror is not None and rotator.fingerprint(mirror) == rotator.fingerprint(l1)
+        # Daemon side: HEADLESS never reads the primary, so it only has the mirror + beacon.
+        monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
+        monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+        probe, _st = rotator._resolve_untrusted_live(mirror, {"slots": {}})
+        assert probe is not None and rotator.fingerprint(probe) == rotator.fingerprint(l1)
+        assert "no usable slot twin" not in (tmp_path / "rotator.log").read_text()
+    finally:
+        _purge_live_keychain()
+
+
+def test_headless_process_never_writes_livebak(
+        isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A HEADLESS process leaves the -livebak mirror untouched. 🐌"""
+    if sys.platform != "darwin":
+        pytest.skip("keychain round-trip is macOS-only")
+    l0, l1 = _seed_live_l1_mirror_l0(monkeypatch, tmp_path)
+    monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
+    try:
+        assert rotator.mirror_live_to_livebak(l1) is False
+        assert rotator._live_backup_read() == l0
+    finally:
+        _purge_live_keychain()
+
+
+def test_throttled_refresh_spawns_no_security_inside_window_and_no_w_read_when_unchanged(
+        isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop-hook path: fresh stamp -> zero `security` runs; expired stamp + unchanged primary
+    -> attribute-only probe, no `-w` read. 🐌"""
+    if sys.platform != "darwin":
+        pytest.skip("keychain round-trip is macOS-only")
+    _l0, _l1 = _seed_live_l1_mirror_l0(monkeypatch, tmp_path)
+    try:
+        assert rotator.refresh_beacon_if_stale() is True  # stamps the beacon
+        argvs: list[list[str]] = []
+        real = rotator.safe_storage.run_security
+
+        def _counting(argv, **kw):
+            argvs.append(list(argv))
+            return real(argv, **kw)
+
+        monkeypatch.setattr(rotator.safe_storage, "run_security", _counting)
+        (tmp_path / "beacon-stop-check.ts").write_text("")  # fresh stamp
+        assert rotator.refresh_beacon_if_stale_throttled() is False
+        assert argvs == []
+        os.utime(tmp_path / "beacon-stop-check.ts", (1, 1))  # expired stamp
+        assert rotator.refresh_beacon_if_stale_throttled() is False  # primary unchanged
+        assert argvs and not any("-w" in a and rotator.KEYCHAIN_SERVICE in a for a in argvs)  # no PRIMARY -w read
+    finally:
+        _purge_live_keychain()
+
+
+
+def test_fresh_beacon_with_stale_mirror_is_repaired_by_one_refresh(
+        isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Beacon matches the unchanged primary but -livebak holds an older token: one refresh
+    call repairs the mirror (tonight's state). 🐌"""
+    if sys.platform != "darwin":
+        pytest.skip("keychain round-trip is macOS-only")
+    _l0, l1 = _seed_live_l1_mirror_l0(monkeypatch, tmp_path)
+    try:
+        assert rotator.refresh_beacon_if_stale() is True  # stamps beacon, mirror repaired
+        rotator._live_backup_write(_blob("MIRROR-OLD-AGAIN"))  # mirror goes stale, primary untouched
+        monkeypatch.setattr(rotator, "_PRIMARY_READ_MEMO", None)
+        assert rotator.refresh_beacon_if_stale() is False  # beacon fresh: no restamp
+        mirror = rotator._live_backup_read()
+        assert mirror is not None and rotator.fingerprint(mirror) == rotator.fingerprint(l1)
+    finally:
+        _purge_live_keychain()

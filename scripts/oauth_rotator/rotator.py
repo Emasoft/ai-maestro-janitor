@@ -1093,6 +1093,88 @@ def beacon_needs_restamp(*, primary_mtime: float | None, now: float | None = Non
         return True
     return primary_mtime > ts
 
+_MIRROR_LATCH_TTL_S = 6 * 3600  # a failed mirror write silences further attempts for this session/6h
+
+
+def _mirror_latch_path() -> Path:
+    sid = os.environ.get("CLAUDE_SESSION_ID") or "ppid%d" % os.getppid()
+    return ROOT / ("livebak-write-off." + "".join(c if c.isalnum() else "_" for c in sid))
+
+
+def mirror_live_to_livebak(prim: dict) -> bool:
+    """Make `-livebak` hold the live credential `prim` the session context just read.
+
+    WHY (TRDD-G9Z8PXCM R2): the daemon runs HEADLESS and can never read the primary, so it
+    judges the live account from the `-livebak` mirror. The mirror used to stay at the
+    switch-time token; once Claude Code refreshed its token the beacon fp no longer matched
+    the mirror, the daemon logged "no usable slot twin ... staying put" and never probed usage.
+    Writing the live blob here lets the daemon's `b_fp == mirror_fp` branch probe with the real
+    token. Only when the fingerprints DIFFER (a few refreshes a day), never in a HEADLESS
+    process, UPDATE path only (an absent item would need an ACL flag, which prompts), and
+    `may_prompt=False` with a hard timeout; one failure latches the write off for the session.
+    Returns True iff the mirror was written."""
+    if not _primary_secret_read_permitted():
+        return False
+    fp = fingerprint(prim)
+    latch = _mirror_latch_path()
+    try:
+        if not fp or (time.time() - latch.stat().st_mtime) < _MIRROR_LATCH_TTL_S:
+            return False
+    except FileNotFoundError:
+        if not fp:
+            return False
+    acct = _keychain_account()
+    if not _keychain_item_exists(LIVE_BACKUP_KEYCHAIN_SERVICE, acct):
+        return False
+    cur = _live_backup_read()
+    if cur is not None and fingerprint(cur) == fp:
+        return False
+    run = safe_storage.run_security(
+        _add_password_argv(LIVE_BACKUP_KEYCHAIN_SERVICE, acct, json.dumps(prim, separators=(",", ":")), set_acl=False),
+        timeout=5,
+        may_prompt=False,
+    )
+    if not run.ok:
+        try:
+            ROOT.mkdir(parents=True, exist_ok=True)
+            latch.write_text("")
+        except OSError:
+            pass
+        _log("beacon: -livebak mirror write FAILED (rc=%s) — mirroring off for this session" % run.returncode)
+        return False
+    _log("beacon: -livebak mirror updated to the live credential (fp %s)" % fp)
+    return True
+
+
+def refresh_beacon_if_stale_throttled(*, min_interval_s: float = 300.0) -> bool:
+    """`refresh_beacon_if_stale` for the Stop hook: ZERO `security` processes unless the stamp
+    file is older than `min_interval_s`; the refresher's own mdat gate then keeps `-w` reads
+    to real credential changes."""
+    stamp = ROOT / "beacon-stop-check.ts"
+    try:
+        if (time.time() - stamp.stat().st_mtime) < min_interval_s:
+            return False
+    except FileNotFoundError:
+        pass
+    ROOT.mkdir(parents=True, exist_ok=True)
+    stamp.write_text("")
+    return refresh_beacon_if_stale()
+
+def _repair_stale_mirror(beacon: dict) -> None:
+    """Beacon fresh and the primary unchanged since it (mdat gate), but `-livebak` may still hold
+    an OLDER token (TRDD-G9Z8PXCM R2 follow-up: the daemon stayed blind until the next token
+    change). Compare the MIRROR's own fingerprint with the beacon's (== the primary's, by the
+    mdat gate); only on a difference read the primary and repair. Steady state = one read of
+    the janitor's own `-livebak` item, zero primary `-w` reads."""
+    if not _primary_secret_read_permitted():
+        return
+    mirror = _live_backup_read()
+    if mirror is None or fingerprint(mirror) == beacon.get("fp"):
+        return
+    prim = _read_live_primary()
+    if prim is not None:
+        mirror_live_to_livebak(prim)
+
 
 def refresh_beacon_if_stale(*, now: float | None = None) -> bool:
     """Re-stamp the live-identity beacon ONLY when the credential actually changed.
@@ -1109,9 +1191,22 @@ def refresh_beacon_if_stale(*, now: float | None = None) -> bool:
     attribute read, ZERO `-w` reads); only a real credential change pays for a stamp."""
     before = read_live_identity_beacon(now=now)
     if not beacon_needs_restamp(primary_mtime=_primary_last_modified(), now=now):
+        try:
+            if before is not None:
+                _repair_stale_mirror(before)
+        except Exception as exc:  # noqa: BLE001 - best-effort, never break the beacon refresh
+            _log("beacon: -livebak repair skipped: %r" % (exc,))
         return False
     if not write_live_identity_beacon(now=now):
         return False
+    # The session context just read the live primary (memoized, so no second `-w` read): mirror
+    # it into -livebak so the headless daemon can probe usage with the REAL token (R2).
+    try:
+        prim = _read_live_primary()
+        if prim is not None:
+            mirror_live_to_livebak(prim)
+    except Exception as exc:  # noqa: BLE001 - the mirror is best-effort, never break the beacon
+        _log("beacon: -livebak mirror skipped: %r" % (exc,))
     after = read_live_identity_beacon(now=now)
     # Log ONLY a real identity change: an unchanged re-stamp is routine bookkeeping and would
     # bury the durable rotator.log in noise, but a live-account change is exactly the event
@@ -1534,7 +1629,9 @@ def claude_running() -> bool:
     (argv[0] basename ``python3``) and ``claude-<x>`` binaries (basename
     ``claude-x`` != ``claude``) are likewise excluded.
     """
-    proc = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True)
+    # timeout: under background-QoS starvation an unbounded `ps` hung the whole tick for
+    # 100+ s (TRDD-G9Z8PXCM R1); a TimeoutExpired fails the tick loudly instead.
+    proc = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True, timeout=10)
     for line in proc.stdout.splitlines():
         line = line.strip()
         if not line:

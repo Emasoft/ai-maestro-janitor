@@ -279,6 +279,19 @@ def main() -> int:
         _maybe_clear(project_dir, transcript_path, state, token_meter)
     except Exception as exc:  # noqa: BLE001 -- never let the clear trigger break a turn
         sys.stderr.write(f"[on-stop-token-meter] clear-check skipped ({exc})\n")
+
+    # Keep the -livebak mirror on the live token so the headless daemon can probe usage
+    # (TRDD-G9Z8PXCM R2). Throttled to one check per 300 s with ZERO `security` processes in
+    # between; its own try block, so a fault here can never break the Stop hook.
+    try:
+        sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
+        import rotator  # noqa: E402
+        from lib import state  # noqa: E402
+
+        if state.is_truthy_env("CLAUDE_PLUGIN_OPTION_OAUTH_BEACON_REFRESH_ENABLED", True) and rotator.configured_rotator_home() is not None:
+            rotator.refresh_beacon_if_stale_throttled()
+    except Exception as exc:  # noqa: BLE001 -- never let the mirror refresh break a turn
+        sys.stderr.write(f"[on-stop-token-meter] beacon refresh skipped ({exc})\n")
     return 0
 
 
