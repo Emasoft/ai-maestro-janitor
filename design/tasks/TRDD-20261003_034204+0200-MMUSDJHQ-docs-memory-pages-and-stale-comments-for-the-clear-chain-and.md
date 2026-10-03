@@ -4,7 +4,7 @@ title: Docs, memory pages and stale comments for the clear chain and rotator
 column: todo
 status: tasked
 created: 2026-10-03T03:42:04+0200
-updated: 2026-10-03T09:31:39+0200
+updated: 2026-10-03T15:52:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -51,3 +51,5 @@ The main session probed the privacy scanner with a real git commit (message prob
 The main session told a worker to remove every at-sign from a card instead of only the flagged line, so audit lines were rewritten (b2b05926, restored next commit). Scope a scanner fix to the flagged line only.
 Also pending an owner-approved plain edit (fastedit cannot target module-level constants): tests/test_release_age_guard_hook.py line 33 hard-codes _NOWISH = 2026-09-27T10:00:00Z, now outside the hook's 7200-minute window, so 9 tests fail (full suite 2026-10-03: 9 failed, 17797 passed) and the release gate is blocked. Intended edit: import datetime, timedelta, timezone and set _NOWISH to the current UTC time minus 10 minutes in the same format; _AGED (2024-01-01) stays fixed (TRDD-BUR8AW77).
 - Also pending the same plain-edit decision: C5 (TRDD-8SC3YEIG) needs a clear-only bootstrap tuple (/janitor-resume) next to the reload tuple (/janitor-arm, /janitor-resume) in scripts/clear_trigger.py lines ~77-90.
+2026-10-03 — C24 (TRDD-8524H5V1, parked in backburner) also waits on this decision: registering host-load needs one new tuple in the module-level _DETECTORS list in scripts/dispatch.py, which fastedit cannot target (verified, reports/board/20261003_155026+0200-fastedit-module-level-test.md). When plain edits are approved, move C24 back to todo.
+2026-10-03 — R4 (TRDD-3OS6AXV3) is the owner of the R4b dead code in scripts/lib/rotator_alert.py listed above; it waits on the same plain-edit decision.
