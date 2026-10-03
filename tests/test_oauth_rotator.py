@@ -2333,6 +2333,49 @@ def test_resolve_untrusted_live_no_usable_twin_marks_stuck(
     assert marker["last_seen_epoch"] >= marker["first_seen_epoch"]
 
 
+
+def test_resolve_untrusted_live_never_refreshes_the_live_twin(
+        isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R3: once an account is live, Claude Code owns its rotating refresh grant — an expired
+    slot twin of the LIVE account must NOT be refreshed (the copy is spent, or the POST spends
+    the live session's grant). A real local HTTP socket counts token-endpoint POSTs: expect 0,
+    and the fail-safe stay-put (None + no-usable-slot-twin marker) instead."""
+    import http.server
+    import threading
+
+    posts: list[bytes] = []
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            posts.append(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":"invalid_grant"}')
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - http.server API
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("JANITOR_OAUTH_TOKEN_URL", "http://127.0.0.1:%d/v1/oauth/token" % server.server_address[1])
+        monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+        rotator.save_state({"live_email": "stale@x", "live_fp": "f" * 16, "slots": {"a@x": {}}})
+        monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                            lambda **_k: {"fp": "f" * 16, "email": "a@x", "ts": 1.0})  # != mirror fp
+        rotator.write_slot("a@x", _blob("EXPIRED-TWIN", refresh="SPENT-REFRESH", expires_ms=_ms_in(-2)))
+        blob, _state = rotator._resolve_untrusted_live(_blob("MIRROR"), rotator.load_state())
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert posts == []
+    assert blob is None
+    assert json.loads((tmp_path / "rotation-stuck.json").read_text())["kind"] == "no-usable-slot-twin"
+
+
 def test_resolve_untrusted_live_unknowable_identity_marks_stuck(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No beacon at all → identity unknowable → the fail-safe None ALSO writes the

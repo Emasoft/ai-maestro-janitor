@@ -1669,6 +1669,15 @@ def classify_refresh_failure(exc: BaseException, body: str = "") -> str:
         return REFRESH_FAIL_TLS
     return REFRESH_FAIL_NETWORK  # URLError (non-HTTP) / TimeoutError — plain network trouble
 
+def _report_refresh_failure(cause: str, on_failure: Callable[[str], None] | None) -> None:
+    """Surface WHY a token exchange failed. A caller-supplied `on_failure` receives it; otherwise it
+    is logged here — a refresh that fails silently is how the 2026-10-03 00:37 "Login expired" went
+    undiagnosed (cmd_auto's slot refreshes passed no callback, so the cause was lost)."""
+    if on_failure is not None:
+        on_failure(cause)
+    else:
+        _log("[refresh] token exchange failed (%s)" % cause)
+
 
 def refresh_oauth_token(blob: dict, *, on_failure: Callable[[str], None] | None = None) -> dict | None:
     """Exchange a SLOT's refreshToken for a fresh token pair at the OAuth token endpoint and
@@ -1708,8 +1717,10 @@ def refresh_oauth_token(blob: dict, *, on_failure: Callable[[str], None] | None 
     # Cloudflare at the token endpoint (HTTP 403 / error code 1010 — "banned browser
     # signature"; empirically verified 2026-06-09). Reuse the same UA the /roles + /usage
     # calls already use (which pass CF) so keepalive-refresh isn't silently 1010-blocked.
+    # JANITOR_OAUTH_TOKEN_URL is a test seam: it lets a test aim the exchange at a real local
+    # socket instead of mocking the refresh path. Production never sets it; the default is unchanged.
     req = urllib.request.Request(
-        TOKEN_URL,
+        os.environ.get("JANITOR_OAUTH_TOKEN_URL", TOKEN_URL),
         data=body,
         method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
@@ -1718,13 +1729,11 @@ def refresh_oauth_token(blob: dict, *, on_failure: Callable[[str], None] | None 
         with urllib.request.urlopen(req, timeout=30, context=tls_context.verifying_context()) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
             tok = json.loads(r.read().decode("utf-8", "replace"))
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError) as exc:
-        if on_failure is not None:
-            on_failure(classify_refresh_failure(exc))
+        _report_refresh_failure(classify_refresh_failure(exc), on_failure)
         return None
     access = tok.get("access_token") or tok.get("accessToken")
     if not access:
-        if on_failure is not None:
-            on_failure(REFRESH_FAIL_MALFORMED)
+        _report_refresh_failure(REFRESH_FAIL_MALFORMED, on_failure)
         return None
     expires_at = tok.get("expiresAt")
     if expires_at is None and "expires_in" in tok:
@@ -2169,7 +2178,7 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
 
       - probe_blob is a token OF THE TRUE LIVE ACCOUNT usable for the usage probe
         (the mirror itself when the beacon proves mirror == live; else the live
-        account's slot twin, keepalive-refreshed if needed), or
+        account's slot twin, only while it is still unexpired — NEVER refreshed here), or
       - None → the identity is unknowable / no usable twin: the caller MUST stay
         put this tick (fail-safe — a wrong stay-put costs one tick; a wrong
         rotation decision on a phantom identity is the 2026-07-08 incident).
@@ -2215,13 +2224,10 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
                 # A usable twin disproves the no-usable-twin marker a previous tick wrote.
                 _clear_stuck()
                 return twin, state
-            if twin is not None and _oauth(twin).get("refreshToken"):
-                refreshed, healed = _refresh_and_heal_slot(b_email, twin, state)
-                if refreshed is not None and not _blob_locally_expired(refreshed):
-                    if healed:
-                        save_state(state)
-                    _clear_stuck()  # same disproof as the fresh-twin path above
-                    return refreshed, state
+            # WHY no refresh here: once an account is live, Claude Code owns its rotating
+            # refresh grant. Refreshing the slot twin can only fail (the copy is spent) or
+            # spend the live session's grant — the 2026-10-03 00:37 "Login expired" is under
+            # investigation for exactly this. An unusable twin means fail-safe stay-put below.
             _decide(
                 "auto: live account %s has no usable slot twin to probe — staying put "
                 "this tick (fail-safe; TRDD-7PYTX4E9)" % b_email
@@ -2255,6 +2261,7 @@ def _refresh_and_heal_slot(email: str, blob: dict, state: dict) -> tuple[dict | 
     Returns ``(fresh_blob, index_changed)``:
       - ``fresh_blob`` is ``None`` when the refresh grant yielded nothing — the CALLER decides
         whether to keep the slot as a degraded fallback or drop it (the two call sites differ).
+        The failure cause is logged by refresh_oauth_token itself, never swallowed.
       - otherwise ``fresh_blob`` is the re-minted token and ``write_slot`` has mirrored it to the
         keychain. FAIL-SOFT: a locked/declined keychain is logged and tolerated — the fresh token
         is still returned for in-memory use (a rotation writes the LIVE credential, a DIFFERENT
