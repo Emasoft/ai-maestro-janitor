@@ -298,7 +298,7 @@ def _main(
         # expire on its own 15-minute TTL at this point would pause the resume for no further
         # reason, since both sources are ALREADY known to have failed. Ensure a template
         # handoff exists for this key (the same fact-only degrade the sync hook writes on its
-        # own failure) and release the hold immediately instead of waiting out a TTL whose
+        # own failure) and end the hold immediately instead of waiting out a TTL whose
         # only original purpose was bounding a `jev_compact` that never returns.
         inputs = ec.HandoffInputs(
             trigger="jev-compaction-failed", findings=findings, cards=in_flight_cards,
@@ -307,10 +307,9 @@ def _main(
         template = ec.compose_template_handoff(inputs, now_iso=now_iso)
         text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
-        ehc._release_summary_hold(sd, key=key)
         state.log_line(
             _LOG, f"jev and the llm-ext fallback both failed ({detail}) — template handoff "
-            "written, hold released",
+            "written (it ends the hold)",
         )
         print(f"SUMMARY_FAILED jev and llm-ext fallback both failed: {detail}")
         return 0
@@ -347,15 +346,10 @@ def _main(
     )
 
     handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
-    # The hold releases the moment the artifact lands, not on the 15-minute TTL -- its ABSENCE
-    # is the release signal (external_handoff_clear._release_summary_hold), so a resumed
-    # session sees the fresh handoff within the same second rather than waiting out the ceiling
-    # that exists only to bound a jev_compact that never returns (TRDD-RAEGS1D5 card 3 C2).
-    # `key=key` (R4): only release THIS lane's own hold record -- a second, still-in-flight
-    # lane's hold (a different transcript, a different key) must survive this release.
-    ehc._release_summary_hold(sd, key=key)
+    # The hold ends the moment this artifact lands: `summary_hold_active` reads the handoff
+    # itself, so there is no release call to make.
     print(f"SUMMARY_READY {len(text.encode('utf-8'))}B for {prev.name} (source={source})")
-    state.log_line(_LOG, f"compacted context ready ({len(text)} chars, source={source}) — hold released")
+    state.log_line(_LOG, f"compacted context ready ({len(text)} chars, source={source})")
     return 0
 
 

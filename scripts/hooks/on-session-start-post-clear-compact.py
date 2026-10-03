@@ -414,15 +414,13 @@ def _main() -> int:
         text = f"{handoff_files.TEMPLATE_MARKER}\n{template}"
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, text, now=now)
 
-        # K8YF2WQ5: this degraded path does NOT release the summary hold. The detached
-        # retry lane spawned below may still land a REAL Jev summary for this same key,
-        # and no freshness-checkable liveness artifact exists for it (verified
-        # 2026-09-27) — releasing here would start the resume clock against a template a
-        # live lane was about to supersede. The hold's own TTL backstop bounds the wait.
+        # The template handoff written above ends the summary hold like any handoff
+        # (recommended default, owner decision pending 2026-10-03 --
+        # `external_handoff_clear._handoff_ends_hold`); a real summary landed later by the
+        # detached retry lane is named by `dispatch._fresh_summary_note`.
         state.log_line(
             "jev-post-clear-hook",
-            "template handoff injected — summary hold left for the detached retry lane "
-            "(or the TTL backstop)",
+            "template handoff injected — it ends the summary hold",
         )
 
         # R2 (TRDD-RAEGS1D5, owner decision 2026-09-23): "if jev is not working after 5
@@ -473,22 +471,8 @@ def _main() -> int:
     # -shaped line inside one would otherwise arrive at session start as marker mimicry) --
     # same treatment `on-session-start.py::_handoff_body` applies to its own injected body.
     print(_INJECTION_HEADER + handoff_note + state.sanitize_for_drift_line(text))
-    # K8YF2WQ5: a completed SUMMARY injection (the real Jev success AND the
-    # unreadable-companion fallback, which still injected a summary built from this
-    # transcript -- both are exactly `full_text is not None`) satisfied the owner's
-    # context, so the hold the clear lane took is released here instead of sitting out
-    # the full 15-minute TTL for a summary already in context. Key-guarded
-    # (`_release_summary_hold`): a hold naming a DIFFERENT transcript is a no-op by
-    # design. `full_text is None` is the template-degradation branch -- it does NOT
-    # release: the detached retry lane it spawns may still land a real Jev summary for
-    # this same key, and THAT lane's own release is the correct one.
-    if full_text is not None:
-        try:
-            import external_handoff_clear as ehc  # noqa: PLC0415
-
-            ehc._release_summary_hold(sd, key=key)
-        except Exception as exc:  # noqa: BLE001 -- a failed unlink must never break session start
-            state.log_line("jev-post-clear-hook", f"summary hold release failed: {exc!r}")
+    # No hold release here: the hold ends because the handoff written above exists on disk
+    # (`external_handoff_clear.summary_hold_active`).
     return 0
 
 

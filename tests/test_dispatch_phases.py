@@ -1047,13 +1047,17 @@ def test_rate_limit_recovery_must_not_consume_the_pending_clear_flag(
 # ---------- summary hold gates the post-clear resume (TRDD-QZVAEWQH) -------
 
 
-def _arm_summary_hold(sd: Path, *, expires_in_s: int, key: str = "") -> None:
+def _arm_summary_hold(
+    sd: Path, *, expires_in_s: int, key: str = "", captured_ago_s: int = 0
+) -> None:
     """Write a minimal `summary-pending.json` — only the fields `summary_hold_active` and
     `pending_summary_key` actually read."""
     import json
 
+    now = int(time.time())
     (sd / "summary-pending.json").write_text(
-        json.dumps({"key": key, "expires": int(time.time()) + expires_in_s}), encoding="utf-8"
+        json.dumps({"key": key, "captured": now - captured_ago_s, "expires": now + expires_in_s}),
+        encoding="utf-8",
     )
 
 
@@ -1101,6 +1105,28 @@ def test_the_hold_clearing_lets_the_next_fire_resume(env_isolation: dict) -> Non
     out = _run_main(dispatch)
     assert "[janitor-resume]" in out, out
     assert not (sd / "resume-after-clear.flag").exists(), "now it must be consumed"
+
+
+
+def test_a_handoff_for_the_held_key_ends_the_hold_and_the_next_fire_resumes(
+    env_isolation: dict,
+) -> None:
+    """Replay of the 2026-10-02 22:09 incident: a hold for key K, then a handoff for K lands a
+    few seconds later and nothing calls a release. The very next fire must emit
+    [janitor-resume] — the hold ends because its handoff exists on disk."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    sd = state.state_dir()
+    _arm_summary_hold(sd, expires_in_s=900, key="k0k0k0k0", captured_ago_s=6)
+    handoff_files.write(sd, "k0k0k0k0", "synthetic compacted context")
+    assert (sd / "summary-pending.json").exists(), "nothing released the hold record"
+
+    out = _run_main(dispatch)
+    assert "[janitor-resume]" in out, out
 
 
 def test_the_resume_note_names_the_fresh_keyed_handoff_by_absolute_path(

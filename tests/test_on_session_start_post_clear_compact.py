@@ -1509,7 +1509,7 @@ def test_success_injection_has_no_recent_turns_section_and_each_exchange_once(
     assert jev_block.index("READ FIRST:") < jev_block.index("-- user u1:0 --")
 
 
-# --- TRDD-K8YF2WQ5: the completed-injection path releases the summary hold ------------------
+# --- the summary hold ends because the injected handoff exists on disk ------------------
 
 
 def _arm_summary_hold(sd: Path, transcript: Path) -> None:
@@ -1528,9 +1528,9 @@ def _arm_summary_hold(sd: Path, transcript: Path) -> None:
     (sd / ehc._PENDING_FILE).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 
 
-def test_success_path_releases_the_summary_hold_it_satisfied(tmp_path, monkeypatch):
-    """K8YF2WQ5: a hold taken for transcript K, a hook SUCCESS (real Jev compose injected)
-    for the SAME transcript — the hold file must be gone, not left to expire on the
+def test_success_path_ends_the_summary_hold_it_satisfied(tmp_path, monkeypatch):
+    """A hold taken for transcript K, a hook SUCCESS (real Jev compose injected) for the SAME
+    transcript — the hold must read inactive (its handoff exists), not wait out the
     15-minute TTL while the summary it was waiting for is already in context."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1561,17 +1561,16 @@ def test_success_path_releases_the_summary_hold_it_satisfied(tmp_path, monkeypat
 
     assert rc == 0
     assert "[janitor-handoff] Post-clear handoff, ALREADY IN CONTEXT below" in buf.getvalue()
-    assert not (sd / ehc._PENDING_FILE).is_file(), (
-        "the hold must be released the moment its summary is injected"
+    assert not ehc.summary_hold_active(sd, int(time.time())), (
+        "the hold must end the moment its summary is on disk"
     )
 
 
-def test_success_path_with_a_different_key_never_releases_another_lanes_hold(
+def test_success_path_with_a_different_key_never_ends_another_lanes_hold(
     tmp_path, monkeypatch,
 ):
-    """K8YF2WQ5 key guard: a hold naming transcript K2 (a different clear's lane) must
-    survive a hook success for transcript K — `_release_summary_hold`'s key check makes
-    the release a no-op, and the hook must not bypass it."""
+    """Key guard: a hold naming transcript K2 (a different clear's lane) must stay active
+    through a hook success for transcript K — only a handoff for ITS key ends it."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     plugin_root = tmp_path / "plugin"
@@ -1606,19 +1605,18 @@ def test_success_path_with_a_different_key_never_releases_another_lanes_hold(
         rc = mod.main()
 
     assert rc == 0
-    assert (sd / ehc._PENDING_FILE).is_file(), (
+    assert ehc.summary_hold_active(sd, int(time.time())), (
         "another lane's still-active hold (a different transcript/key) must survive this run"
     )
 
 
-def test_template_degradation_defers_the_hold_to_the_detached_lane_or_ttl(
+def test_template_degradation_ends_the_hold_like_any_handoff(
     tmp_path, monkeypatch,
 ):
-    """K8YF2WQ5 (amended design, review round 2): on the template-degradation path the hook
-    does NOT release the hold — the detached retry lane it spawns may still land a REAL Jev
-    summary for this same key, and no freshness-checkable liveness artifact exists to gate
-    the release on. The hold waits for that lane's own release (or the TTL backstop), and
-    the deferral is logged rather than silent."""
+    """Template-degradation path: the template handoff the hook injects ends the hold like any
+    handoff (recommended default, owner decision pending 2026-10-03 — flip in
+    `external_handoff_clear._handoff_ends_hold`). A real summary the detached retry lane lands
+    later is named by `dispatch._fresh_summary_note`. The decision is logged, never silent."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     plugin_root = tmp_path / "plugin"
@@ -1665,13 +1663,12 @@ def test_template_degradation_defers_the_hold_to_the_detached_lane_or_ttl(
 
     assert rc == 0
     assert handoff_files.TEMPLATE_MARKER in buf.getvalue()
-    assert (sd / ehc._PENDING_FILE).is_file(), (
-        "the template path must NOT release the hold — a live detached lane may still "
-        "land the real summary for this key"
+    assert not ehc.summary_hold_active(sd, int(time.time())), (
+        "the injected template handoff must end the hold (owner decision pending)"
     )
     log_path = state.log_dir() / "jev-post-clear-hook.log"
     assert log_path.is_file()
-    assert "summary hold left" in log_path.read_text(encoding="utf-8"), (
+    assert "ends the summary hold" in log_path.read_text(encoding="utf-8"), (
         "the deferral must be logged, never silent"
     )
 

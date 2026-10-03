@@ -298,7 +298,7 @@ def test_compact_invocation_form_and_timeout(tmp_path, monkeypatch, _isolated_en
 # --- exit 0: success writes the compacted context through compose_handoff ------------------
 
 
-def test_exit_0_writes_a_composed_handoff_and_releases_the_hold(tmp_path, monkeypatch,
+def test_exit_0_writes_a_composed_handoff_that_ends_the_hold(tmp_path, monkeypatch,
                                                                   _isolated_env):
     project_dir = _isolated_env
     prev = _make_prev_transcript(project_dir)
@@ -317,11 +317,10 @@ def test_exit_0_writes_a_composed_handoff_and_releases_the_hold(tmp_path, monkey
     text = group[0].read_text(encoding="utf-8")
     assert "pointers expand with:" in text
     assert "Jev compaction" in text
-    # The hold must release on ARTIFACT PRESENCE, not merely at some later TTL expiry
-    # (TRDD-RAEGS1D5 card 3 C2): the ten-minute-to-seconds win is exactly this — the moment
-    # the compacted context is written, `summary_hold_active` must already read False.
-    from external_handoff_clear import _PENDING_FILE, summary_hold_active  # noqa: PLC0415
-    assert not (sd / _PENDING_FILE).is_file(), "the hold must be released on success"
+    # The hold ends on ARTIFACT PRESENCE, not merely at some later TTL expiry
+    # (TRDD-RAEGS1D5 card 3 C2): the moment the compacted context is written,
+    # `summary_hold_active` must already read False (no release call exists any more).
+    from external_handoff_clear import summary_hold_active  # noqa: PLC0415
     assert not summary_hold_active(sd, int(time.time())), (
         "summary_hold_active must be False the same second the artifact lands"
     )
@@ -574,8 +573,8 @@ def test_nonzero_exit_maps_to_the_right_finding(
     # `llm_ext_compact.py` stub exists under this fake plugin_root, so the fallback's own
     # subprocess spawn fails), a TEMPLATE handoff is written and the hold is released
     # immediately -- there is nothing left to wait for.
-    from external_handoff_clear import _PENDING_FILE  # noqa: PLC0415
-    assert not (state.state_dir() / _PENDING_FILE).is_file()
+    from external_handoff_clear import summary_hold_active  # noqa: PLC0415
+    assert not summary_hold_active(state.state_dir(), int(time.time()))
     group = handoff_files.newest_group(state.state_dir())
     assert group and group[0].read_text(encoding="utf-8").lstrip().startswith(
         handoff_files.TEMPLATE_MARKER
@@ -636,18 +635,7 @@ def test_auth_finding_deduped_on_the_same_reason(tmp_path, monkeypatch, _isolate
     monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
     _write_probe_stamp(kind="auth", reason="401 invalid key")
 
-    from external_handoff_clear import _release_summary_hold  # noqa: PLC0415
-
-    key = handoff_files.session_key(str(prev))
     assert sps.main() == 0
-    sd = state.state_dir()
-    # `_main`'s own SOURCE_FAILED branch already released this lane's hold (no
-    # `llm_ext_compact.py` stub exists under this fake plugin_root, so the fallback fails too,
-    # and the final-failure path writes a template + releases -- see `run_compact_with_fallback`'s
-    # docstring). This call is therefore a no-op in practice; it stays as a defensive belt-and-
-    # braces cleanup between the two simulated "starts" below, and R4 (owner review finding #1)
-    # now REQUIRES `key=` explicitly -- there is no unconditional release left to fall back to.
-    _release_summary_hold(sd, key=key)
     assert sps.main() == 0
 
     entries = _ledger_entries()
@@ -756,21 +744,15 @@ def test_blocked_finding_deduped_by_content_across_two_sessions(tmp_path, monkey
                f"blocked_digest={same_digest}\n",
     )
 
-    from external_handoff_clear import _release_summary_hold  # noqa: PLC0415
-
-    sd = state.state_dir()
-
     prev1 = _make_prev_transcript(project_dir, name="prevsess1.jsonl")
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev1)
     assert sps.main() == 0
-    _release_summary_hold(sd, key=handoff_files.session_key(str(prev1)))
 
     # A DIFFERENT transcript (a different session_key, so run 2 is a genuine new attempt, not
     # the "already summarized" early-skip) reporting the IDENTICAL content digest.
     prev2 = _make_prev_transcript(project_dir, name="prevsess2.jsonl")
     monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev2)
     assert sps.main() == 0
-    _release_summary_hold(sd, key=handoff_files.session_key(str(prev2)))
 
     entries = _ledger_entries()
     blocked_hits = [e for e in entries if e["code"] == "JEV-COMPACT-BLOCKED"]
@@ -858,8 +840,8 @@ def test_transient_failure_retries_more_than_once_then_llm_ext_fallback_succeeds
     assert "llm-ext fallback summary" in text
     assert "jev-compaction-llm-ext-fallback" in text  # the header line names the source
 
-    from external_handoff_clear import _PENDING_FILE  # noqa: PLC0415
-    assert not (sd / _PENDING_FILE).is_file(), "the hold must release once the fallback succeeds"
+    from external_handoff_clear import summary_hold_active  # noqa: PLC0415
+    assert not summary_hold_active(sd, int(time.time())), "the hold must end once the fallback lands"
 
 
 def test_auth_failure_falls_back_to_llm_ext_without_waiting(tmp_path, monkeypatch, _isolated_env):
@@ -1657,12 +1639,10 @@ def test_a_real_non_template_handoff_still_skips(tmp_path, monkeypatch, _isolate
 # --- TRDD-RAEGS1D5 adversarial-review follow-up fixes (2026-09-23) -------------------------
 
 
-def test_overlapping_lanes_release_only_the_matching_key(tmp_path, monkeypatch, _isolated_env):
-    """R4, LANE level (owner review finding #1): while lane A is still compacting, lane B's
-    own capture overwrites the SAME shared `summary-pending.json` with ITS key -- lane A's
-    later success must still release only ITS OWN hold record. Here that means a no-op: the
-    CURRENT record on disk belongs to B by the time A finishes, so A's release must leave it
-    fully intact rather than dropping B's still-active hold out from under it."""
+def test_lane_a_finishing_leaves_lane_bs_hold_active(tmp_path, monkeypatch, _isolated_env):
+    """LANE level: while lane A is still compacting, lane B's own capture overwrites the SAME
+    shared `summary-pending.json` with ITS key. Lane A's handoff (key A) must not end lane B's
+    hold: the hold ends only on a handoff for ITS OWN key."""
     project_dir = _isolated_env
     prev_a = _make_prev_transcript(project_dir, name="a.jsonl")
     prev_b = _make_prev_transcript(project_dir, name="b.jsonl")
@@ -1691,10 +1671,9 @@ def test_overlapping_lanes_release_only_the_matching_key(tmp_path, monkeypatch, 
 
     # Lane A wrote ITS OWN handoff and finished successfully...
     assert handoff_files.newest_group(sd), "lane A's own compose must still have landed"
-    # ...but the CURRENT pending record on disk still belongs to lane B: A's release call
-    # (key=key_a) must have been a no-op against B's record (key=key_b).
+    # ...but the CURRENT pending record on disk still belongs to lane B and stays active.
     rec = json.loads((sd / ehc._PENDING_FILE).read_text(encoding="utf-8"))
-    assert rec["key"] == key_b, "lane A's release must not have dropped lane B's own hold"
+    assert rec["key"] == key_b, "lane A must not have dropped lane B's own hold"
     assert ehc.summary_hold_active(sd, int(time.time())), "lane B's hold must still be armed"
 
 
@@ -1723,7 +1702,7 @@ def test_exit_6_no_digest_never_tries_llm_ext_fallback(tmp_path, monkeypatch, _i
     sd = state.state_dir()
     text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
     assert text.lstrip().startswith(handoff_files.TEMPLATE_MARKER)
-    assert not (sd / ehc._PENDING_FILE).is_file()
+    assert not ehc.summary_hold_active(sd, int(time.time()))
 
 
 def test_exit_127_command_not_found_never_tries_llm_ext_fallback(
@@ -1762,7 +1741,7 @@ def test_exit_127_command_not_found_never_tries_llm_ext_fallback(
     sd = state.state_dir()
     text = handoff_files.newest_group(sd)[0].read_text(encoding="utf-8")
     assert text.lstrip().startswith(handoff_files.TEMPLATE_MARKER)
-    assert not (sd / ehc._PENDING_FILE).is_file()
+    assert not ehc.summary_hold_active(sd, int(time.time()))
 
 
 def test_llm_ext_fallback_handoff_declares_itself_not_verbatim_jev_output(

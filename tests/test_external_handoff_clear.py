@@ -54,7 +54,7 @@ def test_pending_summary_key_reads_the_live_pending_record(tmp_path):
 
 
 def test_pending_summary_key_falls_back_to_the_newest_group_once_released(tmp_path):
-    """After `_release_summary_hold` deletes the record, the newest handoff group on disk
+    """Once the record is gone, the newest handoff group on disk
     still names the key a late reader needs."""
     import handoff_files
 
@@ -69,47 +69,87 @@ def test_pending_summary_key_empty_when_neither_source_names_one(tmp_path):
     assert ehc.pending_summary_key(sd) == ""
 
 
-# --- _release_summary_hold key guard (TRDD-RAEGS1D5 advisor R4) --------------
+# --- the hold ends with its handoff (never through a release call) -----------------------
 
 
-def test_release_summary_hold_with_a_foreign_key_leaves_the_pending_record_intact(tmp_path):
-    """R4: lane A's own release must NEVER drop lane B's still-active hold. The retry-then-
-    llm-ext fallback lane can now hold for up to ~15 minutes instead of the old <=2-minute
-    single `run_compact` call, so two overlapping `/clear`s in the same state dir (a second
-    manual clear while the owner iterates, or two panes of one project) collide far more
-    often than before this card — without this guard, lane A finishing (successfully or not)
-    would unlink `summary-pending.json` out from under lane B, and B's session would then
-    resume EARLY, before its own compaction landed."""
+def _hold(sd: Path, key: str, *, captured: int, expires: int | None = None) -> None:
     import json
 
-    sd = _project(tmp_path) / ".janitor" / "state"
-    # Lane B's hold: written LAST, so it is the CURRENT pending record on disk.
     (sd / ehc._PENDING_FILE).write_text(
-        json.dumps({"key": "lane-b-key", "expires": int(time.time()) + 900}), encoding="utf-8"
+        json.dumps({"key": key, "captured": captured,
+                    "expires": expires if expires is not None else captured + 900}),
+        encoding="utf-8",
     )
 
-    ehc._release_summary_hold(sd, key="lane-a-key")  # a DIFFERENT lane's own key
 
-    assert (sd / ehc._PENDING_FILE).is_file(), "a foreign key's release must be a no-op"
-    assert ehc.summary_hold_active(sd, int(time.time())), "lane B's hold must survive intact"
-    assert ehc.pending_summary_key(sd) == "lane-b-key"
+def _set_mtime(path: Path, epoch: int) -> None:
+    os.utime(path, (epoch, epoch))
 
 
-def test_release_summary_hold_with_the_matching_key_releases_it(tmp_path):
-    """The mirror case: a lane releasing ITS OWN hold (the key it captured with) must still
-    actually release it -- the guard in `test_release_summary_hold_with_a_foreign_key_...`
-    above must not have made every release a no-op."""
-    import json
+def test_a_handoff_for_the_key_written_after_capture_ends_the_hold(tmp_path):
+    import handoff_files
 
     sd = _project(tmp_path) / ".janitor" / "state"
-    (sd / ehc._PENDING_FILE).write_text(
-        json.dumps({"key": "lane-a-key", "expires": int(time.time()) + 900}), encoding="utf-8"
-    )
+    now = int(time.time())
+    _hold(sd, "keyk0001", captured=now - 6, expires=now + 900)
+    assert ehc.summary_hold_active(sd, now)
+    handoff_files.write(sd, "keyk0001", "synthetic summary")
+    assert not ehc.summary_hold_active(sd, now)
 
-    ehc._release_summary_hold(sd, key="lane-a-key")
 
-    assert not (sd / ehc._PENDING_FILE).is_file()
-    assert not ehc.summary_hold_active(sd, int(time.time()))
+def test_an_older_handoff_or_a_different_key_leaves_the_hold_active(tmp_path):
+    import handoff_files
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    now = int(time.time())
+    _hold(sd, "keyk0001", captured=now - 6, expires=now + 900)
+    older = handoff_files.write(sd, "keyk0001", "synthetic old summary")
+    _set_mtime(older, now - 60)
+    handoff_files.write(sd, "otherkey", "synthetic other-key summary")
+    assert ehc.summary_hold_active(sd, now)
+
+
+def test_a_template_handoff_also_ends_the_hold(tmp_path):
+    """Recommended default, owner decision pending (2026-10-03): a template ends the hold."""
+    import handoff_files
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    now = int(time.time())
+    _hold(sd, "keyk0001", captured=now - 6, expires=now + 900)
+    handoff_files.write(sd, "keyk0001", f"{handoff_files.TEMPLATE_MARKER}\nsynthetic template")
+    assert not ehc.summary_hold_active(sd, now)
+
+
+def test_capture_takes_no_hold_when_a_handoff_for_the_key_exists(tmp_path):
+    import handoff_files
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    transcript = tmp_path / "prev.jsonl"
+    transcript.write_text('{"x": 1}\n', encoding="utf-8")
+    key = handoff_files.session_key(str(transcript))
+    handoff_files.write(sd, key, "synthetic summary")
+    rec = ehc._capture_summary_source(sd, {"transcript": str(transcript)}, int(time.time()))
+    assert rec is not None and rec["key"] == key, "a SECOND clear of the same key must still fire"
+    assert not (sd / ehc._PENDING_FILE).exists()
+
+
+def test_capture_still_returns_none_for_an_unreadable_transcript(tmp_path):
+    sd = _project(tmp_path) / ".janitor" / "state"
+    assert ehc._capture_summary_source(sd, {"transcript": str(tmp_path / "nope")}, 1) is None
+
+
+def test_a_killed_hook_does_not_hold_forever(tmp_path):
+    """clear observed after capture, no handoff, and 100 s have passed -> the hold ends."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    now = int(time.time())
+    _hold(sd, "keyk0001", captured=now - 200, expires=now + 700)
+    assert ehc.summary_hold_active(sd, now), "no clear observed yet: still held"
+    (sd / "clear-observed.ts").write_text(str(now - 150), encoding="utf-8")
+    assert not ehc.summary_hold_active(sd, now)
+    (sd / "clear-observed.ts").write_text(str(now - 50), encoding="utf-8")
+    assert ehc.summary_hold_active(sd, now), "the hook may still be running (<100 s)"
+    (sd / "clear-observed.ts").write_text(str(now - 250), encoding="utf-8")
+    assert ehc.summary_hold_active(sd, now), "an observation older than the capture is stale"
 
 
 # --- _run: NEITHER lane composes (TRDD-QZVAEWQH) ------------------------------

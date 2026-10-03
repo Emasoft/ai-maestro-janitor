@@ -102,6 +102,11 @@ def _capture_summary_source(sd: Path, facts: dict, now: int) -> dict | None:
     summary exists"; it is "the material the summary will be made FROM is still there, and we
     know where". That is answerable with two syscalls.
 
+    None stays reserved for "transcript unreadable". When a handoff for this key already exists
+    the normal record is still returned but `summary-pending.json` is NOT written: a hold that
+    is born next to its own handoff would only block the resume (the detached retry lane and a
+    second clear of the same key both land here).
+
     Writing the file before the clear also makes the hold crash-safe: if this process dies
     between the fire and the summary, the next heartbeat finds a pending record with a TTL rather
     than a session that silently resumed with nothing.
@@ -112,54 +117,52 @@ def _capture_summary_source(sd: Path, facts: dict, now: int) -> dict | None:
     if not _summary_source_readable(transcript):
         return None
 
+    key = handoff_files.session_key(transcript)
     record = {
         "transcript": transcript,
-        "key": handoff_files.session_key(transcript),
+        "key": key,
         "captured": now,
         "expires": now + _HOLD_TTL_S,
     }
-    state.atomic_write(sd / _PENDING_FILE, json.dumps(record, indent=2) + "\n")
+    if not _handoff_ends_hold(sd, key, 0):
+        state.atomic_write(sd / _PENDING_FILE, json.dumps(record, indent=2) + "\n")
     return record
 
+# A post-clear hook is killed at 90 s; past this grace a clear that was observed but produced no
+# handoff must not keep the hold alive.
+_HOOK_KILL_GRACE_S = 100
 
-def _release_summary_hold(sd: Path, *, key: str) -> None:
-    """Drop the hold. Its ABSENCE is the release signal, so this must be unlink-not-rewrite.
 
-    `key` MUST match the PENDING RECORD's own `key` field or this is a no-op (TRDD-RAEGS1D5
-    advisor R4). REQUIRED, no unconditional path -- the production callers
-    (`summarize_previous_session.py::_main` and, since TRDD-K8YF2WQ5, the post-clear-compact
-    hook's completed-injection path) always have their own lane's key in hand by the time
-    they release, so there
-    is no legitimate caller left that needs to release "whichever record happens to be
-    there". Before this guard existed at all the release was unconditional: a lane that just
-    finished ITS OWN compaction would unlink `summary-pending.json` even if a SECOND,
-    still-in-flight lane had since overwritten it with a different transcript's record. The
-    retry-then-llm-ext fallback lane can now hold for up to ~15 minutes (a 5-minute Jev retry
-    budget plus the llm-ext attempt) instead of the old <=2-minute single `run_compact` call,
-    so two overlapping `/clear`s in the same state dir (a second manual clear while the owner
-    iterates, or two panes of one project) collide far more often than before — without this
-    check, lane A's release would drop lane B's still-active hold and B's session would then
-    resume EARLY, before its own compaction landed, pointing at whichever handoff happens to
-    be newest (`pending_summary_key`'s own fallback) rather than B's. A missing/unreadable
-    record is treated as "nothing to guard" and falls through to the unlink — a record that's
-    already gone means there is nothing left to protect anyway.
+def _handoff_ends_hold(sd: Path, key: str, since: int) -> bool:
+    """True when a handoff for `key` written at/after `since` is on disk.
+
+    Matched through `handoff_files._entries` (which uses `handoff_files.parse`; no second
+    filename parser); `since` is compared with the file mtime.
     """
-    import json  # noqa: PLC0415 - only this path needs it
-
-    try:
-        rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
-        if str(rec.get("key") or "") != key:
-            return  # a DIFFERENT lane's still-active hold -- not ours to release
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    try:
-        (sd / _PENDING_FILE).unlink()
-    except OSError:
-        pass
+    if not key:
+        return False
+    for ekey, _ts, path in handoff_files._entries(sd):
+        if ekey != key or state.file_mtime(path) < since:
+            continue
+        # RECOMMENDED DEFAULT, OWNER DECISION PENDING (2026-10-03): a TEMPLATE handoff
+        # (fact-only degrade, `TEMPLATE_MARKER` first line) also ends the hold, because it was
+        # injected into the resumed context all the same. A "no" is a one-line change: skip the
+        # entry here when its first line is `handoff_files.TEMPLATE_MARKER`. A later real summary
+        # is named by `dispatch._fresh_summary_note` either way.
+        return True
+    return False
 
 
 def summary_hold_active(sd: Path, now: int) -> bool:
     """True while a cleared session is waiting for its summary — read by the heartbeat.
+
+    The hold ends when its handoff exists on disk (`_handoff_ends_hold`), NOT through a release
+    call: Claude's first response waits for every SessionStart hook to finish
+    (code.claude.com/docs/en/hooks, "Claude's first response still waits for the hooks to
+    finish"), so the resume turn always sees the injected context. A release call was a second
+    source of truth that 3.6.3 lacked, and the hold outlived its handoff (incident 2026-10-02
+    22:09). If the post-clear hook is killed (90 s) before writing any handoff, the hold also
+    ends once `clear-observed.ts` is newer than `captured` and older than `now` - 100 s.
 
     FAIL-OPEN on every uncertainty: a missing file, unreadable JSON, or a malformed `expires`
     all mean "not held". A hold is a REFUSAL to do work, so an unparseable record must never be
@@ -170,7 +173,13 @@ def summary_hold_active(sd: Path, now: int) -> bool:
 
     try:
         rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
-        return now < int(rec["expires"])
+        if now >= int(rec["expires"]):
+            return False
+        captured = int(rec.get("captured") or 0)
+        if _handoff_ends_hold(sd, str(rec.get("key") or ""), captured):
+            return False
+        observed = state.read_int_state(sd / "clear-observed.ts", 0)
+        return not (captured < observed < now - _HOOK_KILL_GRACE_S)
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -182,8 +191,8 @@ def pending_summary_key(sd: Path) -> str:
     fresh keyed handoff instead of whatever SessionStart already injected. Read
     `summary-pending.json`'s own `key` field while the record is still present — the common
     case, since a resume racing the hold or landing seconds after release both see it. Fall
-    back to the newest handoff GROUP on disk once the record is gone (`_release_summary_hold`
-    deletes it on success, and a resume can land after that deletion). Returns "" when neither
+    back to the newest handoff GROUP on disk once the record is gone (a resume can land after the
+    TTL swept it). Returns "" when neither
     source names a key, so the caller omits the extra note rather than pointing at a guess.
     """
     import json  # noqa: PLC0415
