@@ -186,6 +186,41 @@ def _recent_model_handoff(sd: Path, key: str, transcript_path: str) -> Path | No
         return None
     return path
 
+def _continuity(root: Path, sd: Path, transcript_path: str) -> tuple[str, str | None]:
+    """(`## Continuity` block, quoted NEXT ACTION) from the OLD transcript; ("", None) on a fault.
+
+    Skills, live agents and open files come from the PreCompact hook's own
+    `_build_continuity_record` (loaded by path from THIS file's own plugin tree, not from
+    `CLAUDE_PLUGIN_ROOT`: the file name has a hyphen and the module reads env-derived
+    constants at import, so it cannot move into `lib/`); the goal, tasks, plan file and the
+    last exchange are the clear-only fields in `lib/session_continuity.py`. The two halves
+    fail independently: a native-record fault still leaves the clear-only fields.
+    """
+    import session_continuity as sc  # noqa: PLC0415
+    import state  # noqa: PLC0415
+
+    record: dict = {}
+    try:
+        import importlib.util  # noqa: PLC0415
+
+        spec = importlib.util.spec_from_file_location(
+            "pre_compact_handoff_for_clear",
+            _PLUGIN_ROOT / "scripts" / "hooks" / "pre-compact-handoff.py",
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError("pre-compact-handoff.py not loadable")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        record = mod._build_continuity_record(root, "clear", transcript_path, "", str(root), sd)
+    except Exception as exc:  # noqa: BLE001 -- continuity is best-effort, never blocks the clear
+        state.log_line("jev-post-clear-hook", f"native continuity record unavailable: {exc!r}")
+    try:
+        fields = sc.clear_fields(transcript_path)
+    except Exception as exc:  # noqa: BLE001 -- same: degrade to the generic NEXT ACTION
+        state.log_line("jev-post-clear-hook", f"clear continuity fields unavailable: {exc!r}")
+        return "", None
+    return sc.render_block({**record, **fields}), sc.next_action(fields)
+
 
 def main() -> int:
     try:
@@ -270,6 +305,12 @@ def _main() -> int:
     # why the ordering is load-bearing.
     model_handoff = _recent_model_handoff(sd, key, transcript_path)
     plugin_root = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_PLUGIN_ROOT))
+    # The sidecar exists only for a janitor-orchestrated clear (a user-typed /clear never gets
+    # here), so the continuity block and the quoted NEXT ACTION are built only on this path.
+    # Its byte size is taken out of the lane budget BEFORE the Jev summary is sized, so the
+    # block can never push the injection past `LANE_INJECTION_MAX_BYTES`.
+    continuity_block, next_action = _continuity(root, sd, transcript_path)
+    lane_budget = jcl.LANE_INJECTION_MAX_BYTES - len(continuity_block.encode("utf-8"))
     head_paths, heads_unavailable, in_flight_cards, other_open_ids_line = jcl.state_head_paths(
         root, sd, transcript_path,
     )
@@ -289,7 +330,7 @@ def _main() -> int:
     # janitor finding.
     inputs = ec.HandoffInputs(
         trigger="jev-compaction", findings=findings, cards=in_flight_cards,
-        other_open_ids=other_open_ids_line,
+        other_open_ids=other_open_ids_line, next_action=next_action,
     )
     # Computed BEFORE `run_compact` (TRDD-RAEGS1D5 retune follow-up): `compose_handoff_room`
     # needs the SAME facts `compose_handoff` itself will use once a summary exists -- see that
@@ -308,7 +349,7 @@ def _main() -> int:
     # nothing there, since no summary is being sized.
     inject_inputs, inject_max_bytes = jcl.trim_cards_for_room(
         inputs, now_iso=now_iso, tail=(), transcript_path=transcript_path,
-        max_bytes=jcl.LANE_INJECTION_MAX_BYTES, source=jcl.SOURCE_JEV,
+        max_bytes=lane_budget, source=jcl.SOURCE_JEV,
     )
 
     # `run_compact` execs `jev_compact.py compact` BY PATH -- it owns the jev-probe stamp
@@ -401,7 +442,7 @@ def _main() -> int:
         # sized against above.
         text = ec.compose_handoff(
             inject_inputs, now_iso=now_iso, summary=inject_text, source=jcl.SOURCE_JEV, tail=(),
-            max_bytes=jcl.LANE_INJECTION_MAX_BYTES,
+            max_bytes=lane_budget,
         )
         handoff_files.write(sd, key or handoff_files.UNKEYED_KEY, full_text, now=now)
     else:
@@ -470,7 +511,10 @@ def _main() -> int:
     # -- TRDD-D7RLXAN1, formerly the tail's -- and a `[janitor-…]`
     # -shaped line inside one would otherwise arrive at session start as marker mimicry) --
     # same treatment `on-session-start.py::_handoff_body` applies to its own injected body.
-    print(_INJECTION_HEADER + handoff_note + state.sanitize_for_drift_line(text))
+    print(
+        _INJECTION_HEADER + handoff_note
+        + state.sanitize_for_drift_line(continuity_block + text)
+    )
     # No hold release here: the hold ends because the handoff written above exists on disk
     # (`external_handoff_clear.summary_hold_active`).
     return 0

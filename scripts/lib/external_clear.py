@@ -1627,6 +1627,9 @@ class HandoffInputs:
     trigger: str = ""
     idle_seconds: int | None = None
     context_tokens: int | None = None
+    # The clear path's NEXT ACTION sentence (`session_continuity.next_action`): it quotes the
+    # last human message and the reply that answered it. None keeps the generic card-STATE text.
+    next_action: str | None = None
 
 
 def compose_template_handoff(
@@ -1667,7 +1670,12 @@ def compose_template_handoff(
         # The empty-cards fallback stays ONE runnable instruction and does not exceed the old
         # prose's byte cost, so max_bytes trimming behaviour is unchanged. Both renderings (the
         # live call and the trim loop) go through this same render(), so one branch covers both.
-        if cards[:n_cards]:
+        if inputs.next_action:
+            # The clear path knows what the cleared session was doing (TRDD-DS3WDTPV C2): the
+            # quoted last message + reply replace the card-STATE pointer, which named whichever
+            # card happened to be in flight, not what the user last asked.
+            out += [inputs.next_action]
+        elif cards[:n_cards]:
             out += [
                 "Read the `## STATE` block of the first in-flight card below, then continue its "
                 "NEXT ACTION. A card's STATE block is authoritative; this handoff is only an index.",

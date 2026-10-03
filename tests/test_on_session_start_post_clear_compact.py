@@ -1503,9 +1503,11 @@ def test_success_injection_has_no_recent_turns_section_and_each_exchange_once(
 
     assert rc == 0
     assert "## Recent turns" not in out
-    assert out.count("NEWEST-OWNER-MARKER") == 1
-    assert out.count("ASSISTANT-REPLY-MARKER") == 1
+    # Counted inside the Jev block only: the clear path's NEXT ACTION (TRDD-DS3WDTPV C2)
+    # deliberately quotes the last exchange once more, outside it.
     jev_block = out.split("## Compacted context (Jev compaction)", 1)[1]
+    assert jev_block.count("NEWEST-OWNER-MARKER") == 1
+    assert jev_block.count("ASSISTANT-REPLY-MARKER") == 1
     assert jev_block.index("READ FIRST:") < jev_block.index("-- user u1:0 --")
 
 
