@@ -206,3 +206,29 @@ def test_wedge_debounced_rotation_still_respects_the_dwell_window(tmp_path: Path
     rotator.save_state({**rotator.load_state(), "last_switch_at": __import__("time").time() - 1})
     rotator.cmd_auto()
     assert switches == [], "a wedge-scheduled tick must still defer inside the dwell window"
+
+def _daemon_tick_primary_read_permitted(monkeypatch: pytest.MonkeyPatch) -> bool:
+    """Run the daemon's rotator-tick body with the rotator subprocess stubbed out, and report
+    whether the env it would hand the subprocess lets the rotator do the `-w` primary read."""
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda: True)
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        daemon, "_run_workload",
+        lambda *a, **k: seen.append(rotator._primary_secret_read_permitted()),
+    )
+    daemon.task_oauth_rotator_tick()
+    return seen[0]
+
+
+def test_daemon_tick_skips_primary_read_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-ZKXQXHBI's daemon-context primary `-w` read is OFF unless explicitly opted in."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    monkeypatch.delenv("JANITOR_ROTATOR_DAEMON_PRIMARY_READ", raising=False)
+    assert _daemon_tick_primary_read_permitted(monkeypatch) is False
+
+
+def test_daemon_tick_primary_read_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 lets the daemon tick attempt the primary read."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    monkeypatch.setenv("JANITOR_ROTATOR_DAEMON_PRIMARY_READ", "1")
+    assert _daemon_tick_primary_read_permitted(monkeypatch) is True

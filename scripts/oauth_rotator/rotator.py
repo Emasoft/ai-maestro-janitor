@@ -1669,10 +1669,47 @@ def classify_refresh_failure(exc: BaseException, body: str = "") -> str:
         return REFRESH_FAIL_TLS
     return REFRESH_FAIL_NETWORK  # URLError (non-HTTP) / TimeoutError — plain network trouble
 
+def _token_url() -> str:
+    """The token endpoint. JANITOR_OAUTH_TOKEN_URL is a TEST SEAM and is honoured ONLY for a
+    loopback http(s) host: anyone able to set the rotator's env could otherwise redirect every
+    refresh token to a host of their choosing. The host is compared EXACTLY (urlsplit hostname) —
+    never by prefix/substring, which `http://127.0.0.1.evil.com` and a URL whose userinfo part is
+    `localhost` (`http://localhost` + `@` + an attacker host) would defeat. Anything else is ignored with a loud warning (the URL's host only, never a token)."""
+    from urllib.parse import urlsplit  # local: no module-level urllib.parse import to anchor an edit on
+
+    raw = os.environ.get("JANITOR_OAUTH_TOKEN_URL")
+    if not raw:
+        return TOKEN_URL
+    try:
+        parts = urlsplit(raw)
+        host = parts.hostname
+    except ValueError:
+        parts, host = None, None
+    if parts is not None and parts.scheme in ("http", "https") and host in ("127.0.0.1", "localhost", "::1"):
+        return raw
+    _log("[refresh] WARNING: ignoring JANITOR_OAUTH_TOKEN_URL — host %r is not loopback; using the real token endpoint" % host)
+    return TOKEN_URL
+
+
+def _is_best_known_live(email: str) -> bool:
+    """True when `email` is the best-known LIVE identity: state.live_email, or the session beacon's
+    email when the beacon is NEWER than state.last_switch_at. A beacon older than the last switch
+    names the account switched AWAY from; honouring it would stop the outgoing spare ever being
+    refreshed (how fmuaddib/emanuele decayed)."""
+    state = load_state()
+    if state.get("live_email") == email:
+        return True
+    beacon = read_live_identity_beacon()
+    if beacon is None or beacon.get("email") != email:
+        return False
+    last_switch = state.get("last_switch_at")
+    return not isinstance(last_switch, (int, float)) or float(beacon["ts"]) > float(last_switch)
+
 def _report_refresh_failure(cause: str, on_failure: Callable[[str], None] | None) -> None:
     """Surface WHY a token exchange failed. A caller-supplied `on_failure` receives it; otherwise it
     is logged here — a refresh that fails silently is how the 2026-10-03 00:37 "Login expired" went
-    undiagnosed (cmd_auto's slot refreshes passed no callback, so the cause was lost)."""
+    undiagnosed: `_refresh_and_heal_slot` (cmd_auto's refresh kernel) passed no callback, so the
+    cause was lost. (`_keepalive_refresh` already passes `on_failure=failure_cause.append`.)"""
     if on_failure is not None:
         on_failure(cause)
     else:
@@ -1717,10 +1754,9 @@ def refresh_oauth_token(blob: dict, *, on_failure: Callable[[str], None] | None 
     # Cloudflare at the token endpoint (HTTP 403 / error code 1010 — "banned browser
     # signature"; empirically verified 2026-06-09). Reuse the same UA the /roles + /usage
     # calls already use (which pass CF) so keepalive-refresh isn't silently 1010-blocked.
-    # JANITOR_OAUTH_TOKEN_URL is a test seam: it lets a test aim the exchange at a real local
-    # socket instead of mocking the refresh path. Production never sets it; the default is unchanged.
+    # _token_url() honours the JANITOR_OAUTH_TOKEN_URL test seam for loopback hosts only.
     req = urllib.request.Request(
-        os.environ.get("JANITOR_OAUTH_TOKEN_URL", TOKEN_URL),
+        _token_url(),
         data=body,
         method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
@@ -2226,8 +2262,8 @@ def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None
                 return twin, state
             # WHY no refresh here: once an account is live, Claude Code owns its rotating
             # refresh grant. Refreshing the slot twin can only fail (the copy is spent) or
-            # spend the live session's grant — the 2026-10-03 00:37 "Login expired" is under
-            # investigation for exactly this. An unusable twin means fail-safe stay-put below.
+            # spend the live session grant (memory 53KFOJEI, TRDD-HL3WBA2Q). An unusable twin
+            # means fail-safe stay-put below.
             _decide(
                 "auto: live account %s has no usable slot twin to probe — staying put "
                 "this tick (fail-safe; TRDD-7PYTX4E9)" % b_email
@@ -2273,6 +2309,9 @@ def _refresh_and_heal_slot(email: str, blob: dict, state: dict) -> tuple[dict | 
         and so MUST be persisted by the caller BEFORE any _switch_blob (which re-loads state from
         disk, so an unsaved update would be lost).
     """
+    if _is_best_known_live(email):
+        _log("[refresh] refusing to refresh %s: it is the best-known LIVE account (Claude Code owns its rotating grant)" % email)
+        return None, False
     refreshed = refresh_oauth_token(blob)
     if refreshed is None:
         return None, False
@@ -2764,6 +2803,9 @@ def _keepalive_refresh() -> list[str]:
     for email in list(slots.keys()):
         if email == live_email:
             continue  # never refresh the live account out from under Claude Code
+        if _is_best_known_live(email):
+            _log("[keepalive] %s: not refreshed — it is the best-known LIVE account (session beacon; state.live_email is stale)" % email)
+            continue
         blob = read_slot(email)
         if not blob:
             continue

@@ -808,17 +808,15 @@ def task_oauth_rotator_tick() -> None:
     if not oauth_supervisor.opt_in_present():
         return  # rotator not activated on this machine -> silent no-op
     rotator_py = _HERE / "oauth_rotator" / "rotator.py"
-    # TRDD-ZKXQXHBI: the tick now ATTEMPTS one bounded read of the primary live item
-    # behind its own latch (a -25308 refusal trips that latch at once, timeouts need 3 in
-    # a row, 600 s cooldown; the SHARED keychain latch is never tripped), so we no longer
-    # force JANITOR_ROTATOR_HEADLESS here. FIX B2's blunt skip (TRDD-K3WQ7XM9) is retired
-    # for the tick: it was the leading cause of the live account's slot twin decaying
-    # (TRDD-K0PMVRN6 H1) — the mirror-based identity work it forced left the slot un-
-    # refreshed. The read stays hard-timeout-bound and cannot prompt: in this LaunchAgent
-    # context the ACL read returns -25308 WITHOUT a GUI prompt (may_prompt=False + the
-    # latch make a hang impossible to repeat). The env var remains an OPERATOR lever —
-    # setting it explicitly still skips the read (the F1 capture line then says
-    # "skipped by policy") — but the daemon no longer sets it FOR the tick.
+    # TRDD-ZKXQXHBI added a bounded daemon-tick read of the PRIMARY live item (`security -w`)
+    # behind its own latch, but its precondition — probing that read from the daemon's
+    # LaunchAgent context — was NEVER run, and a wrong guess is a keychain prompt storm.
+    # Owner decision pending (2026-10-03), so the default is the previous safe behaviour:
+    # FIX B2 (TRDD-K3WQ7XM9) marks the tick HEADLESS and the rotator never reads the primary
+    # (it works from the -livebak mirror). JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 opts in to the
+    # ZKXQXHBI read. Session-context reads are untouched (they never set HEADLESS).
+    if os.environ.get("JANITOR_ROTATOR_DAEMON_PRIMARY_READ", "").strip() != "1":
+        os.environ["JANITOR_ROTATOR_HEADLESS"] = "1"
     _run_workload(
         [sys.executable, str(rotator_py), "tick", "--only-if-claude-running"],
         timeout=120,

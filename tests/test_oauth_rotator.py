@@ -3186,3 +3186,137 @@ def test_a_truncated_blob_missing_the_refresh_key_is_not_a_setup_token_slot() ->
     assert rotator.is_setup_token_slot(
         {"claudeAiOauth": {"accessToken": "x", "refreshToken": None}}) is True, \
         "the key present and null is the real setup-token shape"
+
+@pytest.fixture
+def token_server(monkeypatch: pytest.MonkeyPatch):
+    """A REAL loopback HTTP server standing in for the token endpoint (via the loopback-only
+    JANITOR_OAUTH_TOKEN_URL seam); yields the list of request bodies it received."""
+    import http.server
+    import threading
+
+    posts: list[bytes] = []
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            posts.append(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":"invalid_grant"}')
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - http.server API
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("JANITOR_OAUTH_TOKEN_URL", "http://127.0.0.1:%d/v1/oauth/token" % server.server_address[1])
+    try:
+        yield posts
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_token_url_override_ignored_unless_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R3-A: JANITOR_OAUTH_TOKEN_URL redirects refresh tokens, so only a loopback http(s) host
+    is honoured; anything else is ignored with a loud warning and the real endpoint is used."""
+    seen: list[str] = []
+    logs: list[str] = []
+
+    def _urlopen(req, *_a, **_k):  # the seam: records the destination, never touches the network
+        seen.append(req.full_url)
+        raise urllib.error.URLError("no network in this test")
+
+    monkeypatch.setattr(rotator.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(rotator, "_log", logs.append)
+    for bad in ("https://evil.example/steal", "http://127.0.0.1.evil.example/x", "http://localhost" + "@" + "evil.example/x", "ftp://127.0.0.1/x", "file:///etc/passwd"):
+        monkeypatch.setenv("JANITOR_OAUTH_TOKEN_URL", bad)
+        rotator.refresh_oauth_token(_blob("T", refresh="SECRET-RT"))
+    assert seen == [rotator.TOKEN_URL] * 5
+    assert sum("JANITOR_OAUTH_TOKEN_URL" in line and "ignor" in line for line in logs) == 5
+    assert not any("SECRET-RT" in line for line in logs)
+    for good in ("http://127.0.0.1:9/t", "http://localhost:9/t", "http://[::1]:9/t"):
+        monkeypatch.setenv("JANITOR_OAUTH_TOKEN_URL", good)
+        rotator.refresh_oauth_token(_blob("T", refresh="SECRET-RT"))
+    assert seen[5:] == ["http://127.0.0.1:9/t", "http://localhost:9/t", "http://[::1]:9/t"]
+
+
+def test_keepalive_never_refreshes_the_beacon_live_account(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token_server: list[bytes]) -> None:
+    """R3-D: state.live_email is stale (names b@x) but the session beacon says a@x is live —
+    keepalive must send ZERO token POSTs for a@x (a real local server counts them)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "b@x", "live_fp": "f" * 16, "slots": {"a@x": {}}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": "f" * 16, "email": "a@x", "ts": 1.0})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: _blob("A", expires_ms=_ms_in(1)) if e == "a@x" else None)
+    posts = token_server
+    refreshed = rotator._keepalive_refresh()
+    assert posts == []
+    assert refreshed == []
+
+def test_keepalive_ignores_a_beacon_older_than_the_last_switch(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token_server: list[bytes]) -> None:
+    """R3-D: a beacon stamped BEFORE state.last_switch_at names the account switched AWAY from;
+    refusing it would let the outgoing spare decay, so keepalive still refreshes that slot."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    rotator.save_state({"live_email": "b@x", "live_fp": "f" * 16, "last_switch_at": 1000.0,
+                        "slots": {"a@x": {}}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": "f" * 16, "email": "a@x", "ts": 500.0})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: _blob("A", expires_ms=_ms_in(1)) if e == "a@x" else None)
+    rotator._keepalive_refresh()
+    assert len(token_server) == 1, "the outgoing account's slot must still be refreshed"
+
+
+def test_refresh_and_heal_slot_refuses_the_live_identity(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token_server: list[bytes]) -> None:
+    """R3-D: the cmd_auto / recovery kernel also refuses a slot equal to state.live_email."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "a@x", "live_fp": "f" * 16, "slots": {"a@x": {}}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: None)
+    posts = token_server
+    fresh, changed = rotator._refresh_and_heal_slot("a@x", _blob("A", expires_ms=_ms_in(-1)), rotator.load_state())
+    assert posts == [] and fresh is None and changed is False
+
+
+def test_cmd_auto_full_tick_never_posts_for_the_live_account(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token_server: list[bytes]) -> None:
+    """R3-E: one whole cmd_auto run, mirror-sourced live, beacon != mirror fp and naming a@x
+    whose slot twin is expired → the local token server receives 0 POSTs."""
+    mirror = _blob("MIRROR", expires_ms=_ms_in(8))
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "stale@x", "live_fp": "f" * 16, "slots": {"a@x": {}, "b@x": {}}})
+    monkeypatch.setattr(rotator, "read_live_blob_with_source", lambda: (mirror, "mirror"))
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": "0" * 16, "email": "a@x", "ts": 1.0})
+    slots = {"a@x": _blob("EXPIRED-TWIN", refresh="SPENT", expires_ms=_ms_in(-2)),
+             "b@x": _blob("B", expires_ms=_ms_in(50))}
+    monkeypatch.setattr(rotator, "read_slot", lambda e: slots.get(e))
+    monkeypatch.setattr(rotator, "usage_request", lambda b: (0, None))
+    monkeypatch.setattr(rotator, "_switch_blob", lambda *_a: None)
+    posts = token_server
+    rotator.cmd_auto()
+    assert posts == []
+
+
+def test_refresh_failure_log_never_carries_token_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R3-F: classify_refresh_failure only returns the fixed REFRESH_FAIL_* strings, and an
+    exception / body quoting a token never reaches the rotator log."""
+    import io as _io
+    causes = {rotator.REFRESH_FAIL_TRANSPORT_REFUSED, rotator.REFRESH_FAIL_CREDENTIAL_DEAD,
+              rotator.REFRESH_FAIL_NETWORK, rotator.REFRESH_FAIL_TLS, rotator.REFRESH_FAIL_MALFORMED}
+    secret = "sk-ant-oat01-FAKESECRET"
+    from email.message import Message
+    http_err = urllib.error.HTTPError("http://x", 400, "bad", Message(), _io.BytesIO(b"{\"t\":\"%s\"}" % secret.encode()))
+    for exc in (urllib.error.URLError(secret), ValueError(secret), TimeoutError(secret), http_err):
+        assert rotator.classify_refresh_failure(exc, secret) in causes
+    logs: list[str] = []
+    monkeypatch.setattr(rotator, "_log", logs.append)
+    monkeypatch.setattr(rotator.urllib.request, "urlopen", lambda *_a, **_k: (_ for _ in ()).throw(urllib.error.URLError(secret)))
+    monkeypatch.delenv("JANITOR_OAUTH_TOKEN_URL", raising=False)
+    assert rotator.refresh_oauth_token(_blob("T", refresh=secret)) is None
+    assert logs and not any(secret in line for line in logs)
