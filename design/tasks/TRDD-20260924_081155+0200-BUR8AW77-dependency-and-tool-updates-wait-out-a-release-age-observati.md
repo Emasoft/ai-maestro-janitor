@@ -3,7 +3,7 @@ trdd-id: BUR8AW77
 title: Dependency and tool updates wait out a release-age observation period before install
 column: testing
 created: 2026-09-24T08:11:55+0200
-updated: 2026-09-27T14:59:22+0200
+updated: 2026-10-03T08:12:48+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -34,3 +34,7 @@ REVIEW ROUND 1 CURES (2026-09-27, adversarial fork on fd1e39c5) — (a) knob def
 - [x] early-release finding emits a WARNING and never denies; escalation is permissionDecision "ask" via the git-safety confirm mechanism (grep-verified: zero deny paths)
 - [x] local/user-authored installs exempt without lookup (fail-open)
 - [x] hooks/hooks.json registration deferred to the owner (needs Claude restart; exact JSON in the worker report)
+
+## Known defects
+
+2026-10-03: tests/test_release_age_guard_hook.py line 33 hard-codes _NOWISH = 2026-09-27T10:00:00Z; since about 2026-10-02 it is outside the 7200-minute window, so 9 early-release tests fail and the release gate is blocked. The hook itself is fine. Fix: _NOWISH = current UTC time minus 10 minutes. Waiting on an owner-approved plain edit (fastedit cannot edit module-level constants); tracked on TRDD-MMUSDJHQ.
