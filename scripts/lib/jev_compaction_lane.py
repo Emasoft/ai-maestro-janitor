@@ -112,13 +112,25 @@ AUTH_SEEN_FILE = "jev-auth-finding-seen"
 _TRDDGREP_TIMEOUT_S = 10
 
 
-def previous_transcript(root: Path, current_session_id: str) -> Path | None:
-    """The newest transcript that is NOT this session's.
+def previous_transcript(root: Path, current_session_id: str, own_pid: int | None = None) -> Path | None:
+    """The newest transcript that is NOT this session's and NOT another process's live session.
 
     `current_session_id` is excluded by STEM, not by mtime: at SessionStart the new transcript may
     already exist and may already be the newest, so "newest" alone would summarize the blank
     session that just started — the same empty-source trap the post-clear path guards against,
     arriving by a different route.
+
+    WHY live sessions are skipped (TRDD-LXUZYFD9): in a multi-pane project the newest other
+    transcript is often a SIBLING pane's still-running session, so after a janitor clear the
+    summarizer picked it as "the previous session" and held every pane on it. A session whose pid
+    is alive in `~/.claude/sessions/<pid>.json` is never "previous" -- EXCEPT the one owned by
+    `own_pid`, the claude process this code runs for: after /clear the same process continues
+    under a new sessionId while its sessions file may still name the just-cleared session, which
+    is exactly the one to summarize. The detached summarizer cannot resolve its claude ancestor
+    (its parent hook has exited), so the SessionStart hook hands the pid down in
+    `JANITOR_CLAUDE_PID`, which is the default for `own_pid`. When the pid is unknown (None and
+    no/invalid env) NO live session is skipped: fail toward the old behaviour, never toward
+    skipping our own session.
     """
     try:
         import cold_cache_compact  # noqa: PLC0415
@@ -127,9 +139,14 @@ def previous_transcript(root: Path, current_session_id: str) -> Path | None:
         if newest is None:
             return None
         parent = newest.parent
+        if own_pid is None:
+            env_pid = os.environ.get("JANITOR_CLAUDE_PID", "")
+            own_pid = int(env_pid) if env_pid.isdigit() else None
+        live = _live_session_ids(own_pid) if own_pid is not None else set()
         candidates = [
             p for p in parent.glob("*.jsonl")
             if p.is_file() and p.stat().st_size > 0 and current_session_id not in p.stem
+            and p.stem not in live
         ]
         if not candidates:
             return None
@@ -137,6 +154,28 @@ def previous_transcript(root: Path, current_session_id: str) -> Path | None:
     except (OSError, ValueError, ImportError):
         return None
 
+
+def _live_session_ids(own_pid: int) -> set[str]:
+    """sessionIds of Claude Code sessions live right now AND owned by a process other than
+    `own_pid`: `~/.claude/sessions/<pid>.json` whose pid is alive. A missing/unreadable directory
+    or file yields nothing (today's behaviour)."""
+    live: set[str] = set()
+    for f in (Path.home() / ".claude" / "sessions").glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            pid, sid = int(data["pid"]), str(data["sessionId"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if pid == own_pid:
+            continue
+        try:
+            os.kill(pid, 0)
+        except PermissionError:  # pid exists, owned by another user: alive
+            pass
+        except OSError:
+            continue
+        live.add(sid)
+    return live
 
 def _board_ids_by_column(root: Path) -> dict[str, list[tuple[str, str]]] | None:
     """`{column: [(id, title), ...]}` off `trddgrep`'s plain board dump, or `None` when

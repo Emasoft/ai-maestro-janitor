@@ -1045,6 +1045,21 @@ def main() -> int:
             log_dir = state.log_dir()
             log_dir.mkdir(parents=True, exist_ok=True)
             with (log_dir / "session-summary.stderr.log").open("a", encoding="utf-8") as errsink:
+                # TRDD-LXUZYFD9: this detached child cannot find its claude ancestor once this hook
+                # exits (reparented), so hand the pid down; detached_uv_env() copies os.environ.
+                # Walk the process table: hooks run bash -> uv -> python, so getppid() is NOT claude.
+                # Unset when not found: previous_transcript then skips no live session (safe side).
+                # 2 s: must leave room inside the hook's 5 s budget; a timeout leaves JANITOR_CLAUDE_PID
+                # unset (safe side).
+                _ps = state.run_subprocess(
+                    ["ps", "-axo", "pid=,ppid=,command="], timeout=2.0, capture=True,
+                    detector_name="session-start",
+                )
+                _claude_pid = state.claude_ancestor_pid(
+                    os.getpid(), state.parse_ps_table(_ps.stdout if _ps and _ps.stdout else ""),
+                )
+                if _claude_pid is not None:
+                    os.environ["JANITOR_CLAUDE_PID"] = str(_claude_pid)
                 subprocess.Popen(  # noqa: S603 - explicit args, no shell
                     [str(script)],
                     stdout=subprocess.DEVNULL, stderr=errsink,

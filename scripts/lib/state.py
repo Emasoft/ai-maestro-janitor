@@ -1029,6 +1029,35 @@ def process_ancestry(start_pid: int, table: dict[int, tuple[int, str]]) -> list[
     return out
 
 
+
+def claude_ancestor_pid(start_pid: int, table: dict[int, tuple[int, str]]) -> int | None:
+    """Pid of the nearest ancestor of `start_pid` whose executable basename is `claude`, else None.
+
+    Same executable test as `fleet_restart.argv_is_claude` (argv[0] basename, never a substring).
+    Walks like `process_ancestry`: stops at pid <= 1, a cycle, a missing parent or 64 levels.
+    A hook is launched through bash -> uv -> python, so its own parent is NOT the claude process
+    (TRDD-LXUZYFD9); only a walk finds it.
+    """
+    seen = {start_pid}
+    cur = start_pid
+    for _ in range(64):
+        entry = table.get(cur)
+        if entry is None:
+            return None
+        ppid = entry[0]
+        if ppid <= 1 or ppid in seen:
+            return None
+        parent = table.get(ppid)
+        if parent is None:
+            return None
+        words = parent[1].split(None, 1)
+        if words and os.path.basename(words[0]) in ("claude", "claude.exe"):
+            return ppid
+        seen.add(ppid)
+        cur = ppid
+    return None
+
+
 def terminal_kind(*, ps_text: Optional[str] = None, pid: Optional[int] = None) -> str:
     """Identify the terminal program hosting this process by walking the PROCESS
     ANCESTRY to the launching terminal — NOT by inferring from `$TERM_PROGRAM` &
