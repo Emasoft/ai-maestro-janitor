@@ -4,7 +4,7 @@ title: Rotator keeps the live account measurable, rotates under load, and warns 
 column: todo
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-03T06:12:24+0200
+updated: 2026-10-03T06:15:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -325,3 +325,4 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 
 2026-10-03: stays open until release 2 — its eht includes the parked backburner card HSRERK5S (R5).
 2026-10-03 06:12 STATE: committed R3 fe76d99c, R6+R3 follow-ups 2b18348f, R1 30d320eb, R4 b4ba693b, R4b b956914d, R2 415d1971. R1b (rotator tick in own thread, bounded plugin-update step) verified (166 passed, linters clean) but NOT yet committed: blocked only by test literals (a made-up plugin-at-marketplace id) tripping the privacy scanner, a worker is rewriting them. R4c in progress: exclude the live account from 'no rotation target' and add an 'auth-failed' condition written by the StopFailure hook (the alarm currently cannot fire before or at a repeat of the 00:37 wall). R0 report reports/oauth-rotator/20261003_034130+0200-R0-login-expired-root-cause.md. Owner decisions pending: N2 (re-stage the LaunchAgent at Standard on this Mac now), release route, one-off plain edit for fastedit-refused leftovers (listed on MMUSDJHQ), re-capture of the two dead spare accounts, real-notification field check (launchctl asuser $(id -u) osascript -e 'display notification "janitor R4 field check" with title "ai-maestro-janitor"'), and a Keychain Access look at the -livebak item's ACL. NEXT ACTION: commit R1b after the literal fix; verify and commit R4c; then card updates (implementation-commits for G9Z8PXCM, JY0OBQZ4, ZAKT0NRI, 3OS6AXV3; R2 review notes on G9Z8PXCM); then the full uv run pytest with no workers running.
+2026-10-03 06:15 correction: R1b is COMMITTED as e9b7622d (its subject line was lost to a git -F mix-up; the full message is attached as a git note). Next: verify and commit R4c, then card updates and the full test suite.
