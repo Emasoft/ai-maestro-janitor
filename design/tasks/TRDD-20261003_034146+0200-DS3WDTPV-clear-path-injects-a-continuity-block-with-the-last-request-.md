@@ -1,0 +1,53 @@
+---
+trdd-id: DS3WDTPV
+title: Clear path injects a continuity block with the last request and own reply
+column: todo
+status: tasked
+created: 2026-10-03T03:41:46+0200
+updated: 2026-10-03T03:45:23+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: feature
+min-approval-requirement: none
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: manager
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-03T03:41:46+0200
+project-id: ai-maestro-janitor
+parent-trdd: K9AHY1ZB
+derived: true
+---
+
+# Clear path injects a continuity block with the last request and own reply
+
+### C2 — continuity block on the clear path
+1. **Dead code first**: `tldr dead hooks/pre-compact-handoff.py`, committed alone.
+2. **Move** `_build_continuity_record` and its helpers, with their constants, to `scripts/lib/session_continuity.py` using `fastedit move-to-file`. Update the test imports in `tests/test_precompact_handoff_hook.py` (`_hook()` :46 loads by path; only `_TRANSCRIPT_ROLES_IMPORT_ERROR` and `_MAX_BACKWARD_SEEK_SECONDS` are monkeypatched). No compatibility re-exports.
+3. **Clear-only fields** (everything through `state.sanitize_for_drift_line`):
+   - `last_user` = the last human record, via `jev_compaction.is_human_record` (`:450`), excluding heartbeat prompts (`transcript_roles.HEARTBEAT_PREFIX`) and automation commands.
+   - `own_reply` = the **first** assistant text after it, up to ~800 chars. This skips later heartbeat replies without classifying them.
+   - `goal` = the last `goal_status` with `met:false`.
+   - `plan_file` = included only if it exists; mentioned, not read.
+   - `open_tasks` = from `~/.claude/tasks/<oldStem>/*.json`, where status is not completed.
+4. **NEXT ACTION**: add a `HandoffInputs.next_action` field (`lib/external_clear.py:1607`, rendered at `:1662-1678`) with no heuristic:
+   > "The user's last message was «last_user». Your reply was «own_reply». If your reply asked the user something, ask it again and stop. Otherwise continue from it."
+
+   Card STATE is the fallback only when `last_user` is empty.
+5. **`## Continuity` block**, placed ahead of the Jev text: goal, open tasks, "re-invoke skills: …", plan file, live agents, open-file paths.
+   - It has its own budget inside `LANE_INJECTION_MAX_BYTES` (8192 < the documented 10,000), applied through `jcl.trim_cards_for_room` (`:775`).
+   - The native-compaction `_continuity_nudge` stays untouched (R2 ruling).
+- **Tests:**
+  - A synthetic fixture shaped like 89d835ac: human "have you fixed the rotator?", an assistant reply ending "reply go …", then 4 heartbeat turns. NEXT ACTION quotes that reply and never "janitor heartbeat". Fails before.
+  - Goal, task and skill fixtures.
+  - The block survives a large Jev text within budget.
+  - No sidecar (a user-typed `/clear`) produces no block.
+  - The source=compact output is byte-identical before and after.
+- **Verify**: SC, plus the real hook run as a subprocess with a temp HOME, with stdout inspected.
+
+Parent plan: TRDD-K9AHY1ZB
+
+## Approval log
+
+- 2026-10-03T03:41:46+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
