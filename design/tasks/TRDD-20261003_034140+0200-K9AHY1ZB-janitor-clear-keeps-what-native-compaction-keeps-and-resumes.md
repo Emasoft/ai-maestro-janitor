@@ -4,7 +4,7 @@ title: Janitor clear keeps what native compaction keeps and resumes in one push
 column: todo
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-03T03:42:13+0200
+updated: 2026-10-03T04:47:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -320,3 +320,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 ## Approval log
 
 - 2026-10-03T03:41:40+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-03: stays open until release 2 — its eht includes parked backburner cards (C3 7X9WXDK9, C4 B3PY3HV7 and C7 part 2).

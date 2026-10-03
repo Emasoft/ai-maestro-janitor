@@ -23,7 +23,7 @@ project-id: ai-maestro-janitor
 
 The pre-commit privacy scan (`scripts/lib/staged_privacy_scan.py`, rule `private-path.ssh-user-host`) flagged the public `<plugin>@<marketplace>` identifier of the janitor plugin (the same identifier is written in CLAUDE.md Working rules) as a user-at-host target on 2026-10-03. It forced a paraphrase of a runnable `claude plugin update` command in cards JSQSJ3PZ and K9AHY1ZB.
 
-Fix: allowlist the known plugin-name AT marketplace-name pattern in `_allow_ssh_host` (`scripts/lib/private_path_patterns.py`), so a runnable plugin update command can be written verbatim in a card. No private data in this card.
+Fix: allowlist the known `<plugin>@<marketplace>` pattern in `_allow_ssh_host` (`scripts/lib/private_path_patterns.py`), so a runnable plugin update command can be written verbatim in a card. No private data in this card.
 
 ## Approval log
 

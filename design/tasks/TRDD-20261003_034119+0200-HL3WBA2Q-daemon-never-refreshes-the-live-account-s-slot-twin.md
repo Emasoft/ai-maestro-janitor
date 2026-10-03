@@ -1,10 +1,10 @@
 ---
 trdd-id: HL3WBA2Q
 title: Daemon never refreshes the live account's slot twin
-column: todo
+column: testing
 status: tasked
 created: 2026-10-03T03:41:19+0200
-updated: 2026-10-03T03:44:49+0200
+updated: 2026-10-03T04:47:28+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,7 @@ approval-datetime: 2026-10-03T03:41:19+0200
 project-id: ai-maestro-janitor
 parent-trdd: JSQSJ3PZ
 derived: true
+implementation-commits: [fe76d99c]
 ---
 
 # Daemon never refreshes the live account's slot twin
