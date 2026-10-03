@@ -1839,6 +1839,22 @@ def _is_template_handoff(path: Path) -> bool:
         return False
     return first.strip() == handoff_files.TEMPLATE_MARKER
 
+def _latest_handoff(paths: list[Path]) -> Path:
+    """The newest handoff of ONE key, ordered by the FILENAME timestamp (as `newest_group` does).
+
+    WHY not mtime: `handoff_files.write`'s dedupe path `os.utime`s an old identical file, so mtime
+    can rank a template above a later real summary. Filenames have second resolution, so a
+    template and a real handoff can share a timestamp: a non-template wins that tie, then the
+    higher pid. An unparseable name ranks lowest.
+    """
+    import handoff_files  # noqa: PLC0415
+
+    def rank(p: Path) -> tuple[int, bool, int]:
+        parsed = handoff_files.parse(p.name)
+        return (parsed[1], not _is_template_handoff(p), parsed[2]) if parsed else (0, False, 0)
+
+    return max(paths, key=rank)
+
 
 def _fresh_summary_note(sd: Path) -> str:
     """A one-line pointer at the freshest post-clear compacted context, when one exists on disk.
@@ -1856,7 +1872,7 @@ def _fresh_summary_note(sd: Path) -> str:
     candidates = _keyed_handoffs(sd)
     if not candidates:
         return ""
-    latest = max(candidates, key=state.file_mtime)
+    latest = _latest_handoff(candidates)
     return (
         f"Read {latest.resolve()} FIRST — the compacted context of the cleared session (it "
         "landed after SessionStart injected the older handoff)."
@@ -1888,7 +1904,7 @@ def _stamp_late_summary(sd: Path) -> None:
     if not key:
         return
     real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]
-    named = max(real, key=state.file_mtime).resolve() if real else ""
+    named = _latest_handoff(real).resolve() if real else ""
     state.atomic_write(_late_summary_stamp(sd, key), f"{named}\n")
 
 
@@ -1906,7 +1922,7 @@ def _phase_late_summary_drift() -> None:
         real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]
         if not real:
             continue
-        path = str(max(real, key=state.file_mtime).resolve())
+        path = str(_latest_handoff(real).resolve())
         if stamp.read_text(encoding="utf-8").strip() == path:
             continue
         state.atomic_write(stamp, f"{path}\n")

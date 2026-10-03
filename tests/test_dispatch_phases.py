@@ -1213,6 +1213,46 @@ def test_each_cleared_session_gets_its_own_late_summary_note(env_isolation: dict
     assert "fuller summary" not in _run_main(dispatch), "each announced once only"
 
 
+def test_the_latest_handoff_of_a_key_orders_by_filename_timestamp_not_mtime(
+    env_isolation: dict,
+) -> None:
+    """C1d: a template named earlier but touched later (the dedupe `utime`) must not outrank the
+    later-named real handoff of the same key."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    now = int(time.time())
+    template = handoff_files.write(
+        sd, "k0k0k0k0", f"{handoff_files.TEMPLATE_MARKER}\nsynthetic template", now=now
+    )
+    real = handoff_files.write(sd, "k0k0k0k0", "synthetic real summary", now=now + 5)
+    os.utime(template, (now + 100, now + 100))
+    assert dispatch._latest_handoff([template, real]) == real
+    assert str(real.resolve()) in dispatch._fresh_summary_note(sd)
+
+
+def test_a_real_handoff_beats_a_template_named_in_the_same_second(env_isolation: dict) -> None:
+    """C1d: filenames have second resolution, so equal timestamps are possible; the non-template
+    wins the tie even against a higher pid."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    template = sd / handoff_files.handoff_name("k0k0k0k0", now=now, pid=900)
+    real = sd / handoff_files.handoff_name("k0k0k0k0", now=now, pid=100)
+    template.write_text(f"{handoff_files.TEMPLATE_MARKER}\nsynthetic template", encoding="utf-8")
+    real.write_text("synthetic real summary", encoding="utf-8")
+    assert dispatch._latest_handoff([template, real]) == real
+    assert dispatch._latest_handoff([real, template]) == real
+
+
 def test_no_late_summary_line_without_a_prior_resume(env_isolation: dict) -> None:
     """An old handoff group on disk must not be announced by a project that never resumed."""
     import handoff_files

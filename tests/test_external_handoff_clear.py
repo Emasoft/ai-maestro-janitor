@@ -148,6 +148,18 @@ def test_take_summary_hold_takes_none_when_a_handoff_for_the_key_exists(tmp_path
     assert not (sd / ehc._PENDING_FILE).exists(), "a SECOND clear of the same key must still fire"
 
 
+def test_take_summary_hold_fails_open_on_a_write_oserror(tmp_path):
+    """C1d: an OSError from the hold write is logged and swallowed (the chain must still clear).
+    A regular FILE where the state dir should be makes the write raise NotADirectoryError for
+    every user, root included."""
+    sd = tmp_path / "state-is-a-file"
+    sd.write_text("not a directory", encoding="utf-8")
+    transcript = tmp_path / "prev.jsonl"
+    transcript.write_text('{"x": 1}\n', encoding="utf-8")
+    ehc.take_summary_hold(sd, str(transcript), int(time.time()))
+    assert sd.read_text(encoding="utf-8") == "not a directory"
+
+
 def test_an_identical_rewrite_still_ends_the_hold(tmp_path):
     """The dedupe path of `handoff_files.write` returns the old file without writing; its mtime
     must still reach the hold's `captured` or the hold outlives its own handoff."""

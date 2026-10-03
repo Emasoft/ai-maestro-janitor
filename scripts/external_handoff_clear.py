@@ -131,19 +131,23 @@ def take_summary_hold(sd: Path, transcript: str, now: int) -> None:
     when a handoff for this key already exists: a hold born next to its own handoff would only
     block the resume (the detached retry lane and a second clear of the same key both land here).
 
-    FAIL-OPEN (TRDD-5MOX0FPO C1c): a failed write is logged and swallowed, never raised. The hold
-    only DELAYS a resume until its summary exists; Claude's first response already waits for every
-    SessionStart hook to finish (code.claude.com/docs/en/hooks), so a clear typed with no hold is
-    still safe, whereas an exception here would abort the chain before Enter and strand the
-    session uncleared over a bookkeeping file.
+    FAIL-OPEN ON THE WRITE ONLY (TRDD-5MOX0FPO C1c/C1d): a failed `atomic_write` (OSError) is
+    logged and swallowed, never raised. The hold only DELAYS a resume until its summary exists;
+    Claude's first response already waits for every SessionStart hook to finish
+    (code.claude.com/docs/en/hooks), so a clear typed with no hold is still safe, whereas an
+    exception here would abort the chain before Enter and strand the session uncleared over a
+    bookkeeping file. `_hold_record` and `_handoff_ends_hold` stay OUTSIDE the try and the catch
+    is OSError, not Exception: a programming error there must raise, not hide behind the
+    fail-open meant for a full or unwritable disk.
     """
     import json  # noqa: PLC0415 - only this path needs it
 
+    record = _hold_record(transcript, now)
+    if _handoff_ends_hold(sd, record["key"], 0):
+        return
     try:
-        record = _hold_record(transcript, now)
-        if not _handoff_ends_hold(sd, record["key"], 0):
-            state.atomic_write(sd / _PENDING_FILE, json.dumps(record, indent=2) + "\n")
-    except Exception as exc:  # noqa: BLE001 - see FAIL-OPEN above
+        state.atomic_write(sd / _PENDING_FILE, json.dumps(record, indent=2) + "\n")
+    except OSError as exc:
         state.log_line(_LOG, f"summary hold write failed, clearing without a hold: {exc!r}")
 
 
