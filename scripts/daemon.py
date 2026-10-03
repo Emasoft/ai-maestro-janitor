@@ -778,6 +778,37 @@ def task_oauth_rotator_supervisor() -> None:
         pass
 
 
+def _evaluate_rotator_alert() -> None:
+    """R4 (TRDD-3OS6AXV3): after each rotator tick, raise the out-of-band desktop alarm.
+
+    WHY here and not in a heartbeat detector: after the 2026-10-03 expiry every model turn
+    only printed "Login expired", so the alarm has to come from the daemon, which lives on.
+    Fail-open: an alarm bug must never take the rotator tick (or the rotation-ESC pass) down.
+    """
+    try:
+        import rotator_alert  # noqa: PLC0415 - lazy, like the rotator module itself
+
+        rot = oauth_supervisor._rotator_module()
+        rotator_alert.evaluate(
+            oauth_supervisor._rotator_root(),
+            now=time.time(),
+            claude_running=rot is not None and rot.claude_running(),
+        )
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        state.log_line("daemon", f"rotator-alert: evaluation failed: {exc}")
+
+
+def task_oauth_rotator_beat() -> None:
+    """The SCHEDULED `oauth-rotator-tick`: the tick, then the R4 out-of-band alarm.
+
+    Kept apart from `task_oauth_rotator_tick` so a direct call of the tick (unit tests, a
+    manual run) can never raise a real desktop notification.
+    """
+    task_oauth_rotator_tick()
+    if oauth_supervisor.opt_in_present():
+        _evaluate_rotator_alert()
+
+
 def task_oauth_rotator_tick() -> None:
     """60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
     TRDD-f892e109 decision 3 — this REPLACES the deleted launchd agent.
@@ -2824,7 +2855,7 @@ def _build_tasks() -> list[Task]:
              background=True),
         Task("oauth-rotator-supervisor", _INTERVAL_OAUTH_SUPERVISOR,
              task_oauth_rotator_supervisor),
-        Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_tick),
+        Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_beat),
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
         Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),

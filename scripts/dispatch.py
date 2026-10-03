@@ -1929,6 +1929,24 @@ def _phase_late_summary_drift() -> None:
         print(state.sanitize_for_drift_line(f"a fuller summary of the cleared session is at {path}"))
 
 
+def _phase_rotator_alert() -> None:
+    """Surface the daemon's `rotator-alert.json` as one drift line (TRDD-3OS6AXV3 R4).
+
+    Second channel behind the daemon's desktop notification: it shows the alarm as soon as a
+    model turn can run. Called BEFORE the summary-hold gate in main(), so a hold can never
+    suppress it. The alert file is only ever written/cleared by the daemon.
+    """
+    import rotator_alert  # noqa: PLC0415 - lazy: only this phase needs it
+
+    sys.path.insert(0, str(_HERE / "oauth_rotator"))
+    import rotator  # noqa: PLC0415 - lazy: the one rotator-home resolver the detectors use
+
+    root = rotator.configured_rotator_home()
+    line = rotator_alert.drift_line(root) if root is not None else None
+    if line:
+        print(line)
+
+
 def _resume_flag_expired(
     flag: Path, since_file: Path, now: int, default_max_age: int, env_var: str
 ) -> tuple[bool, int, int]:
@@ -4333,6 +4351,10 @@ def main() -> int:
 
     # Phase 0.5: log retention.
     _phase_log_retention()
+
+    # Phase 0.45: rotator alarm drift line (TRDD-3OS6AXV3 R4). MUST stay ahead of the summary
+    # hold below: a hold returns from main(), and an alarm about a dead login must never wait for it.
+    _phase_rotator_alert()
 
     # Phase 0.5: THE SUMMARY HOLD (TRDD-2F3I2P18; reordered AHEAD of the clear-resume phase by
     # TRDD-QZVAEWQH). A session that was just cleared is waiting for the cleared session's own
