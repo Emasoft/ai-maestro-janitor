@@ -253,6 +253,11 @@ install_macos() {
   # and requires it in-tree). D-α's absolute interpreter is therefore NOT baked here — it
   # is prepended to the WRITTEN-OUT plist by plist_bake_interpreter() AFTER this heredoc,
   # editing the on-disk runtime file (which CPV does not resolve as a persistence body).
+  #
+  # ProcessType MUST be Standard, not Background: Background puts the job in the darwinbg band,
+  # and on 2026-10-02/03 under host load 335-403 that starved the daemon (rotator ticks took
+  # 137-210 s instead of ~1 s; a plain python start under taskpolicy -b did not run in 10 min).
+  # See reports/oauth-rotator/20261002_195104+0200-rotation-failure-root-cause.md section 4.
   cat >"$HOME/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -267,7 +272,7 @@ install_macos() {
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>ProcessType</key><string>Background</string>
+  <key>ProcessType</key><string>Standard</string>
   <key>StandardOutPath</key><string>$LOG_DIR/daemon-keepalive.out.log</string>
   <key>StandardErrorPath</key><string>$LOG_DIR/daemon-keepalive.err.log</string>
 </dict>
