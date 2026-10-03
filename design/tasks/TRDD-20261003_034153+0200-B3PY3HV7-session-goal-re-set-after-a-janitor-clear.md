@@ -1,10 +1,10 @@
 ---
 trdd-id: B3PY3HV7
 title: Session goal re-set after a janitor clear
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-03T03:45:41+0200
+updated: 2026-10-03T10:58:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -35,3 +35,5 @@ Parent plan: TRDD-K9AHY1ZB
 ## Approval log
 
 - 2026-10-03T03:41:53+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-03T10:52:46+0200 — column → dev. C4 in progress
+- 2026-10-03T10:58:30+0200 — column → testing. code ready; field check after release: after a janitor clear of a session with an unmet goal, /goal is typed once and the goal is active in the new session

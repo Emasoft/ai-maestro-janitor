@@ -122,13 +122,56 @@ _HANDOFF_MAX_FENCE_LINES = 8  # a longer fenced block == inlined payload the han
 _REFERENCE_RE = re.compile(r"\[\[|ATOM-[A-Z0-9]|TRDD-[A-Za-z0-9]|memgrep|#\d+")
 
 
-def plan_clear() -> tuple[list[str], list[str]]:
+def plan_clear(transcript_path: str | None = None) -> tuple[list[str], list[str]]:
     """The two keystroke phases, in order: (phase-A `/clear`, phase-B bootstrap).
 
-    Pure — the single source of truth for what gets typed, so tests and the dry-run
-    plan agree with what really fires. Phase B re-arms AND resumes, in that order.
+    Pure -- the single source of truth for what gets typed, so tests and the dry-run
+    plan agree with what really fires. Phase B re-arms AND resumes, in that order (or
+    re-arms and re-sets an unmet goal, TRDD-B3PY3HV7: see `clear_bootstrap`).
     """
-    return [CLEAR_CMD], list(_BOOTSTRAP_CMDS)
+    return [CLEAR_CMD], clear_bootstrap(transcript_path)
+
+
+
+GOAL_CMD = "/goal"
+GOAL_MAX_CHARS = 4000
+# Bracketed-paste markers survive once their ESC is stripped as a non-printable.
+_PASTE_MARKER_RE = re.compile(r"\[20[01]~")
+
+
+def sanitize_goal(text: str) -> str:
+    """`text` made safe to TYPE into a terminal as `/goal <text>`; "" when nothing usable remains.
+
+    TRDD-B3PY3HV7: the goal comes out of a transcript and is injected by KEYSTROKE, so it must
+    not be able to submit early (newline), drive the terminal (ESC / C0 / C1 controls, bracketed
+    paste), flip text direction (Cf), or smuggle a janitor marker or a second slash-command
+    (leading `/`). `split()` first: it turns every Unicode whitespace (newline, tab, NBSP) into one
+    plain space, so the later `isprintable` filter only ever drops genuine controls.
+    """
+    text = "".join(c for c in " ".join(text.split()) if c.isprintable())
+    text = _PASTE_MARKER_RE.sub("", text)
+    text = re.sub(r"\[(?=janitor-)", "⟦", text, flags=re.IGNORECASE)
+    return " ".join(text[:GOAL_MAX_CHARS].split()).lstrip("/ ")
+
+
+def clear_bootstrap(transcript_path: str | None) -> list[str]:
+    """Phase B for a CLEAR: arm, then `/goal <goal>` INSTEAD of `/janitor-resume` when the cleared
+    session had an unmet goal, else the plain bootstrap.
+
+    TRDD-B3PY3HV7: one push, one turn -- `/goal` kicks off a turn that waits for the SessionStart
+    context (Continuity block + NEXT ACTION), and mirrors native compaction, which keeps the goal
+    active. The resume flag `/janitor-resume` would have consumed is left for the next idle fire.
+    Reload chains must NOT call this: they keep `BOOTSTRAP_CMDS`.
+    """
+    if transcript_path:
+        import session_continuity  # noqa: PLC0415 -- sibling lib, lazy like the other chain imports
+
+        goal = sanitize_goal(
+            session_continuity.clear_fields(transcript_path, goal_max=GOAL_MAX_CHARS)["goal"]
+        )
+        if goal:
+            return [ARM_CMD, f"{GOAL_CMD} {goal}"]
+    return list(_BOOTSTRAP_CMDS)
 
 
 def check_handoff_concise(
@@ -1277,9 +1320,12 @@ def main() -> int:
     delay = args.delay
     settle = args.clear_settle
     terminal = terminal_trigger.self_terminal(os.environ)
+    # TRDD-B3PY3HV7: computed ONCE so the dry-run plan, the chain and the blind fallback all type
+    # the same phase B (`/goal ...` instead of `/janitor-resume` for an unmet goal).
+    boot_cmds = clear_bootstrap(args.transcript_path)
 
     if args.dry_run:
-        boot = ", ".join(_BOOTSTRAP_CMDS)
+        boot = ", ".join(boot_cmds)
         print(f"DRY_RUN would chain {CLEAR_CMD} then {boot} on {terminal.get('kind', '?')}")
         return 0
 
@@ -1300,7 +1346,7 @@ def main() -> int:
             "delay": delay,
             "terminal": terminal,
             "first": CLEAR_CMD,
-            "then": list(_BOOTSTRAP_CMDS),
+            "then": boot_cmds,
             "state_dir": str(_project_root() / ".janitor" / "state"),
             "gate_baseline": _gate_baseline(),
             "directive": directive,
@@ -1326,7 +1372,7 @@ def main() -> int:
     # of a bare `os.environ[...] = ...`.
     with terminal_trigger.scoped_transcript_path_env(args.transcript_path):
         status_a = _fire_phase([CLEAR_CMD], delay=delay, dry_run=args.dry_run)
-        status_b = _fire_phase(list(_BOOTSTRAP_CMDS), delay=delay + settle, dry_run=args.dry_run)
+        status_b = _fire_phase(boot_cmds, delay=delay + settle, dry_run=args.dry_run)
     # Both phases share the same pane, so they degrade together: if the pane isn't
     # automatable, NEITHER fired. The resume state is still recorded, so a manual
     # /clear + /janitor-arm still auto-resumes.

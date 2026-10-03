@@ -181,6 +181,12 @@ def record_intent_from_prompt(prompt: str, *, state_dir: Path | None = None, now
     """
     if not prompt or not prompt.strip():
         return []
+    # TRDD-B3PY3HV7: the clear chain TYPES `/goal <text from the old transcript>` into the pane, so
+    # that prompt is not the user's raw words -- a goal mentioning "/clear" or "/janitor-disarm"
+    # would otherwise stamp a forged consent token. A hand-typed /goal is excluded too: a goal is
+    # a description of work, never an authorization.
+    if prompt.lstrip().startswith("/goal"):
+        return []
     # One negation anywhere disqualifies the WHOLE prompt. Coarse on purpose: a prompt that both
     # forbids and requests the same verb is ambiguous, and ambiguity must not become consent.
     if _NEGATION_RE.search(prompt):

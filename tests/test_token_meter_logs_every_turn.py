@@ -94,6 +94,8 @@ def _fake_user_intent_module(*, interrupted_secs) -> types.ModuleType:
 def _fake_clear_trigger_module(*, spawned: bool = True, why: str = "chain spawned") -> types.ModuleType:
     mod = types.ModuleType("clear_trigger")
     mod.BOOTSTRAP_CMDS = ("/janitor-arm", "/janitor-resume")  # type: ignore[attr-defined]
+    # TRDD-B3PY3HV7: the Stop-boundary clear now asks clear_trigger for its phase B (no goal here).
+    mod.clear_bootstrap = lambda transcript_path: list(mod.BOOTSTRAP_CMDS)  # type: ignore[attr-defined]
     calls: list[dict] = []
 
     def spawn_shrink_chain(

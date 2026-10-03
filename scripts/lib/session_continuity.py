@@ -180,13 +180,18 @@ def carry_task_dir(old_session_id: str, new_session_id: str) -> int:
     return copied
 
 
-def clear_fields(transcript_path: str) -> dict[str, Any]:
+def clear_fields(transcript_path: str, *, goal_max: int = GOAL_MAX_CHARS) -> dict[str, Any]:
     """The clear-only continuity fields of the OLD transcript (all sanitized, all best-effort).
 
     `own_reply` is the LAST assistant text block of the turn that answers `last_user` -- the
     records between that human record and the next human OR heartbeat record -- so a preface,
     a tool call, then a closing question yields the question, and later heartbeat turns never
     reach it.
+
+    `goal_max` (TRDD-B3PY3HV7): the Continuity block keeps the 400-char default, but the clear
+    chain re-types the goal as `/goal <text>` and a goal clipped at 400 chars would be a
+    different, weaker goal -- so that caller widens the clip instead of growing a second
+    goal extractor.
     """
     last_user = reply = goal_cond = plan = ""
     goal_met = True
@@ -220,7 +225,7 @@ def clear_fields(transcript_path: str) -> dict[str, Any]:
     return {
         "last_user": _clean(last_user, LAST_USER_MAX_CHARS),
         "own_reply": _clean(reply, OWN_REPLY_MAX_CHARS, keep_end=True),
-        "goal": "" if goal_met else _clean(goal_cond, GOAL_MAX_CHARS),
+        "goal": "" if goal_met else _clean(goal_cond, goal_max),
         "plan_file": state.sanitize_for_drift_line(plan) if plan_ok else "",
         "open_tasks": _open_tasks(transcript_path),
     }

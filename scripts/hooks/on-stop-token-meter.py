@@ -182,7 +182,8 @@ def _maybe_clear(project_dir: str, transcript_path: str, state, token_meter) -> 
         import clear_trigger  # noqa: PLC0415 -- lazy; scripts/ is already on path
 
         spawned, why = clear_trigger.spawn_shrink_chain(
-            then=list(clear_trigger.BOOTSTRAP_CMDS),
+            # TRDD-B3PY3HV7: `/goal <unmet goal>` replaces `/janitor-resume` when the session had one.
+            then=clear_trigger.clear_bootstrap(transcript_path),
             directive=_CLEAR_DIRECTIVE,
             transcript_path=transcript_path,
             count_toward_cooldown=True,

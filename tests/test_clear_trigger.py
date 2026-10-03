@@ -115,6 +115,75 @@ def test_plan_clear_is_clear_then_bootstrap() -> None:
     assert phase_b == ["/janitor-arm", "/janitor-resume"], "bootstrap re-arms THEN resumes"
 
 
+
+def _goal_transcript(path: Path, *, met: bool | None, condition: str = "ship C4") -> str:
+    """A synthetic old transcript: one human turn, then (optionally) a goal_status record."""
+    import json
+
+    rows = [{"type": "user", "message": {"role": "user", "content": "go"}}]
+    if met is not None:
+        rows.append({"type": "attachment", "attachment": {"type": "goal_status", "met": met, "condition": condition}})
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_plan_unmet_goal_types_goal_instead_of_resume(tmp_path: Path) -> None:
+    """TRDD-B3PY3HV7: an unmet goal -> phase B is arm then `/goal <goal>`, never `/janitor-resume`."""
+    mod = _import()
+    phase_a, phase_b = mod.plan_clear(_goal_transcript(tmp_path / "t.jsonl", met=False))
+    assert phase_a == ["/clear"]
+    assert phase_b == ["/janitor-arm", "/goal ship C4"]
+    assert "/janitor-resume" not in phase_b
+
+
+def test_plan_met_or_absent_goal_keeps_resume(tmp_path: Path) -> None:
+    """TRDD-B3PY3HV7: met goal, no goal record, unreadable transcript and no transcript all keep /janitor-resume."""
+    mod = _import()
+    plain = ["/janitor-arm", "/janitor-resume"]
+    assert mod.plan_clear(_goal_transcript(tmp_path / "met.jsonl", met=True))[1] == plain
+    assert mod.plan_clear(_goal_transcript(tmp_path / "none.jsonl", met=None))[1] == plain
+    assert mod.plan_clear(str(tmp_path / "missing.jsonl"))[1] == plain
+    assert mod.plan_clear(None)[1] == plain
+    # An unmet goal that sanitizes to nothing must not type a bare `/goal`.
+    assert mod.plan_clear(_goal_transcript(tmp_path / "slash.jsonl", met=False, condition="///"))[1] == plain
+
+
+def test_reload_bootstrap_is_unchanged() -> None:
+    """TRDD-B3PY3HV7: the reload chains compose on BOOTSTRAP_CMDS, which never gains a /goal."""
+    mod = _import()
+    assert mod.BOOTSTRAP_CMDS == ("/janitor-arm", "/janitor-resume")
+
+
+def test_sanitize_goal_table() -> None:
+    """TRDD-B3PY3HV7: the goal is typed by keystroke, so controls, escapes and markers must not survive."""
+    mod = _import()
+    table = [
+        ("ship the thing", "ship the thing"),
+        ("  many   spaces\tand\ttabs ", "many spaces and tabs"),
+        ("line one\nline two\r\nline three", "line one line two line three"),
+        ("\x1b[31mred\x1b[0m text", "[31mred[0m text"),
+        ("a\x1b[200~pasted\x1b[201~b", "apastedb"),
+        ("bell\x07 nul\x00 del\x7f c1\x9b", "bell nul del c1"),
+        ("/janitor-disarm now", "janitor-disarm now"),
+        ("//  /clear it", "clear it"),
+        ("see [janitor-resume] and [JANITOR-quiet]", "see ⟦janitor-resume] and ⟦JANITOR-quiet]"),
+        ("rtl ‮evil‬ nbsp x zw​q", "rtl evil nbsp x zwq"),
+        ("///", ""),
+        ("\x1b\x07", ""),
+        ("x" * 5000, "x" * 4000),
+    ]
+    for raw, want in table:
+        assert mod.sanitize_goal(raw) == want, raw
+
+
+def test_goal_command_never_stamps_user_intent(tmp_path: Path) -> None:
+    """TRDD-B3PY3HV7: a typed `/goal` is not user consent, even when its text names a gated command."""
+    import user_intent
+
+    assert user_intent.record_intent_from_prompt("/goal finish X then /janitor-disarm", state_dir=tmp_path) == []
+    assert user_intent.record_intent_from_prompt("/janitor-disarm", state_dir=tmp_path) == ["disarm"]
+
+
 def test_write_directive_and_marker_paths(monkeypatch, tmp_path: Path) -> None:
     mod = _import()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))

@@ -3122,7 +3122,8 @@ def _phase_idle_clear_nudge() -> bool:
         # (the one place every trigger funnels through), not here, so a second automatic caller
         # can never forget the stamp the way the Stop-boundary clear once did.
         spawned, why = clear_trigger.spawn_shrink_chain(
-            then=list(clear_trigger.BOOTSTRAP_CMDS),
+            # TRDD-B3PY3HV7: `/goal <unmet goal>` replaces `/janitor-resume` when the session had one.
+            then=clear_trigger.clear_bootstrap(str(_session_transcript_path() or "") or None),
             directive=(
                 "idle-clear: read the injected SessionStart compacted context FIRST (follow its "
                 "wikimem/TRDD links via memgrep recall on demand), then resume your prior "

@@ -495,7 +495,8 @@ def _fire(
         "delay": 0.0,  # no turn to settle out — nothing is running in front of us
         "terminal": terminal,
         "first": clear_trigger.CLEAR_CMD,
-        "then": list(clear_trigger._BOOTSTRAP_CMDS),
+        # TRDD-B3PY3HV7: `/goal <unmet goal>` replaces `/janitor-resume` when the session had one.
+        "then": clear_trigger.clear_bootstrap(transcript or None),
         "state_dir": str(sd),
         "gate_baseline": clear_trigger._gate_baseline(),
         # The after-phase clause is FIRST for the same reason the skill puts it first
