@@ -313,7 +313,10 @@ def test_the_daemon_stays_resident_and_idles_on_yielded_chores() -> None:
     assert "harness_backend.read_owner_leases()" in body
     # The yield must precede both consumers (source order is execution order here).
     assert body.index("yielded = _apply_leases(") < body.index("bulk_busy = _run_due_tasks(tasks, yielded)")
-    assert body.index("yielded = _apply_leases(") < body.index("sleep_for = _sleep_seconds(tasks, yielded, bulk_busy)")
+    # R1b (TRDD-ZAKT0NRI): the sleep call filters own_thread tasks, so only its anchor and trailing args are asserted.
+    sleep_at = body.index("sleep_for = _sleep_seconds(")
+    assert body.index("yielded = _apply_leases(") < sleep_at
+    assert ", yielded, bulk_busy)" in body[sleep_at : body.index("\n", sleep_at)]
 
 
 def test_the_daemons_exit_and_the_spawn_gate_are_guarded_by_the_SAME_decision() -> None:
