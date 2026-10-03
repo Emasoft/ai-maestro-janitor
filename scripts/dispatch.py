@@ -772,7 +772,6 @@ def _defang_foreign_markers(detector: str, text: str) -> str:
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
-
 _DRIFT_DIGIT_RE = re.compile(r"\d+")
 _DRIFT_ELAPSED_TOKEN_RE = re.compile(
     r"~?\b\d+min\b"
@@ -1655,7 +1654,6 @@ def _phase_rate_limit_recovery() -> bool:
     return True
 
 
-
 def _session_transcript_path() -> Path | None:
     """The current cron fire's OWN transcript, or None when the session is unknown.
 
@@ -1816,6 +1814,28 @@ def _phase_compact_resume() -> bool:
     return True
 
 
+def _keyed_handoffs(sd: Path) -> list[Path]:
+    """Every handoff file of the cleared session's key (`pending_summary_key`), [] when none."""
+    try:
+        import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
+    except ImportError:
+        return []
+    key = _ehc.pending_summary_key(sd)
+    if not key:
+        return []
+    return sorted(Path(sd).glob(f"agent-handoff-{key}-*.md"))
+
+
+def _is_template_handoff(path: Path) -> bool:
+    import handoff_files  # noqa: PLC0415
+
+    try:
+        first = path.read_text(encoding="utf-8").split("\n", 1)[0]
+    except OSError:
+        return False
+    return first.strip() == handoff_files.TEMPLATE_MARKER
+
+
 def _fresh_summary_note(sd: Path) -> str:
     """A one-line pointer at the freshest post-clear compacted context, when one exists on disk.
 
@@ -1829,14 +1849,7 @@ def _fresh_summary_note(sd: Path) -> str:
     Returns "" when no keyed handoff can be attributed to this clear — the caller then falls
     back to the generic "read the injected SessionStart handoff summary" directive alone.
     """
-    try:
-        import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
-    except ImportError:
-        return ""
-    key = _ehc.pending_summary_key(sd)
-    if not key:
-        return ""
-    candidates = sorted(Path(sd).glob(f"agent-handoff-{key}-*.md"))
+    candidates = _keyed_handoffs(sd)
     if not candidates:
         return ""
     latest = max(candidates, key=state.file_mtime)
@@ -1844,6 +1857,41 @@ def _fresh_summary_note(sd: Path) -> str:
         f"Read {latest.resolve()} FIRST — the compacted context of the cleared session (it "
         "landed after SessionStart injected the older handoff)."
     )
+
+
+_LATE_SUMMARY_STAMP = "late-summary-noted.txt"
+
+
+def _stamp_late_summary(sd: Path) -> None:
+    """Record, at resume time, the real (non-template) handoff the resume already named.
+
+    The stamp's existence is what arms `_phase_late_summary_drift`: without it every project
+    holding an old handoff group would announce one on its first fire.
+    """
+    real = [p for p in _keyed_handoffs(sd) if not _is_template_handoff(p)]
+    named = max(real, key=state.file_mtime).resolve() if real else ""
+    state.atomic_write(sd / _LATE_SUMMARY_STAMP, f"{named}\n")
+
+
+def _phase_late_summary_drift() -> None:
+    """One drift line when a real summary lands AFTER a resume that fired on a template handoff.
+
+    The resume (`_phase_clear_resume`) ends the hold on ANY handoff, template included, so a real
+    Jev summary written later by the detached retry lane would otherwise never be shown. Emitted
+    once per path (the stamp), reusing `_fresh_summary_note`'s key and glob logic.
+    """
+    sd = state.state_dir()
+    stamp = sd / _LATE_SUMMARY_STAMP
+    if not stamp.is_file():
+        return
+    real = [p for p in _keyed_handoffs(sd) if not _is_template_handoff(p)]
+    if not real:
+        return
+    path = str(max(real, key=state.file_mtime).resolve())
+    if stamp.read_text(encoding="utf-8").strip() == path:
+        return
+    state.atomic_write(stamp, f"{path}\n")
+    print(state.sanitize_for_drift_line(f"a fuller summary of the cleared session is at {path}"))
 
 
 def _resume_flag_expired(
@@ -2038,6 +2086,8 @@ def _phase_clear_resume() -> bool:
     fresh = _fresh_summary_note(sd)
     if fresh:
         note = f"{note} {fresh}"
+    # Arms `_phase_late_summary_drift`: records the real summary this resume already named.
+    _stamp_late_summary(sd)
     # A /clear wipes the working memory of in-flight background agents from the fresh
     # context — list them so the resumed turn re-attaches to each via SendMessage.
     _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
@@ -3468,6 +3518,7 @@ def _open_issues_bit() -> str:
     except (OSError, ValueError):
         return ""
 
+
 _KEEP_GOING_USER_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_USER_IDLE_S"
 _KEEP_GOING_USER_IDLE_DEFAULT = 600
 _KEEP_GOING_AGENT_STALE_ENV = "CLAUDE_PLUGIN_OPTION_KEEP_GOING_AGENT_STALE_S"
@@ -3648,7 +3699,6 @@ def _board_nudge_signature_changed(
         except OSError:
             pass
     return changed
-
 
 
 def _phase_keep_going_nudge() -> None:
@@ -4272,7 +4322,8 @@ def main() -> int:
     # Placed ahead of every resume phase and every detector, because it is a HOLD: anything that
     # runs before it is work done into a context that is about to be replaced.
     #
-    # It is bounded by the record's own 15-minute TTL, and `summary_hold_active` fails OPEN on a
+    # It ends as soon as its handoff is on disk (`external_handoff_clear._handoff_ends_hold` -- no
+    # release call exists), is bounded by the record's own 15-minute TTL, and `summary_hold_active` fails OPEN on a
     # missing, unreadable or malformed record. A hold is a refusal to work, so an unparseable
     # byte must never be able to wedge a host — the TTL and the fail-open are the two independent
     # guarantees that this can only ever delay a session, never strand one.
@@ -4440,6 +4491,9 @@ def main() -> int:
         gs.ensure_daemon_running()
     except Exception as exc:  # noqa: BLE001
         state.log_line("dispatch", f"ensure_daemon_running failed: {exc}")
+
+    # Phase 1.9: a real summary that landed after a resume fired on a template handoff.
+    _phase_late_summary_drift()
 
     # Phase 2: drift detectors. Inside a harness agent (#J thin mode) the roster is
     # filtered to the workdir-scoped subset — see _NON_HARNESS_DETECTORS.

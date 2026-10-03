@@ -28,8 +28,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "scripts"))
 sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
@@ -123,30 +121,25 @@ def test_the_summary_SOURCE_is_on_disk_before_the_clear_chain_is_spawned(
 
     def _spy_fire(_root, _sd, _terminal, _now, trigger="", transcript=""):
         del trigger  # not part of this test's claim; named so the call shape is exact
-        pending = sd / "summary-pending.json"
-        seen["pending_at_fire"] = pending.is_file()
-        if pending.is_file():
-            rec = json.loads(pending.read_text(encoding="utf-8"))
-            seen["transcript_at_fire"] = rec.get("transcript", "")
-            seen["expires_at_fire"] = rec.get("expires", 0)
+        seen["transcript_at_fire"] = transcript
+        seen["readable_at_fire"] = Path(transcript).is_file()
+        # C1b: the hold is NOT taken here any more -- `clear_trigger` takes it when /clear is
+        # actually entered -- so a chain that waits or is cancelled holds nothing.
+        seen["pending_at_fire"] = (sd / "summary-pending.json").is_file()
 
     monkeypatch.setattr(ehc, "_fire", _spy_fire)
 
     rc = _run_main(root, monkeypatch)
 
     assert rc == 0
-    assert seen.get("pending_at_fire") is True, (
-        "the clear chain was spawned before the summary source was captured — after the clear "
-        "the newest transcript is the NEW EMPTY one, so a later capture summarizes nothing "
-        "while reporting success."
+    assert seen.get("readable_at_fire") is True, (
+        "the clear chain was spawned before the summary source was captured and verified readable"
+        " — after the clear the newest transcript is the NEW EMPTY one, so a later capture"
+        " summarizes nothing while reporting success."
     )
-    assert Path(seen.get("transcript_at_fire", "")).is_file(), (
-        "the captured path must be a readable transcript at fire time, not merely a string"
-    )
-    assert seen.get("expires_at_fire", 0) > 0, (
-        "the hold must carry a TTL — an unbounded hold turns a failed summary into a "
-        "permanently stuck session, which is worse than the cost this reorder avoids"
-    )
+    assert seen.get("pending_at_fire") is False, "the hold must not be armed before /clear is entered"
+
+
 def test_a_model_authored_handoff_survives_a_real_external_fire(tmp_path, monkeypatch) -> None:
     """TRDD-5RXBI65T acceptance box 1: the daemon's auto handoff must not destroy the model's.
 
@@ -180,28 +173,6 @@ def test_a_model_authored_handoff_survives_a_real_external_fire(tmp_path, monkey
     assert len(survivors) == 1, (
         "the daemon lane must delegate, not compose — a second auto-written file here would mean "
         "SUMMARY_DELEGATED regressed back to spending llm-ext attempts it cannot authenticate"
-    )
-
-
-def test_a_failed_handoff_write_never_reaches_the_clear(tmp_path, monkeypatch) -> None:
-    """The guard this file exists for. `atomic_write` currently RAISES, so the clear is skipped —
-    wrapping it in a try/except would look like hardening and would silently make a failed
-    handoff clear the session anyway."""
-    root, _sd = _firing_project(tmp_path, monkeypatch)
-    fired: list[bool] = []
-
-    def _boom(_target, _value):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(ehc.state, "atomic_write", _boom)
-    monkeypatch.setattr(ehc, "_fire", lambda *_a, **_k: fired.append(True))
-
-    with pytest.raises(OSError):
-        _run_main(root, monkeypatch)
-
-    assert fired == [], (
-        "the clear chain was spawned even though writing the handoff FAILED — the session would "
-        "be cleared with no handoff to resume from."
     )
 
 

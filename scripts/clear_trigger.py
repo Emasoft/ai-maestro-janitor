@@ -122,7 +122,6 @@ _HANDOFF_MAX_FENCE_LINES = 8  # a longer fenced block == inlined payload the han
 _REFERENCE_RE = re.compile(r"\[\[|ATOM-[A-Z0-9]|TRDD-[A-Za-z0-9]|memgrep|#\d+")
 
 
-
 def plan_clear() -> tuple[list[str], list[str]]:
     """The two keystroke phases, in order: (phase-A `/clear`, phase-B bootstrap).
 
@@ -217,6 +216,7 @@ def _project_root() -> Path:
         return Path(out.stdout.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):
         return Path.cwd()
+
 
 def session_transcript_path() -> Path | None:
     """THIS session's own transcript, or None when the session is unknown.
@@ -442,6 +442,21 @@ def _run_chain_payload(payload_b64: str) -> int:
         persisted["done"] = True
         _write_directive(directive)
         _write_clear_marker(directive)
+        # TRDD-5MOX0FPO C1b: the summary hold is taken HERE, where /clear is actually about to be
+        # entered -- not when the decision was made. The decision precedes this point by up to
+        # 3600 s (waiting for the user to go idle) and the chain can be cancelled in between; a
+        # hold taken at decision time would black out every heartbeat chore with no clear.
+        hold_transcript = str(data.get("transcript_path") or "").strip()
+        # Only the daemon lane (`external_handoff_clear._fire`) asks for a hold; the other
+        # chains never took one and must not start blacking out chores now.
+        if hold_transcript and data.get("summary_hold"):
+            # NOT wrapped in try/except, unlike the sidecar below: a clear typed with no hold
+            # armed resumes before its summary exists, so a failed write must stop the chain
+            # BEFORE Enter (the exception leaves `pre_submit_first`). It replaces the old
+            # guarantee that a failed hold write at capture time never reached the clear.
+            import external_handoff_clear as ehc  # noqa: PLC0415 - lazy, like `_fire`'s import of this module
+
+            ehc.take_summary_hold(sd, hold_transcript, int(time.time()))
         # TRDD-RAEGS1D5 card 5: when this chain payload NAMES a transcript (every automatic
         # trigger now threads one through — external_handoff_clear, the idle-clear nudge,
         # spawn_shrink_chain), persist a PER-PANE sidecar the fresh session's dedicated hook

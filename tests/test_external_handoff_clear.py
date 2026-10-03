@@ -120,17 +120,47 @@ def test_a_template_handoff_also_ends_the_hold(tmp_path):
     assert not ehc.summary_hold_active(sd, now)
 
 
-def test_capture_takes_no_hold_when_a_handoff_for_the_key_exists(tmp_path):
+def test_capture_writes_no_hold_and_take_summary_hold_arms_it(tmp_path):
+    """C1b: the capture only decides whether to clear; the hold is armed by `take_summary_hold`
+    (called when /clear is actually entered), so a chain that never types /clear holds nothing."""
     import handoff_files
 
     sd = _project(tmp_path) / ".janitor" / "state"
     transcript = tmp_path / "prev.jsonl"
     transcript.write_text('{"x": 1}\n', encoding="utf-8")
-    key = handoff_files.session_key(str(transcript))
-    handoff_files.write(sd, key, "synthetic summary")
-    rec = ehc._capture_summary_source(sd, {"transcript": str(transcript)}, int(time.time()))
-    assert rec is not None and rec["key"] == key, "a SECOND clear of the same key must still fire"
+    now = int(time.time())
+    rec = ehc._capture_summary_source(sd, {"transcript": str(transcript)}, now)
+    assert rec is not None and rec["key"] == handoff_files.session_key(str(transcript))
     assert not (sd / ehc._PENDING_FILE).exists()
+    assert not ehc.summary_hold_active(sd, now)
+    ehc.take_summary_hold(sd, str(transcript), now)
+    assert ehc.summary_hold_active(sd, now)
+
+
+def test_take_summary_hold_takes_none_when_a_handoff_for_the_key_exists(tmp_path):
+    import handoff_files
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    transcript = tmp_path / "prev.jsonl"
+    transcript.write_text('{"x": 1}\n', encoding="utf-8")
+    handoff_files.write(sd, handoff_files.session_key(str(transcript)), "synthetic summary")
+    ehc.take_summary_hold(sd, str(transcript), int(time.time()))
+    assert not (sd / ehc._PENDING_FILE).exists(), "a SECOND clear of the same key must still fire"
+
+
+def test_an_identical_rewrite_still_ends_the_hold(tmp_path):
+    """The dedupe path of `handoff_files.write` returns the old file without writing; its mtime
+    must still reach the hold's `captured` or the hold outlives its own handoff."""
+    import handoff_files
+
+    sd = _project(tmp_path) / ".janitor" / "state"
+    now = int(time.time())
+    old = handoff_files.write(sd, "keyk0001", "synthetic summary")
+    _set_mtime(old, now - 600)
+    _hold(sd, "keyk0001", captured=now - 6, expires=now + 900)
+    assert ehc.summary_hold_active(sd, now)
+    assert handoff_files.write(sd, "keyk0001", "synthetic summary") == old
+    assert not ehc.summary_hold_active(sd, now)
 
 
 def test_capture_still_returns_none_for_an_unreadable_transcript(tmp_path):
@@ -203,7 +233,7 @@ def _delegation_case(tmp_path, monkeypatch, *, on_resume: bool, trigger: str, ga
 
 def test_daemon_lane_delegates_and_leaves_the_hold_armed(tmp_path, monkeypatch):
     """No --on-resume (the keyless launchd caller): fires the clear, never calls llm-ext,
-    prints SUMMARY_DELEGATED, and leaves `summary-pending.json` in place for the cleared
+    prints SUMMARY_DELEGATED, and leaves the hold to the chain (`take_summary_hold`) for the cleared
     session's own SessionStart summarizer to pick up."""
     (rc, out), root = _delegation_case(
         tmp_path, monkeypatch,
@@ -212,7 +242,7 @@ def test_daemon_lane_delegates_and_leaves_the_hold_armed(tmp_path, monkeypatch):
     assert rc == 0
     assert "SUMMARY_DELEGATED" in out, out
     assert "NO_SUMMARY_POST_CLEAR" not in out and "SUMMARY_READY" not in out
-    assert (root / ".janitor" / "state" / ehc._PENDING_FILE).exists(), "hold stays armed"
+    assert not (root / ".janitor" / "state" / ehc._PENDING_FILE).exists(), "the hold is taken by the chain when /clear is entered, not here"
 
 
 def test_on_resume_lane_also_delegates_and_never_calls_llm_ext(tmp_path, monkeypatch):
@@ -227,7 +257,19 @@ def test_on_resume_lane_also_delegates_and_never_calls_llm_ext(tmp_path, monkeyp
     assert rc == 0
     assert "SUMMARY_DELEGATED" in out, out
     assert "SUMMARY_READY" not in out and "NO_SUMMARY_POST_CLEAR" not in out
-    assert (root / ".janitor" / "state" / ehc._PENDING_FILE).exists(), "hold stays armed"
+    assert not (root / ".janitor" / "state" / ehc._PENDING_FILE).exists(), "the hold is taken by the chain when /clear is entered, not here"
+
+
+# --- end to end (real subprocess) --------------------------------------------
+
+
+# The reactive trigger shells out to agentlensPro, an OPTIONAL third-party CLI. These tests are
+# about the watcher, not about that probe (which has its own unit tests against an injected
+# runner), and the suite's sandbox guard rightly refuses to let a unit test spawn arbitrary
+# binaries. An empty command is the probe's documented disable, so this pins the tests to the
+# no-agentlensPro configuration rather than to whatever happens to be installed on the host —
+# which is also the only configuration that is reproducible in CI.
+_NO_AGENTLENS = {ec.CACHE_EXPIRED_COMMAND_ENV: ""}
 
 
 # --- end to end (real subprocess) --------------------------------------------
@@ -306,7 +348,6 @@ def test_awaiting_user_veto_reaches_the_watcher_end_to_end(tmp_path, monkeypatch
     assert forced.fire is False and forced.why == "awaiting-user", (
         "--force overrides trigger terms only; a human is being asked a question"
     )
-
 
 
 def test_decide_on_resume_uses_the_widened_reader_when_a_session_id_is_given(tmp_path, monkeypatch):
@@ -410,7 +451,6 @@ def test_force_never_overrides_a_safety_veto():
 
 
 # --- _fire: the warm-cancel gate is trigger-scoped ----------------------------
-
 
 
 def _captured_payload(monkeypatch, tmp_path: Path, trigger: str, *, transcript: str = "") -> dict:

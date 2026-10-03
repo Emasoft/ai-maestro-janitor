@@ -139,3 +139,17 @@ def test_empty_state_dir_is_not_an_error(tmp_path: Path) -> None:
     assert hf.newest_group(sd) == []
     assert hf.newest(sd) is None
     assert hf.newest_group(tmp_path / "does-not-exist") == []
+
+
+def test_an_identical_rewrite_refreshes_the_mtime(tmp_path: Path) -> None:
+    """The dedupe path returns the existing file without writing; it must still touch it, because
+    the summary hold ends only for a handoff whose mtime is >= the hold's `captured`."""
+    import time
+
+    sd = _sd(tmp_path)
+    first = hf.write(sd, "abcd1234", "synthetic summary")
+    old = int(time.time()) - 600
+    os.utime(first, (old, old))
+    second = hf.write(sd, "abcd1234", "synthetic summary")
+    assert second == first
+    assert first.stat().st_mtime >= time.time() - 5

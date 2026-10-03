@@ -102,31 +102,41 @@ def _capture_summary_source(sd: Path, facts: dict, now: int) -> dict | None:
     summary exists"; it is "the material the summary will be made FROM is still there, and we
     know where". That is answerable with two syscalls.
 
-    None stays reserved for "transcript unreadable". When a handoff for this key already exists
-    the normal record is still returned but `summary-pending.json` is NOT written: a hold that
-    is born next to its own handoff would only block the resume (the detached retry lane and a
-    second clear of the same key both land here).
-
-    Writing the file before the clear also makes the hold crash-safe: if this process dies
-    between the fire and the summary, the next heartbeat finds a pending record with a TTL rather
-    than a session that silently resumed with nothing.
+    None stays reserved for "transcript unreadable". This function WRITES NOTHING: the hold is
+    taken by `take_summary_hold`, called from `clear_trigger._persist_resume_state` right before
+    `/clear` is actually entered. Taken here, it would black out every heartbeat chore for up to
+    15 minutes when the chain then waits for the user to go idle (up to 3600 s) or is cancelled,
+    with no clear ever typed (TRDD-5MOX0FPO C1b).
     """
-    import json  # noqa: PLC0415 - only this path needs it
-
     transcript = str(facts.get("transcript") or "")
     if not _summary_source_readable(transcript):
         return None
+    return _hold_record(transcript, now)
 
-    key = handoff_files.session_key(transcript)
-    record = {
+
+def _hold_record(transcript: str, now: int) -> dict:
+    return {
         "transcript": transcript,
-        "key": key,
+        "key": handoff_files.session_key(transcript),
         "captured": now,
         "expires": now + _HOLD_TTL_S,
     }
-    if not _handoff_ends_hold(sd, key, 0):
+
+
+def take_summary_hold(sd: Path, transcript: str, now: int) -> None:
+    """Arm the hold for a clear that is being typed NOW (crash-safe: written before the Enter).
+
+    If this process dies between the clear and the summary, the next heartbeat finds a pending
+    record with a TTL rather than a session that silently resumed with nothing. No hold is taken
+    when a handoff for this key already exists: a hold born next to its own handoff would only
+    block the resume (the detached retry lane and a second clear of the same key both land here).
+    """
+    import json  # noqa: PLC0415 - only this path needs it
+
+    record = _hold_record(transcript, now)
+    if not _handoff_ends_hold(sd, record["key"], 0):
         state.atomic_write(sd / _PENDING_FILE, json.dumps(record, indent=2) + "\n")
-    return record
+
 
 # A post-clear hook is killed at 90 s; past this grace a clear that was observed but produced no
 # handoff must not keep the hold alive.
@@ -539,6 +549,8 @@ def _fire(
         # per-pane sidecar the fresh session's post-clear-compact hook consumes, instead of
         # that hook guessing "whichever handoff is newest" off the state dir.
         "transcript_path": transcript,
+        # C1b: the chain takes the summary hold itself, only once /clear is actually entered.
+        "summary_hold": True,
     }, env=child_env)
     # STAMP AT SPAWN, unlike the in-model lever which stamps only on a confirmed send.
     # The difference is real, not a relaxation: there, a refused send meant the USER WAS
@@ -663,10 +675,9 @@ def _run(root: Path, sd: Path, now: int, args: argparse.Namespace) -> int:
     # made the clear too late to help. The new guard asks "is the transcript CAPTURED and
     # READABLE?" — milliseconds, no network — and that is the real precondition: it is what makes
     # the clear recoverable, because whatever happens after it, the source is named on disk.
-    # DRY-RUN RETURNS BEFORE THE CAPTURE (review-fork finding, 2026-09-01): the capture WRITES
-    # `summary-pending.json`, which arms the 15-minute hold `dispatch.summary_hold_active`
-    # honours — so a dry-run placed after it blocked resumes and chores on a session that was
-    # never cleared. A dry-run must write nothing; it reports from `facts` instead.
+    # DRY-RUN RETURNS BEFORE THE CAPTURE: a dry-run must write nothing and report from `facts`
+    # instead. (The capture itself no longer writes the hold -- `clear_trigger` takes it only
+    # when /clear is entered, C1b -- but it still decides whether to clear at all.)
     if args.dry_run:
         transcript = str(facts.get("transcript") or "")
         if _summary_source_readable(transcript):

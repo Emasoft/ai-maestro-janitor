@@ -76,11 +76,11 @@ def _import_dispatch():
     return mod
 
 
-
 def _reported_age(out: str) -> int:
     """The `<n>s ago` the phase printed, or -1 when it printed none."""
     m = re.search(r"(\d+)s ago", out)
     return int(m.group(1)) if m else -1
+
 
 def _capture_stdout(fn):
     """Run fn() while capturing print() output. Return captured string."""
@@ -1107,7 +1107,6 @@ def test_the_hold_clearing_lets_the_next_fire_resume(env_isolation: dict) -> Non
     assert not (sd / "resume-after-clear.flag").exists(), "now it must be consumed"
 
 
-
 def test_a_handoff_for_the_held_key_ends_the_hold_and_the_next_fire_resumes(
     env_isolation: dict,
 ) -> None:
@@ -1160,6 +1159,43 @@ def test_fresh_summary_note_empty_when_no_keyed_handoff_exists(env_isolation: di
     _arm_clear_flag(state, "continue TRDD-Z582IKIR")
     sd = state.state_dir()
     assert dispatch._fresh_summary_note(sd) == ""
+
+
+def test_a_real_summary_landing_after_a_template_resume_is_announced_once(
+    env_isolation: dict,
+) -> None:
+    """C1b gap 3: the resume fired on a TEMPLATE handoff; a real summary written later by the
+    detached retry lane is named by exactly one drift line, with its absolute path."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    _arm_clear_flag(state, "continue TRDD-Z582IKIR")
+    sd = state.state_dir()
+    _arm_summary_hold(sd, expires_in_s=900, key="k0k0k0k0", captured_ago_s=6)
+    now = int(time.time())
+    handoff_files.write(
+        sd, "k0k0k0k0", f"{handoff_files.TEMPLATE_MARKER}\nsynthetic template", now=now
+    )
+    assert "[janitor-resume]" in _run_main(dispatch)
+    assert "fuller summary" not in _run_main(dispatch), "nothing real has landed yet"
+
+    real = handoff_files.write(sd, "k0k0k0k0", "synthetic real summary", now=now + 5)
+    out = _run_main(dispatch)
+    assert f"a fuller summary of the cleared session is at {real.resolve()}" in out, out
+    assert "fuller summary" not in _run_main(dispatch), "announced once only"
+
+
+def test_no_late_summary_line_without_a_prior_resume(env_isolation: dict) -> None:
+    """An old handoff group on disk must not be announced by a project that never resumed."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    handoff_files.write(state.state_dir(), "k0k0k0k0", "synthetic real summary")
+    assert "fuller summary" not in _run_main(dispatch)
 
 
 # ---------- _run_detector wall-clock timeout (audit finding 1) -------------

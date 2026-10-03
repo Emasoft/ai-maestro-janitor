@@ -91,7 +91,6 @@ def _state_dir(project: Path) -> Path:
     return project / ".janitor" / "state"
 
 
-
 def _seed_handoff(project: Path) -> Path:
     """A real `/clear` now REFUSES without a handoff (owner invariant 2026-08-28), so any test
     exercising the non-dry path must seed one. Kept minimal and concise-contract-clean so it
@@ -437,7 +436,6 @@ def _capture_still_wanted(mod, monkeypatch) -> dict:
     return captured
 
 
-
 NBSP = " "
 
 
@@ -569,6 +567,7 @@ def test_still_wanted_cancels_on_a_recent_interrupt(tmp_path: Path, monkeypatch)
     assert ok is False
     assert "interrupted" in why
 
+
 def _no_agents_no_interrupt(monkeypatch) -> None:
     """Baseline fakes so `_agents_and_interrupt_ok` returns True and `_recovery_ok` is the
     only cancel under test."""
@@ -648,6 +647,7 @@ def test_still_wanted_ignores_its_own_resume_after_clear_flag(tmp_path: Path, mo
     ok, why = captured["still_wanted"]()
     assert ok is True, why
 
+
 def test_still_wanted_still_vetoes_on_a_stale_resume_after_clear_flag(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -674,6 +674,7 @@ def test_still_wanted_still_vetoes_on_a_stale_resume_after_clear_flag(
     ok, why = captured["still_wanted"]()
     assert ok is False
     assert "recovery pending" in why
+
 
 def test_still_wanted_cancels_when_the_pane_shows_the_retry_wedge(tmp_path: Path, monkeypatch) -> None:
     """FIFTH cancel (owner report §3.6): a pane showing the retry-wedge banner is a state
@@ -754,7 +755,6 @@ def test_still_wanted_repeats_the_wedge_veto_until_the_pane_state_changes(
     assert ok3 is True, why3
 
 
-
 def test_still_wanted_cancels_when_the_current_model_window_is_exhausted_now(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -832,7 +832,6 @@ def test_still_wanted_proceeds_when_no_live_account_usage_is_available(
     monkeypatch.setattr(mod.state, "log_line", lambda name, msg: logs.append(f"[{name}] {msg}"))
     captured = _capture_still_wanted(mod, monkeypatch)
     _no_agents_no_interrupt(monkeypatch)
-
 
     idle_text = (
         _PROJECT_ROOT / "tests" / "fixtures" / "pane_frames" / "synthetic-idle-empty-field.txt"
@@ -915,7 +914,6 @@ def test_persist_resume_state_logs_context_size_at_land(tmp_path: Path, monkeypa
     captured["pre_submit_first"]()
 
     assert any("clear landing at 760000 tokens (84% of window)" in ln for ln in logs), logs
-
 
 
 # --- TRDD-RAEGS1D5 card 5: the per-pane sidecar `_persist_resume_state` writes when the
@@ -1040,6 +1038,7 @@ def test_spawn_shrink_chain_transcript_path_defaults_to_none(tmp_path: Path, mon
     mod.spawn_shrink_chain(then=["/janitor-arm", "/janitor-resume"], directive="resume")
     assert captured["payload"]["transcript_path"] is None
 
+
 def test_spawn_shrink_chain_never_stamps_the_cooldown_itself(tmp_path: Path, monkeypatch) -> None:
     """Regression fix (post-2f463d3b review): the PARENT `spawn_shrink_chain` must never stamp
     the cooldown at spawn time -- only the CHILD, immediately before the verified Enter, may.
@@ -1116,7 +1115,6 @@ def test_completed_chain_with_cooldown_flag_stamps_at_verified_enter(tmp_path: P
     assert rc == 0
     assert field["text"] == "", "the final Enter must have cleared the field"
     assert cold_cache_compact.clear_in_cooldown(sd, now=int(_time.time())) is True
-
 
 
 def test_aborted_before_enter_chain_never_stamps_the_cooldown(tmp_path: Path, monkeypatch) -> None:
@@ -1201,7 +1199,6 @@ def test_still_wanted_still_vetoes_on_a_fresh_rate_limit_flag(tmp_path: Path, mo
     ok, why = captured["still_wanted"]()
     assert ok is False
     assert "recovery pending" in why
-
 
 
 def test_still_wanted_ignores_an_orphan_rate_limit_flag_with_no_since_sidecar(
@@ -1492,3 +1489,80 @@ def test_no_headroom_constants_match_the_real_model_fallback_detector(tmp_path: 
 
     assert mod._NO_HEADROOM_SCOPED_HIGH == det._SCOPED_HIGH
     assert mod._NO_HEADROOM_ACCOUNT_HEADROOM == det._ACCOUNT_HEADROOM
+
+
+def _chain_payload_for_hold(tmp_path: Path, transcript: Path, *, summary_hold: bool) -> str:
+    import base64
+    import json as _json
+
+    payload = {
+        "delay": 0.0,
+        "terminal": {"kind": "tmux"},
+        "first": "/clear",
+        "then": ["/janitor-arm", "/janitor-resume"],
+        "state_dir": str(tmp_path / ".janitor" / "state"),
+        "gate_baseline": 0,
+        "directive": "resume",
+        "transcript_path": str(transcript),
+        "summary_hold": summary_hold,
+    }
+    return base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
+
+
+def test_summary_hold_is_taken_only_when_the_clear_is_entered(tmp_path: Path, monkeypatch) -> None:
+    """C1b: building the chain (the decision) writes no hold; `pre_submit_first` (the moment right
+    before Enter on /clear) does. A chain that waits or is cancelled never blacks out chores."""
+    import handoff_files
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+    transcript = tmp_path / "abcd1234-synthetic.jsonl"
+    transcript.write_text('{"x": 1}\n', encoding="utf-8")
+    pending = tmp_path / ".janitor" / "state" / "summary-pending.json"
+
+    mod._run_chain_payload(_chain_payload_for_hold(tmp_path, transcript, summary_hold=True))
+    assert not pending.exists(), "no /clear typed yet: no hold"
+    captured["pre_submit_first"]()
+    import json as _json
+
+    rec = _json.loads(pending.read_text(encoding="utf-8"))
+    assert rec["key"] == handoff_files.session_key(str(transcript))
+
+
+def test_a_chain_that_did_not_ask_for_a_hold_takes_none(tmp_path: Path, monkeypatch) -> None:
+    """Only the daemon lane sets `summary_hold`; the other chains never held and must not start."""
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+    transcript = tmp_path / "abcd1234-synthetic.jsonl"
+    transcript.write_text('{"x": 1}\n', encoding="utf-8")
+
+    mod._run_chain_payload(_chain_payload_for_hold(tmp_path, transcript, summary_hold=False))
+    captured["pre_submit_first"]()
+    assert not (tmp_path / ".janitor" / "state" / "summary-pending.json").exists()
+
+
+def test_a_failed_hold_write_stops_the_chain_before_enter(tmp_path: Path, monkeypatch) -> None:
+    """A clear typed with no hold armed resumes before its summary exists, so a failed hold write
+    must raise out of `pre_submit_first` (never reaching Enter) instead of being swallowed."""
+    import pytest
+
+    mod = _import()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    captured = _capture_still_wanted(mod, monkeypatch)
+    _no_agents_no_interrupt(monkeypatch)
+    transcript = tmp_path / "abcd1234-synthetic.jsonl"
+    transcript.write_text('{"x": 1}\n', encoding="utf-8")
+    mod._run_chain_payload(_chain_payload_for_hold(tmp_path, transcript, summary_hold=True))
+
+    import external_handoff_clear as ehc
+
+    def _boom(_target, _value):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ehc.state, "atomic_write", _boom)
+    with pytest.raises(OSError):
+        captured["pre_submit_first"]()

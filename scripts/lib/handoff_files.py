@@ -148,6 +148,11 @@ def write(state_dir: Path, key: str, text: str, *, now: int | None = None) -> Pa
     ):
         try:
             if existing.read_text(encoding="utf-8") == text:
+                # WHY touch: `external_handoff_clear.summary_hold_active` ends a hold only for a
+                # handoff whose mtime is >= the hold's `captured`. A dedupe that left the old
+                # mtime in place kept the hold alive although the identical text is exactly what
+                # the resumed session gets injected.
+                os.utime(existing)
                 return existing  # already recorded by this session — writing it again adds nothing
         except OSError:
             break  # unreadable: fall through and write, never lose a handoff to a read error

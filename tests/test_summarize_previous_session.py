@@ -1660,9 +1660,9 @@ def test_lane_a_finishing_leaves_lane_bs_hold_active(tmp_path, monkeypatch, _iso
     real_run_with_fallback = jcl.run_compact_with_fallback
 
     def _racing_run_with_fallback(*args, **kwargs):
-        # Simulate lane B's own `_capture_summary_source` landing WHILE lane A is still
+        # Simulate lane B's own `take_summary_hold` landing WHILE lane A is still
         # compacting -- overwrites the ONE shared summary-pending.json with a DIFFERENT key.
-        ehc._capture_summary_source(sd, {"transcript": str(prev_b)}, int(time.time()))
+        ehc.take_summary_hold(sd, str(prev_b), int(time.time()))
         return real_run_with_fallback(*args, **kwargs)
 
     monkeypatch.setattr(jcl, "run_compact_with_fallback", _racing_run_with_fallback)
