@@ -802,13 +802,19 @@ def _evaluate_rotator_alert() -> None:
         import rotator_alert  # noqa: PLC0415 - lazy, like the rotator module itself
 
         # WHY (TRDD-B78NJU35): rotator_alert has no logger and silently falls back to 4 h on a
-        # malformed value; the fallback must leave a trace here, in daemon.log.
+        # malformed value; the fallback must leave a trace here, in daemon.log. This runs every
+        # tick, so logging each time floods daemon.log (~1440 lines/day for one persistent typo,
+        # what TRDD-JW8CWWNH fights): report only a value differing from the last one reported;
+        # a valid value resets so a later typo is reported again. Function attribute, not a
+        # module global (fastedit cannot edit module-level variables).
         bad_hours = rotator_alert.spare_stale_env_malformed()
-        if bad_hours is not None:
-            state.log_line(
-                "daemon",
-                f"rotator-alert: ROTATOR_SPARE_STALE_AFTER_H={bad_hours[:32]!r} is not a number; using 4 h",
-            )
+        if bad_hours != getattr(_evaluate_rotator_alert, "last_bad_hours", None):
+            _evaluate_rotator_alert.last_bad_hours = bad_hours  # type: ignore[attr-defined]
+            if bad_hours is not None:
+                state.log_line(
+                    "daemon",
+                    f"rotator-alert: ROTATOR_SPARE_STALE_AFTER_H={bad_hours[:32]!r} is not a number; using 4 h",
+                )
         rot = oauth_supervisor._rotator_module()
         rotator_alert.evaluate(
             oauth_supervisor._rotator_root(),

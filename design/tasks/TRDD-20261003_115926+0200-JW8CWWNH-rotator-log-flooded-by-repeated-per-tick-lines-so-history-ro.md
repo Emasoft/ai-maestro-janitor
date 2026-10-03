@@ -4,7 +4,7 @@ title: Rotator log flooded by repeated per-tick lines so history rotates away in
 column: backburner
 status: tasked
 created: 2026-10-03T11:59:26+0200
-updated: 2026-10-03T12:02:11+0200
+updated: 2026-10-03T12:15:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,3 +33,7 @@ Related: TRDD-B78NJU35, TRDD-HSRERK5S.
 ## Provenance
 
 Filed by the main agent from the R8 investigation (TRDD-B78NJU35); authority derives from the owner-approved plan, not a separate owner decision.
+
+## Notes
+
+Also dedup the R8 [keepalive] line 'meta field … is not a number' in rotator.py _num_or: it repeats once per tick per corrupt slot (added 2026-10-03, TRDD-B78NJU35).

@@ -295,6 +295,32 @@ def test_the_daemon_logs_a_malformed_spare_stale_env_but_still_evaluates(
     assert not [m for m in lines if "ROTATOR_SPARE_STALE_AFTER_H" in m]
 
 
+
+def test_the_daemon_logs_a_malformed_spare_stale_env_only_when_it_changes(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-B78NJU35: the same bad value logs once, a different one again, valid-then-bad again."""
+    import daemon  # type: ignore[import-not-found]
+
+    lines: list[str] = []
+    monkeypatch.setattr(daemon.oauth_supervisor, "_rotator_root", lambda: root)
+    monkeypatch.setattr(daemon.notify, "_deliver", lambda *a, **k: None)
+    monkeypatch.setattr(daemon.state, "log_line", lambda _name, msg: lines.append(msg))
+
+    def evaluate(value: str) -> int:
+        monkeypatch.setenv("ROTATOR_SPARE_STALE_AFTER_H", value)
+        lines.clear()
+        daemon._evaluate_rotator_alert()
+        return len([m for m in lines if "ROTATOR_SPARE_STALE_AFTER_H" in m])
+
+    assert evaluate("6") == 0  # valid: resets the remembered value
+    assert evaluate("abc") == 1
+    assert evaluate("abc") == 0
+    assert evaluate("abd") == 1
+    assert evaluate("6") == 0
+    assert evaluate("abd") == 1
+
+
 # ---------- dispatch: the drift line is printed even under a live summary hold ----------
 
 
