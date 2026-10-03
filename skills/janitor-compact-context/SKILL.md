@@ -53,17 +53,17 @@ want the model to author one; this skill will not do that for you.
    ```
 
    **`--force` is NOT a master override.** It relaxes exactly two TRIGGER terms — `idle …`
-   and `no-headroom` (`external_handoff_clear.py:421`) — and its own help says *"every
+   and `no-headroom` (`_decide` in `external_handoff_clear.py`) — and its own help says *"every
    safety veto still holds."* A veto is a refusal to clear something that would be harmed
    by clearing, and forcing harder cannot and must not get past one. In particular
    `--force` does NOT bypass the 300k context floor (`DEFAULT_MIN_CONTEXT_TOKENS`,
-   `external_clear.py:89`): that veto's reason is `context N < 300000 — nothing worth
-   reclaiming` (`external_clear.py:1474`), which is neither `idle …` nor `no-headroom`, so
-   the override at `external_handoff_clear.py:421` never matches it. Add `--dry-run` to
+   `scripts/lib/external_clear.py`): that veto's reason is `context N < 300000 — nothing worth
+   reclaiming` (`nothing worth reclaiming`), which is neither `idle …` nor `no-headroom`, so
+   the override in `_decide` never matches it. Add `--dry-run` to
    inspect the composed handoff without clearing anything.
 
    **`why=active-waiting` is the veto you will hit most, and it is CORRECT.** It means a
-   resume or a BACKGROUND AGENT is in flight (`external_clear.py:983`). Clearing then would
+   resume or a BACKGROUND AGENT is in flight (veto reason `active-waiting`). Clearing then would
    strand work that is running right now. The response is to WAIT for the agents to finish
    and re-run — never to look for a stronger flag. Measured 2026-08-14: a `--force --dry-run`
    on a session with live workers returned `VERDICT HOLD trigger=- why=active-waiting`,
