@@ -1,10 +1,10 @@
 ---
 trdd-id: 8524H5V1
 title: C24 — ledger suppression and host-load registration
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-01T20:39:21+0200
+updated: 2026-10-03T14:43:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,8 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:15+0200
-blocked-by: [U2VUXGBP, UDE86OSZ]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, 8524H5V1]
 blocker-holds-if: not-match:READY
 ---
@@ -37,3 +37,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:46:12+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on U2VUXGBP, UDE86OSZ per DSN035UN wave order
 - 2026-10-01 — REQUIREMENT (wave-1 review finding 2, HIGH): the ledger and drift paths MUST NOT crash on a malformed .janitor.toml. Catch the error from suppression.is_suppressed, record ONE finding CONFIG-001 bad-janitor-toml (add the code to design/specs/issue-codes.toml via the generator flow, coordinate with C10) and fall back to "nothing suppressed". Fail-fast stays right for the CLI, wrong for a background observer. Also dedupe HOST-001 (finding 4): emit on state change or at most once per hour, not every heartbeat.
 - 2026-10-01 — OWNS (wave-1 review finding 2): catch C1A's is_suppressed config error in the ledger/drift path, emit CONFIG-001 bad-janitor-toml, treat nothing as suppressed; never let one config typo stop the heartbeat. May also take C1C's HOST-001 dedupe if C1C hands it over.
+- 2026-10-03T14:43:59+0200 — column → todo. blockers U2VUXGBP (C1A) and UDE86OSZ (C1C) are complete and archived Cleared blocked-by (--clear-blocker override).
