@@ -57,8 +57,10 @@ def _semver_tuple(s: str) -> tuple[int, ...]:
     # TRDD-9UVLOHED: an installed "0.2.2-4ad88f7c087a" made int("2-4ad…") raise -> (-1,), so
     # _is_newer was True forever and a no-op update re-fired every beat. Use the numeric
     # prefix only; the suffix is ignored.
-    # ponytail: equal numeric prefixes count as not newer, so 1.0.0-rc1 -> 1.0.0 is not
-    # signaled; upgrade path: compare the suffix per semver if that ever matters.
+    # ponytail: regression vs the old code, which read "1.0.0-rc1" as (-1,) and DID signal
+    # the step to 1.0.0; equal numeric prefixes now count as not newer, so that step and
+    # commits pushed without a version bump are no longer signaled (the old every-fire signal
+    # caught them by accident). Upgrade: compare the suffix per semver, or installed commit vs repo head.
     m = _SEMVER_PREFIX_RE.match(s)
     if not m:
         return (-1,)
