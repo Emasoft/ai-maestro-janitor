@@ -822,6 +822,32 @@ def task_oauth_rotator_beat() -> None:
         _evaluate_rotator_alert()
 
 
+
+_RC_STDERR_TAIL_CHARS = 300
+_TOKEN_RE = re.compile(r"sk-ant-\S+")
+
+
+def _log_rotator_tick_result(result: Optional[subprocess.CompletedProcess[str]]) -> None:
+    """Log an ABNORMAL rotator tick in daemon.log: rc != 0 or non-empty stderr (TRDD-HSRERK5S).
+
+    WHY: daemon.log used to show only "done in Ns" for the tick, so a failing tick left no
+    cause anywhere. A clean tick writes nothing: the scheduler already logs "starting" and
+    "done in Ns" every minute. Stderr is masked (`sanitize_for_drift_line`: control chars,
+    brackets, e-mail addresses; plus `sk-ant-` tokens) BEFORE the tail is cut: cutting first
+    can slice into a token so its remainder no longer starts with `sk-ant-` and escapes the
+    mask. No latch change on purpose: a hung `security` prompt also uses ~0 CPU, so "starved"
+    cannot be told apart from it. None (timeout / spawn failure) is already logged by
+    `_run_workload`.
+    """
+    if result is None:
+        return
+    err = (result.stderr or "").strip()
+    if result.returncode == 0 and not err:
+        return
+    masked = _TOKEN_RE.sub("sk-ant-⟨redacted⟩", state.sanitize_for_drift_line(err))
+    state.log_line("daemon", f"rotator tick rc={result.returncode} stderr: {masked[-_RC_STDERR_TAIL_CHARS:]}")
+
+
 def task_oauth_rotator_tick() -> None:
     """60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
     TRDD-f892e109 decision 3 — this REPLACES the deleted launchd agent.
@@ -861,10 +887,11 @@ def task_oauth_rotator_tick() -> None:
     # ZKXQXHBI read. Session-context reads are untouched (they never set HEADLESS).
     if os.environ.get("JANITOR_ROTATOR_DAEMON_PRIMARY_READ", "").strip() != "1":
         os.environ["JANITOR_ROTATOR_HEADLESS"] = "1"
-    _run_workload(
+    tick_result = _run_workload(
         [sys.executable, str(rotator_py), "tick", "--only-if-claude-running"],
         timeout=120,
     )
+    _log_rotator_tick_result(tick_result)
     # TRDD-NACCL0CB, second incident 2026-09-02 21:41-21:47: the rotator switched at 21:41:03
     # and the wall landed on the panes between the 21:43 and 21:45 liveness beats; the ESC
     # fired at 21:45:05 — correct, but the owner had seen the red line for ~2 minutes and had

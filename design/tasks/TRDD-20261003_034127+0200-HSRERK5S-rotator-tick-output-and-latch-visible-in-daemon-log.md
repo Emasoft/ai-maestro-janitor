@@ -1,10 +1,10 @@
 ---
 trdd-id: HSRERK5S
 title: Rotator tick output and latch visible in daemon log
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-03T03:41:27+0200
-updated: 2026-10-03T03:45:06+0200
+updated: 2026-10-03T09:37:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -30,3 +30,5 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:41:27+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-03T09:31:50+0200 — column → dev. R5 in progress
+- 2026-10-03T09:37:41+0200 — column → testing. code ready, field check after release: a failing tick's cause appears in daemon.log
