@@ -24,7 +24,7 @@ implementation-commits: [e9b7622d, 346a557d]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
-Code landed as e9b7622d (rotator tick and its alarm in a dedicated daemon thread; plugin-update lock with timeout; heartbeat refreshed around the claude plugin calls). Its commit subject was lost; the full message is in message-only follow-up 346a557d. Column testing: only field acceptance remains (rotator ticks keep a 60 s cadence in daemon.log after release, even during a long main-loop pass).
+Code landed as e9b7622d (rotator tick and its alarm in a dedicated daemon thread; plugin-update lock with timeout; heartbeat refreshed around the claude plugin calls). Its commit subject was lost; the full message is in message-only follow-up 346a557d. Column testing: see the remaining-before-complete line below.
 
 ### R1b — the 31-minute silence (`scripts/daemon.py` chore coordination)
 1. Read the beat loop around the "foreground budget … deferring" path, and find what blocked from 00:18:16 to 00:49:59. Separate a blocked subprocess, the bulk lane (`daemon.py:302+`), and a dead process restarted by session b545353a.

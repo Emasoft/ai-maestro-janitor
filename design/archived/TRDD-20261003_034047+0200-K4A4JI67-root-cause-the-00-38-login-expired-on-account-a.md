@@ -1,10 +1,10 @@
 ---
 trdd-id: K4A4JI67
 title: Root-cause the 00.38 Login expired on account A
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-03T03:40:47+0200
-updated: 2026-10-03T06:24:37+0200
+updated: 2026-10-03T06:27:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -32,11 +32,16 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:40:47+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-03T06:27:07+0200 — COMPLETE by main-agent@ai-maestro-janitor. read-only root-cause card; verdict recorded in the card.
 
 ## Verdict
 
-- H1 (a janitor process spent the live account grant after its 16:42 slot refresh): REFUTED for the logged window. No log line and no code path targets the live account; the only janitor refresh of it was the 16:42 slot refresh whose token pair later became the live credential. Residual UNDETERMINED: the daemon killed the 60 s rotator tick 26 times, and a tick killed after the POST but before the slot write would leave no log line.
+- H1 (a janitor process spent the live account grant after its 16:42 slot refresh): REFUTED for the logged window, with a residual UNDETERMINED for killed ticks (no intent-log line exists before a refresh POST, so a refresh that left no log cannot be excluded). No log line and no code path targets the live account; the only janitor refresh of it was the 16:42 slot refresh whose token pair later became the live credential. Residual UNDETERMINED: the daemon killed the 60 s rotator tick 26 times, and a tick killed after the POST but before the slot write would leave no log line.
 - H2 (another Claude Code process refreshed the shared grant first): UNDETERMINED, leaning against as the proximate cause. From the binary strings (inferred, not traced end to end), a loser of a refresh race adopts the winner token and shows no error, and lock contention has different wording.
 - H3 (Claude Code own refresh failed from starvation or network): UNDETERMINED. The timing fits, but the binary has separate wording for transport failures, so it does not match the displayed message; not excluded.
 - Ranked most likely cause (evidence-limited): the stored refresh grant was rejected as invalid_grant, or the item lacked a refresh token, at the first proactive refresh after a 37-minute idle, so every session sharing the item failed together and the item was left without an accessToken. Why the grant was invalid is NOT established. Q4 (does a running session adopt a credential switched in without /login): inferred yes unless its refresh token is in the in-memory dead set; not tested live.
 - Missing evidence: Claude Code own log of that minute (debug logging was off), an append-only fingerprint log of the live item (the rotator was blind, mirror only, from 19:26 to 00:37), an intent-log line before each refresh POST, and the HTTP status and error body of the refresh. Full report: reports/oauth-rotator/20261003_034130+0200-R0-login-expired-root-cause.md (local-only, reports/ is gitignored).
+
+## Acceptance
+
+- [x] Verdict per hypothesis recorded in the card
