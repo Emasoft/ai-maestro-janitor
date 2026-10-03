@@ -267,7 +267,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 ### Release 1 ship (owner decision 1)
 1. The owner authorizes release 1, with unrelated open cards re-columned, or clears the board first. Resolve RAEGS1D5's 2 decisions.
 2. Run `uv run scripts/publish.py --minor`. Do not watch CI.
-3. When the janitor reports green: update the installed plugin with `claude plugin update` (the janitor plugin, ai-maestro-plugins marketplace, `--scope user`). Re-stage the plist via `keepalive_install.sh`.
+3. When the janitor reports green: update the installed plugin with `claude plugin update <plugin>@<marketplace> --scope user`, plugin `ai-maestro-janitor`, marketplace `ai-maestro-plugins` (exact command: CLAUDE.md Working rules). Re-stage the plist via `keepalive_install.sh`.
 - **Deploy verify:**
   - The cache directory carries the new version.
   - The DATA `rotator.py`/`daemon.py` sha256 equals the cache copy.
