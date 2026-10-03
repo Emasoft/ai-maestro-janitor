@@ -1030,10 +1030,21 @@ def process_ancestry(start_pid: int, table: dict[int, tuple[int, str]]) -> list[
 
 
 
+def is_claude_command(cmd: str) -> bool:
+    """True iff a process command line launches claude: argv[0] basename is `claude`/`claude.exe`.
+
+    The one place this rule lives (same test as `fleet_restart.argv_is_claude`): the EXECUTABLE,
+    never a substring, so `vim --add-dir /src/claude-plugins` is not claude.
+    """
+    words = cmd.split(None, 1)
+    return bool(words) and os.path.basename(words[0]) in ("claude", "claude.exe")
+
+
+
 def claude_ancestor_pid(start_pid: int, table: dict[int, tuple[int, str]]) -> int | None:
     """Pid of the nearest ancestor of `start_pid` whose executable basename is `claude`, else None.
 
-    Same executable test as `fleet_restart.argv_is_claude` (argv[0] basename, never a substring).
+    Uses `is_claude_command`.
     Walks like `process_ancestry`: stops at pid <= 1, a cycle, a missing parent or 64 levels.
     A hook is launched through bash -> uv -> python, so its own parent is NOT the claude process
     (TRDD-LXUZYFD9); only a walk finds it.
@@ -1050,8 +1061,7 @@ def claude_ancestor_pid(start_pid: int, table: dict[int, tuple[int, str]]) -> in
         parent = table.get(ppid)
         if parent is None:
             return None
-        words = parent[1].split(None, 1)
-        if words and os.path.basename(words[0]) in ("claude", "claude.exe"):
+        if is_claude_command(parent[1]):
             return ppid
         seen.add(ppid)
         cur = ppid

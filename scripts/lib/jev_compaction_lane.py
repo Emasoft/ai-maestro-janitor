@@ -112,7 +112,8 @@ AUTH_SEEN_FILE = "jev-auth-finding-seen"
 _TRDDGREP_TIMEOUT_S = 10
 
 
-def previous_transcript(root: Path, current_session_id: str, own_pid: int | None = None) -> Path | None:
+def previous_transcript(root: Path, current_session_id: str, own_pid: int | None = None,
+                        ps_text: str | None = None) -> Path | None:
     """The newest transcript that is NOT this session's and NOT another process's live session.
 
     `current_session_id` is excluded by STEM, not by mtime: at SessionStart the new transcript may
@@ -142,7 +143,7 @@ def previous_transcript(root: Path, current_session_id: str, own_pid: int | None
         if own_pid is None:
             env_pid = os.environ.get("JANITOR_CLAUDE_PID", "")
             own_pid = int(env_pid) if env_pid.isdigit() else None
-        live = _live_session_ids(own_pid) if own_pid is not None else set()
+        live = _live_session_ids(own_pid, ps_text) if own_pid is not None else set()
         candidates = [
             p for p in parent.glob("*.jsonl")
             if p.is_file() and p.stat().st_size > 0 and current_session_id not in p.stem
@@ -155,10 +156,23 @@ def previous_transcript(root: Path, current_session_id: str, own_pid: int | None
         return None
 
 
-def _live_session_ids(own_pid: int) -> set[str]:
+def _live_session_ids(own_pid: int, ps_text: str | None = None) -> set[str]:
     """sessionIds of Claude Code sessions live right now AND owned by a process other than
-    `own_pid`: `~/.claude/sessions/<pid>.json` whose pid is alive. A missing/unreadable directory
-    or file yields nothing (today's behaviour)."""
+    `own_pid`: `~/.claude/sessions/<pid>.json` whose pid is in a fresh process-table snapshot AND
+    whose command is claude. WHY the claude check (TRDD-LXUZYFD9): stale sessions files linger and
+    macOS reuses pids, so a bare "pid is alive" lets an unrelated process make a dead session look
+    live. `ps_text` is injectable (a `ps -axo pid=,ppid=,command=` dump); default is a real
+    snapshot, and if that fails NO session is counted live (safe side). A missing/unreadable
+    directory or file yields nothing (today's behaviour)."""
+    if ps_text is None:
+        proc = state.run_subprocess(
+            ["ps", "-axo", "pid=,ppid=,command="], timeout=2.0, capture=True,
+            detector_name=_LOG,
+        )
+        if proc is None or not proc.stdout:
+            return set()
+        ps_text = proc.stdout
+    table = state.parse_ps_table(ps_text)
     live: set[str] = set()
     for f in (Path.home() / ".claude" / "sessions").glob("*.json"):
         try:
@@ -166,15 +180,8 @@ def _live_session_ids(own_pid: int) -> set[str]:
             pid, sid = int(data["pid"]), str(data["sessionId"])
         except (OSError, ValueError, KeyError, TypeError):
             continue
-        if pid == own_pid:
-            continue
-        try:
-            os.kill(pid, 0)
-        except PermissionError:  # pid exists, owned by another user: alive
-            pass
-        except OSError:
-            continue
-        live.add(sid)
+        if pid != own_pid and pid in table and state.is_claude_command(table[pid][1]):
+            live.add(sid)
     return live
 
 def _board_ids_by_column(root: Path) -> dict[str, list[tuple[str, str]]] | None:

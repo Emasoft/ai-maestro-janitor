@@ -1046,7 +1046,7 @@ def main() -> int:
             log_dir.mkdir(parents=True, exist_ok=True)
             with (log_dir / "session-summary.stderr.log").open("a", encoding="utf-8") as errsink:
                 # TRDD-LXUZYFD9: this detached child cannot find its claude ancestor once this hook
-                # exits (reparented), so hand the pid down; detached_uv_env() copies os.environ.
+                # exits (reparented), so hand the pid down in ITS env only (no os.environ mutation).
                 # Walk the process table: hooks run bash -> uv -> python, so getppid() is NOT claude.
                 # Unset when not found: previous_transcript then skips no live session (safe side).
                 # 2 s: must leave room inside the hook's 5 s budget; a timeout leaves JANITOR_CLAUDE_PID
@@ -1058,13 +1058,17 @@ def main() -> int:
                 _claude_pid = state.claude_ancestor_pid(
                     os.getpid(), state.parse_ps_table(_ps.stdout if _ps and _ps.stdout else ""),
                 )
+                _extra_env: dict[str, str] = {}
                 if _claude_pid is not None:
-                    os.environ["JANITOR_CLAUDE_PID"] = str(_claude_pid)
+                    _extra_env["JANITOR_CLAUDE_PID"] = str(_claude_pid)
+                else:
+                    _slog(state, "session-start",
+                          "claude ancestor not found; live-session skip disabled for this summary")
                 subprocess.Popen(  # noqa: S603 - explicit args, no shell
                     [str(script)],
                     stdout=subprocess.DEVNULL, stderr=errsink,
                     start_new_session=True,
-                    env=state.detached_uv_env(),
+                    env={**state.detached_uv_env(), **_extra_env},
                 )
     except Exception as exc:  # noqa: BLE001 -- never break session start
         _slog(state, "session-start", f"previous-session summary spawn failed: {exc!r}")

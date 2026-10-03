@@ -36,6 +36,11 @@ def _setup(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     return root, tdir, sessions
 
 
+def _ps(*rows: tuple[int, str]) -> str:
+    """A synthetic `ps -axo pid=,ppid=,command=` dump: (pid, command) rows, all children of 1."""
+    return "".join(f"{pid} 1 {cmd}\n" for pid, cmd in rows)
+
+
 def _transcript(tdir: Path, sid: str, mtime: int) -> Path:
     p = tdir / f"{sid}.jsonl"
     p.write_text("{}\n")
@@ -54,7 +59,7 @@ def test_live_sibling_transcript_is_skipped(tmp_path, monkeypatch):
     own = _transcript(tdir, "own-old", 1000)
     _transcript(tdir, "sibling-live", 2000)
     _session_file(sessions, os.getpid(), "sibling-live")
-    assert jcl.previous_transcript(root, "current-new") == own
+    assert jcl.previous_transcript(root, "current-new", ps_text=_ps((os.getpid(), "claude"))) == own
 
 
 def test_dead_pid_does_not_skip(tmp_path, monkeypatch):
@@ -63,7 +68,7 @@ def test_dead_pid_does_not_skip(tmp_path, monkeypatch):
     _transcript(tdir, "own-old", 1000)
     sib = _transcript(tdir, "sibling-dead", 2000)
     _session_file(sessions, _dead_pid(), "sibling-dead")
-    assert jcl.previous_transcript(root, "current-new") == sib
+    assert jcl.previous_transcript(root, "current-new", ps_text=_ps((os.getpid(), "claude"))) == sib
 
 
 def test_no_sessions_dir_keeps_newest_other(tmp_path, monkeypatch):
@@ -80,7 +85,7 @@ def test_own_pid_session_file_naming_cleared_session_is_not_skipped(tmp_path, mo
     old = _transcript(tdir, "cleared-old", 2000)
     _transcript(tdir, "sibling-older", 1000)
     _session_file(sessions, os.getppid(), "cleared-old")
-    assert jcl.previous_transcript(root, "current-new") == old
+    assert jcl.previous_transcript(root, "current-new", ps_text=_ps((os.getppid(), "claude"))) == old
 
 
 def test_unknown_own_pid_skips_nothing(tmp_path, monkeypatch):
@@ -90,7 +95,7 @@ def test_unknown_own_pid_skips_nothing(tmp_path, monkeypatch):
     _transcript(tdir, "own-old", 1000)
     live = _transcript(tdir, "sibling-live", 2000)
     _session_file(sessions, os.getpid(), "sibling-live")
-    assert jcl.previous_transcript(root, "current-new") == live
+    assert jcl.previous_transcript(root, "current-new", ps_text=_ps((os.getpid(), "claude"))) == live
 
 
 def test_claude_ancestor_pid_walks_past_bash_and_uv():
@@ -112,3 +117,21 @@ def test_claude_ancestor_pid_none_without_claude():
         "  300   200 python hook.py\n"
     )
     assert state.claude_ancestor_pid(300, table) is None
+
+
+def test_reused_pid_running_a_non_claude_command_is_not_live(tmp_path, monkeypatch):
+    """A sessions file whose pid is alive but runs python (pid reuse) is not a live session."""
+    root, tdir, sessions = _setup(tmp_path, monkeypatch)
+    _transcript(tdir, "own-old", 1000)
+    stale = _transcript(tdir, "stale-session", 2000)
+    _session_file(sessions, os.getpid(), "stale-session")
+    ps = _ps((os.getpid(), "/usr/bin/python3 -m pytest"))
+    assert jcl.previous_transcript(root, "current-new", ps_text=ps) == stale
+
+
+def test_failed_ps_snapshot_skips_nothing(tmp_path, monkeypatch):
+    """When the real ps call yields nothing, no live session is counted (safe side)."""
+    root, tdir, sessions = _setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))  # ps cannot be found -> run_subprocess None
+    _session_file(sessions, os.getpid(), "sibling")
+    assert jcl._live_session_ids(os.getppid()) == set()
