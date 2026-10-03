@@ -4,7 +4,7 @@ title: C24 — ledger suppression and host-load registration
 column: todo
 status: tasked
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-03T14:43:59+0200
+updated: 2026-10-03T15:48:44+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -38,3 +38,8 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01 — REQUIREMENT (wave-1 review finding 2, HIGH): the ledger and drift paths MUST NOT crash on a malformed .janitor.toml. Catch the error from suppression.is_suppressed, record ONE finding CONFIG-001 bad-janitor-toml (add the code to design/specs/issue-codes.toml via the generator flow, coordinate with C10) and fall back to "nothing suppressed". Fail-fast stays right for the CLI, wrong for a background observer. Also dedupe HOST-001 (finding 4): emit on state change or at most once per hour, not every heartbeat.
 - 2026-10-01 — OWNS (wave-1 review finding 2): catch C1A's is_suppressed config error in the ledger/drift path, emit CONFIG-001 bad-janitor-toml, treat nothing as suppressed; never let one config typo stop the heartbeat. May also take C1C's HOST-001 dedupe if C1C hands it over.
 - 2026-10-03T14:43:59+0200 — column → todo. blockers U2VUXGBP (C1A) and UDE86OSZ (C1C) are complete and archived Cleared blocked-by (--clear-blocker override).
+2026-10-03 — RECON (reports/board/20261003_154755+0200-c24-recon.md): Registering host-load means adding a tuple to the module-level _DETECTORS list in scripts/dispatch.py (L80-508; no filename discovery). fastedit cannot edit module-level constants, so this part waits on the owner's pending one-off plain-edit decision (the same decision listed on TRDD-MMUSDJHQ).
+2026-10-03 — RECON (reports/board/20261003_154755+0200-c24-recon.md): CONFIG-001 is absent from design/specs/issue-codes.toml; adding it needs the toml plus the generated files (scripts/build_issue_codes.py --write regenerates scripts/lib/issue_codes_gen.py, docs/ISSUE-CODES.md, src/rules_gen.rs). Give it NO kind field so it stays a ledger finding, not a ticket. These files are outside this card's Writes list; widen Writes before dispatch.
+2026-10-03 — RECON (reports/board/20261003_154755+0200-c24-recon.md): HOST-001 dedupe already exists per episode: host-load.py uses dedupe.emit_once / emit_forget (prints once, silent until load drops below threshold). The 'state change' half of the requirement is met; only the optional hourly re-emit is missing, and it would live in host-load.py (outside Writes).
+2026-10-03 — RECON (reports/board/20261003_154755+0200-c24-recon.md): HOST-002: the system-daemon-runaway line carries no code. Map it by detector name inside dispatch.py's drift-line path (_run_detector, L1160/L1179) rather than editing scripts/lib/daemon_runaway.py.
+2026-10-03 — RECON (reports/board/20261003_154755+0200-c24-recon.md): The ledger has no path field; is_suppressed(code, path) can only use ref. Catch (ValueError, OSError) around is_suppressed: TOMLDecodeError and UnicodeDecodeError are ValueError subclasses. Tests (tests/test_findings_ledger.py, a dispatch drift test) are also outside Writes; widen Writes to include them.
