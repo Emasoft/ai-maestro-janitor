@@ -4,7 +4,7 @@ title: Session goal re-set after a janitor clear
 column: testing
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-03T11:09:12+0200
+updated: 2026-10-03T11:11:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -43,3 +43,5 @@ Parent plan: TRDD-K9AHY1ZB
 - Decision 2 (typing channel): terminal_trigger types the command by LITERAL keys (tmux send-keys -l, iTerm write text, wtype/xdotool), not bracketed paste. An at-sign in the goal would open Claude Code's file picker, so sanitize_goal replaces it with (at).
 - Decision 4 (cleared goal): in real local transcripts goal_status records carry keys condition, met, reason or sentinel, type (met true adds durationMs, iterations, tokens); no record for a cleared or cancelled goal was found. session_continuity treats a typed /goal clear command record (top-level user record, command wrapper) as met; the extractor keys on the top-level attachment type goal_status, so tool output cannot plant a goal. The clear record shape is UNVERIFIED.
 - Decision 5 (resume flag): the flag cannot be skipped, SessionStart stamps clear-observed.ts (the gate phase B awaits) only while it exists. On the goal path the chain consumes flag, ts and session-id stamp right after run_chained_inject succeeds (kept on failure); the blind fallback writes no flag. Daemon goal source is the recorded pane transcript mapping, never the newest transcript.
+Gap: on the goal path the resume flag is consumed, and the late-summary note (dispatch _fresh_summary_note) only reaches the session through the janitor-resume path, so a real summary that lands after a template injection is not announced. Follow-up: have dispatch emit that note on its own.
+The sanitizer replaces the at-sign with (at) in the typed goal (literal-key typing would open the file picker); the changed text is intended, not corruption.

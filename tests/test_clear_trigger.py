@@ -24,6 +24,8 @@ import state  # noqa: E402  # for the per-pane presence key (matches compact_tri
 
 
 def _import():
+    # external_handoff_clear lives in scripts/, not scripts/lib/: put it on the path so this file passes alone
+    sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
     spec = _u.spec_from_file_location("clear_trigger_under_test", str(_SCRIPT))
     assert spec is not None and spec.loader is not None
     mod = _u.module_from_spec(spec)
@@ -221,6 +223,21 @@ def test_cleared_goal_is_treated_as_met(tmp_path: Path) -> None:
     assert sc.clear_fields(str(q))["goal"] == ""
 
 
+
+def test_goal_set_again_after_a_clear_is_the_goal(tmp_path: Path) -> None:
+    """TRDD-B3PY3HV7: an unmet goal, a typed `/goal clear`, then a NEW unmet goal_status yields the NEW goal."""
+    import json
+
+    import session_continuity as sc
+
+    old = {"type": "attachment", "attachment": {"type": "goal_status", "met": False, "condition": "ship C4"}}
+    clear = {"type": "user", "message": {"role": "user", "content": "<command-name>/goal</command-name>\n<command-args>clear</command-args>"}}
+    new = {"type": "attachment", "attachment": {"type": "goal_status", "met": False, "condition": "ship C5"}}
+    p = tmp_path / "n.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in [old, clear, new]) + "\n", encoding="utf-8")
+    assert sc.clear_fields(str(p))["goal"] == "ship C5"
+
+
 def _flag_after_chain(mod, monkeypatch, tmp_path: Path, then: list[str]) -> bool:
     """Run the chain with `run_chained_inject` replaced by one that fires `pre_submit_first` (the
     moment the resume flag is written) and succeeds; True when the resume flag is still on disk."""
@@ -253,6 +270,7 @@ def test_goal_path_leaves_no_resume_flag(tmp_path: Path, monkeypatch) -> None:
 
 def test_daemon_goal_comes_from_the_recorded_pane_not_the_newest_transcript(tmp_path: Path, monkeypatch) -> None:
     """TRDD-B3PY3HV7: the daemon types into a recorded pane, so its goal source is that pane's own mapping."""
+    sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
     import external_handoff_clear as ehc
     import user_intent
 
