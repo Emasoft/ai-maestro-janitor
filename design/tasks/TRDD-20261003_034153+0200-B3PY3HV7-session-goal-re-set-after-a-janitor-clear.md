@@ -4,7 +4,7 @@ title: Session goal re-set after a janitor clear
 column: testing
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-03T10:58:30+0200
+updated: 2026-10-03T11:09:12+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -37,3 +37,9 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-03T03:41:53+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T10:52:46+0200 — column → dev. C4 in progress
 - 2026-10-03T10:58:30+0200 — column → testing. code ready; field check after release: after a janitor clear of a session with an unmet goal, /goal is typed once and the goal is active in the new session
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
+
+- Decision 2 (typing channel): terminal_trigger types the command by LITERAL keys (tmux send-keys -l, iTerm write text, wtype/xdotool), not bracketed paste. An at-sign in the goal would open Claude Code's file picker, so sanitize_goal replaces it with (at).
+- Decision 4 (cleared goal): in real local transcripts goal_status records carry keys condition, met, reason or sentinel, type (met true adds durationMs, iterations, tokens); no record for a cleared or cancelled goal was found. session_continuity treats a typed /goal clear command record (top-level user record, command wrapper) as met; the extractor keys on the top-level attachment type goal_status, so tool output cannot plant a goal. The clear record shape is UNVERIFIED.
+- Decision 5 (resume flag): the flag cannot be skipped, SessionStart stamps clear-observed.ts (the gate phase B awaits) only while it exists. On the goal path the chain consumes flag, ts and session-id stamp right after run_chained_inject succeeds (kept on failure); the blind fallback writes no flag. Daemon goal source is the recorded pane transcript mapping, never the newest transcript.

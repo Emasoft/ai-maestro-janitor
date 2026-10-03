@@ -109,6 +109,32 @@ def _plan_path(entry: dict[str, Any]) -> str:
     return ""
 
 
+
+import re  # noqa: E402 -- used only by `_GOAL_CLEAR_RE` just below
+
+_GOAL_CLEAR_RE = re.compile(
+    r"<command-name>/goal</command-name>.*?<command-args>\s*(?:clear|off|stop|cancel|none|reset)\s*</command-args>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _is_goal_clear(entry: dict[str, Any]) -> bool:
+    """True for the user record of a typed `/goal clear` (TRDD-B3PY3HV7): a cleared goal is not unmet.
+
+    Keys on the slash-command wrapper of a top-level `user` record whose content is a string or text
+    blocks -- a tool result (nested `tool_result` block) can therefore never plant it. The exact record
+    Claude Code writes for a cleared goal was NOT observed in any local transcript; this matches the
+    documented `/goal clear` command wrapper only.
+    """
+    if entry.get("type") != "user":
+        return False
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, list):
+        content = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return isinstance(content, str) and bool(_GOAL_CLEAR_RE.search(content))
+
+
 def _open_tasks(transcript_path: str) -> list[str]:
     """Subjects of `~/.claude/tasks/<old transcript stem>/*.json` not completed. A missing
     directory is the normal "no task list" case: silent, never a fallback to another list."""
@@ -209,6 +235,8 @@ def clear_fields(transcript_path: str, *, goal_max: int = GOAL_MAX_CHARS) -> dic
                 if isinstance(att, dict) and att.get("type") == "goal_status":
                     goal_met, goal_cond = att.get("met") is not False, str(att.get("condition") or "")
                 plan = _plan_path(entry) or plan
+                if _is_goal_clear(entry):
+                    goal_met = True
                 if entry.get("type") == "user":
                     text = _human_text(entry)
                     if text:

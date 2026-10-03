@@ -496,7 +496,7 @@ def _fire(
         "terminal": terminal,
         "first": clear_trigger.CLEAR_CMD,
         # TRDD-B3PY3HV7: `/goal <unmet goal>` replaces `/janitor-resume` when the session had one.
-        "then": clear_trigger.clear_bootstrap(transcript or None),
+        "then": clear_trigger.clear_bootstrap(_pane_transcript(root, terminal)),
         "state_dir": str(sd),
         "gate_baseline": clear_trigger._gate_baseline(),
         # The after-phase clause is FIRST for the same reason the skill puts it first
@@ -573,6 +573,22 @@ def _fire(
     # and retries with long patience), and NOT stamping would respawn a chain on every daemon
     # beat — a spawn storm against a `clear-chain.lock` that only serializes them.
     cold_cache_compact.mark_clear_fired(sd, now=now)
+
+
+
+def _pane_transcript(root: Path, terminal: dict[str, str]) -> str | None:
+    """The transcript the RECORDED PANE's own session filed (`pane-transcript.<pane>.txt`), or None.
+
+    TRDD-B3PY3HV7: `/goal <goal>` is typed into that pane, so the goal must come from that pane's
+    session -- never from `cold_cache_compact.newest_transcript`, which in a multi-pane project can
+    be a sibling's and would type the sibling's goal here.
+    """
+    import user_intent  # noqa: PLC0415 -- lazy, like `_fire`'s other imports
+
+    found = user_intent.pane_transcript_path(
+        root, {"tmux_pane": terminal.get("pane", ""), "iterm_session_id": terminal.get("session_id", "")}
+    )
+    return str(found) if found else None
 
 
 def main() -> int:

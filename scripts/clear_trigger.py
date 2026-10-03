@@ -148,6 +148,9 @@ def sanitize_goal(text: str) -> str:
     (leading `/`). `split()` first: it turns every Unicode whitespace (newline, tab, NBSP) into one
     plain space, so the later `isprintable` filter only ever drops genuine controls.
     """
+    # `@` would open Claude Code's file picker when typed by literal keys (tmux `send-keys -l`,
+    # iTerm `write text`), and the following keys/Enter could then pick a file instead of submitting.
+    text = text.replace("@", "(at)")
     text = "".join(c for c in " ".join(text.split()) if c.isprintable())
     text = _PASTE_MARKER_RE.sub("", text)
     text = re.sub(r"\[(?=janitor-)", "⟦", text, flags=re.IGNORECASE)
@@ -166,12 +169,30 @@ def clear_bootstrap(transcript_path: str | None) -> list[str]:
     if transcript_path:
         import session_continuity  # noqa: PLC0415 -- sibling lib, lazy like the other chain imports
 
-        goal = sanitize_goal(
-            session_continuity.clear_fields(transcript_path, goal_max=GOAL_MAX_CHARS)["goal"]
-        )
+        try:
+            goal = sanitize_goal(
+                session_continuity.clear_fields(transcript_path, goal_max=GOAL_MAX_CHARS)["goal"]
+            )
+        except Exception as exc:  # noqa: BLE001 -- a bad transcript must never leave the chain with no phase B
+            # TRDD-B3PY3HV7: without this a raise here (truncated/partly written transcript) would
+            # abort the chain after /clear and the fresh session would idle -- the original complaint.
+            state.log_line("clear-trigger", f"clear_bootstrap: goal read failed ({exc!r}) -- plain bootstrap")
+            return list(_BOOTSTRAP_CMDS)
         if goal:
             return [ARM_CMD, f"{GOAL_CMD} {goal}"]
     return list(_BOOTSTRAP_CMDS)
+
+
+
+def is_goal_bootstrap(cmds: Sequence[str]) -> bool:
+    """True when phase B re-sets a goal (it then replaces `/janitor-resume`, TRDD-B3PY3HV7)."""
+    return any(c.startswith(f"{GOAL_CMD} ") for c in cmds)
+
+
+def _consume_resume_flag(sd: Path) -> None:
+    """Remove the pre-clear resume marker (flag + age sidecar + session stamp); absent files are fine."""
+    for name in ("resume-after-clear.flag", "resume-after-clear.ts", "resume-after-clear.session-id.txt"):
+        (sd / name).unlink(missing_ok=True)
 
 
 def check_handoff_concise(
@@ -942,6 +963,12 @@ def _run_chain_payload(payload_b64: str) -> int:
             still_wanted=_still_wanted,
         )
         state.log_line("clear-trigger", f"chain: {'OK' if ok else 'FAILED'} — {why}")
+        # TRDD-B3PY3HV7: the flag had to exist until now (SessionStart stamps `clear-observed.ts`, the
+        # gate phase B waited on, only while the flag is present), but on the goal path nothing may
+        # consume it as a second, generic `[janitor-resume]` mid-goal -- so it is consumed here, once
+        # `/goal` is typed. On failure it is KEPT: it is then the cleared session's only lifeline.
+        if ok and is_goal_bootstrap(data["then"]):
+            _consume_resume_flag(sd)
         # TRDD-11GAS4LC addendum: a distinct, greppable line for the specific case this
         # review added gates for — cancelled by `_still_wanted` at (or near) the verified
         # Enter, as opposed to a plain give-up on the giveup_s clock — so the miss rate
@@ -1364,9 +1391,12 @@ def main() -> int:
     # refusing would discard a command the user typed themselves, which is the behaviour the
     # owner removed. The resume state must then be written HERE, since no pre_submit runs.
     dpath = _write_directive(directive)
-    mpath = _write_clear_marker(directive)
     print(f"DIRECTIVE_WRITTEN {dpath}")
-    print(f"CLEAR_MARKER_WRITTEN {mpath}")
+    # TRDD-B3PY3HV7: no resume flag on the goal path -- nothing awaits it here (no chain gate) and it
+    # would make the next idle heartbeat print a second, generic resume directive mid-goal.
+    if not is_goal_bootstrap(boot_cmds):
+        mpath = _write_clear_marker(directive)
+        print(f"CLEAR_MARKER_WRITTEN {mpath}")
     # `_fire_phase` -> `send_self_command` has no per-child `env=` seam (unlike `_spawn_chain`
     # above), so this legacy fallback path uses the scoped, self-restoring env override instead
     # of a bare `os.environ[...] = ...`.
