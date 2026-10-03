@@ -4,7 +4,7 @@ title: Daemon went silent for 31 minutes after a 687 s pass
 column: testing
 status: tasked
 created: 2026-10-03T03:41:09+0200
-updated: 2026-10-03T06:22:34+0200
+updated: 2026-10-03T06:24:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,6 +34,7 @@ Code landed as e9b7622d (rotator tick and its alarm in a dedicated daemon thread
 - **Verify**: SC, plus `daemon.log` evidence quoted in the card.
 
 Parent plan: TRDD-JSQSJ3PZ
+2026-10-03 remaining before complete: root cause of the 00:18-00:49 stall is NOT confirmed — _consume_plugin_update_requests is the prime suspect only; confirm from daemon.log after release or link QJ5LP4W2 if it is the same cause; full uv run pytest after R4c lands; after release, rotator ticks keep a 60 s cadence in daemon.log during a long main-loop pass.
 
 ## Approval log
 

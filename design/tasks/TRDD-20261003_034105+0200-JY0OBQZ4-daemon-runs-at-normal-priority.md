@@ -23,6 +23,10 @@ implementation-commits: [30d320eb]
 
 # Daemon runs at normal priority
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
+
+2026-10-03 remaining before complete: full uv run pytest after R4c lands; host step N2 (owner decision): re-stage this Mac's LaunchAgent at ProcessType Standard, then check plutil -extract ProcessType and ps -o pri; after release, tick wall time under 30 s at high load in daemon.log.
+
 ### R1 — normal priority (`scripts/keepalive_install.sh:270`, `oauth_rotator/rotator.py claude_running()`)
 1. Change `ProcessType` to `Standard`.
 2. Add `timeout=10` to the `ps` call in `claude_running()`.

@@ -23,6 +23,10 @@ implementation-commits: [415d1971]
 
 # Session beacon mirrors the live token so the daemon can probe usage
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
+
+2026-10-03 remaining before complete: full uv run pytest after R4c lands; GATE before the first production write: an attribute-only look at the real -livebak keychain item's ACL (owner decision, no -w read); after release, a live-account usage line in daemon.log within one tick of an idle fire.
+
 ### R2 — the beacon mirrors the live token (`rotator.py` HEAD `refresh_beacon_if_stale` ~1097, `_live_backup_write` ~926)
 1. After a successful primary read in the session context, write the same blob to `-livebak`. The daemon's existing `b_fp == mirror_fp` branch then probes `/api/oauth/usage` (read-only) with the real live token.
 2. Call it from the Stop hook too (`hooks/on-stop-token-meter.py`, mtime-gated by the existing staleness check). Today it runs only from the 300 s detector on idle heartbeat fires, so a busy session leaves the daemon blind.
