@@ -801,6 +801,14 @@ def _evaluate_rotator_alert() -> None:
     try:
         import rotator_alert  # noqa: PLC0415 - lazy, like the rotator module itself
 
+        # WHY (TRDD-B78NJU35): rotator_alert has no logger and silently falls back to 4 h on a
+        # malformed value; the fallback must leave a trace here, in daemon.log.
+        bad_hours = rotator_alert.spare_stale_env_malformed()
+        if bad_hours is not None:
+            state.log_line(
+                "daemon",
+                f"rotator-alert: ROTATOR_SPARE_STALE_AFTER_H={bad_hours[:32]!r} is not a number; using 4 h",
+            )
         rot = oauth_supervisor._rotator_module()
         rotator_alert.evaluate(
             oauth_supervisor._rotator_root(),

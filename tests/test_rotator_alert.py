@@ -271,6 +271,30 @@ def test_the_daemon_beat_writes_the_alert_file_for_a_stuck_rotator(
     assert "rotation-stuck" in json.loads((root / ra.ALERT_NAME).read_text())["alerts"]
 
 
+
+def test_the_daemon_logs_a_malformed_spare_stale_env_but_still_evaluates(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-B78NJU35: a malformed ROTATOR_SPARE_STALE_AFTER_H leaves one daemon.log line (value
+    capped at 32 chars) and the alarm evaluation still runs; a valid value logs nothing."""
+    import daemon  # type: ignore[import-not-found]
+
+    (root / "rotation-stuck.json").write_text("{}")
+    lines: list[str] = []
+    monkeypatch.setattr(daemon.oauth_supervisor, "_rotator_root", lambda: root)
+    monkeypatch.setattr(daemon.notify, "_deliver", lambda *a, **k: None)
+    monkeypatch.setattr(daemon.state, "log_line", lambda _name, msg: lines.append(msg))
+    monkeypatch.setenv("ROTATOR_SPARE_STALE_AFTER_H", "12h" + "x" * 50)
+    daemon._evaluate_rotator_alert()
+    bad = [m for m in lines if "ROTATOR_SPARE_STALE_AFTER_H" in m]
+    assert len(bad) == 1 and "is not a number; using 4 h" in bad[0] and "x" * 40 not in bad[0]
+    assert "rotation-stuck" in json.loads((root / ra.ALERT_NAME).read_text())["alerts"]
+    lines.clear()
+    monkeypatch.setenv("ROTATOR_SPARE_STALE_AFTER_H", "6")
+    daemon._evaluate_rotator_alert()
+    assert not [m for m in lines if "ROTATOR_SPARE_STALE_AFTER_H" in m]
+
+
 # ---------- dispatch: the drift line is printed even under a live summary hold ----------
 
 

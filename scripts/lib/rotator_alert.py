@@ -61,14 +61,26 @@ def _epoch(raw: object) -> Optional[float]:
 
 
 def _spare_stale_after_s() -> float:
-    """ROTATOR_SPARE_STALE_AFTER_H (hours past expiry, default 4) in seconds. A bad value falls
-    back to 4: raising here would make the daemon's fail-open drop EVERY alarm (TRDD-B78NJU35).
-    This module has no logger, so the fallback is silent."""
-    try:
-        hours = float(os.environ.get("ROTATOR_SPARE_STALE_AFTER_H", "4"))
-    except ValueError:
+    """ROTATOR_SPARE_STALE_AFTER_H (hours past expiry, default 4) in seconds. A malformed value
+    falls back to 4: raising here would make the daemon's fail-open drop EVERY alarm
+    (TRDD-B78NJU35); the daemon logs the fallback via `spare_stale_env_malformed`."""
+    if spare_stale_env_malformed() is not None:
         return 4 * 3600.0
-    return hours * 3600 if hours >= 0 else 4 * 3600.0  # also rejects NaN/negative
+    return float(os.environ.get("ROTATOR_SPARE_STALE_AFTER_H", "4")) * 3600
+
+
+
+def spare_stale_env_malformed() -> Optional[str]:
+    """The raw ROTATOR_SPARE_STALE_AFTER_H when it is set but not a non-negative number, else
+    None. The single parse rule: `_spare_stale_after_s` falls back on it and the daemon (which
+    has the logger this module lacks) reports it, so a typo leaves a trace (TRDD-B78NJU35)."""
+    raw = os.environ.get("ROTATOR_SPARE_STALE_AFTER_H")
+    if raw is None:
+        return None
+    try:
+        return raw if not float(raw) >= 0 else None  # NaN and negatives are malformed too
+    except ValueError:
+        return raw
 
 def _live(st: dict) -> tuple[Optional[str], Optional[float]]:
     """(live account e-mail, its slot twin expiry) from state.json - no credential read."""

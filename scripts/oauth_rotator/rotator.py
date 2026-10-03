@@ -2900,13 +2900,18 @@ def cmd_auto() -> int:
 
 
 
-def _num_or(raw: object, default: float) -> float:
+def _num_or(raw: object, default: float, *, field: str = "", slot: str = "") -> float:
     """float(raw), or `default` on any odd type (old state, hand edit, .bak restore).
     WHY (TRDD-B78NJU35): the per-slot keepalive loop must never raise on one slot's bad meta,
-    or every other slot's refresh is skipped for that tick."""
+    or every other slot's refresh is skipped for that tick. A present-but-bad value is logged
+    (field + value TYPE + the slot's short fingerprint, never the e-mail) so a corrupt slot
+    field is not silently papered over; an absent value (None) is the normal case."""
     try:
         return float(raw)  # type: ignore[arg-type]
     except (TypeError, ValueError):
+        if field and raw is not None:
+            _log("[keepalive] slot %s: meta field %s is not a number (%s); using %s, slot refreshed normally"
+                 % (slot or "?", field, type(raw).__name__, default))
         return default
 
 # A slot whose refresh grant is credential-dead AND past MAX_REFRESH_FAILURES is re-probed at most
@@ -2948,6 +2953,7 @@ def _keepalive_refresh() -> list[str]:
         if eh is None or eh > KEEPALIVE_AHEAD_H:
             continue  # plenty of runway (or undatable) — leave it
         dead_meta = slots.get(email)
+        slot_id = str(dead_meta.get("fp", ""))[:8] if isinstance(dead_meta, dict) else ""
         # WHY (TRDD-B78NJU35): a credential-dead grant past the failure cap never recovers, yet the
         # runway gate above lets a negative `eh` through forever, so every tick re-POSTed it
         # (~106 calls/h from two dead spares). Skip the exchange until the last failure is
@@ -2957,8 +2963,8 @@ def _keepalive_refresh() -> list[str]:
         if (
             isinstance(dead_meta, dict)
             and dead_meta.get("last_refresh_failure") == REFRESH_FAIL_CREDENTIAL_DEAD
-            and _num_or(dead_meta.get("refresh_failures"), 0) >= MAX_REFRESH_FAILURES
-            and time.time() - _num_or(dead_meta.get("last_refresh_fail_at"), 0) < REFRESH_REPROBE_S
+            and _num_or(dead_meta.get("refresh_failures"), 0, field="refresh_failures", slot=slot_id) >= MAX_REFRESH_FAILURES
+            and time.time() - _num_or(dead_meta.get("last_refresh_fail_at"), 0, field="last_refresh_fail_at", slot=slot_id) < REFRESH_REPROBE_S
         ):
             continue
         failure_cause: list[str] = []
@@ -2976,7 +2982,7 @@ def _keepalive_refresh() -> list[str]:
             cause = failure_cause[0] if failure_cause else None
             meta = slots.get(email)
             if isinstance(meta, dict):
-                meta["refresh_failures"] = int(_num_or(meta.get("refresh_failures"), 0)) + 1
+                meta["refresh_failures"] = int(_num_or(meta.get("refresh_failures"), 0, field="refresh_failures", slot=slot_id)) + 1
                 if cause is not None:
                     meta["last_refresh_failure"] = cause
                 # WHY (TRDD-B78NJU35): stamp WHEN it failed so the dead-slot skip above re-probes on a 6 h clock.

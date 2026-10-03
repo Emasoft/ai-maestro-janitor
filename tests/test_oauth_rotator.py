@@ -3505,6 +3505,9 @@ def test_keepalive_bad_meta_types_do_not_stop_the_other_slots(monkeypatch: pytes
     monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)
     assert rotator._keepalive_refresh() == ["good"]
     assert seen == ["bad", "good"] and state["slots"]["bad"]["refresh_failures"] == 1
+    log = rotator.LOG_FILE.read_text(encoding="utf-8")
+    assert "slot o: meta field refresh_failures is not a number (str)" in log
+    assert "refreshed normally" in log
 
 
 def test_refresh_and_heal_slot_success_stamps_last_refresh_ok_at(monkeypatch: pytest.MonkeyPatch) -> None:
