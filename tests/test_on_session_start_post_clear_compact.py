@@ -1675,6 +1675,121 @@ def test_template_degradation_ends_the_hold_like_any_handoff(
     )
 
 
+
+def _run_task_carry(tmp_path, monkeypatch, *, sidecar=True, old_files=None, new_files=None, list_id=None):
+    """Run the real hook main() with a cleared session `old-sid` and a new session `new-sid`
+    under a temp HOME; returns (old_dir, new_dir). TRDD-7X9WXDK9."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    plugin_root = tmp_path / "plugin"
+    _env(tmp_path, monkeypatch, project_dir=project_dir, plugin_root=plugin_root)
+    monkeypatch.setenv("TMUX_PANE", "%8")
+    if list_id:
+        monkeypatch.setenv("CLAUDE_CODE_TASK_LIST_ID", list_id)
+    else:
+        monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
+    tasks = tmp_path / "fake-home" / ".claude" / "tasks"
+    old_dir, new_dir = tasks / "old-sid", tasks / "new-sid"
+    for d, files in ((old_dir, old_files), (new_dir, new_files)):
+        if files is not None:
+            d.mkdir(parents=True)
+            for name, text in files.items():
+                (d / name).write_text(text, encoding="utf-8")
+    transcript = tmp_path / "old-sid.jsonl"
+    transcript.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
+    if sidecar:
+        _write_sidecar(
+            project_dir / ".janitor" / "state", {"TMUX_PANE": "%8"}, transcript=str(transcript)
+        )
+    _stub_jev_compact(plugin_root, tmp_path / "argv.txt", exit_code=0, out_text=_COMPACTED_DOC)
+    mod = _import()
+    monkeypatch.setattr(mod, "_payload", lambda: {"source": "clear", "session_id": "new-sid"})
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+    assert mod.main() == 0
+    return old_dir, new_dir
+
+
+_OLD_TASKS = {
+    "1.json": '{"id": "1", "status": "pending", "subject": "a"}',
+    "2.json": '{"id": "2", "status": "completed", "subject": "b"}',
+    ".lock": "",
+    ".highwatermark": "2",
+}
+
+
+def test_task_dir_is_copied_with_highwatermark_and_without_lock(tmp_path, monkeypatch, capsys):
+    """After a janitor clear the new session gets the old *.json and .highwatermark, never the
+    .lock; the old files stay (copy, not move)."""
+    old_dir, new_dir = _run_task_carry(tmp_path, monkeypatch, old_files=_OLD_TASKS)
+    capsys.readouterr()
+    assert sorted(p.name for p in new_dir.iterdir()) == [".highwatermark", "1.json", "2.json"]
+    assert (new_dir / "1.json").read_text() == _OLD_TASKS["1.json"]
+    assert (old_dir / ".lock").exists() and (old_dir / "1.json").exists()
+
+
+def test_task_dir_never_overwrites_a_non_empty_new_dir(tmp_path, monkeypatch, capsys):
+    """A new dir that already holds files is left exactly as it is."""
+    _old, new_dir = _run_task_carry(
+        tmp_path, monkeypatch, old_files=_OLD_TASKS, new_files={"1.json": "mine"}
+    )
+    capsys.readouterr()
+    assert [p.name for p in new_dir.iterdir()] == ["1.json"]
+    assert (new_dir / "1.json").read_text() == "mine"
+
+
+
+def test_task_dir_is_copied_when_new_dir_holds_only_a_lock(tmp_path, monkeypatch, capsys):
+    """A new dir with only its own .lock still gets the carry, and that .lock is untouched."""
+    _old, new_dir = _run_task_carry(
+        tmp_path, monkeypatch, old_files=_OLD_TASKS, new_files={".lock": "new"}
+    )
+    capsys.readouterr()
+    assert sorted(p.name for p in new_dir.iterdir()) == [".highwatermark", ".lock", "1.json", "2.json"]
+    assert (new_dir / ".lock").read_text() == "new"
+
+
+def test_highwatermark_only_raised_never_lowered(tmp_path, monkeypatch, capsys):
+    """A higher new .highwatermark (9) is kept over the old one (2)."""
+    _old, new_dir = _run_task_carry(
+        tmp_path, monkeypatch, old_files=_OLD_TASKS, new_files={".highwatermark": "9"}
+    )
+    capsys.readouterr()
+    assert (new_dir / ".highwatermark").read_text() == "9"
+
+
+
+def test_highwatermark_raised_to_the_old_value_when_higher(tmp_path, monkeypatch, capsys):
+    """A lower new .highwatermark (1) is raised to the old one (2)."""
+    _old, new_dir = _run_task_carry(
+        tmp_path, monkeypatch, old_files=_OLD_TASKS, new_files={".highwatermark": "1"}
+    )
+    capsys.readouterr()
+    assert (new_dir / ".highwatermark").read_text() == "2"
+
+
+def test_task_dir_not_copied_when_task_list_id_is_set(tmp_path, monkeypatch, capsys):
+    """CLAUDE_CODE_TASK_LIST_ID pins a shared list: nothing is copied."""
+    _old, new_dir = _run_task_carry(tmp_path, monkeypatch, old_files=_OLD_TASKS, list_id="shared")
+    capsys.readouterr()
+    assert not new_dir.exists()
+
+
+def test_task_dir_not_copied_without_a_sidecar(tmp_path, monkeypatch, capsys):
+    """A user-typed /clear (no sidecar) is not a janitor chain: nothing is copied."""
+    _old, new_dir = _run_task_carry(tmp_path, monkeypatch, sidecar=False, old_files=_OLD_TASKS)
+    capsys.readouterr()
+    assert not new_dir.exists()
+
+
+def test_task_dir_not_copied_when_old_dir_has_no_json(tmp_path, monkeypatch, capsys):
+    """An old dir without *.json (another backend) is not copied."""
+    _old, new_dir = _run_task_carry(
+        tmp_path, monkeypatch, old_files={".lock": "", ".highwatermark": "0"}
+    )
+    capsys.readouterr()
+    assert not new_dir.exists()
+
+
 if __name__ == "__main__":
     import pytest
 

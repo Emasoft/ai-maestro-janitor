@@ -1,10 +1,10 @@
 ---
 trdd-id: 7X9WXDK9
 title: Task list carried into the new session after a janitor clear
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-03T03:41:49+0200
-updated: 2026-10-03T03:45:31+0200
+updated: 2026-10-03T10:46:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -36,3 +36,6 @@ Parent plan: TRDD-K9AHY1ZB
 ## Approval log
 
 - 2026-10-03T03:41:49+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-03T10:37:08+0200 — column → dev. C3 in progress
+- 2026-10-03T10:44:40+0200 — column → testing. code ready; field check after release: after a janitor clear the new session's TaskList shows the open tasks
+- 2026-10-03 C3 revision: new dir counts as having tasks only if it holds a json file; highwatermark raised never lowered. NOTE: the no-sidecar, env-set, no-json and no-overwrite tests passed trivially before the change; they are not regression proof.

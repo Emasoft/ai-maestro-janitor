@@ -133,6 +133,53 @@ def _open_tasks(transcript_path: str) -> list[str]:
     return [_clean(s, TASK_SUBJECT_MAX_CHARS) for _i, s in rows[:OPEN_TASKS_MAX]]
 
 
+
+def carry_task_dir(old_session_id: str, new_session_id: str) -> int:
+    """Copy the cleared session task files into the new session task dir; returns files copied.
+
+    TRDD-7X9WXDK9 (C3): a clear starts a new sessionId, and the file task backend keys its list
+    by sessionId, so the open tasks the Continuity block names would otherwise not be live in
+    TaskList. WHY the guards: CLAUDE_CODE_TASK_LIST_ID set means the user pinned a shared list
+    that survives the clear on its own; no *.json in the old dir means a non-file backend
+    (storageV5) whose layout this does not know; any *.json in the new dir means it already has
+    tasks and is never touched. Only *.json counts: Claude Code may create .lock (and the
+    .highwatermark) in the new dir before this hook runs, and that must not block the carry.
+    The task-dir layout (~/.claude/tasks/<sessionId>/N.json, .lock, .highwatermark) is
+    UNDOCUMENTED Claude Code internals, verified by measurement only: field check needed.
+    Copy, never move: the old session files stay. Both .lock files are skipped (the old one is a
+    live lock of the old session, the new one is the new session own; matched by name because
+    Path(".lock").suffix is empty). .highwatermark: the old value replaces the new one only when
+    it is higher (both read as ints; unreadable new value is kept), so new ids never reuse an
+    old id.
+    """
+    import os  # noqa: PLC0415
+    import shutil  # noqa: PLC0415
+
+    if os.environ.get("CLAUDE_CODE_TASK_LIST_ID") or not old_session_id or not new_session_id:
+        return 0
+    root = Path.home() / ".claude" / "tasks"
+    old_dir, new_dir = root / old_session_id, root / new_session_id
+    if old_dir == new_dir or not any(old_dir.glob("*.json")):
+        return 0
+    if any(new_dir.glob("*.json")):
+        return 0
+    new_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for f in old_dir.iterdir():
+        if not f.is_file() or f.name.endswith(".lock"):
+            continue
+        target = new_dir / f.name
+        if f.name == ".highwatermark" and target.exists():
+            try:
+                if int(f.read_text().strip()) <= int(target.read_text().strip()):
+                    continue
+            except (OSError, ValueError):
+                continue
+        shutil.copy2(f, target)
+        copied += 1
+    return copied
+
+
 def clear_fields(transcript_path: str) -> dict[str, Any]:
     """The clear-only continuity fields of the OLD transcript (all sanitized, all best-effort).
 

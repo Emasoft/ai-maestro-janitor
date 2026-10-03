@@ -295,6 +295,16 @@ def _main() -> int:
         )
         return 0
 
+    # TRDD-7X9WXDK9 (C3): make the cleared session open tasks live in the new session. Own
+    # try/except: a task-copy fault must never cost the post-clear injection.
+    try:
+        import session_continuity as sc  # noqa: PLC0415
+        new_sid = str(data.get("session_id", "") or "").strip()
+        copied = sc.carry_task_dir(Path(transcript_path).stem, new_sid)
+        if copied:
+            state.log_line("jev-post-clear-hook", f"carried {copied} task file(s) to {new_sid}")
+    except Exception as exc:  # noqa: BLE001 -- best-effort, never breaks the hook
+        state.log_line("jev-post-clear-hook", f"task-dir carry failed: {exc!r}")
     import external_clear as ec  # noqa: PLC0415
     import handoff_files  # noqa: PLC0415
     import jev_compaction_lane as jcl  # noqa: PLC0415
