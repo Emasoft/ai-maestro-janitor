@@ -54,13 +54,15 @@ _UPDATED_FROM_RE = re.compile(r"updated from \S+ to (\S+?)[. ]?$", re.MULTILINE)
 def _semver_tuple(s: str) -> tuple[int, ...]:
     """Sort key. Returns a (-1,) tuple for non-semver strings so they sort
     LOWEST — that's a safe direction (we'd never call them 'newer')."""
-    parts = s.split(".")
-    if len(parts) < 3:
+    # TRDD-9UVLOHED: an installed "0.2.2-4ad88f7c087a" made int("2-4ad…") raise -> (-1,), so
+    # _is_newer was True forever and a no-op update re-fired every beat. Use the numeric
+    # prefix only; the suffix is ignored.
+    # ponytail: equal numeric prefixes count as not newer, so 1.0.0-rc1 -> 1.0.0 is not
+    # signaled; upgrade path: compare the suffix per semver if that ever matters.
+    m = _SEMVER_PREFIX_RE.match(s)
+    if not m:
         return (-1,)
-    try:
-        return tuple(int(p) for p in parts[:3])
-    except ValueError:
-        return (-1,)
+    return tuple(int(p) for p in m.group(0).split("."))
 
 
 def _scope_allowed(scope: str) -> bool:

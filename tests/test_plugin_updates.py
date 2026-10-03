@@ -107,5 +107,32 @@ class TestPluginUpdatesEnabledGate(unittest.TestCase):
             )
 
 
+
+class TestIsNewerIgnoresCommitSuffix(unittest.TestCase):
+    """TRDD-9UVLOHED: a "-<sha>" suffix on the installed version must not read as non-semver."""
+
+    @staticmethod
+    def _is_newer(latest: str, current: str) -> bool:
+        import importlib.util  # detector filename has a hyphen, so load it by path
+
+        spec = importlib.util.spec_from_file_location("plugin_updates_under_test", DETECTOR)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._is_newer(latest, current)
+
+    def test_same_prefix_with_suffix_is_not_newer(self):
+        """0.2.2 vs installed 0.2.2-<sha> is no upgrade."""
+        self.assertFalse(self._is_newer("0.2.2", "0.2.2-4ad88f7c087a"))
+
+    def test_higher_prefix_with_suffix_is_newer(self):
+        """0.2.3 vs installed 0.2.2-<sha> is an upgrade."""
+        self.assertTrue(self._is_newer("0.2.3", "0.2.2-4ad88f7c087a"))
+
+    def test_suffixed_latest_same_prefix_is_not_newer(self):
+        """A suffixed latest with the same numeric prefix is no upgrade."""
+        self.assertFalse(self._is_newer("0.2.2-abc", "0.2.2"))
+
+
 if __name__ == "__main__":
     unittest.main()
