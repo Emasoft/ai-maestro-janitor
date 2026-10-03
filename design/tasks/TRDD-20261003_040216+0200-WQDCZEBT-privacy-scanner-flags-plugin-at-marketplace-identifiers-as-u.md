@@ -4,7 +4,7 @@ title: Privacy scanner flags plugin at marketplace identifiers as user at host
 column: backburner
 status: tasked
 created: 2026-10-03T04:02:16+0200
-updated: 2026-10-03T04:02:24+0200
+updated: 2026-10-03T07:36:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,7 @@ Fix: allowlist the known `<plugin>@<marketplace>` pattern in `_allow_ssh_host` (
 ## Approval log
 
 - 2026-10-03T04:02:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Evidence
+
+2026-10-03: the rule private-path.ssh-user-host also matches Claude Code plugin ids written as plugin name, at-sign, marketplace name (seen on TRDD-9UVLOHED line 27). Side effect: a worker told to remove every at-sign rewrote current-owner, assignee and an append-only MANDATE log line (b2b05926), later restored. Plugin ids have no dot after the at-sign; exempting that shape would end the false positive.

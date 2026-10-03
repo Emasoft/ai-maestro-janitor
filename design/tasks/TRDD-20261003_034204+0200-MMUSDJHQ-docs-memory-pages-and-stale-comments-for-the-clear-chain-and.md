@@ -4,7 +4,7 @@ title: Docs, memory pages and stale comments for the clear chain and rotator
 column: todo
 status: tasked
 created: 2026-10-03T03:42:04+0200
-updated: 2026-10-03T06:20:44+0200
+updated: 2026-10-03T07:36:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -47,3 +47,5 @@ RELEASE BLOCKERS (fastedit refused, owner asked about a one-off plain edit): del
 - A worker ran sed -i on a test file.
 - The main session passed two -F files to git commit, so e9b7622d lost its subject and card id (fixed by message-only follow-up 346a557d, no history rewrite).
 - Fastedit-refused leftovers still pending an owner-approved plain edit: a stale comment in scripts/clear_trigger.py, the _LATE_SUMMARY_STAMP constant in scripts/dispatch.py, R4b dead code in scripts/lib/rotator_alert.py.
+The main session probed the privacy scanner with a real git commit (message probe); only the block stopped a junk commit. Probe with the scanner script or git commit --dry-run instead.
+The main session told a worker to remove every at-sign from a card instead of only the flagged line, so audit lines were rewritten (b2b05926, restored next commit). Scope a scanner fix to the flagged line only.
