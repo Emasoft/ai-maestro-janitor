@@ -1033,8 +1033,10 @@ def process_ancestry(start_pid: int, table: dict[int, tuple[int, str]]) -> list[
 def is_claude_command(cmd: str) -> bool:
     """True iff a process command line launches claude: argv[0] basename is `claude`/`claude.exe`.
 
-    The one place this rule lives (same test as `fleet_restart.argv_is_claude`): the EXECUTABLE,
-    never a substring, so `vim --add-dir /src/claude-plugins` is not claude.
+    Same rule as `fleet_restart.argv_is_claude` (the EXECUTABLE, never a substring, so
+    `vim --add-dir /src/claude-plugins` is not claude). Not shared code on purpose: that one
+    tokenizes with shlex (quoted argv[0] containing spaces); this one splits on whitespace
+    for `ps` command lines.
     """
     words = cmd.split(None, 1)
     return bool(words) and os.path.basename(words[0]) in ("claude", "claude.exe")

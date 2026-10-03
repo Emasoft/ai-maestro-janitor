@@ -32,6 +32,6 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-03T09:38:01+0200 — column → dev. C6 in progress
 - 2026-10-03T10:02:09+0200 — column → testing. code ready; field check after release: the post-clear summary names the cleared session, not a sibling's
 
-## STATE
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
 Assumed, not measured: that sessions/<pid>.json still names the old session right after /clear. If a post-clear measurement shows it never lags, the own-pid hand-off can be removed.
