@@ -962,7 +962,7 @@ def _plugin_update_requests_path() -> Path:
 
 
 @contextlib.contextmanager
-def _plugin_requests_lock() -> Iterator[None]:
+def _plugin_requests_lock(timeout: Optional[float] = None) -> Iterator[None]:
     """Serialise the read-modify-write of plugin-update-requests.json across processes.
 
     N sessions' `plugin-updates` detectors AND the daemon's consume all mutate this one shared
@@ -971,12 +971,32 @@ def _plugin_requests_lock() -> Iterator[None]:
     marketplace lock (skip-and-retry, because it wraps a ~10-min operation), this critical
     section is microseconds — read + rewrite a tiny JSON — so a BLOCKING exclusive flock is
     correct and deadlock-free. Fail-open: if the lock cannot be taken (no fcntl, fs error) the
-    body still runs unlocked rather than crash the read-only detector that called it."""
+    body still runs unlocked rather than crash the read-only detector that called it.
+
+    `timeout` (seconds; None = wait forever, the detectors' behaviour) bounds the wait and raises
+    TimeoutError — the DAEMON passes one because its main loop must never block here: a holder
+    that stalls (2026-10-03 incident: daemon stuck ~31 min with no heartbeat) would otherwise
+    wedge the loop and the rotator with it. TimeoutError is an OSError, so it is caught BEFORE
+    the fail-open `except OSError` below, which would swallow it and run the body unlocked."""
     fd = None
     try:
         init_global_state()
         fd = os.open(str(global_state_dir() / "plugin-update-requests.lock"), os.O_RDWR | os.O_CREAT, 0o644)
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        if timeout is None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"plugin-update-requests.lock held > {timeout:g}s") from None
+                    time.sleep(0.05)
+    except TimeoutError:
+        os.close(fd)  # type: ignore[arg-type]  # fd was opened above, before the timed wait
+        raise
     except OSError:
         if fd is not None:
             try:
@@ -1008,13 +1028,15 @@ def _read_plugin_update_requests_raw() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def request_plugin_update(plugin_id: str, scope: str, reason: str = "") -> None:
+def request_plugin_update(
+    plugin_id: str, scope: str, reason: str = "", lock_timeout: Optional[float] = None
+) -> None:
     """Enqueue a request for the daemon to update ``plugin_id`` at ``scope`` (TRDD-YMTUPQER).
     Keyed ``<plugin_id>|<scope>``; idempotent (re-enqueue overwrites the same key). Atomic;
     best-effort/fail-open — a write hiccup just falls back to the daemon's 1 h user-scope
     sweep, so this never crashes the read-only detector that calls it."""
     key = f"{plugin_id}|{scope}"
-    with _plugin_requests_lock():
+    with _plugin_requests_lock(lock_timeout):
         data = _read_plugin_update_requests_raw()
         data[key] = {"plugin_id": plugin_id, "scope": scope, "reason": reason}
         try:
@@ -1033,12 +1055,14 @@ def plugin_update_requests() -> list[dict]:
     return list(_read_plugin_update_requests_raw().values())
 
 
-def clear_plugin_update_request(plugin_id: str, scope: str) -> None:
+def clear_plugin_update_request(
+    plugin_id: str, scope: str, lock_timeout: Optional[float] = None
+) -> None:
     """Remove one consumed request (``<plugin_id>|<scope>``). The daemon calls this BEFORE
     running the update (clear-before-run: a run that fails is re-signalled by the detector's
     next ~5 min fire). Idempotent, atomic, fail-open."""
     key = f"{plugin_id}|{scope}"
-    with _plugin_requests_lock():
+    with _plugin_requests_lock(lock_timeout):
         data = _read_plugin_update_requests_raw()
         if key not in data:
             return

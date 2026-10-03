@@ -66,44 +66,77 @@ def test_request_present_clear_roundtrip() -> None:
     gs.clear_rotator_tick_request()
     assert gs.rotator_tick_requested_present() is False
 
+import time  # noqa: E402  # fastedit cannot edit the top import block
+
+
+def _wait_for(pred, timeout: float = 5.0) -> bool:  # type: ignore[no-untyped-def]
+    end = time.time() + timeout
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.05)
+    return False
+
+def _fresh_ticker(task):  # type: ignore[no-untyped-def]
+    """A tick thread whose task just ran, so only a wedge request (not the beat) can run it."""
+    daemon.state.atomic_write(task.last_run_path, str(int(time.time())))
+    return daemon._RotatorTickThread(task)
+
 
 # ---------- the daemon consume-helper + the raise site --------------------
 
 def test_consume_runs_the_tick_once_and_clears_flag() -> None:
-    """Flag set => the oauth-rotator-tick Task runs exactly once, flag cleared, True."""
+    """Flag set => the tick THREAD runs the Task exactly once, flag cleared, True."""
     calls: list[str] = []
-    task = daemon.Task("oauth-rotator-tick", 60, lambda: calls.append("ran"))
-    gs.request_rotator_tick("retry-wedged-esc")
+    task = daemon.Task("oauth-rotator-tick", 3600, lambda: calls.append("ran"), own_thread=True)
+    ticker = _fresh_ticker(task)
+    ticker.start()
+    try:
+        gs.request_rotator_tick("retry-wedged-esc")
 
-    consumed = daemon._consume_rotator_tick_request([task])
+        consumed = daemon._consume_rotator_tick_request(ticker)
 
-    assert consumed is True
-    assert calls == ["ran"], "the wedge request must run the rotator tick exactly once"
-    assert gs.rotator_tick_requested_present() is False, "the flag must be cleared on consume"
+        assert consumed is True
+        assert _wait_for(lambda: bool(calls)), "the wedge request must run the rotator tick"
+        time.sleep(1.5)
+        assert calls == ["ran"], "the wedge request must run the rotator tick exactly once"
+        assert gs.rotator_tick_requested_present() is False, "the flag must be cleared on consume"
+    finally:
+        ticker.shutdown(5)
 
 
 def test_consume_is_a_noop_when_no_request() -> None:
     """No flag => False and nothing runs (the 60 s beat keeps owning the tick)."""
     calls: list[str] = []
-    task = daemon.Task("oauth-rotator-tick", 60, lambda: calls.append("ran"))
-
-    assert daemon._consume_rotator_tick_request([task]) is False
-    assert calls == []
+    task = daemon.Task("oauth-rotator-tick", 3600, lambda: calls.append("ran"), own_thread=True)
+    ticker = _fresh_ticker(task)
+    ticker.start()
+    try:
+        assert daemon._consume_rotator_tick_request(ticker) is False
+        time.sleep(1.5)
+        assert calls == []
+    finally:
+        ticker.shutdown(5)
 
 
 def test_consume_runs_only_the_tick_not_sibling_tasks() -> None:
-    """With a full task list, only 'oauth-rotator-tick' runs — never a sibling chore."""
+    """The thread runs only its own task — never a sibling chore of the same roster."""
     ran: list[str] = []
     tasks = [
         daemon.Task("github-config-audit", 1200, lambda: ran.append("github-config-audit")),
-        daemon.Task("oauth-rotator-tick", 60, lambda: ran.append("oauth-rotator-tick")),
+        daemon.Task("oauth-rotator-tick", 3600, lambda: ran.append("oauth-rotator-tick"), own_thread=True),
         daemon.Task("version-update", 21600, lambda: ran.append("version-update")),
     ]
-    gs.request_rotator_tick("retry-wedged-esc")
-
-    daemon._consume_rotator_tick_request(tasks)
-
-    assert ran == ["oauth-rotator-tick"], "only the rotator tick may run on consume"
+    ticker = _fresh_ticker(tasks[1])
+    ticker.start()
+    try:
+        gs.request_rotator_tick("retry-wedged-esc")
+        daemon._consume_rotator_tick_request(ticker)
+        assert _wait_for(lambda: bool(ran))
+        time.sleep(1.5)
+        assert ran == ["oauth-rotator-tick"], "only the rotator tick may run on consume"
+    finally:
+        ticker.shutdown(5)
 
 
 def test_the_wedge_scheduled_tick_carries_the_env_and_beat_does_not() -> None:
@@ -115,14 +148,18 @@ def test_the_wedge_scheduled_tick_carries_the_env_and_beat_does_not() -> None:
     def _spy() -> None:
         observed.append(os.environ.get("JANITOR_ROTATOR_WEDGE_TICK"))
 
-    task = daemon.Task("oauth-rotator-tick", 60, _spy)
+    task = daemon.Task("oauth-rotator-tick", 3600, _spy, own_thread=True)
+    ticker = _fresh_ticker(task)
+    ticker.start()
+    try:
+        gs.request_rotator_tick("retry-wedged-esc")
+        daemon._consume_rotator_tick_request(ticker)
+        assert _wait_for(lambda: observed == ["1"]), "the wedge-scheduled run must set the env"
+        assert _wait_for(lambda: "JANITOR_ROTATOR_WEDGE_TICK" not in os.environ), "the env must be popped afterwards"
+    finally:
+        ticker.shutdown(5)
 
-    gs.request_rotator_tick("retry-wedged-esc")
-    daemon._consume_rotator_tick_request([task])
-    assert observed == ["1"], "the wedge-scheduled run must set the env for the tick body"
-    assert "JANITOR_ROTATOR_WEDGE_TICK" not in os.environ, "the env must be popped afterwards"
-
-    task.run()  # the ordinary 60 s beat's due-loop path — no consume, no wedge context
+    task.run()  # the ordinary 60 s beat's path — no consume, no wedge context
     assert observed == ["1", None], "a beat-scheduled run must NOT inherit the wedge context"
 
 

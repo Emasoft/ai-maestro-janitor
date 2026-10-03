@@ -413,6 +413,19 @@ def _on_signal(signum: int, _frame: Optional[FrameType]) -> None:
     _running = False
     state.log_line("daemon", f"received signal {signum} — graceful shutdown")
 
+import threading  # noqa: E402  # fastedit cannot edit the top import block; stdlib, placed beside its only users
+
+# Thread-local switch: the rotator-tick THREAD must never write the daemon heartbeat. The
+# heartbeat is the main loop's liveness proof; if the tick thread refreshed it while the main
+# loop was stuck, `_kill_wedged_daemon` could never detect the wedge (2026-10-03 incident:
+# daemon stuck ~31 min in the main loop, killed only by another session's wedge check).
+_thread_state = threading.local()
+
+
+def _tick_heartbeat() -> None:
+    if not getattr(_thread_state, "no_heartbeat", False):
+        gs.write_heartbeat()
+
 
 def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
                        heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC,
@@ -471,11 +484,11 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
     while True:
         try:
             stdout, stderr = proc.communicate(timeout=heartbeat_tick)
-            gs.write_heartbeat()
+            _tick_heartbeat()
             rc = proc.returncode if proc.returncode is not None else -1
             return subprocess.CompletedProcess(cmd, rc, stdout or "", stderr or "")
         except subprocess.TimeoutExpired:
-            gs.write_heartbeat()
+            _tick_heartbeat()
             if (
                 time.time() > deadline
                 or not _running
@@ -2644,11 +2657,17 @@ class Task:
     """
 
     def __init__(
-        self, name: str, interval_s: int, fn: Callable[[], None], *, background: bool = False
+        self, name: str, interval_s: int, fn: Callable[[], None], *,
+        background: bool = False, own_thread: bool = False,
     ) -> None:
         self.name = name
         self.interval_s = interval_s
         self.fn = fn
+        # own_thread tasks are NEVER dispatched by the main loop (`_run_due_tasks` skips
+        # them, `_sleep_seconds` ignores them): a `_RotatorTickThread` runs them. Only
+        # `oauth-rotator-tick` — a main-loop stall (2026-10-03: ~31 min stuck outside
+        # `_run_due_tasks`) must not stop OAuth rotation.
+        self.own_thread = own_thread
         # Background tasks run in ONE detached child at a time (the "bulk lane") so a
         # 20-minute bulk workload can never block the main loop's 60 s survival beats.
         # WHY: oauth-rotation starvation incident 2026-07-17 — two back-to-back ~1190 s
@@ -2855,7 +2874,9 @@ def _build_tasks() -> list[Task]:
              background=True),
         Task("oauth-rotator-supervisor", _INTERVAL_OAUTH_SUPERVISOR,
              task_oauth_rotator_supervisor),
-        Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_beat),
+        # Run by its own thread (see _RotatorTickThread), never by the main loop.
+        Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_beat,
+             own_thread=True),
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
         Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),
@@ -3108,6 +3129,8 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
             break
         if task.name in yielded:
             continue  # the active server owns this chore (Phase B2)
+        if task.own_thread:
+            continue  # its own thread runs it — never the main loop (2026-10-03 stall)
         if not task.is_due():  # a task with a live child is never due (time_until_due)
             continue
         if task.background:
@@ -3268,39 +3291,105 @@ def _consume_version_update_request(tasks: list[Task]) -> bool:
             break
     return True
 
+class _RotatorTickThread(threading.Thread):
+    """Runs the `own_thread` oauth-rotator-tick task on its own 1 s-polled cadence.
 
-def _consume_rotator_tick_request(tasks: list[Task]) -> bool:
+    WHY (incident 2026-10-03): the single-threaded main loop sat ~31 min inside a step
+    OUTSIDE `_run_due_tasks` (prime suspect `_consume_plugin_update_requests`), and the 60 s
+    rotator tick — which only the main loop ran — stopped with it. The tick now has its own
+    thread; the task body (`task_oauth_rotator_beat`: tick, then the R4 alarm) runs here
+    after every tick, via `Task.run()` so failcount/backoff bookkeeping is unchanged.
+
+    The thread NEVER writes the daemon heartbeat (`_thread_state.no_heartbeat`): the heartbeat
+    must keep proving the MAIN loop is alive, or `_kill_wedged_daemon` could not detect a
+    stuck main loop. Cross-process exclusion is unchanged: `rotator.py` takes its own
+    non-blocking flock (a lock released by the OS on process death, so a killed daemon cannot
+    lock out its successor); concurrent `oauth-recovery` / manual runs just skip. The tick
+    child is a `_run_workload` subprocess (`start_new_session`, no `preexec_fn`) killed by the
+    existing timeout ladder, which also stops it on shutdown (`_running`)."""
+
+    def __init__(self, task: Task) -> None:
+        super().__init__(name="rotator-tick", daemon=True)
+        self._task = task
+        self._stop_evt = threading.Event()
+        self._wedge = threading.Event()
+        self._yielded = threading.Event()
+
+    def request_wedge_tick(self) -> None:
+        self._wedge.set()
+
+    def set_yielded(self, yielded: bool) -> None:
+        """The ai-maestro server owns the tick while True (decided by the main loop)."""
+        if yielded:
+            self._yielded.set()
+        else:
+            self._yielded.clear()
+
+    def shutdown(self, timeout: float) -> None:
+        self._stop_evt.set()
+        self.join(timeout)
+
+    def run(self) -> None:
+        _thread_state.no_heartbeat = True
+        while not self._stop_evt.wait(1.0):
+            if self._yielded.is_set() or gs.kill_switch_present():
+                continue
+            wedge = self._wedge.is_set()
+            if not (wedge or self._task.is_due()):
+                continue
+            self._wedge.clear()
+            if wedge:
+                # Process-global env, set around the tick only; the sole other
+                # subprocess spawner racing it is the main loop's bulk-lane Popen, whose
+                # children never read this variable.
+                os.environ["JANITOR_ROTATOR_WEDGE_TICK"] = "1"
+            try:
+                self._task.run()
+            finally:
+                os.environ.pop("JANITOR_ROTATOR_WEDGE_TICK", None)
+
+
+def _consume_rotator_tick_request(ticker: "_RotatorTickThread") -> bool:
     """Wedge-triggered immediate rotator tick consume (TRDD-GXXKAGY6).
 
     The session-liveness beat RAISES `rotator-tick-requested.flag` when a confirmed retry
-    wedge is on screen (the 429-shaped wall the rotator is the remedy for); this runs the
-    oauth-rotator-tick task NOW (≤ ~60 s, one loop pass) instead of waiting for the next
-    60 s beat — same clear-before-run shape as `_consume_version_update_request` (TRDD-
-    Y9KM5RCJ): the flag is cleared first, a wedged pane that persists re-signals on the
-    next detection pass, and going through the Task's `.run()` keeps the failcount/backoff
-    bookkeeping while forcing the run past its cadence. The wedge context rides to the
+    wedge is on screen (the 429-shaped wall the rotator is the remedy for); this SIGNALS the
+    rotator-tick thread to run the tick NOW instead of waiting for its next 60 s beat. It no
+    longer runs the tick inline: the tick lives in its own thread so a stalled main loop
+    cannot stop rotation (2026-10-03). Clear-before-signal, same shape as
+    `_consume_version_update_request` (TRDD-Y9KM5RCJ): the flag is cleared first, a wedged
+    pane that persists re-signals on the next detection pass. The wedge context rides to the
     rotator SUBPROCESS as `JANITOR_ROTATOR_WEDGE_TICK=1` (the env var is the only channel
-    that crosses the subprocess boundary — the JANITOR_ROTATOR_HEADLESS precedent), set
-    around `task.run()` and popped after so a beat-scheduled run never inherits it; cmd_auto
-    then treats the live 429 as already debounced (rotator.wedge_tick_requested). Gated on
-    the task NOT being yielded to the ai-maestro server — a tick we must not run must not be
-    scheduled into running either. Returns True iff a request was consumed."""
+    that crosses the subprocess boundary), set around the thread's `task.run()` — see
+    `_RotatorTickThread`. Gated by the caller on the task NOT being yielded to the
+    ai-maestro server. Returns True iff a request was consumed."""
     if not gs.rotator_tick_requested_present():
         return False
     gs.clear_rotator_tick_request()
-    for task in tasks:
-        if task.name == "oauth-rotator-tick":
-            # TRDD-GXXKAGY6 review cure 2: the env is set/popped around task.run() in the
-            # SINGLE-THREADED main loop (the bulk lane runs in detached children whose Popen
-            # snapshots os.environ only at spawn, itself sequential after this), so no other
-            # task can read the wedge context mid-window today — the pop is belt, not armor.
-            os.environ["JANITOR_ROTATOR_WEDGE_TICK"] = "1"
-            try:
-                task.run()
-            finally:
-                os.environ.pop("JANITOR_ROTATOR_WEDGE_TICK", None)
-            break
+    ticker.request_wedge_tick()
     return True
+
+_PLUGIN_UPDATE_LOCK_TIMEOUT_SEC = 30
+_PLUGIN_UPDATE_MAX_FAILS = 2
+_PLUGIN_UPDATE_SKIP_SEC = 6 * 3600
+
+
+def _plugin_update_failures_path() -> Path:
+    return gs.global_state_dir() / "plugin-update-failures.json"
+
+
+def _read_plugin_update_failures() -> dict[str, dict[str, int]]:
+    """`{"<plugin_id>|<scope>": {fails, skip_until}}`; `{}` when missing or unreadable (the
+    only cost of losing it is one extra attempt per request)."""
+    try:
+        data = json.loads(_plugin_update_failures_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_plugin_update_failures(failures: dict[str, dict[str, int]]) -> None:
+    state.atomic_write(_plugin_update_failures_path(), json.dumps(failures))
 
 
 def _consume_plugin_update_requests() -> int:
@@ -3316,53 +3405,92 @@ def _consume_plugin_update_requests() -> int:
     <mkt>` + `claude plugin update <id> --scope user` under the shared marketplace lock. On a
     real version change, stamp the reload generation so the target's session picks it up.
     Returns the count actually updated. Called from the main loop AFTER the
-    stop/pause/maintenance branches — a stopped or idled daemon must never act."""
+    stop/pause/maintenance branches — a stopped or idled daemon must never act.
+
+    Incident 2026-10-03: this step ran in the main loop with an UNBOUNDED queue-lock wait and
+    two subprocesses (120 s + 180 s) that never refreshed the heartbeat, and the daemon sat
+    ~31 min stuck until another session killed it as wedged. So: the queue lock has a timeout
+    (a timeout logs and ends this pass), the subprocesses go through `_run_workload` (which
+    refreshes the heartbeat), and a request that keeps failing — or kills the daemon mid-run,
+    which counts as a failure because the attempt is recorded BEFORE the run — is skipped for
+    6 h after 2 consecutive failures, so a restarted daemon does not replay the same wedge."""
     reqs = gs.plugin_update_requests()
     if not reqs:
         return 0
     updated = 0
-    for req in reqs:
-        plugin_id = str(req.get("plugin_id") or "")
-        scope = str(req.get("scope") or "")
-        gs.clear_plugin_update_request(plugin_id, scope)  # clear-before-run
-        if "@" not in plugin_id or scope != "user":
-            continue
-        if state.is_ai_maestro_plugin_id(plugin_id):
-            state.log_line("daemon", f"plugin-update: skipping self/fleet plugin {plugin_id}")
-            continue
-        marketplace = plugin_id.split("@", 1)[1]
-        with gs.marketplace_lock() as got:
-            if not got:
-                # Contention (not failure) — re-enqueue so a later loop retries without
-                # waiting for the detector's ~5 min re-signal.
-                gs.request_plugin_update(plugin_id, scope, str(req.get("reason") or ""))
-                state.log_line("daemon", f"plugin-update deferred (marketplace lock held): {plugin_id}")
+    failures = _read_plugin_update_failures()
+    try:
+        for req in reqs:
+            plugin_id = str(req.get("plugin_id") or "")
+            scope = str(req.get("scope") or "")
+            gs.clear_plugin_update_request(  # clear-before-run
+                plugin_id, scope, lock_timeout=_PLUGIN_UPDATE_LOCK_TIMEOUT_SEC
+            )
+            if "@" not in plugin_id or scope != "user":
                 continue
-            try:
-                child_env = {**os.environ, **state.plugin_options_env()}
-                subprocess.run(  # noqa: S603 - explicit args, no shell
+            if state.is_ai_maestro_plugin_id(plugin_id):
+                state.log_line("daemon", f"plugin-update: skipping self/fleet plugin {plugin_id}")
+                continue
+            key = f"{plugin_id}|{scope}"
+            now = int(time.time())
+            rec = failures.get(key) or {}
+            if rec.get("fails", 0) >= _PLUGIN_UPDATE_MAX_FAILS:
+                if now < rec.get("skip_until", 0):
+                    state.log_line(
+                        "daemon",
+                        f"plugin-update: {plugin_id} failed {rec['fails']}x in a row — "
+                        f"skipping until {rec['skip_until']}",
+                    )
+                    continue
+                rec = {}
+            # Recorded BEFORE the run: a daemon killed mid-run still counts the attempt.
+            failures[key] = {"fails": rec.get("fails", 0) + 1, "skip_until": now + _PLUGIN_UPDATE_SKIP_SEC}
+            _write_plugin_update_failures(failures)
+            marketplace = plugin_id.split("@", 1)[1]
+            with gs.marketplace_lock() as got:
+                if not got:
+                    # Contention (not failure) — re-enqueue so a later loop retries without
+                    # waiting for the detector's ~5 min re-signal.
+                    failures.pop(key, None)
+                    _write_plugin_update_failures(failures)
+                    gs.request_plugin_update(
+                        plugin_id, scope, str(req.get("reason") or ""),
+                        lock_timeout=_PLUGIN_UPDATE_LOCK_TIMEOUT_SEC,
+                    )
+                    state.log_line("daemon", f"plugin-update deferred (marketplace lock held): {plugin_id}")
+                    continue
+                mkt = _run_workload(
                     ["claude", "plugin", "marketplace", "update", marketplace],
-                    capture_output=True, text=True, timeout=120, check=False, env=child_env,
+                    timeout=120, max_attempts=1,
                 )
-                up = subprocess.run(  # noqa: S603
+                up = None if mkt is None else _run_workload(
                     ["claude", "plugin", "update", plugin_id, "--scope", "user"],
-                    capture_output=True, text=True, timeout=180, check=False, env=child_env,
+                    timeout=180, max_attempts=1,
                 )
-            except (OSError, subprocess.SubprocessError) as exc:
-                state.log_line("daemon", f"plugin-update {plugin_id} failed: {exc}")
+            if up is None or up.returncode != 0:
+                state.log_line(
+                    "daemon",
+                    f"plugin-update {plugin_id} failed ({failures[key]['fails']}/"
+                    f"{_PLUGIN_UPDATE_MAX_FAILS} before a {_PLUGIN_UPDATE_SKIP_SEC // 3600} h skip)"
+                    f"{'' if up is None else f' rc={up.returncode}'}",
+                )
                 continue
-        # Share the ROBUST matcher with the other two update paths in this file (audit
-        # finding 4). A bare `"updated from"` substring made any CLI wording change —
-        # "Updated from", "updated to vX", an arrow form, localized output — a false
-        # negative: the plugin IS updated on disk, but no reload generation is stamped, so
-        # every live session keeps running the OLD cached code until some other path
-        # happens to set the flag.
-        if up.returncode == 0 and _stdout_proves_plugin_updated(up.stdout or ""):
-            gs.set_reload_flag(f"plugin-update@{plugin_id}")
-            state.log_line("daemon", f"plugin-update: updated {plugin_id} [scope=user]; reload flag set")
-            updated += 1
-        else:
-            state.log_line("daemon", f"plugin-update {plugin_id}: no change (rc={up.returncode})")
+            failures.pop(key, None)
+            _write_plugin_update_failures(failures)
+            # Share the ROBUST matcher with the other two update paths in this file (audit
+            # finding 4). A bare `"updated from"` substring made any CLI wording change —
+            # "Updated from", "updated to vX", an arrow form, localized output — a false
+            # negative: the plugin IS updated on disk, but no reload generation is stamped, so
+            # every live session keeps running the OLD cached code until some other path
+            # happens to set the flag.
+            if _stdout_proves_plugin_updated(up.stdout or ""):
+                gs.set_reload_flag(f"plugin-update@{plugin_id}")
+                state.log_line("daemon", f"plugin-update: updated {plugin_id} [scope=user]; reload flag set")
+                updated += 1
+            else:
+                state.log_line("daemon", f"plugin-update {plugin_id}: no change (rc={up.returncode})")
+    except TimeoutError as exc:
+        state.log_line("daemon", f"plugin-update: request-queue lock wait timed out — skipping this pass: {exc}")
     return updated
 
 
@@ -3574,6 +3702,10 @@ def main() -> int:
     last_keepalive_check = 0.0  # wall-clock stamp gating the keepalive self-heal cadence
     foreign_daemons_reported: set[int] = set()  # per-process dedupe for DAEMON-DOUBLE
     chores_yielded_last_loop = False  # Phase B2 transition logging (yield ↔ resume), not per-tick spam
+    # The rotator tick runs in its own thread so a stalled main loop cannot stop rotation
+    # (incident 2026-10-03, see _RotatorTickThread). daemon=True: it can never block exit.
+    ticker = _RotatorTickThread(next(t for t in tasks if t.own_thread))
+    ticker.start()
     try:
         while _running:
             # Call-time knobs (enabled(), …) can change mid-run even though the
@@ -3662,6 +3794,7 @@ def main() -> int:
             yielded = _apply_leases(
                 tasks, yielded, harness_backend.read_owner_leases(), time.time()
             )
+            ticker.set_yielded("oauth-rotator-tick" in yielded)
             if bool(yielded) != chores_yielded_last_loop:  # log transitions, not every tick
                 chores_yielded_last_loop = bool(yielded)
                 # TRDD-HXZ8B0IS: a flap between "yielded" and "resumed" used to log with no
@@ -3707,7 +3840,7 @@ def main() -> int:
                 # means the daemon is actively working) and BEFORE the due-loop. While the
                 # server owns the tick the request stays QUEUED, so the moment the server
                 # drops, the wedge's tick runs.
-                _consume_rotator_tick_request(tasks)
+                _consume_rotator_tick_request(ticker)
 
             bulk_busy = _run_due_tasks(tasks, yielded)
 
@@ -3732,7 +3865,8 @@ def main() -> int:
             # Sleep precisely until the next task is due, but in 1-second
             # increments so signals interrupt promptly. Yield + bulk-lane deferral
             # exclusions live in _sleep_seconds (Phase B2; bulk-lane incident).
-            sleep_for = _sleep_seconds(tasks, yielded, bulk_busy)
+            # Thread-owned tasks keep their own cadence; they must not clamp the main sleep.
+            sleep_for = _sleep_seconds([t for t in tasks if not t.own_thread], yielded, bulk_busy)
             for _ in range(sleep_for):
                 if not _running or gs.kill_switch_present():
                     break
@@ -3744,6 +3878,8 @@ def main() -> int:
                     break
                 time.sleep(1)
     finally:
+        # _run_workload kills the tick child within ~10 s once `_running` is False.
+        ticker.shutdown(15)
         if exit_reason == "kill-switch":
             # A DELIBERATE stop, so the OS keepalive must go — launchd `KeepAlive: true`
             # / `ThrottleInterval: 30` and systemd `Restart=always` would otherwise
