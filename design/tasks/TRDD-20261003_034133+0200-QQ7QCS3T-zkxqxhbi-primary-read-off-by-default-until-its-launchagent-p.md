@@ -1,10 +1,10 @@
 ---
 trdd-id: QQ7QCS3T
 title: ZKXQXHBI primary read off by default until its LaunchAgent probe passes
-column: todo
+column: testing
 status: tasked
 created: 2026-10-03T03:41:33+0200
-updated: 2026-10-03T03:41:35+0200
+updated: 2026-10-03T05:09:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-03T03:41:33+0200
 project-id: ai-maestro-janitor
 parent-trdd: JSQSJ3PZ
+implementation-commits: [2b18348f]
 ---
 
 # ZKXQXHBI primary read off by default until its LaunchAgent probe passes
@@ -29,6 +30,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - **Verify**: SC.
 
 Parent plan: TRDD-JSQSJ3PZ
+2026-10-03: default-off gate landed in 2b18348f (daemon forces HEADLESS unless JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 in the LaunchAgent env). Owner decision still pending.
 
 ## Approval log
 
