@@ -3417,3 +3417,136 @@ def test_fresh_beacon_with_stale_mirror_is_repaired_by_one_refresh(
         assert mirror is not None and rotator.fingerprint(mirror) == rotator.fingerprint(l1)
     finally:
         _purge_live_keychain()
+
+
+
+def _dead_slot_state(fail_age_s: float | None) -> dict:
+    near_ms = int((time.time() - 3600) * 1000)  # already lapsed: the runway gate always passes
+    meta: dict = {"fp": "old", "expires_at": near_ms, "refresh_failures": rotator.MAX_REFRESH_FAILURES,
+                  "last_refresh_failure": rotator.REFRESH_FAIL_CREDENTIAL_DEAD}
+    if fail_age_s is not None:
+        meta["last_refresh_fail_at"] = time.time() - fail_age_s
+    return {"live_email": "live@x.com", "slots": {"alt@x.com": meta}}
+
+
+def test_keepalive_skips_a_dead_slot_within_6h_and_reprobes_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-B78NJU35: a credential-dead slot past the failure cap is not re-POSTed every tick:
+    skipped for 6 h after its last failure (counter kept so the REAUTH nudge stays), re-probed after."""
+    state = _dead_slot_state(3600)
+    calls: list[int] = []
+    monkeypatch.setattr(rotator, "load_state", lambda: state)
+    monkeypatch.setattr(rotator, "save_state", lambda *_a, **_k: None)
+    monkeypatch.setattr(rotator, "read_slot", lambda email: _blob("t", expires_ms=state["slots"]["alt@x.com"]["expires_at"]))
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda *_a, **_k: calls.append(1))
+    rotator._keepalive_refresh()
+    meta = state["slots"]["alt@x.com"]
+    assert calls == [] and meta["refresh_failures"] == rotator.MAX_REFRESH_FAILURES
+    meta["last_refresh_fail_at"] = time.time() - 7 * 3600
+    rotator._keepalive_refresh()
+    assert calls == [1] and meta["refresh_failures"] == rotator.MAX_REFRESH_FAILURES + 1
+    assert time.time() - meta["last_refresh_fail_at"] < 60  # the 6 h clock restarted
+
+
+def test_recapture_clears_the_dead_slot_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-B78NJU35: cmd_capture replaces the slot meta wholesale, so a re-captured account loses
+    refresh_failures / last_refresh_failure / last_refresh_fail_at and is refreshed again."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    live = _blob("LIVE-TOKEN", expires_ms=_ms_in(8))
+    monkeypatch.setattr(rotator, "read_live_blob_with_source", lambda: (live, "primary"))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a, **_k: "alt@x.com")
+    store: dict = {}
+    monkeypatch.setattr(rotator, "write_slot", lambda email, blob: store.__setitem__(email, blob))
+    monkeypatch.setattr(rotator, "read_slot", lambda email: store.get(email))
+    st = _dead_slot_state(60)
+    st["live_email"] = "other" + "@" + "x.com"
+    rotator.save_state(st)
+    assert rotator.cmd_capture(only_if_running=False) == 0
+    meta = rotator.load_state()["slots"]["alt@x.com"]
+    assert not {"refresh_failures", "last_refresh_failure", "last_refresh_fail_at"} & set(meta)
+
+
+def test_keepalive_success_stamps_last_refresh_ok_at(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-B78NJU35: a successful keepalive exchange records last_refresh_ok_at (epoch)."""
+    near_ms = int((time.time() + 1800) * 1000)
+    state: dict = {"live_email": "live@x.com", "slots": {"alt@x.com": {"fp": "old", "expires_at": near_ms}}}
+    monkeypatch.setattr(rotator, "load_state", lambda: state)
+    monkeypatch.setattr(rotator, "save_state", lambda *_a, **_k: None)
+    monkeypatch.setattr(rotator, "read_slot", lambda email: _blob("t", expires_ms=near_ms))
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda *_a, **_k: _blob("fresh", expires_ms=_ms_in(8)))
+    monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)
+    before = time.time()
+    rotator._keepalive_refresh()
+    assert before <= state["slots"]["alt@x.com"]["last_refresh_ok_at"] <= time.time()
+
+
+
+def test_keepalive_bad_meta_types_do_not_stop_the_other_slots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-B78NJU35: non-numeric refresh_failures / last_refresh_fail_at on one slot must not
+    raise out of the loop: that slot is attempted as before, and the healthy slot is refreshed."""
+    lapsed = int((time.time() - 3600) * 1000)
+    state: dict = {"live_email": "live" + "@" + "x.com", "slots": {
+        "bad": {"fp": "o", "expires_at": lapsed, "refresh_failures": "many",
+                "last_refresh_failure": rotator.REFRESH_FAIL_CREDENTIAL_DEAD, "last_refresh_fail_at": "yesterday"},
+        "good": {"fp": "o", "expires_at": lapsed},
+    }}
+    seen: list[str] = []
+    monkeypatch.setattr(rotator, "load_state", lambda: state)
+    monkeypatch.setattr(rotator, "save_state", lambda *_a, **_k: None)
+    monkeypatch.setattr(rotator, "read_slot", lambda email: _blob(email, expires_ms=lapsed))
+
+    def _fake_refresh(blob: dict, *, on_failure=None):
+        tok = blob["claudeAiOauth"]["accessToken"]
+        seen.append(tok)
+        return _blob("fresh-" + tok, expires_ms=_ms_in(8)) if tok == "good" else None
+
+    monkeypatch.setattr(rotator, "refresh_oauth_token", _fake_refresh)
+    monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)
+    assert rotator._keepalive_refresh() == ["good"]
+    assert seen == ["bad", "good"] and state["slots"]["bad"]["refresh_failures"] == 1
+
+
+def test_refresh_and_heal_slot_success_stamps_last_refresh_ok_at(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-B78NJU35: the cmd_auto refresh kernel records last_refresh_ok_at too."""
+    state: dict = {"slots": {"alt@x.com": {"fp": "old"}}}
+    monkeypatch.setattr(rotator, "_is_best_known_live", lambda email: False)
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda *_a, **_k: _blob("fresh", expires_ms=_ms_in(8)))
+    monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)
+    _fresh, changed = rotator._refresh_and_heal_slot("alt@x.com", _blob("t"), state)
+    assert changed and state["slots"]["alt@x.com"]["last_refresh_ok_at"] > 0
+
+
+def test_refresh_failure_log_carries_http_status_and_error_code_only(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-B78NJU35: a real HTTP 400 is logged as http=400 error=invalid_grant; the body's
+    error_description is never logged, and the persisted cause is still credential-dead."""
+    import http.server
+    import threading
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":"invalid_grant","error_description":"SECRET-DESCRIPTION-xyz"}')
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - http.server API
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("JANITOR_OAUTH_TOKEN_URL", "http://127.0.0.1:%d/v1/oauth/token" % server.server_address[1])
+        causes: list[str] = []
+        assert rotator.refresh_oauth_token(_blob("t", refresh="SPENT-REFRESH"), on_failure=causes.append) is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    log = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert "http=400 error=invalid_grant" in log
+    assert "SECRET-DESCRIPTION" not in log and "SPENT-REFRESH" not in log
+    assert causes == [rotator.REFRESH_FAIL_CREDENTIAL_DEAD]

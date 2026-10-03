@@ -1,10 +1,10 @@
 ---
 trdd-id: B78NJU35
 title: Spare accounts stop decaying (account B root cause, spare-age alert)
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-03T03:41:36+0200
-updated: 2026-10-03T03:41:39+0200
+updated: 2026-10-03T11:52:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,3 +29,5 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:41:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-03T11:22:38+0200 — column → dev. R8 code in progress
+- 2026-10-03T11:52:07+0200 — column → testing. code ready; field check after release: daemon.log shows the dead spares probed every 6 h instead of every tick, and one spare-stale alarm

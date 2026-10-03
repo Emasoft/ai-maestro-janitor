@@ -354,3 +354,66 @@ def test_dispatch_watchdog_is_quiet_after_a_fresh_completed_tick(
     state.state_dir().mkdir(parents=True, exist_ok=True)
     _arm_summary_hold(state.state_dir(), expires_in_s=900)
     assert "rotator alert" not in _run_main(dispatch)
+
+
+
+def _spare_state(root: Path, *, live_exp_s: float, spares: dict[str, float]) -> None:
+    slots = {LIVE: {"expires_at": int(live_exp_s * 1000)}}
+    slots.update({name: {"expires_at": int(exp * 1000)} for name, exp in spares.items()})
+    (root / "state.json").write_text(json.dumps({"live_email": LIVE, "slots": slots}))
+
+
+def test_spare_stale_fires_for_one_stale_spare_beside_a_healthy_one(root: Path) -> None:
+    """TRDD-B78NJU35: a spare expired > 4 h ago raises spare-stale while a healthy spare keeps
+    no-rotation-target silent; the text names the fix and no account."""
+    _spare_state(root, live_exp_s=NOW - 36000, spares={SPARE: NOW - 5 * 3600, "healthy-spare": NOW + 3 * 3600})
+    _fresh_tick(root)
+    active = ra.active_conditions(root, NOW, claude_running=True)
+    assert "spare-stale" in active and "no-rotation-target" not in active
+    assert "/janitor-capture-all-logins" in active["spare-stale"] and SPARE not in active["spare-stale"]
+    # only 3 h past expiry is inside the 4 h grace: no alarm
+    _spare_state(root, live_exp_s=NOW, spares={SPARE: NOW - 3 * 3600, "healthy-spare": NOW + 3 * 3600})
+    assert "spare-stale" not in ra.active_conditions(root, NOW, claude_running=True)
+
+
+def test_spare_stale_never_counts_the_live_account(root: Path) -> None:
+    """The live account's slot twin goes stale by design - it must not raise spare-stale."""
+    _spare_state(root, live_exp_s=NOW - 10 * 3600, spares={"healthy-spare": NOW + 3 * 3600})
+    assert "spare-stale" not in ra.active_conditions(root, NOW, claude_running=True)
+
+
+def test_spare_stale_is_suppressed_by_no_rotation_target(root: Path) -> None:
+    """When every spare is expired, no-rotation-target already says it: only that one fires."""
+    _spare_state(root, live_exp_s=NOW, spares={SPARE: NOW - 5 * 3600})
+    active = ra.active_conditions(root, NOW, claude_running=True)
+    assert "no-rotation-target" in active and "spare-stale" not in active
+
+
+def test_spare_stale_threshold_is_env_tunable(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ROTATOR_SPARE_STALE_AFTER_H moves the hours past expiry."""
+    _spare_state(root, live_exp_s=NOW, spares={SPARE: NOW - 2 * 3600, "healthy-spare": NOW + 3 * 3600})
+    assert "spare-stale" not in ra.active_conditions(root, NOW, claude_running=True)
+    monkeypatch.setenv("ROTATOR_SPARE_STALE_AFTER_H", "1")
+    assert "spare-stale" in ra.active_conditions(root, NOW, claude_running=True)
+
+
+
+def test_bad_spare_stale_env_falls_back_to_4h_and_keeps_other_conditions(
+        root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-B78NJU35: ROTATOR_SPARE_STALE_AFTER_H="12h" must not raise (the daemon's fail-open
+    would drop every alarm): other conditions still report and spare-stale uses the 4 h default."""
+    monkeypatch.setenv("ROTATOR_SPARE_STALE_AFTER_H", "12h")
+    _spare_state(root, live_exp_s=NOW, spares={SPARE: NOW - 5 * 3600, "healthy-spare": NOW + 3 * 3600})
+    (root / "rotation-stuck.json").write_text("{}")
+    active = ra.active_conditions(root, NOW, claude_running=True)
+    assert "rotation-stuck" in active and "spare-stale" in active  # 5 h > the 4 h fallback
+
+
+def test_spare_stale_follows_the_due_backoff(root: Path) -> None:
+    """spare-stale notifies at first sight, not again within the hour, and again after 1 h."""
+    _spare_state(root, live_exp_s=NOW, spares={SPARE: NOW - 5 * 3600, "healthy-spare": NOW + 3 * 3600})
+    run = Runner()
+    for at, expected in ((NOW, 1), (NOW + 600, 1), (NOW + 3601, 2)):
+        _fresh_tick(root, at)  # keep tick-stalled quiet so only spare-stale is counted
+        assert "spare-stale" in ra.evaluate(root, now=at, claude_running=True, runner=run)
+        assert len(run.argvs) == expected

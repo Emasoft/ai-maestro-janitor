@@ -1862,7 +1862,23 @@ def refresh_oauth_token(blob: dict, *, on_failure: Callable[[str], None] | None 
         with urllib.request.urlopen(req, timeout=30, context=tls_context.verifying_context()) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
             tok = json.loads(r.read().decode("utf-8", "replace"))
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError) as exc:
-        _report_refresh_failure(classify_refresh_failure(exc), on_failure)
+        # WHY (TRDD-B78NJU35): the first failure of a dying spare was unrecoverable because the
+        # log never said the HTTP status or OAuth error code. Read the body ONCE (the stream is
+        # single-use), classify from it, and log only status + the short JSON "error" code —
+        # never error_description, the body, or a token.
+        err_body = ""
+        if isinstance(exc, urllib.error.HTTPError):
+            try:
+                err_body = exc.read(65536).decode("utf-8", "replace")  # capped: a hostile/huge body must not balloon memory
+            except Exception:  # noqa: BLE001 -- a closed socket must not hide the failure being reported
+                err_body = ""
+            try:
+                parsed = json.loads(err_body)
+                code = parsed.get("error") if isinstance(parsed, dict) else None
+            except ValueError:
+                code = None
+            _log("[refresh] token endpoint http=%s error=%s" % (exc.code, code if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", code) else "-"))
+        _report_refresh_failure(classify_refresh_failure(exc, err_body), on_failure)
         return None
     access = tok.get("access_token") or tok.get("accessToken")
     if not access:
@@ -2433,6 +2449,8 @@ def _refresh_and_heal_slot(email: str, blob: dict, state: dict) -> tuple[dict | 
         # manually" pain TRDD-J9TM3WQK eliminated. Clearing it here strictly REDUCES spurious
         # REAUTH nudges and never touches a token, so it cannot affect live auth.
         meta["refresh_failures"] = 0
+        # WHY (TRDD-B78NJU35): diagnostics only — last successful refresh time, same stamp as _keepalive_refresh.
+        meta["last_refresh_ok_at"] = time.time()
         return refreshed, True
     return refreshed, False
 
@@ -2881,6 +2899,23 @@ def cmd_auto() -> int:
     return 0
 
 
+
+def _num_or(raw: object, default: float) -> float:
+    """float(raw), or `default` on any odd type (old state, hand edit, .bak restore).
+    WHY (TRDD-B78NJU35): the per-slot keepalive loop must never raise on one slot's bad meta,
+    or every other slot's refresh is skipped for that tick."""
+    try:
+        return float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+# A slot whose refresh grant is credential-dead AND past MAX_REFRESH_FAILURES is re-probed at most
+# this often (TRDD-B78NJU35): before, every ~1 min tick re-POSTed the dead grant (~106 token
+# endpoint calls/h from two dead spares, measured 2026-10-03). 6 h still lets a transient
+# invalid_request recover on its own; a re-capture replaces the slot meta and so clears the skip.
+REFRESH_REPROBE_S = 6 * 3600
+
+
 def _keepalive_refresh() -> list[str]:
     """F2b keepalive: PREVENT slot expiry (vs F2a which RECOVERS from it). For each SLOT whose
     token carries a refreshToken and is within KEEPALIVE_AHEAD_H of expiry, exchange it for a
@@ -2912,6 +2947,20 @@ def _keepalive_refresh() -> list[str]:
         eh = expires_in_h(blob)
         if eh is None or eh > KEEPALIVE_AHEAD_H:
             continue  # plenty of runway (or undatable) — leave it
+        dead_meta = slots.get(email)
+        # WHY (TRDD-B78NJU35): a credential-dead grant past the failure cap never recovers, yet the
+        # runway gate above lets a negative `eh` through forever, so every tick re-POSTed it
+        # (~106 calls/h from two dead spares). Skip the exchange until the last failure is
+        # REFRESH_REPROBE_S old; refresh_failures stays >= max so cascade.py still nudges REAUTH.
+        # A re-capture replaces the whole meta dict, which drops these fields and clears the skip.
+        # Odd types in the meta parse to safe defaults (= attempt the refresh, as before this skip).
+        if (
+            isinstance(dead_meta, dict)
+            and dead_meta.get("last_refresh_failure") == REFRESH_FAIL_CREDENTIAL_DEAD
+            and _num_or(dead_meta.get("refresh_failures"), 0) >= MAX_REFRESH_FAILURES
+            and time.time() - _num_or(dead_meta.get("last_refresh_fail_at"), 0) < REFRESH_REPROBE_S
+        ):
+            continue
         failure_cause: list[str] = []
         fresh = refresh_oauth_token(blob, on_failure=failure_cause.append)
         if fresh is None:
@@ -2927,9 +2976,11 @@ def _keepalive_refresh() -> list[str]:
             cause = failure_cause[0] if failure_cause else None
             meta = slots.get(email)
             if isinstance(meta, dict):
-                meta["refresh_failures"] = int(meta.get("refresh_failures", 0)) + 1
+                meta["refresh_failures"] = int(_num_or(meta.get("refresh_failures"), 0)) + 1
                 if cause is not None:
                     meta["last_refresh_failure"] = cause
+                # WHY (TRDD-B78NJU35): stamp WHEN it failed so the dead-slot skip above re-probes on a 6 h clock.
+                meta["last_refresh_fail_at"] = time.time()
                 changed = True
             if cause is not None:
                 _log("[keepalive] %s: refresh failed (%s)" % (email, cause))
@@ -2948,6 +2999,8 @@ def _keepalive_refresh() -> list[str]:
             meta["fp"] = fingerprint(fresh)
             meta["expires_at"] = _oauth(fresh).get("expiresAt")
             meta["refresh_failures"] = 0  # a successful exchange clears the dead-refresh counter (TRDD-HJGR4I5W)
+            # WHY (TRDD-B78NJU35): diagnostics only — a spare's last success was unrecoverable from the rotated logs.
+            meta["last_refresh_ok_at"] = time.time()
             changed = True
         actions.append(email)
     if changed:

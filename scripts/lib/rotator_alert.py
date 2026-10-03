@@ -12,6 +12,7 @@ names the single action and never a token or an e-mail.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Callable, Optional
@@ -56,6 +57,18 @@ def _epoch(raw: object) -> Optional[float]:
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None
     return raw / 1000 if raw > 1e12 else float(raw)
+
+
+
+def _spare_stale_after_s() -> float:
+    """ROTATOR_SPARE_STALE_AFTER_H (hours past expiry, default 4) in seconds. A bad value falls
+    back to 4: raising here would make the daemon's fail-open drop EVERY alarm (TRDD-B78NJU35).
+    This module has no logger, so the fallback is silent."""
+    try:
+        hours = float(os.environ.get("ROTATOR_SPARE_STALE_AFTER_H", "4"))
+    except ValueError:
+        return 4 * 3600.0
+    return hours * 3600 if hours >= 0 else 4 * 3600.0  # also rejects NaN/negative
 
 def _live(st: dict) -> tuple[Optional[str], Optional[float]]:
     """(live account e-mail, its slot twin expiry) from state.json - no credential read."""
@@ -111,6 +124,16 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         }
         if not any(e is not None and e > now for e in exps.values()):
             out["no-rotation-target"] = _ACTIONS["no-rotation-target"]
+        # WHY (TRDD-B78NJU35): a spare whose slot expiry is long past was never refreshed (the 8 h
+        # token + ROTATOR_SPARE_STALE_AFTER_H, default 4, = no refresh for 12 h+), i.e. it is dying
+        # silently. Without this the first alarm is the wall. Skipped when no-rotation-target
+        # already says it, and the live account is excluded by `exps` above.
+        stale_s = _spare_stale_after_s()
+        if "no-rotation-target" not in out and any(e is not None and e < now - stale_s for e in exps.values()):
+            out["spare-stale"] = (
+                "a spare account has not been refreshed for hours - "
+                "run /janitor-capture-all-logins to re-capture the stale spare account"
+            )
         # No "live token expired" condition, on purpose: the only expiry the daemon may read is
         # the live account's slot twin, and that goes stale BY DESIGN, so it would fire ~8 h
         # after every switch while the real login is fine. The wall itself is reported by
