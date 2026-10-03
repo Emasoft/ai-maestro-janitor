@@ -4,7 +4,7 @@ title: Rotator keeps the live account measurable, rotates under load, and warns 
 column: dev
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-03T06:25:10+0200
+updated: 2026-10-03T12:01:43+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -328,3 +328,4 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-03: stays open until release 2 — its eht includes the parked backburner card HSRERK5S (R5).
 2026-10-03 06:12 STATE: committed R3 fe76d99c, R6+R3 follow-ups 2b18348f, R1 30d320eb, R4 b4ba693b, R4b b956914d, R2 415d1971. R1b (rotator tick in own thread, bounded plugin-update step) verified (166 passed, linters clean) and landed as e9b7622d. R4c in progress: exclude the live account from 'no rotation target' and add an 'auth-failed' condition written by the StopFailure hook (the alarm currently cannot fire before or at a repeat of the 00:37 wall). R0 report reports/oauth-rotator/20261003_034130+0200-R0-login-expired-root-cause.md. Owner decisions pending: N2 (re-stage the LaunchAgent at Standard on this Mac now), release route, one-off plain edit for fastedit-refused leftovers (listed on MMUSDJHQ), re-capture of the two dead spare accounts, real-notification field check (launchctl asuser $(id -u) osascript -e 'display notification "janitor R4 field check" with title "ai-maestro-janitor"'), and a Keychain Access look at the -livebak item's ACL. NEXT ACTION: R4c (TRDD-3OS6AXV3) verify+commit; full uv run pytest; deferred plugin reload; release-2 cards.
 2026-10-03 06:15 correction: R1b is COMMITTED as e9b7622d (its subject line was lost to a git -F mix-up; the full message is in follow-up commit 346a557d, message-only; git notes are not pushed). Next: verify and commit R4c, then card updates and the full test suite.
+TRDD-L2CCH9D5 and TRDD-JW8CWWNH (filed 2026-10-03 from R8) are non-blocking backlog: linked by parent-trdd only, not in npt/eht, so they do not hold this umbrella open.

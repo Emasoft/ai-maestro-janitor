@@ -4,7 +4,7 @@ title: Rotator ticks killed mid-keepalive may spend a refresh grant without stor
 column: backburner
 status: tasked
 created: 2026-10-03T11:59:24+0200
-updated: 2026-10-03T11:59:24+0200
+updated: 2026-10-03T12:02:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,3 +31,7 @@ Related: TRDD-B78NJU35, TRDD-ZAKT0NRI.
 ## Approval log
 
 - 2026-10-03T11:59:24+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Provenance
+
+Filed by the main agent from the R8 investigation (TRDD-B78NJU35); authority derives from the owner-approved plan, not a separate owner decision.
