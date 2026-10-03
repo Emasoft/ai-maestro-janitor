@@ -1934,7 +1934,9 @@ def _phase_rotator_alert() -> None:
 
     Second channel behind the daemon's desktop notification: it shows the alarm as soon as a
     model turn can run. Called BEFORE the summary-hold gate in main(), so a hold can never
-    suppress it. The alert file is only ever written/cleared by the daemon.
+    suppress it. The alert file is only ever written/cleared by the daemon; `drift_line` also
+    runs the session-side tick-stalled watchdog (one stat), because a fully hung daemon writes
+    no file at all.
     """
     import rotator_alert  # noqa: PLC0415 - lazy: only this phase needs it
 
@@ -1942,7 +1944,7 @@ def _phase_rotator_alert() -> None:
     import rotator  # noqa: PLC0415 - lazy: the one rotator-home resolver the detectors use
 
     root = rotator.configured_rotator_home()
-    line = rotator_alert.drift_line(root) if root is not None else None
+    line = rotator_alert.drift_line(root, time.time()) if root is not None else None
     if line:
         print(line)
 

@@ -55,9 +55,11 @@ def _epoch(raw: object) -> Optional[float]:
 
 
 def _tick_age(root: Path, now: float) -> float:
+    # mtime of the stamp the rotator writes ONLY when a tick runs to completion (rotator.py
+    # _stamp_tick_completed, atomic os.replace): a skipped or hung tick never moves it.
     try:
-        return now - float((root / "tick-completed.ts").read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
+        return now - (root / "tick-completed.ts").stat().st_mtime
+    except OSError:
         return float("inf")  # never stamped: a tick that ran just before this would have stamped
 
 
@@ -70,18 +72,25 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         exps = {em: _epoch(m.get("expires_at")) for em, m in slots.items() if isinstance(m, dict)}
         if not any(e is not None and e > now for e in exps.values()):
             out["no-rotation-target"] = _ACTIONS["no-rotation-target"]
-        # Live expiry comes from the live account's slot twin: the daemon never reads the
-        # primary credential, and the -livebak mirror is a keychain read that may prompt.
-        live_exp = exps.get(st.get("live_email"))
-        if live_exp is None:
-            state.log_line("daemon", "rotator-alert: live-token-expired skipped (no slot twin expiry)")
-        elif now - live_exp > LIVE_EXPIRED_GRACE_S:
-            out["live-token-expired"] = _ACTIONS["live-token-expired"]
+        # No "live token expired" condition, on purpose: the only expiry the daemon may read is
+        # the live account's slot twin, and that goes stale BY DESIGN (the rotator never
+        # refreshes the live twin), so it would fire ~8 h after every switch while the real
+        # login is fine. The -livebak mirror expiry would be right but needs a keychain read
+        # (R2 records no non-secret expiry file), which the daemon must not do.
         if _tick_age(root, now) > TICK_STALL_S:
             out["tick-stalled"] = _ACTIONS["tick-stalled"]
     if (root / "rotation-stuck.json").is_file():
         out["rotation-stuck"] = _ACTIONS["rotation-stuck"]
     return out
+
+
+
+def _due(prior: dict, now: float) -> bool:
+    # Backoff: 2nd notification after DEBOUNCE_S (1 h), then once per 24 h while it holds.
+    last, n = prior.get("last_notified"), prior.get("notified")
+    if not isinstance(last, (int, float)) or not isinstance(n, int):
+        return True
+    return now - last >= (DEBOUNCE_S if n <= 1 else 86400)
 
 
 def evaluate(
@@ -91,20 +100,29 @@ def evaluate(
     claude_running: bool,
     runner: Optional[Callable[[list[str]], None]] = None,
 ) -> list[str]:
-    """Notify (debounced per condition), keep `rotator-alert.json` equal to the live set of
-    conditions, delete it when none hold. Returns the active condition names."""
+    """Keep `rotator-alert.json` equal to the live set of conditions (every evaluation), delete
+    it when none hold, and notify with a backoff: first occurrence, again after 1 h, then at
+    most daily while it holds; any change of the SET of conditions notifies at once. Returns the
+    active condition names."""
     active = active_conditions(root, now, claude_running)
     path = root / ALERT_NAME
     prior = _dict(_read_json(path).get("alerts"))
+    set_changed = set(prior) != set(active)
     alerts: dict[str, dict] = {}
     for cond, action in active.items():
         p = _dict(prior.get(cond))
-        last = p.get("last_notified")
-        if not isinstance(last, (int, float)) or now - last >= DEBOUNCE_S:
+        last, n = p.get("last_notified"), p.get("notified")
+        if set_changed or _due(p, now):
             if notify.enabled():
                 notify._deliver(f"[janitor] {action}", runner=runner)
             last = now
-        alerts[cond] = {"first_seen": p.get("first_seen", int(now)), "last_notified": int(last), "action": action}
+            n = 1 if set_changed or not isinstance(n, int) else n + 1
+        alerts[cond] = {
+            "first_seen": p.get("first_seen", int(now)),
+            "last_notified": int(last) if isinstance(last, (int, float)) else int(now),
+            "notified": n if isinstance(n, int) else 1,
+            "action": action,
+        }
     if alerts:
         state.atomic_write(path, json.dumps({"alerts": alerts}))
     else:
@@ -112,10 +130,14 @@ def evaluate(
     return list(active)
 
 
-def drift_line(root: Path) -> Optional[str]:
-    """One drift line for the heartbeat, or None when no alert file / no alerts."""
+def drift_line(root: Path, now: float) -> Optional[str]:
+    """One drift line for the heartbeat, or None. Merges the daemon's alert file with a
+    session-side watchdog for `tick-stalled`: a fully hung daemon writes no file, so any live
+    session (this runs only inside one) checks the last-completed-tick stamp itself, one stat."""
     alerts = _dict(_read_json(root / ALERT_NAME).get("alerts"))
-    if not alerts:
+    actions = {str(a.get("action", c)) for c, a in alerts.items() if isinstance(a, dict)}
+    if (root / "tick-completed.ts").exists() and _tick_age(root, now) > TICK_STALL_S:
+        actions.add(_ACTIONS["tick-stalled"])
+    if not actions:
         return None
-    actions = sorted({str(a.get("action", c)) for c, a in alerts.items() if isinstance(a, dict)})
-    return state.sanitize_for_drift_line("rotator alert: " + "; ".join(actions))
+    return state.sanitize_for_drift_line("rotator alert: " + "; ".join(sorted(actions)))

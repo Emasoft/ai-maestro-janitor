@@ -45,7 +45,14 @@ def _write_state(root: Path, *, live_exp_s: float, spare_exp_s: float | None) ->
 
 
 def _fresh_tick(root: Path, now: float = NOW) -> None:
-    (root / "tick-completed.ts").write_text(str(now - 30))
+    _stamp(root, now - 30)
+
+
+
+def _stamp(root: Path, at: float) -> None:
+    p = root / "tick-completed.ts"
+    p.write_text(str(int(at)))
+    os.utime(p, (at, at))  # the evaluator reads the stamp's mtime
 
 
 @pytest.fixture
@@ -92,21 +99,20 @@ def test_healthy_state_raises_nothing(root: Path) -> None:
     assert run.argvs == [] and not (root / ra.ALERT_NAME).exists()
 
 
-def test_live_token_expired_needs_the_five_minute_grace(root: Path) -> None:
-    """Expired 4 min ago: quiet. Expired 6 min ago and unrefreshed: live-token-expired."""
+def test_stale_slot_twin_never_raises_live_token_expired(root: Path) -> None:
+    """The live twin goes stale by design (never refreshed): an expiry 8 h ago must stay quiet."""
     _fresh_tick(root)
-    _write_state(root, live_exp_s=NOW - 240, spare_exp_s=NOW + 7200)
-    assert ra.evaluate(root, now=NOW, claude_running=True, runner=Runner()) == []
-    _write_state(root, live_exp_s=NOW - 360, spare_exp_s=NOW + 7200)
+    _write_state(root, live_exp_s=NOW - 8 * 3600, spare_exp_s=NOW + 7200)
     run = Runner()
-    assert ra.evaluate(root, now=NOW, claude_running=True, runner=run) == ["live-token-expired"]
-    assert len(run.argvs) == 1 and "/login" in run.argvs[0][-1]
+    assert ra.evaluate(root, now=NOW, claude_running=True, runner=run) == []
+    assert run.argvs == [] and not (root / ra.ALERT_NAME).exists()
 
 
 def test_tick_stalled_only_while_claude_runs(root: Path) -> None:
     """No completed tick for 11 min fires with a claude session up, and not without one."""
     _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=NOW + 7200)
     (root / "tick-completed.ts").write_text(str(NOW - 660))
+    _stamp(root, NOW - 660)
     assert ra.evaluate(root, now=NOW, claude_running=False, runner=Runner()) == []
     assert ra.evaluate(root, now=NOW, claude_running=True, runner=Runner()) == ["tick-stalled"]
 
@@ -120,8 +126,9 @@ def test_rotation_stuck_file_alerts_even_without_claude(root: Path) -> None:
     assert SPARE not in json.dumps(run.argvs) and SPARE not in (root / ra.ALERT_NAME).read_text()
 
 
-def test_debounce_is_hourly_per_condition_and_keeps_first_seen(root: Path) -> None:
-    """An unchanged condition re-notifies only after an hour; first_seen is preserved."""
+def test_banner_backoff_first_then_hourly_then_daily(root: Path) -> None:
+    """Notify at first sight, again after 1 h, then at most once per 24 h; the file updates
+    on every evaluation and first_seen is preserved."""
     (root / "rotation-stuck.json").write_text("{}")
     run = Runner()
     ra.evaluate(root, now=NOW, claude_running=False, runner=run)
@@ -129,8 +136,38 @@ def test_debounce_is_hourly_per_condition_and_keeps_first_seen(root: Path) -> No
     assert len(run.argvs) == 1
     ra.evaluate(root, now=NOW + 3601, claude_running=False, runner=run)
     assert len(run.argvs) == 2
+    ra.evaluate(root, now=NOW + 3601 + 7200, claude_running=False, runner=run)
+    ra.evaluate(root, now=NOW + 3601 + 80000, claude_running=False, runner=run)
+    assert len(run.argvs) == 2  # no 3rd banner inside 24 h of the 2nd
+    ra.evaluate(root, now=NOW + 3601 + 86400, claude_running=False, runner=run)
+    assert len(run.argvs) == 3
     saved = json.loads((root / ra.ALERT_NAME).read_text())["alerts"]["rotation-stuck"]
-    assert saved["first_seen"] == int(NOW) and saved["last_notified"] == int(NOW + 3601)
+    assert saved["first_seen"] == int(NOW) and saved["last_notified"] == int(NOW + 3601 + 86400)
+
+
+
+def test_no_spare_account_for_days_gives_a_handful_of_banners(root: Path) -> None:
+    """Condition (a) held for 3 days, evaluated every minute: at most 5 banners, not ~72."""
+    _write_state(root, live_exp_s=NOW - 3600, spare_exp_s=NOW - 60)
+    run = Runner()
+    for i in range(3 * 24 * 60):
+        t = NOW + i * 60
+        _stamp(root, t - 30)
+        ra.evaluate(root, now=t, claude_running=True, runner=run)
+    assert len(run.argvs) <= 5
+
+
+def test_a_change_of_the_condition_set_notifies_immediately(root: Path) -> None:
+    """A second condition appearing inside the backoff window notifies at once."""
+    _write_state(root, live_exp_s=NOW - 3600, spare_exp_s=NOW - 60)
+    _fresh_tick(root)
+    run = Runner()
+    ra.evaluate(root, now=NOW, claude_running=True, runner=run)
+    n = len(run.argvs)
+    (root / "rotation-stuck.json").write_text("{}")
+    _fresh_tick(root, NOW + 60)
+    ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
+    assert len(run.argvs) > n
 
 
 def test_alert_file_is_cleared_when_the_condition_clears(root: Path) -> None:
@@ -221,6 +258,47 @@ def test_dispatch_prints_nothing_without_an_alert_file(
     home = tmp_path / "rot-home"
     home.mkdir()
     (home / "state.json").write_text(json.dumps({"slots": {}}))
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
+    dispatch = _import_dispatch()
+    import state
+
+    state.state_dir().mkdir(parents=True, exist_ok=True)
+    _arm_summary_hold(state.state_dir(), expires_in_s=900)
+    assert "rotator alert" not in _run_main(dispatch)
+
+
+
+def test_dispatch_watchdog_reports_a_hung_daemon_without_an_alert_file(
+    env_isolation: dict,  # noqa: F811 -- the imported fixture
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No alert file, but the last completed tick is 11 min old: the session still prints it."""
+    import time
+
+    home = tmp_path / "rot-home"
+    home.mkdir()
+    (home / "state.json").write_text(json.dumps({"slots": {}}))
+    _stamp(home, time.time() - 660)
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
+    dispatch = _import_dispatch()
+    import state
+
+    state.state_dir().mkdir(parents=True, exist_ok=True)
+    _arm_summary_hold(state.state_dir(), expires_in_s=900)
+    assert "rotator alert: the account rotator has stopped ticking" in _run_main(dispatch)
+
+
+def test_dispatch_watchdog_is_quiet_after_a_fresh_completed_tick(
+    env_isolation: dict,  # noqa: F811 -- the imported fixture
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tick completed 30 s ago: no watchdog line."""
+    import time
+
+    home = tmp_path / "rot-home"
+    home.mkdir()
+    (home / "state.json").write_text(json.dumps({"slots": {}}))
+    _stamp(home, time.time() - 30)
     monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
     dispatch = _import_dispatch()
     import state
