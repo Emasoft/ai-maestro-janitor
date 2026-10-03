@@ -832,20 +832,30 @@ def _log_rotator_tick_result(result: Optional[subprocess.CompletedProcess[str]])
 
     WHY: daemon.log used to show only "done in Ns" for the tick, so a failing tick left no
     cause anywhere. A clean tick writes nothing: the scheduler already logs "starting" and
-    "done in Ns" every minute. Stderr is masked (`sanitize_for_drift_line`: control chars,
-    brackets, e-mail addresses; plus `sk-ant-` tokens) BEFORE the tail is cut: cutting first
-    can slice into a token so its remainder no longer starts with `sk-ant-` and escapes the
-    mask. No latch change on purpose: a hung `security` prompt also uses ~0 CPU, so "starved"
-    cannot be told apart from it. None (timeout / spawn failure) is already logged by
-    `_run_workload`.
+    "done in Ns" every minute. Stderr is masked BEFORE the tail is cut: cutting first can
+    slice into a token so its remainder no longer starts with `sk-ant-` and escapes the mask.
+    Masking is shape-based: e-mail addresses and sk-ant- tokens (plus control chars and
+    brackets via `sanitize_for_drift_line`). No latch change on purpose: a hung `security`
+    prompt also uses ~0 CPU, so "starved" cannot be told apart from it. None (timeout / spawn
+    failure) is already logged by `_run_workload`.
+
+    Never raises: it runs right before the rotation-ESC pass in `task_oauth_rotator_tick`, and
+    a bad byte, unwritable log dir or full disk must not skip that pass (same rule as
+    `_evaluate_rotator_alert`).
     """
-    if result is None:
-        return
-    err = (result.stderr or "").strip()
-    if result.returncode == 0 and not err:
-        return
-    masked = _TOKEN_RE.sub("sk-ant-⟨redacted⟩", state.sanitize_for_drift_line(err))
-    state.log_line("daemon", f"rotator tick rc={result.returncode} stderr: {masked[-_RC_STDERR_TAIL_CHARS:]}")
+    try:
+        if result is None:
+            return
+        err = (result.stderr or "").strip()
+        if result.returncode == 0 and not err:
+            return
+        masked = _TOKEN_RE.sub("sk-ant-⟨redacted⟩", state.sanitize_for_drift_line(err))
+        state.log_line("daemon", f"rotator tick rc={result.returncode} stderr: {masked[-_RC_STDERR_TAIL_CHARS:]}")
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        try:
+            state.log_line("daemon", f"rotator tick result not logged: {type(exc).__name__}")
+        except Exception:  # noqa: BLE001, S110 - even the fallback line must not raise
+            pass
 
 
 def task_oauth_rotator_tick() -> None:

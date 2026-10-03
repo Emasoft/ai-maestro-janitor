@@ -75,3 +75,23 @@ def test_token_cut_by_truncation_is_still_masked(tmp_path: Path) -> None:
     log = _tick(tmp_path, f"import sys; print(\"{tok}\", file=sys.stderr); sys.exit(1)")
     assert "rotator tick rc=1" in log
     assert "AbCdEfGhIj" not in log
+
+
+
+def test_email_inside_repr_quotes_is_masked(tmp_path: Path) -> None:
+    """An e-mail inside repr() single quotes in stderr is masked."""
+    log = _tick(tmp_path, f"import sys; print(repr(\"slot for {_ADDR}\"), file=sys.stderr); sys.exit(1)")
+    assert "rotator tick rc=1" in log
+    assert _ADDR not in log
+
+
+def test_unwritable_log_dir_does_not_raise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A log write that really fails must not propagate out of the tick-result helper."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    monkeypatch.setenv("JANITOR_LOG_DIR", str(blocker))
+    daemon.state.log_dir.cache_clear()
+    script = tmp_path / "tick.py"
+    script.write_text("import sys; sys.exit(2)")
+    result = daemon._run_workload([sys.executable, str(script)], timeout=20, max_attempts=1)
+    daemon._log_rotator_tick_result(result)
