@@ -1,10 +1,10 @@
 ---
 trdd-id: G9Z8PXCM
 title: Session beacon mirrors the live token so the daemon can probe usage
-column: todo
+column: testing
 status: tasked
 created: 2026-10-03T03:41:14+0200
-updated: 2026-10-03T06:20:39+0200
+updated: 2026-10-03T06:22:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -41,6 +41,7 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:41:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-03T06:22:35+0200 — column → testing. code committed; only field acceptance after release remains
 
 ## Review notes
 

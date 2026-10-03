@@ -1,10 +1,10 @@
 ---
 trdd-id: 3OS6AXV3
 title: Owner warned out of band when no rotation target exists or the rotator stalls
-column: todo
+column: dev
 status: tasked
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-03T06:20:34+0200
+updated: 2026-10-03T06:22:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -42,3 +42,4 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:41:23+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-03T06:22:36+0200 — column → dev. R4c in progress (live account excluded from no-rotation-target; auth-failed condition from the StopFailure hook)
