@@ -108,6 +108,32 @@ def test_stale_slot_twin_never_raises_live_token_expired(root: Path) -> None:
     assert run.argvs == [] and not (root / ra.ALERT_NAME).exists()
 
 
+
+def test_live_twin_with_future_expiry_is_not_a_rotation_target(root: Path) -> None:
+    """The live account's own twin expires later, every spare is expired: still no target."""
+    _fresh_tick(root)
+    _write_state(root, live_exp_s=NOW + 7200, spare_exp_s=NOW - 60)
+    assert ra.evaluate(root, now=NOW, claude_running=True, runner=Runner()) == ["no-rotation-target"]
+
+
+def test_auth_failed_marker_raises_a_banner_at_once_and_expires(root: Path) -> None:
+    """A hook-written marker is an `auth-failed` condition that notifies immediately; it is
+    gone after 6 h, and when the live slot expiry moves (a fresh login)."""
+    _fresh_tick(root)
+    _write_state(root, live_exp_s=NOW + 7200, spare_exp_s=NOW + 7200)
+    ra.record_auth_failed(root, "authentication_failed", NOW)
+    run = Runner()
+    assert ra.evaluate(root, now=NOW, claude_running=True, runner=run) == ["auth-failed"]
+    assert len(run.argvs) == 1 and "/login" in run.argvs[0][2]
+    assert "example.test" not in run.argvs[0][2]
+    _write_state(root, live_exp_s=NOW + 9000, spare_exp_s=NOW + 7200)
+    assert "auth-failed" not in ra.active_conditions(root, NOW + 60, True)
+    _write_state(root, live_exp_s=NOW + 7200, spare_exp_s=NOW + 7200)
+    assert "auth-failed" in ra.active_conditions(root, NOW + 5 * 3600, True)
+    assert "auth-failed" not in ra.active_conditions(root, NOW + 6 * 3600 + 1, True)
+
+
+
 def test_tick_stalled_only_while_claude_runs(root: Path) -> None:
     """No completed tick for 11 min fires with a claude session up, and not without one."""
     _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=NOW + 7200)
@@ -168,6 +194,28 @@ def test_a_change_of_the_condition_set_notifies_immediately(root: Path) -> None:
     _fresh_tick(root, NOW + 60)
     ra.evaluate(root, now=NOW + 60, claude_running=True, runner=run)
     assert len(run.argvs) > n
+
+
+
+def test_a_condition_that_flaps_follows_the_backoff(root: Path) -> None:
+    """Active -> notified; cleared; back within DEBOUNCE_S -> NOT notified; gone and back after
+    DEBOUNCE_S -> notified (shared-login sessions flip the auth-failed marker on and off)."""
+    stuck = root / "rotation-stuck.json"
+    run = Runner()
+    stuck.write_text("{}")
+    ra.evaluate(root, now=NOW, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+    stuck.unlink()
+    ra.evaluate(root, now=NOW + 60, claude_running=False, runner=run)
+    stuck.write_text("{}")
+    ra.evaluate(root, now=NOW + 120, claude_running=False, runner=run)
+    assert len(run.argvs) == 1
+    stuck.unlink()
+    ra.evaluate(root, now=NOW + 180, claude_running=False, runner=run)
+    ra.evaluate(root, now=NOW + 180 + ra.DEBOUNCE_S + 1, claude_running=False, runner=run)
+    stuck.write_text("{}")
+    ra.evaluate(root, now=NOW + 180 + ra.DEBOUNCE_S + 2, claude_running=False, runner=run)
+    assert len(run.argvs) == 2
 
 
 def test_alert_file_is_cleared_when_the_condition_clears(root: Path) -> None:

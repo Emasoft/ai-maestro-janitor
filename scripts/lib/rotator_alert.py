@@ -36,6 +36,10 @@ _ACTIONS = {
 }
 
 
+REPEAT_S = 86400  # after the 2nd notification, repeat an unchanged condition at most daily
+AUTH_FAILED_NAME = "auth-failed.json"  # written by the StopFailure hook on a 401
+AUTH_FAILED_TTL_S = 6 * 3600  # the marker expires on its own after 6 h
+AUTH_FAILED_ACTION = "the login was rejected (Login expired) - run /login"
 def _read_json(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -53,6 +57,33 @@ def _epoch(raw: object) -> Optional[float]:
         return None
     return raw / 1000 if raw > 1e12 else float(raw)
 
+def _live(st: dict) -> tuple[Optional[str], Optional[float]]:
+    """(live account e-mail, its slot twin expiry) from state.json - no credential read."""
+    live = st.get("live_email")
+    live = live if isinstance(live, str) else None
+    slot = _dict(_dict(st.get("slots")).get(live))
+    return live, _epoch(slot.get("expires_at"))
+
+
+def record_auth_failed(root: Path, kind: str, now: float) -> None:
+    """Called by the StopFailure hook on an authentication failure: marker for the daemon.
+    Holds a timestamp, the error kind and the live account/expiry it was raised under (so a
+    rotation clears it) - never a token. The clear on a working login is `clear_auth_failed`."""
+    live, live_exp = _live(_read_json(root / "state.json"))
+    root.mkdir(parents=True, exist_ok=True)
+    state.atomic_write(
+        root / AUTH_FAILED_NAME,
+        json.dumps({"ts": int(now), "kind": kind, "live_email": live, "live_exp": live_exp}),
+    )
+
+
+
+def clear_auth_failed(root: Path) -> None:
+    """Called by the Stop hook: Claude Code fires Stop only for a turn that ended WITHOUT an
+    API error, so a Stop is proof the login works again - the marker is no longer true. (The
+    beacon fp is NOT used for this: a re-stamp of a still-dead primary changes it too.)"""
+    (root / AUTH_FAILED_NAME).unlink(missing_ok=True)
+
 
 def _tick_age(root: Path, now: float) -> float:
     # mtime of the stamp the rotator writes ONLY when a tick runs to completion (rotator.py
@@ -66,31 +97,49 @@ def _tick_age(root: Path, now: float) -> float:
 def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str, str]:
     """Condition name -> action text for every alarm that holds right now."""
     out: dict[str, str] = {}
+    st = _read_json(root / "state.json")
+    live, live_exp = _live(st)
     if claude_running:
-        st = _read_json(root / "state.json")
+        # The live account is NOT a rotation target: its slot twin keeps a future expiry
+        # (the rotator never refreshes it) long after the real login died, so counting it hid
+        # "no spare" until the wall itself (incident 2026-10-03 00:37).
         slots = _dict(st.get("slots"))
-        exps = {em: _epoch(m.get("expires_at")) for em, m in slots.items() if isinstance(m, dict)}
+        exps = {
+            em: _epoch(m.get("expires_at"))
+            for em, m in slots.items()
+            if isinstance(m, dict) and em != live
+        }
         if not any(e is not None and e > now for e in exps.values()):
             out["no-rotation-target"] = _ACTIONS["no-rotation-target"]
         # No "live token expired" condition, on purpose: the only expiry the daemon may read is
-        # the live account's slot twin, and that goes stale BY DESIGN (the rotator never
-        # refreshes the live twin), so it would fire ~8 h after every switch while the real
-        # login is fine. The -livebak mirror expiry would be right but needs a keychain read
-        # (R2 records no non-secret expiry file), which the daemon must not do.
+        # the live account's slot twin, and that goes stale BY DESIGN, so it would fire ~8 h
+        # after every switch while the real login is fine. The wall itself is reported by
+        # `auth-failed` below, written by the session's StopFailure hook.
         if _tick_age(root, now) > TICK_STALL_S:
             out["tick-stalled"] = _ACTIONS["tick-stalled"]
     if (root / "rotation-stuck.json").is_file():
         out["rotation-stuck"] = _ACTIONS["rotation-stuck"]
+    marker = _read_json(root / AUTH_FAILED_NAME)
+    ts = _epoch(marker.get("ts"))
+    # Normally cleared by the next successful Stop (`clear_auth_failed`); these are backstops:
+    # age, or the live account / its slot expiry moved (a rotation rewrites them).
+    if (
+        ts is not None
+        and now - ts <= AUTH_FAILED_TTL_S
+        and marker.get("live_email") == live
+        and marker.get("live_exp") == live_exp
+    ):
+        out["auth-failed"] = AUTH_FAILED_ACTION
     return out
 
 
 
 def _due(prior: dict, now: float) -> bool:
-    # Backoff: 2nd notification after DEBOUNCE_S (1 h), then once per 24 h while it holds.
+    # Backoff: 2nd notification after DEBOUNCE_S (1 h), then once per REPEAT_S while it holds.
     last, n = prior.get("last_notified"), prior.get("notified")
     if not isinstance(last, (int, float)) or not isinstance(n, int):
         return True
-    return now - last >= (DEBOUNCE_S if n <= 1 else 86400)
+    return now - last >= (DEBOUNCE_S if n <= 1 else REPEAT_S)
 
 
 def evaluate(
@@ -102,27 +151,41 @@ def evaluate(
 ) -> list[str]:
     """Keep `rotator-alert.json` equal to the live set of conditions (every evaluation), delete
     it when none hold, and notify with a backoff: first occurrence, again after 1 h, then at
-    most daily while it holds; any change of the SET of conditions notifies at once. Returns the
-    active condition names."""
+    most daily while it holds; a NEW condition notifies at once. A condition that was active
+    within the last DEBOUNCE_S is not new when it reappears: it resumes its old backoff (sessions
+    sharing one login flip `auth-failed` on and off, and each flip must not be a banner). The
+    recent-state lives in its own file because the alert file is deleted when nothing holds.
+    Returns the active condition names."""
     active = active_conditions(root, now, claude_running)
     path = root / ALERT_NAME
+    recent_path = root / "rotator-alert-recent.json"
     prior = _dict(_read_json(path).get("alerts"))
-    set_changed = set(prior) != set(active)
+    recent = {
+        c: _dict(v)
+        for c, v in _read_json(recent_path).items()
+        if isinstance(v, dict) and now - (_epoch(v.get("t")) or 0) <= DEBOUNCE_S
+    }
     alerts: dict[str, dict] = {}
+    new = {c for c in active if c not in prior and c not in recent}
     for cond, action in active.items():
-        p = _dict(prior.get(cond))
+        p = _dict(prior.get(cond)) or _dict(recent.get(cond))
         last, n = p.get("last_notified"), p.get("notified")
-        if set_changed or _due(p, now):
+        if cond in new or _due(p, now):
             if notify.enabled():
                 notify._deliver(f"[janitor] {action}", runner=runner)
             last = now
-            n = 1 if set_changed or not isinstance(n, int) else n + 1
+            n = 1 if cond in new or not isinstance(n, int) else n + 1
         alerts[cond] = {
             "first_seen": p.get("first_seen", int(now)),
             "last_notified": int(last) if isinstance(last, (int, float)) else int(now),
             "notified": n if isinstance(n, int) else 1,
             "action": action,
         }
+    recent.update({c: {**a, "t": int(now)} for c, a in alerts.items()})
+    if recent:
+        state.atomic_write(recent_path, json.dumps(recent))
+    else:
+        recent_path.unlink(missing_ok=True)
     if alerts:
         state.atomic_write(path, json.dumps({"alerts": alerts}))
     else:

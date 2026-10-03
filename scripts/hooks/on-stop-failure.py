@@ -52,6 +52,27 @@ def _error_fields(payload: dict) -> tuple[str, str]:
     msg = payload.get("last_assistant_message") or payload.get("error_message") or ""
     return (str(etype)[:64], str(msg)[:300])
 
+def _mark_auth_failed(etype: str, now: int, plugin_root: str) -> None:
+    """On a credential rejection, drop the marker the daemon turns into an `auth-failed`
+    alarm (TRDD-3OS6AXV3 R4c). WHY here: the daemon cannot see a login die (it reads no
+    keychain), but the session that just hit the wall can. The root comes from the SAME
+    resolver the daemon evaluates (supervisor._rotator_root: canonical, or the legacy root
+    that holds state.json), so writer and reader cannot diverge. Every import path derives
+    from `plugin_root` like main() does - mixing it with `__file__` could load two cached
+    versions during a version roll. The marker carries no token. A failed write is LOGGED,
+    not raised: the hook must never crash, but a marker that never lands means the alarm
+    never fires, and that must leave a trace."""
+    from lib import state  # noqa: PLC0415 -- local package, not PyPI
+
+    try:
+        sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
+        import rotator_alert  # noqa: PLC0415 -- scripts/lib is on sys.path by now
+        import supervisor  # noqa: PLC0415 -- scripts/oauth_rotator, same resolver as the daemon
+
+        rotator_alert.record_auth_failed(supervisor._rotator_root(), etype, now)
+    except Exception as exc:  # noqa: BLE001 -- see docstring
+        state.log_line("stop-failure", f"auth-failed marker not written: {exc!r}")
+
 
 def main() -> int:
     # All side-effecting code lives inside main() so the hook script is
@@ -118,6 +139,8 @@ def main() -> int:
                 "stop-failure",
                 f"{etype}: credential rejected — rotation (daemon's next tick) is the fix, not a window reset",
             )
+            sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
+            _mark_auth_failed(etype, now, plugin_root)
     except Exception:  # noqa: BLE001 -- routing/telemetry MUST NOT break the resume-cue capture
         pass
 

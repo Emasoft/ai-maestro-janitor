@@ -292,6 +292,23 @@ def main() -> int:
             rotator.refresh_beacon_if_stale_throttled()
     except Exception as exc:  # noqa: BLE001 -- never let the mirror refresh break a turn
         sys.stderr.write(f"[on-stop-token-meter] beacon refresh skipped ({exc})\n")
+
+    # A Stop is proof the login works (Claude Code fires Stop only for a turn that ended
+    # WITHOUT an API error; StopFailure replaces it): drop the `auth-failed` marker the
+    # StopFailure hook left, using the SAME root resolver the daemon evaluates. Its own try
+    # block, and a failure is logged, so it can never break the hook or hide silently.
+    try:
+        sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
+        import rotator_alert  # noqa: E402
+        import supervisor  # noqa: E402
+        from lib import state  # noqa: E402
+
+        try:
+            rotator_alert.clear_auth_failed(supervisor._rotator_root())
+        except Exception as exc:  # noqa: BLE001 -- logged, never raised
+            state.log_line("token-meter", f"auth-failed marker not cleared: {exc!r}")
+    except Exception as exc:  # noqa: BLE001 -- never let the marker clear break a turn
+        sys.stderr.write(f"[on-stop-token-meter] auth-failed clear skipped ({exc})\n")
     return 0
 
 

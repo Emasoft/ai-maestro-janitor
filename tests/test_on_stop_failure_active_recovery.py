@@ -44,6 +44,8 @@ def _purge_lib_modules() -> None:
         if name == "lib" or name.startswith("lib."):
             sys.modules.pop(name, None)
 
+import json  # noqa: E402
+
 
 def _load_hook() -> Any:
     """Load the hook module fresh (spec_from_file_location — mirrors the other in-process
@@ -127,6 +129,141 @@ def test_rotator_spawn_when_gate_open(monkeypatch: pytest.MonkeyPatch, tmp_path:
     rotator_calls = [c for c in calls if any("rotator.py" in str(a) for a in c)]
     assert len(rotator_calls) == 1
     assert rotator_calls[0][-1] == "auto"
+
+
+
+def _rotator_homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+    """Isolate HOME (the daemon's root resolver reads it live); return (canonical, legacy) roots."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    canonical = home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "oauth-rotator"
+    return canonical, home / ".claude" / "account-rotator"
+
+
+
+def _auth_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"hook_event_name": "StopFailure", "error": "authentication_failed", "last_assistant_message": "Login expired"}
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps(payload)))
+
+
+def test_auth_failure_payload_writes_the_marker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A StopFailure payload with error=authentication_failed leaves a token-free marker."""
+    canonical, _legacy = _rotator_homes(monkeypatch, tmp_path)
+    _auth_payload(monkeypatch)
+    _run_hook(monkeypatch, tmp_path)
+    marker = json.loads((canonical / "auth-failed.json").read_text())
+    assert marker["kind"] == "authentication_failed" and isinstance(marker["ts"], int)
+
+
+
+def test_marker_lands_in_the_legacy_root_the_daemon_reads(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Only the legacy root holds state.json: the daemon's resolver picks it, so must the hook."""
+    canonical, legacy = _rotator_homes(monkeypatch, tmp_path)
+    legacy.mkdir(parents=True)
+    (legacy / "state.json").write_text("{}")
+    _auth_payload(monkeypatch)
+    _run_hook(monkeypatch, tmp_path)
+    assert (legacy / "auth-failed.json").is_file() and not canonical.exists()
+
+
+
+def test_unwritable_root_is_logged_and_the_hook_still_exits_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A marker that cannot be written must leave a log line, never crash the hook."""
+    _canonical, legacy = _rotator_homes(monkeypatch, tmp_path)
+    legacy.mkdir(parents=True)
+    (legacy / "state.json").write_text("{}")
+    legacy.chmod(0o500)
+    try:
+        _auth_payload(monkeypatch)
+        _hook, project = _run_hook(monkeypatch, tmp_path)  # asserts rc == 0
+    finally:
+        legacy.chmod(0o700)
+    log = (project / ".janitor" / "logs" / "stop-failure.log").read_text()
+    assert "auth-failed marker not written" in log
+
+
+def test_rate_limit_payload_writes_no_marker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The 429 path is unchanged: the resume flag is written and no auth marker appears."""
+    canonical, _legacy = _rotator_homes(monkeypatch, tmp_path)
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps({"error": "rate_limit"})))
+    _hook, project = _run_hook(monkeypatch, tmp_path)
+    assert (project / ".janitor" / "state" / "rate-limited.flag").exists()
+    assert not (canonical / "auth-failed.json").exists()
+
+
+
+_STOP_HOOK_PATH = _PROJECT_ROOT / "scripts" / "hooks" / "on-stop-token-meter.py"
+
+
+def _marker_and_stop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Any, Path]:
+    """Real temp dirs: a fresh auth-failed marker in the canonical rotator root, plus the env
+    the Stop hook needs. Returns (rotator_alert module, rotator root)."""
+    canonical, _legacy = _rotator_homes(monkeypatch, tmp_path)
+    canonical.mkdir(parents=True)
+    (canonical / "auth-failed.json").write_text(
+        json.dumps({"ts": int(__import__("time").time()), "kind": "authentication_failed", "live_email": None, "live_exp": None})
+    )
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "project"))
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+    import rotator_alert  # noqa: PLC0415
+
+    return rotator_alert, canonical
+
+
+def test_successful_stop_clears_the_auth_failed_marker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A Stop (a turn that ended WITHOUT an API error) proves the login works: marker gone."""
+    ra, root = _marker_and_stop(monkeypatch, tmp_path)
+    assert "auth-failed" in ra.active_conditions(root, __import__("time").time(), False)
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps({"transcript_path": str(tmp_path / "t.jsonl")})))
+    _purge_lib_modules()
+    spec = _u.spec_from_file_location("janitor_on_stop_token_meter_under_test", str(_STOP_HOOK_PATH))
+    assert spec is not None and spec.loader is not None
+    hook = _u.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    assert hook.main() == 0
+    assert not (root / "auth-failed.json").exists()
+    assert "auth-failed" not in ra.active_conditions(root, __import__("time").time(), False)
+
+
+def test_marker_holds_without_a_stop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """No Stop ran: the marker still raises the condition (TTL and identity are only backstops)."""
+    ra, root = _marker_and_stop(monkeypatch, tmp_path)
+    assert "auth-failed" in ra.active_conditions(root, __import__("time").time(), False)
+
+
+
+def test_real_subprocess_failure_then_stop_writes_then_clears_the_marker(tmp_path: Path) -> None:
+    """Both hooks as real processes, temp HOME and plugin data (never the real keychain/HOME):
+    an authentication_failed StopFailure leaves the marker at the resolver root, a Stop removes it."""
+    import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    home = tmp_path / "home"
+    data = tmp_path / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+    project = tmp_path / "project"
+    for d in (home, data, project):
+        d.mkdir(parents=True)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "CLAUDE_PLUGIN_DATA": str(data),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gstate"),
+    }
+    marker = data / "oauth-rotator" / "auth-failed.json"
+
+    def _run(hook: Path, payload: dict) -> None:
+        r = subprocess.run([sys.executable, str(hook)], input=json.dumps(payload), env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+
+    _run(_HOOK_PATH, {"hook_event_name": "StopFailure", "error": "authentication_failed"})
+    assert marker.is_file()
+    _run(_STOP_HOOK_PATH, {"transcript_path": str(tmp_path / "t.jsonl")})
+    assert not marker.exists()
 
 
 def test_import_actually_resolves() -> None:
