@@ -53,9 +53,13 @@ want the model to author one; this skill will not do that for you.
    ```
 
    **`--force` is NOT a master override.** It relaxes exactly two TRIGGER terms — `idle …`
-   and `no-headroom` (`external_handoff_clear.py:240`) — and its own help says *"every
+   and `no-headroom` (`external_handoff_clear.py:421`) — and its own help says *"every
    safety veto still holds."* A veto is a refusal to clear something that would be harmed
-   by clearing, and forcing harder cannot and must not get past one. Add `--dry-run` to
+   by clearing, and forcing harder cannot and must not get past one. In particular
+   `--force` does NOT bypass the 300k context floor (`DEFAULT_MIN_CONTEXT_TOKENS`,
+   `external_clear.py:89`): that veto's reason is `context N < 300000 — nothing worth
+   reclaiming` (`external_clear.py:1474`), which is neither `idle …` nor `no-headroom`, so
+   the override at `external_handoff_clear.py:421` never matches it. Add `--dry-run` to
    inspect the composed handoff without clearing anything.
 
    **`why=active-waiting` is the veto you will hit most, and it is CORRECT.** It means a

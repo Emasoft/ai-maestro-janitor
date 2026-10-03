@@ -2,7 +2,7 @@
 name: janitor-compaction-floor-gate
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / why is the context still huge right after a compaction / what should the auto-compact threshold be / compacting barely shrank anything / who compacts my context now that auto-compact is off / prompt is too long / context window full and nothing happened / how do I turn auto-compact back on / claude stopped responding near the context limit / what is the compaction threshold now / why did the janitor clear my session / where did my context go / the summary replaced my conversation / my session stopped at the context limit instead of compacting / the janitor did not clear even though the cache expired / a busy session never gets cleared / what survives a clear now / 16 agents hung on the externalized compaction / the fleet froze for 40 minutes after a restart / a resume storm serialized every session behind the llm-ext lane / sessions stuck at startup on a blocking SessionStart hook / the compaction fired below the floor because the installed plugin was a stale rollout"
 ocd: 2026-07-17
-lmd: 2026-09-24
+lmd: 2026-10-03
 metadata:
   node_type: memory
   type: project
@@ -21,7 +21,7 @@ release-bump `b5c298a`). The buggy loop-prone form was NEVER published — it wa
 pre-publish batch, so no release ever shipped the size-only gate.
 
 This page is the map — the fact detail lives in three sub-pages (split 2026-09-02 to stay under
-the page-size cap; no fact moved, only relocated).
+the page-size cap; no fact moved, only relocated). [^1]
 
 ## Applies to
 
@@ -51,3 +51,5 @@ the page-size cap; no fact moved, only relocated).
   trap; both the Stop hook and its tests live on that fault line.
 
 ## Notes and lessons learned
+
+[^1]: [id: ATOM-D5VL-8I1Y, status: valid, keywords: "claude_idle_after_the_janitor_cleared_it goal_lost_after_janitor_clear tasks_vanished_after_clear summary_hold_blocks_resume_forever what_survives_a_janitor_clear clear_continuity_behaviours cleared_session_stateless_assumption resume_cue_never_fires_after_clear goal_re-set_by_typing_slash_goal summarizer_clobbered_live_session", ocd: 2026-10-03, lmd: 2026-10-03] DO NOT treat a cleared session as stateless, BECAUSE the clear path now carries continuity: the post-clear hook injects Continuity plus NEXT ACTION (C2, TRDD-DS3WDTPV), open task files are carried over (C3, TRDD-7X9WXDK9), an unmet goal is re-set by typing /goal instead of /janitor-resume (C4, TRDD-B3PY3HV7), the summarizer skips other processes live sessions (C6, TRDD-LXUZYFD9), and the summary hold ends once any keyed handoff newer than the capture exists (C1, TRDD-5MOX0FPO). DO look at those five behaviours before debugging an idle agent, a lost goal, or a vanished task list after a janitor clear.
