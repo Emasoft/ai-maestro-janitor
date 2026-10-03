@@ -4,7 +4,7 @@ title: Janitor clear keeps what native compaction keeps and resumes in one push
 column: todo
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-03T04:47:37+0200
+updated: 2026-10-03T06:12:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -324,3 +324,4 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 ## STATE
 
 2026-10-03: stays open until release 2 — its eht includes parked backburner cards (C3 7X9WXDK9, C4 B3PY3HV7 and C7 part 2).
+2026-10-03 06:12 STATE: committed C1 bdc81d1c, 4e2e4fa4, 767c4904, a48d8974, a5903a15 and C2 cc48b42f (continuity block + NEXT ACTION quoting the last human message and own reply; end-to-end hook run verified on a synthetic incident). Remaining before release: card 5MOX0FPO needs a5903a15 and DS3WDTPV needs cc48b42f in implementation-commits; the real-file 22:09 replay in tests_dev/; release-2 cards C3-C6 untouched. Plan: ~/.claude/plans/wiggly-tinkering-hammock.md.
