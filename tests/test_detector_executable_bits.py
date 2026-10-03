@@ -57,19 +57,17 @@ def test_every_hook_is_executable_in_git():
 
 
 def test_runnable_shebang_scripts_are_executable_in_git():
-    """The PEP-723 scripts that are RUN (not just imported) must be executable."""
-    runnable = [
-        "scripts/dispatch.py",
-        "scripts/daemon.py",
-        "scripts/reload_trigger.py",
-        "scripts/identify_environment.py",
-        "scripts/lib/terminal_trigger.py",
-        "scripts/jev_compact.py",
-    ]
+    """Every tracked scripts/**/*.py that starts with a `#!` shebang must be 100755 in git."""
     out = subprocess.run(
-        ["git", "ls-files", "-s", *runnable],
+        ["git", "ls-files", "-s", "scripts"],
         cwd=_ROOT, capture_output=True, text=True, check=True,
     ).stdout
-    modes = {line.split("\t", 1)[1]: line.split()[0] for line in out.splitlines() if "\t" in line}
-    bad = [p for p in runnable if modes.get(p) == "100644"]
-    assert not bad, f"runnable shebang scripts not executable in git: {bad} (chmod +x + git add)"
+    bad: list[str] = []
+    for line in out.splitlines():
+        meta, _, path = line.partition("\t")
+        if not path.endswith(".py") or meta.split()[0] != "100644":
+            continue
+        with (_ROOT / path).open("rb") as fh:
+            if fh.read(2) == b"#!":
+                bad.append(path)
+    assert not bad, f"shebang scripts not executable in git: {bad} (chmod +x + git add)"
