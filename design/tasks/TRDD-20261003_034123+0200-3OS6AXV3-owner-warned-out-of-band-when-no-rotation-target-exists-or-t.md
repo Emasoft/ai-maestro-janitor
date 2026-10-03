@@ -4,7 +4,7 @@ title: Owner warned out of band when no rotation target exists or the rotator st
 column: todo
 status: tasked
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-03T03:44:57+0200
+updated: 2026-10-03T06:20:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,6 +18,7 @@ approval-datetime: 2026-10-03T03:41:23+0200
 project-id: ai-maestro-janitor
 parent-trdd: JSQSJ3PZ
 derived: true
+implementation-commits: [b4ba693b, b956914d]
 ---
 
 # Owner warned out of band when no rotation target exists or the rotator stalls

@@ -4,7 +4,7 @@ title: Session beacon mirrors the live token so the daemon can probe usage
 column: todo
 status: tasked
 created: 2026-10-03T03:41:14+0200
-updated: 2026-10-03T03:44:29+0200
+updated: 2026-10-03T06:20:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,6 +18,7 @@ approval-datetime: 2026-10-03T03:41:14+0200
 project-id: ai-maestro-janitor
 parent-trdd: JSQSJ3PZ
 derived: true
+implementation-commits: [415d1971]
 ---
 
 # Session beacon mirrors the live token so the daemon can probe usage
@@ -40,3 +41,7 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Approval log
 
 - 2026-10-03T03:41:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Review notes
+
+R2 review findings applied before commit: the beacon is trusted only when newer than last_switch_at; -livebak is written only when the primary fingerprint differs from the mirror's (no keychain write per turn); the write is update-only, may_prompt=False, 5 s timeout, session latch. Not yet verified: the real -livebak keychain item ACL (owner check pending).

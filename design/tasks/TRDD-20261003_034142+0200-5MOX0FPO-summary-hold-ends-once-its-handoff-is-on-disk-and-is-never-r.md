@@ -4,7 +4,7 @@ title: Summary hold ends once its handoff is on disk and is never re-taken over 
 column: testing
 status: tasked
 created: 2026-10-03T03:41:42+0200
-updated: 2026-10-03T05:09:35+0200
+updated: 2026-10-03T06:20:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,7 +18,7 @@ approval-datetime: 2026-10-03T03:41:42+0200
 project-id: ai-maestro-janitor
 parent-trdd: K9AHY1ZB
 derived: true
-implementation-commits: [bdc81d1c, 4e2e4fa4, 767c4904, a48d8974]
+implementation-commits: [bdc81d1c, 4e2e4fa4, 767c4904, a48d8974, a5903a15]
 ---
 
 # Summary hold ends once its handoff is on disk and is never re-taken over one

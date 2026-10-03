@@ -1,10 +1,10 @@
 ---
 trdd-id: DS3WDTPV
 title: Clear path injects a continuity block with the last request and own reply
-column: todo
+column: testing
 status: tasked
 created: 2026-10-03T03:41:46+0200
-updated: 2026-10-03T03:45:23+0200
+updated: 2026-10-03T06:20:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,6 +18,7 @@ approval-datetime: 2026-10-03T03:41:46+0200
 project-id: ai-maestro-janitor
 parent-trdd: K9AHY1ZB
 derived: true
+implementation-commits: [cc48b42f]
 ---
 
 # Clear path injects a continuity block with the last request and own reply
