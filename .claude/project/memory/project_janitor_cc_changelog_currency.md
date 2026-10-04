@@ -2,7 +2,7 @@
 name: project_janitor_cc_changelog_currency
 description: "is the janitor up to date with the new Claude Code release / did the CC changelog break the janitor / what Claude Code changes affect the janitor plugin / bring the janitor up to date with Claude Code / a forked session cleared itself or reloaded plugins it already had / the exfil guard missed a < redirection / the context watchdog never fires and looks healthy / my LOCAL TRDDs under ~/.claude/projects vanished / TaskCreate does not exist any more / the rules tell me to use a task tool I do not have / stale-task detector never fires is that a bug / a subagent spawn cap changed did the janitor adapt / does the janitor cover GitLab token families / is a symlinked plugin dev checkout safe from cache prune / the janitor thinks context is under 20 percent when it is nearly full / does Claude Code now resume itself after a rate limit / is the OAuth rotator still needed / Continue automatically at usage limit / CLAUDE_CODE_PROJECT_DIR_NAME / project_slug returns the wrong dir / why is every project sharing one memory dir / fleet_scan resolves every project to the same slug / promptCacheTtl and subagentPromptCacheTtl / is the janitor up to date with Claude Code 2.1.248 / --restricted mode makes the janitor inert / CLAUDE_CODE_RESTRICTED / arming a heartbeat that can never fire / why did arming succeed in a session with no Bash / a hook stdout brace object is now an error / experimental.cacheTtl per-agent prompt cache TTL / CLAUDE.md says keep-alive but the levers are gone / is the CLAUDE.md feature list stale / prompt-cache keep-alive still exist"
 ocd: 2026-06-11
-lmd: 2026-09-29
+lmd: 2026-10-04
 metadata:
   node_type: memory
   type: project
@@ -53,136 +53,6 @@ breaking):**
 The full triage report is gitignored + ephemeral under the repo's `reports/` tree.
 See `[[project_rotator_let_429_happen_version_skew]]` (the rate-limit menu that
 freezes the session on 429 — the rotator must rotate PROACTIVELY via the daemon).
-
-
-^ATOM-N3ZN-TOX5 [desc:"The Claude Code compatibility audit through 2.1.212 (verbatim): each dated finding from 2.1.198-2.1.212 and whether the janitor was affected or already adapted", keywords: claude_code_compatibility_audit_through_2.1.212 integer_env_vars_scientific_notation_digit_separators task_tool_mode_parameter_deprecated subagent_spawn_cap_200 plugin_options_user_scope_only_2.1.207 false_100_percent_context_used_2.1.208 CLAUDE_CODE_RETRY_WATCHDOG_retries_transient_errors_up_to_300x rate-limited.flag_fires_less_often_but_stays_correct subagents_run_in_the_background_by_default_2.1.198 run_in_background_true_is_now_redundant_but_harmless re-run_this_audit_each_time_cc_jumps_a_few_minor_versions the_janitor_is_coupled_to_harness_internals, type: project, ocd: 2026-08-02, lmd: 2026-08-02]
-
-### Claude Code compatibility (changelog reviewed through **2.1.212**; audit ≥2.1.198)
-
-The janitor is coupled to harness internals (plugin options, hooks, subagents, the context
-indicator), so a CC release can break or silently change it. Findings from the ≥2.1.198 sweep —
-**re-run this audit each time CC jumps a few minor versions**, and extend this list:
-
-- **2.1.211 — integer env vars accept scientific notation + digit separators** (`1e6`, `64_000`;
-  2.1.208 had fixed `1e6` silently becoming `1`). The janitor's ~50 `CLAUDE_PLUGIN_OPTION_*` int
-  knobs flow through `state.coerce_int`, which gated on `str.isdigit()` and so SILENTLY rejected
-  those spellings → reverted the knob to its default. ✅ *ADOPTED (TRDD-CCCOMPAT):
-  `state.parse_nonneg_int` now accepts the same spellings CC does (plain / `64_000` / `1e6` /
-  `2.7e5`, whole-number only, non-negative); `coerce_int` + both hook-local `_coerce_int`
-  (`pre-tool-context-usage`, `pre-tool-token-budget`) delegate to it. Regression-tested.*
-- **2.1.212 — Task tool `mode` parameter deprecated (now ignored); subagents inherit the parent's
-  permission mode.** ✅ *janitor unaffected — verified it passes NO `mode` to Task/Agent; it spawns
-  agents via bare `[janitor-memory-*]`/`[janitor-ticket]` MARKERS, never a `mode` param. Do NOT add
-  one.*
-- **2.1.212 — per-session subagent-spawn cap (default 200, `CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION`;
-  `/clear` resets it).** The janitor's heartbeat spawns count toward it AND the user's shared
-  budget. ✅ *no code change — the janitor's spawns are ALREADY rate-limited well under 200 (memory
-  chores by the per-day `memory_settings` cadence; tickets by `tickets.budget_left` per-day). A
-  compaction does NOT reset the budget (only `/clear` does), so on a multi-day session keep the
-  janitor's spawn rates conservative; if it ever nears the cap, that is a future TRDD, not a bug.*
-- **2.1.212 — `continue:false` hook halt no longer dropped on a mid-stream tool failure; hook
-  infra errors no longer misreported as user rejections.** ✅ *janitor unaffected — its
-  UserPromptSubmit hooks use `decision:block` (user-mem privacy) / `additionalContext`, never
-  `continue:false`. The "infra error ≠ user rejection" fix (with 2.1.210's hook-timeout fix)
-  strictly HELPS the unattended mission — a slow janitor hook can no longer read as a stop.*
-- **2.1.212 — `/fork` now copies the conversation into a background session; the in-session
-  subagent is `/subtask`.** ✅ *janitor unaffected — it uses the Agent tool with
-  `run_in_background`, never the `/fork` command (the "fork" hits in the tree are git-fork
-  detection in `identify_environment.py` + memgrep build artifacts).*
-- **2.1.210 — a hook-callback timeout was misreported to the model as a user rejection, stopping
-  unattended sessions.** CC FIX (no janitor change). The janitor's synchronous in-hook subprocess
-  calls (`compact_trigger`, the beacon spawn) already carry their own bounded timeouts (≤20s) and
-  are best-effort/fail-open, so even a slow one degrades cleanly; this fix removes the false-stop
-  risk on pre-fix CLIs. Confirms the fail-open hook design is correct — keep it.
-- **2.1.207 — plugin options are USER-scope only.** `pluginConfigs` is **no longer read from a
-  project `.claude/settings.json`**. It fails SILENTLY (the knob reverts to its default, no
-  error), so a pre-2.1.207 project-scope config makes the janitor behave like a fresh install.
-  README's Configuration section now says user scope. An **`env` block** in project settings is
-  unaffected. ✅ *fixed in docs.*
-- **2.1.207 — `${user_config.*}` rejected in shell-form hook/monitor commands** (shell-injection
-  fix). ✅ *janitor unaffected — verified zero usages; hooks pass options as
-  `$CLAUDE_PLUGIN_OPTION_<KEY>`. Do NOT introduce `${user_config.*}`.*
-- **2.1.208 — false "100% context used" after a CLI auto-update** (the window "briefly reset to
-  200k" on long-context sessions). Not cosmetic here: at ≥85% `pre-tool-context-usage.py` fires
-  `/compact` AND denies the tool call, so a bogus number **destroys real conversation**.
-  `token_meter.resolve_context` now rejects a snapshot whose `tokens > window` (impossible in a
-  healthy session — the harness compacts first) and recomputes against the configured window.
-  ✅ *guarded + regression-tested; the guard stays for pre-2.1.208 CLIs.*
-- **2.1.202 — a re-invoked skill no longer appends a DUPLICATE copy of its instructions.** This
-  changes TRDD-DLI76AUC's cost model: before 2.1.202 every `[janitor-renew]` → `/janitor-arm`
-  stacked another full copy of the (then 12.5 KB) skill into context, so the churn compounded.
-  Post-fix, skill BYTE size is a one-off and `cost ≈ tool_calls × context × 0.1` dominates —
-  which is why the arm's 6→4 tool-call cut is the load-bearing half of that TRDD, not the shrink.
-- **2.1.199 — a subagent killed by a rate limit no longer reports SUCCESS.** The error now
-  reaches the parent (and partial work is returned). Previously a rate-limited
-  `janitor-memory-subconscious-agent` looked like a clean run, so a memory chore could be
-  stamped done having done nothing. No code change needed — but never re-introduce a "the agent
-  returned, therefore it worked" assumption.
-- **2.1.199 — `CLAUDE_CODE_RETRY_WATCHDOG` retries transient errors up to 300×.** Fewer turns die
-  on transient (non-usage) 429s, so `on-stop-failure`'s `rate-limited.flag` fires less often. The
-  flag remains the correct signal; only its frequency drops.
-- **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
-  `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
-
-
-^ATOM-PD07-O9B4 [desc:"Claude Code compatibility audit 2.1.213-2.1.232: what broke, what was fixed, and what is still open", keywords: claude_code_compatibility_audit_through_2.1.232 session_start_source_fork input_redirection_exfil_bypass local_design_swept_by_session_cleanup hardcoded_1m_window_under_200k_hold subagent_spawn_cap_200_removed concurrent_subagent_cap_20 agent_name_colon_reserved a_forked_session_reloaded_plugins_it_already_had a_fork_would_clear_the_conversation_it_was_forked_to_preserve exfil_guard_missed_a_bash_input_redirection_form pipe_form_worked_throughout_which_is_why_no_test_saw_it context_watchdog_under-reported_occupancy_5x_under_the_1m_hold my_local_trdds_under_.claude_projects_vanished, type: project, ocd: 2026-08-14, lmd: 2026-08-14]
-
-### Claude Code compatibility (changelog reviewed through **2.1.232**; audit ≥2.1.213)
-
-Extends the ≥2.1.198 sweep above. **Two genuine BREAKS found, both FIXED; two gaps still open.**
-
-- **2.1.214 — SessionStart now reports source `"fork"` instead of `"resume"`.** ❌ *BREAK, FIXED
-  (`fd43765c`).* `on-session-start` seeded `reload-acked.ts` only for `(startup, resume)`, and
-  `dispatch._phase_plugin_reload` treats an ABSENT stamp as 0 and self-heals by emitting
-  `[janitor-reload]` once — so a fork reloaded plugins it was already running. Compounded by
-  TRDD-VHPYSN56 (same day): a reload above the context threshold now SHRINKS FIRST, so the fork
-  would `/clear` the conversation it was forked to preserve. A missing enum value became
-  DESTRUCTIVE by composition with a feature added hours later. `external_clear.RESUME_SOURCES`
-  deliberately still excludes `fork` (a fork is neither away nor cold) — now documented as a
-  decision, not an accident.
-- **2.1.232 — Bash input redirections (`< file`) are permission-checked at the harness.** ❌
-  *BREAK in the janitor's OWN guard, FIXED (`91540ee9`).* `pre-bash-safety._SEPARATOR_RE` split on
-  `| ; && xargs` only, so a `<`-redirected exfil was ONE segment and never tripped
-  `check_compositional_exfil`. Reproduced with two forms that differ by ONE operator, described
-  rather than spelled — the SHAPE is the lesson, and a copy-pasteable line here would be a live
-  exfil recipe shipped inside a plugin, so the command bodies are deliberately absent, not
-  merely masked: reading a secret file and PIPING it into an uploader was CAUGHT, while the same
-  uploader fed by STDIN REDIRECTION from the same file was ALLOWED — same source, same sink. The
-  pipe form worked throughout, which is exactly why no test saw it. `<`, `<<<`, `<(` are now
-  separators (`<<<` must precede `<` in the alternation).
-- **2.1.223 — `CLAUDE_CODE_DISABLE_1M_CONTEXT` holds EVERY native-1M model to 200K.** ❌ *FIXED
-  (`226afce6`).* Two sites hardcoded a 1M fallback window, so under the hold occupancy
-  under-reported ~5x (190k reads as 19%, not 95%) and the ≥85% guard never fired — silently INERT,
-  not loudly wrong. `token_meter.default_window()` now resolves it from the environment and honors
-  falsy spellings. Narrow (only when no statusline snapshot is readable) and worse for it.
-- **2.1.228 — session cleanup was deleting inside a project's `memory/` folder.** ⚠ *OPEN —
-  TRDD-9DLBHWGV.* The FIX is the evidence: the sweep reaches inside `~/.claude/projects/<slug>/`
-  and only `memory/` was carved out. LOCAL TRDDs live in `<slug>/design/` (6 of them, verified) with
-  no carve-out and no mirror, while USER memory has one. Mirror, do not relocate — the LOCAL design
-  root is fixed by a USER-owned global rule.
-- **2.1.224 — the 200-subagent-per-session spawn cap was REMOVED.** ✅ *supersedes the 2.1.212 entry
-  above, which recorded that cap as a live constraint; it is no longer one (concurrency and depth
-  limits still apply).*
-- **2.1.217/2.1.219 — concurrent-subagent cap (default 20, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`);
-  nested spawning disabled by default in 2.1.217, then restored to depth 3 in 2.1.219.** ✅ *no code
-  change. Two janitor agents carry the `Agent` tool (memory-subconscious, security), so their nested
-  spawns were silently no-ops on 2.1.217–2.1.218 and work again from 2.1.219.*
-- **2.1.218 — agent markdown rejects agent names containing `:`** (reserved for plugin namespacing).
-  ✅ *verified clean — all three janitor agents use a bare `name:`. The `plugin:agent` form is the
-  DISPATCH address, never the `name:` field. Do not "namespace" the frontmatter.*
-- **2.1.221 — plugins from `/plugin` activate immediately when safe.** ✅ *reload subsystem NOT
-  affected: the janitor's case is the DAEMON updating plugin files out-of-process, not `/plugin
-  install` (all `set_reload_flag` sites are in `daemon.py`).*
-- **Still open, lower severity:** GitLab token families + the `glab` config store are not covered by
-  the janitor's secret scanning (2.1.232 added them at the harness) — a LEVERAGE gap, not a break;
-  the marketplace settings keys (`additionalMarketplaces`/`allowedMarketplaces`, owner wildcards) are
-  read nowhere; `resolve_latest_published` is github.com-only now that GitLab marketplaces exist; and
-  `cache_prune` vs a `command`-source `mode: "link"` plugin dir is SETTLED, not open — two
-audit agents disagreed and the pessimistic one was WRONG. Measured directly: `shutil.rmtree`
-REFUSES a symlinked version dir (raises `OSError`, deletes nothing), the linked dev checkout
-survives byte-intact, and `apply_prune_plan` already records the refusal as `failed` rather
-than raising. No fix needed — do not "harden" this again.
-
 
 ^ATOM-Y4OP-5BLD [desc: "CC 2.1.232-2.1.240 triage: 1 real break (the todo tools are gone by default), everything else already-adopted or transparent", keywords: is_the_janitor_up_to_date_with_claude_code_2.1.240 did_the_CC_changelog_break_the_janitor TaskCreate_does_not_exist_any_more stale-task_detector_never_fires the_rules_tell_me_to_use_a_task_tool_I_do_not_have CC_2.1.233_removed_TaskCreate_TaskGet_TaskUpdate_TaskList_and_TodoWrite the_break_is_in_the_rules_not_the_code stale-task_and_task-pr-mismatch_are_now_correctly_silent a_detector_that_finds_nothing_forever_looks_like_a_clean_project 11_gitlab_token_families_already_adopted_in_secret_rotation_patterns reworded_the_rule_tool-agnostically_at_3_sites CLAUDE_CODE_ENABLE_TODO_TOOLS_restores_the_old_tools, ocd: 2026-08-22, lmd: 2026-08-22]
 
@@ -277,6 +147,11 @@ Claude Code 2.1.257 (2026-09-01) fixed three prompt-cache-miss sources UPSTREAM,
 
 ^ATOM-3AEZ-O0IH [desc: "keep-alive feature name in repo since v0.1.0 (2026-04-18, README+plugin.json); CLAUDE.md line itself entered 2026-08-02, before the 2026-08-04 lever removal (referent inferred, see body)", keywords: CLAUDE.md_says_keep-alive_but_the_levers_are_gone is_the_CLAUDE.md_feature_list_stale prompt-cache_keep-alive_still_exist prompt_cache_keep_alive stale_advert_candidate cold_cache_compact should_compact_on_resume should_compact_after_idle should_compact_proactively_idle heartbeat_cadence_is_the_keep-alive TRDD-H12K9JYX_wikimem_migration 2026-08-04_user_directive_removed_levers, type: project, trdd: TRDD-5Q24T9SO, ocd: 2026-09-29, lmd: 2026-09-29]
 **DOC-CURRENCY FACT (verified 2026-09-29, adversarially reviewed in TRDD-5Q24T9SO item-3/item-5, commits 3af48bbe..56e87515): the CLAUDE.md feature-list line "prompt-cache keep-alive" (line 5) is a STALE ADVERT CANDIDATE.** The line entered this file at commit `1f42f770` on 2026-08-02 (the TRDD-H12K9JYX wikimem migration — the line itself could predate 2026-08-02 via the migration's own source) — TWO DAYS BEFORE the 2026-08-04 USER directive that removed the cache-EXPIRED levers: `cold_cache_compact.py`'s header documents the removal (the `should_compact_on_resume` + `should_compact_after_idle` gates were deleted, with an explicit "do not re-add them"). Its LIKELY referent at authoring time was that machinery (inferred from the 2-day gap, not observed). **What the keep-alive role actually is TODAY: no distinct mechanism exists** — the heartbeat cadence itself is the incidental keep-alive (each cron fire is a model turn re-reading context at ~0.1x cache-read rate), and the remaining warm lever `should_compact_proactively_idle` is deliberate arithmetic, not a ping. Do not "fix" this by re-adding a ping mechanism (the 2026-08-04 directive forbids it); the cure, when a janitor-doc pass happens, is to reword or drop the CLAUDE.md line — it is a doc edit, NOT policy.
+
+
+## See also
+
+- [[project_janitor_cc_changelog_currency-audit-2-1-198-to-2-1-232]]
 
 ## Notes and lessons learned
 
