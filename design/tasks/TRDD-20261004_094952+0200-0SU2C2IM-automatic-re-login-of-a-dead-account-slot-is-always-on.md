@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: dev
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-04T09:53:59+0200
+updated: 2026-10-04T11:03:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T09:49:52+0200
 parent-trdd: JSQSJ3PZ
+implementation-commits: [90135636, 94bf446d, e0c9cabe, 3cb92e46, 7598cb5c, 3b96c091, 8f37dee1, 60dd828d]
 ---
 
 # Automatic re-login of a dead account slot is always on
@@ -39,3 +40,12 @@ Related: supersedes the default chosen in TRDD-5OJX3SCF; parent umbrella TRDD-JS
 - 2026-10-04 — CORRECTION to Context: all three slot tokens were expired and refresh-refused that night, not two; the cascade line lists two because the live account is always classed healthy. The cause (flag off) is strongly inferred, not proven. That the web session cookie suffices was shown on 2026-10-04 for one spare account by a manual capture; the other spare profile was signed in to the wrong account, so an unattended capture would have filed the wrong slot (janitor issue 179).
 - 2026-10-04 — DESIGN DECISION for this card: unset or empty variable means ON; an explicit falsy value (0, false, no, off) stays as an emergency stop. The owner did not ask to remove the stop or the three-launch cap; both stay until the owner says otherwise.
 - 2026-10-04 — KNOWN LIMIT: the re-login cannot help a daemon that cannot read the keychain. On 2026-10-04 09:03 the daemon lost keychain access after the macOS login session was replaced; see the sibling card created the same day.
+
+## Open items carried past the first release (2026-10-04)
+
+A refused capture (profile signed in to another account) uses up one of the three per-slot launches and raises no alert; the owner sees nothing. Fix: a refusal must not count as a launch and must raise the out-of-band alert naming the profile and the account it is signed in to.
+The three-launch cap never resets, which contradicts the owner's 'never stop the automatic relogin'. Awaiting the owner's decision; proposed: reset every 24 hours and alert each time the cap is exhausted.
+The capture guard's 30-second page-read timer is not reset on a poll where the Authorize button is absent, so a later single failed read can refuse early (review of 7598cb5c). Rare; not fixed.
+Not yet observed end to end on this machine: no automatic re-login, no renewal of a spare, and no account switch has been seen running the new code. The temporary launchctl setting of CLAUDE_ROTATOR_AUTO_BOOTSTRAP must be removed after the release is installed, so the code default is what runs.
+The live account's slot is never re-captured automatically (by design, e0c9cabe/3cb92e46); it depends on the session-written copy of the live login, which has not been observed working on this machine.
+Memory page oauth-rotation-renew-reauth-operations still says auto-bootstrap is opt-in and default OFF (its step-3 sentence, the description and keywords of ATOM-LTOX-A05P, and lesson ATOM-DTL6-3KUL). A first correction in 8f37dee1 attached superseding lessons to the wrong atoms and was reverted in 60dd828d. Needs a correction pass that matches atom ids to bodies first, supersedes only the opt-in statements, and keeps the Verify step valid.
