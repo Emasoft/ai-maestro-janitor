@@ -4,7 +4,7 @@ title: memgrep tests share process-wide state and fail at random under load
 column: ai_review
 status: tasked
 created: 2026-10-04T14:01:11+0200
-updated: 2026-10-04T14:01:11+0200
+updated: 2026-10-04T14:51:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T14:01:11+0200
+implementation-commits: [efa63d72, 0523af49, 19984aad]
 ---
 
 # memgrep tests share process-wide state and fail at random under load
@@ -45,6 +46,9 @@ Clippy clean; 409 and 196 tests pass in parallel, serially, and in two repeat ru
 - OPEN: nothing stops a new test from calling the process-wide setter again; add a clippy disallowed-methods entry for std::env::set_var and remove_var.
 - OPEN: the jev tests still set process environment variables under their own lock (two helper sites); cache_hit_skips_network failure was assumed to share cause 1, not proven.
 - OPEN: a test run with overrides ignored writes fixture pages into the real USER memory folder, which shows the tests can reach real state whenever an override is missed.
+- The eight unit tests that still reach the real state folder: mem_reference reference_atom_wires_atom_body_and_target_page, reference_topic_second_call_is_a_no_op, reference_topic_wires_both_ends_in_one_call; memory new_page_public_project_creates_the_flag_and_the_symlink_in_one_write, scope_derives_the_path_and_the_env_override_relocates_the_root; xi9_cli update_lesson_desc_edits_footnote_without_stdin, update_lesson_desc_preserves_inline_body, update_lesson_desc_round_trips_props_only_footnote.
+- CORRECTION to commit 0523af49's message: that cli children no longer write lock files in the real state folder was not measured separately; a normal run still created one new real lock file, attributed to unit tests, inconclusive.
+- RESIDUE: a verification run with overrides disabled left two symlinks in the real USER memory folder and an untracked fixture folder under scripts/memgrep; removal awaits the owner.
 
 ## Approval log
 
