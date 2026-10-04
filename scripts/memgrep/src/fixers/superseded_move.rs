@@ -96,7 +96,9 @@ pub(crate) fn fix(path: &Path, text: &str) -> Option<String> {
     if movers.is_empty() {
         return None;
     }
-    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    // WHY the LAST terminated line: `contains("\r\n")` gave a mostly-LF page with one stray CRLF a CRLF heading; the end of the page decides what follows it.
+    let crlf = text.rfind('\n').and_then(|i| i.checked_sub(1)).is_some_and(|p| text.as_bytes().get(p) == Some(&b'\r'));
+    let eol = if crlf { "\r\n" } else { "\n" };
     let mut out = String::with_capacity(text.len() + 32);
     let emit_movers = |out: &mut String| {
         for &(a, b) in &movers {
@@ -216,11 +218,9 @@ mod tests {
     fn never_inserts_inside_the_frontmatter_at_a_footer_lookalike_comment() {
         let fm = "---\nname: p\n# Notes and lessons learned\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n";
         let before = format!("{fm}# p\n{OLD}\n{CUR}");
-        // Either a refusal or a fix that leaves the frontmatter byte-identical is acceptable.
-        if let Some(fixed) = fix(Path::new(P), &before) {
-            assert!(fixed.starts_with(fm), "frontmatter corrupted: {fixed}");
-            assert!(fixed.find("## Superseded").unwrap() >= fm.len());
-        }
+        let fixed = fix(Path::new(P), &before).expect("body has no footer: delimiter goes at the end");
+        assert!(fixed.starts_with(fm), "frontmatter corrupted: {fixed}");
+        assert!(fixed.find("## Superseded").unwrap() >= fm.len());
     }
 
     #[test]
@@ -229,6 +229,8 @@ mod tests {
         if let Some(fixed) = fix(Path::new(P), &before) {
             assert!(fixed.find("^c1 ").unwrap() < fixed.find("^s1 ").unwrap(), "{fixed}");
         }
+        // The footer-shaped heading precedes a live atom, so the fixer must refuse.
+        assert_eq!(fix(Path::new(P), &before), None);
     }
 
     #[test]
@@ -246,10 +248,28 @@ mod tests {
         let fixed = fix(Path::new(P), &before).expect("fixed");
         assert!(!fixed.replace("\r\n", "").contains('\n'));
         let tail = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n^c1 [desc:\"c\", keywords: k1 k2 k3, ocd: 2026-01-01, lmd: 2026-01-01]\nCur.\n^s1 [desc:\"o\", keywords: k1 k2 k3, status: superseded, ocd: 2026-01-01, lmd: 2026-01-01]\nOld.";
-        if let Some(fixed) = fix(Path::new(P), tail) {
-            assert!(fixed.contains("Old.") && fixed.contains("## Superseded\n"));
-            assert!(!fixed.contains("Old.## "), "{fixed}");
-        }
+        let fixed = fix(Path::new(P), tail).expect("fixed");
+        assert!(fixed.contains("Old.") && fixed.contains("## Superseded\n"));
+        assert!(!fixed.contains("Old.## "), "{fixed}");
+    }
+
+    #[test]
+    fn one_stray_crlf_line_does_not_turn_the_inserted_heading_crlf() {
+        let before = test_page(&format!("{OLD}\n{CUR}")).replacen("Cur body.\n", "Cur body.\r\n", 1);
+        assert_eq!(before.matches("\r\n").count(), 1);
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert_eq!(fixed.matches("\r\n").count(), 1, "{fixed:?}");
+        assert!(fixed.contains("## Superseded\n\n"));
+        assert!(!has(&fixed, NO_DELIM));
+    }
+
+    #[test]
+    fn a_footer_heading_inside_a_code_fence_is_not_the_insertion_point() {
+        let before = test_page(&format!("{OLD}\n{CUR}\n```\n## Notes and lessons learned\n```\n"));
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        let fence_open = fixed.find("```\n## Notes").unwrap();
+        assert!(fixed.find("## Superseded").unwrap() > fence_open + 30, "inserted inside the fence: {fixed}");
+        assert!(!has(&fixed, NO_DELIM));
     }
 
 }
