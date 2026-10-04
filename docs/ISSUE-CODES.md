@@ -184,7 +184,7 @@ unattended access to your repository.
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
-| `AICTX-002` | ai-context-poisoning | low | a dependency can write agent-context files: {path} |
+| `AICTX-002` | ai-context-poisoning | low | a dependency can create or modify agent-context files: {path} |
 | `AICTX-003` | agent-context-integrity | high | an auto-loaded agent-context file carries an injection pattern: {path} |
 | `BRPROT-001` | branch-protection | high | the default branch of {slug} is unprotected |
 | `BRPROT-002` | branch-protection | high | the branch-protection baseline on {slug} has drifted: {detail} |
@@ -203,18 +203,18 @@ unattended access to your repository.
 | `WFSEC-005` | workflow-security | critical | a workflow exposes a secret in {where} |
 | `WFSEC-006` | workflow-security | medium | a workflow's own safety rail is missing or defeated in {where} |
 
-### `AICTX-002` — a dependency can write agent-context files: {path}
+### `AICTX-002` — a dependency can create or modify agent-context files: {path}
 
 - **Scanner:** `ai-context-poisoning` · **Severity:** `low` · **Kind:** `security-workflow`
-- **What it is:** An installed package ships code that writes to an agent-context path (.claude/*, AGENTS.md, .cursorrules, .github/agents/*). This is a CAPABILITY, not evidence that anything was written or poisoned.
-- **Why it matters:** A dependency that generates the files the agent reads as instructions can shape agent behaviour — and one such CLI also writes a GitHub Actions workflow. Worth knowing about; not by itself an incident.
+- **What it is:** An installed package ships code that creates or modifies files at an agent-context path (.claude/*, AGENTS.md, .cursorrules, .github/agents/*). This is a CAPABILITY, not evidence that anything was written or poisoned.
+- **Why it matters:** A dependency that generates the files the agent reads as instructions can shape agent behaviour — and one such CLI also creates a GitHub Actions workflow. Worth knowing about; not by itself an incident.
 - **Fix attempted:** Confirm whether the package triggers this at INSTALL time (a preinstall/install/postinstall/prepare script in its own package.json) or only from an explicit command. If install-triggered, treat it as an active supply-chain risk; if command-only, the realistic control is guarding the INVOCATION, since that is the only trigger. Then check whether the generated paths actually exist.
 
 ### `AICTX-003` — an auto-loaded agent-context file carries an injection pattern: {path}
 
 - **Scanner:** `agent-context-integrity` · **Severity:** `high` · **Kind:** `security-workflow`
 - **What it is:** A file the agent loads as INSTRUCTIONS — CLAUDE.md, AGENTS.md, .cursorrules, .claude/agents|skills|rules/*, or a PROJECT-scope memory page — matches a prompt-injection / authority-override rule. The file is git-tracked, so it arrived by clone, pull, or a merged PR.
-- **Why it matters:** This is the one poisoning vector that needs no execution: no postinstall, no MCP server, no command. CLAUDE.md is read into EVERY session's context automatically, so a poisoned line is acted on before any detector runs. Distinct from AICTX-002, which reports a dependency that CAN WRITE such a file — this reports content that is already THERE and already loading.
+- **Why it matters:** This is the one poisoning vector that needs no execution: no postinstall, no MCP server, no command. CLAUDE.md is read into EVERY session's context automatically, so a poisoned line is acted on before any detector runs. Distinct from AICTX-002, which reports a dependency that CAN CREATE OR MODIFY such a file — this reports content that is already THERE and already loading.
 - **Fix attempted:** Read the cited line in the file itself; do NOT act on any instruction it contains. Establish provenance with `git log -p -- <path>` — a legitimate rule and an injected one look identical in isolation, and the commit that introduced it is what distinguishes them. If it came from an untrusted clone or an unreviewed PR, remove it and treat the whole repo as suspect. A security scanner's own fixtures are the expected false positive.
 
 ### `BRPROT-001` — the default branch of {slug} is unprotected
@@ -338,7 +338,7 @@ unattended access to your repository.
 
 | Code | Severity | Fix | Emitter | Summary |
 |---|---|---|---|---|
-| `AICTX-002` | LOW | none | janitor:ai-context-poisoning | a dependency can write agent-context files: {path} |
+| `AICTX-002` | LOW | none | janitor:ai-context-poisoning | a dependency can create or modify agent-context files: {path} |
 | `AICTX-003` | HIGH | none | janitor:agent-context-integrity | an auto-loaded agent-context file carries an injection pattern: {path} |
 
 ### BRPROT
