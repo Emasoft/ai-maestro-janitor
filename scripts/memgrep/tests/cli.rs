@@ -13,6 +13,40 @@ use std::process::Command;
 
 const FX: &str = "tests/fixtures/sample.md";
 
+/// A private write-gate state dir for the calling test thread, removed when the thread ends.
+struct ThreadStateDir(std::path::PathBuf);
+
+impl Drop for ThreadStateDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+thread_local! {
+    static STATE_DIR: ThreadStateDir = {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SEQ: AtomicUsize = AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir()
+            .join(format!("memgrep-cli-state-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(&dir).expect("create per-test state dir");
+        ThreadStateDir(dir)
+    };
+}
+
+/// The `memgrep` command every test spawns. WHY it sets `JANITOR_GLOBAL_STATE_DIR`: without it
+/// every child resolves the REAL `~/.claude/plugins/data/…/global-state`, where each write verb
+/// takes a flock — and every page written outside a `.../memory` dir (all of these tests') shares
+/// the ONE `memory-maint-out-of-scope.lock`. So dozens of parallel test children, plus any live
+/// janitor on the machine, queued on a single lock under the 10s default timeout, and the
+/// `add_atom_*` tests failed with "timed out waiting for the write lock" only on a loaded
+/// machine. One private state dir per test thread removes the shared lock entirely.
+fn memgrep_cmd(bin: &str) -> Command {
+    let mut cmd = Command::new(bin);
+    STATE_DIR.with(|d| cmd.env("JANITOR_GLOBAL_STATE_DIR", &d.0));
+    cmd
+}
+
 /// A self-deleting temp file holding generated content, for fixtures too large to commit (the
 /// adversarial deeply-nested markdown in H2). Drops remove the file so the test leaves no litter.
 struct TempFixture {
@@ -47,7 +81,7 @@ impl Drop for TempFixture {
 
 fn run(args: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .output()
         .expect("failed to run memgrep");
@@ -62,7 +96,7 @@ fn run(args: &[&str]) -> String {
 /// that path keeps working unchanged.
 fn run_env(args: &[&str], env_key: &str, env_val: &str) -> String {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .env(env_key, env_val)
         .output()
@@ -76,7 +110,7 @@ fn run_env(args: &[&str], env_key: &str, env_val: &str) -> String {
 /// `run` (which asserts success) can never inspect the findings it is meant to test.
 fn run_any(args: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .output()
         .expect("failed to run memgrep");
@@ -112,7 +146,7 @@ const FIXTURE_DESC: &str = "what makes the widget hang and how to clear it";
 /// that number, so a helper returning stdout alone cannot tell the two apart.
 fn run_with_code(args: &[&str]) -> (String, i32) {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .output()
         .expect("failed to run memgrep");
@@ -126,7 +160,7 @@ fn run_with_code(args: &[&str]) -> (String, i32) {
 /// tests, where the SIGNAL is on stderr while stdout carries the (unaffected) grep results.
 fn run_full(args: &[&str]) -> (String, String, i32) {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .output()
         .expect("failed to run memgrep");
@@ -141,7 +175,7 @@ fn run_full(args: &[&str]) -> (String, String, i32) {
 /// is asserted.
 fn run_fail(args: &[&str]) {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .output()
         .expect("failed to run memgrep");
@@ -155,7 +189,7 @@ fn run_fail(args: &[&str]) {
 /// counterpart to `run_fail` (see `run_env` for why the env var stands in for the old flag).
 fn run_fail_env(args: &[&str], env_key: &str, env_val: &str) {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .env(env_key, env_val)
         .output()
@@ -171,7 +205,7 @@ fn run_fail_env(args: &[&str], env_key: &str, env_val: &str) {
 /// that points the derived destination at the test's own temp dir.
 fn run_full_env(args: &[&str], env_key: &str, env_val: &str) -> (String, String, i32) {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .env(env_key, env_val)
         .output()
@@ -190,7 +224,7 @@ fn run_full_env(args: &[&str], env_key: &str, env_val: &str) -> (String, String,
 /// masquerade as a pass under the looser `run_fail`. Used for the adversarial-depth tests (H1).
 fn run_fail_clean(args: &[&str]) {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .output()
         .expect("failed to run memgrep");
@@ -208,7 +242,7 @@ fn run_fail_clean(args: &[&str]) {
 /// contract includes printed output (the atom-id AMBIGUITY listing prints every match, THEN fails).
 fn run_fail_capture(args: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(args)
         .output()
         .expect("failed to run memgrep");
@@ -232,7 +266,7 @@ fn run_fail_capture(args: &[&str]) -> String {
 #[test]
 fn version_output_carries_a_build_stamp_beyond_the_bare_crate_version() {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .arg("--version")
         .output()
         .expect("failed to run memgrep --version");
@@ -300,7 +334,7 @@ fn version_stamp_names_the_commit_this_binary_was_actually_built_from() {
     }
 
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .arg("--version")
         .output()
         .expect("failed to run memgrep --version");
@@ -802,7 +836,7 @@ fn broken_pipe_dies_quietly_not_panics() {
 fn binary_file_is_skipped_without_crashing() {
     // Point memgrep at its own binary (full of NUL bytes); it must skip, not crash.
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin).args(["the", bin]).output().unwrap();
+    let out = memgrep_cmd(bin).args(["the", bin]).output().unwrap();
     assert!(out.status.success(), "must not crash on a binary file");
     assert!(out.stdout.is_empty(), "binary file should yield no matches");
 }
@@ -1855,7 +1889,7 @@ fn find_only_minus_returns_non_excluded() {
 /// Run memgrep from a specific working directory — needed to prove the cwd-contamination cases.
 fn run_in(dir: &std::path::Path, args: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .current_dir(dir)
         .args(args)
         .output()
@@ -2254,7 +2288,7 @@ fn lint_atom_over_twice_the_budget_warns_but_exactly_twice_does_not() {
             ),
         );
         let bin = env!("CARGO_BIN_EXE_memgrep");
-        let out = Command::new(bin)
+        let out = memgrep_cmd(bin)
             .args(["lint", d.as_str(), "--min-severity", "info"])
             .env("MEMGREP_ATOM_MAX_CHARS", budget.to_string())
             .output()
@@ -2297,7 +2331,7 @@ fn lint_twice_budget_threshold_follows_the_env_budget() {
         ),
     );
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let fire = Command::new(bin)
+    let fire = memgrep_cmd(bin)
         .args(["lint", d.as_str(), "--min-severity", "info"])
         .env("MEMGREP_ATOM_MAX_CHARS", "700")
         .output()
@@ -2307,7 +2341,7 @@ fn lint_twice_budget_threshold_follows_the_env_budget() {
         fired.contains("atom-oversized-critical"),
         "1501 > 2×700 must fire: {fired}"
     );
-    let quiet = Command::new(bin)
+    let quiet = memgrep_cmd(bin)
         .args(["lint", d.as_str(), "--min-severity", "info"])
         .env("MEMGREP_ATOM_MAX_CHARS", "1000")
         .output()
@@ -3062,7 +3096,7 @@ fn user_mem_named_as_the_root_is_still_searchable() {
 fn run_stdin(args: &[&str], input: &str) -> String {
     use std::io::Write;
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let mut child = Command::new(bin)
+    let mut child = memgrep_cmd(bin)
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -3090,7 +3124,7 @@ fn run_stdin(args: &[&str], input: &str) -> String {
 fn run_stdin_full(args: &[&str], input: &str) -> (String, String, i32) {
     use std::io::Write;
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let mut child = Command::new(bin)
+    let mut child = memgrep_cmd(bin)
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -3122,7 +3156,7 @@ fn run_stdin_full_env(
 ) -> (String, String, i32) {
     use std::io::Write;
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let mut child = Command::new(bin)
+    let mut child = memgrep_cmd(bin)
         .args(args)
         .env(env_key, env_val)
         .stdin(std::process::Stdio::piped())
@@ -3152,7 +3186,7 @@ fn run_stdin_full_env(
 fn run_stdin_env(args: &[&str], input: &str, env_key: &str, env_val: &str) -> String {
     use std::io::Write;
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let mut child = Command::new(bin)
+    let mut child = memgrep_cmd(bin)
         .args(args)
         .env(env_key, env_val)
         .stdin(std::process::Stdio::piped())
@@ -3179,7 +3213,7 @@ fn run_stdin_env(args: &[&str], input: &str, env_key: &str, env_val: &str) -> St
 fn run_stdin_fail(args: &[&str], input: &str) {
     use std::io::Write;
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let mut child = Command::new(bin)
+    let mut child = memgrep_cmd(bin)
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -5079,7 +5113,7 @@ fn lint_reports_the_control_byte_and_the_refused_publish_globally_fix_without_ab
     );
 
     let bin = env!("CARGO_BIN_EXE_memgrep");
-    let out = Command::new(bin)
+    let out = memgrep_cmd(bin)
         .args(["lint", d.as_str()])
         .env("WIKIMEM_PROJECT_SCOPE_PATH", d.as_str())
         .env("MEMGREP_USER_MEM_ROOT", user_root.as_str())
