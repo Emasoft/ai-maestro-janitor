@@ -1,10 +1,10 @@
 ---
 trdd-id: JSQSJ3PZ
 title: Rotator keeps the live account measurable, rotates under load, and warns before the wall
-column: testing
+column: blocked
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-04T20:11:30+0200
+updated: 2026-10-04T20:14:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,6 +18,10 @@ approval-datetime: 2026-10-03T03:40:28+0200
 project-id: ai-maestro-janitor
 npt: [JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ]
 eht: [3OS6AXV3, HSRERK5S]
+blocked-by: [JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ]
+pre-block-column: testing
+blocker-probe: [trddgrep, why, JSQSJ3PZ]
+blocker-holds-if: not-match:READY
 ---
 
 # Rotator keeps the live account measurable, rotates under load, and warns before the wall
@@ -323,6 +327,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - 2026-10-03T06:25:09+0200 — column → dev by main-agent@ai-maestro-janitor.
 - 2026-10-03T06:25:10+0200 — column → dev by main-agent@ai-maestro-janitor. children in dev/testing
 - 2026-10-04T20:11:30+0200 — column → testing. Umbrella: no code is being written on it. Release-1 code shipped in 3.7.0; all four prerequisite cards are in testing. It waits on the rotator field acceptance on this machine and stays open until release 2 (its effects cards 3OS6AXV3 and the parked HSRERK5S). testing is not terminal, so the stays-open ruling holds.
+- 2026-10-04T20:13:39+0200 — column → blocked. Correction of the same day's move to testing: the linter raised ORDER-NPT-VIOLATED, because a parent may not pass dev while its prerequisite cards are unfinished. Nobody is writing code on this umbrella, so dev was untrue as well; blocked on its prerequisite cards is the column that is both true and lint-clean.
 
 ## STATE
 
@@ -330,6 +335,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-03 06:12 STATE: committed R3 fe76d99c, R6+R3 follow-ups 2b18348f, R1 30d320eb, R4 b4ba693b, R4b b956914d, R2 415d1971. R1b (rotator tick in own thread, bounded plugin-update step) verified (166 passed, linters clean) and landed as e9b7622d. R4c in progress: exclude the live account from 'no rotation target' and add an 'auth-failed' condition written by the StopFailure hook (the alarm currently cannot fire before or at a repeat of the 00:37 wall). R0 report reports/oauth-rotator/20261003_034130+0200-R0-login-expired-root-cause.md. Owner decisions pending: N2 (re-stage the LaunchAgent at Standard on this Mac now), release route, one-off plain edit for fastedit-refused leftovers (listed on MMUSDJHQ), re-capture of the two dead spare accounts, real-notification field check (launchctl asuser $(id -u) osascript -e 'display notification "janitor R4 field check" with title "ai-maestro-janitor"'), and a Keychain Access look at the -livebak item's ACL. NEXT ACTION: R4c (TRDD-3OS6AXV3) verify+commit; full uv run pytest; deferred plugin reload; release-2 cards.
 2026-10-03 06:15 correction: R1b is COMMITTED as e9b7622d (its subject line was lost to a git -F mix-up; the full message is in follow-up commit 346a557d, message-only; git notes are not pushed). Next: verify and commit R4c, then card updates and the full test suite.
 TRDD-L2CCH9D5 and TRDD-JW8CWWNH (filed 2026-10-03 from R8) are non-blocking backlog: linked by parent-trdd only, not in npt/eht, so they do not hold this umbrella open.
+2026-10-04 column testing (was dev). Correction to the move reason recorded in the approval log - it called HSRERK5S parked, but HSRERK5S and 3OS6AXV3 are both in testing. Verified with git merge-base against tag v3.7.0 - fe76d99c, 2b18348f, 30d320eb, b4ba693b, b956914d, 415d1971 and e9b7622d are all inside the 3.7.0 release. Whether R4c landed was not checked. Field evidence so far is negative - on 2026-10-04 the heartbeat printed the alert that account rotation is stuck nine times in one afternoon. NEXT ACTION - after 3.7.1 is installed, observe the field acceptance list in the plan, and treat the stuck alert as a failing result until it stops.
 
 ## Release status
 

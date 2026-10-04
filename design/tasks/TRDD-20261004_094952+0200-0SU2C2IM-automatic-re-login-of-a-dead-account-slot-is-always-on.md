@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: testing
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-04T20:10:59+0200
+updated: 2026-10-04T20:13:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -51,3 +51,4 @@ Not yet observed end to end on this machine: no automatic re-login, no renewal o
 The live account's slot is never re-captured automatically (by design, e0c9cabe/3cb92e46); it depends on the session-written copy of the live login, which has not been observed working on this machine.
 Memory page oauth-rotation-renew-reauth-operations still says auto-bootstrap is opt-in and default OFF (its step-3 sentence, the description and keywords of ATOM-LTOX-A05P, and lesson ATOM-DTL6-3KUL). A first correction in 8f37dee1 attached superseding lessons to the wrong atoms and was reverted in 60dd828d. Needs a correction pass that matches atom ids to bodies first, supersedes only the opt-in statements, and keeps the Verify step valid.
 2026-10-04 — Item 1 (a refused capture uses up a launch and raises no alert) is implemented in c91af837: the capture leaves a marker, the launcher refunds the attempt once and holds relaunches for six hours, and the alert names both accounts. Follow-ups in progress: clear the marker on a successful capture, refund only a charged launch, carry the account as data instead of parsing the message.
+2026-10-04 column testing (was dev). Correction to the move reason - c91af837 is NOT inside the 3.7.0 release (git merge-base against tag v3.7.0), so the refusal refund and alert first ship in 3.7.1. Of the three follow-ups listed above as in progress, two landed in cbb431b5 (the marker clears on a good capture, only a charged launch is refunded). The third, carrying the account as data instead of parsing the message, has no commit and no card. Still waiting on the owner - whether the three-launch cap resets (proposed every 24 hours). Still stale - memory page oauth-rotation-renew-reauth-operations says auto-bootstrap is opt-in. NEXT ACTION - after 3.7.1 is installed, observe one automatic re-login with no environment variable set.

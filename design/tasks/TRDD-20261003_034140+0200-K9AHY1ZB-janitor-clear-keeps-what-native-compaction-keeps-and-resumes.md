@@ -1,10 +1,10 @@
 ---
 trdd-id: K9AHY1ZB
 title: Janitor clear keeps what native compaction keeps and resumes in one push
-column: testing
+column: blocked
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-04T20:11:30+0200
+updated: 2026-10-04T20:14:01+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,6 +18,10 @@ approval-datetime: 2026-10-03T03:41:40+0200
 project-id: ai-maestro-janitor
 npt: [5MOX0FPO, DS3WDTPV]
 eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ]
+blocked-by: [5MOX0FPO, DS3WDTPV]
+pre-block-column: testing
+blocker-probe: [trddgrep, why, K9AHY1ZB]
+blocker-holds-if: not-match:READY
 ---
 
 # Janitor clear keeps what native compaction keeps and resumes in one push
@@ -322,11 +326,13 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - 2026-10-03T03:41:40+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:25:15+0200 — column → dev by main-agent@ai-maestro-janitor. children in dev/testing
 - 2026-10-04T20:11:30+0200 — column → testing. Umbrella: no code is being written on it. Release-1 code shipped in 3.7.0; both prerequisite cards (5MOX0FPO, DS3WDTPV) are in testing. It waits on the clear-chain field acceptance and stays open until release 2 (parked effects cards 7X9WXDK9, B3PY3HV7, MMUSDJHQ). testing is not terminal, so the stays-open ruling holds.
+- 2026-10-04T20:13:40+0200 — column → blocked. Correction of the same day's move to testing: the linter raised ORDER-NPT-VIOLATED, because a parent may not pass dev while its prerequisite cards are unfinished. Nobody is writing code on this umbrella, so dev was untrue as well; blocked on its prerequisite cards is the column that is both true and lint-clean.
 
 ## STATE
 
 2026-10-03: stays open until release 2 — its eht includes parked backburner cards (C3 7X9WXDK9, C4 B3PY3HV7 and C7 part 2).
 2026-10-03 06:12 STATE: committed C1 bdc81d1c, 4e2e4fa4, 767c4904, a48d8974, a5903a15 and C2 cc48b42f (continuity block + NEXT ACTION quoting the last human message and own reply; end-to-end hook run verified on a synthetic incident). Remaining before release: card 5MOX0FPO needs a5903a15 and DS3WDTPV needs cc48b42f in implementation-commits; the real-file 22:09 replay in tests_dev/; release-2 cards C3-C6 untouched. Plan: ~/.claude/plans/wiggly-tinkering-hammock.md.
+2026-10-04 column testing (was dev). Correction to the move reason recorded in the approval log - it called 7X9WXDK9, B3PY3HV7 and MMUSDJHQ parked, but 7X9WXDK9 and B3PY3HV7 are in testing and MMUSDJHQ is in todo. Verified with git merge-base against tag v3.7.0 - bdc81d1c, a5903a15 and cc48b42f are inside the 3.7.0 release. The mover first read this STATE through a truncated diff and re-read it whole afterwards. Still open and not code in flight - the real-file 22.09 replay in tests_dev, implementation-commits on 5MOX0FPO (a5903a15) and DS3WDTPV (cc48b42f), and the clear-path field acceptance. NEXT ACTION - record those two implementation-commits, run the replay, then observe the field acceptance after 3.7.1 is installed.
 
 ## Release status
 

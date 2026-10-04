@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: testing
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-04T20:10:59+0200
+updated: 2026-10-04T20:13:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,3 +31,4 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 
 
 2026-10-04 — 3.7.0 was published on the fourth run (tag and main on 6157e726). Blockers found and fixed on the way: 15 strict-validator findings, a bandit B310 finding, the privacy scan refusing the integrity manifest, the address lint on a test fixture, and 21 clippy findings. GitHub CI then failed its Tests job on two macOS-only tests, fixed in 37d72fcd for the next release.
+2026-10-04 column testing (was dev). Correction to the move reason - it said all findings were cleared, but the archived card JHHD3S4Z second H1 was left open as an owner decision. The strict validator run on HEAD on 2026-10-04 reported 0 critical, major, minor and nit findings, so that item does not block today, but whether the validator still scans archived cards was not checked. 37d72fcd is NOT inside the 3.7.0 release, so its proof is the 3.7.1 CI run. NEXT ACTION - after the 3.7.1 CI run is green, close this card.
