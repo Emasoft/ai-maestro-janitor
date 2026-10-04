@@ -4,7 +4,7 @@ title: Daemon never refreshes the live account's slot twin
 column: testing
 status: tasked
 created: 2026-10-03T03:41:19+0200
-updated: 2026-10-03T05:09:46+0200
+updated: 2026-10-04T11:05:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -38,3 +38,7 @@ Parent plan: TRDD-JSQSJ3PZ
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
 2026-10-03: follow-ups in 2b18348f — loopback-only token-URL seam, live-account guard at _refresh_and_heal_slot and _keepalive_refresh (beacon trusted only when newer than last_switch_at).
+
+## Release status
+
+2026-10-04 — The release published today ships this card's code committed so far (fe76d99c, 2b18348f). The card stays in testing because its acceptance has not been observed on this machine after an install.

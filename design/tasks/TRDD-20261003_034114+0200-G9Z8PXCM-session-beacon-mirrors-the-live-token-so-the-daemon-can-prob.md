@@ -4,7 +4,7 @@ title: Session beacon mirrors the live token so the daemon can probe usage
 column: testing
 status: tasked
 created: 2026-10-03T03:41:14+0200
-updated: 2026-10-03T06:22:35+0200
+updated: 2026-10-04T11:05:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -50,3 +50,7 @@ Parent plan: TRDD-JSQSJ3PZ
 ## Review notes
 
 R2 review findings applied before commit: the beacon is trusted only when newer than last_switch_at; -livebak is written only when the primary fingerprint differs from the mirror's (no keychain write per turn); the write is update-only, may_prompt=False, 5 s timeout, session latch. Not yet verified: the real -livebak keychain item ACL (owner check pending).
+
+## Release status
+
+2026-10-04 — The release published today ships this card's code committed so far (415d1971). The card stays in testing because its STATE says a full uv run pytest after R4c, an attribute-only look at the real -livebak keychain item's ACL before the first production write, and a live-account usage line in daemon.log within one tick of an idle fire after release are still open.
