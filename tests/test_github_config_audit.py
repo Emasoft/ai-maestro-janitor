@@ -105,7 +105,7 @@ def test_ruleset_protected_repo_still_reports_review_and_check_gaps() -> None:
     facts = RepoFacts(
         slug="o/r", admin=True, default_branch="main",
         rulesets=[_branch_rs("deletion", "non_fast_forward"), _tag_rs()],
-        classic_protected=None, has_workflows=True,
+        classic_protected=None, has_workflows=True, pr_review_expected=True,
     )
     codes = _codes(facts)
     assert "NO_PR_REVIEW" in codes
@@ -137,7 +137,7 @@ def test_no_pr_review_when_protected_but_no_pr_rule() -> None:
     facts = RepoFacts(
         slug="o/r", admin=True, default_branch="main",
         rulesets=[_branch_rs("deletion", "non_fast_forward"), _tag_rs()],
-        classic_protected=None, has_workflows=True,
+        classic_protected=None, has_workflows=True, pr_review_expected=True,
     )
     assert "NO_PR_REVIEW" in _codes(facts)
 
@@ -430,6 +430,19 @@ def test_no_pr_review_is_silent_where_the_builder_omits_the_rule() -> None:
         classic_protected=None, has_workflows=True,
         pr_review_expected=False,
     )
+    assert "NO_PR_REVIEW" not in _codes(facts)
+
+
+def test_no_pr_review_silent_for_facts_that_never_resolved_the_builder_verdict() -> None:
+    """janitor#327: a RepoFacts built WITHOUT pr_review_expected (any non-gatherer path)
+    must not claim a review is expected — the default is the safe, silent direction. FAILS
+    if the default is ever True again."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_branch_rs("deletion", "non_fast_forward"), _tag_rs()],
+        classic_protected=None, has_workflows=True,
+    )
+    assert facts.pr_review_expected is False
     assert "NO_PR_REVIEW" not in _codes(facts)
 
 

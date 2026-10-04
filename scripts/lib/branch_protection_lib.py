@@ -171,7 +171,11 @@ def prrd_pull_request_requirement(slug: str | None) -> bool | None:
         import state as _st  # noqa: PLC0415 -- local, same reason as the imports below
 
         local = _st.project_root() / "design" / "requirements" / "PRRD.md"
-        if local.is_file() and slug.split("/")[-1] == _st.project_root().name:
+        # casefold both sides (issue 327): a repo slug and its checkout directory that differ
+        # only by case (ai-maestro-webdesign vs AI-MAESTRO-WEBDESIGN-AGENT-style names) must
+        # match, or the repo's own PRRD is never read and the audit re-fires a false finding.
+        # Comparison only — nothing returned or stored changes spelling.
+        if local.is_file() and slug.split("/")[-1].casefold() == _st.project_root().name.casefold():
             text = local.read_text(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 -- a local-read fault must fall through to the network
         text = None

@@ -148,3 +148,16 @@ def test_fetch_survives_gh_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     or unauthenticated host."""
     monkeypatch.setenv("PATH", "/nonexistent-bin-dir")
     assert gcf._fetch_remote_workflows("o/r") == {}
+
+
+def test_fix_path_does_not_select_no_pr_review_for_unresolved_facts() -> None:
+    """janitor#327: the fix acts on classify_repo's findings; a hand-built RepoFacts (builder
+    verdict never resolved) must not yield NO_PR_REVIEW, or the fix would re-impose a rule
+    GitHub self-approval makes unreviewable on a solo-owned repo."""
+    rs = {"target": "branch", "enforcement": "active",
+          "rules": [{"type": "deletion"}, {"type": "required_status_checks"}]}
+    facts = gcf.gca.RepoFacts(
+        slug="o/r", admin=True, default_branch="main", rulesets=[rs],
+        classic_protected=None, has_workflows=True,
+    )
+    assert "NO_PR_REVIEW" not in {f.code for f in gcf.gca.classify_repo(facts)}

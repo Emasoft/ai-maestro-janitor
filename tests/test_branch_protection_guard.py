@@ -1375,3 +1375,21 @@ def test_apply_stays_SILENT_when_the_project_is_not_a_github_repo(project_env: P
     findings = list((project_env / ".janitor").rglob("*findings*"))
     blob = "".join(p.read_text(encoding="utf-8") for p in findings if p.is_file())
     assert "BRPROT-003" not in blob, "a non-GitHub project must not be nagged every pass"
+
+
+def test_prrd_local_match_is_case_insensitive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """issue 327: slug and checkout dirname differing only by case still read the local PRRD;
+    genuinely different names do not."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    import state as st  # type: ignore[import-not-found]
+
+    root = tmp_path / "My-Repo"
+    (root / "design" / "requirements").mkdir(parents=True)
+    (root / "design" / "requirements" / "PRRD.md").write_text(
+        "---\nrequire-pull-request: true\n---\nbody\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(st, "project_root", lambda *a, **k: root)
+
+    assert bpl.prrd_pull_request_requirement("o/my-repo") is True
+    assert bpl.prrd_pull_request_requirement("o/MY-REPO") is True
+    assert bpl.prrd_pull_request_requirement("o/other-repo") is None

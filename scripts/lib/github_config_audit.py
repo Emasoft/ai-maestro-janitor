@@ -107,12 +107,15 @@ class RepoFacts:
     has_workflows: bool | None = None    # whether .github/workflows has any workflow file
     # Whether the ratified baseline would even EMIT a pull_request rule for this repo —
     # `branch_protection_lib.require_pull_request_for(slug)`, resolved at GATHER time so the
-    # classifier stays pure (janitor#283 / TRDD-KDLJ04AM). Default True keeps hand-built
-    # facts (and any stale serialized ones) on the old, stricter behavior; the gatherer
-    # always sets it explicitly. False on a solo-owned standalone repo per the USER's
-    # 2026-08-13 ruling — flagging NO_PR_REVIEW there contradicts our own builder, and the
-    # fix path would re-impose the rule the ruling removed.
-    pr_review_expected: bool = True
+    # classifier stays pure (janitor#283 / TRDD-KDLJ04AM). False on a solo-owned standalone
+    # repo per the USER's 2026-08-13 ruling — flagging NO_PR_REVIEW there contradicts our
+    # own builder, and the fix path would re-impose the rule the ruling removed.
+    # Default MUST be False (issue #327): a Facts not built by the gatherer never resolved
+    # the builder's verdict, so it cannot claim a review is expected — a True default made
+    # #283's fix hold only on the gatherer path and re-fired the false positive everywhere
+    # else. Same convention as this class's None fields: "not determined" stays silent.
+    # Only the gatherer sets True (when `require_pull_request_for` says the builder emits it).
+    pr_review_expected: bool = False
 
 
 def _active_branch_rulesets(rulesets: list[dict]) -> list[dict]:
