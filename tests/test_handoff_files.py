@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -162,6 +163,11 @@ def test_a_dedupe_touch_does_not_reorder_other_keys(tmp_path: Path) -> None:
     sd = _sd(tmp_path)
     a = hf.write(sd, "aaaaaaaa", "synthetic A", now=1_800_000_000)
     b = hf.write(sd, "bbbbbbbb", "synthetic B", now=1_800_000_100)
+    # WHY pin B's mtime into the past: the dedupe touch stamps wall-clock "now", and on Linux the
+    # coarse kernel clock gives the touch and B's just-finished write the same mtime, so a strict
+    # `>` was flaky on CI. Setting B's mtime explicitly makes the comparison independent of the clock.
+    old = int(time.time()) - 600
+    os.utime(b, (old, old))
     assert hf.write(sd, "aaaaaaaa", "synthetic A", now=1_800_000_200) == a  # deduped + touched
     assert a.stat().st_mtime > b.stat().st_mtime, "the touch is what this test is about"
     assert hf.newest(sd) == b
