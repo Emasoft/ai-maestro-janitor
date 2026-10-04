@@ -59,6 +59,7 @@ All notable changes to this project will be documented in this file.
 - **memgrep:** Four lines the gate scanner read as threats say the same thing in a form it does not match (TRDD-CWKM5218) (65d376a)
 - **hooks:** Release-age guard fetches only http and https URLs (TRDD-CWKM5218) (43167dc)
 - **privacy-scan:** Integrity-manifest digest lines no longer read as SSNs (TRDD-CWKM5218) (74b2b29)
+- **memgrep:** Clear the 21 clippy findings the push gate rejects (TRDD-CWKM5218) (9ef417e)
 
 ### Documentation
 
@@ -418,6 +419,7 @@ All notable changes to this project will be documented in this file.
 - **integrity:** Manifest re-hash after wikimem index regeneration touched CLAUDE.md (hash verified against file) (9c275a4)
 - **cleanup:** Remove dead rotator-alert leftovers and a superseded comment (TRDD-MMUSDJHQ) (95422ab)
 - Bump version to 3.7.0 (f44a99e)
+- Bump version to 3.7.0 (feb16cb)
 
 ### Refactor
 
