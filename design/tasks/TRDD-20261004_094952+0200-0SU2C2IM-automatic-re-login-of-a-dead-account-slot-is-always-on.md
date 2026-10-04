@@ -1,10 +1,10 @@
 ---
 trdd-id: 0SU2C2IM
 title: Automatic re-login of a dead account slot is always on
-column: todo
+column: dev
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-04T09:49:52+0200
+updated: 2026-10-04T09:53:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T09:49:52+0200
+parent-trdd: JSQSJ3PZ
 ---
 
 # Automatic re-login of a dead account slot is always on
@@ -34,3 +35,7 @@ Related: supersedes the default chosen in TRDD-5OJX3SCF; parent umbrella TRDD-JS
 ## Approval log
 
 - 2026-10-04T09:49:52+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-04 — OWNER, verbatim, second directive: "don't make temporary things. implement permanent solutions." Consequence: the default is changed in code (scripts/oauth_rotator/rotator.py, _bootstrap_seeded_slots); a launchctl setenv made the same day is temporary and is not the fix.
+- 2026-10-04 — CORRECTION to Context: all three slot tokens were expired and refresh-refused that night, not two; the cascade line lists two because the live account is always classed healthy. The cause (flag off) is strongly inferred, not proven. That the web session cookie suffices was shown on 2026-10-04 for one spare account by a manual capture; the other spare profile was signed in to the wrong account, so an unattended capture would have filed the wrong slot (janitor issue 179).
+- 2026-10-04 — DESIGN DECISION for this card: unset or empty variable means ON; an explicit falsy value (0, false, no, off) stays as an emergency stop. The owner did not ask to remove the stop or the three-launch cap; both stay until the owner says otherwise.
+- 2026-10-04 — KNOWN LIMIT: the re-login cannot help a daemon that cannot read the keychain. On 2026-10-04 09:03 the daemon lost keychain access after the macOS login session was replaced; see the sibling card created the same day.
