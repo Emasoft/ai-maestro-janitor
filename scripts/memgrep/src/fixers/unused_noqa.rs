@@ -67,8 +67,12 @@ fn rewrite_line(line: &str, drop: &BTreeSet<String>) -> Option<Option<String>> {
     let eol = &line[body.len()..];
     // Frontmatter `lint-ignore: [A, B]`.
     if let Some(v) = body.strip_prefix("lint-ignore:") {
-        let inner = v.trim().strip_prefix('[')?.strip_suffix(']')?;
-        return Some(strip_selectors(inner, drop).map(|k| format!("lint-ignore: [{k}]{eol}")));
+        v.trim().strip_prefix('[')?.strip_suffix(']')?;
+        // WHY spans, not a rebuilt `lint-ignore: [..]`: rebuilding normalised the spacing between
+        // the colon and `[` and dropped whitespace after `]`, i.e. changed bytes outside the
+        // removed selector, the very thing the comment path above was fixed for.
+        let (open, close) = (body.find('[')?, body.rfind(']')?);
+        return Some(strip_selectors(&body[open + 1..close], drop).map(|k| format!("{}{k}{}{eol}", &body[..=open], &body[close..])));
     }
     // HTML comment `<!-- [memgrep:] noqa: A, B -->` ending the line. WHY only the LAST comment: the
     // parser (noqa.rs `classify`) honours a line comment only when nothing follows it on the line.
@@ -329,6 +333,12 @@ mod tests {
         assert_eq!(fix(Path::new(P), &fixed), None);
         let fixed = fixed_with_oracle(&base("lint-ignore: [atom-bad-ocd]\n"));
         assert_eq!(fixed, base(""));
+        // Spacing outside the removed selector survives byte for byte (no space after the colon,
+        // padding inside the brackets, trailing spaces after `]`).
+        let odd = base("lint-ignore:[ atom-no-keywords , atom-bad-ocd ]  \n");
+        let fixed = fixed_with_oracle(&odd);
+        assert_eq!(fixed, base("lint-ignore:[ atom-no-keywords ]  \n"));
+        assert_eq!(odd.replacen(" , atom-bad-ocd", "", 1), fixed);
     }
 
     #[test]
