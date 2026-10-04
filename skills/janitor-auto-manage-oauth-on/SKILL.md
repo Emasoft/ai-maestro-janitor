@@ -68,15 +68,16 @@ thing a machine can't: the human sign-in.
   untouched, and you do **not** need to make Chrome your default — Chrome only
   needs to be installed. Accounts that already self-renew are never nudged.
 - **Auto-bootstrap** — once you've signed in (a live session now exists in that
-  account's Chrome profile), the daemon does **not** auto-open a browser by
-  default (TRDD-5OJX3SCF - opening a visible window unprompted is a surprise, and
-  on a dead account it re-launched every ~60s tick). Instead the
-  `[oauth-capture-stalled]` nudge points you at `/janitor-refresh-cc-logins`,
-  which does the visible capture as a deliberate, user-initiated action. Power
-  users who want the daemon to mint `slot_capture_browser.py` slots hands-free set
-  `CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1` (then it is per-slot launch-capped + announced
-  in `rotator.log`).
-  It runs **visible** (a real Chrome window appears briefly — Cloudflare blocks
+  account's Chrome profile), the daemon launches `slot_capture_browser.py` itself,
+  **by default** (TRDD-0SU2C2IM; per-slot launch-capped). Setting
+  `CLAUDE_ROTATOR_AUTO_BOOTSTRAP` to `0`, `false`, `no` or `off` turns it off. It
+  skips the live account, launches nothing when the live account is unknown, and a
+  capture whose Chrome profile is signed in to a different account is refused
+  before Authorize. Expect a Chrome window to open unprompted while you work —
+  that surprise is why this was opt-in before (TRDD-5OJX3SCF). If a slot stays
+  dead (web session expired and needing your passkey/2FA, launch cap used up, or
+  a refused capture), run `/janitor-refresh-cc-logins` for the manual capture.
+  The automatic capture runs **visible** (a real Chrome window appears briefly — Cloudflare blocks
   headless on the consent page; opt into headless with
   `CLAUDE_ROTATOR_BOOTSTRAP_HEADLESS=1` only if your environment allows it) and
   **detached** so it never blocks or starves the keep-alive rotation. From then
@@ -87,8 +88,8 @@ thing a machine can't: the human sign-in.
 Maturity: both pieces are implemented and unit-tested; full unattended
 end-to-end verification (a live headful capture clearing Cloudflare on the
 consent page) is tracked as TRDD-32acd15f #142 — until that lands, treat the
-auto-bootstrap as best-effort (a failed capture is logged and re-attempted next
-tick, and the stalled nudge tells you when to step in).
+auto-bootstrap as best-effort (a failed capture is logged and, up to the per-slot
+launch cap, re-attempted on a later tick; the stalled nudge tells you when to step in).
 
 ## Prerequisites
 

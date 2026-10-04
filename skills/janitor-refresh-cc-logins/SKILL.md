@@ -85,9 +85,14 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
       offer to retry that account (back to 3a) before moving on. Exit 0 means A session is
       saved; it cannot tell WHOSE — step 4b is what catches the wrong one.
 
-4. **File the FULL-OAUTH slot.** Nothing runs the capture automatically: auto-bootstrap is
-   opt-in (`CLAUDE_ROTATOR_AUTO_BOOTSTRAP`, default OFF, TRDD-5OJX3SCF) — this step is run by
-   hand EVERY time a slot goes credential-dead, not once.
+4. **File the FULL-OAUTH slot.** Auto-bootstrap runs by default (TRDD-0SU2C2IM): the rotator
+   launches this capture itself for a credential-dead slot, skips the live account, and
+   launches nothing when the live account is unknown. Setting `CLAUDE_ROTATOR_AUTO_BOOTSTRAP`
+   to `0`, `false`, `no` or `off` disables it. A capture whose Chrome profile is signed in to a
+   different account is refused before Authorize. The automatic path is best-effort — run
+   this step by hand whenever a slot is still credential-dead: the claude.ai web session
+   expired (needs your passkey/2FA), the slot is the live account, the automatic attempts ran
+   out (per-slot launch cap) or were refused, or auto-bootstrap is disabled.
 
    a. Run the capture for the account you just logged in (owner-ratified verbatim line):
 
