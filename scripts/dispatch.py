@@ -1887,9 +1887,6 @@ def _late_summary_stamp(sd: Path, key: str) -> Path:
     return sd / f"{_LATE_SUMMARY_STAMP_PREFIX}{key}.txt"
 
 
-_LATE_SUMMARY_STAMP = "late-summary-noted.txt"
-
-
 def _stamp_late_summary(sd: Path) -> None:
     """Record, at resume time, the real (non-template) handoff the resume already named.
 

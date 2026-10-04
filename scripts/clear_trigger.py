@@ -514,12 +514,8 @@ def _run_chain_payload(payload_b64: str) -> int:
         # Only the daemon lane (`external_handoff_clear._fire`) asks for a hold; the other
         # chains never took one and must not start blacking out chores now.
         if hold_transcript and data.get("summary_hold"):
-            # C1c SUPERSEDES the next four comment lines: `take_summary_hold` is FAIL-OPEN (it
-            # logs a failed write and returns), so it never stops the chain before Enter.
-            # NOT wrapped in try/except, unlike the sidecar below: a clear typed with no hold
-            # armed resumes before its summary exists, so a failed write must stop the chain
-            # BEFORE Enter (the exception leaves `pre_submit_first`). It replaces the old
-            # guarantee that a failed hold write at capture time never reached the clear.
+            # `take_summary_hold` is fail-open (it logs a failed write and returns, commit a48d8974),
+            # so a failed hold write never stops the chain before Enter.
             import external_handoff_clear as ehc  # noqa: PLC0415 - lazy, like `_fire`'s import of this module
 
             ehc.take_summary_hold(sd, hold_transcript, int(time.time()))

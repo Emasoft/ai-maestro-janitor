@@ -26,12 +26,10 @@ import state  # noqa: E402
 
 ALERT_NAME = "rotator-alert.json"
 DEBOUNCE_S = 3600  # re-notify an unchanged condition at most hourly
-LIVE_EXPIRED_GRACE_S = 300  # live token past expiry AND not refreshed for this long
 TICK_STALL_S = 600  # no completed rotator tick for this long while claude runs
 
 _ACTIONS = {
     "no-rotation-target": "no spare account to rotate to - run /janitor-capture-all-logins",
-    "live-token-expired": "the live login has expired and was not refreshed - run /login",
     "tick-stalled": "the account rotator has stopped ticking - run /janitor-doctor",
     "rotation-stuck": "account rotation is stuck - run /janitor-capture-all-logins",
 }
