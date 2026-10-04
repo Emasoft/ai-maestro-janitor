@@ -226,9 +226,6 @@ mod tests {
     #[test]
     fn midpage_lessons_learned_heading_never_pulls_the_movers_above_live_atoms() {
         let before = format!("---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n{OLD}\n## Lessons learned about X\n{CUR}\n## Notes and lessons learned\n");
-        if let Some(fixed) = fix(Path::new(P), &before) {
-            assert!(fixed.find("^c1 ").unwrap() < fixed.find("^s1 ").unwrap(), "{fixed}");
-        }
         // The footer-shaped heading precedes a live atom, so the fixer must refuse.
         assert_eq!(fix(Path::new(P), &before), None);
     }
@@ -267,8 +264,12 @@ mod tests {
     fn a_footer_heading_inside_a_code_fence_is_not_the_insertion_point() {
         let before = test_page(&format!("{OLD}\n{CUR}\n```\n## Notes and lessons learned\n```\n"));
         let fixed = fix(Path::new(P), &before).expect("fixed");
-        let fence_open = fixed.find("```\n## Notes").unwrap();
-        assert!(fixed.find("## Superseded").unwrap() > fence_open + 30, "inserted inside the fence: {fixed}");
+        // WHY the whole block: an offset bound alone passed when the heading landed between the
+        // fenced line and the closing fence. The fence must survive as one contiguous piece and the
+        // delimiter must come after its END.
+        let block = "```\n## Notes and lessons learned\n```\n";
+        let at = fixed.find(block).expect("the fenced block was split or altered");
+        assert!(fixed.find("## Superseded").unwrap() >= at + block.len(), "inserted inside or above the fence: {fixed}");
         assert!(!has(&fixed, NO_DELIM));
     }
 
