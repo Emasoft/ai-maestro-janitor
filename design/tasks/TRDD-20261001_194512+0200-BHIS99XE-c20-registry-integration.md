@@ -4,7 +4,7 @@ title: C20 — registry integration
 column: ai_review
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-04T14:53:52+0200
+updated: 2026-10-04T15:16:04+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -19,7 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, BHIS99XE]
 blocker-holds-if: not-match:READY
-implementation-commits: [ef58378a]
+implementation-commits: [ef58378a, 84cec0d8]
 ---
 
 # C20 — registry integration
@@ -54,3 +54,14 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - OPEN: every_emitted_code_is_registered scans memory.rs up to the first test module only; the production function footnote_block_marker sits after it (between two test modules) and is not scanned. It emits no code today. The scan regex also accepts lowercase-and-hyphen names only; no registry name has a digit today. Widen both before C21 adds codes.
 - VERIFIED after the commit, by the main agent: the lookup name equals the emitted code at all 40 sites including the four publish-globally arms and the three cross-page sites; a recursive search of the crate source and tests finds no lint code emitted outside memory.rs. NOT independently verified: that the derived grandfathered set equals the old list (worker table only; the floor set is covered by the pre_write sweep test).
 - INCIDENT: the commit was refused twice by a zero-byte .git/index.lock created 14:15:37 by an unknown process, with no git running. It was removed after 34 minutes by scripts/lib/git_utils.clear_stale_index_lock (returned removed). Second lock collision on 2026-10-04; the creator is not identified.
+
+## Guard hardening (2026-10-04, 84cec0d8)
+
+- DONE in 84cec0d8, test-only: write_gate_lists_equal_the_reviewed_lists pins the derived floor set (14) and grandfathered set (8) to the lists reviewed before ef58378a; every_emitted_code_is_registered now strips each column-zero test module and scans all remaining text, accepts digits in names, and asserts the two emitting functions and the late function footnote_block_marker stay in the scan. Both were shown to fail when broken.
+- VERIFIED by the main agent on 84cec0d8: clippy clean; 411 passed plus 1 ignored and 196, in parallel and serially; release build clean; the pinned lists were re-extracted independently from the revision before ef58378a and are equal.
+- CORRECTION to the earlier VERIFIED line: the counts 410 plus 1 ignored and 196 on ef58378a came from the worker; the main agent's run of that count was on the tree before the three cross-page sites were converted.
+- CLOSES the open item about the scan stopping at the first test module and the lowercase-only regex.
+- MITIGATES, does not close, the fail-open grandfathered set: the pinned-list test now trips on it, but the by-name exclusion and the missing per-page or cross-page registry field remain.
+- CLOSES IN SUBSTANCE the item about every_error_code_lint_page_text_emits_is_classified: the pinned-list test supplies the independent check; the old test is left in place.
+- STILL OPEN: panic on an unregistered code; the scan is single-file and sees only quoted literals after code: or rule_sev( (a code held in a const, built by format, or passed through a helper is missed, and a production comment of that shape is read as an emitted code); nothing asserts that the lookup name equals the emitted code; the rules_gen.rs dead-code allow; the main.rs style note; consumers of the WARN to INFO downgrade; the unknown creator of the stale index lock.
+- NEW OPEN: the module strip matches only a plain mod at column zero closed by a column-zero brace; three cosmetic leftovers in the two tests (a blank line after one test attribute, a doubled blank line, a doc comment repeating the comment below it) that the edit tool could not reach.
