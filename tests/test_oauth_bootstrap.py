@@ -110,7 +110,7 @@ def _wire(
     monkeypatch.setattr(rotator, "ROOT", root)
     monkeypatch.setattr(rotator, "SLOTS", root / "slots")
     monkeypatch.setattr(rotator, "STATE_FILE", root / "state.json")
-    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # opt INTO auto-launch (default OFF, TRDD-5OJX3SCF)
+    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # explicit on (default is also ON, TRDD-0SU2C2IM)
     rotator.save_state({"live_email": None, "live_fp": None, "slots": {e: {**({"refresh_failures": spec["rf"]} if "rf" in spec else {}), **({"bootstrap_attempts": spec["ba"]} if "ba" in spec else {})} for e, spec in slots.items()}})
 
     blobs = {e: _blob(e.split("@", 1)[0].upper(), refresh=spec["refresh"]) for e, spec in slots.items()}
@@ -197,7 +197,7 @@ def test_bootstrap_never_raises_on_capture_failure(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(rotator, "ROOT", root)
     monkeypatch.setattr(rotator, "SLOTS", root / "slots")
     monkeypatch.setattr(rotator, "STATE_FILE", root / "state.json")
-    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # opt INTO auto-launch (default OFF, TRDD-5OJX3SCF)
+    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # explicit on (default is also ON, TRDD-0SU2C2IM)
     emails = ["boom@x.com", "ok@x.com"]
     rotator.save_state({"live_email": None, "live_fp": None, "slots": {e: {} for e in emails}})
     blobs = {e: _blob(e.split("@", 1)[0].upper(), refresh=None) for e in emails}
@@ -228,7 +228,7 @@ def test_bootstrap_uses_profiles_env_override(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(rotator, "ROOT", root)
     monkeypatch.setattr(rotator, "SLOTS", root / "slots")
     monkeypatch.setattr(rotator, "STATE_FILE", root / "state.json")
-    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # opt INTO auto-launch (default OFF, TRDD-5OJX3SCF)
+    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # explicit on (default is also ON, TRDD-0SU2C2IM)
     monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(alt_profiles))
     rotator.save_state({"live_email": None, "live_fp": None, "slots": {"e@x.com": {}}})
     monkeypatch.setattr(rotator, "read_slot", lambda _: _blob("E", refresh=None))
@@ -418,15 +418,42 @@ def test_bootstrap_action_truth_table() -> None:
     assert A(eligible=True, auto_on=True, attempts=4, max_launches=cap) == "capped"
 
 
-def test_bootstrap_off_by_default_no_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default (CLAUDE_ROTATOR_AUTO_BOOTSTRAP unset): an eligible seeded slot NEVER opens a
-    browser. The daemon must not surprise the user; the slot is left for the human (the
-    oauth-capture-stalled detector nudges /janitor-refresh-cc-logins)."""
+def test_bootstrap_on_by_default_launches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default (CLAUDE_ROTATOR_AUTO_BOOTSTRAP unset): an eligible seeded slot IS re-logged-in
+    automatically (TRDD-0SU2C2IM) -- dead slots with valid web sessions must not sit un-renewed."""
     captured = _wire(tmp_path, monkeypatch, {"seeded@x.com": {"refresh": None, "session": 20.0}})
-    monkeypatch.delenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", raising=False)  # back to the default (OFF)
+    monkeypatch.delenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", raising=False)  # back to the default (ON)
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == ["seeded@x.com"]
+    assert done == ["seeded@x.com"]
+
+
+def test_bootstrap_empty_value_launches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An EMPTY CLAUDE_ROTATOR_AUTO_BOOTSTRAP value means ON: the eligible seeded slot is re-logged-in."""
+    captured = _wire(tmp_path, monkeypatch, {"seeded@x.com": {"refresh": None, "session": 20.0}})
+    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "")
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == ["seeded@x.com"]
+    assert done == ["seeded@x.com"]
+
+
+@pytest.mark.parametrize("value", ["0", "false", "No", "OFF"])
+def test_bootstrap_explicit_falsy_no_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    """An explicit falsy CLAUDE_ROTATOR_AUTO_BOOTSTRAP is the emergency stop: no browser is opened."""
+    captured = _wire(tmp_path, monkeypatch, {"seeded@x.com": {"refresh": None, "session": 20.0}})
+    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", value)
     done = rotator._bootstrap_seeded_slots()
     assert captured == []
     assert done == []
+
+
+def test_bootstrap_explicit_one_launches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1 still launches for an eligible seeded slot."""
+    captured = _wire(tmp_path, monkeypatch, {"seeded@x.com": {"refresh": None, "session": 20.0}})
+    monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == ["seeded@x.com"]
+    assert done == ["seeded@x.com"]
 
 
 def test_bootstrap_capped_after_max_launches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

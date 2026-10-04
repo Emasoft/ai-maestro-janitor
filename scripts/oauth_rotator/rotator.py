@@ -3267,15 +3267,18 @@ def _bootstrap_seeded_slots() -> list[str]:
     missing, bad env, missing profile) is logged and SKIPPED, never aborting the loop or the
     tick (a non-fatal helper must not crash the beat it runs in).
 
-    AUTO-LAUNCH is OPT-IN, default OFF (CLAUDE_ROTATOR_AUTO_BOOTSTRAP), SEPARATE from the
-    rotation opt-in: opening a VISIBLE browser from the unattended daemon is a higher-surprise
-    act, so it never fires unless explicitly enabled (TRDD-5OJX3SCF). Even when on, each slot is
+    AUTO-LAUNCH is ON by default (CLAUDE_ROTATOR_AUTO_BOOTSTRAP unset/empty = on; only an explicit
+    0/false/no/off turns it off, as an emergency stop), SEPARATE from the rotation opt-in
+    (TRDD-0SU2C2IM; the old opt-in default was TRDD-5OJX3SCF). Each slot is
     LAUNCH-CAPPED at MAX_BOOTSTRAP_LAUNCHES (the RENEW_COOKIE analogue of MAX_REFRESH_FAILURES,
     TRDD-HJGR4I5W) so a never-minting capture cannot re-open a browser every tick; a successful
     mint replaces the slot meta (counter gone) and a recovered slot resets to 0. Every launch and
     the cap boundary are announced via _log."""
     launched: list[str] = []
-    auto_on = _env_truthy(os.environ.get("CLAUDE_ROTATOR_AUTO_BOOTSTRAP"))
+    # WHY default ON: with the default OFF, on 2026-10-04 dead slots with valid web sessions sat
+    # un-renewed all night and the owner rotated by hand. The explicit off value stays as an
+    # emergency stop (TRDD-0SU2C2IM; the old opt-in default was TRDD-5OJX3SCF).
+    auto_on = (os.environ.get("CLAUDE_ROTATOR_AUTO_BOOTSTRAP") or "").strip().lower() not in ("0", "false", "no", "off")
     state = load_state()
     now = time.time()
     changed = False
