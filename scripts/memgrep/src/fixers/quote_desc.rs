@@ -249,6 +249,11 @@ mod tests {
         assert_eq!(fixed, before.replace("desc: some prose,", "desc: \"some prose\","));
         assert!(fixed.contains(", more words here, "));
         assert!(has_code(Path::new(P), &before, CODE) && !has_code(Path::new(P), &fixed, CODE));
+        // WHY this does not hide the malformed marker: the stray segment has its own finding,
+        // `atom-dropped-props`, which the fix must leave standing so a human still sees it.
+        // Measured 2026-10-05 with `memgrep lint` on both pages.
+        assert!(has_code(Path::new(P), &before, "atom-dropped-props"));
+        assert!(has_code(Path::new(P), &fixed, "atom-dropped-props"));
     }
 
     #[test]
