@@ -417,6 +417,7 @@ All notable changes to this project will be documented in this file.
 - **memory:** Split chore — ATOM-0GLJ-EK3A (2394c) decomposed into 0GLJ-EK3A + ATOM-J2L0-SMXK on review-fork-gate page (split pass, PROJECT scope, validate clean) (24d68ee)
 - **integrity:** Manifest re-hash after wikimem index regeneration touched CLAUDE.md (hash verified against file) (9c275a4)
 - **cleanup:** Remove dead rotator-alert leftovers and a superseded comment (TRDD-MMUSDJHQ) (95422ab)
+- Bump version to 3.7.0 (f44a99e)
 
 ### Refactor
 
@@ -447,6 +448,7 @@ All notable changes to this project will be documented in this file.
 - **daemon:** Sleep-order check follows R1b's own_thread filter (TRDD-ZAKT0NRI) (b787bf2)
 - **clear:** Clear-then-new-goal case; test_clear_trigger passes when run alone (TRDD-B3PY3HV7) (852c72e)
 - **release-age-guard:** Compute the fresh-release date at import, not a fixed day (TRDD-BUR8AW77) (0ddc41e)
+- **oauth:** Fixture address uses the noreply domain so the push gate's address lint passes (TRDD-CWKM5218) (fa13ecb)
 
 ### Memory
 
