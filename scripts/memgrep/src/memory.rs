@@ -5863,6 +5863,11 @@ struct LintArgs {
     /// every page it visits. Off by default, so the owner's "autofix this always, no exceptions"
     /// ruling (TRDD-RY0IJBJI) is what every ordinary caller still gets.
     ///
+    /// Owner ruling 2026-08-29 (quoted at `scripts/detectors/wikimem-syntax.py`): "fixing both BEFORE
+    /// and AFTER executing the wikimem page edit is MANDATORY, NO EXCEPTIONS. --no-fix can only be
+    /// used for debug or diagnostic use cases." So never pass it around a memory edit; a read-only
+    /// surveillance pass is the diagnostic use it allows.
+    ///
     /// It exists for SURVEILLANCE callers, and the distinction is about AUTHORITY, not caution: a
     /// heartbeat detector runs every ~5 minutes in every armed session on the machine, so leaving
     /// it on the fixing path made a corpus WRITE a side effect of merely looking — the janitor
@@ -6041,6 +6046,16 @@ pub(crate) struct Violation {
     pub(crate) msg: String,
     pub(crate) code: &'static str,
     pub(crate) anchor: String,
+}
+
+
+/// Severity of a memgrep lint code, read from the issue-code registry (`design/specs/issue-codes.toml`
+/// via `rules_gen.rs`) so a code's severity has ONE source. An unregistered name panics: a code the
+/// registry does not know is a bug `every_emitted_code_is_registered` must catch, never a default.
+pub(crate) fn rule_sev(name: &str) -> Severity {
+    crate::lint_rules::rule_by_name(name)
+        .unwrap_or_else(|| panic!("lint code `{name}` is not in the issue-code registry"))
+        .sev
 }
 
 /// One of the three memory SCOPE layers, and its rank in the strictly-upward reference order.
@@ -6310,27 +6325,29 @@ impl PublishGloballyIssue {
     /// `(severity, code, message)` — `memgrep lint`'s rendering of this issue. Kept beside the
     /// issue itself so a new variant cannot be added without also giving it a lint rendering.
     fn lint_line(self) -> (Severity, &'static str, &'static str) {
+        // Severity comes from the issue-code registry (`rule_sev`), not a literal, so it is stated
+        // once. The code literal is repeated only because `rule_sev` is keyed by it.
         match self {
             PublishGloballyIssue::MissingDefaultFalse => (
-                Severity::Warn,
+                rule_sev("publish-globally-missing"),
                 "publish-globally-missing",
                 "missing `publish-globally:` field — normalization defaults it to `false` \
                  (opt-in publishing; no symlink exists, so there is no evidence of intent)",
             ),
             PublishGloballyIssue::MissingSymlinkImpliesTrue => (
-                Severity::Warn,
+                rule_sev("publish-globally-missing"),
                 "publish-globally-missing",
                 "missing `publish-globally:` field, but a USER-scope symlink to this page \
                  already exists — normalization defaults it to `true`",
             ),
             PublishGloballyIssue::TrueNoSymlink => (
-                Severity::Error,
+                rule_sev("publish-globally-not-symlinked"),
                 "publish-globally-not-symlinked",
                 "`publish-globally: true` but no symlink exists at the USER memory root — \
                  the page is not actually reachable from USER-scope recall as it claims",
             ),
             PublishGloballyIssue::ConflictFalseWithSymlink => (
-                Severity::Error,
+                rule_sev("publish-globally-conflict"),
                 "publish-globally-conflict",
                 "`publish-globally: false` but a USER-scope symlink to this page still exists — \
                  the symlink is evidence of publish intent, so reconciliation flips the flag to \
@@ -6741,7 +6758,7 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
             .join(", ");
         for (path, line) in &wheres {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-dup-id"),
                 path: path.clone(),
                 line: *line,
                 msg: format!(
@@ -6814,7 +6831,7 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
         {
             if to_s.rank < from_s.rank && requested(&from_c) {
                 violations.push(Violation {
-                    sev: Severity::Error,
+                    sev: rule_sev("link-downward-cross-scope"),
                     path: rel(&e.from),
                     line: e.line,
                     msg: format!(
@@ -6853,7 +6870,7 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
                 // an edit whose fix is not in the file being edited. 64 of these are pre-existing
                 // legacy edges; `add-link` retires them by writing both ends in one transaction.
                 violations.push(Violation {
-                    sev: Severity::Warn,
+                    sev: rule_sev("link-one-sided"),
                     path: rel(&e.from),
                     line: e.line,
                     msg: format!(
@@ -6905,7 +6922,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     // plain stdout.
     if let Some((line, _col, _offset, cp)) = find_control_byte(text) {
         violations.push(Violation {
-            sev: Severity::Error,
+            sev: rule_sev("control-byte-in-page"),
             path: p.clone(),
             line,
             msg: format!(
@@ -6929,7 +6946,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     };
     if !has(&["ocd", "created"]) {
         violations.push(Violation {
-            sev: Severity::Error,
+            sev: rule_sev("page-no-ocd"),
             path: p.clone(),
             line: 0,
             msg: "missing required frontmatter field `ocd`".into(),
@@ -6939,7 +6956,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     }
     if !has(&["lmd", "updated"]) {
         violations.push(Violation {
-            sev: Severity::Error,
+            sev: rule_sev("page-no-lmd"),
             path: p.clone(),
             line: 0,
             msg: "missing required frontmatter field `lmd`".into(),
@@ -6949,7 +6966,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     }
     if !has(&["description", "summary"]) {
         violations.push(Violation {
-            sev: Severity::Error,
+            sev: rule_sev("page-no-description"),
             path: p.clone(),
             line: 0,
             msg: "missing required frontmatter field `description`".into(),
@@ -6972,7 +6989,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let min_p = min_lint_page_phrases();
         if min_p > 0 && unique_phrases(&phrases).len() < min_p {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("page-description-too-few-phrases"),
                 path: p.clone(),
                 line: 0,
                 msg: format!(
@@ -6988,7 +7005,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let d_dupes = duplicate_phrases(&phrases);
         if !d_dupes.is_empty() {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("page-description-duplicated-phrases"),
                 path: p.clone(),
                 line: 0,
                 // The count only, never the phrases: a lint finding is printed anywhere (logs,
@@ -7051,7 +7068,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     let fence_open: Option<usize> = unclosed_fence_line(text);
     if let Some(open_at) = fence_open.as_ref() {
         violations.push(Violation {
-            sev: Severity::Error,
+            sev: rule_sev("page-unclosed-fence"),
             path: p.clone(),
             line: open_at + 1,
             msg: "unclosed code fence opened here — every atom and heading BELOW it is \
@@ -7075,7 +7092,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     });
     if !has_notes_section {
         violations.push(Violation {
-            sev: Severity::Error,
+            sev: rule_sev("page-no-notes-section"),
             path: p.clone(),
             line: 0,
             msg: "missing `## Notes and lessons learned` section".into(),
@@ -7145,7 +7162,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     for (label, &line) in &ref_lines {
         if !def_lines.contains_key(label) {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("footnote-dangling-ref"),
                 path: p.clone(),
                 line,
                 msg: format!("footnote reference `[^{label}]` has no `[^{label}]:` definition"),
@@ -7183,7 +7200,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
                 ),
             };
             violations.push(Violation {
-                sev: Severity::Info,
+                sev: rule_sev("lesson-uncited"),
                 path: p.clone(),
                 line,
                 msg,
@@ -7209,7 +7226,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let masked = mask_inline_code(raw);
         if let Some((id, bad)) = mangled_atom_marker(&masked) {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-bad-bracket"),
                 path: p.clone(),
                 line: i + 1,
                 msg: format!(
@@ -7222,7 +7239,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             });
         } else if let Some(id) = unclosed_atom_marker(&masked) {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-unclosed-props"),
                 path: p.clone(),
                 line: i + 1,
                 msg: format!(
@@ -7237,7 +7254,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             // they are the fingerprint of text pasted out of recall's display output — which is
             // how a marker acquires them, and there the same paste is fatal.
             violations.push(Violation {
-                sev: Severity::Info,
+                sev: rule_sev("stray-display-bracket"),
                 path: p.clone(),
                 line: i + 1,
                 msg: "line carries `⟦`/`⟧` — recall's DISPLAY escaping of `[`/`]`; a SOURCE page \
@@ -7270,7 +7287,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         // caller, `lint_paths_with`, because uniqueness is a corpus property, not a page one.
         if desc_unquoted_prose(&a.props_raw) {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-unquoted-desc"),
                 path: p.clone(),
                 line: a.line,
                 msg: "atom `desc:` value is unquoted prose — quote it (`desc:\"…\"`) or grep and the \
@@ -7283,7 +7300,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let dropped = dropped_prop_segments(&a.props_raw);
         if !dropped.is_empty() {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-dropped-props"),
                 path: p.clone(),
                 line: a.line,
                 // The count only, never the segments: a lint finding is printed anywhere (logs,
@@ -7335,7 +7352,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let kw_min = min_lint_keywords();
         if kw_min > 0 && unique_phrases(&atom_kw).len() < kw_min {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-keywords-too-few"),
                 path: p.clone(),
                 line: a.line,
                 msg: format!(
@@ -7352,7 +7369,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let kw_dupes = duplicate_phrases(&atom_kw);
         if !kw_dupes.is_empty() {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-keywords-duplicated"),
                 path: p.clone(),
                 line: a.line,
                 // The count only, never the keyphrases: a lint finding is printed anywhere
@@ -7380,7 +7397,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
                 && a.line < h
             {
                 violations.push(Violation {
-                    sev: Severity::Warn,
+                    sev: rule_sev("superseded-atom-above-delimiter"),
                     path: p.clone(),
                     line: a.line,
                     msg: format!(
@@ -7407,7 +7424,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             && a.line > footer_start
         {
             violations.push(Violation {
-                sev: Severity::Warn,
+                sev: rule_sev("atom-after-footer"),
                 path: p.clone(),
                 line: a.line,
                 msg: format!(
@@ -7424,7 +7441,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let missing = |key: &str| props.get(key).map(|v| v.is_empty()).unwrap_or(true);
         if missing("keywords") {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("atom-no-keywords"),
                 path: p.clone(),
                 line: a.line,
                 msg: format!(
@@ -7437,25 +7454,34 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             });
         }
         for key in ["ocd", "lmd"] {
-            // WARN: the atom still parses and still ranks — only its date-sort and `--since`
-            // filtering are wrong, and a missing date cannot be reconstructed mechanically.
+            // An atom's `ocd:`/`lmd:` are OPTIONAL: the atom inherits the page's dates (recall's
+            // date fallback does exactly that), so a missing one loses nothing and is INFO
+            // (decision D1, issue-codes.toml; was WARN, F16). A PRESENT but non-ISO date is still
+            // WARN — it breaks date-sort and `--since` filtering. Neither can be reconstructed
+            // mechanically. Severity of both comes from the registry via `rule_sev`.
             match props.get(key).and_then(|v| v.first()) {
-                None => violations.push(Violation {
-                    sev: Severity::Warn,
-                    path: p.clone(),
-                    line: a.line,
-                    msg: format!("atom `^{}` has no `{key}:` date", a.id),
-                    code: if key == "ocd" { "atom-no-ocd" } else { "atom-no-lmd" },
-                    anchor: format!("atom:{}", a.id),
-                }),
-                Some(v) if !is_iso_date(v) => violations.push(Violation {
-                    sev: Severity::Warn,
-                    path: p.clone(),
-                    line: a.line,
-                    msg: format!("atom `^{}` `{key}:` = `{v}` is not ISO `YYYY-MM-DD`", a.id),
-                    code: if key == "ocd" { "atom-bad-ocd" } else { "atom-bad-lmd" },
-                    anchor: format!("atom:{}", a.id),
-                }),
+                None => {
+                    let code = if key == "ocd" { "atom-no-ocd" } else { "atom-no-lmd" };
+                    violations.push(Violation {
+                        sev: rule_sev(code),
+                        path: p.clone(),
+                        line: a.line,
+                        msg: format!("atom `^{}` has no `{key}:` date", a.id),
+                        code,
+                        anchor: format!("atom:{}", a.id),
+                    })
+                }
+                Some(v) if !is_iso_date(v) => {
+                    let code = if key == "ocd" { "atom-bad-ocd" } else { "atom-bad-lmd" };
+                    violations.push(Violation {
+                        sev: rule_sev(code),
+                        path: p.clone(),
+                        line: a.line,
+                        msg: format!("atom `^{}` `{key}:` = `{v}` is not ISO `YYYY-MM-DD`", a.id),
+                        code,
+                        anchor: format!("atom:{}", a.id),
+                    })
+                }
                 Some(_) => {}
             }
         }
@@ -7472,7 +7498,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             // dispatch on — an un-actionable finding is, by definition, informational, not
             // a defect to gate a write on.
             violations.push(Violation {
-                sev: Severity::Info,
+                sev: rule_sev("atom-oversized"),
                 path: p.clone(),
                 line: marker_line,
                 msg: format!(
@@ -7491,7 +7517,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         // body-shape rule above (the frozen-body boundary note).
         if atom_budget > 0 && body_chars > 2 * atom_budget && !atom_is_superseded {
             violations.push(Violation {
-                sev: Severity::Warn,
+                sev: rule_sev("atom-oversized-critical"),
                 path: p.clone(),
                 line: marker_line,
                 msg: format!(
@@ -7512,7 +7538,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         && let Some(&first_line) = superseded_atom_lines.first()
     {
         violations.push(Violation {
-            sev: Severity::Warn,
+            sev: rule_sev("superseded-atom-no-delimiter-heading"),
             path: p.clone(),
             line: first_line,
             msg: format!(
@@ -7544,7 +7570,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         let Some(meta) = meta else {
             if body.trim_start().starts_with(&MANGLED_ATOM_BRACKETS[..]) {
                 violations.push(Violation {
-                    sev: Severity::Error,
+                    sev: rule_sev("lesson-bad-bracket"),
                     path: p.clone(),
                     line: def_line,
                     msg: format!(
@@ -7562,7 +7588,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
                 // metadata still READS correctly to a human — it is only un-findable and
                 // un-addressable, and the fix is authoring, not mechanical.
                 violations.push(Violation {
-                    sev: Severity::Warn,
+                    sev: rule_sev("lesson-no-meta"),
                     path: p.clone(),
                     line: def_line,
                     msg: format!(
@@ -7577,7 +7603,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         };
         if rest.trim().is_empty() {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("lesson-empty-body"),
                 path: p.clone(),
                 line: def_line,
                 msg: format!(
@@ -7590,7 +7616,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         }
         if meta.contains("supersedes:") && !rest.contains("SUPERSEDED BODY:") {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("lesson-superseded-no-body"),
                 path: p.clone(),
                 line: def_line,
                 msg: format!(
@@ -7603,7 +7629,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         }
         if desc_unquoted_prose(&meta) {
             violations.push(Violation {
-                sev: Severity::Error,
+                sev: rule_sev("lesson-unquoted-desc"),
                 path: p.clone(),
                 line: def_line,
                 msg: format!("lesson `[^{label}]` `desc:` value is unquoted prose — quote it"),
@@ -7620,7 +7646,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         };
         if lesson_missing("keywords") {
             violations.push(Violation {
-                sev: Severity::Warn,
+                sev: rule_sev("lesson-no-keywords"),
                 path: p.clone(),
                 line: def_line,
                 msg: format!(
@@ -7635,7 +7661,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             // durable identity — `[^N]` is page-local and renumbers on every edit, so only the
             // `id:` survives a split/merge/migrate, and a citation of the label alone rots.
             violations.push(Violation {
-                sev: Severity::Warn,
+                sev: rule_sev("lesson-no-id"),
                 path: p.clone(),
                 line: def_line,
                 msg: format!(
@@ -7660,7 +7686,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
             && lesson_missing("superseeded-by")
         {
             violations.push(Violation {
-                sev: Severity::Warn,
+                sev: rule_sev("lesson-superseded-no-pointer"),
                 path: p.clone(),
                 line: def_line,
                 msg: format!(
@@ -7735,22 +7761,17 @@ pub(crate) fn write_gate_blocks(v: &Violation) -> bool {
 
 /// The floor codes proper — see `write_gate_blocks` for the per-code rationale.
 pub(crate) fn write_gate_floors() -> &'static [&'static str] {
-    &[
-        "control-byte-in-page",
-        "page-unclosed-fence",
-        "page-description-duplicated-phrases",
-        "footnote-dangling-ref",
-        "atom-bad-bracket",
-        "atom-unclosed-props",
-        "atom-unquoted-desc",
-        "atom-dropped-props",
-        "atom-keywords-duplicated",
-        "atom-no-keywords",
-        "lesson-bad-bracket",
-        "lesson-empty-body",
-        "lesson-unquoted-desc",
-        "lesson-superseded-no-body",
-    ]
+    // Derived from the registry's `gate_floor` field (design/specs/issue-codes.md) instead of a
+    // hand-kept list, so the spec is the one place a floor is declared. Keyed by the kebab NAME
+    // because that is what `Violation::code` carries. Built once: the registry is a const table.
+    static FLOORS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        crate::rules_gen::RULES
+            .iter()
+            .filter(|r| r.gate_floor)
+            .map(|r| r.name)
+            .collect()
+    });
+    &FLOORS
 }
 
 /// The grandfather set: ERROR codes `lint_page_text` emits that the write gate deliberately does
@@ -7758,16 +7779,20 @@ pub(crate) fn write_gate_floors() -> &'static [&'static str] {
 /// in `mod tests` can assert the two sets are disjoint and together classify every ERROR code the
 /// linter can emit. Rationales: `write_gate_blocks`'s doc comment.
 #[allow(dead_code)] // read by the floor tests; step 3's refusal message names it
-const WRITE_GATE_GRANDFATHERED_CODES: &[&str] = &[
-    "page-no-ocd",
-    "page-no-lmd",
-    "page-no-description",
-    "page-no-notes-section",
-    "page-description-too-few-phrases",
-    "atom-keywords-too-few",
-    "publish-globally-not-symlinked",
-    "publish-globally-conflict",
-];
+static WRITE_GATE_GRANDFATHERED_CODES: std::sync::LazyLock<Vec<&'static str>> =
+    std::sync::LazyLock::new(|| {
+        // Derived from the registry, independently of `write_gate_floors`: every ERROR code that is
+        // not a `gate_floor`, minus the two CROSS-page ERROR codes. Those are emitted by
+        // `lint_paths_with`'s corpus passes, never by `lint_page_text`, so they were never in this
+        // per-page set; the registry has no per-page/cross-page field to derive that from, so the
+        // exclusion is named here (add the field to the spec to drop it).
+        crate::rules_gen::RULES
+            .iter()
+            .filter(|r| r.sev == Severity::Error && !r.gate_floor)
+            .filter(|r| !matches!(r.name, "atom-dup-id" | "link-downward-cross-scope"))
+            .map(|r| r.name)
+            .collect()
+    });
 
 // ─────────────────────────── `memgrep recall` ───────────────────────────
 
@@ -14624,7 +14649,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         for f in write_gate_floors() {
             assert!(write_gate_blocks(&mk(f)), "floor code `{f}` must block a write");
         }
-        for g in WRITE_GATE_GRANDFATHERED_CODES {
+        for g in WRITE_GATE_GRANDFATHERED_CODES.iter() {
             assert!(
                 !write_gate_blocks(&mk(g)),
                 "grandfathered code `{g}` must NOT block a write"
@@ -14651,6 +14676,38 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             anchor: String::new(),
         };
         assert!(!write_gate_blocks(&info_floor));
+    }
+
+
+    /// Every lint code the production source can emit is in the issue-code registry. Scans the
+    /// non-test source for each way a code reaches a `Violation` (`code: "x"`, `rule_sev("x")`, and
+    /// the `if key == … { "a" } else { "b" }` pairs the ocd/lmd and publish-globally sites build),
+    /// so a code with no `code: "` literal is covered too and a new unregistered one fails here.
+    #[test]
+    fn every_emitted_code_is_registered() {
+        let src = include_str!("memory.rs");
+        let (prod, _) = src
+            .split_once("\n#[cfg(test)]\nmod tests {\n")
+            .expect("production/test boundary marker present");
+        let single = Regex::new(r#"(?:code:\s*|rule_sev\()"([a-z][a-z-]*)""#).expect("valid regex");
+        let pair = Regex::new(r#"let code = if key == "[a-z]+" \{ "([a-z][a-z-]*)" \} else \{ "([a-z][a-z-]*)" \};"#)
+            .expect("valid regex");
+        let mut emitted: Vec<&str> = single.captures_iter(prod).map(|c| c.get(1).unwrap().as_str()).collect();
+        for c in pair.captures_iter(prod) {
+            emitted.push(c.get(1).unwrap().as_str());
+            emitted.push(c.get(2).unwrap().as_str());
+        }
+        // The scan itself must not rot: these four come through three different construction shapes.
+        for known in ["page-no-ocd", "atom-no-lmd", "atom-bad-ocd", "publish-globally-conflict"] {
+            assert!(emitted.contains(&known), "the source scan no longer finds `{known}`: {emitted:?}");
+        }
+        for code in emitted {
+            assert!(
+                crate::lint_rules::rule_by_name(code).is_some(),
+                "lint code `{code}` is emitted by memory.rs but missing from the issue-code registry \
+                 (design/specs/issue-codes.toml; regenerate with scripts/build_issue_codes.py --write)"
+            );
+        }
     }
 
     #[test]
