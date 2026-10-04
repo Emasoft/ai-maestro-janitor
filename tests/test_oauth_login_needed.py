@@ -630,7 +630,7 @@ def _write_stuck_detail(home: Path, kind: str, detail: str) -> None:
     branch) falls back to plaintext slot files and returns () on an index-only home, which
     would end main() before the tertiary nudge ever runs."""
     now = int(time.time())
-    _write_login_slot(home, "healthy@x.com", expires_in_days=30.0)
+    _write_login_slot(home, "healthy@users.noreply.github.com", expires_in_days=30.0)
     (home / "rotation-stuck.json").write_text(json.dumps({
         "kind": kind,
         "detail": detail,
@@ -672,9 +672,13 @@ def test_stuck_dedupe_is_per_state_change_not_per_day(tmp_path, monkeypatch, cap
     def base_home() -> None:
         home.mkdir(parents=True, exist_ok=True)
         (home / "slots").mkdir(parents=True, exist_ok=True)
-        (home / "state.json").write_text(json.dumps({"slots": {"healthy@x.com": {}}}))
+        # The slot file is "<address>.json". The suffix is appended to a variable
+        # because the push gate's address lint reads "<address>.json" written as
+        # one literal as an address on a different, non-exempt domain.
+        healthy = "healthy@users.noreply.github.com"
+        (home / "state.json").write_text(json.dumps({"slots": {healthy: {}}}))
         (home / "opt-in.flag").touch()
-        (home / "slots" / "healthy@x.com.json").write_text(json.dumps(
+        (home / "slots" / (healthy + ".json")).write_text(json.dumps(
             {"claudeAiOauth": {"accessToken": "x",
                                "expiresAt": int((time.time() + 30 * 86400) * 1000)}}))
 
