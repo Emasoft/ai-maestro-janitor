@@ -4,7 +4,7 @@ title: Owner warned out of band when no rotation target exists or the rotator st
 column: testing
 status: tasked
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-03T14:44:19+0200
+updated: 2026-10-04T09:22:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -18,7 +18,7 @@ approval-datetime: 2026-10-03T03:41:23+0200
 project-id: ai-maestro-janitor
 parent-trdd: JSQSJ3PZ
 derived: true
-implementation-commits: [b4ba693b, b956914d, 2732ae2c]
+implementation-commits: [b4ba693b, b956914d, 2732ae2c, 95422abd]
 ---
 
 # Owner warned out of band when no rotation target exists or the rotator stalls
@@ -45,3 +45,4 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-03T06:22:36+0200 — column → dev. R4c in progress (live account excluded from no-rotation-target; auth-failed condition from the StopFailure hook)
 - 2026-10-03T13:53:58+0200 — column → testing by main-agent@ai-maestro-janitor. implementation landed
 - 2026-10-03 — R4 cannot reach complete until the owner approves a one-off plain edit for the fastedit-refused R4b leftovers (dead _ACTIONS entry, LIVE_EXPIRED_GRACE_S, DEBOUNCE_S comment, 'add a spare account' alert wording), listed on TRDD-MMUSDJHQ.
+2026-10-04 — 95422abd removed LIVE_EXPIRED_GRACE_S and the live-token-expired action text. Body condition (b) 'live token past expiry and not refreshed for 5 minutes' is NOT implemented: the code comment in scripts/lib/rotator_alert.py (above the tick-stalled check) says no such condition exists on purpose. The card body still lists (b); whether (b) is dropped for good is an open decision, so this card stays in testing. Still open: alert wording and the DEBOUNCE_S comment.

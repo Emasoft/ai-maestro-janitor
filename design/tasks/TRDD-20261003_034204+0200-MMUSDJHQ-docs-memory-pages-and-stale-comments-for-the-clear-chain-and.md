@@ -4,7 +4,7 @@ title: Docs, memory pages and stale comments for the clear chain and rotator
 column: todo
 status: tasked
 created: 2026-10-03T03:42:04+0200
-updated: 2026-10-03T15:53:47+0200
+updated: 2026-10-04T09:22:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -18,7 +18,7 @@ approval-datetime: 2026-10-03T03:42:04+0200
 project-id: ai-maestro-janitor
 parent-trdd: K9AHY1ZB
 derived: true
-implementation-commits: [bfefa9f8]
+implementation-commits: [bfefa9f8, 95422abd]
 ---
 
 # Docs, memory pages and stale comments for the clear chain and rotator
@@ -64,3 +64,4 @@ Also pending an owner-approved plain edit (fastedit cannot target module-level c
 - R4 TRDD-3OS6AXV3: cannot complete until the R4b leftovers in scripts/lib/rotator_alert.py are removed.
 - C24 TRDD-8524H5V1: parked in backburner; needs one new tuple (host-load) in the module-level _DETECTORS list in scripts/dispatch.py; move back to todo when plain edits are approved.
 This section is the single list; earlier mentions elsewhere on this card are superseded by it.
+2026-10-04 — owner approved plain edits ('complete the pending tasks, all of them'). DONE: clear_trigger.py stale comment, dispatch.py _LATE_SUMMARY_STAMP, rotator_alert.py LIVE_EXPIRED_GRACE_S and the live-token-expired _ACTIONS entry (95422abd); test _NOWISH (0ddc41e5). STILL OPEN: R4 alert wording and DEBOUNCE_S comment (intended text not yet read from docs_dev/20261003_060617+0200-R4b-report.md); C5 TRDD-8SC3YEIG; C24 TRDD-8524H5V1; this card's own part 1 (memory atom, two compaction pages, SKILL.md).
