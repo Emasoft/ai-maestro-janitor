@@ -81,9 +81,11 @@ def _pin_memgrep_for_the_gates(monkeypatch):
 # (TRDD-XI10BA5D step B / A10, which also discharged the tuple-index debt) may close with `}))`
 # (a plain statement) or `})),` (a match-arm expression), so BOTH terminators are matched,
 # non-greedy, but a push that is a match arm's tail expression ends in a bare `})` with no `;`/`,`,
-# so that block runs on into the next push — harmless for extraction (the run-on only adds text
-# that is itself a later push block); the `let code = …;` scan in `_extract_lint_codes_from_source`
-# is what makes codes bound outside a block found deliberately, not by that accident.
+# so that block runs on into the next push and takes in EVERYTHING between the two pushes (the next
+# arm's `let code = …;` included). That is harmless only as long as no kebab literal that is not a
+# code sits between two such pushes — the exact-set assert below fails if one ever does. The
+# `let code = …;` scan in `_extract_lint_codes_from_source` is what finds bound codes deliberately,
+# not by that accident.
 # Scoping the kebab-literal search to the TEXT INSIDE each push call (not the whole file) is what
 # excludes unrelated literals like
 # `"atom-page"` (a CLI subcommand name) or `"footnote-integrity"` (a string a TEST asserts
