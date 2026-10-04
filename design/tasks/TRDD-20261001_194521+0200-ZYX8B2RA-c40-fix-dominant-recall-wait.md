@@ -1,10 +1,10 @@
 ---
 trdd-id: ZYX8B2RA
 title: C40 — fix dominant recall wait
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-01T19:45:21+0200
-updated: 2026-10-01T19:48:18+0200
+updated: 2026-10-04T13:11:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -15,8 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:21+0200
-blocked-by: [V12ZHM1B]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, ZYX8B2RA]
 blocker-holds-if: not-match:READY
 ---
@@ -35,3 +35,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:21+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:43+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on V12ZHM1B per DSN035UN wave order
+- 2026-10-04T13:11:02+0200 — column → todo by main-agent@ai-maestro-janitor. blocker V12ZHM1B is complete and archived Cleared blocked-by (--clear-blocker override).

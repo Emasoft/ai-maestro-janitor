@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: dev
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-04T12:00:34+0200
+updated: 2026-10-04T13:11:43+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T11:25:52+0200
-implementation-commits: [676dc799, 00bb2762, 65d376ae, 44c8af2a, 43167dc7, 74b2b295]
+implementation-commits: [676dc799, 00bb2762, 65d376ae, 44c8af2a, 43167dc7, 74b2b295, 37d72fcd]
 ---
 
 # Clear the strict-validator findings that block the 3.7.0 publish
@@ -25,3 +25,8 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 ## Approval log
 
 - 2026-10-04T11:25:52+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Outcome
+
+
+2026-10-04 — 3.7.0 was published on the fourth run (tag and main on 6157e726). Blockers found and fixed on the way: 15 strict-validator findings, a bandit B310 finding, the privacy scan refusing the integrity manifest, the address lint on a test fixture, and 21 clippy findings. GitHub CI then failed its Tests job on two macOS-only tests, fixed in 37d72fcd for the next release.

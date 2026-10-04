@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: dev
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-04T11:03:47+0200
+updated: 2026-10-04T13:11:20+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,7 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T09:49:52+0200
 parent-trdd: JSQSJ3PZ
-implementation-commits: [90135636, 94bf446d, e0c9cabe, 3cb92e46, 7598cb5c, 3b96c091, 8f37dee1, 60dd828d]
+implementation-commits: [90135636, 94bf446d, e0c9cabe, 3cb92e46, 7598cb5c, 3b96c091, 8f37dee1, 60dd828d, c91af837]
 ---
 
 # Automatic re-login of a dead account slot is always on
@@ -49,3 +49,4 @@ The capture guard's 30-second page-read timer is not reset on a poll where the A
 Not yet observed end to end on this machine: no automatic re-login, no renewal of a spare, and no account switch has been seen running the new code. The temporary launchctl setting of CLAUDE_ROTATOR_AUTO_BOOTSTRAP must be removed after the release is installed, so the code default is what runs.
 The live account's slot is never re-captured automatically (by design, e0c9cabe/3cb92e46); it depends on the session-written copy of the live login, which has not been observed working on this machine.
 Memory page oauth-rotation-renew-reauth-operations still says auto-bootstrap is opt-in and default OFF (its step-3 sentence, the description and keywords of ATOM-LTOX-A05P, and lesson ATOM-DTL6-3KUL). A first correction in 8f37dee1 attached superseding lessons to the wrong atoms and was reverted in 60dd828d. Needs a correction pass that matches atom ids to bodies first, supersedes only the opt-in statements, and keeps the Verify step valid.
+2026-10-04 — Item 1 (a refused capture uses up a launch and raises no alert) is implemented in c91af837: the capture leaves a marker, the launcher refunds the attempt once and holds relaunches for six hours, and the alert names both accounts. Follow-ups in progress: clear the marker on a successful capture, refund only a charged launch, carry the account as data instead of parsing the message.

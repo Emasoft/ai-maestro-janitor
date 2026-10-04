@@ -1,10 +1,10 @@
 ---
 trdd-id: KSCAFSLD
 title: C17 — fixer dedup_phrases
-column: blocked
+column: testing
 status: tasked
 created: 2026-10-01T19:45:01+0200
-updated: 2026-10-01T19:48:04+0200
+updated: 2026-10-04T13:11:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,10 +15,11 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:01+0200
-blocked-by: [622ROA5F]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, KSCAFSLD]
 blocker-holds-if: not-match:READY
+implementation-commits: [9fb13752]
 ---
 
 # C17 — fixer dedup_phrases
@@ -35,3 +36,5 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:01+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:45:54+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
+- 2026-10-04T13:10:58+0200 — column → todo by main-agent@ai-maestro-janitor. blocker 622ROA5F is complete and archived Cleared blocked-by (--clear-blocker override).
+- 2026-10-04T13:11:09+0200 — column → testing by main-agent@ai-maestro-janitor. fixer implemented in 9fb13752, unit-tested, awaiting review

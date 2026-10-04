@@ -3,7 +3,7 @@ trdd-id: RSSN9A0P
 title: A stale legacy rotator root can silently desync the janitor and ai-maestro daemons
 column: blocked
 created: 2026-08-27T01:36:38+0200
-updated: 2026-08-28T07:29:34+0200
+updated: 2026-10-04T13:11:23+0200
 blocked-by: [ai-maestro#153]
 current-owner: janitor-main-session
 task-type: bugfix
@@ -355,6 +355,7 @@ the probe starts reporting "agree".
 Found only because the owner rejected my false claim that the daemons share no state. I had
 generalised "no coordination handshake" into "no shared state" and stated the second. The shared
 substrate was three greps away the whole time.
+2026-10-04 — A worker asked to implement a fail-loud janitor half found no such decision recorded on this card and stopped; the card remains blocked on ai-maestro issue 153.
 
 ## Approval log
 
