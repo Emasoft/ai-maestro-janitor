@@ -10,7 +10,10 @@ pub(crate) fn fix(path: &Path, text: &str) -> Option<String> {
     if !has_code(path, text, CODE) {
         return None;
     }
-    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    // WHY the LAST terminated line: `contains("\r\n")` gave a mostly-LF page with one stray CRLF
+    // a CRLF heading, i.e. mixed line endings; the end of the page decides what follows it.
+    let crlf = text.rfind('\n').and_then(|i| i.checked_sub(1)).is_some_and(|p| text.as_bytes().get(p) == Some(&b'\r'));
+    let eol = if crlf { "\r\n" } else { "\n" };
     let mut out = text.to_string();
     if !out.is_empty() && !out.ends_with('\n') {
         out.push_str(eol);
@@ -53,4 +56,22 @@ mod tests {
         let t = format!("{BEFORE}```\nunclosed\n");
         assert_eq!(fix(Path::new(P), &t), None);
     }
+
+
+    #[test]
+    fn appends_with_the_line_ending_of_the_last_line() {
+        let t = BEFORE.replacen("\n", "\r\n", 1);
+        let fixed = fix(Path::new(P), &t).expect("fixed");
+        assert!(fixed.ends_with("\n## Notes and lessons learned\n") && !fixed.ends_with("\r\n## Notes and lessons learned\r\n"), "{fixed:?}");
+    }
+
+    #[test]
+    fn no_final_newline_and_footer_before_eof() {
+        let fixed = fix(Path::new(P), BEFORE.trim_end()).expect("fixed");
+        assert_eq!(fixed, format!("{BEFORE}\n## Notes and lessons learned\n"));
+        let see = format!("{BEFORE}\n## See also\n\n- [[x]]\n");
+        let fixed = fix(Path::new(P), &see).expect("fixed");
+        assert!(fixed.starts_with(&see) && fixed.ends_with("## Notes and lessons learned\n"));
+    }
+
 }

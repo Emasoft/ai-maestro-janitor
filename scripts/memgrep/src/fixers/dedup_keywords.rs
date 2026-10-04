@@ -88,4 +88,33 @@ fn drops_case_insensitive_repeats_keeping_first_spelling() {
         let fixed = fix(Path::new(P), &before).expect("fixed");
         assert!(fixed.contains("keywords:\"a b c\","));
     }
+
+
+    #[test]
+    fn two_atoms_fence_crlf_and_non_ascii() {
+        let a = |id: &str, kw: &str| format!("^{id} [desc:\"d\", keywords: {kw}, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.\n");
+        let before = test_page(&format!("{}\n{}\n```\n{}```", a("a1", "x y x"), a("a2", "É é z"), a("a3", "q q")));
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert!(fixed.contains("keywords: x y,") && fixed.contains("keywords: É z,"));
+        assert!(fixed.contains("keywords: q q,"), "a marker inside a fence must not be touched");
+        let crlf = before.replace('\n', "\r\n");
+        let fixed = fix(Path::new(P), &crlf).expect("fixed");
+        assert!(fixed.contains("keywords: x y,") && fixed.matches("\r\n").count() == crlf.matches("\r\n").count());
+    }
+
+    #[test]
+    fn refuses_a_quoted_value_whose_closing_quote_is_not_last() {
+        let t = test_page("^a1 [desc:\"d\", keywords:\"a b a\" c, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.");
+        if let Some(f) = fix(Path::new(P), &t) {
+            assert!(f.contains("keywords:\"a b\" c") || f.contains("keywords:\"a b a\" c"));
+        }
+    }
+
+    #[test]
+    fn never_touches_other_props_when_the_guard_would_fail() {
+        // a keywords prop duplicated as a key: the lint reads the last, the edit hits the first.
+        let t = test_page("^a1 [desc:\"d\", keywords: a a b c, keywords: x y z, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.");
+        assert_eq!(fix(Path::new(P), &t), None);
+    }
+
 }

@@ -33,12 +33,14 @@ pub(super) fn marker_props(line: &str) -> Option<(usize, usize)> {
         return None;
     }
     let open = i + 1;
-    let (mut depth, mut in_quote) = (0i32, false);
+    // WHY bracket depth only, no quote state: the parser (`first_block_property_marker`) and the lint
+    // close the props at the matching `]` regardless of quotes; a quote-aware extent here would
+    // disagree with them about where an atom's props end (`desc:"x ] y"`).
+    let mut depth = 0i32;
     for (j, &c) in b.iter().enumerate().skip(i) {
         match c {
-            b'"' => in_quote = !in_quote,
-            b'[' if !in_quote => depth += 1,
-            b']' if !in_quote => {
+            b'[' => depth += 1,
+            b']' => {
                 depth -= 1;
                 if depth == 0 {
                     return Some((open, j));
@@ -138,8 +140,36 @@ pub(super) fn accept_if_better(path: &Path, before: &str, after: String, code: &
     let (b, a) = (code_counts(path, before), code_counts(path, &after));
     let count = |m: &BTreeMap<&'static str, usize>, c: &str| m.get(c).copied().unwrap_or(0);
     let improved = count(&a, code) < count(&b, code);
-    let no_new = a.iter().all(|(c, n)| *n <= count(&b, c));
-    (improved && no_new).then_some(after)
+    // WHY equal, not `<=`: a fall in an UNRELATED code is a collateral change the fixer did not
+    // declare (typically content that carried findings vanished).
+    let others_equal = a.keys().chain(b.keys()).all(|c| *c == code || count(&a, c) == count(&b, c));
+    // WHY: the per-code count check proves "lint is not worse", never "nothing was lost" — a rewrite
+    // that deleted an atom whose only finding was the target would pass it. No SAFE fixer may add or
+    // remove an atom or a lesson, so those identities must be unchanged.
+    (improved && others_equal && identities(before) == identities(&after)).then_some(after)
+}
+
+/// Atom ids (every line-leading `^id [` marker) and footnote definition labels (`[^N]:`), sorted.
+fn identities(text: &str) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+    for line in text.lines() {
+        if marker_props(line).is_some() {
+            let id: String = line
+                .trim_start()
+                .strip_prefix('^')
+                .unwrap_or_default()
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            v.push(format!("^{id}"));
+        } else if let Some(rest) = line.trim_start().strip_prefix("[^")
+            && let Some(end) = rest.find("]:")
+        {
+            v.push(format!("[^{}", &rest[..end]));
+        }
+    }
+    v.sort();
+    v
 }
 
 pub(super) fn has_code(path: &Path, text: &str, code: &str) -> bool {
@@ -211,4 +241,55 @@ mod tests {
         let t = test_page(&format!("^a1 [desc: say \"hi\" there, {TAIL}]\nBody."));
         assert_eq!(fix(Path::new(P), &t), None);
     }
+
+
+    #[test]
+    fn marker_extent_follows_the_parser_not_quote_state() {
+        // The parser closes the props at the first `]` (bracket depth only); so must the fixer.
+        let line = "^a1 [desc:\"x ] y\", keywords: k1 k2 k3]";
+        let (a, b) = marker_props(line).expect("marker");
+        assert_eq!(&line[a..b], "desc:\"x ");
+    }
+
+    #[test]
+    fn fence_frontmatter_crlf_non_ascii_two_atoms() {
+        let before = test_page(&format!(
+            "^a1 [desc: héllo wörld, {TAIL}]\nB.\n^a2 [desc: second one, {TAIL}]\nB.\n```\n^a3 [desc: in fence, {TAIL}]\n```"
+        ));
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert!(fixed.contains("desc: \"héllo wörld\"") && fixed.contains("desc: \"second one\""));
+        assert!(fixed.contains("desc: in fence,"));
+        let crlf = before.replace('\n', "\r\n");
+        let fixed = fix(Path::new(P), &crlf).expect("fixed");
+        assert_eq!(fixed.matches("\r\n").count(), crlf.matches("\r\n").count());
+        // frontmatter `^id [desc: x]` lookalike is not an atom
+        let fm = "---\nname: p\n^z [desc: not an atom]\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n\n## Notes and lessons learned\n";
+        assert_eq!(fix(Path::new(P), fm), None);
+    }
+
+    #[test]
+    fn duplicate_desc_keys_only_the_first_is_wrapped_losslessly() {
+        let t = test_page(&format!("^a1 [desc: first one, desc: \"second\", {TAIL}]\nBody."));
+        let f = fix(Path::new(P), &t).expect("fixed");
+        assert_eq!(f, t.replace("desc: first one", "desc: \"first one\""));
+    }
+
+    /// Shared acceptance check: a candidate that DELETES an atom must be rejected even though the
+    /// target finding count falls and no other count rises.
+    #[test]
+    fn accept_if_better_rejects_a_candidate_that_deleted_an_atom() {
+        let before = test_page(&format!("^a1 [desc: some prose here, {TAIL}]\nBody.\n^a2 [desc:\"ok\", {TAIL}]\nB2."));
+        let lossy = test_page(&format!("^a2 [desc:\"ok\", {TAIL}]\nB2."));
+        assert_eq!(accept_if_better(Path::new(P), &before, lossy, CODE), None);
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert!(accept_if_better(Path::new(P), &before, fixed, CODE).is_some());
+    }
+
+    #[test]
+    fn accept_if_better_rejects_a_candidate_that_loses_a_footnote_definition() {
+        let before = test_page(&format!("^a1 [desc: some prose here, {TAIL}]\nBody [^1].\n\n[^1]: a lesson."));
+        let lossy = test_page(&format!("^a1 [desc:\"some prose here\", {TAIL}]\nBody [^1]."));
+        assert_eq!(accept_if_better(Path::new(P), &before, lossy, CODE), None);
+    }
+
 }

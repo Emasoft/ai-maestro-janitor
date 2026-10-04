@@ -39,7 +39,8 @@ fn rewrite_line(line: &str, drop: &BTreeSet<String>) -> Option<Option<String>> {
     if end < start || !body[end + 3..].trim().is_empty() {
         return None;
     }
-    let t = body[start + 4..end].trim();
+    // WHY get(): `<!-->` makes the last `<!--` and `-->` overlap (end < start + 4); decline, never slice.
+    let t = body.get(start + 4..end)?.trim();
     let at = t.to_ascii_lowercase().find("noqa")?;
     let colon = at + t[at..].find(':')?;
     let keep: Vec<&str> = t[colon + 1..].split(',').map(str::trim).filter(|c| !c.is_empty() && !drop.contains(*c)).collect();
@@ -56,19 +57,23 @@ pub(crate) fn fix(path: &Path, text: &str) -> Option<String> {
         .filter_map(|v| rule_by_name(v.code).map(|r| (r, v.line)))
         .collect();
     let n = noqa::parse(text);
+    // WHY one entry per (line, selector): a selector reused on several lines is unused only where it
+    // suppresses nothing, so the lossless check below must remove ONE occurrence per entry. Removing
+    // every occurrence made the fixer refuse (silently do nothing) on any page reusing a selector.
+    let unused: Vec<(usize, String)> = noqa::unused(&n, &findings).into_iter().filter(|(_, s)| page_decidable(s)).collect();
     let mut by_line: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
-    for (ln, sel) in noqa::unused(&n, &findings) {
-        if page_decidable(&sel) {
-            by_line.entry(ln).or_default().insert(sel);
-        }
+    for (ln, sel) in &unused {
+        by_line.entry(*ln).or_default().insert(sel.clone());
     }
     if by_line.is_empty() {
         return None;
     }
     // Page-level declarations need the frontmatter line (0 = the `lint-ignore:` line itself).
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let blank = |i: Option<usize>| i.and_then(|i| lines.get(i)).is_none_or(|l| l.trim().is_empty());
     let mut out = String::with_capacity(text.len());
     let (mut in_fm, mut done) = (false, 0usize);
-    for (idx, line) in text.split_inclusive('\n').enumerate() {
+    for (idx, line) in lines.iter().enumerate() {
         let ln = idx + 1;
         if idx == 0 && line.trim_end() == "---" {
             in_fm = true;
@@ -81,15 +86,22 @@ pub(crate) fn fix(path: &Path, text: &str) -> Option<String> {
                 out.push_str(&new);
                 done += 1;
             }
-            Some(Some(None)) => done += 1,
+            Some(Some(None)) => {
+                // WHY: an HTML comment line can be what separates two blocks; deleting it between two
+                // text lines would join them into one paragraph, so refuse unless a neighbour is blank.
+                if !in_fm && !blank(idx.checked_sub(1)) && !blank(Some(idx + 1)) {
+                    return None;
+                }
+                done += 1;
+            }
             _ => out.push_str(line),
         }
     }
     // Lossless: exactly the unused selectors left the multiset, nothing else was declared or lost.
-    let (old_sel, new_n) = (selectors(&n), noqa::parse(&out));
-    let mut expect = old_sel.clone();
-    for d in by_line.values().flatten() {
-        expect.retain(|s| s != d);
+    let (mut expect, new_n) = (selectors(&n), noqa::parse(&out));
+    for (_, d) in &unused {
+        let pos = expect.iter().position(|s| s == d)?;
+        expect.remove(pos);
     }
     if done == 0 || selectors(&new_n) != expect {
         return None;
@@ -144,4 +156,44 @@ mod tests {
         let t = test_page("x <!-- noqa: link-one-sided --> <!-- noqa: not-a-rule -->");
         assert_eq!(fix(Path::new(P), &t), None);
     }
+
+
+    #[test]
+    fn a_selector_reused_on_several_lines_is_dropped_only_where_unused() {
+        let used = "^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01] <!-- noqa: atom-no-keywords -->";
+        let before = test_page(&format!("{used}\nFact. <!-- noqa: atom-no-keywords -->"));
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert_eq!(fixed, test_page(&format!("{used}\nFact.")));
+    }
+
+    #[test]
+    fn a_dangling_comment_open_overlapping_its_close_never_panics() {
+        for t in ["x <!--> <!-- noqa: atom-no-keywords -->", "<!--->", "a <!-- noqa: atom-no-keywords --><!-->"] {
+            let _ = fix(Path::new(P), &test_page(t));
+        }
+    }
+
+    #[test]
+    fn deleting_a_whole_comment_line_between_two_text_lines_is_refused() {
+        // Removing it would join the two lines into one paragraph.
+        let t = test_page("para one\n<!-- memgrep: noqa: atom-no-keywords -->\npara two");
+        assert_eq!(fix(Path::new(P), &t), None);
+    }
+
+    #[test]
+    fn rewrites_the_frontmatter_lint_ignore_list_and_deletes_it_when_empty() {
+        let base = |ig: &str| format!("---\nname: p\ndescription: \"alpha / beta / gamma / delta\"\n{ig}ocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01]\nB.\n\n## Notes and lessons learned\n");
+        let fixed = fix(Path::new(P), &base("lint-ignore: [atom-no-keywords, atom-bad-ocd]\n")).expect("fixed");
+        assert_eq!(fixed, base("lint-ignore: [atom-no-keywords]\n"));
+        let fixed = fix(Path::new(P), &base("lint-ignore: [atom-bad-ocd]\n")).expect("fixed");
+        assert_eq!(fixed, base(""));
+    }
+
+    #[test]
+    fn crlf_lines_keep_their_line_ending() {
+        let before = test_page("Fact one. <!-- noqa: atom-no-keywords -->\nKept.").replace('\n', "\r\n");
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert_eq!(fixed, test_page("Fact one.\nKept.").replace('\n', "\r\n"));
+    }
+
 }

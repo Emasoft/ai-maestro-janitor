@@ -14,11 +14,15 @@ const HEADING: &str = "## Superseded";
 struct Scan {
     /// (start, end-exclusive) line indices of each superseded atom block.
     superseded: Vec<(usize, usize)>,
+    /// Line indices of every non-superseded atom marker.
+    live: Vec<usize>,
     delimiter: Option<usize>,
+    /// First line after the closing frontmatter delimiter (lines.len() when it never closes).
+    body_start: usize,
 }
 
 fn scan(lines: &[&str]) -> Scan {
-    let mut s = Scan { superseded: Vec::new(), delimiter: None };
+    let mut s = Scan { superseded: Vec::new(), live: Vec::new(), delimiter: None, body_start: 0 };
     let (mut fence, mut in_fm) = (None::<Fence>, false);
     let mut open: Option<(usize, bool)> = None;
     let close = |s: &mut Scan, open: &mut Option<(usize, bool)>, end: usize| {
@@ -29,10 +33,15 @@ fn scan(lines: &[&str]) -> Scan {
     for (i, line) in lines.iter().enumerate() {
         if i == 0 && line.trim_end() == "---" {
             in_fm = true;
+            // WHY: an unclosed frontmatter leaves no body at all, so nothing may be inserted anywhere.
+            s.body_start = lines.len();
             continue;
         }
         if in_fm {
             in_fm = line.trim_end() != "---";
+            if !in_fm {
+                s.body_start = i + 1;
+            }
             continue;
         }
         if fence_step(line, &mut fence) || fence.is_some() {
@@ -40,8 +49,15 @@ fn scan(lines: &[&str]) -> Scan {
         }
         if let Some((a, b)) = marker_props(line) {
             close(&mut s, &mut open, i);
-            let status = parse_block_props(&line[a..b]).get("status").and_then(|v| v.first().cloned());
-            open = Some((i, status.as_deref() == Some("superseded")));
+            let is_superseded = parse_block_props(&line[a..b]).get("status").and_then(|v| v.first()).is_some_and(|v| {
+                // WHY: mirrors the lint (`status_from_props`): case-insensitive, and the common
+                // `superseeded` misspelling counts, otherwise the lint flags an atom this never moves.
+                matches!(v.trim().to_ascii_lowercase().as_str(), "superseded" | "superseeded")
+            });
+            if !is_superseded {
+                s.live.push(i);
+            }
+            open = Some((i, is_superseded));
         } else if line.trim_start().starts_with('#') {
             close(&mut s, &mut open, i);
             if s.delimiter.is_none() && line.trim().eq_ignore_ascii_case(HEADING) {
@@ -63,7 +79,19 @@ pub(crate) fn fix(path: &Path, text: &str) -> Option<String> {
             let blank_after = lines.get(d + 1).is_some_and(|l| l.trim().is_empty());
             (m, d + 1 + usize::from(blank_after), false)
         }
-        None => (s.superseded.clone(), footer_section_line(text).unwrap_or(lines.len()), true),
+        None => {
+            // WHY: `footer_section_line` is not frontmatter aware, so a YAML comment such as
+            // `# Notes and lessons learned` would become the insertion point INSIDE the frontmatter.
+            // Search the body only (lines after the closing delimiter).
+            let body = lines[s.body_start.min(lines.len())..].concat();
+            let at = footer_section_line(&body).map_or(lines.len(), |i| i + s.body_start);
+            // WHY: a footer-shaped heading mid-page (`## Lessons learned about X`) would put the
+            // delimiter above live atoms that follow it; refuse rather than guess a layout.
+            if s.live.iter().any(|&l| l >= at) {
+                return None;
+            }
+            (s.superseded.clone(), at, true)
+        }
     };
     if movers.is_empty() {
         return None;
@@ -182,4 +210,46 @@ mod tests {
     fn none_when_nothing_is_superseded() {
         assert_eq!(fix(Path::new(P), &test_page(CUR)), None);
     }
+
+
+    #[test]
+    fn never_inserts_inside_the_frontmatter_at_a_footer_lookalike_comment() {
+        let fm = "---\nname: p\n# Notes and lessons learned\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n";
+        let before = format!("{fm}# p\n{OLD}\n{CUR}");
+        // Either a refusal or a fix that leaves the frontmatter byte-identical is acceptable.
+        if let Some(fixed) = fix(Path::new(P), &before) {
+            assert!(fixed.starts_with(fm), "frontmatter corrupted: {fixed}");
+            assert!(fixed.find("## Superseded").unwrap() >= fm.len());
+        }
+    }
+
+    #[test]
+    fn midpage_lessons_learned_heading_never_pulls_the_movers_above_live_atoms() {
+        let before = format!("---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n{OLD}\n## Lessons learned about X\n{CUR}\n## Notes and lessons learned\n");
+        if let Some(fixed) = fix(Path::new(P), &before) {
+            assert!(fixed.find("^c1 ").unwrap() < fixed.find("^s1 ").unwrap(), "{fixed}");
+        }
+    }
+
+    #[test]
+    fn moves_a_differently_spelled_superseded_status_like_the_lint_reads_it() {
+        let odd = OLD.replace("status: superseded", "status: Superseeded");
+        let before = test_page(&format!("{odd}\n{CUR}"));
+        assert!(has(&before, NO_DELIM));
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert!(fixed.find("## Superseded").unwrap() < fixed.find("^s1 ").unwrap());
+    }
+
+    #[test]
+    fn crlf_and_no_final_newline_never_lose_a_line() {
+        let before = test_page(&format!("{OLD}\n{CUR}")).replace('\n', "\r\n");
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert!(!fixed.replace("\r\n", "").contains('\n'));
+        let tail = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n^c1 [desc:\"c\", keywords: k1 k2 k3, ocd: 2026-01-01, lmd: 2026-01-01]\nCur.\n^s1 [desc:\"o\", keywords: k1 k2 k3, status: superseded, ocd: 2026-01-01, lmd: 2026-01-01]\nOld.";
+        if let Some(fixed) = fix(Path::new(P), tail) {
+            assert!(fixed.contains("Old.") && fixed.contains("## Superseded\n"));
+            assert!(!fixed.contains("Old.## "), "{fixed}");
+        }
+    }
+
 }
