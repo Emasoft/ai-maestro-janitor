@@ -80,8 +80,12 @@ def _pin_memgrep_for_the_gates(monkeypatch):
 # Every finding is built as `violations.push(Violation { … code: "code", … })` — the struct
 # (TRDD-XI10BA5D step B / A10, which also discharged the tuple-index debt) may close with `}))`
 # (a plain statement) or `})),` (a match-arm expression), so BOTH terminators are matched,
-# non-greedy so one block never swallows the next. Scoping the kebab-literal search to the TEXT
-# INSIDE each push call (not the whole file) is what excludes unrelated literals like
+# non-greedy, but a push that is a match arm's tail expression ends in a bare `})` with no `;`/`,`,
+# so that block runs on into the next push — harmless for extraction (the run-on only adds text
+# that is itself a later push block); the `let code = …;` scan in `_extract_lint_codes_from_source`
+# is what makes codes bound outside a block found deliberately, not by that accident.
+# Scoping the kebab-literal search to the TEXT INSIDE each push call (not the whole file) is what
+# excludes unrelated literals like
 # `"atom-page"` (a CLI subcommand name) or `"footnote-integrity"` (a string a TEST asserts
 # against, not a code memgrep emits) without needing an explicit denylist — neither ever appears
 # inside a `violations.push(Violation { … })` call.
@@ -96,6 +100,12 @@ def _extract_lint_codes_from_source() -> frozenset[str]:
     codes: set[str] = set()
     for block in _PUSH_BLOCK_RE.findall(text):
         codes.update(_KEBAB_LITERAL_RE.findall(block))
+    # A push block may take its code from a `let code = if … { "a" } else { "b" };` bound just
+    # ABOVE it (TRDD-BHIS99XE, ef58378a: the binding feeds both `rule_sev(code)` and `code,`), so
+    # the literal is no longer INSIDE the block. Scan those bindings too, or the drift guard
+    # reports a live code as removed.
+    for binding in re.findall(r"let code = [^;]*;", text):
+        codes.update(_KEBAB_LITERAL_RE.findall(binding))
     return frozenset(codes)
 
 
