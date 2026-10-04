@@ -232,10 +232,9 @@ def diagnose(facts: Facts) -> list[Finding]:
                 f"{s.email} has needed a one-time login for "
                 f"{s.cannot_self_renew_age_s / 3600.0:.1f}h (> {COOKIE_LEG_ALERT_S / 3600.0:.0f}h) "
                 f"— its refresh path is dead. CHECK THE COOKIE LAYER FIRST: if this account "
-                f"still has a live claude.ai session cookie it can mint a fresh token with NO "
-                f"re-login (check-login.sh, then rotator.py tick with "
-                f"CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1). Only if the cookie is gone too does a full "
-                f"/janitor-refresh-cc-logins re-login apply — and the cookie path expires with "
+                f"still has a live claude.ai session cookie the daemon re-captures it by itself on "
+                f"its next tick, with NO re-login. Only a missing cookie needs "
+                f"/janitor-refresh-cc-logins — and the cookie path expires with "
                 f"the cookie, so check it before the fleet runs out of accounts.",
             ))
     return out

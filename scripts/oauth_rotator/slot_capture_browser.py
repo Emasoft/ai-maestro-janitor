@@ -197,9 +197,63 @@ def _looks_like_challenge(text: str) -> bool:
     return bool(text) and bool(_CHALLENGE_MARKERS_RE.search(text))
 
 
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+# Exit code of a capture refused BEFORE the Authorize click (wrong/unconfirmed account).
+EXIT_CONSENT_REFUSED = 3
+
+
+def _consent_logged_in_email(page_text: str) -> str | None:
+    """The account the consent page says it is signed in as, lower-cased, or None.
+
+    Language-independent: the only address on the page wins; with several, the addresses on
+    lines containing "logged in" must name exactly one. Pure string match on VISIBLE text."""
+    found = {m.group(0).lower() for m in _EMAIL_RE.finditer(page_text)}
+    if len(found) == 1:
+        return next(iter(found))
+    on_line = {m.group(0).lower() for ln in page_text.splitlines() if "logged in" in ln.lower()
+               for m in _EMAIL_RE.finditer(ln)}
+    return next(iter(on_line)) if len(on_line) == 1 else None
+
+
+def _consent_refusal(actual: str | None, target: str) -> str | None:
+    """The refusal message when the consent page is not provably signed in as `target`
+    (`actual` = `_consent_logged_in_email` result), else None (proceed). Fails CLOSED when
+    the account is unknown: a minted grant cannot be undone and may evict the grant the live
+    session shares, so an unconfirmed account never clicks."""
+    if actual is None:
+        return ("[capture] REFUSED: could not confirm which account the consent page is signed "
+                "in as; not authorizing.")
+    if actual != target.lower():
+        return (f"[capture] REFUSED: the Chrome profile for {target} is signed in as {actual}; "
+                f"not authorizing (no grant minted). Sign that profile in as {target} with "
+                f"open-login.sh.")
+    return None
+
+
+def _read_consent_email(page, wait_s: float = 5.0) -> str | None:
+    """Re-read the page VISIBLE text for up to `wait_s` seconds: the footer can render after the
+    Authorize button, so "not found" is only decided once the wait is over."""
+    deadline = time.time() + wait_s
+    while True:
+        try:
+            actual = _consent_logged_in_email(page.inner_text("body") or "")
+        except Exception:
+            actual = None
+        if actual is not None or time.time() >= deadline:
+            return actual
+        page.wait_for_timeout(500)
+
+
+class _ConsentRefused(Exception):
+    """Raised by `_drive_browser` when `_consent_refusal` blocks the Authorize click."""
+
+
 def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | None:
     """Drive the account's REAL Chrome (CDP-attached), auto-click Authorize, return raw
-    `code#state`.
+    `code#state`. Raises `_ConsentRefused` (before any click) when the consent page is not
+    provably signed in as `email`.
 
     Transport rationale lives in the module docstring: we launch the real Chrome binary
     ourselves (real macOS keychain → decrypts the persisted claude.ai cookies, no mock
@@ -284,6 +338,7 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                         page_text = ""
                     if _looks_like_challenge(page_text):
                         challenge_seen = True
+                    refused: str | None = None
                     for sel in APPROVE_SELECTORS:
                         try:
                             btn = page.query_selector(sel)
@@ -296,11 +351,21 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                             label = (btn.text_content() or "").strip()
                             if _COOKIE_BUTTON_RE.search(label):
                                 continue
+                            # Account guard at the moment of the click (TRDD-0SU2C2IM): a minted
+                            # grant cannot be undone and may evict the grant the live session
+                            # shares, so an unconfirmed or wrong account fails CLOSED. A login
+                            # page has no approve button and never reaches here. Recorded, not
+                            # raised, because the `except Exception` below would swallow it.
+                            refused = _consent_refusal(_read_consent_email(page), email)
+                            if refused:
+                                break
                             btn.click()
                             print(f"[capture] clicked approval button ({sel}).")
                             break
                         except Exception:
                             continue
+                    if refused:
+                        raise _ConsentRefused(refused)
                     page.wait_for_timeout(2000)
                 if not reached:
                     if challenge_seen:
@@ -484,7 +549,11 @@ def capture(email: str, headless: bool) -> int:
     url = _build_url(challenge, state)
 
     _materialize_cookies(profile_email)  # opt-in Phase-2c: keychain cookies → profile (best-effort)
-    raw_code = _drive_browser(email, url, state, headless)
+    try:
+        raw_code = _drive_browser(email, url, state, headless)
+    except _ConsentRefused as refusal:
+        print(refusal)  # nothing was clicked, no grant minted
+        return EXIT_CONSENT_REFUSED
     if not raw_code:
         print("[capture] FAILED: no authorization code captured.")
         return 1

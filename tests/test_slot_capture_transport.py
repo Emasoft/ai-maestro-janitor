@@ -176,6 +176,71 @@ def test_looks_like_challenge_never_matches_ordinary_consent_copy(text: str) -> 
     assert scb._looks_like_challenge(text) is False
 
 
+
+# --------------------------------------------------------------------------- #
+# Consent-page account guard (TRDD-0SU2C2IM)                                    #
+# --------------------------------------------------------------------------- #
+_CONSENT_PAGE = (
+    "Claude\nAuthorize access\nClaude Code would like to connect to your account\n"
+    "Authorize\nDecline\n"
+)
+
+
+def test_consent_email_from_footer_in_realistic_page() -> None:
+    """The "Logged in as <email>" footer inside a full consent page yields the address."""
+    text = _CONSENT_PAGE + "Logged in as first@users.noreply.github.com\nSwitch account\n"
+    assert scb._consent_logged_in_email(text) == "first@users.noreply.github.com"
+
+
+def test_consent_email_mixed_case_and_newline_after_as() -> None:
+    """Case is ignored, the address is lower-cased, a newline between "as" and it is fine."""
+    text = _CONSENT_PAGE + "LOGGED IN AS\nFirst@Users.NoReply.GitHub.com\nSwitch account"
+    assert scb._consent_logged_in_email(text) == "first@users.noreply.github.com"
+
+
+def test_consent_email_none_without_any_address() -> None:
+    """A page with no address (login prompt, bare consent page) yields None."""
+    assert scb._consent_logged_in_email(_CONSENT_PAGE) is None
+    assert scb._consent_logged_in_email("") is None
+
+
+def test_consent_email_stops_before_switch_account() -> None:
+    """Text on the next line ("Switch account") is never part of the address."""
+    text = "Logged in as first@users.noreply.github.com\nSwitch account"
+    assert scb._consent_logged_in_email(text) == "first@users.noreply.github.com"
+
+
+def test_consent_email_non_english_prefix_single_address() -> None:
+    """A localized footer works: the only address on the page is the account."""
+    text = "Connecté en tant que First@Users.NoReply.GitHub.com\nChanger de compte"
+    assert scb._consent_logged_in_email(text) == "first@users.noreply.github.com"
+
+
+def test_consent_email_picks_the_logged_in_line_among_two() -> None:
+    """With two addresses, the one on the "Logged in" line wins."""
+    text = "Questions? second@users.noreply.github.com\nLogged in as first@users.noreply.github.com\nSwitch account"
+    assert scb._consent_logged_in_email(text) == "first@users.noreply.github.com"
+
+
+def test_consent_email_none_for_two_addresses_without_logged_in_line() -> None:
+    """Two addresses and no "Logged in" line is ambiguous, so None (fail closed upstream)."""
+    assert scb._consent_logged_in_email("first@users.noreply.github.com\nsecond@users.noreply.github.com") is None
+
+
+def test_consent_refusal_decision() -> None:
+    """Mismatch and unknown account refuse (no click); a case-insensitive match proceeds."""
+    assert scb._consent_refusal("second@users.noreply.github.com", "first@users.noreply.github.com") == (
+        "[capture] REFUSED: the Chrome profile for first@users.noreply.github.com is signed in as "
+        "second@users.noreply.github.com; not authorizing (no grant minted). Sign that profile in as "
+        "first@users.noreply.github.com with open-login.sh."
+    )
+    assert scb._consent_refusal(None, "first@users.noreply.github.com") == (
+        "[capture] REFUSED: could not confirm which account the consent page is signed in as; "
+        "not authorizing."
+    )
+    assert scb._consent_refusal("first@users.noreply.github.com", "First@Users.NoReply.GitHub.com") is None
+
+
 # --------------------------------------------------------------------------- #
 # Shared profiles-root resolver wiring                                          #
 # --------------------------------------------------------------------------- #
