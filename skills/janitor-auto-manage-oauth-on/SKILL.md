@@ -75,9 +75,10 @@ thing a machine can't: the human sign-in.
   capture whose Chrome profile is signed in to a different account is refused
   before Authorize. Expect a Chrome window to open unprompted while you work —
   that surprise is why this was opt-in before (TRDD-5OJX3SCF). If a slot stays
-  dead (web session expired and needing your passkey/2FA, launch cap used up, or
-  a refused capture), run `/janitor-refresh-cc-logins` for the manual capture.
-  The automatic capture runs **visible** (a real Chrome window appears briefly — Cloudflare blocks
+  dead (web session expired and needing your passkey/2FA, the slot is the live
+  account, launch cap used up, or a refused capture), run
+  `/janitor-refresh-cc-logins` for the manual capture. The automatic capture runs
+  **visible** (a real Chrome window appears briefly — Cloudflare blocks
   headless on the consent page; opt into headless with
   `CLAUDE_ROTATOR_BOOTSTRAP_HEADLESS=1` only if your environment allows it) and
   **detached** so it never blocks or starves the keep-alive rotation. From then
@@ -89,7 +90,8 @@ Maturity: both pieces are implemented and unit-tested; full unattended
 end-to-end verification (a live headful capture clearing Cloudflare on the
 consent page) is tracked as TRDD-32acd15f #142 — until that lands, treat the
 auto-bootstrap as best-effort (a failed capture is logged and, up to the per-slot
-launch cap, re-attempted on a later tick; the stalled nudge tells you when to step in).
+launch cap, re-attempted on a later tick; if a slot stays dead, step in with
+`/janitor-refresh-cc-logins`).
 
 ## Prerequisites
 

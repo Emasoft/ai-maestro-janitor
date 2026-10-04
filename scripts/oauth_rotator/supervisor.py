@@ -214,8 +214,9 @@ def diagnose(facts: Facts) -> list[Finding]:
                 # CHECK THE COOKIE LAYER FIRST — this alert is named `cookie-leg-stuck` and
                 # used to send the reader straight past the cookie to a full re-login. When a
                 # live claude.ai session cookie still exists, `/janitor-refresh-cc-logins`
-                # step 4 alone (the CDP-attach capture, `rotator.py tick` with
-                # AUTO_BOOTSTRAP=1) mints a fresh refresh-bearing slot FROM that cookie — no
+                # step 4 alone (the CDP-attach capture; `rotator.py tick` also launches it
+                # itself, auto-bootstrap being on by default) mints a fresh refresh-bearing
+                # slot FROM that cookie — no
                 # re-authentication at all. Only when the cookie is gone too does the full
                 # step-3 re-login become necessary, and by then the cheap path has expired
                 # with the cookie. So the order matters and the old wording inverted it.
