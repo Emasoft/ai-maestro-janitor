@@ -49,9 +49,9 @@ from pathlib import Path
 # subsystem) is UNCHANGED by this move — the directive says it must stay
 # separate, and `memory_scopes.resolve_local_dir_for` still owns it.
 #
-# LOCAL mirrors the repo's `design/` EXACTLY — the same four lifecycle folders
-# (`proposals/ tasks/ archived/ refused/`), plus (as of TRDD-WY198OIP)
-# `requirements/` and `specs/`, which carry no proposals/archived/refused
+# LOCAL mirrors the repo's `design/` EXACTLY — the same three lifecycle folders
+# (`proposals/ tasks/ archived/`; no refused/ — janitor#309), plus (as of TRDD-WY198OIP)
+# `requirements/` and `specs/`, which carry no proposals/archived
 # lifecycle of their own — see `NON_TASK_FOLDERS` below.
 #
 # WHY this is an SSOT and not a constant copied into each caller: before this, all
@@ -65,10 +65,12 @@ from pathlib import Path
 LOCAL = "local"
 PROJECT = "project"
 
-# The four lifecycle folders, in pipeline order. Both scopes carry all four.
-DESIGN_FOLDERS = ("proposals", "tasks", "archived", "refused")
+# The three lifecycle folders, in pipeline order. Both scopes carry all three. There is NO
+# `refused/` folder: owner ruling 2026-09-24 (janitor#309/#329) — refused is a `column:` value on
+# a card that stays in `proposals/`.
+DESIGN_FOLDERS = ("proposals", "tasks", "archived")
 
-# Non-task folders with NO proposals/archived/refused lifecycle of their own —
+# Non-task folders with NO proposals/archived lifecycle of their own —
 # kept OUT of DESIGN_FOLDERS so no consumer that iterates it accidentally
 # treats them as having lifecycle siblings (owner directive ai-maestro#163).
 NON_TASK_FOLDERS = ("requirements", "specs")
@@ -255,7 +257,7 @@ def ensure_local_design(project_dir: str | None = None) -> Path:
     Only the TRDD-AUTHORING path calls this. Detectors must NOT: a read-only observer
     that materializes the thing it observes would make every project look like it has
     local design, and would write to disk on every heartbeat. Creates both
-    `DESIGN_FOLDERS` (proposals/tasks/archived/refused) and `NON_TASK_FOLDERS`
+    `DESIGN_FOLDERS` (proposals/tasks/archived) and `NON_TASK_FOLDERS`
     (requirements/specs) — the full LOCAL layout, mirroring PROJECT's `design/`.
     """
     root = local_design_root(project_dir)

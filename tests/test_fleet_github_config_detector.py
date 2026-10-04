@@ -180,7 +180,13 @@ def _with_origin(tmp_path: Path, slug: str) -> Path:
 
 
 def _proposals(tmp_path: Path) -> list[Path]:
-    return sorted((tmp_path / "proj" / "design" / "proposals").glob("TRDD-*.md"))
+    """OPEN proposals: a withdrawn card stays in proposals/ as `column: refused` (owner ruling
+    2026-09-24, janitor#309/#329), so it is not counted as open."""
+    return [
+        p
+        for p in sorted((tmp_path / "proj" / "design" / "proposals").glob("TRDD-*.md"))
+        if "column: refused" not in p.read_text(encoding="utf-8")
+    ]
 
 
 def test_proposes_a_fix_when_THIS_repo_is_the_drifted_one(tmp_path: Path) -> None:

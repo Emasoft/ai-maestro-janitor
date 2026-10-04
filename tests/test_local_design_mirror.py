@@ -77,7 +77,8 @@ def test_mirror_only_file_is_never_deleted_when_primary_also_has_content(_isolat
 
 
 def test_nested_lifecycle_subdir_structure_is_preserved(_isolate):
-    """All four lifecycle subdirs (proposals/tasks/archived/refused) round-trip intact."""
+    """All three lifecycle subdirs (proposals/tasks/archived) round-trip intact; no refused/ zone
+    exists (owner ruling 2026-09-24, janitor#309/#329), so a stray one is not mirrored."""
     primary = msc.resolve_local_design_dir()
     for sub, name in (
         ("proposals", "TRDD-a.md"),
@@ -95,9 +96,9 @@ def test_nested_lifecycle_subdir_structure_is_preserved(_isolate):
         ("proposals", "TRDD-a.md"),
         ("tasks", "TRDD-b.md"),
         ("archived", "TRDD-c.md"),
-        ("refused", "TRDD-d.md"),
     ):
         assert (mirror / sub / name).read_text(encoding="utf-8") == sub
+    assert not (mirror / "refused").exists()
 
 
 def test_unwritable_mirror_fails_open_without_raising(_isolate, monkeypatch):

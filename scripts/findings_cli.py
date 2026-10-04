@@ -49,7 +49,9 @@ def _cmd_list(limit: int) -> int:
 
 def _show_trdd(uid: str) -> int:
     project_dir = None  # current project — trdd_common resolves both scopes from it
-    for folder in ("proposals", "tasks", "archived", "refused"):
+    # No "refused" folder: owner ruling 2026-09-24 (janitor#309/#329) — a refused card is
+    # `column: refused` in proposals/, so the loop already finds it.
+    for folder in ("proposals", "tasks", "archived"):
         for _scope, path in trdd_common.trdd_files(folder, project_dir):
             if trdd_common.extract_uid(path.name) == uid:
                 print(f"--- {path} ---")

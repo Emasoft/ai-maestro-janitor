@@ -1,6 +1,6 @@
 """Refusal-aware PROJECT-proposal dedupe (ai-maestro-plugins#15).
 
-A proposal a HUMAN refused (moved to `design/refused/`, premise judged false) must not be
+A proposal a HUMAN refused (`column: refused`, kept in `design/proposals/`, premise judged false) must not be
 re-authored every heartbeat under the same dedupe key: the second time PKGPOL-001 came around,
 the human approved the false-premise dispatch on the title alone, and only a memory note
 surfacing during recall stopped it. These are the same evidence-scoped semantics
@@ -58,28 +58,32 @@ def _propose(project: Path, *, evidence: list[str] | None = None, now: int = NOW
     )
 
 
-def _proposal_files(project: Path) -> list[Path]:
+def _all_cards(project: Path) -> list[Path]:
     d = project / "design" / "proposals"
     return sorted(d.glob("TRDD-*.md")) if d.is_dir() else []
 
 
+def _proposal_files(project: Path) -> list[Path]:
+    """The OPEN proposals — `column: refused` cards stay in proposals/ but are not open."""
+    # Match the frontmatter LINE, not a substring: a re-proposal's body cites the prior refusal
+    # with the words "`column: refused`", which must not make the NEW card look refused.
+    return [p for p in _all_cards(project) if "\ncolumn: refused\n" not in p.read_text(encoding="utf-8")]
+
+
 def _refuse_by_hand(project: Path, uid: str) -> Path:
-    """What a human/main-Claude does per the TRDD lifecycle: move the card to design/refused/
-    and flip its column. Deliberately NOT a plugin API call — no refuse verb exists, and the
-    scan must work against exactly this manual shape."""
+    """What a human/main-Claude does per the owner ruling (2026-09-24, janitor#309/#329): flip the
+    card's column to `refused` IN PLACE — it stays in design/proposals/, there is no refused/
+    folder. Deliberately NOT a plugin API call — no refuse verb exists, and the scan must work
+    against exactly this manual shape."""
     src = next(p for p in _proposal_files(project) if uid in p.name)
-    dest_dir = project / "design" / "refused"
-    dest_dir.mkdir(parents=True, exist_ok=True)
     text = src.read_text(encoding="utf-8")
     text = re.sub(r"(?m)^column: proposal$", "column: refused", text)
     text = text.replace(
         "**PROPOSED BY THE JANITOR — awaiting approval. NOT authorized to execute.**",
         "**REFUSED 2026-08-05 — THE PREMISE IS FALSE.** Measured first-hand; nothing is disabled.",
     )
-    dest = dest_dir / src.name
-    dest.write_text(text, encoding="utf-8")
-    src.unlink()
-    return dest
+    src.write_text(text, encoding="utf-8")
+    return src
 
 
 def test_a_human_refused_proposal_is_not_reproposed_on_unchanged_evidence(project: Path) -> None:
@@ -97,6 +101,7 @@ def test_a_human_refused_proposal_is_not_reproposed_on_unchanged_evidence(projec
     assert is_new is False
     assert r_uid == uid, "the suppression must cite the refusing card, not invent an id"
     assert _proposal_files(project) == [], "no fresh proposal may be authored"
+    assert not (project / "design" / "refused").exists()
 
 
 def test_changed_evidence_reproposes_and_cites_the_prior_refusal(project: Path) -> None:
@@ -118,7 +123,7 @@ def test_changed_evidence_reproposes_and_cites_the_prior_refusal(project: Path) 
 
 
 def test_a_janitor_withdrawn_card_never_suppresses(project: Path) -> None:
-    """retract() moves a cleared finding to refused/ but PROMISES re-proposal when the condition
+    """retract() sets a cleared finding to column refused (in place) but PROMISES re-proposal when the condition
     reappears ("the janitor proposes it again with a NEW id"). Withdrawn ≠ refused: only a human
     verdict suppresses."""
     first = _propose(project)

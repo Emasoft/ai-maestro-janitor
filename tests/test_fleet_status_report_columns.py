@@ -208,3 +208,25 @@ def test_folder_column_is_relative_to_home_so_the_dashboard_can_be_shared() -> N
     home = str(Path.home())
     assert fstat._tilde(home + "/Code/thing") == "~/Code/thing"
     assert fstat._tilde("/opt/elsewhere") == "/opt/elsewhere", "paths outside home are untouched"
+
+
+def test_kanban_shows_a_refused_proposal_in_the_refused_lane_and_names_no_refused_folder(
+    tmp_path, monkeypatch
+):
+    """janitor#309/#329: a `column: refused` card stays in design/proposals/ and renders in the
+    refused lane (by its column, not a folder); the lane tooltip no longer cites design/refused/."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    proposals = tmp_path / "design" / "proposals"
+    proposals.mkdir(parents=True)
+    (proposals / "TRDD-20260101_000000+0000-ABCD1234-x.md").write_text(
+        "---\ntrdd-id: ABCD1234\ntitle: x\ncolumn: refused\n---\nbody\n", encoding="utf-8"
+    )
+    (proposals / "TRDD-20260101_000000+0000-EFGH5678-y.md").write_text(
+        "---\ntrdd-id: EFGH5678\ntitle: y\ncolumn: proposal\n---\nbody\n", encoding="utf-8"
+    )
+
+    board = fstat._gather_kanban(str(tmp_path))
+
+    assert [c["id"] for c in board["refused"]] == ["ABCD1234"]
+    assert [c["id"] for c in board["proposal"]] == ["EFGH5678"]
+    assert "design/refused" not in fstat._KANBAN_COLTIP["refused"]

@@ -1075,3 +1075,17 @@ def test_bare_shape_card_is_counted_by_the_board(tmp_path):
     columns, _heads = dispatch._all_folders_columns(str(tmp_path), tc)
 
     assert columns.get("15ECPBSA") == "todo"
+
+
+# ── no design/refused/ zone (owner ruling 2026-09-24, janitor#309/#329) ──────
+
+
+def test_design_folders_match_the_owner_ruling_no_refused_zone(tmp_path):
+    """The lifecycle zones are exactly proposals/tasks/archived; `refused` is a column, not a folder,
+    and ensure_local_design must not create one."""
+    assert tc.DESIGN_FOLDERS == ("proposals", "tasks", "archived")
+    root = tc.ensure_local_design(str(tmp_path))
+    assert sorted(p.name for p in root.iterdir()) == sorted(
+        ["proposals", "tasks", "archived", *tc.NON_TASK_FOLDERS]
+    )
+    assert not (root / "refused").exists()

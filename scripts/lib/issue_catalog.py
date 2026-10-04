@@ -338,7 +338,8 @@ def raise_issue(
         # in the ledger. A per-heartbeat "still refused" line would re-litigate a closed question 288
         # times a day, and a fresh approval request nearly caused a false-premise dispatch once
         # already (ai-maestro-plugins#15). The finding resurfaces by itself the moment its evidence
-        # changes, and the refused TRDD in design/refused/ remains the auditable record.
+        # changes, and the refused TRDD (`column: refused`, still in design/proposals/ — no refused folder exists,
+        # owner ruling 2026-09-24, janitor#309/#329) remains the auditable record.
         return Raised(
             code=code, domain=tickets.PROJECT, ok=True, trdd=uid,
             why=f"previously refused (TRDD-{uid}) — suppressed until the evidence changes",

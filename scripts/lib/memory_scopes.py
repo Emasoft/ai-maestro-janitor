@@ -645,11 +645,12 @@ def sync_user_memory_mirror() -> str | None:
 # reaches). Per-project sub-namespaced by ``project_slug`` — see resolve_local_design_mirror_dir.
 _LOCAL_DESIGN_MIRROR_DIRNAME = "local-design-mirror"
 
-# design/ holds exactly these four lifecycle subdirs per the TRDD rules
-# (``trdd-approval-tiers.md`` / ``trdd-design-tasks.md``). Naming them explicitly — rather
-# than mirroring the whole ``design/`` tree — means only real TRDD ``*.md`` files are ever
-# copied, never some unrelated file a future convention drops next to them.
-_DESIGN_LIFECYCLE_SUBDIRS = ("proposals", "tasks", "archived", "refused")
+# design/ holds exactly these three lifecycle subdirs (owner ruling 2026-09-24, janitor#309/#329:
+# no ``refused/`` folder — refused is a ``column:`` value on a card in ``proposals/``).
+# Naming them explicitly — rather than mirroring the whole ``design/`` tree — means only real
+# TRDD ``*.md`` files are ever copied, never some unrelated file a future convention drops
+# next to them.
+_DESIGN_LIFECYCLE_SUBDIRS = ("proposals", "tasks", "archived")
 
 
 def resolve_local_design_dir_for(project_dir: str) -> Path:

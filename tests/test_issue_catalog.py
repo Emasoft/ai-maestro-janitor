@@ -52,8 +52,15 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         cached.cache_clear()
 
 
-def _proposals(project: Path) -> list[Path]:
+def _cards(project: Path) -> list[Path]:
+    """EVERY card in design/proposals/, including `column: refused` ones (owner ruling 2026-09-24:
+    refused is a column, cards stay in proposals/)."""
     return sorted((project / "design" / "proposals").glob("TRDD-*.md"))
+
+
+def _proposals(project: Path) -> list[Path]:
+    """The OPEN proposals: cards in design/proposals/ that are not `column: refused`."""
+    return [p for p in _cards(project) if "column: refused" not in p.read_text(encoding="utf-8")]
 
 
 # --------------------------------------------------------------------------- #
@@ -244,9 +251,12 @@ def test_a_finding_that_CLEARS_withdraws_its_proposal(project: Path) -> None:
     uid = issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo")
 
     assert uid == r.trdd
-    assert _proposals(project) == [], "the withdrawn proposal must leave design/proposals/"
-    refused = sorted((project / "design" / "refused").glob("TRDD-*.md"))
-    assert len(refused) == 1, "it is KEPT, never deleted — it is a record of what the janitor saw"
+    # Owner ruling 2026-09-24 (janitor#309/#329): no design/refused/ zone — the card STAYS in
+    # proposals/ and only its column changes.
+    assert not (project / "design" / "refused").exists(), "the abolished zone must not be created"
+    refused = _cards(project)
+    assert len(refused) == 1, "it is KEPT in place, never deleted — a record of what the janitor saw"
+    assert r.trdd in refused[0].name
     text = refused[0].read_text(encoding="utf-8")
     assert "column: refused" in text
     assert "WITHDRAWN BY THE JANITOR" in text
@@ -255,30 +265,26 @@ def test_a_finding_that_CLEARS_withdraws_its_proposal(project: Path) -> None:
 
 def test_a_manually_refused_proposal_is_not_re_proposed(project: Path) -> None:
     """janitor#99 / #131 class: a human verified a proposal was a false positive and moved it to
-    design/refused/ (NOT via the janitor's own retract()). The exact same finding recurring on the
+    `column: refused` in proposals/ (NOT via the janitor's own retract()). The exact same finding recurring on the
     next scan must NOT mint a fresh proposal under a new id — that re-derives an answer already on
     disk and burns a full review every time, which is the recurrence measured live in #99."""
     issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
     assert len(_proposals(project)) == 1
 
-    # Simulate a human's manual disposition: move proposal -> refused, record a verification, but
+    # Simulate a human's manual disposition: set column refused IN PLACE, record a verification, but
     # do NOT write the janitor's own auto-retract marker (that marker means "the condition vanished
     # on its own", a different fact from "a human looked and said no").
     proposal_path = _proposals(project)[0]
     text = proposal_path.read_text(encoding="utf-8")
-    refused_dir = project / "design" / "refused"
-    refused_dir.mkdir(parents=True, exist_ok=True)
     refused_text = text.replace("column: proposal", "column: refused") + (
         "\n## Approval log\n\n- 2026-08-01: verified against the live repo — a ruleset IS attached; "
         "false positive. Refused by the user.\n"
     )
-    (refused_dir / proposal_path.name).write_text(refused_text, encoding="utf-8")
-    proposal_path.unlink()
-    assert _proposals(project) == []
+    proposal_path.write_text(refused_text, encoding="utf-8")
 
     again = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW + 300)
 
-    assert _proposals(project) == [], "a refused finding must not re-mint a proposal"
+    assert _cards(project) == [proposal_path], "a refused finding must not re-mint a proposal"
     # The suppression is REPORTED, not merely silent (merged from #203): `trdd` names the refused
     # card that settled it, and the EMPTY COMMAND is what marks the outcome as suppressed — a real
     # proposal always carries an approve command. This assertion used to demand `trdd == ""`, which
@@ -288,7 +294,8 @@ def test_a_manually_refused_proposal_is_not_re_proposed(project: Path) -> None:
         "the suppressed outcome must cite the refused card, so a reader can find the verdict"
     )
     assert not again.line, "a settled verdict surfaces NOTHING per fire — no re-litigation"
-    assert len(list(refused_dir.glob("TRDD-*.md"))) == 1, "the human's refusal record is untouched"
+    assert proposal_path.read_text(encoding="utf-8") == refused_text, "the human's refusal record is untouched"
+    assert not (project / "design" / "refused").exists()
 
 
 def test_an_auto_retracted_finding_CAN_be_re_proposed(project: Path) -> None:
@@ -298,11 +305,11 @@ def test_an_auto_retracted_finding_CAN_be_re_proposed(project: Path) -> None:
     r = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
     uid = issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo")
     assert uid == r.trdd
-    assert _proposals(project) == []
+    assert len(_cards(project)) == 1  # the withdrawn card stays, as column: refused
 
     again = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW + 300)
 
-    assert len(_proposals(project)) == 1, "a vanished-then-recurring finding proposes again"
+    assert len(_cards(project)) == 2, "a vanished-then-recurring finding proposes again (old card kept)"
     assert again.trdd and again.trdd != r.trdd, "under a NEW id, per retract()'s own documented contract"
 
 
@@ -778,7 +785,7 @@ def test_the_incident_ticket_now_renders_a_READABLE_title(project: Path) -> None
 def test_retract_stamps_column_refused_even_when_the_proposal_was_BLOCKED(project: Path) -> None:
     """A proposal can be sitting at `column: blocked` when its finding vanishes. The stamp used to
     match only `^column: proposal$`, so such a card landed in `design/refused/` still asserting
-    `column: blocked` — the folder and the column contradicting each other, silently, because
+    `column: blocked` — the card and its column contradicting each other, silently, because
     `re.sub` returns the string unchanged on no-match. Reported by a peer agent from another repo
     2026-08-29."""
     r = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
@@ -790,7 +797,7 @@ def test_retract_stamps_column_refused_even_when_the_proposal_was_BLOCKED(projec
 
     assert issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo") == r.trdd
 
-    refused = list((project / "design" / "refused").glob("*.md"))
+    refused = _cards(project)
     assert len(refused) == 1
     assert "column: refused" in refused[0].read_text(encoding="utf-8")
     assert "column: blocked" not in refused[0].read_text(encoding="utf-8")
@@ -812,6 +819,45 @@ def test_retract_stamps_ONLY_the_frontmatter_column_not_a_board_census_in_the_bo
 
     issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo")
 
-    body = list((project / "design" / "refused").glob("*.md"))[0].read_text(encoding="utf-8")
+    body = _cards(project)[0].read_text(encoding="utf-8")
     assert "column: refused" in body
     assert "column: complete    197" in body, "the body census must survive verbatim"
+
+
+def test_retract_never_creates_a_refused_folder_nor_removes_the_original(project: Path) -> None:
+    """janitor#309/#329: the withdrawal path used to write design/refused/<card> and unlink the
+    committed proposals/ original. Now the same file stays at the same path, column changed only."""
+    r = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    original = _proposals(project)[0]
+
+    assert issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo") == r.trdd
+
+    assert original.is_file(), "the original proposal file must still exist at its path"
+    assert not (project / "design" / "refused").exists()
+    assert "column: refused" in original.read_text(encoding="utf-8")
+
+
+def test_retract_leaves_a_human_refused_card_byte_identical(project: Path) -> None:
+    """janitor#329: a card already `column: refused` carries a human verdict; the WITHDRAWN
+    boilerplate ("No human declined this") must never be written over it."""
+    issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    prop = _proposals(project)[0]
+    text = prop.read_text(encoding="utf-8").replace("column: proposal", "column: refused") + (
+        "\nREFUSED — FALSE POSITIVE. Terminal.\n"
+    )
+    prop.write_text(text, encoding="utf-8")
+
+    assert issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo") is None
+
+    assert prop.read_text(encoding="utf-8") == text
+    assert "WITHDRAWN BY THE JANITOR" not in text
+    assert not (project / "design" / "refused").exists()
+
+
+def test_a_refused_card_is_not_reminded_about_as_pending(project: Path) -> None:
+    """A `column: refused` card stays in proposals/ but is not awaiting approval."""
+    issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    assert len(ticket_proposal.pending()) == 1
+    prop = _proposals(project)[0]
+    prop.write_text(prop.read_text(encoding="utf-8").replace("column: proposal", "column: refused"), encoding="utf-8")
+    assert ticket_proposal.pending() == []

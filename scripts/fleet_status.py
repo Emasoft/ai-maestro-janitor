@@ -454,7 +454,7 @@ def _recovery_rollup() -> str:
 # The kanban columns, in lifecycle order. The first is the proposal stage, the
 # middle is the TRDD v2 pipeline (the 15+ statuses), and the tail is the terminal
 # / exception lanes. The source FOLDER pins the super-column (proposals→proposal,
-# refused→refused, archived→archived); design/tasks/ uses each TRDD's own column.
+# archived→archived; a proposals/ card with `column: refused` shows as refused); design/tasks/ uses each TRDD's own column.
 _KANBAN_ORDER = (
     "proposal", "backburner", "todo", "design", "dispatch", "dev", "testing",
     "ai_review", "human_review", "complete", "publish", "published", "deploy",
@@ -485,7 +485,7 @@ _KANBAN_COLTIP = {
     "failed": "Terminal: abandoned with a post-mortem",
     "superseded": "Terminal: replaced by split/group children",
     "cancelled": "Withdrawn — the work is no longer wanted",
-    "refused": "A proposal that was NEVER approved (design/refused/)",
+    "refused": "A proposal not approved to become a task; stays in design/proposals/ and may be improved and re-proposed",
     "archived": "Once-approved, now terminal (design/archived/)",
 }
 
@@ -547,10 +547,9 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
     # board (the 3-pillars spec is explicit: columns and transitions are identical, scope is
     # a filter). `trdd_common` resolves each lifecycle folder in PROJECT (honoring
     # TRDD_PATH) and LOCAL (`~/.claude/projects/<slug>/design/`).
-    folders = {
-        "tasks": None, "proposals": "proposal",
-        "archived": "archived", "refused": "refused",
-    }
+    # No "refused" folder: owner ruling 2026-09-24 (janitor#309/#329) — refused is a `column:`
+    # value on a card that stays in proposals/, so it is read from the card below.
+    folders = {"tasks": None, "proposals": "proposal", "archived": "archived"}
     for folder, forced in folders.items():
         for scope, f in trdd_common.trdd_files(folder, top):
             try:
@@ -568,7 +567,7 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
             # A genuinely MISSING column falls back to `todo`, not `backburner`: `todo` forces
             # the next agent to evaluate the task, where `backburner` quietly buries it
             # (3P-TRDD-11).
-            col = forced or fm.get("column") or trdd_common.V1_PIPELINE_STATUS_TO_COLUMN.get(
+            col = ("refused" if fm.get("column") == "refused" else forced) or fm.get("column") or trdd_common.V1_PIPELINE_STATUS_TO_COLUMN.get(
                 trdd_common.norm_state(fm.get("status", "")), "todo"
             )
             # full uuid: prefer frontmatter trdd-id; else the 8-hex from the filename.

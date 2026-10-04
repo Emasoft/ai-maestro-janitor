@@ -639,7 +639,13 @@ def _catalog_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _proposals(project: Path) -> list[Path]:
-    return sorted((project / "design" / "proposals").glob("TRDD-*.md"))
+    """OPEN proposals: a withdrawn card stays in proposals/ as `column: refused` (owner ruling
+    2026-09-24, janitor#309/#329), so it is not counted as open."""
+    return [
+        p
+        for p in sorted((project / "design" / "proposals").glob("TRDD-*.md"))
+        if "column: refused" not in p.read_text(encoding="utf-8")
+    ]
 
 
 def test_dedupe_key_is_stable_when_an_unrelated_edit_shifts_the_line(
@@ -740,7 +746,12 @@ def test_an_old_line_keyed_proposal_is_withdrawn_on_the_next_reconcile(
     assert withdrawn == [opened.trdd], (
         f"the old-format proposal must be withdrawn by the new-format reconcile pass: {withdrawn!r}"
     )
-    assert _proposals(_catalog_project) == [], "the stale proposal must have left design/proposals/"
+    assert _proposals(_catalog_project) == [], "the stale proposal must no longer be open"
+    kept = list((_catalog_project / "design" / "proposals").glob("TRDD-*.md"))
+    assert len(kept) == 1 and "column: refused" in kept[0].read_text(encoding="utf-8"), (
+        "the withdrawn card stays in design/proposals/ as column: refused"
+    )
+    assert not (_catalog_project / "design" / "refused").exists()
 
 
 def test_dedupe_where_fails_fast_on_an_empty_matched_span(_catalog_project: Path) -> None:

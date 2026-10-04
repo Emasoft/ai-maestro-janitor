@@ -263,7 +263,13 @@ def test_workflow_run_pwn_checkout_critical_rides_heartbeat(tmp_path: Path) -> N
 
 
 def _proposals(project_dir: Path) -> list[Path]:
-    return sorted((project_dir / "design" / "proposals").glob("TRDD-*.md"))
+    """OPEN proposals: a withdrawn card stays in proposals/ as `column: refused` (owner ruling
+    2026-09-24, janitor#309/#329), so it is not counted as open."""
+    return [
+        p
+        for p in sorted((project_dir / "design" / "proposals").glob("TRDD-*.md"))
+        if "column: refused" not in p.read_text(encoding="utf-8")
+    ]
 
 
 def test_a_finding_proposes_a_fix_with_the_approval_command(tmp_path: Path) -> None:

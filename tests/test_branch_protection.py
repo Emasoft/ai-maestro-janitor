@@ -211,10 +211,17 @@ def test_dedupe_then_rearm(tmp_path: Path) -> None:
     assert len(list(proposals.glob("TRDD-*.md"))) == 1, "a recurring finding must not stack proposals"
 
     assert _run(repo, protected).stdout == ""                   # protected: silent…
-    assert list(proposals.glob("TRDD-*.md")) == [], "…and the stale proposal must LEAVE the board"
+    # Owner ruling 2026-09-24 (janitor#309/#329): the withdrawn card STAYS in proposals/ as
+    # `column: refused` (no refused/ folder, original never deleted) — it just stops being open.
+    kept = list(proposals.glob("TRDD-*.md"))
+    assert len(kept) == 1 and "column: refused" in kept[0].read_text(encoding="utf-8"), (
+        "…and the stale proposal must stop being OPEN (column: refused, file kept)"
+    )
+    assert not (project_dir / "design" / "refused").exists()
 
     again = _run(repo)
     assert "BRPROT-001" in again.stdout, again.stderr                # regression: re-alerts
+    assert len(list(proposals.glob("TRDD-*.md"))) == 2, "a NEW proposal beside the withdrawn card"
 
 
 def test_disabled_env_silent(tmp_path: Path) -> None:

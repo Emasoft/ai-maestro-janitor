@@ -40,9 +40,10 @@ import trdd_common  # noqa: E402
 
 _ID_RE = re.compile(r"^(?:TRDD-)?([A-Z0-9]{8})$", re.IGNORECASE)
 
-# The marker `retract()` writes into a card it moves to `design/refused/` because the FINDING
-# CLEARED — as opposed to a human moving the card there because they judged the premise FALSE.
-# The two populations share a folder but mean opposite things for re-proposal: a withdrawn card
+# The marker `retract()` writes into a card it sets to `column: refused` because the FINDING
+# CLEARED — as opposed to a human setting that column because they judged the premise FALSE.
+# (No `design/refused/` folder exists: owner ruling 2026-09-24, janitor#309/#329.)
+# The two populations share a column but mean opposite things for re-proposal: a withdrawn card
 # explicitly promises "if the same condition reappears, the janitor proposes it again", while a
 # human refusal is a settled verdict that must NOT be re-litigated every heartbeat
 # (ai-maestro-plugins#15). One constant, used by both the writer and the scanner, so the
@@ -105,7 +106,9 @@ def _new_trdd_id(project_dir: str | None = None) -> str:
 
     alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     taken = set()
-    for folder in ("proposals", "tasks", "archived", "refused"):
+    # No "refused" zone: the owner abolished design/refused/ on 2026-09-24 (janitor#309, #329) —
+    # a refused card is `column: refused` inside proposals/, so proposals/ already covers it.
+    for folder in ("proposals", "tasks", "archived"):
         for _scope, path in trdd_common.trdd_files(folder, project_dir):
             uid = trdd_common.extract_uid(path.name)
             if uid:
@@ -164,7 +167,7 @@ def _prior_refusal_note(prior: tuple[str, str] | None) -> str:
     when = f" on {date}" if date else ""
     return (
         f"\n**⚠ A prior proposal under this SAME dedupe key was REFUSED{when}"
-        f" (TRDD-{uid}, in `design/refused/`).** This proposal exists again because the recorded"
+        f" (TRDD-{uid}, `column: refused` in `design/proposals/`).** This proposal exists again because the recorded"
         " evidence has CHANGED since that refusal. Read the refused card's verdict FIRST, then"
         " judge the new evidence on its own merits — do not approve on the title alone.\n"
     )
@@ -193,7 +196,7 @@ def propose(
     Returns None only when there is nothing to propose: the kind is not PROJECT-domain, the finding is
     ALREADY an open ticket (approved — the queue owns it now), or no design root can be resolved.
 
-    A HUMAN-REFUSED proposal (a card in `design/refused/` with the same dedupe key that `retract()`
+    A HUMAN-REFUSED proposal (a `design/proposals/` card with `column: refused` and the same dedupe key that `retract()`
     did not write) suppresses re-proposal while its recorded evidence is unchanged: the refusal is a
     settled verdict, and re-surfacing it as a fresh approval request re-litigates it every 5 minutes
     (ai-maestro-plugins#15 — the second time around, the human approved a false-premise dispatch).
@@ -229,7 +232,10 @@ def propose(
             fm = _frontmatter(path.read_text(encoding="utf-8"))
         except OSError:
             continue
-        if fm.get("ticket-dedupe-key", "") == key:
+        # A `column: refused` card is NOT an open proposal: it is judged by the refusal scan below
+        # (human verdict suppresses, withdrawn card re-proposes). Owner ruling 2026-09-24,
+        # janitor#309/#329: refused is a column in proposals/, never a folder.
+        if fm.get("ticket-dedupe-key", "") == key and fm.get("column", "") != "refused":
             uid = trdd_common.extract_uid(path.name) or ""
             return (uid, f"/janitor-support-open-ticket TRDD-{uid}", False) if uid else None
     for t in tickets.load_all():
@@ -254,13 +260,19 @@ def propose(
     #     and skipped. A spoof through this narrower gate still only causes a re-proposal,
     #     which is the fail-open direction this whole scan deliberately fails toward.
     prior_refusal: tuple[str, str] | None = None  # most recent (uid, refused-on) with CHANGED evidence
-    for _scope, path in trdd_common.trdd_files("refused", project_dir):
+    # Keyed on `column: refused` over proposals/ — there is no design/refused/ folder (owner ruling
+    # 2026-09-24, janitor#309/#329); a folder walk would miss every refused card on the board.
+    for _scope, path in trdd_common.trdd_files("proposals", project_dir):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         fm = _frontmatter(text)
-        if fm.get("ticket-dedupe-key", "") != key or _WITHDRAWN_LINE_RE.search(text):
+        if (
+            fm.get("column", "") != "refused"
+            or fm.get("ticket-dedupe-key", "") != key
+            or _WITHDRAWN_LINE_RE.search(text)
+        ):
             continue
         refused_uid = trdd_common.extract_uid(path.name) or ""
         refused_on = (fm.get("updated", "") or fm.get("created", ""))[:10]
@@ -426,6 +438,10 @@ def pending(project_dir: str | None = None) -> list[Pending]:
             continue
         if fm.get("ticket-kind", "") not in tickets.KIND_REGISTRY:
             continue  # not a ticket proposal — a hand-written TRDD in the same folder
+        if fm.get("column", "") == "refused":
+            # Refused cards now stay in proposals/ (owner ruling 2026-09-24, janitor#309/#329);
+            # they are NOT awaiting approval, so must not be reminded about.
+            continue
         uid = trdd_common.extract_uid(path.name) or ""
         if not uid:
             continue
@@ -451,38 +467,36 @@ def retract(dedupe_key: str, project_dir: str | None = None, now: int | None = N
     restored. Left alone, the board fills with proposals for problems that no longer exist, which is
     worse than an empty board: it trains its reader to stop trusting the board at all.
 
-    It moves to `design/refused/` because the lineage rule keys on ONE question — *was it ever
-    approved?* This one never was, so it never entered the pipeline and can never be `archived`. But
-    the body says plainly that the JANITOR withdrew it because the finding is gone; `refused` normally
-    means a human declined, and that is a materially different fact about the user's judgement, so it
-    must not be left to be misread from the folder alone.
+    The card STAYS in `design/proposals/` and only its `column:` becomes `refused` (owner ruling
+    2026-09-24, janitor#309/#329: refused is a column, there is no `design/refused/` zone, and the
+    file is never moved or deleted). The body says plainly that the JANITOR withdrew it because the
+    finding is gone; `refused` normally means a human declined, a materially different fact about the
+    user's judgement, so the marker line is what tells the two apart.
 
-    An APPROVED finding is never retracted here. Once the ticket exists the queue owns it, and only
-    the agent working it may close it — a detector deciding a ticket is moot mid-repair would race the
-    agent doing the repair.
+    A card that is ALREADY `column: refused` is never touched: that is a human verdict (or an earlier
+    withdrawal), and rewriting it would overwrite the verdict with "No human declined this"
+    (janitor#329). An APPROVED finding is never retracted here either. Once the ticket exists the
+    queue owns it, and only the agent working it may close it — a detector deciding a ticket is moot
+    mid-repair would race the agent doing the repair.
     """
     key = _dedupe_key(dedupe_key)
     if not key:
         return None
     found = None
-    for scope, path in trdd_common.trdd_files("proposals", project_dir):
+    for _scope, path in trdd_common.trdd_files("proposals", project_dir):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        if _frontmatter(text).get("ticket-dedupe-key", "") == key:
-            found = (scope, path, text)
+        fm = _frontmatter(text)
+        if fm.get("ticket-dedupe-key", "") == key and fm.get("column", "") != "refused":
+            found = (path, text)
             break
     if found is None:
         return None
-    scope, path, text = found
+    path, text = found
 
     uid = trdd_common.extract_uid(path.name) or ""
-    refused = trdd_common.scope_folder(scope, "refused", project_dir)
-    if refused is None:
-        return None
-    refused.mkdir(parents=True, exist_ok=True)
-
     ts = int(time.time()) if now is None else int(now)
     iso = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ts))
     # `count=1` targets the FRONTMATTER column and nothing else: frontmatter is the first thing in
@@ -492,21 +506,16 @@ def retract(dedupe_key: str, project_dir: str | None = None, now: int | None = N
     #
     # Matching ANY value, not just `proposal`: a proposal can sit at `column: blocked` when it is
     # withdrawn, and the old `^column: proposal$` pattern simply did not match it — leaving the card
-    # in `design/refused/` still asserting `column: blocked`, i.e. the folder and the column
-    # contradicting each other. Reported from another repo by a peer agent 2026-08-29 and confirmed
-    # here; `re.sub` returning the string unchanged on no-match is what made it silent.
+    # still asserting `column: blocked`. `re.sub` returning the string unchanged on no-match is what
+    # made it silent.
     out = re.sub(r"(?m)^column: .*$", "column: refused", text, count=1)
     out = re.sub(r"(?m)^updated: .*$", f"updated: {iso}", out)
     out = out.replace(
         "**PROPOSED BY THE JANITOR — awaiting approval. NOT authorized to execute.**",
         f"**{_WITHDRAWN_MARKER} — the finding is GONE. No human declined this.**\n\n"
         f"The condition this proposal described is no longer detectable as of {time.strftime('%Y-%m-%d', time.localtime(ts))} "
-        "(fixed by hand, or it was transient). It is kept as a record, never deleted. If the same "
-        "condition reappears, the janitor proposes it again with a NEW id — this one is closed.",
+        "(fixed by hand, or it was transient). It is kept in place as a record, never deleted or moved. "
+        "If the same condition reappears, the janitor proposes it again with a NEW id — this one is closed.",
     )
-    state.atomic_write(refused / path.name, out)
-    try:
-        path.unlink()
-    except OSError:
-        pass
+    state.atomic_write(path, out)
     return uid or None

@@ -201,14 +201,16 @@ def test_local_design_no_longer_shares_a_slug_dir_with_local_memory(tmp_path: Pa
 
 
 def test_local_mirrors_the_repo_design_folders(tmp_path: Path) -> None:
-    """LOCAL carries the SAME four lifecycle folders as the repo's design/, plus the two
+    """LOCAL carries the SAME three lifecycle folders as the repo's design/, plus the two
     non-task folders (`requirements/`, `specs/`) that have no lifecycle of their own —
-    mirroring the whole dir is what avoids tasks/tasks/."""
+    mirroring the whole dir is what avoids tasks/tasks/. No `refused/` folder: owner ruling
+    2026-09-24 (janitor#309/#329), refused is a column."""
     root = _project(tmp_path)
     created = trdd_common.ensure_local_design(str(root))
-    for folder in ("proposals", "tasks", "archived", "refused", "requirements", "specs"):
+    for folder in ("proposals", "tasks", "archived", "requirements", "specs"):
         assert (created / folder).is_dir(), f"LOCAL design must carry {folder}/"
-    assert trdd_common.DESIGN_FOLDERS == ("proposals", "tasks", "archived", "refused")
+    assert not (created / "refused").exists()
+    assert trdd_common.DESIGN_FOLDERS == ("proposals", "tasks", "archived")
     assert trdd_common.NON_TASK_FOLDERS == ("requirements", "specs")
 
 
