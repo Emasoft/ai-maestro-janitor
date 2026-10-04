@@ -22,7 +22,7 @@ eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ]
 
 # Janitor clear keeps what native compaction keeps and resumes in one push
 
-# Make the OAuth rotator work, and make a janitor /clear resume in one push with nothing lost
+## Make the OAuth rotator work, and make a janitor /clear resume in one push with nothing lost
 
 ## Context
 

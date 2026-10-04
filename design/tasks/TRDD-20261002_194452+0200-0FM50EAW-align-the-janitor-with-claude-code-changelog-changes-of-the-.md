@@ -22,8 +22,8 @@ project-id: ai-maestro-janitor
 
 ## User instruction (verbatim, 2026-10-02)
 > update the project to align and take advantage of the following recent changes (from 30 days ago till now) of claude code:
->   https://code.claude.com/docs/en/changelog.md
->   Be sure to delegate. fan out subagents. use tldr-code skill, fastedit skill, jgrep skill and quicksilver skill to save tokens.
+> https://code.claude.com/docs/en/changelog.md
+> Be sure to delegate. fan out subagents. use tldr-code skill, fastedit skill, jgrep skill and quicksilver skill to save tokens.
 
 ## Scope
 Window: Claude Code releases from 2026-09-02 to 2026-10-02. For each changelog entry decide: affects janitor (hooks, cron/CronCreate, SessionStart/clear, plugin cache/update, keychain/OAuth, compaction, subagents, settings), opportunity to adopt, or not relevant. Prior knowledge: wikimem page project_janitor_cc_changelog_currency in .claude/project/memory.

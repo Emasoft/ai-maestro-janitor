@@ -1115,8 +1115,8 @@ prefiltered, and there is NO result cap unless the caller passes `--top N` (the 
 behind the verb is that no memory may be missed because of a cap). `status: superseded` atoms are
 scored BY DEFAULT (status is history, not relevance); `--no-superseded` excludes them. Output
 layers follow `--output <basic|medium|full>` with the same lesson/keyword resolution switches as
-`recall`. COST + PRIVACY are part of the contract: every scored atom's full text (desc + keywords
-+ body + resolved lessons) is SENT to the scoring backend per query — billed per atom, with the
+`recall`. COST + PRIVACY are part of the contract: every scored atom's full text (desc + keywords +
+body + resolved lessons) is SENT to the scoring backend per query — billed per atom, with the
 persistent `(query, atom)` score cache making reruns free; `--no-cache` re-scores and writes
 nothing. The backend resolves via `$JEV_API`, overridable per call with `--api
 <typesafe|openrouter|gateway>` and `--model <MODEL>`; a gateway backend (`$JEV_GATEWAY_URL`)

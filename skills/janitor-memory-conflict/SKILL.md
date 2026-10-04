@@ -172,7 +172,7 @@ uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" c
   - [Execution context and what this is](references/conflict-background.md#execution-context-and-what-this-is)
   - [Scope](references/conflict-background.md#scope)
   - [EXIT / SUCCESS / idempotency contract](references/conflict-background.md#exit-success-idempotency-contract)
-  - [What `--op merge` enforces at commit](references/conflict-background.md#what---op-merge-enforces-at-commit)
+  - [What `merge-mem-topic` enforces](references/conflict-background.md#what-merge-mem-topic-enforces)
 - [conflict-protocol](references/conflict-protocol.md) — preconditions, the per-pair
   pipeline stages, the lesson form, why a same-slug edit fails, security and scope.
   - [Preconditions — verify BEFORE doing any work](references/conflict-protocol.md#preconditions-verify-before-doing-any-work)

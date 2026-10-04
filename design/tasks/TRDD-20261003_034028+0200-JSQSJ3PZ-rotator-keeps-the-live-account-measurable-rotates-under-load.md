@@ -22,7 +22,7 @@ eht: [3OS6AXV3, HSRERK5S]
 
 # Rotator keeps the live account measurable, rotates under load, and warns before the wall
 
-# Make the OAuth rotator work, and make a janitor /clear resume in one push with nothing lost
+## Make the OAuth rotator work, and make a janitor /clear resume in one push with nothing lost
 
 ## Context
 

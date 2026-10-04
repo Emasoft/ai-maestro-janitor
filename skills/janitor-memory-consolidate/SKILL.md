@@ -214,7 +214,7 @@ uv run --script --quiet "$CLAUDE_PLUGIN_ROOT/scripts/memory_dispatch_claim.py" c
   bounds/safety, recording an abstain.
   - [No-third-page check (pre-merge)](references/merge-protocol.md#no-third-page-check-pre-merge)
   - [Claim exit codes](references/merge-protocol.md#claim-exit-codes)
-  - [The two-phase transaction contract](references/merge-protocol.md#the-memgrep-verb-contract-no-staged-copies-no-hand-edits)
+  - [The memgrep verb contract (no staged copies, no hand edits)](references/merge-protocol.md#the-memgrep-verb-contract-no-staged-copies-no-hand-edits)
   - [What is_legal_merge checks](references/merge-protocol.md#what-is_legal_merge-checks-your-pre-flight-not-the-verbs)
   - [What the merge write gate refuses](references/merge-protocol.md#what-the-merge-write-gate-refuses-the-failure-catalog)
   - [Why backlink redirect is the load-bearing step](references/merge-protocol.md#why-backlink-redirect-is-the-load-bearing-step)
