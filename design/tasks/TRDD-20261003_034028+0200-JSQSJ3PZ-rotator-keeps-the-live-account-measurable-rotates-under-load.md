@@ -1,10 +1,10 @@
 ---
 trdd-id: JSQSJ3PZ
 title: Rotator keeps the live account measurable, rotates under load, and warns before the wall
-column: dev
+column: testing
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-04T11:05:46+0200
+updated: 2026-10-04T20:11:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -322,6 +322,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 - 2026-10-03T03:40:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:25:09+0200 — column → dev by main-agent@ai-maestro-janitor.
 - 2026-10-03T06:25:10+0200 — column → dev by main-agent@ai-maestro-janitor. children in dev/testing
+- 2026-10-04T20:11:30+0200 — column → testing. Umbrella: no code is being written on it. Release-1 code shipped in 3.7.0; all four prerequisite cards are in testing. It waits on the rotator field acceptance on this machine and stays open until release 2 (its effects cards 3OS6AXV3 and the parked HSRERK5S). testing is not terminal, so the stays-open ruling holds.
 
 ## STATE
 

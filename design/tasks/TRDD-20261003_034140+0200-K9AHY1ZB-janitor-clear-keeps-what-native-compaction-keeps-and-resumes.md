@@ -1,10 +1,10 @@
 ---
 trdd-id: K9AHY1ZB
 title: Janitor clear keeps what native compaction keeps and resumes in one push
-column: dev
+column: testing
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-04T11:05:47+0200
+updated: 2026-10-04T20:11:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -321,6 +321,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 
 - 2026-10-03T03:41:40+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:25:15+0200 — column → dev by main-agent@ai-maestro-janitor. children in dev/testing
+- 2026-10-04T20:11:30+0200 — column → testing. Umbrella: no code is being written on it. Release-1 code shipped in 3.7.0; both prerequisite cards (5MOX0FPO, DS3WDTPV) are in testing. It waits on the clear-chain field acceptance and stays open until release 2 (parked effects cards 7X9WXDK9, B3PY3HV7, MMUSDJHQ). testing is not terminal, so the stays-open ruling holds.
 
 ## STATE
 
