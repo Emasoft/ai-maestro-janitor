@@ -113,9 +113,12 @@ mod tests {
         let fixed = fix(Path::new(P), &before).expect("fixed");
         // (a) literal
         assert_eq!(fixed, page("\"alpha / beta / gamma / delta\""));
-        // (b) lossless: surviving phrases are the unique set of the old ones
-        let old = page_description_phrases("alpha / beta / Alpha / gamma ; BETA / delta");
-        assert_eq!(page_description_phrases("alpha / beta / gamma / delta"), unique_phrases(&old));
+        // (b) lossless: phrases parsed from the OUTPUT are the unique set of those parsed from the INPUT
+        let desc = |t: &str| {
+            let l = t.lines().find(|l| l.starts_with("description:")).expect("description line");
+            page_description_phrases(l["description:".len()..].trim().trim_matches('"'))
+        };
+        assert_eq!(desc(&fixed), unique_phrases(&desc(&before)));
         // (c) oracle
         assert!(!has_code(Path::new(P), &fixed, CODE));
     }
@@ -124,6 +127,7 @@ mod tests {
     fn idempotent_and_none_when_no_repeats() {
         let fixed = fix(Path::new(P), &page("a b / c d / a b / e f / g h")).unwrap();
         assert_eq!(fix(Path::new(P), &fixed), None);
+        assert_eq!(fix(Path::new(P), &page("a b / c d / e f / g h")), None);
     }
 
     #[test]
@@ -155,13 +159,16 @@ mod tests {
         assert_eq!(fix(Path::new(P), t), None);
     }
 
+
     #[test]
     fn single_quoted_value_is_fixed_correctly_or_refused() {
+        // WHY: lint keeps the single quotes inside the first phrase ('a b != a b), so it reports no
+        // duplicate here and the fixer must leave the page alone.
         let before = page("'a b / c d / a b / e f'");
-        if let Some(f) = fix(Path::new(P), &before) {
-            assert_eq!(f, page("'a b / c d / e f'"));
-        }
+        assert!(!has_code(Path::new(P), &before, CODE));
+        assert_eq!(fix(Path::new(P), &before), None);
     }
+
 
     #[test]
     fn crlf_non_ascii_and_dots_terminator() {
@@ -169,7 +176,7 @@ mod tests {
         let fixed = fix(Path::new(P), &before).expect("fixed");
         assert_eq!(fixed, page("\"école / x y / z w\"").replace('\n', "\r\n"));
         let dots = page("\"a b / c d / a b / e f\"").replace("\n---\n# p", "\n...\n# p");
-        assert!(fix(Path::new(P), &dots).is_some());
+        let fixed = fix(Path::new(P), &dots).expect("fixed");
+        assert_eq!(fixed, page("\"a b / c d / e f\"").replace("\n---\n# p", "\n...\n# p"));
     }
-
 }
