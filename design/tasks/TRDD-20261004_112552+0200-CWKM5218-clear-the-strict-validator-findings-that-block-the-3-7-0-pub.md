@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: dev
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-04T11:25:52+0200
+updated: 2026-10-04T11:28:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T11:25:52+0200
+implementation-commits: [676dc799, 00bb2762, 65d376ae]
 ---
 
 # Clear the strict-validator findings that block the 3.7.0 publish
