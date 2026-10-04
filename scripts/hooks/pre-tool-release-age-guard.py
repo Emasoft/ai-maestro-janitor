@@ -115,11 +115,16 @@ _UA = "ai-maestro-janitor-release-age-guard (+https://github.com/Emasoft/ai-maes
 
 
 def _get_json(url: str) -> Any | None:
+    # bandit B310 flags urlopen because it accepts file:/ and custom schemes. This
+    # function receives its URL as an argument, so the scheme is checked here rather
+    # than trusted; http is allowed only because tests serve the registry locally.
+    if urllib.parse.urlsplit(url).scheme not in ("https", "http"):
+        return None
     try:
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # nosec B310 - scheme checked above
             url, headers={"User-Agent": _UA, "Accept": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=2.5) as resp:  # noqa: S310 — fixed https/test-local URLs
+        with urllib.request.urlopen(req, timeout=2.5) as resp:  # noqa: S310 # nosec B310 - scheme checked above
             return json.loads(resp.read().decode("utf-8", "replace"))
     except Exception:  # noqa: BLE001 — fail-open by design: a registry outage must never block a tool call
         return None

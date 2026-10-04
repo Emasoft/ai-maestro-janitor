@@ -316,6 +316,20 @@ def test_registry_outage_fails_open(registry_base: str) -> None:
     assert rc == 0 and out == {}
 
 
+
+def test_get_json_refuses_non_http_scheme(tmp_path: Path) -> None:
+    """A file: URL holding valid JSON is refused (it was readable before the scheme check)."""
+    import importlib.util
+
+    payload = tmp_path / "payload.json"
+    payload.write_text(json.dumps({"ok": True}))
+    spec = importlib.util.spec_from_file_location("release_age_guard_under_test", _HOOK)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._get_json(payload.as_uri()) is None
+
+
 def test_malformed_input_silent_allow() -> None:
     proc = subprocess.run(
         [str(_HOOK)],
