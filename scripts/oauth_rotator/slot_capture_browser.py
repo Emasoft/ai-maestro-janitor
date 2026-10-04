@@ -84,6 +84,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import rotator  # type: ignore[import-not-found]  # noqa: E402
+import rotator_alert  # noqa: E402  -- scripts/lib/rotator_alert.py (refusal marker, TRDD-0SU2C2IM)
 import tls_context  # noqa: E402  -- scripts/lib/tls_context.py (TRDD-X6I04SAO)
 
 # Constants VERBATIM from claude-login-automation/src/auth.ts (the working ref).
@@ -588,6 +589,13 @@ def capture(email: str, headless: bool) -> int:
         raw_code = _drive_browser(email, url, state, headless)
     except _ConsentRefused as refusal:
         print(refusal)  # nothing was clicked, no grant minted
+        # WHY a marker (TRDD-0SU2C2IM): this process is detached, so the launcher cannot read our
+        # exit code; the marker is how it learns the refusal (no launch charged, no relaunch every
+        # tick) and how the out-of-band alert learns which account the profile is signed in as.
+        # The account is parsed from the message `_consent_refusal` builds (None = unconfirmed).
+        wrong = re.search(r"is signed in as (\S+?);", str(refusal))
+        rotator_alert.record_capture_refused(
+            rotator.ROOT, email, wrong.group(1) if wrong else None, time.time())
         return EXIT_CONSENT_REFUSED
     if not raw_code:
         print("[capture] FAILED: no authorization code captured.")

@@ -70,6 +70,7 @@ import burn_gate  # noqa: E402  # scripts/oauth_rotator/burn_gate.py — pure fa
 import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
+import rotator_alert  # noqa: E402  # scripts/lib/rotator_alert.py — refused-capture marker (TRDD-0SU2C2IM)
 import safe_storage  # noqa: E402  # scripts/oauth_rotator/safe_storage.py — keychain_scope_args() lever (TRDD-K3WQ7XM9 FIX B)
 import tls_context  # noqa: E402  # scripts/lib/tls_context.py — verifying_context() (TRDD-X6I04SAO)
 import token_burn  # noqa: E402  # scripts/lib/token_burn.py — scoped_rotation_veto (TRDD-QE390SJA)
@@ -3318,8 +3319,24 @@ def _bootstrap_seeded_slots() -> list[str]:
         meta = (state.get("slots") or {}).get(email)
         rf = int(meta.get("refresh_failures", 0)) if isinstance(meta, dict) else 0
         attempts = int(meta.get("bootstrap_attempts", 0)) if isinstance(meta, dict) else 0
+        eligible = _bootstrap_eligible(has_refresh, has_session, refresh_failures=rf)
+        # WHY (TRDD-0SU2C2IM): a capture that REFUSED (profile signed in to another account) minted
+        # nothing, so it must not use up one of the MAX_BOOTSTRAP_LAUNCHES, and it must not be
+        # relaunched every tick either. The detached capture leaves a marker (rotator_alert); an
+        # unknown outcome leaves none and still counts as a launch (fail closed, as before).
+        refused = rotator_alert.fresh_refusal(ROOT, email, now) if eligible else None
+        if not eligible:
+            rotator_alert.clear_capture_refused(ROOT, email)  # recovered: the alert must end
+        if refused and isinstance(meta, dict):
+            # Refund once per refusal: only a marker newer than the last launch belongs to it, and
+            # `bootstrap_refused_ts` remembers it was already refunded.
+            if refused["ts"] >= meta.get("last_bootstrap_at", 0) and meta.get("bootstrap_refused_ts") != refused["ts"]:
+                attempts = max(0, attempts - 1)
+                meta["bootstrap_attempts"] = attempts
+                meta["bootstrap_refused_ts"] = refused["ts"]
+                changed = True
         action = _bootstrap_action(
-            eligible=_bootstrap_eligible(has_refresh, has_session, refresh_failures=rf),
+            eligible=eligible,
             auto_on=auto_on,
             attempts=attempts,
             max_launches=MAX_BOOTSTRAP_LAUNCHES,
@@ -3338,6 +3355,8 @@ def _bootstrap_seeded_slots() -> list[str]:
                 changed = True
             continue
         if action == "capped":  # already past the cap: stay silent, do not launch
+            continue
+        if refused:  # action == "launch" but the last capture was refused: wait out the cooldown
             continue
         try:  # action == "launch"
             if _invoke_slot_capture(email):  # True = LAUNCHED, False = skipped (already running)

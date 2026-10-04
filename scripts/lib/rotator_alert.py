@@ -108,6 +108,43 @@ def clear_auth_failed(root: Path) -> None:
     (root / AUTH_FAILED_NAME).unlink(missing_ok=True)
 
 
+
+# WHY a marker file (TRDD-0SU2C2IM): the capture is launched DETACHED, so the launcher never sees
+# its exit code; the capture itself knows when it refused (wrong account, nothing clicked), so it
+# leaves this marker in the rotator root for the launcher (no launch charged, no relaunch for
+# REFUSED_COOLDOWN_S) and for `active_conditions` (the out-of-band alert) to read.
+CAPTURE_REFUSED_PREFIX = "capture-refused."
+# WHY bounded time and not "until the account changes": the profile's signed-in account is only
+# observable by opening Chrome, which is the very launch being suppressed. 6 h caps the cost at one
+# visible window per slot per 6 h and the delay after the owner fixes the profile at 6 h.
+REFUSED_COOLDOWN_S = 6 * 3600
+
+
+def _refusal_path(root: Path, email: str) -> Path:
+    return root / f"{CAPTURE_REFUSED_PREFIX}{email.replace('/', '_')}.json"
+
+
+def record_capture_refused(root: Path, email: str, actual: Optional[str], now: float) -> None:
+    """Called by slot_capture_browser when it refuses to authorize: profile `email` is signed in
+    as `actual` (None = could not be confirmed). Holds names and a timestamp, never a token."""
+    root.mkdir(parents=True, exist_ok=True)
+    state.atomic_write(
+        _refusal_path(root, email),
+        json.dumps({"ts": int(now), "target": email, "actual": actual}),
+    )
+
+
+def fresh_refusal(root: Path, email: str, now: float) -> Optional[dict]:
+    """The refusal marker for `email` if younger than REFUSED_COOLDOWN_S, else None."""
+    marker = _read_json(_refusal_path(root, email))
+    ts = _epoch(marker.get("ts"))
+    return marker if ts is not None and 0 <= now - ts < REFUSED_COOLDOWN_S else None
+
+
+def clear_capture_refused(root: Path, email: str) -> None:
+    _refusal_path(root, email).unlink(missing_ok=True)
+
+
 def _tick_age(root: Path, now: float) -> float:
     # mtime of the stamp the rotator writes ONLY when a tick runs to completion (rotator.py
     # _stamp_tick_completed, atomic os.replace): a skipped or hung tick never moves it.
@@ -163,6 +200,19 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         and marker.get("live_exp") == live_exp
     ):
         out["auth-failed"] = AUTH_FAILED_ACTION
+    # WHY not gated on claude_running: a refused capture means a spare cannot be re-logged in, and
+    # the owner is the only one who can fix the profile; nothing else reports it (TRDD-0SU2C2IM).
+    for path in sorted(root.glob(f"{CAPTURE_REFUSED_PREFIX}*.json")):
+        marker = _read_json(path)
+        target = marker.get("target")
+        if not isinstance(target, str) or fresh_refusal(root, target, now) is None:
+            continue
+        actual = marker.get("actual")
+        out[f"capture-refused:{target}"] = (
+            f"profile {target} is signed in as {actual}; sign it in as {target}"
+            if isinstance(actual, str)
+            else f"profile {target} could not be confirmed as signed in; sign it in as {target}"
+        )
     return out
 
 

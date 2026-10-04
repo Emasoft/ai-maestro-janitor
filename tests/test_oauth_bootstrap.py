@@ -20,6 +20,7 @@ All real, NO mocks of the code under test:
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sqlite3
 import time
@@ -628,3 +629,64 @@ def test_invoke_slot_capture_refuses_denied_fixture_domain(
     # fail-open: a plausible real account still launches (the Popen recorder fires once).
     assert rotator._invoke_slot_capture("real@gmail.com") is True
     assert len(_FakePopen.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# A refused capture (profile signed in to another account), TRDD-0SU2C2IM
+# ---------------------------------------------------------------------------
+_SPARE_ADDR = "spare.person@users.noreply.github.com"
+_OTHER_ADDR = "other.person@users.noreply.github.com"
+
+
+def _refusal_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attempts: int) -> list[str]:
+    captured = _wire(tmp_path, monkeypatch, {_SPARE_ADDR: {"refresh": None, "session": 20.0, "ba": attempts}})
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    return captured
+
+
+def _attempts() -> int:
+    return rotator.load_state()["slots"][_SPARE_ADDR]["bootstrap_attempts"]
+
+
+def test_refused_capture_does_not_use_up_a_launch_and_is_not_relaunched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launch that ended in a refusal is refunded once, and the slot waits out the cooldown."""
+    captured = _refusal_setup(tmp_path, monkeypatch, attempts=2)
+    state = rotator.load_state()
+    state["slots"][_SPARE_ADDR]["last_bootstrap_at"] = int(time.time()) - 60
+    rotator.save_state(state)
+    rotator.rotator_alert.record_capture_refused(rotator.ROOT, _SPARE_ADDR, _OTHER_ADDR, time.time())
+    assert rotator._bootstrap_seeded_slots() == []
+    assert rotator._bootstrap_seeded_slots() == []  # next tick: still no relaunch, no second refund
+    assert captured == []
+    assert _attempts() == 1
+
+
+def test_refused_capture_raises_exactly_one_alert_naming_both_accounts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One out-of-band condition with the profile and the account it is signed in as."""
+    _refusal_setup(tmp_path, monkeypatch, attempts=1)
+    now = time.time()
+    rotator.rotator_alert.record_capture_refused(rotator.ROOT, _SPARE_ADDR, _OTHER_ADDR, now)
+    ra = rotator.rotator_alert
+    sent: list[list[str]] = []
+    assert ra.evaluate(rotator.ROOT, now=now, claude_running=False, runner=sent.append) == [f"capture-refused:{_SPARE_ADDR}"]
+    ra.evaluate(rotator.ROOT, now=now + 60, claude_running=False, runner=sent.append)
+    assert len(sent) <= 1  # debounced (none on a platform without the desktop channel)
+    alerts = json.loads((rotator.ROOT / ra.ALERT_NAME).read_text())["alerts"]
+    assert list(alerts) == [f"capture-refused:{_SPARE_ADDR}"]
+    assert alerts[f"capture-refused:{_SPARE_ADDR}"]["notified"] == 1
+    assert alerts[f"capture-refused:{_SPARE_ADDR}"]["action"] == (
+        f"profile {_SPARE_ADDR} is signed in as {_OTHER_ADDR}; sign it in as {_SPARE_ADDR}"
+    )
+
+
+def test_ordinary_failed_capture_still_uses_up_a_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No marker (unknown outcome): the launch stays counted, as before."""
+    captured = _refusal_setup(tmp_path, monkeypatch, attempts=0)
+    assert rotator._bootstrap_seeded_slots() == [_SPARE_ADDR]
+    assert captured == [_SPARE_ADDR]
+    assert _attempts() == 1
