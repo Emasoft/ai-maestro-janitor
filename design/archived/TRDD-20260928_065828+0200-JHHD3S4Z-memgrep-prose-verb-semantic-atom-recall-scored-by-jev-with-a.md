@@ -19,7 +19,7 @@ approval-datetime: 2026-09-28T06:58:28+0200
 
 # memgrep prose verb — semantic atom recall scored by Jev with a persistent query-atom score cache
 
-# memgrep prose — semantic atom recall via Jev
+## memgrep prose — semantic atom recall via Jev
 
 Owner directive 2026-09-28: add a memgrep verb that searches atoms by natural-language PROSE instead of key-phrase/metadata matching. Every atom in the wikimem is scored by Jev (jgrep's decision model: TypeSafe native / OpenRouter / gateway, key from env) with one yes/no question per atom; the verb prints ALL atoms above a 0.9 default threshold (-t overridable), keeping the existing grep conveniences: date filters, sorting, view modes (description / body / full atom incl. notes, superseded versions, lessons, references), scope selection (user/project/local), page/topic restriction.
 
