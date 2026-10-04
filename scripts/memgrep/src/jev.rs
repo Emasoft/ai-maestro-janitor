@@ -358,11 +358,10 @@ fn parse_answer(v: &serde_json::Value) -> Result<f64, String> {
                 }
             }
             // OpenRouter decision API: probability keyed by the decision type itself.
-            if let Some(serde_json::Value::String(t)) = map.get("type") {
-                if let Some(serde_json::Value::Number(n)) = map.get(t.as_str()) {
+            if let Some(serde_json::Value::String(t)) = map.get("type")
+                && let Some(serde_json::Value::Number(n)) = map.get(t.as_str()) {
                     return n.as_f64().ok_or_else(|| format!("non-finite {t}"));
                 }
-            }
             Err(format!(
                 "answer object lacks a probability field (tried probability/prob/p/score and type-keyed): {v}"
             ))
@@ -1159,7 +1158,7 @@ mod tests {
         // Point at the live server for the priming call.
         scorer.config.url = format!("http://127.0.0.1:{port}/v1/systemone");
         let c = chunk("a", "stable body text");
-        let first = ProseScorer::score(&scorer, "rain query", &[c.clone()]);
+        let first = ProseScorer::score(&scorer, "rain query", std::slice::from_ref(&c));
         assert_eq!(first[0].as_ref().unwrap(), &0.42);
         server.join().unwrap();
 

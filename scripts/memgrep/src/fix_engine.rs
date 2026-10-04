@@ -32,20 +32,19 @@ pub(crate) fn fix_page(
             let eligible = match rule.fix {
                 Fix::Safe => true,
                 Fix::Unsafe => allow_unsafe,
-                Fix::NoFix => false,
+                Fix::None => false,
             };
             if !eligible {
                 continue;
             }
-            if let Some(t) = f(path, &cur) {
-                if t != cur {
+            if let Some(t) = f(path, &cur)
+                && t != cur {
                     cur = t;
                     changed = true;
                     if !fixed.contains(&rule.code) {
                         fixed.push(rule.code);
                     }
                 }
-            }
         }
         if !changed {
             converged = true;
@@ -66,7 +65,7 @@ mod tests {
     static SAFE_A: Rule = rule("T-001", Fix::Safe);
     static SAFE_B: Rule = rule("T-002", Fix::Safe);
     static UNSAFE: Rule = rule("T-003", Fix::Unsafe);
-    static NOFIX: Rule = rule("T-004", Fix::NoFix);
+    static NOFIX: Rule = rule("T-004", Fix::None);
 
     fn a_to_b(_: &Path, t: &str) -> Option<String> {
         t.contains('a').then(|| t.replace('a', "b"))

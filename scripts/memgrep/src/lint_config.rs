@@ -159,7 +159,7 @@ pub(crate) fn is_enabled(cfg: &LintConfig, rule: &Rule, page: &Path) -> bool {
 
 pub(crate) fn is_fixable(cfg: &LintConfig, rule: &Rule) -> bool {
     match rule.fix {
-        Fix::NoFix => return false,
+        Fix::None => return false,
         Fix::Unsafe if !cfg.unsafe_fixes => return false,
         _ => {}
     }
@@ -273,7 +273,7 @@ mod tests {
     fn fixable_gating() {
         let safe = rule("WM-001", "a", Fix::Safe);
         let uns = rule("WM-002", "b", Fix::Unsafe);
-        let nof = rule("WM-003", "c", Fix::NoFix);
+        let nof = rule("WM-003", "c", Fix::None);
         let mut c = LintConfig::default();
         assert!(is_fixable(&c, &safe));
         assert!(!is_fixable(&c, &uns));

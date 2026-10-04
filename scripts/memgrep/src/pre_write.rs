@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 pub(crate) fn prepare(dest: &Path, proposed: &str) -> Result<()> {
     let blocked: Vec<_> = lint_page_text(dest, proposed, false)
         .into_iter()
-        .filter(|v| write_gate_blocks(v))
+        .filter(write_gate_blocks)
         .collect();
     if blocked.is_empty() {
         return Ok(());
@@ -155,7 +155,7 @@ fn enforce_id_rules(
         }
     }
     let mut refusals: Vec<String> = Vec::new();
-    for (id, _fp) in &old_union {
+    for id in old_union.keys() {
         if !new_union.contains_key(*id) && !policy.retired_ids.contains(*id) {
             refusals.push(format!(
                 "id-set rule: `{id}` is present on disk but absent from the proposed bytes and \
@@ -653,7 +653,7 @@ mod tests {
         let landed = std::fs::read_to_string(&written).unwrap();
         let blocking_written: Vec<&str> = lint_page_text(&written, &landed, false)
             .into_iter()
-            .filter(|v| write_gate_blocks(v))
+            .filter(write_gate_blocks)
             .map(|v| v.code)
             .collect();
         let refused: Vec<&str> = crate::memory::write_gate_floors()

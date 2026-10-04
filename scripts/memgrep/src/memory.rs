@@ -6903,7 +6903,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     // The message carries only the location and the byte's hex value, NEVER a content
     // snippet — a wikimem page can hold private material, and a lint finding is printed to
     // plain stdout.
-    if let Some((line, _col, _offset, cp)) = find_control_byte(&text) {
+    if let Some((line, _col, _offset, cp)) = find_control_byte(text) {
         violations.push(Violation {
             sev: Severity::Error,
             path: p.clone(),
@@ -6922,7 +6922,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     // Check 3 — required frontmatter fields. Read RAW frontmatter so a missing `lmd:` is NOT
     // masked by read_note's fs-mtime fallback. Accept the model's documented aliases
     // (created/updated/summary) so a valid note using them is not falsely flagged.
-    let fm = md::parse_frontmatter(&text);
+    let fm = md::parse_frontmatter(text);
     let has = |keys: &[&str]| {
         keys.iter()
             .any(|k| fm.get(*k).map(|v| !v.trim().is_empty()).unwrap_or(false))
@@ -7009,7 +7009,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     // unconditional at every write's `atomic_write_page`, never performed by lint). Shares
     // `classify_publish_globally` with the write path so a finding here and a normalization
     // there can never disagree.
-    if let Some(state) = publish_globally_state(path, &text)
+    if let Some(state) = publish_globally_state(path, text)
         && let Some(issue) = classify_publish_globally(state.has_field, state.is_true, state.has_symlink)
     {
         let (sev, code, msg) = issue.lint_line();
@@ -7026,7 +7026,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     }
 
     let lines: Vec<&str> = text.lines().collect();
-    let ctx = md::build_context(&text, lines.len());
+    let ctx = md::build_context(text, lines.len());
 
     // Check 0 — AN UNCLOSED CODE FENCE, reported FIRST because it invalidates every other
     // structural conclusion on the page (janitor#279).
@@ -7048,7 +7048,7 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     // copy of the rule: this lint exists to fire exactly when a walker is confused, so it
     // must be confused by exactly the same things. A cleverer detector that disagreed with
     // the consumers would flag pages they parse fine and stay silent on pages they mangle.
-    let fence_open: Option<usize> = unclosed_fence_line(&text);
+    let fence_open: Option<usize> = unclosed_fence_line(text);
     if let Some(open_at) = fence_open.as_ref() {
         violations.push(Violation {
             sev: Severity::Error,
@@ -7258,14 +7258,14 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     // line found below — used by the two delimiter checks after this loop. memgrep's default
     // SEARCH exclude is keyed on the `status:` prop, never on position; this pair of checks is
     // the READABILITY layer that keeps the delimiter honest about what the metadata already says.
-    let superseded_heading = superseded_heading_line(&text);
+    let superseded_heading = superseded_heading_line(text);
     let mut superseded_atom_lines: Vec<usize> = Vec::new();
     // The page's TRAILING footer region (janitor#260 endgame — see `footer_section_trailing_line`'s
     // own docstring for why this is NOT `footer_section_line`, which anchors `add-atom` instead).
     // Computed once per page, outside the loop, so every atom on the page is judged against the
     // same boundary.
-    let footer_trailing = footer_section_trailing_line(&text);
-    for a in atoms_for_lint(&text) {
+    let footer_trailing = footer_section_trailing_line(text);
+    for a in atoms_for_lint(text) {
         // The atom-id declarations feed Check 8 (corpus-unique ids) — collected by the
         // caller, `lint_paths_with`, because uniqueness is a corpus property, not a page one.
         if desc_unquoted_prose(&a.props_raw) {
@@ -14635,7 +14635,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn floor_and_grandfather_sets_are_disjoint() {
         for f in write_gate_floors() {
             assert!(
-                !WRITE_GATE_GRANDFATHERED_CODES.contains(&f),
+                !WRITE_GATE_GRANDFATHERED_CODES.contains(f),
                 "`{f}` appears in BOTH the floor set and the grandfather set — the classifier \
                  would be order-dependent"
             );
@@ -15041,7 +15041,7 @@ mod prose_tests {
              ## Notes and lessons learned\n",
         )
         .unwrap();
-        let atoms = prose_all_atoms(&[dir.clone()], false);
+        let atoms = prose_all_atoms(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(atoms.len(), 2, "every atom enumerated, none dropped");
         let ids: Vec<&str> = atoms.iter().map(|(_, a, _, _)| a.id.as_str()).collect();
@@ -15106,7 +15106,7 @@ mod prose_tests {
              ## Notes and lessons learned\n",
         )
         .unwrap();
-        let atoms = prose_all_atoms(&[dir.clone()], false);
+        let atoms = prose_all_atoms(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(atoms.len(), 2, "enumeration sees both atoms before any filter");
         let sup = atoms.iter().find(|(_, a, _, _)| a.id == "ATOM-AAAA-0001").unwrap();
@@ -15149,7 +15149,7 @@ mod prose_tests {
              ## Notes and lessons learned\n",
         )
         .unwrap();
-        let candidates = prose_all_atoms(&[dir.clone()], false);
+        let candidates = prose_all_atoms(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!candidates.is_empty(), "fixture atom enumerated");
         let chunks: Vec<jev::ProseChunk> = candidates

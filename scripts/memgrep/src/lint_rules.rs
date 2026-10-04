@@ -5,7 +5,7 @@ use crate::memory::Severity;
 pub(crate) enum Fix {
     Safe,
     Unsafe,
-    NoFix,
+    None,
 }
 pub(crate) type FixerFn = fn(&std::path::Path, &str) -> Option<String>;
 #[derive(Debug)]

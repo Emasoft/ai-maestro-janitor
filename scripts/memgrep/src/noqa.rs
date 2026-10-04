@@ -210,7 +210,7 @@ pub(crate) fn strip(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (idx, raw) in text.split_inclusive('\n').enumerate() {
         let ln = idx + 1;
-        let it = items.iter().filter(|i| i.line == ln).last();
+        let it = items.iter().rfind(|i| i.line == ln);
         match it {
             None => out.push_str(raw),
             Some(i) if i.whole_line => {}
@@ -230,7 +230,7 @@ mod tests {
     use crate::memory::Severity;
 
     fn rule(code: &'static str, name: &'static str) -> Rule {
-        Rule { code, name, family: "WMATOM", sev: Severity::Warn, fix: Fix::NoFix, gate_floor: false, summary: "" }
+        Rule { code, name, family: "WMATOM", sev: Severity::Warn, fix: Fix::None, gate_floor: false, summary: "" }
     }
 
     #[test]
