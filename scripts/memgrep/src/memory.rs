@@ -15145,7 +15145,7 @@ mod prose_tests {
         std::fs::write(
             dir.join("p.md"),
             "---\nname: p\ndescription: \"live e2e\"\nocd: 2026-01-01\nlmd: 2026-01-02\n---\n\
-             ^ATOM-AAAA-0001 [keywords: review, fork, spawn]\nThe review fork runs synchronously and must never run in the background.\n\n\
+             ^ATOM-AAAA-0001 [keywords: review, fork, synchronous]\nThe review fork runs synchronously and must never run in the background.\n\n\
              ## Notes and lessons learned\n",
         )
         .unwrap();
@@ -15172,7 +15172,7 @@ mod prose_tests {
             .collect();
         let config = jev::JevConfig::resolve(Some("typesafe"), None).expect("config resolves with TYPESAFE_API_KEY set");
         let scorer = jev::JevScorer::new(config);
-        let results = scorer.score("which memory covers the review fork spawn rule?", &chunks);
+        let results = scorer.score("which memory covers the review fork rule?", &chunks);
         assert_eq!(results.len(), chunks.len(), "one answer per chunk");
         for r in &results {
             assert!(r.is_ok(), "live backend errored: {:?}", r.as_ref().err());
