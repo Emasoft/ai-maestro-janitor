@@ -1,10 +1,10 @@
 ---
 trdd-id: BHIS99XE
 title: C20 — registry integration
-column: ai_review
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-04T15:16:04+0200
+updated: 2026-10-05T01:56:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -19,7 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, BHIS99XE]
 blocker-holds-if: not-match:READY
-implementation-commits: [ef58378a, 84cec0d8]
+implementation-commits: [ef58378a, 84cec0d8, bc2bfb65, 5db16407]
 ---
 
 # C20 — registry integration
@@ -39,6 +39,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01 — FACT from C01 (supersedes plan F1 "37 literals"): memory.rs has 34 `code: "` literals; six memgrep codes are emitted without one (atom-no-ocd, atom-no-lmd, atom-bad-ocd, atom-bad-lmd, publish-globally-not-symlinked, publish-globally-conflict). every_emitted_code_is_registered must therefore NOT rely on a `code: "` source scan alone: find how those six are constructed (tldr/jgrep) and cover them, e.g. by asserting the registry against the codes produced by linting a fixture corpus that triggers every rule, or by scanning every string literal passed into a Violation.
 - 2026-10-01 — STYLE (wave-1 review finding 7): C02 placed the new mod lines after const MD_EXTS in main.rs instead of inside the existing mod block; move them into the block when this card touches main.rs.
 - 2026-10-04T13:11:01+0200 — column → todo by main-agent@ai-maestro-janitor. blocker 2UAEQQ4A is complete and archived Cleared blocked-by (--clear-blocker override).
+- 2026-10-05T01:56:08+0200 — COMPLETE by main-agent@ai-maestro-janitor. ai review 2026-10-05: no real defect; the byte-identical Verify clause was measured with an old and a new binary; open items on the card are follow-ups carried by CGA3U0BN, C21 and C24.
 
 ## Result and open items (2026-10-04)
 
@@ -65,3 +66,16 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - CLOSES IN SUBSTANCE the item about every_error_code_lint_page_text_emits_is_classified: the pinned-list test supplies the independent check; the old test is left in place.
 - STILL OPEN: panic on an unregistered code; the scan is single-file and sees only quoted literals after code: or rule_sev( (a code held in a const, built by format, or passed through a helper is missed, and a production comment of that shape is read as an emitted code); nothing asserts that the lookup name equals the emitted code; the rules_gen.rs dead-code allow; the main.rs style note; consumers of the WARN to INFO downgrade; the unknown creator of the stale index lock.
 - NEW OPEN: the module strip matches only a plain mod at column zero closed by a column-zero brace; three cosmetic leftovers in the two tests (a blank line after one test attribute, a doubled blank line, a doc comment repeating the comment below it) that the edit tool could not reach.
+
+## Review 2026-10-05
+
+Read-only review (reports/memgrep-fixers, c20-review): no real defect. ef58378a and 84cec0d8 touch only scripts/memgrep/src/memory.rs. bc2bfb65 and 5db16407 touch tests/test_memory_lint_gate_coverage.py, OUTSIDE this card's Writes list: ef58378a moved code literals into let-code bindings and broke that Python drift guard, so the test had to follow; 5db16407 corrects one comment in it.
+Verify clause measured 2026-10-05, not taken from the earlier worker run: memgrep built from ef58378a^ and from HEAD, both run as lint --no-fix on one copy of the PROJECT memory. Both exit 0 with 119 findings. Old: 43 WARN atom-no-ocd, 37 WARN atom-no-lmd. New: the same 80 findings as INFO, at the same file and line. With those two codes removed the two outputs are identical (16 atom-oversized, 16 lesson-uncited, 7 link-one-sided, same summary line). Limits of that test: HEAD was the after-tree, not 84cec0d8 alone, and both binaries shared one copy and its index sidecar; neither produced a differing line.
+The OPEN items listed above on this card are follow-ups, not acceptance conditions of C20: the drift-guard rewrite is TRDD-CGA3U0BN; the panic on an unregistered code matters when C21 and C24 add codes and is carried there; the rules_gen.rs dead-code allow and the main.rs style note are outside this card's write set.
+
+## Acceptance checklist
+
+- [x] Rust gate passes: cargo test on the whole memgrep crate exit 0 on 2026-10-05 (423 unit and 196 cli tests passed, 1 ignored); clippy --all-targets -D warnings exit 0.
+- [x] lint --no-fix output on the PROJECT memory is identical before and after except the two D1 codes (atom-no-ocd, atom-no-lmd, WARN to INFO): measured, see Review 2026-10-05.
+- [x] Push-site severity comes from the registry, the floors and grandfathered lists derive from gate_floor, and every_emitted_code_is_registered exists and passes (named tests run by the reviewer, exit 0 each).
+- [x] Python drift guard: pytest tests/test_memory_lint_gate_coverage.py 5 passed, exit 0.

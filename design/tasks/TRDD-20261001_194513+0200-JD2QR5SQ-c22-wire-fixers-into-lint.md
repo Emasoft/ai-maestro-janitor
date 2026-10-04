@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-05T01:50:18+0200
+updated: 2026-10-05T01:56:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -39,3 +39,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 ## STATE
 
 2026-10-05: blocked-by trimmed to the two cards still open (3HLI7DMK C21, I23YCEW7). C14 to C19 (4G427D8M, 9SUZ48E8, QBU0HSM9, KSCAFSLD, RLD015QB, RUJQ7WSX) were completed and archived on 2026-10-05 after review; the fixers are unit-tested and ready to wire. Wiring notes from that review: the unused-noqa fixer needs C21 before lint emits its code; the lint-ignore frontmatter line is still rebuilt with normalised spacing; a single-quoted description with a repeated phrase is not reported by lint.
+2026-10-05 later: CORRECTION to the line above. The lint-ignore frontmatter line is no longer rebuilt with normalised spacing: e0d7dc50 reassembles it from its own bytes around the bracket span (test with an oddly spaced line). The other two wiring notes still stand; the single-quoted description gap is now card TRDD-GTP15HRC and the frontmatter terminator mismatch is TRDD-ZW0GUQCG.

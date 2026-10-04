@@ -1,10 +1,10 @@
 ---
 trdd-id: 3HLI7DMK
 title: C21 — labels and lint flags
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-05T01:50:19+0200
+updated: 2026-10-05T01:56:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,8 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:12+0200
-blocked-by: [BHIS99XE]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, 3HLI7DMK]
 blocker-holds-if: not-match:READY
 ---
@@ -36,6 +36,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:12+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:09+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on BHIS99XE, OWGEOJ0D, 7SMPCPNT per DSN035UN wave order
 - 2026-10-01 — DESIGN NOTE (review finding 4): print the safe-fix label on a finding only when the registered fixer would actually change that page (e.g. atom-unquoted-desc over 200 chars has no fix) — a label that promises a fix the engine will not make is a lie.
+- 2026-10-05T01:56:08+0200 — column → todo by main-agent@ai-maestro-janitor. its only open blocker C20 (BHIS99XE) was completed on 2026-10-05; OWGEOJ0D and 7SMPCPNT were already complete Cleared blocked-by (--clear-blocker override).
 
 ## STATE
 
