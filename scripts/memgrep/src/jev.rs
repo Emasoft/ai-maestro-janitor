@@ -1022,6 +1022,38 @@ mod tests {
         unsafe { std::env::remove_var(k) }
     }
 
+    /// Read one whole HTTP request (headers plus the `Content-Length` body) off `s`.
+    ///
+    /// WHY every mock server calls this before replying: the old servers did ONE `read` of the
+    /// first segment and then closed. Closing a TCP socket that still holds unread inbound bytes
+    /// sends RST, and an RST makes the peer drop the response it had not yet read — so whenever
+    /// the client's headers and JSON body arrived as two segments (likelier on a loaded machine)
+    /// the client saw a connection error instead of the scripted 200/429/401 and the test failed
+    /// (`retry_429_then_success`, `failing_batch_isolates_its_chunks`). Draining the request
+    /// first makes the close an orderly FIN regardless of timing.
+    fn drain_request(s: &mut std::net::TcpStream) {
+        let mut data = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let (header_end, body_len) = loop {
+            let n = s.read(&mut chunk).expect("mock server: read request");
+            assert!(n > 0, "mock server: client closed before sending a full request");
+            data.extend_from_slice(&chunk[..n]);
+            if let Some(pos) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&data[..pos]).to_ascii_lowercase();
+                let len = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .map_or(0, |v| v.trim().parse::<usize>().expect("content-length"));
+                break (pos + 4, len);
+            }
+        };
+        while data.len() < header_end + body_len {
+            let n = s.read(&mut chunk).expect("mock server: read request body");
+            assert!(n > 0, "mock server: client closed mid-body");
+            data.extend_from_slice(&chunk[..n]);
+        }
+    }
+
     fn chunk(id: &str, text: &str) -> ProseChunk {
         ProseChunk { id: id.into(), title: None, keywords: None, text: text.into() }
     }
@@ -1085,8 +1117,7 @@ mod tests {
             for stream in listener.incoming() {
                 let mut s = stream.unwrap();
                 h2.fetch_add(1, Ordering::SeqCst);
-                let mut buf = [0u8; 8192];
-                let _ = s.read(&mut buf);
+                drain_request(&mut s);
                 if h2.load(Ordering::SeqCst) == 1 {
                     let _ = s.write_all(
                         b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -1146,8 +1177,7 @@ mod tests {
         let server = thread::spawn(move || {
             for stream in listener.incoming().take(1) {
                 let mut s = stream.unwrap();
-                let mut buf = [0u8; 8192];
-                let _ = s.read(&mut buf);
+                drain_request(&mut s);
                 let _ = s.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"answers\":{\"c0\":0.42}}",
                 );
@@ -1202,8 +1232,7 @@ mod tests {
             for stream in listener.incoming() {
                 let mut s = stream.unwrap();
                 h2.fetch_add(1, Ordering::SeqCst);
-                let mut buf = [0u8; 8192];
-                let _ = s.read(&mut buf);
+                drain_request(&mut s);
                 let _ = s.write_all(
                     b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 );
@@ -1308,8 +1337,7 @@ mod tests {
             let mut n = 0u32;
             for stream in listener.incoming() {
                 let mut s = stream.unwrap();
-                let mut buf = [0u8; 65536];
-                let _ = s.read(&mut buf);
+                drain_request(&mut s);
                 n += 1;
                 h2.fetch_add(1, Ordering::SeqCst);
                 if n == 1 {
@@ -1435,8 +1463,7 @@ mod tests {
         let server = thread::spawn(move || {
             for stream in listener.incoming() {
                 let mut s = stream.unwrap();
-                let mut buf = [0u8; 8192];
-                let _ = s.read(&mut buf);
+                drain_request(&mut s);
                 let resp = format!(
                     "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}"
                 );
