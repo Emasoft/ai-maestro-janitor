@@ -1,10 +1,10 @@
 ---
 trdd-id: CWKM5218
 title: Clear the strict-validator findings that block the 3.7.0 publish
-column: dev
+column: testing
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-04T13:11:43+0200
+updated: 2026-10-04T20:10:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -25,6 +25,7 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 ## Approval log
 
 - 2026-10-04T11:25:52+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-04T20:10:59+0200 — column → testing. 3.7.0 was published on 6157e726 with all strict-validator findings cleared; no code is being written for this card. Awaiting proof: the macOS test fix 37d72fcd needs a green GitHub CI run on 3.7.1. Strict validator re-run 2026-10-04 on HEAD: 0 critical, major, minor, nit.
 
 ## Outcome
 
