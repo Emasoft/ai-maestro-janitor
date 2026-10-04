@@ -105,9 +105,7 @@ fn drops_case_insensitive_repeats_keeping_first_spelling() {
     #[test]
     fn refuses_a_quoted_value_whose_closing_quote_is_not_last() {
         let t = test_page("^a1 [desc:\"d\", keywords:\"a b a\" c, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.");
-        if let Some(f) = fix(Path::new(P), &t) {
-            assert!(f.contains("keywords:\"a b\" c") || f.contains("keywords:\"a b a\" c"));
-        }
+        assert_eq!(fix(Path::new(P), &t), None, "a value whose closing quote is not last is refused, not guessed at");
     }
 
     #[test]
