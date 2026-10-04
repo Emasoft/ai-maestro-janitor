@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import threading
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Generator, Optional
@@ -30,7 +31,8 @@ assert _HOOK.is_file(), f"hook not found at {_HOOK}"
 
 # --- local registry server (real HTTP, canned JSON) -------------------------
 
-_NOWISH = "2026-09-27T10:00:00.000000Z"  # ~minutes old at test time
+# Computed at import: a fixed date ages out of the hook's release-age window and the tests rot (TRDD-BUR8AW77).
+_NOWISH = (datetime.now(timezone.utc) - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 _AGED = "2024-01-01T00:00:00.000000Z"  # years old
 
 _REGISTRY: dict[str, Any] = {
