@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-01T19:48:11+0200
+updated: 2026-10-05T01:50:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:13+0200
-blocked-by: [3HLI7DMK, I23YCEW7, 4G427D8M, 9SUZ48E8, QBU0HSM9, KSCAFSLD, RLD015QB, RUJQ7WSX]
+blocked-by: [3HLI7DMK]
 pre-block-column: todo
 blocker-probe: [trddgrep, why, JD2QR5SQ]
 blocker-holds-if: not-match:READY
@@ -35,3 +35,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 
 - 2026-10-01T19:45:13+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:11+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 3HLI7DMK, I23YCEW7, 4G427D8M, 9SUZ48E8, QBU0HSM9, KSCAFSLD, RLD015QB, RUJQ7WSX per DSN035UN wave order
+
+## STATE
+
+2026-10-05: blocked-by trimmed to the two cards still open (3HLI7DMK C21, I23YCEW7). C14 to C19 (4G427D8M, 9SUZ48E8, QBU0HSM9, KSCAFSLD, RLD015QB, RUJQ7WSX) were completed and archived on 2026-10-05 after review; the fixers are unit-tested and ready to wire. Wiring notes from that review: the unused-noqa fixer needs C21 before lint emits its code; the lint-ignore frontmatter line is still rebuilt with normalised spacing; a single-quoted description with a repeated phrase is not reported by lint.

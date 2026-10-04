@@ -1,10 +1,10 @@
 ---
 trdd-id: QBU0HSM9
 title: C16 — fixer dedup_keywords
-column: ai_review
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:45:00+0200
-updated: 2026-10-04T13:25:40+0200
+updated: 2026-10-05T01:49:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,7 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, QBU0HSM9]
 blocker-holds-if: not-match:READY
-implementation-commits: [9fb13752, 9254214e]
+implementation-commits: [9fb13752, 9254214e, 57e4caff]
 ---
 
 # C16 — fixer dedup_keywords
@@ -39,3 +39,16 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-04T13:10:57+0200 — column → todo by main-agent@ai-maestro-janitor. blocker 622ROA5F is complete and archived Cleared blocked-by (--clear-blocker override).
 - 2026-10-04T13:11:07+0200 — column → testing by main-agent@ai-maestro-janitor. fixer implemented in 9fb13752, unit-tested, awaiting review
 - 2026-10-04T13:25:09+0200 — column → ai_review by main-agent@ai-maestro-janitor. implemented and unit-tested, not wired into lint; testing overstated it
+- 2026-10-05T01:49:30+0200 — COMPLETE by main-agent@ai-maestro-janitor. ai review 2026-10-05 found test gaps against the acceptance rule; all closed and verified by a whole-crate test run and clippy; unit level only, wiring is C22.
+
+## Review 2026-10-05
+
+C16 review: the refusal test asserted only inside if-let, so a refusal asserted nothing. Measured: for a quoted value whose closing quote is not last the fixer returns None; 57e4caff asserts that. The review claim that the lossless check did not test the output was rejected: the same test compares the output with the exact expected text.
+The fixer is implemented and unit-tested only; nothing calls it until C22 (TRDD-JD2QR5SQ) wires the fixers into lint. Test edits on 2026-10-05 were made with plain exact-match edits and read back as diffs, because the fastedit tool left orphan test attributes in this crate twice that day.
+
+## Acceptance checklist
+
+- [x] Each test has a before/after literal. Evidence 2026-10-05: cargo test on the whole memgrep crate exit 0 (423 unit and 196 cli tests passed, 1 ignored), the 57 fixer tests pass, cargo clippy --all-targets -D warnings exit 0, and per file the test-attribute count equals the tests cargo lists.
+- [x] Each fixing test has a lossless assert, and no test asserts only inside a conditional.
+- [x] Oracle: the fixed page no longer reports the code. Asserted with has_code on the fixing test.
+- [x] The card wrote only its own file under src/fixers.

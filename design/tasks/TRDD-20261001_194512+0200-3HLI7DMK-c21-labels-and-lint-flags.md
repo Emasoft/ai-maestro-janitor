@@ -4,7 +4,7 @@ title: C21 — labels and lint flags
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-01T19:52:38+0200
+updated: 2026-10-05T01:50:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:12+0200
-blocked-by: [BHIS99XE, OWGEOJ0D, 7SMPCPNT]
+blocked-by: [BHIS99XE]
 pre-block-column: todo
 blocker-probe: [trddgrep, why, 3HLI7DMK]
 blocker-holds-if: not-match:READY
@@ -36,3 +36,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:12+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:09+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on BHIS99XE, OWGEOJ0D, 7SMPCPNT per DSN035UN wave order
 - 2026-10-01 — DESIGN NOTE (review finding 4): print the safe-fix label on a finding only when the registered fixer would actually change that page (e.g. atom-unquoted-desc over 200 chars has no fix) — a label that promises a fix the engine will not make is a lie.
+
+## STATE
+
+2026-10-05: blocked-by trimmed to BHIS99XE (C20, in ai_review). OWGEOJ0D (C11) and 7SMPCPNT (C12) are complete and archived, so listing them raised GRAPH-DANGLING-BLOCKER. Note for this card: the C19 unused-noqa fixer tests carry a has_code assert that cannot fail until this card makes lint emit unused-noqa; re-run them then (see archived TRDD-RUJQ7WSX).
