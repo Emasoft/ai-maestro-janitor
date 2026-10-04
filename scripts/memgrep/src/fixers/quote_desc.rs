@@ -231,6 +231,24 @@ mod tests {
     fn idempotent_and_none_on_clean_input() {
         let fixed = fix(Path::new(P), &test_page(&format!("^a1 [desc: some prose here, {TAIL}]\nBody."))).unwrap();
         assert_eq!(fix(Path::new(P), &fixed), None);
+        // Hand-written clean page, never passed through the fixer: None, not Some(input).
+        let clean = test_page(&format!("^a1 [desc: \"some prose here\", {TAIL}]\nBody."));
+        assert!(!has_code(Path::new(P), &clean, CODE));
+        assert_eq!(fix(Path::new(P), &clean), None);
+    }
+
+    #[test]
+    fn a_comma_inside_an_unquoted_desc_quotes_only_what_the_parser_already_read() {
+        // WHY this is the right output and not a loss: the props parser splits at the top-level
+        // comma BEFORE any fixer runs, so the desc it reads is already `some prose` and
+        // `more words here` is already a stray item. The fixer quotes exactly the value the parser
+        // saw and leaves the stray bytes in place for a human; guessing where the author meant
+        // the desc to end is not a deterministic repair.
+        let before = test_page(&format!("^a1 [desc: some prose, more words here, {TAIL}]\nBody."));
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert_eq!(fixed, before.replace("desc: some prose,", "desc: \"some prose\","));
+        assert!(fixed.contains(", more words here, "));
+        assert!(has_code(Path::new(P), &before, CODE) && !has_code(Path::new(P), &fixed, CODE));
     }
 
     #[test]
@@ -259,9 +277,11 @@ mod tests {
         let fixed = fix(Path::new(P), &before).expect("fixed");
         assert!(fixed.contains("desc: \"héllo wörld\"") && fixed.contains("desc: \"second one\""));
         assert!(fixed.contains("desc: in fence,"));
+        assert!(has_code(Path::new(P), &before, CODE) && !has_code(Path::new(P), &fixed, CODE));
         let crlf = before.replace('\n', "\r\n");
         let fixed = fix(Path::new(P), &crlf).expect("fixed");
         assert_eq!(fixed.matches("\r\n").count(), crlf.matches("\r\n").count());
+        assert!(has_code(Path::new(P), &crlf, CODE) && !has_code(Path::new(P), &fixed, CODE));
         // frontmatter `^id [desc: x]` lookalike is not an atom
         let fm = "---\nname: p\n^z [desc: not an atom]\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n\n## Notes and lessons learned\n";
         assert_eq!(fix(Path::new(P), fm), None);
@@ -272,6 +292,7 @@ mod tests {
         let t = test_page(&format!("^a1 [desc: first one, desc: \"second\", {TAIL}]\nBody."));
         let f = fix(Path::new(P), &t).expect("fixed");
         assert_eq!(f, t.replace("desc: first one", "desc: \"first one\""));
+        assert!(has_code(Path::new(P), &t, CODE) && !has_code(Path::new(P), &f, CODE));
     }
 
     /// Shared acceptance check: a candidate that DELETES an atom must be rejected even though the
