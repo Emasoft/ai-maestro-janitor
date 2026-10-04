@@ -14633,6 +14633,60 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         }
     }
 
+
+    /// The write-gate lists equal the lists reviewed when they were hand-kept. WHY: the derived
+    /// grandfathered set excludes two cross-page codes by name and would otherwise accept a new
+    /// ERROR code silently; these literals are the independent check. A difference means the spec
+    /// changed a gate decision.
+    #[test]
+    fn write_gate_lists_equal_the_reviewed_lists() {
+        // WHY: the derived grandfathered set excludes two cross-page codes by name and would
+        // otherwise accept a new ERROR code silently; this literal is the independent check.
+        // The spec is the source of behaviour; this literal is only a tripwire. Do not
+        // "simplify" it away by deriving it from the registry. A difference means the spec
+        // changed a gate decision: update the literal deliberately.
+        let mut floors: Vec<&str> = vec![
+            "control-byte-in-page",
+            "page-unclosed-fence",
+            "page-description-duplicated-phrases",
+            "footnote-dangling-ref",
+            "atom-bad-bracket",
+            "atom-unclosed-props",
+            "atom-unquoted-desc",
+            "atom-dropped-props",
+            "atom-keywords-duplicated",
+            "atom-no-keywords",
+            "lesson-bad-bracket",
+            "lesson-empty-body",
+            "lesson-unquoted-desc",
+            "lesson-superseded-no-body",
+        ];
+        let mut grandfathered: Vec<&str> = vec![
+            "page-no-ocd",
+            "page-no-lmd",
+            "page-no-description",
+            "page-no-notes-section",
+            "page-description-too-few-phrases",
+            "atom-keywords-too-few",
+            "publish-globally-not-symlinked",
+            "publish-globally-conflict",
+        ];
+        floors.sort_unstable();
+        grandfathered.sort_unstable();
+        let mut derived_floors: Vec<&str> = write_gate_floors().to_vec();
+        let mut derived_grandfathered: Vec<&str> = WRITE_GATE_GRANDFATHERED_CODES.to_vec();
+        derived_floors.sort_unstable();
+        derived_grandfathered.sort_unstable();
+        assert_eq!(
+            derived_floors, floors,
+            "a difference means the spec changed a gate decision: update this literal deliberately"
+        );
+        assert_eq!(
+            derived_grandfathered, grandfathered,
+            "a difference means the spec changed a gate decision: update this literal deliberately"
+        );
+    }
+
     #[test]
     fn floors_block_and_grandfathered_do_not() {
         let path = Path::new("fixture/floors.md");
@@ -14684,13 +14738,40 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// the `if key == … { "a" } else { "b" }` pairs the ocd/lmd and publish-globally sites build),
     /// so a code with no `code: "` literal is covered too and a new unregistered one fails here.
     #[test]
+
     fn every_emitted_code_is_registered() {
         let src = include_str!("memory.rs");
-        let (prod, _) = src
-            .split_once("\n#[cfg(test)]\nmod tests {\n")
-            .expect("production/test boundary marker present");
-        let single = Regex::new(r#"(?:code:\s*|rule_sev\()"([a-z][a-z-]*)""#).expect("valid regex");
-        let pair = Regex::new(r#"let code = if key == "[a-z]+" \{ "([a-z][a-z-]*)" \} else \{ "([a-z][a-z-]*)" \};"#)
+        // Strip every column-zero `#[cfg(test)]` immediately followed by `mod <name> {` (it ends
+        // at the next column-zero `}`) and scan ALL remaining text: production code also sits
+        // between and after test modules, and a split at the first test module left that region
+        // unscanned. Any other `#[cfg(test)]` item must NOT start a strip, or production code up
+        // to the next column-zero `}` would be dropped silently.
+        let mut prod_text = String::new();
+        let mut in_test_mod = false;
+        let mut lines = src.lines().peekable();
+        while let Some(line) = lines.next() {
+            if in_test_mod {
+                in_test_mod = line != "}";
+                continue;
+            }
+            if line == "#[cfg(test)]"
+                && lines.peek().is_some_and(|n| n.starts_with("mod ") && n.ends_with(" {"))
+            {
+                in_test_mod = true;
+                continue;
+            }
+            prod_text.push_str(line);
+            prod_text.push('\n');
+        }
+        let prod = prod_text.as_str();
+        // The stripping itself must not rot: production past the first test module and the two
+        // emitting functions stay in, and this very test (inside a test module) stays out.
+        for kept in ["fn footnote_block_marker", "fn lint_page_text", "fn lint_paths_with"] {
+            assert!(prod.contains(kept), "production text `{kept}` was stripped from the scan");
+        }
+        assert!(!prod.contains("fn every_emitted_code_is_registered"), "test modules were not stripped");
+        let single = Regex::new(r#"(?:code:\s*|rule_sev\()"([a-z][a-z0-9-]*)""#).expect("valid regex");
+        let pair = Regex::new(r#"let code = if key == "[a-z]+" \{ "([a-z][a-z0-9-]*)" \} else \{ "([a-z][a-z0-9-]*)" \};"#)
             .expect("valid regex");
         let mut emitted: Vec<&str> = single.captures_iter(prod).map(|c| c.get(1).unwrap().as_str()).collect();
         for c in pair.captures_iter(prod) {
