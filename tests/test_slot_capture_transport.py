@@ -241,6 +241,76 @@ def test_consent_refusal_decision() -> None:
     assert scb._consent_refusal("first@users.noreply.github.com", "First@Users.NoReply.GitHub.com") is None
 
 
+
+class _FakePage:
+    """Browser page stand-in: `texts` is consumed one item per `inner_text` call (the last one
+    repeats); an Exception item is raised, like a transient CDP error."""
+
+    def __init__(self, *texts: "str | Exception") -> None:
+        self._texts = list(texts)
+
+    def inner_text(self, _selector: str) -> str:
+        item = self._texts.pop(0) if len(self._texts) > 1 else self._texts[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def wait_for_timeout(self, _ms: int) -> None:
+        pass
+
+
+_TARGET = "first@users.noreply.github.com"
+
+
+def test_read_consent_email_every_read_raising_is_unreadable_not_not_found() -> None:
+    """Reads that always raise report read_ok False, never (True, None) which would refuse."""
+    assert scb._read_consent_email(_FakePage(RuntimeError("cdp")), wait_s=0.05) == (False, None)
+
+
+def test_read_consent_email_recovers_after_a_transient_error() -> None:
+    """A read that raises once and then returns the footer yields the address."""
+    page = _FakePage(RuntimeError("cdp"), _CONSENT_PAGE + f"Logged in as {_TARGET}\n")
+    assert scb._read_consent_email(page, wait_s=2.0) == (True, _TARGET)
+
+
+def test_read_consent_email_clean_read_without_address_is_not_found() -> None:
+    """A page read cleanly with no address is (True, None): still fails closed upstream."""
+    assert scb._read_consent_email(_FakePage(_CONSENT_PAGE), wait_s=0.05) == (True, None)
+
+
+def test_consent_gate_unreadable_neither_clicks_nor_refuses_until_the_bound() -> None:
+    """All-raising reads: no click, no refusal inside the bound; the distinct refusal after it."""
+    page = _FakePage(RuntimeError("cdp"))
+    refusal, may_click, since = scb._consent_gate(page, _TARGET, None, limit_s=3600, wait_s=0.01)
+    assert (refusal, may_click) == (None, False) and since is not None
+    refusal, may_click, _ = scb._consent_gate(page, _TARGET, since - 10, limit_s=5, wait_s=0.01)
+    assert refusal == scb._CONSENT_UNREADABLE_REFUSAL and may_click is False
+    assert refusal == (
+        "[capture] REFUSED: could not read the consent page to confirm the signed-in account; "
+        "not authorizing."
+    )
+
+
+def test_consent_gate_clean_read_decides_and_resets_the_timer() -> None:
+    """A clean read clicks on a match, refuses on no address, and returns a cleared timer."""
+    ok = _FakePage(_CONSENT_PAGE + f"Logged in as {_TARGET}\n")
+    assert scb._consent_gate(ok, _TARGET, 123.0, wait_s=0.01) == (None, True, None)
+    refusal, may_click, since = scb._consent_gate(_FakePage(_CONSENT_PAGE), _TARGET, 123.0, wait_s=0.01)
+    assert refusal is not None and may_click is False and since is None
+
+
+def test_consent_glued_footer_text_is_refused_not_falsely_confirmed() -> None:
+    """Documents a known limit: when the page glues the next element onto the address the
+    captured address mismatches the target and is REFUSED. A visible refusal is preferred to a
+    false confirm (loosening the match to a prefix could not tell "...github.comSwitch" from a
+    look-alike domain such as "...github.community"). The real page was observed on 2026-10-04
+    not to glue the footer."""
+    text = f"Logged in as {_TARGET}Switch account"
+    actual = scb._consent_logged_in_email(text)
+    assert actual == f"{_TARGET}switch"
+    assert scb._consent_refusal(actual, _TARGET) is not None
+
+
 # --------------------------------------------------------------------------- #
 # Shared profiles-root resolver wiring                                          #
 # --------------------------------------------------------------------------- #

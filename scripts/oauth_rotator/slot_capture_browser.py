@@ -232,18 +232,49 @@ def _consent_refusal(actual: str | None, target: str) -> str | None:
     return None
 
 
-def _read_consent_email(page, wait_s: float = 5.0) -> str | None:
+def _read_consent_email(page, wait_s: float = 5.0) -> tuple[bool, str | None]:
     """Re-read the page VISIBLE text for up to `wait_s` seconds: the footer can render after the
-    Authorize button, so "not found" is only decided once the wait is over."""
+    Authorize button, so "not found" is only decided once the wait is over.
+
+    Returns (read_ok, address). read_ok is False when EVERY read raised: a transient browser
+    error is not "page read, no address", so the caller must not refuse on it (the poll loop
+    retries, bounded by `_consent_gate`). A read that returned text at least once and found no
+    address is (True, None) and still fails closed."""
     deadline = time.time() + wait_s
+    read_ok = False
     while True:
         try:
             actual = _consent_logged_in_email(page.inner_text("body") or "")
+            read_ok = True
         except Exception:
             actual = None
         if actual is not None or time.time() >= deadline:
-            return actual
+            return read_ok, actual
         page.wait_for_timeout(500)
+
+# Reads that keep RAISING are not "no address": no click and no refusal while they fail, but only
+# for this long in a row, so a dead page does not hold Chrome open for the whole 5-min consent timeout.
+_CONSENT_UNREADABLE_LIMIT_S = 30.0
+_CONSENT_UNREADABLE_REFUSAL = (
+    "[capture] REFUSED: could not read the consent page to confirm the signed-in account; "
+    "not authorizing."
+)
+
+
+def _consent_gate(page, email: str, unreadable_since: float | None,
+                  limit_s: float = _CONSENT_UNREADABLE_LIMIT_S,
+                  wait_s: float = 5.0) -> tuple[str | None, bool, float | None]:
+    """One account-guard pass at the Authorize button: (refusal, may_click, unreadable_since).
+
+    A clean read decides (match -> click, otherwise refusal) and resets the timer. An all-raising
+    read neither clicks nor refuses until reads have failed for `limit_s` in a row."""
+    read_ok, actual = _read_consent_email(page, wait_s)
+    if read_ok:
+        refusal = _consent_refusal(actual, email)
+        return refusal, refusal is None, None
+    now = time.time()
+    since = now if unreadable_since is None else unreadable_since
+    return (_CONSENT_UNREADABLE_REFUSAL if now - since >= limit_s else None), False, since
 
 
 class _ConsentRefused(Exception):
@@ -321,6 +352,7 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                       "the window, log in as the target account; auto-proceeds (up to 5 min)…")
                 reached = False
                 challenge_seen = False
+                unreadable_since: float | None = None
                 deadline = time.time() + 300
                 while time.time() < deadline:
                     try:
@@ -356,8 +388,11 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                             # shares, so an unconfirmed or wrong account fails CLOSED. A login
                             # page has no approve button and never reaches here. Recorded, not
                             # raised, because the `except Exception` below would swallow it.
-                            refused = _consent_refusal(_read_consent_email(page), email)
-                            if refused:
+                            # A page that cannot be READ (transient CDP error) neither clicks nor
+                            # refuses this pass; the poll comes round again until the bound.
+                            refused, may_click, unreadable_since = _consent_gate(
+                                page, email, unreadable_since)
+                            if refused or not may_click:
                                 break
                             btn.click()
                             print(f"[capture] clicked approval button ({sel}).")
