@@ -1789,19 +1789,27 @@ def _token_url() -> str:
 
 
 def _is_best_known_live(email: str) -> bool:
-    """True when `email` is the best-known LIVE identity: state.live_email, or the session beacon's
-    email when the beacon is NEWER than state.last_switch_at. A beacon older than the last switch
-    names the account switched AWAY from; honouring it would stop the outgoing spare ever being
-    refreshed (how fmuaddib/emanuele decayed). E-mails compare case-insensitively."""
-    state = load_state()
-    want = email.casefold()
-    if str(state.get("live_email") or "").casefold() == want:
-        return True
+    """True when `email` is a best-known LIVE identity (see `_best_known_live_emails`).
+    E-mails compare case-insensitively."""
+    return email.casefold() in _best_known_live_emails(load_state())
+
+def _best_known_live_emails(state: dict) -> set[str]:
+    """The SINGLE rule for "which account is live": the casefolded set of state.live_email (when
+    set) plus the session beacon's email when the beacon is NEWER than state.last_switch_at (or
+    last_switch_at is not a number). EMPTY set = live identity unknown. A beacon older than the last
+    switch names the account switched AWAY from; honouring it would stop the outgoing spare ever
+    being refreshed (how fmuaddib/emanuele decayed). Both can be present when state is stale."""
+    live: set[str] = set()
+    live_email = str(state.get("live_email") or "").casefold()
+    if live_email:
+        live.add(live_email)
     beacon = read_live_identity_beacon()
-    if beacon is None or str(beacon.get("email") or "").casefold() != want:
-        return False
-    last_switch = state.get("last_switch_at")
-    return not isinstance(last_switch, (int, float)) or float(beacon["ts"]) > float(last_switch)
+    beacon_email = str((beacon or {}).get("email") or "").casefold()
+    if beacon is not None and beacon_email:
+        last_switch = state.get("last_switch_at")
+        if not isinstance(last_switch, (int, float)) or float(beacon["ts"]) > float(last_switch):
+            live.add(beacon_email)
+    return live
 
 def _report_refresh_failure(cause: str, on_failure: Callable[[str], None] | None) -> None:
     """Surface WHY a token exchange failed. A caller-supplied `on_failure` receives it; otherwise it
@@ -3283,18 +3291,21 @@ def _bootstrap_seeded_slots() -> list[str]:
     state = load_state()
     now = time.time()
     changed = False
-    # WHY fail closed: with no live identity at all (no state.live_email and no usable session
-    # beacon) _is_best_known_live is False for EVERY slot, so the live account's slot would be
-    # treated as a spare. Launching for it mints a grant that may log out every running session;
-    # a skipped tick costs nothing. The per-slot check below stays the single definition of "live".
-    if not state.get("live_email") and not (read_live_identity_beacon() or {}).get("email"):
-        _log("auto-bootstrap: live account unknown (no live_email, no session beacon) - launching no re-login this tick")
+    # WHY fail closed: with an EMPTY live set (no state.live_email and no FRESH session beacon) no
+    # slot counts as live, so the live account's slot would be treated as a spare. Launching for it
+    # mints a grant that may log out every running session; a skipped tick costs nothing. The set
+    # comes from the one shared rule (_best_known_live_emails), read ONCE per tick: a stale-only
+    # beacon must count as unknown here, or the per-slot skip below would match nothing and launch
+    # every eligible slot, the live one included.
+    live = _best_known_live_emails(state)
+    if not live:
+        _log("auto-bootstrap: live account unknown (no live_email, no fresh session beacon) - launching no re-login this tick")
         return launched
     for email in list((state.get("slots") or {}).keys()):
         # WHY: a new grant for the LIVE account may evict the grant every running session shares
         # (observed by hand 2026-10-04, TRDD-0SU2C2IM). Skip before any read, counter or log so it
-        # costs no launch attempt. Same "live" source as the keepalive path (beacon-aware).
-        if _is_best_known_live(email):
+        # costs no launch attempt. Same "live" rule as the keepalive path (beacon-aware).
+        if email.casefold() in live:
             continue
         blob = read_slot(email)
         inner = _oauth(blob) if blob else {}

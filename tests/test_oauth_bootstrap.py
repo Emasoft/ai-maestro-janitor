@@ -531,6 +531,21 @@ def test_bootstrap_launches_slot_named_by_stale_beacon(tmp_path: Path, monkeypat
     done = rotator._bootstrap_seeded_slots()
     assert captured == [email] and done == [email]
 
+def test_bootstrap_stale_beacon_only_means_unknown_live_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """live_email empty and the only beacon is OLDER than last_switch_at (a restored state.json
+    after a past switch): the live account is unknown, so NOTHING launches -- not even the slot the
+    stale beacon names, which might be the live one -- and its counter does not move."""
+    email = "seeded@users.noreply.github.com"
+    captured = _wire(tmp_path, monkeypatch, {email: {"refresh": None, "session": 20.0, "ba": 1}})
+    state = rotator.load_state()
+    state["live_email"] = None
+    state["last_switch_at"] = 2000.0
+    rotator.save_state(state)
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: {"email": email, "ts": 1000.0})
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == [] and done == []
+    assert rotator.load_state()["slots"][email]["bootstrap_attempts"] == 1
+
 
 def test_bootstrap_resets_attempts_when_recovered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A slot that regained a refresh (now self-renewing) has its stale bootstrap_attempts reset
