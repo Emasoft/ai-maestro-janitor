@@ -270,6 +270,8 @@ mod tests {
         let block = "```\n## Notes and lessons learned\n```\n";
         let at = fixed.find(block).expect("the fenced block was split or altered");
         assert!(fixed.find("## Superseded").unwrap() >= at + block.len(), "inserted inside or above the fence: {fixed}");
+        // ...and before the REAL footer, which test_page puts after the body.
+        assert!(fixed.find("## Superseded").unwrap() < fixed.rfind("## Notes and lessons learned").unwrap(), "{fixed}");
         assert!(!has(&fixed, NO_DELIM));
     }
 
