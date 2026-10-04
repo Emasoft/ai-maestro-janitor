@@ -24,31 +24,70 @@ fn selectors(n: &Noqa) -> Vec<String> {
 }
 
 /// New text of one line whose declared selectors `drop` removes; None to delete the whole line.
+/// `list` (a comma-separated selector list) without the `drop` selectors, byte-preserving outside the
+/// removed selectors: each dropped one takes exactly one adjacent separator with it (its following
+/// comma and the whitespace after it; a trailing run of dropped ones takes the comma before the run).
+/// None when no selector is left.
+fn strip_selectors(list: &str, drop: &BTreeSet<String>) -> Option<String> {
+    let (mut names, mut pos) = (Vec::<(usize, usize)>::new(), 0);
+    for seg in list.split(',') {
+        let t = seg.trim();
+        if !t.is_empty() {
+            let s = pos + seg.len() - seg.trim_start().len();
+            names.push((s, s + t.len()));
+        }
+        pos += seg.len() + 1;
+    }
+    let dropped: Vec<bool> = names.iter().map(|&(s, e)| drop.contains(&list[s..e])).collect();
+    // First index of the trailing run of dropped selectors (names.len() when the last one is kept).
+    let run = dropped.iter().rposition(|d| !d).map_or(0, |i| i + 1);
+    if run == 0 {
+        return None;
+    }
+    let mut ranges = Vec::new();
+    for i in (0..run).filter(|&i| dropped[i]) {
+        ranges.push((names[i].0, names[i + 1].0));
+    }
+    if run < names.len() {
+        ranges.push((names[run - 1].1, names[names.len() - 1].1));
+    }
+    ranges.sort();
+    let (mut out, mut at) = (String::new(), 0);
+    for (s, e) in ranges {
+        out.push_str(&list[at..s]);
+        at = e;
+    }
+    out.push_str(&list[at..]);
+    Some(out)
+}
+
+/// New text of one line whose declared selectors `drop` removes; None to delete the whole line.
 fn rewrite_line(line: &str, drop: &BTreeSet<String>) -> Option<Option<String>> {
     let body = line.trim_end_matches(['\n', '\r']);
     let eol = &line[body.len()..];
     // Frontmatter `lint-ignore: [A, B]`.
     if let Some(v) = body.strip_prefix("lint-ignore:") {
         let inner = v.trim().strip_prefix('[')?.strip_suffix(']')?;
-        let keep: Vec<&str> = inner.split(',').map(str::trim).filter(|c| !c.is_empty() && !drop.contains(*c)).collect();
-        return Some((!keep.is_empty()).then(|| format!("lint-ignore: [{}]{eol}", keep.join(", "))));
+        return Some(strip_selectors(inner, drop).map(|k| format!("lint-ignore: [{k}]{eol}")));
     }
-    // HTML comment `<!-- [memgrep:] noqa: A, B -->` ending the line.
+    // HTML comment `<!-- [memgrep:] noqa: A, B -->` ending the line. WHY only the LAST comment: the
+    // parser (noqa.rs `classify`) honours a line comment only when nothing follows it on the line.
     let start = body.rfind("<!--")?;
     let end = body.rfind("-->")?;
     if end < start || !body[end + 3..].trim().is_empty() {
         return None;
     }
     // WHY get(): `<!-->` makes the last `<!--` and `-->` overlap (end < start + 4); decline, never slice.
-    let t = body.get(start + 4..end)?.trim();
-    let at = t.to_ascii_lowercase().find("noqa")?;
-    let colon = at + t[at..].find(':')?;
-    let keep: Vec<&str> = t[colon + 1..].split(',').map(str::trim).filter(|c| !c.is_empty() && !drop.contains(*c)).collect();
-    if keep.is_empty() {
-        let before = body[..start].trim_end_matches([' ', '\t']);
-        return Some((!before.trim().is_empty()).then(|| format!("{before}{eol}")));
+    let inner = body.get(start + 4..end)?;
+    let at = inner.to_ascii_lowercase().find("noqa")?;
+    let list_at = start + 4 + at + inner[at..].find(':')? + 1;
+    match strip_selectors(&body[list_at..end], drop) {
+        Some(k) => Some(Some(format!("{}{k}{}{eol}", &body[..list_at], &body[end..]))),
+        None => {
+            let before = body[..start].trim_end_matches([' ', '\t']);
+            Some((!before.trim().is_empty()).then(|| format!("{before}{eol}")))
+        }
     }
-    Some(Some(format!("{}<!-- {} {} -->{eol}", &body[..start], &t[..=colon], keep.join(", "))))
 }
 
 pub(crate) fn fix(path: &Path, text: &str) -> Option<String> {
@@ -119,14 +158,45 @@ pub(crate) fn fix(path: &Path, text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixers::quote_desc::test_page;
+    use crate::fixers::quote_desc::{has_code, test_page};
 
     const P: &str = "/tmp/memgrep-fixer-test/p.md";
+    const CODE: &str = "unused-noqa";
+    /// A line on which `atom-no-keywords` fires (and `atom-bad-ocd`, `atom-bad-lmd`, `atom-no-ocd` do not).
+    const L: &str = "^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01] ";
+
+    /// WHY not `has_code(.., "unused-noqa")`: lint_page_text does not emit `unused-noqa` yet (C21 wires
+    /// it in), so that oracle could never see the defect. Same predicate the lint will use instead:
+    /// a page-decidable selector that suppresses no finding.
+    fn has_unused(text: &str) -> bool {
+        let findings: Vec<(&Rule, usize)> =
+            lint_page_text(Path::new(P), text, false).iter().filter_map(|v| rule_by_name(v.code).map(|r| (r, v.line))).collect();
+        noqa::unused(&noqa::parse(text), &findings).iter().any(|(_, s)| page_decidable(s))
+    }
+
+    /// Fix the page and check the oracle: `before` has an unused selector, `fixed` has none, and
+    /// the lint will not report `unused-noqa` for it (has_code stays as a forward-compatible guard).
+    fn fixed_with_oracle(before: &str) -> String {
+        assert!(has_unused(before), "oracle must see the defect before the fix");
+        let fixed = fix(Path::new(P), before).expect("fixed");
+        assert!(!has_unused(&fixed));
+        assert!(!has_code(Path::new(P), &fixed, CODE));
+        fixed
+    }
+
+    /// Fix `<L><comment>`: exact output literal, deleting `gone` is the only change, and fix is idempotent.
+    fn check_comment(comment: &str, gone: &str, expected: &str) {
+        let before = test_page(&format!("{L}{comment}\nBody."));
+        let fixed = fixed_with_oracle(&before);
+        assert_eq!(fixed, test_page(&format!("{L}{expected}\nBody.")));
+        assert_eq!(before.replacen(gone, "", 1), fixed);
+        assert_eq!(fix(Path::new(P), &fixed), None);
+    }
 
     #[test]
     fn removes_only_the_unused_selector_comment() {
         let before = test_page("Fact one. <!-- noqa: atom-no-keywords -->\nKept line.");
-        let fixed = fix(Path::new(P), &before).expect("fixed");
+        let fixed = fixed_with_oracle(&before);
         // (a) literal: the comment and the whitespace before it go
         assert_eq!(fixed, test_page("Fact one.\nKept line."));
         // (b) lossless: only the comment was removed (everything else is byte-equal)
@@ -138,10 +208,78 @@ mod tests {
     #[test]
     fn keeps_a_selector_that_still_suppresses_a_finding() {
         // atom-no-keywords fires on a1 (no keywords: prop); atom-bad-ocd does not fire.
-        let before = test_page("^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01] <!-- noqa: atom-no-keywords, atom-bad-ocd -->\nBody.");
-        let f = fix(Path::new(P), &before).expect("fixed");
+        let before = test_page(&format!("{L}<!-- noqa: atom-no-keywords, atom-bad-ocd -->\nBody."));
+        let f = fixed_with_oracle(&before);
         assert!(f.contains("<!-- noqa: atom-no-keywords -->"));
         assert!(!f.contains("atom-bad-ocd"));
+    }
+
+    #[test]
+    fn no_spaces_inside_the_comment_stay_unspaced() {
+        check_comment("<!--noqa: atom-bad-ocd, atom-no-keywords-->", "atom-bad-ocd, ", "<!--noqa: atom-no-keywords-->");
+        check_comment("<!--noqa: atom-no-keywords, atom-bad-ocd-->", ", atom-bad-ocd", "<!--noqa: atom-no-keywords-->");
+    }
+
+    #[test]
+    fn dropped_first_middle_or_last_of_three_takes_one_separator() {
+        // used last: first + middle dropped
+        check_comment("<!-- noqa: atom-bad-ocd, atom-bad-lmd, atom-no-keywords -->", "atom-bad-ocd, atom-bad-lmd, ", "<!-- noqa: atom-no-keywords -->");
+        // used first: middle + last dropped (a trailing run takes the comma before it)
+        check_comment("<!-- noqa: atom-no-keywords, atom-bad-ocd, atom-bad-lmd -->", ", atom-bad-ocd, atom-bad-lmd", "<!-- noqa: atom-no-keywords -->");
+        // used middle: first + last dropped; two removals, one separator each
+        let before = test_page(&format!("{L}<!-- noqa: atom-bad-ocd, atom-no-keywords, atom-bad-lmd -->\nBody."));
+        let fixed = fixed_with_oracle(&before);
+        assert_eq!(fixed, test_page(&format!("{L}<!-- noqa: atom-no-keywords -->\nBody.")));
+        assert_eq!(before.replacen("atom-bad-ocd, ", "", 1).replacen(", atom-bad-lmd", "", 1), fixed);
+    }
+
+    #[test]
+    fn irregular_spacing_is_preserved_outside_the_dropped_selector() {
+        // Rule: a non-last dropped selector takes its own text through the start of the next selector;
+        // a trailing dropped run takes everything from the end of the last kept selector to its own end.
+        check_comment("<!--  noqa:atom-bad-ocd ,atom-no-keywords  -->", "atom-bad-ocd ,", "<!--  noqa:atom-no-keywords  -->");
+        check_comment("<!--  noqa:atom-no-keywords ,atom-bad-ocd  -->", " ,atom-bad-ocd", "<!--  noqa:atom-no-keywords  -->");
+    }
+
+    #[test]
+    fn a_selector_that_prefixes_another_is_removed_by_span_not_by_substring() {
+        // atom-no-ocd is unused; atom-no-ocd-x names no rule (never judged), so it survives untouched.
+        let before = test_page(&format!("{L}<!-- noqa: atom-no-ocd, atom-no-ocd-x, atom-no-keywords -->\nBody."));
+        let fixed = fixed_with_oracle(&before);
+        assert_eq!(fixed, test_page(&format!("{L}<!-- noqa: atom-no-ocd-x, atom-no-keywords -->\nBody.")));
+        assert_eq!(fix(Path::new(P), &fixed), None);
+        // the shorter name is used and the longer is unknown: nothing to fix
+        let used_short = test_page(&format!("{L}<!-- noqa: atom-no-keywords, atom-no-keywords-x -->\nBody."));
+        assert_eq!(fix(Path::new(P), &used_short), None);
+    }
+
+    #[test]
+    fn the_same_unused_selector_listed_twice_goes_twice_with_one_separator_each() {
+        check_comment("<!-- noqa: atom-bad-ocd, atom-bad-ocd, atom-no-keywords -->", "atom-bad-ocd, atom-bad-ocd, ", "<!-- noqa: atom-no-keywords -->");
+        let before = test_page(&format!("{L}<!-- noqa: atom-bad-ocd, atom-no-keywords, atom-bad-ocd -->\nBody."));
+        let fixed = fixed_with_oracle(&before);
+        assert_eq!(fixed, test_page(&format!("{L}<!-- noqa: atom-no-keywords -->\nBody.")));
+        assert_eq!(before.replacen("atom-bad-ocd, ", "", 1).replacen(", atom-bad-ocd", "", 1), fixed);
+    }
+
+    #[test]
+    fn dropping_every_selector_still_deletes_the_whole_comment() {
+        let before = test_page("Fact. <!--noqa:atom-bad-ocd ,atom-bad-lmd-->\nKept.");
+        let fixed = fixed_with_oracle(&before);
+        assert_eq!(fixed, test_page("Fact.\nKept."));
+    }
+
+    #[test]
+    fn only_the_last_comment_on_a_line_is_a_suppression_like_the_parser_says() {
+        // noqa.rs `classify` honours a line comment only when nothing follows it: the first is inert text.
+        let before = test_page("text <!-- noqa: atom-no-keywords --> <!-- noqa: atom-bad-ocd -->");
+        assert!(has_unused(&before));
+        // WHY None: deleting the last comment would promote the inert first one to a live suppression,
+        // so the declared-selector multiset would change; the lossless guard refuses and leaves the line.
+        assert_eq!(fix(Path::new(P), &before), None);
+        // last comment used: the inert first one is never judged, so nothing to fix
+        let t = test_page(&format!("{L}<!-- noqa: atom-bad-ocd --> <!-- noqa: atom-no-keywords -->"));
+        assert_eq!(fix(Path::new(P), &t), None);
     }
 
     #[test]
@@ -157,19 +295,20 @@ mod tests {
         assert_eq!(fix(Path::new(P), &t), None);
     }
 
-
     #[test]
     fn a_selector_reused_on_several_lines_is_dropped_only_where_unused() {
         let used = "^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01] <!-- noqa: atom-no-keywords -->";
         let before = test_page(&format!("{used}\nFact. <!-- noqa: atom-no-keywords -->"));
-        let fixed = fix(Path::new(P), &before).expect("fixed");
+        let fixed = fixed_with_oracle(&before);
         assert_eq!(fixed, test_page(&format!("{used}\nFact.")));
+        assert_eq!(before.replacen("Fact. <!-- noqa: atom-no-keywords -->", "Fact.", 1), fixed);
     }
 
     #[test]
     fn a_dangling_comment_open_overlapping_its_close_never_panics() {
+        // Measured: every one of these declines (None) rather than slicing across the overlap.
         for t in ["x <!--> <!-- noqa: atom-no-keywords -->", "<!--->", "a <!-- noqa: atom-no-keywords --><!-->"] {
-            let _ = fix(Path::new(P), &test_page(t));
+            assert_eq!(fix(Path::new(P), &test_page(t)), None, "{t}");
         }
     }
 
@@ -183,17 +322,20 @@ mod tests {
     #[test]
     fn rewrites_the_frontmatter_lint_ignore_list_and_deletes_it_when_empty() {
         let base = |ig: &str| format!("---\nname: p\ndescription: \"alpha / beta / gamma / delta\"\n{ig}ocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01]\nB.\n\n## Notes and lessons learned\n");
-        let fixed = fix(Path::new(P), &base("lint-ignore: [atom-no-keywords, atom-bad-ocd]\n")).expect("fixed");
+        let before = base("lint-ignore: [atom-no-keywords, atom-bad-ocd]\n");
+        let fixed = fixed_with_oracle(&before);
         assert_eq!(fixed, base("lint-ignore: [atom-no-keywords]\n"));
-        let fixed = fix(Path::new(P), &base("lint-ignore: [atom-bad-ocd]\n")).expect("fixed");
+        assert_eq!(before.replacen(", atom-bad-ocd", "", 1), fixed);
+        assert_eq!(fix(Path::new(P), &fixed), None);
+        let fixed = fixed_with_oracle(&base("lint-ignore: [atom-bad-ocd]\n"));
         assert_eq!(fixed, base(""));
     }
 
     #[test]
     fn crlf_lines_keep_their_line_ending() {
         let before = test_page("Fact one. <!-- noqa: atom-no-keywords -->\nKept.").replace('\n', "\r\n");
-        let fixed = fix(Path::new(P), &before).expect("fixed");
+        let fixed = fixed_with_oracle(&before);
         assert_eq!(fixed, test_page("Fact one.\nKept.").replace('\n', "\r\n"));
+        assert_eq!(before.replacen(" <!-- noqa: atom-no-keywords -->", "", 1), fixed);
     }
-
 }
