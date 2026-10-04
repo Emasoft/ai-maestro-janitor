@@ -690,3 +690,14 @@ def test_ordinary_failed_capture_still_uses_up_a_launch(tmp_path: Path, monkeypa
     assert rotator._bootstrap_seeded_slots() == [_SPARE_ADDR]
     assert captured == [_SPARE_ADDR]
     assert _attempts() == 1
+
+
+def test_manual_capture_refusal_does_not_change_the_attempt_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal with no launch recorded (a capture run by hand) was never charged, so no refund."""
+    captured = _refusal_setup(tmp_path, monkeypatch, attempts=2)  # no last_bootstrap_at
+    rotator.rotator_alert.record_capture_refused(rotator.ROOT, _SPARE_ADDR, _OTHER_ADDR, time.time())
+    assert rotator._bootstrap_seeded_slots() == []  # still held for the cooldown
+    assert captured == []
+    assert _attempts() == 2

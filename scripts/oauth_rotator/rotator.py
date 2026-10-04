@@ -3328,9 +3328,15 @@ def _bootstrap_seeded_slots() -> list[str]:
         if not eligible:
             rotator_alert.clear_capture_refused(ROOT, email)  # recovered: the alert must end
         if refused and isinstance(meta, dict):
-            # Refund once per refusal: only a marker newer than the last launch belongs to it, and
-            # `bootstrap_refused_ts` remembers it was already refunded.
-            if refused["ts"] >= meta.get("last_bootstrap_at", 0) and meta.get("bootstrap_refused_ts") != refused["ts"]:
+            # Refund once per refusal, and only when a launch was actually CHARGED for it: a recorded
+            # launch (`last_bootstrap_at`, epoch seconds like the marker's `ts`), a marker not older
+            # than it, and a count to give back. A MANUAL capture's refusal (no launch recorded, or
+            # attempts already 0) was never charged, so refunding it would reset a real count.
+            # `bootstrap_refused_ts` remembers a refusal was already refunded.
+            launched_at = meta.get("last_bootstrap_at")
+            if (isinstance(launched_at, (int, float)) and not isinstance(launched_at, bool)
+                    and refused["ts"] >= launched_at and attempts > 0
+                    and meta.get("bootstrap_refused_ts") != refused["ts"]):
                 attempts = max(0, attempts - 1)
                 meta["bootstrap_attempts"] = attempts
                 meta["bootstrap_refused_ts"] = refused["ts"]

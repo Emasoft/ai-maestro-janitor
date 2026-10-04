@@ -218,18 +218,32 @@ def _consent_logged_in_email(page_text: str) -> str | None:
     return next(iter(on_line)) if len(on_line) == 1 else None
 
 
-def _consent_refusal(actual: str | None, target: str) -> str | None:
-    """The refusal message when the consent page is not provably signed in as `target`
+class _Refusal(str):
+    """A refusal message that also carries the account the profile is signed in as (None = unknown).
+    WHY data, not wording: the alert reads the account from here, so rewording the message cannot
+    silently degrade it to "could not be confirmed"."""
+
+    actual: str | None
+
+    def __new__(cls, message: str, actual: str | None) -> "_Refusal":
+        obj = super().__new__(cls, message)
+        obj.actual = actual
+        return obj
+
+
+def _consent_refusal(actual: str | None, target: str) -> "_Refusal | None":
+    """The refusal when the consent page is not provably signed in as `target`
     (`actual` = `_consent_logged_in_email` result), else None (proceed). Fails CLOSED when
     the account is unknown: a minted grant cannot be undone and may evict the grant the live
-    session shares, so an unconfirmed account never clicks."""
+    session shares, so an unconfirmed account never clicks. The observed account travels as
+    `.actual` on the returned message, never re-parsed out of its wording."""
     if actual is None:
-        return ("[capture] REFUSED: could not confirm which account the consent page is signed "
-                "in as; not authorizing.")
+        return _Refusal("[capture] REFUSED: could not confirm which account the consent page is signed "
+                        "in as; not authorizing.", None)
     if actual != target.lower():
-        return (f"[capture] REFUSED: the Chrome profile for {target} is signed in as {actual}; "
-                f"not authorizing (no grant minted). Sign that profile in as {target} with "
-                f"open-login.sh.")
+        return _Refusal(f"[capture] REFUSED: the Chrome profile for {target} is signed in as {actual}; "
+                        f"not authorizing (no grant minted). Sign that profile in as {target} with "
+                        f"open-login.sh.", actual)
     return None
 
 
@@ -256,15 +270,14 @@ def _read_consent_email(page, wait_s: float = 5.0) -> tuple[bool, str | None]:
 # Reads that keep RAISING are not "no address": no click and no refusal while they fail, but only
 # for this long in a row, so a dead page does not hold Chrome open for the whole 5-min consent timeout.
 _CONSENT_UNREADABLE_LIMIT_S = 30.0
-_CONSENT_UNREADABLE_REFUSAL = (
+_CONSENT_UNREADABLE_REFUSAL = _Refusal(
     "[capture] REFUSED: could not read the consent page to confirm the signed-in account; "
-    "not authorizing."
-)
+    "not authorizing.", None)
 
 
 def _consent_gate(page, email: str, unreadable_since: float | None,
                   limit_s: float = _CONSENT_UNREADABLE_LIMIT_S,
-                  wait_s: float = 5.0) -> tuple[str | None, bool, float | None]:
+                  wait_s: float = 5.0) -> tuple[_Refusal | None, bool, float | None]:
     """One account-guard pass at the Authorize button: (refusal, may_click, unreadable_since).
 
     A clean read decides (match -> click, otherwise refusal) and resets the timer. An all-raising
@@ -279,7 +292,12 @@ def _consent_gate(page, email: str, unreadable_since: float | None,
 
 
 class _ConsentRefused(Exception):
-    """Raised by `_drive_browser` when `_consent_refusal` blocks the Authorize click."""
+    """Raised by `_drive_browser` when `_consent_refusal` blocks the Authorize click.
+    `actual` is the account the profile is signed in as (None = unknown), carried as data."""
+
+    def __init__(self, refusal: "_Refusal") -> None:
+        super().__init__(str(refusal))
+        self.actual = refusal.actual
 
 
 def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | None:
@@ -371,7 +389,7 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                         page_text = ""
                     if _looks_like_challenge(page_text):
                         challenge_seen = True
-                    refused: str | None = None
+                    refused: _Refusal | None = None
                     for sel in APPROVE_SELECTORS:
                         try:
                             btn = page.query_selector(sel)
@@ -592,10 +610,9 @@ def capture(email: str, headless: bool) -> int:
         # WHY a marker (TRDD-0SU2C2IM): this process is detached, so the launcher cannot read our
         # exit code; the marker is how it learns the refusal (no launch charged, no relaunch every
         # tick) and how the out-of-band alert learns which account the profile is signed in as.
-        # The account is parsed from the message `_consent_refusal` builds (None = unconfirmed).
-        wrong = re.search(r"is signed in as (\S+?);", str(refusal))
-        rotator_alert.record_capture_refused(
-            rotator.ROOT, email, wrong.group(1) if wrong else None, time.time())
+        # The account comes from the exception attribute, never from the message wording (None =
+        # unconfirmed), so rewording the message cannot silently degrade the alert.
+        rotator_alert.record_capture_refused(rotator.ROOT, email, refusal.actual, time.time())
         return EXIT_CONSENT_REFUSED
     if not raw_code:
         print("[capture] FAILED: no authorization code captured.")
@@ -654,6 +671,10 @@ def capture(email: str, headless: bool) -> int:
         print("[capture] FAILED: another rotator operation held the lock; nothing was written. "
               "Re-run this capture.")
         return 1
+    # WHY (TRDD-0SU2C2IM): the owner fixed the profile and this capture proved it, so the refusal
+    # marker for it is stale. Clearing it here ends the alert and lifts the relaunch hold at once,
+    # instead of after REFUSED_COOLDOWN_S. Keyed by the profile (argv) account, where it was recorded.
+    rotator_alert.clear_capture_refused(rotator.ROOT, profile_email)
 
     # opt-in Phase-2c: snapshot the (now possibly refreshed) profile cookies back into the
     # keychain, encrypted at rest. Keyed by the PROFILE owner (argv email), since the
