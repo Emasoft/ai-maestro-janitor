@@ -63,15 +63,37 @@ mod tests {
         let t = BEFORE.replacen("\n", "\r\n", 1);
         let fixed = fix(Path::new(P), &t).expect("fixed");
         assert!(fixed.ends_with("\n## Notes and lessons learned\n") && !fixed.ends_with("\r\n## Notes and lessons learned\r\n"), "{fixed:?}");
+        assert!(has_code(Path::new(P), &t, CODE) && !has_code(Path::new(P), &fixed, CODE));
+    }
+
+    #[test]
+    fn a_pure_crlf_page_gets_a_crlf_section_and_no_bare_lf() {
+        // WHY: the test above has ONE CRLF line; this is the page a Windows editor actually saves.
+        let t = BEFORE.replace('\n', "\r\n");
+        let fixed = fix(Path::new(P), &t).expect("fixed");
+        assert_eq!(fixed, format!("{t}\r\n## Notes and lessons learned\r\n"));
+        assert!(fixed.starts_with(&t));
+        assert!(!fixed.replace("\r\n", "").contains('\n'), "{fixed:?}");
+        assert!(has_code(Path::new(P), &t, CODE) && !has_code(Path::new(P), &fixed, CODE));
+    }
+
+    #[test]
+    fn none_on_a_page_that_already_has_the_section() {
+        // Hand-written, never passed through the fixer: nothing to fix means None, not Some(input).
+        let t = format!("{BEFORE}\n## Notes and lessons learned\n");
+        assert!(!has_code(Path::new(P), &t, CODE));
+        assert_eq!(fix(Path::new(P), &t), None);
     }
 
     #[test]
     fn no_final_newline_and_footer_before_eof() {
         let fixed = fix(Path::new(P), BEFORE.trim_end()).expect("fixed");
         assert_eq!(fixed, format!("{BEFORE}\n## Notes and lessons learned\n"));
+        assert!(!has_code(Path::new(P), &fixed, CODE));
         let see = format!("{BEFORE}\n## See also\n\n- [[x]]\n");
         let fixed = fix(Path::new(P), &see).expect("fixed");
         assert!(fixed.starts_with(&see) && fixed.ends_with("## Notes and lessons learned\n"));
+        assert!(has_code(Path::new(P), &see, CODE) && !has_code(Path::new(P), &fixed, CODE));
     }
 
 }
