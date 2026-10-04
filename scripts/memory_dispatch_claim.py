@@ -128,6 +128,24 @@ def is_claimable(state_dir: Path, dispatch_id: str, chore: str) -> bool:
     return payload_matches_chore(payload, chore)
 
 
+def peek_one(state_dir: Path, chore: str) -> Path | None:
+    """Read-only: the oldest unclaimed dispatch `claim_one(state_dir, chore)` would claim.
+
+    janitor#319: `--peek` printed `candidates()[0]` — chore-blind — so a peek of
+    `consolidate` reported a `conflict` record as available work, the exact overstatement
+    `payload_matches_chore` exists to prevent on the claim path. Peek and claim now apply
+    the same predicate to the same oldest-first pool, so they cannot disagree.
+    """
+    for path in candidates(state_dir):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue  # unreadable matches no chore — same treatment claim_one gives it
+        if payload_matches_chore(payload, chore):
+            return path
+    return None
+
+
 def _matching_records(
     state_dir: Path, prefix: str, chore: str | None, scope: str | None
 ) -> list[tuple[str, dict]]:
@@ -885,11 +903,13 @@ def main() -> int:
         return 3
 
     if args.peek:
-        nxt = candidates(state_dir)
-        if not nxt:
+        # janitor#319: filter by --chore like the claim below (see `peek_one`); no match
+        # exits 2 exactly as a claim of that chore would.
+        nxt = peek_one(state_dir, args.chore)
+        if nxt is None:
             print("no claimable dispatch", file=sys.stderr)
             return 2
-        print(nxt[0])
+        print(nxt)
         return 0
 
     try:

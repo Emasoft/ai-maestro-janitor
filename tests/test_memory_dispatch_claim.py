@@ -1540,3 +1540,30 @@ def test_find_completion_report_dedupes_a_symlinked_project_root(tmp_path, monke
     found = mdc._find_completion_report(state_dir, "1000000-abcd1234", 0)
     assert found is not None
     assert found == (str(skeleton), False)
+
+
+def test_peek_with_chore_returns_the_matching_dispatch_not_the_oldest(tmp_path):
+    """janitor#319: `--peek --chore B` with candidates [A, B] must name B's record."""
+    _dispatch(tmp_path, 100, "conflict")
+    want = _dispatch(tmp_path, 200, "consolidate")
+    proc = _run_cli(["--chore", "consolidate", "--state-dir", str(tmp_path), "--peek"])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str(want)
+
+
+def test_peek_with_a_chore_that_has_no_record_reports_nothing(tmp_path):
+    """janitor#319: peek of an absent chore exits 2 like a claim does, never naming another chore's record."""
+    _dispatch(tmp_path, 100, "conflict")
+    proc = _run_cli(["--chore", "split", "--state-dir", str(tmp_path), "--peek"])
+    assert proc.returncode == 2, proc.stderr
+    assert proc.stdout == ""
+    assert "no claimable dispatch" in proc.stderr
+
+
+def test_plain_peek_of_the_oldest_chore_is_unchanged(tmp_path):
+    """Peeking the chore of the oldest record still names the oldest record."""
+    first = _dispatch(tmp_path, 100, "conflict")
+    _dispatch(tmp_path, 200, "conflict")
+    proc = _run_cli(["--chore", "conflict", "--state-dir", str(tmp_path), "--peek"])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str(first)
