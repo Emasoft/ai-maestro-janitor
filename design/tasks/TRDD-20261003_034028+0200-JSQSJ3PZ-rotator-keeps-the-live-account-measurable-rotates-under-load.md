@@ -4,7 +4,7 @@ title: Rotator keeps the live account measurable, rotates under load, and warns 
 column: blocked
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-04T20:14:00+0200
+updated: 2026-10-05T01:27:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,7 +19,7 @@ project-id: ai-maestro-janitor
 npt: [JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ]
 eht: [3OS6AXV3, HSRERK5S]
 blocked-by: [JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ]
-pre-block-column: testing
+pre-block-column: dev
 blocker-probe: [trddgrep, why, JSQSJ3PZ]
 blocker-holds-if: not-match:READY
 ---
@@ -336,6 +336,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-03 06:15 correction: R1b is COMMITTED as e9b7622d (its subject line was lost to a git -F mix-up; the full message is in follow-up commit 346a557d, message-only; git notes are not pushed). Next: verify and commit R4c, then card updates and the full test suite.
 TRDD-L2CCH9D5 and TRDD-JW8CWWNH (filed 2026-10-03 from R8) are non-blocking backlog: linked by parent-trdd only, not in npt/eht, so they do not hold this umbrella open.
 2026-10-04 column testing (was dev). Correction to the move reason recorded in the approval log - it called HSRERK5S parked, but HSRERK5S and 3OS6AXV3 are both in testing. Verified with git merge-base against tag v3.7.0 - fe76d99c, 2b18348f, 30d320eb, b4ba693b, b956914d, 415d1971 and e9b7622d are all inside the 3.7.0 release. Whether R4c landed was not checked. Field evidence so far is negative - on 2026-10-04 the heartbeat printed the alert that account rotation is stuck nine times in one afternoon. NEXT ACTION - after 3.7.1 is installed, observe the field acceptance list in the plan, and treat the stuck alert as a failing result until it stops.
+2026-10-05 column blocked (was testing for about two hours on 2026-10-04; that move raised ORDER-NPT-VIOLATED because a parent may not pass dev while its prerequisite cards are unfinished). blocked-by lists the same cards as npt. pre-block-column set to dev, the lint-clean place for a parent to wait. Probe measured 2026-10-05: trddgrep why prints the word READY for a card whose prerequisites are satisfied (seen on BHIS99XE) and does not print it for a blocked card (seen on 3HLI7DMK). The NEXT ACTION above is unchanged.
 
 ## Release status
 
