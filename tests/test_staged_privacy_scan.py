@@ -163,6 +163,44 @@ def test_bare_hex_run_outside_lockfile_still_blocks(repo: Path) -> None:
     assert len(hits) == 1
 
 
+# A 64-hex digest whose digit run (245038516) reads as an SSN shape.
+_MANIFEST_LINE = '    "scripts/a.py": "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf",\n'
+
+
+def _ssn_hits(repo: Path) -> list:
+    return [h for h in sps.scan_staged(repo) if h.rule == "pii-us_ssn"]
+
+
+def test_integrity_manifest_entry_line_suppressed(repo: Path) -> None:
+    """A digest entry line in the exact integrity-manifest path is suppressed and counted."""
+    (repo / ".integrity").mkdir()
+    _stage(repo, ".integrity/manifest-sha256.json", "{\n" + _MANIFEST_LINE + "}\n")
+    assert _ssn_hits(repo) == []
+    assert sps._LAST_SUPPRESSED > 0
+
+
+def test_manifest_entry_line_in_ordinary_file_still_blocks(repo: Path) -> None:
+    """The same entry line in an ordinary file still blocks (path gate control)."""
+    (repo / "data").mkdir()
+    _stage(repo, "data/other.json", _MANIFEST_LINE)
+    assert len(_ssn_hits(repo)) == 1
+
+
+def test_manifest_basename_in_other_directory_still_blocks(repo: Path) -> None:
+    """A same-named file in another directory is not suppressed (basename is not enough)."""
+    (repo / "vendor").mkdir()
+    _stage(repo, "vendor/manifest-sha256.json", _MANIFEST_LINE)
+    assert len(_ssn_hits(repo)) == 1
+
+
+def test_non_entry_line_in_integrity_manifest_still_blocks(repo: Path) -> None:
+    """A non-entry line carrying an SSN shape inside the manifest is still scanned."""
+    (repo / ".integrity").mkdir()
+    ssn = "123" + "-" + "45" + "-" + "6789"
+    _stage(repo, ".integrity/manifest-sha256.json", '    "note": "' + ssn + '",\n')
+    assert len(_ssn_hits(repo)) == 1
+
+
 def test_trdd_governance_author_token_does_not_block(repo: Path) -> None:
     """Issue #314: trddgrep's `<role>@<project-id>` governance author token
     matches the ssh user-at-host shape but names no machine — must not block

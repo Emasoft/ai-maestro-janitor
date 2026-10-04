@@ -106,6 +106,13 @@ def _mask(s: str) -> str:
 #      never "any line with a long hex run" — that variant would suppress a
 #      hand-pasted real secret that happens to look hex.
 #
+#   3. The integrity manifest's sha256 digests hit the SSN shape by digit-run
+#      chance; this blocked the 3.7.0 bump commit (2026-10-04), the first
+#      release under this scan (TRDD-CWKM5218). Suppression is keyed to the
+#      exact generated path AND the exact entry-line shape: a basename match
+#      would let a hand-made file of that name anywhere skip the rules, and a
+#      whole-file match would let a pasted value in the manifest skip them.
+#
 # The count of suppressed lines is returned/disclosed in the summary output —
 # a bypass that cannot be seen is a bypass (no silent suppression).
 
@@ -141,12 +148,21 @@ _GENSUM_KEY = re.compile(
     r'^\s*(?:checksum|integrity|resolved)\s*=\s*"[^"]*"\s*,?\s*$'
 )
 
+# The integrity manifest (scripts/generate_integrity_manifest.py) is JSON of
+# `"<path>": "<sha256 hex>"` entries. Suppression is keyed to this exact path
+# AND this exact entry-line shape (see the comment block above).
+_INTEGRITY_MANIFEST_PATH = ".integrity/manifest-sha256.json"
+_INTEGRITY_ENTRY = re.compile(r'^\s*"[^"]*":\s?"[0-9a-fA-F]{64}",?\s*$')
 
-def _is_machine_generated_line(text: str, generated_file: bool) -> bool:
+
+def _is_machine_generated_line(text: str, generated_file: bool, path: str = "") -> bool:
     """True iff this line is machine-generated dependency metadata where the
     PII/path shapes are meaningless. In a named lockfile every line
-    qualifies; elsewhere only exact generated-manifest key assignments do."""
+    qualifies; elsewhere only exact generated-manifest key assignments do,
+    plus entry lines of the integrity manifest (exact path AND exact shape)."""
     if generated_file:
+        return True
+    if path == _INTEGRITY_MANIFEST_PATH and _INTEGRITY_ENTRY.match(text) is not None:
         return True
     return _GENSUM_KEY.match(text) is not None
 
@@ -316,7 +332,7 @@ def scan_staged(root: Path) -> list[StagedHit]:
             # The scanner's own negative-control tests (see _SELF_TEST_FILES).
             continue
         generated = _is_generated_file(path)
-        if _is_machine_generated_line(text, generated):
+        if _is_machine_generated_line(text, generated, path):
             # Machine-generated dependency metadata (issue #316): the PII
             # and home/path shapes are meaningless here — skip the SHAPE
             # rules. The host-identity token check (below) still runs: not
