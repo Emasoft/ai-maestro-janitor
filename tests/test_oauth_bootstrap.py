@@ -111,7 +111,9 @@ def _wire(
     monkeypatch.setattr(rotator, "SLOTS", root / "slots")
     monkeypatch.setattr(rotator, "STATE_FILE", root / "state.json")
     monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # explicit on (default is also ON, TRDD-0SU2C2IM)
-    rotator.save_state({"live_email": None, "live_fp": None, "slots": {e: {**({"refresh_failures": spec["rf"]} if "rf" in spec else {}), **({"bootstrap_attempts": spec["ba"]} if "ba" in spec else {})} for e, spec in slots.items()}})
+    # live_email is a KNOWN account that is in no test's slot set: the bootstrap fails closed when
+    # the live identity is unknown, so tests that expect launches need a known, non-slot live account.
+    rotator.save_state({"live_email": "other@users.noreply.github.com", "live_fp": None, "slots": {e: {**({"refresh_failures": spec["rf"]} if "rf" in spec else {}), **({"bootstrap_attempts": spec["ba"]} if "ba" in spec else {})} for e, spec in slots.items()}})
 
     blobs = {e: _blob(e.split("@", 1)[0].upper(), refresh=spec["refresh"]) for e, spec in slots.items()}
     monkeypatch.setattr(rotator, "read_slot", lambda e: blobs.get(e))
@@ -199,7 +201,7 @@ def test_bootstrap_never_raises_on_capture_failure(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(rotator, "STATE_FILE", root / "state.json")
     monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # explicit on (default is also ON, TRDD-0SU2C2IM)
     emails = ["boom@x.com", "ok@x.com"]
-    rotator.save_state({"live_email": None, "live_fp": None, "slots": {e: {} for e in emails}})
+    rotator.save_state({"live_email": "other@users.noreply.github.com", "live_fp": None, "slots": {e: {} for e in emails}})
     blobs = {e: _blob(e.split("@", 1)[0].upper(), refresh=None) for e in emails}
     monkeypatch.setattr(rotator, "read_slot", lambda e: blobs.get(e))
     for e in emails:
@@ -230,7 +232,7 @@ def test_bootstrap_uses_profiles_env_override(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(rotator, "STATE_FILE", root / "state.json")
     monkeypatch.setenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", "1")  # explicit on (default is also ON, TRDD-0SU2C2IM)
     monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(alt_profiles))
-    rotator.save_state({"live_email": None, "live_fp": None, "slots": {"e@x.com": {}}})
+    rotator.save_state({"live_email": "other@users.noreply.github.com", "live_fp": None, "slots": {"e@x.com": {}}})
     monkeypatch.setattr(rotator, "read_slot", lambda _: _blob("E", refresh=None))
     _make_session(alt_profiles, "e@x.com", 20.0)  # session lives under the OVERRIDE root
     captured: list[str] = []
@@ -474,6 +476,60 @@ def test_bootstrap_increments_attempts_on_launch(tmp_path: Path, monkeypatch: py
     assert captured == ["seed@gmail.com"] and done == ["seed@gmail.com"]
     state = rotator.load_state()
     assert state["slots"]["seed@gmail.com"]["bootstrap_attempts"] == 1
+
+
+def test_bootstrap_skips_live_account_without_counting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The LIVE account is never auto-captured (a new grant may evict the one every running
+    session shares, TRDD-0SU2C2IM): not launched, bootstrap_attempts untouched, compared
+    case-insensitively. The same slot as a NON-live account launches (see the increments test)."""
+    captured = _wire(tmp_path, monkeypatch, {"live@users.noreply.github.com": {"refresh": None, "session": 20.0, "ba": 1}})
+    state = rotator.load_state()
+    state["live_email"] = "LIVE@Users.NoReply.GitHub.com"
+    rotator.save_state(state)
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == [] and done == []
+    assert rotator.load_state()["slots"]["live@users.noreply.github.com"]["bootstrap_attempts"] == 1
+
+
+
+def test_bootstrap_unknown_live_identity_launches_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No live_email and no session beacon: the live account is unknown, so NOTHING launches
+    (fail closed -- the eligible slot might be the live one) and no counter moves."""
+    captured = _wire(tmp_path, monkeypatch, {"seeded@users.noreply.github.com": {"refresh": None, "session": 20.0, "ba": 1}})
+    state = rotator.load_state()
+    state["live_email"] = None
+    rotator.save_state(state)
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: None)
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == [] and done == []
+    assert rotator.load_state()["slots"]["seeded@users.noreply.github.com"]["bootstrap_attempts"] == 1
+
+
+def test_bootstrap_skips_slot_named_by_fresh_beacon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """live_email empty but a FRESH beacon (newer than last_switch_at) names the slot: it is the
+    live account, so it is not launched."""
+    email = "seeded@users.noreply.github.com"
+    captured = _wire(tmp_path, monkeypatch, {email: {"refresh": None, "session": 20.0}})
+    state = rotator.load_state()
+    state["live_email"] = None
+    state["last_switch_at"] = 1000.0
+    rotator.save_state(state)
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: {"email": email, "ts": 2000.0})
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == [] and done == []
+
+
+def test_bootstrap_launches_slot_named_by_stale_beacon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A beacon naming the slot but OLDER than last_switch_at names the account switched AWAY
+    from; live_email names a different account, so the slot is a spare and IS launched."""
+    email = "seeded@users.noreply.github.com"
+    captured = _wire(tmp_path, monkeypatch, {email: {"refresh": None, "session": 20.0}})
+    state = rotator.load_state()
+    state["last_switch_at"] = 2000.0
+    rotator.save_state(state)
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: {"email": email, "ts": 1000.0})
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == [email] and done == [email]
 
 
 def test_bootstrap_resets_attempts_when_recovered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
