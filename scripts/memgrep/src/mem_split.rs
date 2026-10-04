@@ -786,12 +786,6 @@ pub fn cmd_split_atom_cli(args: &[String]) -> Result<()> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
-
-    // `JANITOR_GLOBAL_STATE_DIR` (read by `write_gate`) is process-wide, and `cargo test` runs
-    // tests in parallel threads by default — mirrors `memory.rs`'s own `EDIT_ENV_MUTEX` pattern
-    // so these tests never race each other or touch the real `~/.claude/...` lock files.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     /// A two-line-bodied atom carrying every prop class a re-tune must not disturb: an `ocd` older
@@ -834,11 +828,11 @@ mod tests {
 
     fn with_state_dir<F: FnOnce()>(state_dir: &Path, f: F) {
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", state_dir);
         }
         f();
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
     }
 
@@ -868,7 +862,6 @@ mod tests {
 
     #[test]
     fn split_topic_moves_atom_and_its_lesson_leaving_both_pages_integrity_clean() {
-        let _env = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let scope = tmp_scope("topic-basic");
         let state_dir = scope.join("state");
         let src_body = "---\nname: misc\ndescription: \"a grab bag of stuff / misc notes\"\n---\n\
@@ -913,7 +906,6 @@ mod tests {
 
     #[test]
     fn split_topic_refuses_when_the_destination_page_already_exists() {
-        let _env = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let scope = tmp_scope("topic-exists");
         let state_dir = scope.join("state");
         let src = write_page(
@@ -943,7 +935,6 @@ mod tests {
 
     #[test]
     fn split_topic_wires_the_see_also_link_both_ways() {
-        let _env = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let scope = tmp_scope("topic-links");
         let state_dir = scope.join("state");
         let src = write_page(
@@ -980,7 +971,6 @@ mod tests {
 
     #[test]
     fn split_atom_produces_a_unique_second_id_and_stays_footnote_clean() {
-        let _env = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let scope = tmp_scope("atom-split");
         let state_dir = scope.join("state");
         let src = write_page(

@@ -6101,7 +6101,7 @@ fn scope_root_override(layer: ScopeLayer) -> Option<PathBuf> {
         "PROJECT" => "WIKIMEM_PROJECT_SCOPE_PATH",
         _ => "WIKIMEM_USER_SCOPE_PATH",
     };
-    let raw = std::env::var(key).ok().filter(|v| !v.is_empty())?;
+    let raw = crate::scoped_env::var(key).ok().filter(|v| !v.is_empty())?;
     Some(resolve_scope_pattern(&raw, layer))
 }
 
@@ -6112,7 +6112,7 @@ fn scope_project_dir() -> String {
     // persistence scanner flags that as cross-plugin env poisoning (MAJOR, blocked publish #3),
     // and it is right to: a reserved var written by one plugin's process is read by every other.
     // Production code only ever READS the reserved var; the memgrep-owned one is what tests set.
-    std::env::var("MEMGREP_PROJECT_DIR")
+    crate::scoped_env::var("MEMGREP_PROJECT_DIR")
         .ok()
         .filter(|v| !v.is_empty())
         .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|v| !v.is_empty()))
@@ -6461,7 +6461,7 @@ fn resolve_project_mem_root() -> PathBuf {
 fn resolve_user_mem_root() -> PathBuf {
     // `WIKIMEM_USER_SCOPE_PATH` is the documented override; `MEMGREP_USER_MEM_ROOT` predates it and
     // is kept as the TEST hook the existing suite sets. Checked first so those tests keep working.
-    if let Ok(over) = std::env::var("MEMGREP_USER_MEM_ROOT")
+    if let Ok(over) = crate::scoped_env::var("MEMGREP_USER_MEM_ROOT")
         && !over.is_empty()
     {
         return PathBuf::from(over);
@@ -9719,7 +9719,6 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     // ── GH-310: symlinks are indexed, deduped by realpath, and refused on write ─────────────
 
@@ -12344,10 +12343,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// bidirectional).
     #[test]
     fn migrate_leave_link_wires_both_ends_of_the_move() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-leavelink-both");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
         let scope = edit_test_tmpdir("leavelink-both");
         let from = scope.join("from.md");
@@ -12367,7 +12365,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let dest_text = std::fs::read_to_string(&to).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -12380,10 +12378,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// Without `--leave-link` the default is unchanged: neither page gains a `See also` link.
     #[test]
     fn migrate_without_leave_link_adds_no_link_by_default() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-leavelink-off");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
         let scope = edit_test_tmpdir("leavelink-off");
         let from = scope.join("from.md");
@@ -12402,7 +12399,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let dest_text = std::fs::read_to_string(&to).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -12416,14 +12413,13 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// lock or write — both pages must stay byte-identical to their pre-call bytes.
     #[test]
     fn migrate_leave_link_refuses_a_downward_cross_scope_link_and_writes_nothing() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-leavelink-down");
         let project_root = edit_test_tmpdir("leavelink-down-project");
         let local_root = edit_test_tmpdir("leavelink-down-local");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
-            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &project_root);
-            std::env::set_var("WIKIMEM_LOCAL_SCOPE_PATH", &local_root);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &project_root);
+            crate::scoped_env::set_var("WIKIMEM_LOCAL_SCOPE_PATH", &local_root);
         }
 
         let from = project_root.join("from.md"); // PROJECT (rank 1)
@@ -12445,9 +12441,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let dest_after = std::fs::read_to_string(&to).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
-            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
-            std::env::remove_var("WIKIMEM_LOCAL_SCOPE_PATH");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            crate::scoped_env::remove_var("WIKIMEM_LOCAL_SCOPE_PATH");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&project_root);
@@ -13277,10 +13273,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     // test needs to hold the scope's `write_gate` lock from the SAME process while calling the
     // command — mirroring `write_gate::tests::acquire_times_out_when_lock_is_held`. Every test
     // here sets `JANITOR_GLOBAL_STATE_DIR` to a throwaway temp dir so it never touches the real
-    // `~/.claude/...` lock files, and holds `EDIT_ENV_MUTEX` for its whole body since that env
-    // var (and `MEMGREP_LOCK_TIMEOUT_S`) is process-wide while `cargo test` runs tests in
-    // parallel threads by default (same reasoning as `write_gate::tests::ENV_MUTEX`).
-    static EDIT_ENV_MUTEX: Mutex<()> = Mutex::new(());
+    // `~/.claude/...` lock files, through `crate::scoped_env` (a per-thread override — see that
+    // module for why a process-wide `set_var` raced across parallel tests).
 
     fn edit_test_tmpdir(label: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -13333,10 +13327,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     #[test]
     fn edit_replaces_a_unique_match() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-unique");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope(
@@ -13351,7 +13344,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13371,10 +13364,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // retry when the page never changed (the measured cause: a heredoc-appended trailing
         // newline made the anchor mismatch mid-line). No --base-sha256 given here at all, so
         // there is nothing for the CAS to even judge stale.
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-absent");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope("scope-absent", "hello world\n");
@@ -13386,7 +13378,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content_after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13414,10 +13406,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // changed), and the old text is still absent because the anchor itself is wrong.
         // This must get the "no match" wording, never STALE_MSG, or the caller loops:
         // reread, recompute the SAME hash, retry, fail identically, forever.
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-absent-goodhash");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope("scope-absent-goodhash", "hello world\n");
@@ -13430,7 +13421,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content_after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13448,10 +13439,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     #[test]
     fn edit_refuses_an_ambiguous_multi_match_without_replace_all() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-ambiguous");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope("scope-ambiguous", "dup dup dup\n");
@@ -13463,7 +13453,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content_after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13478,10 +13468,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     #[test]
     fn edit_replace_all_replaces_every_match() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-replace-all");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope("scope-replace-all", "dup dup dup\n");
@@ -13493,7 +13482,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content_after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13517,10 +13506,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // Asserts on the BYTES, not on the error text: the invariant is "the page on disk is
         // untouched", and a test that only checked the message would still pass if the refusal
         // happened after the write.
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-nonutf8");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let scope = edit_test_tmpdir("scope-nonutf8");
@@ -13541,7 +13529,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let bytes_after = std::fs::read(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13559,10 +13547,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     #[test]
     fn edit_refuses_with_the_canonical_stale_message_on_a_wrong_base_sha256() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-badhash");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope("scope-badhash", "hello world\n");
@@ -13577,7 +13564,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content_after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13589,11 +13576,10 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     #[test]
     fn edit_times_out_bounded_while_another_writer_holds_the_scope_lock() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-lockheld");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
-            std::env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
         }
 
         let (scope, page) = edit_test_scope("scope-lockheld", "hello world\n");
@@ -13611,8 +13597,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content_after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
-            std::env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13637,10 +13623,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// that fired after the write would pass every unit test above and still corrupt the page.
     #[test]
     fn edit_refuses_a_write_whose_proposed_bytes_trip_a_floor_code() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-gate-floor");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope("scope-gate-floor", "body under a fine page\n");
@@ -13657,7 +13642,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let after = std::fs::read(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13677,10 +13662,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// strict table is the card's default, and this fixture's grandfathered debt stays welcome).
     #[test]
     fn edit_writes_through_the_gate_when_the_proposed_bytes_are_clean() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("state-gate-clean");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let (scope, page) = edit_test_scope("scope-gate-clean", "hello world\n");
@@ -13692,7 +13676,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -13703,9 +13687,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     // ── `publish-globally:` reconciliation ──────────────────────────────────────────────────
     //
-    // `EDIT_ENV_MUTEX` is reused here (not a new mutex) because these tests ALSO set process-wide
-    // env vars (`MEMGREP_USER_MEM_ROOT`, sometimes alongside `JANITOR_GLOBAL_STATE_DIR`) and must
-    // never race a concurrently-running `cmd_edit_cli` test over the same vars.
+    // These tests set `MEMGREP_USER_MEM_ROOT` (sometimes alongside `JANITOR_GLOBAL_STATE_DIR`)
+    // through `crate::scoped_env`, so they are per-thread and never race `cmd_edit_cli` tests.
 
     /// A `<tmp>/.claude/project/memory/p.md` page — the literal substring `scope_layer` matches
     /// on for `SCOPE_PROJECT` — plus its enclosing scratch dir. Distinct from `edit_test_scope`
@@ -13772,9 +13755,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// path visibly wrong instead of quietly plausible.
     #[test]
     fn scope_patterns_resolve_home_and_project_symbols_but_never_project_ones_for_user() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_PROJECT_DIR", "/tmp/My Proj");
+            crate::scoped_env::set_var("MEMGREP_PROJECT_DIR", "/tmp/My Proj");
         }
         let home = std::env::var("HOME").unwrap_or_default();
 
@@ -13784,7 +13766,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let user_misused = resolve_scope_pattern("~/store/@project_slug@", SCOPE_USER);
 
         unsafe {
-            std::env::remove_var("MEMGREP_PROJECT_DIR");
+            crate::scoped_env::remove_var("MEMGREP_PROJECT_DIR");
         }
 
         assert_eq!(local, PathBuf::from(&home).join(".claude/projects/-tmp-My-Proj/memory"),
@@ -13815,10 +13797,9 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let user_root = edit_test_tmpdir("scope-derive-user");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&user_root).unwrap();
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
-            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &home);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &home);
         }
 
         // The relocated root must classify as PROJECT — the whole point of the override.
@@ -13841,8 +13822,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             .is_some_and(|(a, b)| a == b);
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
-            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
         }
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -13874,14 +13855,13 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let page = memdir.join("p.md");
         let user_root = edit_test_tmpdir("newpage-public-user");
         std::fs::create_dir_all(&user_root).unwrap();
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
             // `--path` is gone — the destination is derived from `--scope` against the (env-
             // overridable) scope root, exactly like `scope_derives_the_path_and_the_env_override_
             // relocates_the_root` above. Pointing the PROJECT root at `memdir` keeps the derived
             // `<scope root>/<name>.md` byte-identical to the old explicit `--path`.
-            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &memdir);
+            crate::scoped_env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &memdir);
         }
 
         let desc: String = (1..=20).map(|i| format!("phrase number {i} here")).collect::<Vec<_>>().join(" / ");
@@ -13902,8 +13882,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             .is_some_and(|(a, b)| a == b);
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
-            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -13947,9 +13927,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn lint_no_fix_reports_without_repairing() {
         let (scope, page) = pubglobal_project_page("lint-nofix", PUBGLOBAL_PAGE_MISSING);
         let user_root = edit_test_tmpdir("lint-nofix-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let before = std::fs::read_to_string(&page).unwrap();
@@ -13957,7 +13936,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -13982,9 +13961,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn lint_missing_field_is_autofixed_and_therefore_not_reported() {
         let (scope, page) = pubglobal_project_page("lint-missing", PUBGLOBAL_PAGE_MISSING);
         let user_root = edit_test_tmpdir("lint-missing-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let before = std::fs::read_to_string(&page).unwrap();
@@ -13992,7 +13970,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14019,9 +13997,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn lint_true_without_symlink_is_autofixed_by_creating_the_symlink() {
         let (scope, page) = pubglobal_project_page("lint-true-nosym", PUBGLOBAL_PAGE_TRUE);
         let user_root = edit_test_tmpdir("lint-true-nosym-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let v = lint_paths(std::slice::from_ref(&page), false);
@@ -14033,7 +14010,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             .is_some_and(|(a, b)| a == b);
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14054,9 +14031,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let (scope, page) = pubglobal_project_page("lint-conflict", PUBGLOBAL_PAGE_FALSE);
         let user_root = edit_test_tmpdir("lint-conflict-user");
         pubglobal_make_symlink(&user_root, &page);
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let v = lint_paths(std::slice::from_ref(&page), false);
@@ -14064,7 +14040,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let link_survives = user_root.join("p.md").symlink_metadata().is_ok();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14091,16 +14067,15 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn normalize_inserts_false_when_no_field_and_no_symlink() {
         let (scope, page) = pubglobal_project_page("norm-missing", PUBGLOBAL_PAGE_MISSING);
         let user_root = edit_test_tmpdir("norm-missing-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let passes = normalize_page_until_clean(&page).unwrap();
         let content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14118,16 +14093,15 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let (scope, page) = pubglobal_project_page("norm-missing-sym", PUBGLOBAL_PAGE_MISSING);
         let user_root = edit_test_tmpdir("norm-missing-sym-user");
         pubglobal_make_symlink(&user_root, &page);
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let passes = normalize_page_until_clean(&page).unwrap();
         let content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14140,9 +14114,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn normalize_creates_the_symlink_when_true_and_missing() {
         let (scope, page) = pubglobal_project_page("norm-true-nosym", PUBGLOBAL_PAGE_TRUE);
         let user_root = edit_test_tmpdir("norm-true-nosym-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let before = std::fs::read_to_string(&page).unwrap();
@@ -14152,7 +14125,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let link_resolves = std::fs::canonicalize(&link).ok() == page.canonicalize().ok();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14173,9 +14146,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let (scope, page) = pubglobal_project_page("norm-conflict", PUBGLOBAL_PAGE_FALSE);
         let user_root = edit_test_tmpdir("norm-conflict-user");
         pubglobal_make_symlink(&user_root, &page);
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let before = std::fs::read_to_string(&page).unwrap();
@@ -14184,7 +14156,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let link_survives = user_root.join("p.md").symlink_metadata().is_ok();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14211,9 +14183,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn normalize_is_idempotent_second_call_on_a_clean_page_writes_nothing() {
         let (scope, page) = pubglobal_project_page("norm-idem", PUBGLOBAL_PAGE_MISSING);
         let user_root = edit_test_tmpdir("norm-idem-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let first_passes = normalize_page_until_clean(&page).unwrap();
@@ -14230,7 +14201,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let mtime_after_second = std::fs::metadata(&page).unwrap().modified().unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14251,15 +14222,14 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // detect pass, and a correct normalizer must give up loudly rather than spin forever.
         let (scope, page) = pubglobal_project_page("norm-unfixable", "---\nname: p\nno closing delimiter here\n");
         let user_root = edit_test_tmpdir("norm-unfixable-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let res = normalize_page_until_clean(&page);
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14284,16 +14254,15 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         std::fs::create_dir_all(&memory_dir).unwrap();
         let page = memory_dir.join("p.md");
         let user_root = edit_test_tmpdir("atomic-new-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let res = atomic_write_page(&page, PUBGLOBAL_PAGE_MISSING);
         let content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14315,9 +14284,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
              description: \"d\"\n---\nbo\u{0008}dy\n\n## Notes and lessons learned\n";
         let (scope, page) = pubglobal_project_page("atomic-doubly-corrupt", DOUBLY_CORRUPT);
         let user_root = edit_test_tmpdir("atomic-doubly-corrupt-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         // The corrective write an operator's `update-mem-topic --old-file/--new-file` would
@@ -14327,7 +14295,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14345,12 +14313,11 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // Proves the reconciliation runs on the ACTUAL write path (`cmd_edit_cli` -> `atomic_write_page`),
         // not merely from `memgrep lint`, and that the edit itself still lands correctly alongside
         // the ONE inserted line — byte-identical otherwise.
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let state_dir = edit_test_tmpdir("edit-pubglobal-state");
         let user_root = edit_test_tmpdir("edit-pubglobal-user");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         let scope = edit_test_tmpdir("edit-pubglobal-scope");
@@ -14368,8 +14335,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14397,9 +14364,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // ONE write), with the convergence pass-count exposed at each step.
         let (scope, page) = pubglobal_project_page("nplus1", PUBGLOBAL_PAGE_MISSING);
         let user_root = edit_test_tmpdir("nplus1-user");
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         unsafe {
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         // Phase 0 — BEFORE change 1: the page starts missing the field (one fix + one confirm).
@@ -14415,7 +14381,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let final_content = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14728,8 +14694,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     // ── TRDD-XI10BA5D A2 step 4, named test 4: the USER-side symlink survives a gated write ────
     //
-    // Env overrides are process-wide: both fns hold EDIT_ENV_MUTEX for the whole body (same
-    // reasoning as `scope_derives_the_path_and_the_env_override_relocates_the_root`). The symlink
+    // Env overrides go through `crate::scoped_env` (per-thread, no cross-test race). The symlink
     // assertions are unix-only (create_user_symlink is a no-op elsewhere, mirroring
     // pubglobal_make_symlink), so the fns are whole-body #[cfg(unix)] — on a Windows runner they
     // must SKIP VISIBLY, not run and assert nothing.
@@ -14743,15 +14708,14 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     #[test]
     #[cfg(unix)]
     fn gated_write_preserves_the_user_symlink() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let scope = edit_test_tmpdir("symlink-preserve");
         let memory_dir = scope.join(".claude/project/memory");
         std::fs::create_dir_all(&memory_dir).unwrap();
         let page = memory_dir.join("p.md");
         let user_root = edit_test_tmpdir("symlink-preserve-user");
         unsafe {
-            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &scope);
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &scope);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
 
         // The proposed bytes: publish-globally: true → commit's normalize loop owns creating the
@@ -14775,8 +14739,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let page_is_regular = page.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink());
 
         unsafe {
-            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);
@@ -14797,7 +14761,6 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     #[test]
     #[cfg(unix)]
     fn a_refused_gated_write_leaves_the_user_symlink_untouched() {
-        let _env = EDIT_ENV_MUTEX.lock().unwrap();
         let scope = edit_test_tmpdir("symlink-refused");
         let memory_dir = scope.join(".claude/project/memory");
         std::fs::create_dir_all(&memory_dir).unwrap();
@@ -14809,8 +14772,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         std::fs::write(&page, page_text).unwrap();
         let user_root = edit_test_tmpdir("symlink-refused-user");
         unsafe {
-            std::env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &scope);
-            std::env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
+            crate::scoped_env::set_var("WIKIMEM_PROJECT_SCOPE_PATH", &scope);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", &user_root);
         }
         let link = user_root.join("p.md");
         std::os::unix::fs::symlink(page.canonicalize().unwrap(), &link).unwrap();
@@ -14830,8 +14793,8 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let after = std::fs::read_to_string(&page).unwrap();
 
         unsafe {
-            std::env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
-            std::env::remove_var("MEMGREP_USER_MEM_ROOT");
+            crate::scoped_env::remove_var("WIKIMEM_PROJECT_SCOPE_PATH");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&user_root);

@@ -23,6 +23,7 @@ mod predicate;
 mod pre_write;
 mod query_dsl;
 mod search;
+mod scoped_env;
 mod where_dsl;
 mod write_gate;
 

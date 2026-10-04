@@ -526,18 +526,7 @@ pub fn cmd_delete_atom_cli(args: &[String]) -> Result<()> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
-
-    // `JANITOR_GLOBAL_STATE_DIR` is a PROCESS-WIDE env var but `cargo test` runs tests in
-    // parallel threads of the SAME process — any test that sets it must hold this for its whole
-    // body, mirroring `write_gate`'s own test isolation (see its `ENV_MUTEX` for the measured
-    // flake this prevents).
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        ENV_MUTEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
 
     /// A fresh, empty temp dir under the OS temp root — never the real `~/.claude/...` state.
     fn tmpdir(label: &str) -> PathBuf {
@@ -565,10 +554,9 @@ mod tests {
 
     #[test]
     fn refuses_topic_delete_when_a_referrer_exists_then_force_moves_it_to_trashcan() {
-        let _env = env_lock();
         let dir = tmpdir("topic-refuse");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
         }
         let target = write_page(&dir, "obsolete", "the obsolete fact.\n\n## Notes and lessons learned\n");
         write_page(&dir, "keeper", "see [[obsolete]] for background.\n\n## Notes and lessons learned\n");
@@ -612,10 +600,9 @@ mod tests {
 
     #[test]
     fn delete_atom_with_lessons_renumbers_remaining_footnotes_contiguously() {
-        let _env = env_lock();
         let dir = tmpdir("atom-renumber");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
         }
         let page = write_page(
             &dir,
@@ -690,10 +677,9 @@ mod tests {
         // surviving [^2] onto [^1] — refs == defs == {1}, so footnote_integrity_violations sees a
         // clean page while Y now cites Z's unrelated lesson. Silent, and unrecoverable by reading
         // the result.
-        let _env = env_lock();
         let dir = tmpdir("atom-shared-lesson");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
         }
         let page = write_page(
             &dir,
@@ -739,10 +725,9 @@ mod tests {
 
     #[test]
     fn base_sha256_mismatch_refuses_and_writes_nothing() {
-        let _env = env_lock();
         let dir = tmpdir("atom-stale");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", dir.join("state"));
         }
         let page = write_page(&dir, "misc", "^foo [keywords: k]\nfoo fact, no lessons.\n");
         let before = std::fs::read_to_string(&page).unwrap();

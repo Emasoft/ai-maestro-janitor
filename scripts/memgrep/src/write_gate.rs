@@ -93,7 +93,7 @@ fn canonicalize_best_effort(page: &Path) -> PathBuf {
 /// The two ladders MUST stay byte-identical: if only one language drops the legacy rung, the
 /// write gate and the state it guards silently resolve to different directories.
 fn global_state_dir() -> PathBuf {
-    if let Ok(over) = std::env::var("JANITOR_GLOBAL_STATE_DIR")
+    if let Ok(over) = crate::scoped_env::var("JANITOR_GLOBAL_STATE_DIR")
         && !over.is_empty()
     {
         return resolve_best_effort(&expand_user(&over));
@@ -212,7 +212,7 @@ pub fn acquire(scope_root: &Path) -> Result<WriteGuard> {
         .open(&lock_path)
         .with_context(|| format!("open lock file {}", lock_path.display()))?;
 
-    let timeout_s: u64 = std::env::var("MEMGREP_LOCK_TIMEOUT_S")
+    let timeout_s: u64 = crate::scoped_env::var("MEMGREP_LOCK_TIMEOUT_S")
         .ok()
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(DEFAULT_LOCK_TIMEOUT_S);
@@ -348,30 +348,8 @@ pub(crate) fn sha256_of_file(page: &Path) -> Result<String> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
-
-    // `JANITOR_GLOBAL_STATE_DIR` / `MEMGREP_LOCK_TIMEOUT_S` are PROCESS-WIDE env vars, but
-    // `cargo test` runs every `#[test]` fn in its own thread, in parallel, by default. Any test
-    // in this module that sets one of them MUST hold this mutex for its entire body, or a
-    // concurrently-running sibling test observes the wrong value mid-run (measured: it does,
-    // flakily, exactly this way) — never rely on `--test-threads=1` instead, since that would
-    // serialize the WHOLE binary's 150+ unrelated tests just to fix two of them here.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    /// Take `ENV_MUTEX` WITHOUT propagating poison.
-    ///
-    /// `.lock().unwrap()` turns one failing test into three: the first test to panic poisons the
-    /// mutex, and every later test that touches it then fails with `PoisonError` instead of its
-    /// own verdict — so the run reports a cascade and hides which test actually broke. Observed
-    /// exactly that way (3 "failures", 8/8 green when re-run serially), which also makes the
-    /// suite look flaky when only one test is at fault.
-    ///
-    /// Recovering the guard is right HERE specifically because the mutex protects no invariant of
-    /// its own: it guards process-global env vars, and every test that takes it sets the vars it
-    /// needs before reading them. There is no state a panicking sibling could leave inconsistent.
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        ENV_MUTEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
+    // `JANITOR_GLOBAL_STATE_DIR` / `MEMGREP_LOCK_TIMEOUT_S` are set through `crate::scoped_env`
+    // (a per-thread override, see that module for why a process-wide `set_var` raced here).
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -395,10 +373,9 @@ mod tests {
 
     #[test]
     fn lock_path_for_matches_python_sha16_formula() {
-        let _env = env_lock();
         let state_dir = tmpdir("state");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let scope = PathBuf::from("/tmp/fixed/scope/memory");
@@ -417,7 +394,7 @@ mod tests {
         let canonical_state_dir = std::fs::canonicalize(&state_dir).unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
 
@@ -444,10 +421,9 @@ mod tests {
     /// pass just as well with the old per-directory hashing.
     #[test]
     fn out_of_scope_roots_all_share_one_bounded_lock() {
-        let _env = env_lock();
         let state_dir = tmpdir("state-oos");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let a = lock_path_for(Path::new("/tmp/whatever/notmemory"));
@@ -455,7 +431,7 @@ mod tests {
         let real = lock_path_for(Path::new("/tmp/fixed/scope/memory"));
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
 
@@ -488,24 +464,23 @@ mod tests {
     /// as a wrong answer, so nothing else in the suite would have caught it.
     #[test]
     fn acquire_two_out_of_scope_pages_does_not_self_deadlock() {
-        let _env = env_lock();
         let state_dir = tmpdir("state-oos2");
         let dir_a = tmpdir("oos-a");
         let dir_b = tmpdir("oos-b");
         std::fs::write(dir_a.join("p.md"), "a").unwrap();
         std::fs::write(dir_b.join("p.md"), "b").unwrap();
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
             // Keep the failure FAST and unambiguous: with the bug this returns Err(timeout) in a
             // second instead of stalling the suite for the 10s default.
-            std::env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
+            crate::scoped_env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
         }
 
         let got = acquire_two(&dir_a.join("p.md"), &dir_b.join("p.md"));
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
-            std::env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
         }
         for d in [&state_dir, &dir_a, &dir_b] {
             let _ = std::fs::remove_dir_all(d);
@@ -616,10 +591,9 @@ mod tests {
 
     #[test]
     fn acquire_serializes_two_concurrent_holders() {
-        let _env = env_lock();
         let state_dir = tmpdir("state-contend");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
         let scope = tmpdir("scope-contend");
 
@@ -630,7 +604,9 @@ mod tests {
         let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
         let order2 = order.clone();
         let scope2 = scope.clone();
+        let env = crate::scoped_env::snapshot();
         let handle = std::thread::spawn(move || {
+            crate::scoped_env::install(env);
             let _g2 = acquire(&scope2).expect("second acquire must eventually succeed");
             order2.lock().unwrap().push("second");
         });
@@ -642,7 +618,7 @@ mod tests {
 
         let seq = order.lock().unwrap().clone();
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -652,11 +628,10 @@ mod tests {
 
     #[test]
     fn acquire_times_out_when_lock_is_held() {
-        let _env = env_lock();
         let state_dir = tmpdir("state-timeout");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
-            std::env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("MEMGREP_LOCK_TIMEOUT_S", "1");
         }
         let scope = tmpdir("scope-timeout");
 
@@ -666,8 +641,8 @@ mod tests {
         let elapsed = started.elapsed();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
-            std::env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(&scope);
@@ -683,11 +658,10 @@ mod tests {
     /// hanging the whole suite.
     #[test]
     fn acquire_two_opposite_order_never_deadlocks() {
-        let _env = env_lock();
         let state_dir = tmpdir("state-two");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
-            std::env::set_var("MEMGREP_LOCK_TIMEOUT_S", "4");
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("MEMGREP_LOCK_TIMEOUT_S", "4");
         }
         // Two DISTINCT scope roots, each shaped like a real memory dir so scope_root_for
         // resolves to it rather than to a parent.
@@ -705,9 +679,12 @@ mod tests {
         // (2026-08-29). The clearer name is the honest fix — nothing is muted or exempted, the
         // shape that meant "runs a command" is simply gone. The qualified `std::thread::` form
         // inside is unambiguous and is not what fired.
+        let env = crate::scoped_env::snapshot();
         let start_racer =
             |a: PathBuf, b: PathBuf, done: std::sync::Arc<std::sync::atomic::AtomicUsize>| {
+            let env = env.clone();
             std::thread::spawn(move || {
+                crate::scoped_env::install(env);
                 // Hold the pair briefly so the two threads genuinely overlap.
                 for _ in 0..5 {
                     let (_ga, _gb) = acquire_two(&a, &b).expect("acquire_two must not deadlock");
@@ -722,8 +699,8 @@ mod tests {
         t2.join().unwrap();
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
-            std::env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_LOCK_TIMEOUT_S");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(s1.parent().unwrap());
@@ -736,17 +713,16 @@ mod tests {
     /// process would self-deadlock.
     #[test]
     fn acquire_two_same_scope_takes_one_lock() {
-        let _env = env_lock();
         let state_dir = tmpdir("state-two-same");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
         let s = tmpdir("two-same").join("memory");
         std::fs::create_dir_all(&s).unwrap();
         let (_ga, gb) = acquire_two(&s.join("a.md"), &s.join("b.md")).unwrap();
         let second_is_none = gb.is_none();
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&state_dir);
         let _ = std::fs::remove_dir_all(s.parent().unwrap());

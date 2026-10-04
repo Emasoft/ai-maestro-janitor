@@ -626,13 +626,6 @@ pub fn cmd_merge_atom_cli(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // `cmd_merge_topic_cli`/`cmd_merge_atom_cli` touch a PROCESS-WIDE env var
-    // (`JANITOR_GLOBAL_STATE_DIR`, read by `write_gate`) while `cargo test` runs tests in parallel
-    // threads by default — mirrors `memory::tests::EDIT_ENV_MUTEX` exactly (same reasoning: hold
-    // this for the WHOLE body of any test that sets the env var).
-    static MERGE_ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     fn tmpdir(label: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -714,13 +707,12 @@ mod tests {
 
     #[test]
     fn merge_topic_cli_writes_tombstone_and_destination_gains_the_atom() {
-        let _env = MERGE_ENV_MUTEX.lock().unwrap();
         let scope = tmpdir("topic-cli");
         let memory_dir = scope.join("memory");
         std::fs::create_dir_all(&memory_dir).unwrap();
         let state_dir = tmpdir("topic-cli-state");
         unsafe {
-            std::env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir);
         }
 
         let from_path = memory_dir.join("from.md");
@@ -750,7 +742,7 @@ mod tests {
         let into_after = res.is_ok().then(|| std::fs::read_to_string(&into_path).unwrap());
 
         unsafe {
-            std::env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
         }
         let _ = std::fs::remove_dir_all(&scope);
         let _ = std::fs::remove_dir_all(&state_dir);
