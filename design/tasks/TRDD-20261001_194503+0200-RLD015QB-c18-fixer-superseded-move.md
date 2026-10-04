@@ -1,10 +1,10 @@
 ---
 trdd-id: RLD015QB
 title: C18 — fixer superseded_move
-column: testing
+column: ai_review
 status: tasked
 created: 2026-10-01T19:45:03+0200
-updated: 2026-10-04T13:11:11+0200
+updated: 2026-10-04T13:25:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,7 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, RLD015QB]
 blocker-holds-if: not-match:READY
-implementation-commits: [9fb13752]
+implementation-commits: [9fb13752, 9254214e]
 ---
 
 # C18 — fixer superseded_move
@@ -38,3 +38,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:55+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
 - 2026-10-04T13:10:59+0200 — column → todo by main-agent@ai-maestro-janitor. blocker 622ROA5F is complete and archived Cleared blocked-by (--clear-blocker override).
 - 2026-10-04T13:11:11+0200 — column → testing by main-agent@ai-maestro-janitor. fixer implemented in 9fb13752, unit-tested, awaiting review
+- 2026-10-04T13:25:11+0200 — column → ai_review by main-agent@ai-maestro-janitor. implemented and unit-tested, not wired into lint; testing overstated it

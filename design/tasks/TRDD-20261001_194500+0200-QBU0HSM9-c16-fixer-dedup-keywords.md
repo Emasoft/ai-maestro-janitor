@@ -1,10 +1,10 @@
 ---
 trdd-id: QBU0HSM9
 title: C16 — fixer dedup_keywords
-column: testing
+column: ai_review
 status: tasked
 created: 2026-10-01T19:45:00+0200
-updated: 2026-10-04T13:11:07+0200
+updated: 2026-10-04T13:25:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,7 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, QBU0HSM9]
 blocker-holds-if: not-match:READY
-implementation-commits: [9fb13752]
+implementation-commits: [9fb13752, 9254214e]
 ---
 
 # C16 — fixer dedup_keywords
@@ -38,3 +38,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:52+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 622ROA5F per DSN035UN wave order
 - 2026-10-04T13:10:57+0200 — column → todo by main-agent@ai-maestro-janitor. blocker 622ROA5F is complete and archived Cleared blocked-by (--clear-blocker override).
 - 2026-10-04T13:11:07+0200 — column → testing by main-agent@ai-maestro-janitor. fixer implemented in 9fb13752, unit-tested, awaiting review
+- 2026-10-04T13:25:09+0200 — column → ai_review by main-agent@ai-maestro-janitor. implemented and unit-tested, not wired into lint; testing overstated it
