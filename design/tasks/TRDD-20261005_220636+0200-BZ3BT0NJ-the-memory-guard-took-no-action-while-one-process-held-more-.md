@@ -4,7 +4,7 @@ title: The memory guard took no action while one process held more memory than t
 column: todo
 status: tasked
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-05T22:07:30+0200
+updated: 2026-10-05T22:40:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,3 +32,11 @@ To do: read what memory-guard measures and acts on, and why it returned in 0 s (
 ## Corrections
 
 2026-10-05 (review): memory-guard was seen finishing in 0 s at 21:35, 21:37 and 21:39 only; nothing is shown for 21:23 to 21:33, when the daemon itself was stalled. A per-process kill is a destructive act on another session's process: this card PROPOSES it to the owner, it does not implement it without that decision. The command that outlived its tool timeout and was moved to the background has its own card.
+
+## Owner decisions
+
+2026-10-05, the owner, verbatim: "each project with a janitor armed is supervised by the global janitor daemon subprocess, so you can say that the janitor is one and many at the same time. so the author of all TRDD cards opened by the janitors is simply \"janitor\". for the other questions: reduce the intervention on external processes to a minimum, but on processes runaway or under other emergency it can intervene, but always in a way to never lose data. it must stop a process or a tool only after it logged it and made sure to be able to resume/restart it after the fix without loosing data or context or goals. data must not be lost unless it is something temporary like an intermediate compilation artifact, or cache files. and after the janitor fix the issue it must resume the work. remember that the main mission of the janitor is preverving continuity. so it can slow down things, but never stop them, unless for temporary fixes. other than that, it must decide by itself on the base of verified facts only. never assuming anything."
+
+## What the owner's policy settles for this card (session's reading, 2026-10-05)
+
+The guard MAY intervene on a runaway process or in another emergency, and otherwise keeps away from processes that are not the janitor's own. Order of an intervention, from the owner's words: (1) log it first; (2) make sure the work can be resumed or restarted afterwards without loss of data, context or goals; (3) only then stop the process or tool; (4) fix; (5) resume the work. Only temporary data may be lost (an intermediate build product, a cache). Slowing work down is allowed; stopping it is allowed only for the time of a fix. Consequences for the design: suspending a process (it is frozen, keeps its memory and state, and continues on resume) is the intervention that fits, because nothing is lost; ending a process is allowed only when the guard has verified beforehand that the work can be restarted without loss, and it must then restart or resume that work itself; an alert alone is not the goal, continuity is. What must be VERIFIED before any code, not assumed: that a suspended process of the kind seen on 2026-10-05 releases no memory by being frozen (a frozen process still holds what it allocated, so freezing stops growth but does not by itself free the machine); what a suspended or ended edit tool leaves in the file it was writing and in its lock and backup; how the owning session is told so that it retries or resumes; and how the guard itself gets to run in time. Until those are measured this card states them as open facts, not as design.
