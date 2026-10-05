@@ -1269,6 +1269,10 @@ def test_stamp_late_summary_is_keyed_to_the_cleared_session_not_the_newest_group
     handoff_files.write(sd, "aaaa0001", "older session", now=now - 500)
     _write_clear_sidecar(sd, "cccc0003", now)
     dispatch._stamp_late_summary(sd, now)
+    # Assert on the SET of stamps, not on one path: a wrong key must fail here with the names
+    # found, not raise FileNotFoundError on a read of a stamp that was never written.
+    stamps = {p.name for p in sd.glob("late-summary-noted-*.txt")}
+    assert stamps == {"late-summary-noted-cccc0003.txt"}, f"stamps found: {sorted(stamps)}"
     assert (sd / "late-summary-noted-cccc0003.txt").read_text(encoding="utf-8") == "\n"
     assert not (sd / "late-summary-noted-aaaa0001.txt").exists()
 
