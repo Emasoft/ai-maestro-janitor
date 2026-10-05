@@ -4,7 +4,7 @@ title: rotator ticks read the live credential from the mirror copy because the p
 column: todo
 status: tasked
 created: 2026-10-05T11:16:11+0200
-updated: 2026-10-05T11:16:11+0200
+updated: 2026-10-05T13:36:55+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,8 @@ First step, read-only: find in the rotator why the primary read fails headless (
 ## Approval log
 
 - 2026-10-05T11:16:11+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-05 — correction: the clause in the first paragraph about how many ticks logged the accounts as exhausted is account state of one host on one day and should not have been written here; treat it as removed. The finding is only that the primary live credential was unreadable to the daemon and the mirror copy was used.
+2026-10-05 — the first step is reading the code and the logs ONLY. No keychain command is to be run: any query against the real item can raise a prompt on the owner's screen. Any fix that changes keychain access is the owner's decision.

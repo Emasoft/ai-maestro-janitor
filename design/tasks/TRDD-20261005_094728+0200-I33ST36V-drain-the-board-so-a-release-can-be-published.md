@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-05T11:12:47+0200
+updated: 2026-10-05T13:37:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -44,6 +44,9 @@ Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages an
 2026-10-05 — archived TRDD-PWIAEW40 carries one frozen line saying it stays in testing, written before its close succeeded; it is superseded by the lines after it and was not removed. Its derived task (the skill text) was checked on 2026-10-05: 0 hits for the removed import function name, 0 for the other removed script name and 0 for the phrase setup-token under the skills and commands folders; the rewrite of the refresh-logins skill was not re-read line by line.
 2026-10-05 — the 14 testing cards whose wait predated v3.7.0 were checked against the machine's logs by two workers: 5 passed (3 of them partial: one covers 34 hours of a 7-day window, one saw no failing tick, one leaves a second box open), 1 partial observation, 1 failed, 2 not observed, 5 could not be told; each card carries its line. The daemon log covers about 34 hours and the rotator log about 7 hours, so several checks are partial.
 2026-10-05 — waiting on the owner, three questions: the keychain-read default (TRDD-QQ7QCS3T), installing the privacy scan into other repositories (TRDD-ASHLUQ6O, which blocks TRDD-FWDZDB7W), and registering the release-age hook with its window (TRDD-BUR8AW77). Publishing is the owner's go-ahead too: the board is truthful about what is unfinished; it is not finished.
+2026-10-05 — a second publish dry-run on commit 551c4d36 passed every gate before the version bump (17951 tests passed, plugin validation clean). Afterwards another session committed 31c2e3b0 (memgrep, TRDD-7KAL6PNB) on the same branch, and the daemon fix 8a5619f7 (TRDD-D5BPUFIV) and one memory-page split were committed; both earlier dry-runs are void. A third dry-run stopped at the type-check step: pyright timed out after fifteen minutes on a heavily loaded machine. So nothing after 551c4d36 has passed the gate.
+2026-10-05 — another interactive session is working in this repository at the same time and has committed; two agents writing git in one tree is the probable cause of that morning's stale lock file (inferred, not shown). Before a real publish: confirm no other session is active here and the machine is idle.
+2026-10-05 — the owner was given the summary and the three questions on 2026-10-05 and asked whether to publish; no answer yet. An agent does not publish on its own reading.
 
 ## Order of work adopted on 2026-10-05
 

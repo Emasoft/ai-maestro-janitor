@@ -4,7 +4,7 @@ title: Owner warned out of band when no rotation target exists or the rotator st
 column: human_review
 status: tasked
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-05T11:17:29+0200
+updated: 2026-10-05T13:37:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -54,3 +54,4 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — DECIDED (owner delegated decisions; the owner may reverse it): body condition (b) is DROPPED, not satisfied; reason, per a worker's reading of the code comment at the alert module: the only expiry reading for the live account is stale by design; reopen if a reliable source appears. The alert 'account rotation is stuck' was live on 2026-10-05; read from the alert state on that day: condition key rotation-stuck, first seen 2026-10-05 (read from the recent-alert debounce file; the live alert file was absent at read time, so it is not raised at this moment). That is condition (d) of this card, observed live. RESUME POINT: Column testing. The alert was observed for one condition; nothing waits on an event except the owner clearing it with the capture-all-logins command.
 2026-10-05 — correction: 'observed live' above is too strong. The read came from the recent-alert record, which shows the rotation-stuck condition was raised at some point on 2026-10-05; the live alert file was absent, and the heartbeat stopped printing the alert after about 10:29 that day, so it may have cleared by itself. WAITING ON THE OWNER, not on an event: if the alert returns, the capture-all-logins command is the owner's action.
 2026-10-05 — possibly related: TRDD-HVGU9OBL (the primary live credential was unreadable on every logged rotator tick); a hypothesis, not a finding.
+2026-10-05 — the rotation-stuck alert was printed again by the heartbeat later the same day, so it had not cleared for good. If TRDD-HVGU9OBL turns out to be its cause, capturing logins may not be the remedy; read that card before acting on the alert.
