@@ -11,8 +11,9 @@
 
 use crate::md;
 use crate::memory::{
-    atom_id_matches, atomic_write_page, bump_page_lmd, fence_step, footer_section_line,
-    locate_atom_body_matching, read_page_for_write, reindex_owning_scope, rel, today_date, Fence,
+    atom_id_matches, atomic_write_page, bump_page_lmd, downward_reason, fence_step,
+    footer_section_line, locate_atom_body_matching, read_page_for_write, reindex_owning_scope, rel,
+    scope_layer, today_date, Fence,
 };
 use crate::write_gate;
 use anyhow::{Context, Result};
@@ -158,6 +159,50 @@ struct ReferenceTopicArgs {
     dry_run: bool,
 }
 
+/// TRDD-7KAL6PNB (ai-maestro-janitor#330): THE LINK LAW is a WITHIN-LAYER law — across layers
+/// references go strictly UPWARD (LOCAL 0 < PROJECT 1 < USER 2), and a downward edge is what
+/// `lint` reports as `link-downward-cross-scope` ERROR (privacy for USER→LOCAL, portability for
+/// USER→PROJECT). The reference verbs wire BOTH ends in one edit, so a pair straddling two
+/// layers ALWAYS lands a link on the upper page pointing at the lower one — the pair must be
+/// refused whole, before any lock or read (fail-open on `None`: an unmapped path is not proof of
+/// a violation — a test fixture or relocated root must stay linkable, as migrate already rules).
+/// KNOWN CEILING (shared with migrate): when exactly ONE side classifies and the other is `None`,
+/// the guard fails open and the pair proceeds — a future hardening can fail closed on that shape.
+fn guard_downward_cross_scope(page: &Path, to: &Path) -> Result<()> {
+    let (Some(from_s), Some(to_s)) = (
+        page.canonicalize().ok().and_then(|p| scope_layer(&p)),
+        to.canonicalize().ok().and_then(|p| scope_layer(&p)),
+    ) else {
+        return Ok(());
+    };
+    if to_s.rank < from_s.rank {
+        anyhow::bail!(
+            "would link DOWN from {} page `{}` to {} page `{}` — {}. Cross-scope references go strictly upward; record the pointer on the {} page some other way.",
+            from_s.name,
+            rel(page),
+            to_s.name,
+            rel(to),
+            downward_reason(to_s),
+            from_s.name
+        );
+    }
+    if from_s.rank < to_s.rank {
+        // The reciprocal half writes a link ONTO the upper page pointing down (an edge the lint
+        // flags from the UPPER page's side), so the pair is refused from this direction too. The
+        // upper page leads the message so the pair's roles read the same in both arms.
+        anyhow::bail!(
+            "would link DOWN from {} page `{}` to {} page `{}` — {}. Cross-scope references go strictly upward; record the pointer on the {} page some other way.",
+            to_s.name,
+            rel(to),
+            from_s.name,
+            rel(page),
+            downward_reason(from_s),
+            to_s.name
+        );
+    }
+    Ok(())
+}
+
 /// `memgrep reference-mem-topic --page A --to B` — wire `[[B]]` into A's `## See also` and
 /// `[[A]]` into B's, in one edit. Idempotent (a link that already exists is a no-op, never
 /// duplicated); refuses when either page does not exist, so the link can never dangle.
@@ -169,6 +214,7 @@ pub fn cmd_reference_topic_cli(args: &[String]) -> Result<()> {
     if a.page == a.to {
         anyhow::bail!("--page and --to are the same page — nothing to link");
     }
+    guard_downward_cross_scope(&a.page, &a.to)?;
 
     // Deadlock-free two-scope lock, shared with migrate/merge/split — see `write_gate::acquire_two`.
     let (_g1, _g2) = write_gate::acquire_two(&a.page, &a.to)?;
@@ -284,6 +330,7 @@ pub fn cmd_reference_atom_cli(args: &[String]) -> Result<()> {
     if a.page == a.to {
         anyhow::bail!("--page and --to are the same page — nothing to link");
     }
+    guard_downward_cross_scope(&a.page, &a.to)?;
 
     // Deadlock-free two-scope lock, shared with migrate/merge/split — see `write_gate::acquire_two`.
     let (_g1, _g2) = write_gate::acquire_two(&a.page, &a.to)?;
@@ -418,6 +465,131 @@ mod tests {
         assert!(b_text.contains("## See also"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TRDD-7KAL6PNB (ai-maestro-janitor#330): a USER page may not link DOWN to a LOCAL page —
+    /// the lint reports exactly this edge as `link-downward-cross-scope` ERROR, so the verb must
+    /// refuse it before any lock or write. Fails without the guard in
+    /// `guard_downward_cross_scope`.
+    #[test]
+    fn reference_topic_refuses_a_downward_cross_scope_link_and_writes_nothing() {
+        let user_root = ref_tmpdir("topic-down-user");
+        let local_root = ref_tmpdir("topic-down-local");
+        unsafe {
+            crate::scoped_env::set_var("WIKIMEM_USER_SCOPE_PATH", &user_root);
+            crate::scoped_env::set_var("WIKIMEM_LOCAL_SCOPE_PATH", &local_root);
+        }
+
+        let user_page = write_page(&user_root, "user-page.md", "user-page", "Prose U.\n");
+        let local_page = write_page(&local_root, "local-page.md", "local-page", "Prose L.\n");
+        let user_before = std::fs::read_to_string(&user_page).unwrap();
+        let local_before = std::fs::read_to_string(&local_page).unwrap();
+
+        let res = cmd_reference_topic_cli(&[
+            "--page".to_string(),
+            user_page.display().to_string(), // USER (rank 2)
+            "--to".to_string(),
+            local_page.display().to_string(), // LOCAL (rank 0) — DOWN
+        ]);
+        let user_after = std::fs::read_to_string(&user_page).unwrap();
+        let local_after = std::fs::read_to_string(&local_page).unwrap();
+
+        unsafe {
+            crate::scoped_env::remove_var("WIKIMEM_USER_SCOPE_PATH");
+            crate::scoped_env::remove_var("WIKIMEM_LOCAL_SCOPE_PATH");
+        }
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+
+        let err = res.expect_err("USER -> LOCAL reference must be refused");
+        assert!(err.to_string().contains("link DOWN"), "refusal must name the downward link: {err}");
+        assert_eq!(user_after, user_before, "user page must be untouched");
+        assert_eq!(local_after, local_before, "local page must be untouched");
+    }
+
+    /// The mirror case (ai-maestro-janitor#330, both directions): the caller invokes from the
+    /// LOWER page, but the reciprocal half still lands a downward link ON the upper page —
+    /// so the pair must be refused from this side too.
+    #[test]
+    fn reference_topic_refuses_the_reciprocal_downward_link_when_invoked_from_the_lower_page() {
+        let user_root = ref_tmpdir("topic-down-lower-user");
+        let local_root = ref_tmpdir("topic-down-lower-local");
+        unsafe {
+            crate::scoped_env::set_var("WIKIMEM_USER_SCOPE_PATH", &user_root);
+            crate::scoped_env::set_var("WIKIMEM_LOCAL_SCOPE_PATH", &local_root);
+        }
+
+        let user_page = write_page(&user_root, "user-page.md", "user-page", "Prose U.\n");
+        let local_page = write_page(&local_root, "local-page.md", "local-page", "Prose L.\n");
+        let user_before = std::fs::read_to_string(&user_page).unwrap();
+        let local_before = std::fs::read_to_string(&local_page).unwrap();
+
+        let res = cmd_reference_topic_cli(&[
+            "--page".to_string(),
+            local_page.display().to_string(), // LOCAL (rank 0) — invoked from the LOWER page
+            "--to".to_string(),
+            user_page.display().to_string(), // USER (rank 2) — reciprocal writes DOWN onto this
+        ]);
+        let user_after = std::fs::read_to_string(&user_page).unwrap();
+        let local_after = std::fs::read_to_string(&local_page).unwrap();
+
+        unsafe {
+            crate::scoped_env::remove_var("WIKIMEM_USER_SCOPE_PATH");
+            crate::scoped_env::remove_var("WIKIMEM_LOCAL_SCOPE_PATH");
+        }
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+
+        let err = res.expect_err("LOCAL -> USER reference must be refused too (reciprocal lands DOWN)");
+        // Matches BOTH guard arms: each names the pair as would-link-DOWN.
+        assert!(err.to_string().contains("link DOWN"), "refusal must name the downward link: {err}");
+        assert_eq!(user_after, user_before, "user page must be untouched");
+        assert_eq!(local_after, local_before, "local page must be untouched");
+    }
+
+    /// The same guard on `reference-mem-atom`: the atom's `See also:` line plus the reciprocal
+    /// link would both carry the downward edge.
+    #[test]
+    fn reference_atom_refuses_a_downward_cross_scope_link_and_writes_nothing() {
+        let user_root = ref_tmpdir("atom-down-user");
+        let local_root = ref_tmpdir("atom-down-local");
+        unsafe {
+            crate::scoped_env::set_var("WIKIMEM_USER_SCOPE_PATH", &user_root);
+            crate::scoped_env::set_var("WIKIMEM_LOCAL_SCOPE_PATH", &local_root);
+        }
+
+        let user_page = write_page(
+            &user_root,
+            "user-page.md",
+            "user-page",
+            "Prose U.\n\n^atom-u1\natom fact.\n\n## Notes and lessons learned\n",
+        );
+        let local_page = write_page(&local_root, "local-page.md", "local-page", "Prose L.\n");
+        let user_before = std::fs::read_to_string(&user_page).unwrap();
+        let local_before = std::fs::read_to_string(&local_page).unwrap();
+
+        let res = cmd_reference_atom_cli(&[
+            "--page".to_string(),
+            user_page.display().to_string(), // USER (rank 2)
+            "--atom".to_string(),
+            "atom-u1".to_string(),
+            "--to".to_string(),
+            local_page.display().to_string(), // LOCAL (rank 0) — DOWN
+        ]);
+        let user_after = std::fs::read_to_string(&user_page).unwrap();
+        let local_after = std::fs::read_to_string(&local_page).unwrap();
+
+        unsafe {
+            crate::scoped_env::remove_var("WIKIMEM_USER_SCOPE_PATH");
+            crate::scoped_env::remove_var("WIKIMEM_LOCAL_SCOPE_PATH");
+        }
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+
+        let err = res.expect_err("USER -> LOCAL atom reference must be refused");
+        assert!(err.to_string().contains("link DOWN"), "refusal must name the downward link: {err}");
+        assert_eq!(user_after, user_before, "user page must be untouched");
+        assert_eq!(local_after, local_before, "local page must be untouched");
     }
 
     #[test]

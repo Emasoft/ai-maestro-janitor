@@ -6587,7 +6587,7 @@ fn scope_summary_label(paths: &[PathBuf]) -> String {
 /// Only the TARGET layer decides it: anything pointing DOWN at LOCAL leaks machine-private data,
 /// and the sole remaining downward case (USER → PROJECT) is the portability one. Taking the source
 /// too would imply a distinction that does not exist.
-fn downward_reason(to: ScopeLayer) -> &'static str {
+pub(crate) fn downward_reason(to: ScopeLayer) -> &'static str {
     if to == SCOPE_LOCAL {
         // A page NAME and topic are disclosure even when the body is not, and PROJECT memory is
         // pushed to GitHub — so this leaks machine-private information to every future cloner.
