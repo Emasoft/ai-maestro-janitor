@@ -123,7 +123,7 @@ failed — use the wikimem index below and `memgrep recall "<symptom>"`. Recall
 BEFORE acting: it is the cheapest call in this repo and the corpus has repeatedly
 turned out to already hold the answer.
 
-<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=31c800b52189 generated=2026-09-27T17:00:33+0200
+<+-+-JANITOR-WIKIMEM-INDEX-START-(do-not-modify)-+-+> v1 digest=a6005d3b45f1 generated=2026-10-05T05:04:45+0200
 ## Wikimem index (PROJECT scope) — recall by symptom, read on demand
 
 Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "<symptom>" .claude/project/memory`.
@@ -217,6 +217,7 @@ Deep knowledge lives in these pages, not in this file. Search: `memgrep recall "
 - [oauth-rotator-keychain-latch-false-positive-under-load](.claude/project/memory/oauth-rotator-keychain-latch-false-positive-under-load.md) — the janitor failed again to rotate
 - [plugin-cache-install-integrity](.claude/project/memory/plugin-cache-install-integrity.md) — the installed plugin is missing agents commands or hooks
 - [project_janitor_cc_changelog_currency](.claude/project/memory/project_janitor_cc_changelog_currency.md) — is the janitor up to date with the new Claude Code release
+- [project_janitor_cc_changelog_currency-audit-2-1-198-to-2-1-232](.claude/project/memory/project_janitor_cc_changelog_currency-audit-2-1-198-to-2-1-232.md) — did the Claude Code changelog 2.1.198 to 2.1.232 break the janitor
 - [project_rotator_let_429_happen_version_skew](.claude/project/memory/project_rotator_let_429_happen_version_skew.md) — the oauth rotator let a 429 happen instead of rotating
 - [reference_macos_security_keychain_gotchas](.claude/project/memory/reference_macos_security_keychain_gotchas.md) — Storing a secret in the macOS keychain via `security` came back TRUNCATED (only 128 bytes) or as a HEX string
 - [reference_oauth_token_cloudflare_1010_useragent](.claude/project/memory/reference_oauth_token_cloudflare_1010_useragent.md) — OAuth rotator can't mint or renew a slot — token exchange
