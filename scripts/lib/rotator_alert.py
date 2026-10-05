@@ -188,7 +188,14 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         if _tick_age(root, now) > TICK_STALL_S:
             out["tick-stalled"] = _ACTIONS["tick-stalled"]
     if (root / "rotation-stuck.json").is_file():
-        out["rotation-stuck"] = _ACTIONS["rotation-stuck"]
+        # WHY: a login capture cannot help when every account is at its limit; on 2026-10-05 the
+        # generic text sent the owner to /janitor-capture-all-logins for hours (TRDD-QHACQPPG).
+        kind = _read_json(root / "rotation-stuck.json").get("kind")
+        out["rotation-stuck"] = (
+            "every account is at its usage limit - waiting for a window to reset"
+            if kind == "all-accounts-maxed"
+            else _ACTIONS["rotation-stuck"]
+        )
     marker = _read_json(root / AUTH_FAILED_NAME)
     ts = _epoch(marker.get("ts"))
     # Normally cleared by the next successful Stop (`clear_auth_failed`); these are backstops:

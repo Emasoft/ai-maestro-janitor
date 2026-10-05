@@ -152,6 +152,24 @@ def test_rotation_stuck_file_alerts_even_without_claude(root: Path) -> None:
     assert SPARE not in json.dumps(run.argvs) and SPARE not in (root / ra.ALERT_NAME).read_text()
 
 
+
+def test_stuck_alert_for_all_accounts_maxed_says_wait_not_capture(root: Path) -> None:
+    """A stuck marker of kind all-accounts-maxed tells the owner to wait, not to capture logins."""
+    (root / "rotation-stuck.json").write_text(
+        json.dumps({"kind": "all-accounts-maxed", "detail": "x", "first_seen_epoch": 1, "last_seen_epoch": 1})
+    )
+    text = ra.active_conditions(root, NOW, False)["rotation-stuck"]
+    assert text == "every account is at its usage limit - waiting for a window to reset"
+    assert "capture-all-logins" not in text
+
+
+def test_stuck_alert_for_other_kinds_keeps_the_capture_remedy(root: Path) -> None:
+    """Control: no kind, another kind, or a truncated marker keeps the capture-logins text."""
+    for content in ("{}", json.dumps({"kind": "no-usable-slot-twin"}), "{\"kind\": \"all-acc"):
+        (root / "rotation-stuck.json").write_text(content)
+        assert ra.active_conditions(root, NOW, False)["rotation-stuck"] == ra._ACTIONS["rotation-stuck"]
+
+
 def test_banner_backoff_first_then_hourly_then_daily(root: Path) -> None:
     """Notify at first sight, again after 1 h, then at most once per 24 h; the file updates
     on every evaluation and first_seen is preserved."""

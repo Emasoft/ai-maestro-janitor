@@ -1,10 +1,10 @@
 ---
 trdd-id: QHACQPPG
 title: The rotator reports a usage-endpoint throttle with no rotation target as exhausted and the stuck alert gives the wrong remedy
-column: backburner
+column: dev
 status: tasked
 created: 2026-10-05T16:43:27+0200
-updated: 2026-10-05T16:43:27+0200
+updated: 2026-10-05T16:47:12+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,7 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 ## Approval log
 
 - 2026-10-05T16:43:27+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Decisions
+
+2026-10-05: only the alert-text half is implemented now; suppressing the stuck report on a usage-endpoint throttle is waiting for an owner decision, because a guard placed in the final stuck branch does not stop the degraded rotate and would delay a real low-utilisation limit report.
