@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-05T02:36:52+0200
+updated: 2026-10-05T03:04:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -43,3 +43,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-05 CORRECTION: C21 does NOT make the C19 has_code unused-noqa assert real. C21 emits unused-noqa in the lint command path only (apply_lint_config); lint_page_text, which has_code uses, is unchanged. Deciding where suppression lives (lint only, or lint_page_text and so the write gate) is carded as TRDD-KTD3N7H6 and is this card's to settle, since wiring fixers into lint needs emitter, fixer and gate to agree. Also for this card: C21 already calls fixers::fixer_for in-process per labelled finding to decide the safe-fix label, so the call site exists.
 - 2026-10-05: From C21 (TRDD-3HLI7DMK, commit 453512bc, column ai_review): lint only dry-runs registered fixers to compute the safe-fix label; it applies none. When C22 wires them in it must test: (a) a deselected, ignored or noqa-suppressed rule is NOT autofixed; (b) a run refused for an unusable --config leaves every page byte-identical; (c) the pre-existing publish-globally autofix in lint_paths currently runs regardless of selection, decide whether that stays.
 - 2026-10-05: C22 also owns the WM-LINT-10 wording defect: "safe-fix MUST NOT be printed for a fix the engine will not make" is only true once lint applies the fix.
+2026-10-05: C21 follow-up 92663adf changed what C22 inherits. The safe-fix label is now a whole-rule answer per page with three conditions (see TRDD-3HLI7DMK STATE) and is deliberately withheld on a page where the fixer leaves any finding of that rule, and always for unused-noqa. Per-finding labels, and a label for unused-noqa, are C22's once it applies the fixes. The two "- 2026-10-05" lines above still stand.

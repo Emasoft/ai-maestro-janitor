@@ -1,10 +1,10 @@
 ---
 trdd-id: 3HLI7DMK
 title: C21 — labels and lint flags
-column: dev
+column: ai_review
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-05T02:44:14+0200
+updated: 2026-10-05T03:04:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,7 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, 3HLI7DMK]
 blocker-holds-if: not-match:READY
-implementation-commits: [453512bc]
+implementation-commits: [453512bc, 92663adf]
 ---
 
 # C21 — labels and lint flags
@@ -80,3 +80,13 @@ The two cards named above: TRDD-57KAZJI7 (lint config policy) and TRDD-KTD3N7H6 
 - 2026-10-05: Read but NOT examined, left open on this card: a noqa comment may be reported as unused after the autofix repaired its finding; apply_lint_config compares page paths in the form rel() prints, which may differ from the form of cross-page findings; per-file-ignores globs match that same displayed path.
 - 2026-10-05: Advisor not consulted for this fix: the fable-advisor agent type is not available in this session (headroom check passed, no advisor agent or tool is listed). The fix went through a measurement agent and an adversarial review instead.
 - 2026-10-05 NEXT ACTION (replaces the ones above): implement the two fixes per the DECISION line, gate, commit; then return this card to ai_review.
+2026-10-05 FIXED in 92663adf: both defects. An empty selector matches nothing, so it is refused as unknown (exit 2 on the command line, CONFIG-001 in a config; a trailing comma is refused). The fixable and unfixable config lists are validated like the other selector lists.
+2026-10-05 CORRECTION to the DECISION line above: the safe-fix rule as implemented has THREE conditions, not two. A finding of a rule on a page is labelled only when (a) the per-page lint of the original text produces that rule, (b) the fixer changes the text, and (c) the per-page lint of the fixed text has none of that rule left. Because the per-page lint never emits unused-noqa, unused-noqa carries no safe-fix label until C22. On a mixed page (one fixable finding, one refused) nothing of that rule is labelled.
+- 2026-10-05: Spec clause WM-LINT-10 was updated in 92663adf (label wording, empty selector, the two extra validated lists). The three sentences were written by the main session through specgrep edit with the write switch AIM_PILLAR_ALLOW_WRITE=1, after the worker stopped at the tool's refusal outside the ai-maestro checkout. The owner has been told and can revert the three sentences.
+2026-10-05 KNOWN LEFTOVER in 92663adf: the doc comments above lint_label and apply_lint_config in scripts/memgrep/src/memory.rs each appear twice, old wording then new; the old wording is stale. fastedit cannot delete comment lines (its delete verb removes the function and leaves the comment, tested on a scratch copy). Removal needs a plain edit and waits on the owner.
+- 2026-10-05: Gate for 92663adf, tree hash identical before and after: cargo build and clippy clean; cargo test --release THREE runs, 424 unit + 222 CLI passed each; pytest 17906 passed, 2 skipped; ruff, mypy, pyright clean. Both defects re-run on the rebuilt binary: empty selector and trailing comma exit 2, the mixed page prints no safe-fix.
+- 2026-10-05: Timing, read-only lint of the three memory scopes through the wrapper: about 3.0 s on this build (three samples) against about 2.0 s on an installed binary from before C20 (two samples). The difference covers all of C21, not only the label change; it was not attributed further.
+- 2026-10-05: NOT shown: that the build of 453512bc labelled unused-noqa as safe-fix (inferred from an old assertion, never run). Label tests exist for atom-unquoted-desc and page-no-notes-section only; the other safe-fixable rules have none.
+- 2026-10-05: Still open on this card, unchanged by 92663adf: a noqa comment may be reported as unused after the autofix repaired its finding; path-form coupling in apply_lint_config; the three undecided behaviours on TRDD-57KAZJI7 and TRDD-KTD3N7H6; the installed memgrep is not reinstalled.
+2026-10-05 NEXT ACTION (replaces the ones above): owner answers on the stale doc comments; otherwise nothing on this card's code. Review of 92663adf, then the card may leave ai_review.
+2026-10-05 CORRECTION on timing: the figures "about 3.0 s against about 2.0 s" in the commit message of 92663adf are WRONG. The gate's first timing loop did not pin the binary, so both loops ran the installed pre-C20 memgrep (both printed 95 WARN, 55 INFO). Re-measured with MEMGREP_BIN pinned, three samples each, read-only lint of the three memory scopes through the wrapper: build of 92663adf 0.44, 0.51, 0.64 s (15 WARN, 135 INFO); installed pre-C20 binary 0.61, 0.51, 0.49 s (95 WARN, 55 INFO). No measurable cost from C21 or its fix at this corpus size. The commit message is not rewritten; this line is the correction.
