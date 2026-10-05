@@ -4,7 +4,7 @@ title: The iTerm Automation alert tells the human to enable a list entry that ma
 column: dev
 status: tasked
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-05T05:56:42+0200
+updated: 2026-10-05T06:30:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T04:48:26+0200
-implementation-commits: [47f2abe6]
+implementation-commits: [47f2abe6, e4558fcb]
 ---
 
 # The iTerm Automation alert tells the human to enable a list entry that macOS may never have created and repeats on every heartbeat
@@ -86,4 +86,10 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 05:15 A plain terminate signal to the session-spawned daemon, so the launchd standby would take over, was attempted at 05:15 and refused by the Claude Code permission classifier; no signal was sent.
 2026-10-05 05:15 Review of the restart proposal (adversarial fork, 05:10): the restart changes working directory and responsible process together, so its result must be read from the new daemon's flag content (probe_outcome and second_view), not from the alert's presence; no forced kill.
 2026-10-05 05:25 — review of the attempted restart: a restart is expected to cure only the second view, would destroy the only live reproduction of the osascript failure, and cannot be undone; it is NOT recommended until the probe records its real error. Fix order decided: first and alone, the probe records exit code, error text and exception type; then an explicit working directory for the second view, at daemon start and at spawn, described as fixing the second view only; alert wording states the measured outcome and drops the Automation remedy; the repetition is a separate defect with a cause read from the code (the flag is rewritten on every scan because the change comparison ignores only the evidence-age field while three other fields are patched in afterwards, and the heartbeat hashes the whole file) and gets its own change. The earlier idea that the daemon exits when its directory has gone is dropped: a start-time change of directory makes it unnecessary.
-2026-10-05 — first code change: the iTerm probe now writes its real failure to the daemon log (exit code, trailing AppleScript error number, cleaned error text, exception type, resolved osascript path; also the timeout and the exit-0-with-no-output cases). Return shapes, the flag file and the alert are unchanged. It takes effect in a daemon only after a publish and a daemon restart. Next: the second view discards its error text in the same way and runs without an explicit working directory.
+2026-10-05 — first code change: the iTerm probe now writes its real failure to the daemon log (exit code, trailing AppleScript error number, cleaned error text, exception type, resolved osascript path; also the timeout and the exit-0-with-no-output cases). Return shapes, the flag file and the alert are unchanged. (One return VALUE does change: see the correction line about undecodable output.) It takes effect in a daemon only after a publish and a daemon restart. Next: the second view discards its error text in the same way and runs without an explicit working directory.
+2026-10-05 05:20 — observation of the running session-spawned daemon: 35 open descriptors against a limit of 256, so descriptor exhaustion is contradicted; its standard input, output and error are on /dev/null; its PATH contains /usr/bin and its temporary directory exists; osascript is invoked by bare name and both this daemon's PATH and a fresh shell's resolve the same /usr/bin/osascript; the child is given no environment or working directory of its own.
+2026-10-05 05:25 — replay matrix, each run calling the same probe script with the same subprocess arguments, from a process started inside a LIVE iTerm session: baseline; the daemon's exact environment; detached with stdio on /dev/null; from a deleted working directory; all of these together. Every run returned every session with exit 0 and empty error text. So none of environment, detachment, working directory or stdio reproduces the failure WHEN THE ORIGINATING iTerm SESSION IS ALIVE. Not excluded: an interaction with a dead originating session.
+2026-10-05 05:25 — the iTerm session that started the failing daemon no longer exists (its session id is not among the sessions the probe returns). This is the one measured difference between the failing daemon and every successful replay. It is a lead, NOT an established cause: nothing has shown that a dead originating session makes the Apple event fail.
+2026-10-05 — correction to commit 47f2abe6's message, which says the probe 'failed for hours': the failing outcome was observed directly for about one hour; the figure of about fifteen hours is the age of the last positive evidence, not a measured duration of failure. History is not rewritten; this line is the correction.
+2026-10-05 — correction to commit 47f2abe6: 'return values unchanged' is false in one branch. Undecodable child output used to return an empty string with 'error' and now returns the decoded text with 'ok'. A follow-up commit corrects the docstring and pins the new behaviour with a test. The same follow-up moves the detail building inside the guard, logs a failure line only when it changes, and takes the last AppleScript error number anywhere in the text.
+2026-10-05 — order of the remaining changes, decided after review: (1) follow-up to the probe logging; (2) the repetition, which violates completed card KU3ERYFX (one print per episode), has a cause read from the code and is independent of the unknown, starting from a failing test because the cause is read and not yet demonstrated; (3) the second view: error text discarded and no explicit working directory; (4) alert wording.
