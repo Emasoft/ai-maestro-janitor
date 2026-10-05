@@ -1,10 +1,10 @@
 ---
 trdd-id: QHACQPPG
 title: The rotator reports a usage-endpoint throttle with no rotation target as exhausted and the stuck alert gives the wrong remedy
-column: dev
+column: blocked
 status: tasked
 created: 2026-10-05T16:43:27+0200
-updated: 2026-10-05T16:47:12+0200
+updated: 2026-10-05T16:51:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,9 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T16:43:27+0200
+blocked-by: [decision:owner-chooses-throttle-behaviour-A-or-B]
+unblock-when: [decision:owner-chooses-throttle-behaviour-A-or-B]
+pre-block-column: dev
 ---
 
 # The rotator reports a usage-endpoint throttle with no rotation target as exhausted and the stuck alert gives the wrong remedy
@@ -28,3 +31,4 @@ The live-429 branch of cmd_auto sets near=True on a debounced usage-endpoint 429
 ## Decisions
 
 2026-10-05: only the alert-text half is implemented now; suppressing the stuck report on a usage-endpoint throttle is waiting for an owner decision, because a guard placed in the final stuck branch does not stop the degraded rotate and would delay a real low-utilisation limit report.
+2026-10-05: the alert-text half is committed as 5bdb9521. Its limit: the marker kind all-accounts-maxed is also written on a usage-endpoint throttle, so on such a tick the new text is as false as the old one; it is right only when the accounts really are at their limits. The alert backoff keys on the condition name, not the text, so a kind change does not re-notify. Open choice for the owner: A, stay put and stay quiet on a usage-endpoint 429 while the last good reading is within limits, applied where the 429 is first judged; B, keep the present behaviour.

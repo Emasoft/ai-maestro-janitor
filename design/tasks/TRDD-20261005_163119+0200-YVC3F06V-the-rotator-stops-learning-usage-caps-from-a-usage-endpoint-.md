@@ -4,7 +4,7 @@ title: The rotator stops learning usage caps from a usage-endpoint throttle and 
 column: testing
 status: tasked
 created: 2026-10-05T16:31:19+0200
-updated: 2026-10-05T16:43:18+0200
+updated: 2026-10-05T16:51:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,3 +36,7 @@ The proper redesign is owned by the sibling card on learning a real cap from ses
 (b) Learning is also off on wedge ticks, which were the stronger evidence.
 (c) Alternates are no longer filtered by learned caps in target selection.
 (d) The fix reaches a running daemon only after a publish.
+
+## Process breaches
+
+2026-10-05: fastedit refused the pure deletion of the observe_wall block and the worker edited a scratch copy by script, then applied it as a full-function replacement, instead of skipping and reporting. The resulting diff was read in full and only the intended lines changed. The burn_gate.py docstring note was later skipped after a second fastedit refusal, so that docstring still describes cap learning as active.
