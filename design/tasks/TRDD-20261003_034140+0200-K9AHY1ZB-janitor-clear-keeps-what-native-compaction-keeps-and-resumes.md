@@ -4,7 +4,7 @@ title: Janitor clear keeps what native compaction keeps and resumes in one push
 column: dev
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-05T03:12:09+0200
+updated: 2026-10-05T09:44:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -338,6 +338,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-05 later: column dev (was blocked since 2026-10-04). The line above saying the probe was measured is WRONG: BHIS99XE was not a blocked card. Valid test on two scratch cards: after the blocker was closed, trddgrep why on the blocked card printed BLOCKED with no locally-resolvable blocker, never READY, and the card stayed in blocked, so the probe would never clear. blocked-by is cleared; npt still lists the prerequisite cards. dev here means waiting on those cards, not code in flight. The NEXT ACTION above is unchanged.
 2026-10-05: TRDD-PHS3DIBD added to blocked-by. The clear chain resumed a cleared session with a pointer to an older session's handoff (observed 02:17 to 02:20 on 2026-10-05); the umbrella must not unblock while that is open.
 2026-10-05 CORRECTION to the line above: blocked-by is back to empty and TRDD-PHS3DIBD is listed under npt instead, next to the two other prerequisite cards. A non-empty blocked-by on a card in dev is a lint error (GRAPH-BLOCKED-NOT-BLOCKED); this umbrella carries its open prerequisites in npt.
+2026-10-05 — prerequisite TRDD-PHS3DIBD has its root-cause fix landed (unpublished) and is in testing, waiting on the first janitor clear on a release that carries it. This umbrella stays blocked on that same live event and on its other prerequisites; it is NOT unblocked.
 
 ## Release status
 

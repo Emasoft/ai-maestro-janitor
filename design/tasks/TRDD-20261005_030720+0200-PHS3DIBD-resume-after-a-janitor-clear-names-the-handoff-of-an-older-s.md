@@ -1,10 +1,10 @@
 ---
 trdd-id: PHS3DIBD
 title: Resume after a janitor clear names the handoff of an older session because the pending-summary record is never removed
-column: dev
+column: testing
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T03:37:54+0200
+updated: 2026-10-05T09:44:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,7 +17,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T03:07:20+0200
 parent-trdd: K9AHY1ZB
 derived: true
-implementation-commits: [124b724a]
+implementation-commits: [124b724a, 868b711f]
 ---
 
 # Resume after a janitor clear names the handoff of an older session because the pending-summary record is never removed
@@ -49,6 +49,7 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 ## Approval log
 
 - 2026-10-05T03:07:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-05T09:44:59+0200 — column → testing. code landed; waits on the first janitor clear on a release carrying it
 
 ## STATE
 
@@ -76,3 +77,7 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 2026-10-05 TOOL DEFECT met while landing this: the edit tool (fastedit 0.5.0) rewrote both scripts with mode 0600, dropping the executable bit; it was restored before the commit. Reported upstream as issue 11 on the fastedit repository. After any fastedit write to a tracked script, check that git reports no mode change.
 2026-10-05: The two tests whose names contain known_limit pin today's wrong behaviour on purpose. When the resume is told its cleared session they must be INVERTED, not deleted.
 2026-10-05 NEXT ACTION (replaces the ones above): read the writer of the per-pane resume-after-clear sidecar files and decide whether the resume can take the cleared session's key from them; that is the root-cause fix this card stays open for.
+2026-10-05 — ROOT CAUSE FIXED in code (unpublished, commit 868b711f): the resume now reads which session was cleared from the record the clear trigger writes per pane just before the clear keystroke (old transcript path and write time). The record whose stored time is within 10 seconds of the resume flag's time names the cleared session; measured on one host the two times differ by 0 to 1 second and the closest two clears are 3107 seconds apart. With a match nothing else is consulted; with none or several, one log line is written and the old behaviour applies. The late-summary stamp is written inside the same resume, so it is now keyed to the cleared session.
+2026-10-05 — the two tests that pinned the wrong behaviour were INVERTED, not deleted, and renamed so known_limit no longer appears in their names (one in the external-handoff-clear tests, one in the dispatch-phase tests). With only the new branch disabled they fail on values: the key is the older session, the fresh note is empty, and the stamp file for the cleared session does not exist.
+2026-10-05 — LIMITS: the handoff-and-clear command and a blind-send fallback write no clear record and keep the old behaviour (for the first, the newest handoff is the one just written; no test covers that path). A path that should write the record and fails (no transcript, unresolved pane, write error) still falls to the guess, with the log line. Test records are written by hand in the two-line shape. Three wrong stamps already on disk are not repaired; the stale pending record stays on disk and is ignored for matched clears. OPEN QUESTION: three other places use the newest handoff group on disk — the session summarizer (cannot disagree: it checks the key of the transcript it was told to summarize), and two places in the session-start hook (one can name a different session only when no clear record exists and injects nothing; the other can pick the newest group after a clear that wrote no record and was not traced further).
+2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: the first janitor clear on a host running a release that carries commit 868b711f — pass if the late-summary stamp written by that resume is keyed to the session that was cleared and the dispatcher log has no line 'no clear record within 10 s of the resume flag'. Until then nothing more is developable on this card.

@@ -1,10 +1,10 @@
 ---
 trdd-id: DGBZVZPP
 title: memgrep tests share process-wide state and fail at random under load
-column: ai_review
+column: todo
 status: tasked
 created: 2026-10-04T14:01:11+0200
-updated: 2026-10-04T14:51:05+0200
+updated: 2026-10-05T09:45:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -49,6 +49,7 @@ Clippy clean; 409 and 196 tests pass in parallel, serially, and in two repeat ru
 - The eight unit tests that still reach the real state folder: mem_reference reference_atom_wires_atom_body_and_target_page, reference_topic_second_call_is_a_no_op, reference_topic_wires_both_ends_in_one_call; memory new_page_public_project_creates_the_flag_and_the_symlink_in_one_write, scope_derives_the_path_and_the_env_override_relocates_the_root; xi9_cli update_lesson_desc_edits_footnote_without_stdin, update_lesson_desc_preserves_inline_body, update_lesson_desc_round_trips_props_only_footnote.
 - CORRECTION to commit 0523af49's message: that cli children no longer write lock files in the real state folder was not measured separately; a normal run still created one new real lock file, attributed to unit tests, inconclusive.
 - RESIDUE: a verification run with overrides disabled left two symlinks in the real USER memory folder and an untracked fixture folder under scripts/memgrep; removal awaits the owner.
+2026-10-05 — column corrected: the open items on this card are code work, not review, and nobody is working them, so ai_review was a false claim. First step when picked up: a lint guard that forbids tests from changing process-wide environment (no such guard exists today).
 
 ## Approval log
 
