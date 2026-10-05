@@ -4,7 +4,7 @@ title: Resume after a janitor clear names the handoff of an older session becaus
 column: todo
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T03:12:22+0200
+updated: 2026-10-05T03:16:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -59,3 +59,10 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 2026-10-05: The memory wiki (ATOM-LMFJ-JEWP and its lesson 17) describes the hold ending when a handoff exists and says nothing about the record being deleted or about the expires gap. It needs a correction once this card is fixed.
 2026-10-05: The first listed test needs a handoff on disk for the stale key A as well as the newer group for key B; with no A handoff the note is empty today and the test would fail for the wrong reason.
 2026-10-05 NEXT ACTION: put forward a fix in pending_summary_key for review: the record's key is used only while the record is unexpired and well formed, and never when a handoff group of a different key has a filename timestamp newer than the record's captured time; otherwise the newest handoff group decides. No change to summary_hold_active.
+2026-10-05 DECISION (supersedes the NEXT ACTION line above): the fix is the smallest one. pending_summary_key receives the current time and uses the record's key only while the record is unexpired, tested exactly as the hold check tests it (int of the expires field, with a missing or unparseable field meaning "do not trust"). Otherwise the newest handoff group decides, as it already does when the record is absent. summary_hold_active is NOT touched. The clause "never when a newer group belongs to a different key" is DROPPED: review showed it can itself pick the wrong session, because the lookup is not told which session is resuming.
+2026-10-05 REJECTED alternative: trusting the record only while the hold is active. When a post-clear hook is killed before writing any handoff, the hold ends on the clear-observed rule while the record is still unexpired; the record's key then correctly yields no note, whereas the newest-group fallback would name an older session's handoff.
+2026-10-05 KNOWN LIMIT, NOT fixed by this change: for up to fifteen minutes after a daemon-lane clear the record is unexpired, and during that time ANY resume in the same project reads that record's key, including a later clear of another session or of the same pane's successor session by a chain that writes no record. The hold is normally already over in that state, so the record misleads while serving no purpose. Closing this needs the resume to be told which session was cleared; at the point the resume is emitted only the new session's own id is available (dispatch.py, _phase_clear_resume; worker's reading, the sidecar writer was not read).
+2026-10-05 ALSO OPEN after this change: the clear chains that never write the record; nothing removes the record file; three stamp files already written under stale keys; no stamp was written for session 20d63f12, so a late fuller summary for it would not be announced.
+2026-10-05: The fallback orders handoff groups by the timestamp in the file name, not by file modification time (handoff_files.newest_group, read by a measurement worker; not re-read by the main session). The replay used three keys only.
+2026-10-05: This card STAYS OPEN after the fix lands. It must not move to ai_review on the lookup change alone; the umbrella keeps it under npt.
+2026-10-05: Advisor not consulted: none is available in this session and no exemption applies; the change went through a measurement worker and two adversarial review rounds.
