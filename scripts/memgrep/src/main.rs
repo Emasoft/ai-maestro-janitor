@@ -576,6 +576,11 @@ fn after_help() -> String {
          * `lint` MUTATES. It reconciles publish-globally/symlink state and autofixes as it goes,\n    \
          so running it IS a maintenance action, not a read-only check.\n  \
          * `--min-severity` gates the EXIT CODE, not the report — lower findings still PRINT.\n  \
+         * `lint` rule selection: `--select`/`--extend-select`/`--ignore` take FAMILY-NNN codes, families,\n    \
+         prefixes or kebab names (an unknown one is exit 2); `--ignore` REPLACES the config file's list.\n    \
+         `--statistics` prints a per-rule count table; `--exit-zero` never gates; `--output-format json`\n    \
+         prints one array. A nearest `.janitor.toml` is discovered unless `--isolated`; `--config FILE`\n    \
+         must be valid (else exit 2). Exit codes: 0 clean, 1 gated, 2 usage error.\n  \
          * `--keywords` on any write verb wants AT LEAST 10 (MEMGREP_MIN_KEYWORDS); each comma item is ONE\n    \
          phrase and its internal spaces become `_`.\n  \
          * `edit` takes --old-file/--new-file PATHS, not inline strings, and refuses when the old\n    \

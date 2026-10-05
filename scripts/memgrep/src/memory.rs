@@ -5881,6 +5881,52 @@ struct LintArgs {
     /// law) or needs a semantic judgement call (atom decomposition).
     #[arg(long = "min-severity", value_enum, default_value_t = Severity::Error)]
     min_severity: Severity,
+    /// Rules to enable: FAMILY-NNN code, family, any code prefix or kebab name (comma-separated).
+    /// Replaces `[lint] select` of `.janitor.toml`.
+    #[arg(long = "select", value_delimiter = ',', value_parser = parse_selector)]
+    select: Option<Vec<String>>,
+    /// Rules to enable in addition to the selected ones (appended to `[lint] extend-select`).
+    #[arg(long = "extend-select", value_delimiter = ',', value_parser = parse_selector)]
+    extend_select: Option<Vec<String>>,
+    /// Rules to disable. Replaces `[lint] ignore` of `.janitor.toml`.
+    #[arg(long = "ignore", value_delimiter = ',', value_parser = parse_selector)]
+    ignore: Option<Vec<String>>,
+    /// Print a per-rule count table instead of the individual findings.
+    #[arg(long = "statistics")]
+    statistics: bool,
+    /// Exit 0 even when findings (or a config error) gate the run.
+    #[arg(long = "exit-zero")]
+    exit_zero: bool,
+    /// `text` (default, one line per finding) or `json` (one array on stdout).
+    #[arg(long = "output-format", value_enum, default_value_t = LintFormat::Text)]
+    output_format: LintFormat,
+    /// Use this `.janitor.toml` instead of the nearest ancestor of the linted path.
+    #[arg(long = "config", conflicts_with = "isolated")]
+    config: Option<PathBuf>,
+    /// Ignore every `.janitor.toml`: built-in defaults plus the CLI flags only.
+    #[arg(long = "isolated")]
+    isolated: bool,
+}
+
+/// True when `sel` is `ALL` or matches at least one registered rule (the matcher `is_enabled` uses).
+fn selector_is_known(sel: &str) -> bool {
+    crate::rules_gen::RULES.iter().any(|r| crate::lint_config::selector_matches(sel, r))
+}
+
+/// clap value parser for a command-line selector. A selector that matches no rule would silently
+/// deselect everything (exit 0 on a gate), so it is a usage error: clap prints it and exits 2.
+fn parse_selector(s: &str) -> std::result::Result<String, String> {
+    if selector_is_known(s) {
+        Ok(s.to_string())
+    } else {
+        Err(format!("unknown selector \"{s}\" (matches no registered lint rule)"))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum LintFormat {
+    Text,
+    Json,
 }
 
 /// `memgrep lint <memdir>` — a DETERMINISTIC, heuristic-free structural lint of every note. Unlike
@@ -5914,6 +5960,15 @@ struct LintArgs {
 /// instructions — we only parse it.
 pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     let a = LintArgs::parse_from(std::iter::once("lint".to_string()).chain(args.iter().cloned()));
+    // The config is resolved BEFORE linting: lint autofixes pages, so a run that is going to refuse
+    // (explicit --config unusable, exit 2) must not have touched the corpus first.
+    let (cfg, config_error) = match lint_config_for(&a) {
+        Ok(r) => r,
+        Err(msg) => {
+            eprintln!("memgrep lint: {msg}");
+            std::process::exit(2);
+        }
+    };
     // already sorted by (severity, path, line). The DEFAULT path calls the unchanged
     // `lint_paths` verbatim — so "adding --no-fix changed nothing for anyone who didn't pass it"
     // is visible here, not merely asserted.
@@ -5922,12 +5977,27 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     } else {
         lint_paths(&a.paths, a.hidden)
     };
+    let (violations, fixable) = apply_lint_config(violations, &cfg, &a.paths, a.hidden);
+    if let Some((path, err)) = &config_error {
+        // CONFIG-001 is not a registry rule (no CONFIG family in design/specs/issue-codes.toml), so it
+        // is reported here, never as a `Violation` (whose code `rule_sev` would panic on).
+        eprintln!("memgrep lint: CONFIG-001 invalid lint config {}: {err} (built-in defaults used)", path.display());
+    }
+    if a.output_format == LintFormat::Json {
+        print_lint_json(&violations, &fixable, a.statistics);
+    } else if a.statistics {
+        print_lint_statistics(&violations, &fixable);
+    }
     // EVERYTHING prints, always. Only the EXIT CODE is gated by --min-severity: a severity model
     // that hid findings would trade one unusable output (all-noise) for another (silently
     // incomplete), and the reader loses either way. The severity leads the line so
     // `| grep '^ERROR'` is exact.
-    for v in &violations {
-        // `SEV path:line [code] — msg[ ⟦anchor:<value>⟧]`. Severity stays the LEADING token
+    let print_lines = a.output_format == LintFormat::Text && !a.statistics;
+    for (v, safe) in violations.iter().zip(&fixable).filter(|_| print_lines) {
+        // `SEV path:line [code] — msg (FAMILY-NNN[ · safe-fix])[ ⟦anchor:<value>⟧]`. The label sits
+        // AFTER the message and BEFORE the anchor: `_LINE_RE` takes the msg lazily up to an optional
+        // trailing anchor, and the precheck regexes only anchor on the prefix through the message
+        // start, so a label there breaks no consumer. Severity stays the LEADING token
         // (WM-LINT-06), so `| grep '^ERROR'` is unchanged; the code sits before the em-dash so
         // `[atom-no-keywords]` is greppable on its own and a consumer can key on the CHECK rather
         // than on its prose. The ANCHOR (TRDD-XI10BA5D step B) is TRAILING, at end of line and
@@ -5941,17 +6011,19 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
             format!(" ⟦anchor:{}⟧", v.anchor)
         };
         println!(
-            "{} {}:{} [{}] — {}{}",
+            "{} {}:{} [{}] — {}{}{}",
             v.sev.label(),
             v.path,
             v.line,
             v.code,
             v.msg,
+            lint_label(v.code, *safe),
             anchor_suffix
         );
     }
     let gating: Vec<&Violation> = violations.iter().filter(|v| v.sev >= a.min_severity).collect();
-    if gating.is_empty() {
+    // A broken config gates like an ERROR (it silently changed which rules ran) unless --exit-zero.
+    if gating.is_empty() && config_error.is_none() {
         // A count ALWAYS goes to stderr — including the zero case (janitor#191). This used to be
         // gated on `!violations.is_empty()`, so a clean corpus produced NO output at all and exit
         // 0. That is indistinguishable from "the linter did not look": same empty stdout, same
@@ -5973,16 +6045,228 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     } else {
         // Non-zero exit so the lint is usable as a pre-commit / write-skill gate (issue #47). The
         // count goes to stderr so it never pollutes the machine-parseable stdout violation list.
+        // A config error gated this run: say so, or "0 at or above ERROR" next to exit 1 is a lie.
+        let config_note = if config_error.is_some() { "; lint config error (CONFIG-001)" } else { "" };
         eprintln!(
-            "memgrep lint: {} finding(s), {} at or above {} ({}; {})",
+            "memgrep lint: {} finding(s), {} at or above {} ({}; {}){config_note}",
             violations.len(),
             gating.len(),
             a.min_severity.label(),
             scope_summary_label(&a.paths),
             cross_page_coverage_label(&a.paths)
         );
+        if a.exit_zero {
+            return Ok(());
+        }
         std::process::exit(1);
     }
+}
+
+/// ` (FAMILY-NNN · safe-fix)` for a registered code; the `safe-fix` part only when the registered
+/// fixer would actually change that page (a label that promises a fix the engine will not make is a
+/// lie, TRDD-3HLI7DMK design note). Empty for a code outside the registry.
+fn lint_label(name: &str, safe_fix: bool) -> String {
+    match crate::lint_rules::rule_by_name(name) {
+        Some(r) if safe_fix => format!(" ({} · safe-fix)", r.code),
+        Some(r) => format!(" ({})", r.code),
+        None => String::new(),
+    }
+}
+
+/// The effective lint config and, when a `.janitor.toml` was malformed, `(path, error)` for CONFIG-001.
+/// `--isolated` skips every file; `--config` names one; otherwise the nearest ancestor of the first
+/// linted path. An EXPLICIT `--config` that cannot be read or parsed is a usage error (`Err`, the
+/// caller exits 2): the user named that file, so linting with other rules would be a silent lie. A
+/// DISCOVERED malformed file goes through `load_lenient` so a typo never crashes or silently stops
+/// lint (CONFIG-001 on stderr, defaults, exit 1). A selector in the file that matches no rule
+/// invalidates the file exactly like an unknown key.
+fn lint_config_for(
+    a: &LintArgs,
+) -> std::result::Result<(crate::lint_config::LintConfig, Option<(PathBuf, String)>), String> {
+    use crate::lint_config::{CliOverrides, discover, load, load_lenient, resolve};
+    let file = if a.isolated {
+        None
+    } else {
+        a.config.clone().or_else(|| {
+            let start = a.paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+            discover(&start.canonicalize().unwrap_or(start))
+        })
+    };
+    // Anything unknown in a lint config invalidates the file: an unknown KEY already does
+    // (deny_unknown_fields), so an unknown selector VALUE follows the same policy (fail fast).
+    let unknown_selector = |c: &crate::lint_config::LintConfig| -> Option<String> {
+        c.select
+            .iter()
+            .chain(&c.extend_select)
+            .chain(&c.ignore)
+            .chain(c.per_file_ignores.iter().flat_map(|(_, s)| s))
+            .find(|s| !selector_is_known(s))
+            .map(|s| format!("unknown selector \"{s}\" (matches no registered lint rule)"))
+    };
+    let (loaded, err) = match &file {
+        Some(p) if a.config.is_some() => {
+            let c = load(p).map_err(|e| format!("cannot use --config {}: {e:#}", p.display()))?;
+            if let Some(e) = unknown_selector(&c) {
+                return Err(format!("cannot use --config {}: {e}", p.display()));
+            }
+            (Some(c), None)
+        }
+        Some(p) => {
+            let (c, e) = load_lenient(p);
+            match e.or_else(|| unknown_selector(&c)) {
+                // Invalid: none of the file's settings apply, only the built-in defaults.
+                Some(e) => (
+                    Some(crate::lint_config::LintConfig { source: Some(p.clone()), ..Default::default() }),
+                    Some((p.clone(), e)),
+                ),
+                None => (Some(c), None),
+            }
+        }
+        None => (None, None),
+    };
+    let cli = CliOverrides {
+        select: a.select.clone(),
+        extend_select: a.extend_select.clone(),
+        ignore: a.ignore.clone(),
+        ..Default::default()
+    };
+    Ok((resolve(&cli, loaded), err))
+}
+
+/// Apply selection, per-file ignores and noqa to raw findings, add the WMSUP findings, and compute
+/// per finding whether a safe fixer would change its page (parallel `Vec<bool>`, same order).
+fn apply_lint_config(
+    raw: Vec<Violation>,
+    cfg: &crate::lint_config::LintConfig,
+    paths: &[PathBuf],
+    hidden: bool,
+) -> (Vec<Violation>, Vec<bool>) {
+    use crate::lint_config::{is_enabled, is_fixable};
+    use crate::lint_rules::rule_by_name;
+    let mut pages: BTreeSet<String> = collect_md(paths, hidden)
+        .into_iter()
+        .filter(|p| !is_index_file(p))
+        .map(|p| rel(&p))
+        .collect();
+    pages.extend(raw.iter().map(|v| v.path.clone()));
+    let mut out: Vec<Violation> = Vec::new();
+    let mut fixable: Vec<bool> = Vec::new();
+    for page in pages {
+        let page_path = Path::new(&page);
+        let text = md::read_text(page_path);
+        let noqa = text.as_deref().map(crate::noqa::parse).unwrap_or_default();
+        let mine: Vec<&Violation> = raw.iter().filter(|v| v.path == page).collect();
+        // Every raw finding counts as "used" for unused-noqa, whether or not selected: a suppression
+        // of a deselected rule is not stale, and an enabled-then-suppressed finding must not orphan
+        // its own comment.
+        let seen: Vec<(&crate::lint_rules::Rule, usize)> =
+            mine.iter().filter_map(|v| rule_by_name(v.code).map(|r| (r, v.line))).collect();
+        let mut page_findings: Vec<Violation> = Vec::new();
+        for v in mine {
+            let keep = match rule_by_name(v.code) {
+                Some(r) => is_enabled(cfg, r, page_path) && !crate::noqa::suppresses(&noqa, r, v.line),
+                None => true,
+            };
+            if keep {
+                page_findings.push(v.clone());
+            }
+        }
+        // WMSUP: stale and blanket suppressions, themselves subject to select/ignore.
+        let unused_rule = rule_by_name("unused-noqa");
+        if let Some(r) = unused_rule.filter(|r| is_enabled(cfg, r, page_path)) {
+            for (line, sel) in crate::noqa::unused(&noqa, &seen) {
+                page_findings.push(Violation {
+                    sev: rule_sev("unused-noqa"),
+                    path: page.clone(),
+                    line,
+                    msg: format!("suppression `{sel}` matches no finding ({})", r.summary),
+                    code: "unused-noqa",
+                    anchor: format!("noqa:{sel}"),
+                });
+            }
+        }
+        if let Some(r) = rule_by_name("blanket-noqa").filter(|r| is_enabled(cfg, r, page_path)) {
+            for line in &noqa.blanket_lines {
+                page_findings.push(Violation {
+                    sev: rule_sev("blanket-noqa"),
+                    path: page.clone(),
+                    line: *line,
+                    msg: format!("{} — name the codes to suppress", r.summary),
+                    code: "blanket-noqa",
+                    anchor: format!("noqa:line-{line}"),
+                });
+            }
+        }
+        let mut cache: BTreeMap<&'static str, bool> = BTreeMap::new();
+        for v in page_findings {
+            let safe = match (rule_by_name(v.code), text.as_deref()) {
+                (Some(r), Some(t)) if is_fixable(cfg, r) && r.fix == crate::lint_rules::Fix::Safe => {
+                    *cache.entry(r.name).or_insert_with(|| {
+                        crate::fixers::fixer_for(r.name)
+                            .and_then(|f| f(page_path, t))
+                            .is_some_and(|new| new != t)
+                    })
+                }
+                _ => false,
+            };
+            fixable.push(safe);
+            out.push(v);
+        }
+    }
+    // Same order contract as `lint_paths_with`: (severity, path, line); the sort must carry `fixable`.
+    let mut idx: Vec<usize> = (0..out.len()).collect();
+    idx.sort_by(|&i, &j| (out[i].sev, &out[i].path, out[i].line).cmp(&(out[j].sev, &out[j].path, out[j].line)));
+    let sorted_v = idx.iter().map(|&i| out[i].clone()).collect();
+    let sorted_f = idx.iter().map(|&i| fixable[i]).collect();
+    (sorted_v, sorted_f)
+}
+
+/// `--statistics` text: `count<TAB>CODE<TAB>fix<TAB>name`, most frequent first (ruff's table shape).
+fn lint_statistics(violations: &[Violation], fixable: &[bool]) -> Vec<(usize, String, String, bool)> {
+    let mut counts: BTreeMap<&str, (usize, bool)> = BTreeMap::new();
+    for (v, f) in violations.iter().zip(fixable) {
+        let e = counts.entry(v.code).or_insert((0, false));
+        e.0 += 1;
+        e.1 |= *f;
+    }
+    let mut rows: Vec<(usize, String, String, bool)> = counts
+        .into_iter()
+        .map(|(name, (n, f))| {
+            let code = crate::lint_rules::rule_by_name(name).map_or(String::new(), |r| r.code.to_string());
+            (n, code, name.to_string(), f)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
+    rows
+}
+
+fn print_lint_statistics(violations: &[Violation], fixable: &[bool]) {
+    for (n, code, name, f) in lint_statistics(violations, fixable) {
+        println!("{n}\t{code}\t{}\t{name}", if f { "[*]" } else { "" });
+    }
+}
+
+/// `--output-format json`: one array of finding objects (or, with `--statistics`, of count rows).
+fn print_lint_json(violations: &[Violation], fixable: &[bool], statistics: bool) {
+    let arr: Vec<serde_json::Value> = if statistics {
+        lint_statistics(violations, fixable)
+            .into_iter()
+            .map(|(n, code, name, f)| serde_json::json!({"count": n, "code": code, "name": name, "fixable": f}))
+            .collect()
+    } else {
+        violations
+            .iter()
+            .zip(fixable)
+            .map(|(v, f)| {
+                let code = crate::lint_rules::rule_by_name(v.code).map_or("", |r| r.code);
+                serde_json::json!({
+                    "severity": v.sev.label(), "path": v.path, "line": v.line, "code": code,
+                    "name": v.code, "message": v.msg, "anchor": v.anchor, "fixable": f,
+                })
+            })
+            .collect()
+    };
+    println!("{}", serde_json::Value::Array(arr));
 }
 
 /// The pure lint core: collect every structural violation across `paths`, sorted by `(path, line)`.

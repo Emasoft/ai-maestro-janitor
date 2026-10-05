@@ -169,9 +169,11 @@ mod tests {
     /// A line on which `atom-no-keywords` fires (and `atom-bad-ocd`, `atom-bad-lmd`, `atom-no-ocd` do not).
     const L: &str = "^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01] ";
 
-    /// WHY not `has_code(.., "unused-noqa")`: lint_page_text does not emit `unused-noqa` yet (C21 wires
-    /// it in), so that oracle could never see the defect. Same predicate the lint will use instead:
-    /// a page-decidable selector that suppresses no finding.
+    /// WHY not `has_code(.., "unused-noqa")`: `unused-noqa` is emitted by the CLI path
+    /// (`memory.rs::apply_lint_config`, C21), after `lint_page_text` has produced the raw findings
+    /// and the noqa comments have been matched against them. `has_code` goes through
+    /// `lint_page_text` only, so it can never see this code. Same predicate as that emission
+    /// instead: a page-decidable selector that suppresses no finding.
     fn has_unused(text: &str) -> bool {
         let findings: Vec<(&Rule, usize)> =
             lint_page_text(Path::new(P), text, false).iter().filter_map(|v| rule_by_name(v.code).map(|r| (r, v.line))).collect();
@@ -179,7 +181,8 @@ mod tests {
     }
 
     /// Fix the page and check the oracle: `before` has an unused selector, `fixed` has none, and
-    /// the lint will not report `unused-noqa` for it (has_code stays as a forward-compatible guard).
+    /// the lint will not report `unused-noqa` for it (the `has_code` assert below can never fail,
+    /// see `has_unused`; the real oracle is `has_unused`).
     fn fixed_with_oracle(before: &str) -> String {
         assert!(has_unused(before), "oracle must see the defect before the fix");
         let fixed = fix(Path::new(P), before).expect("fixed");

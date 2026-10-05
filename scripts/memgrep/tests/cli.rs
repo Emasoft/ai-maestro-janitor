@@ -5825,3 +5825,379 @@ fn new_mem_topic_content_refuses_a_frontmatter_name_that_mismatches_the_destinat
         "nothing was written"
     );
 }
+
+// ── TRDD-3HLI7DMK (C21) — lint labels, selection flags, statistics, json, config, noqa ───────
+
+/// A valid page minus its Notes section: exactly one finding, `page-no-notes-section` (WMPAGE-010,
+/// ERROR, safe-fix). `extra` is spliced into the body.
+fn lint_no_notes_page(extra: &str) -> String {
+    format!(
+        "---\nname: nonotes\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\nBody.\n{extra}"
+    )
+}
+
+/// A valid page WITH its Notes section: no finding at all unless `extra` adds one.
+fn lint_clean_page(extra: &str) -> String {
+    format!(
+        "---\nname: clean\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\nBody.\n{extra}\n## Notes and lessons learned\n"
+    )
+}
+
+fn lint_atom_page(desc: &str) -> String {
+    format!(
+        "---\nname: atoms\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\n# atoms\n^a1 [desc: {desc}, keywords: {FIXTURE_KEYWORDS}, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.\n\n## Notes and lessons learned\n"
+    )
+}
+
+fn lint_line_with<'a>(out: &'a str, name: &str) -> &'a str {
+    let tag = format!("[{name}]");
+    out.lines().find(|l| l.contains(&tag)).unwrap_or_else(|| panic!("no `{tag}` line in:\n{out}"))
+}
+
+#[test]
+fn lint_label_names_the_code_and_safe_fix_before_the_anchor() {
+    let d = TempDir::new("lint-label-safe");
+    d.write("p.md", &lint_atom_page("some prose here"));
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    let line = lint_line_with(&o, "atom-unquoted-desc");
+    assert!(
+        line.ends_with(" (WMATOM-004 · safe-fix) ⟦anchor:atom:a1⟧"),
+        "label must sit after the message and before the anchor: {line}"
+    );
+}
+
+#[test]
+fn lint_label_omits_safe_fix_when_the_fixer_would_change_nothing() {
+    let d = TempDir::new("lint-label-nofix");
+    // > 200 chars: the quote_desc fixer refuses, so promising a fix would be a lie.
+    d.write("p.md", &lint_atom_page(&"long prose ".repeat(25)));
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    let line = lint_line_with(&o, "atom-unquoted-desc");
+    assert!(line.ends_with(" (WMATOM-004) ⟦anchor:atom:a1⟧"), "no safe-fix label expected: {line}");
+}
+
+#[test]
+fn lint_select_ignore_and_extend_select_choose_the_rules() {
+    let d = TempDir::new("lint-select");
+    d.write("p.md", &lint_no_notes_page(""));
+    for sel in ["WMPAGE-010", "WMPAGE", "WM", "page-no-notes-section"] {
+        let (o, _e, c) = run_full(&["lint", d.as_str(), "--select", sel]);
+        assert_eq!(c, 1, "--select {sel} keeps the ERROR:\n{o}");
+        assert_eq!(o.lines().count(), 1, "--select {sel}:\n{o}");
+        assert!(o.contains("[page-no-notes-section]"), "--select {sel}:\n{o}");
+    }
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--select", "WMLESS"]);
+    assert_eq!((c, o.as_str()), (0, ""), "a deselected rule must not print or gate");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--ignore", "WMPAGE-010"]);
+    assert_eq!((c, o.as_str()), (0, ""), "--ignore removes the rule");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--select", "WMLESS", "--extend-select", "WMPAGE-010"]);
+    assert_eq!(c, 1, "--extend-select adds to --select:\n{o}");
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+}
+
+#[test]
+fn lint_statistics_prints_a_count_table_instead_of_findings() {
+    let d = TempDir::new("lint-stats");
+    d.write("p.md", &lint_no_notes_page(""));
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--statistics"]);
+    assert_eq!(c, 1, "statistics still gates:\n{o}");
+    assert_eq!(o, "1\tWMPAGE-010\t[*]\tpage-no-notes-section\n");
+}
+
+#[test]
+fn lint_exit_zero_never_gates_but_still_reports() {
+    let d = TempDir::new("lint-exit-zero");
+    d.write("p.md", &lint_no_notes_page(""));
+    let (_o, _e, c) = run_full(&["lint", d.as_str()]);
+    assert_eq!(c, 1, "the control run must gate");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--exit-zero"]);
+    assert_eq!(c, 0, "--exit-zero:\n{o}\n{e}");
+    assert!(o.contains("[page-no-notes-section]"), "the finding is still printed:\n{o}");
+    assert!(e.contains("1 at or above ERROR"), "the summary does not claim a clean run:\n{e}");
+}
+
+#[test]
+fn lint_output_format_json_prints_one_array() {
+    let d = TempDir::new("lint-json");
+    d.write("p.md", &lint_no_notes_page(""));
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--output-format", "json"]);
+    assert_eq!(c, 1);
+    let v: serde_json::Value = serde_json::from_str(&o).expect("stdout is one JSON document");
+    let arr = v.as_array().expect("an array");
+    assert_eq!(arr.len(), 1, "{o}");
+    let f = &arr[0];
+    assert_eq!(f["severity"], "ERROR");
+    assert_eq!(f["code"], "WMPAGE-010");
+    assert_eq!(f["name"], "page-no-notes-section");
+    assert_eq!(f["fixable"], true);
+    assert_eq!(f["line"], 0);
+    assert!(f["path"].as_str().unwrap().ends_with("p.md"));
+}
+
+#[test]
+fn lint_config_discovery_isolated_and_explicit_config() {
+    let d = TempDir::new("lint-config");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint]\nselect = [\"WMLESS\"]\n");
+    let (o, _e, c) = run_full(&["lint", d.as_str()]);
+    assert_eq!((c, o.as_str()), (0, ""), "the discovered .janitor.toml deselects WMPAGE");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--isolated"]);
+    assert_eq!(c, 1, "--isolated ignores the file:\n{o}");
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+    let other = TempDir::new("lint-config-other");
+    other.write("c.toml", "[lint]\nignore = [\"WMPAGE-010\"]\n");
+    let cfg = other.join("c.toml");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--config", cfg.to_str().unwrap(), "--select", "WM"]);
+    assert_eq!((c, o.as_str()), (0, ""), "--config names the file; CLI --select still overrides select");
+    let (_o, _e, c) = run_full(&["lint", d.as_str(), "--config", cfg.to_str().unwrap(), "--isolated"]);
+    assert_eq!(c, 2, "--config and --isolated conflict (clap usage error)");
+}
+
+#[test]
+fn lint_malformed_config_reports_config_001_and_lints_with_defaults() {
+    let d = TempDir::new("lint-config-bad");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint]\nselct = [\"WM\"]\n");
+    let (o, e, c) = run_full(&["lint", d.as_str()]);
+    assert_eq!(c, 1, "no crash, no silent pass:\n{o}\n{e}");
+    assert!(e.contains("CONFIG-001") && e.contains(".janitor.toml"), "{e}");
+    assert!(o.contains("[page-no-notes-section]"), "defaults still lint:\n{o}");
+    let (_o, e, c) = run_full(&["lint", d.as_str(), "--select", "WMLESS"]);
+    assert_eq!(c, 1, "a broken config gates even when nothing else is selected:\n{e}");
+    let (_o, _e, c) = run_full(&["lint", d.as_str(), "--exit-zero"]);
+    assert_eq!(c, 0);
+}
+
+#[test]
+fn lint_noqa_suppresses_and_unused_and_blanket_are_reported() {
+    // line-level: the dangling ref sits on line 7 and is silenced by the trailing comment
+    let d = TempDir::new("lint-noqa-line");
+    d.write(
+        "p.md",
+        &format!(
+            "---\nname: dangling\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\nBody cites [^7]. <!-- noqa: WMLESS-001 -->\n\n## Notes and lessons learned\n"
+        ),
+    );
+    let (o, _e, c) = run_full(&["lint", d.as_str()]);
+    assert_eq!((c, o.as_str()), (0, ""), "the suppressed finding vanishes and the comment is not unused");
+    // page-level: whole-page suppression of the missing Notes section
+    let d = TempDir::new("lint-noqa-page");
+    d.write("p.md", &lint_no_notes_page("<!-- memgrep: noqa: WMPAGE-010 -->\n"));
+    let (o, _e, c) = run_full(&["lint", d.as_str()]);
+    assert_eq!((c, o.as_str()), (0, ""), "page-level noqa");
+    // unused: names a rule that does not fire
+    let d = TempDir::new("lint-noqa-unused");
+    d.write("p.md", &lint_clean_page("Text. <!-- noqa: WMLESS-001 -->"));
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--min-severity", "warn"]);
+    assert_eq!(c, 1, "WMSUP-001 is WARN:\n{o}");
+    let line = lint_line_with(&o, "unused-noqa");
+    assert!(line.starts_with("WARN ") && line.contains(":8 ") && line.contains("(WMSUP-001"), "{line}");
+    assert!(line.ends_with("⟦anchor:noqa:WMLESS-001⟧"), "{line}");
+    // blanket: reported, never honored
+    let d = TempDir::new("lint-noqa-blanket");
+    d.write("p.md", &lint_clean_page("Text. <!-- noqa -->"));
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--min-severity", "warn"]);
+    assert_eq!(c, 1, "WMSUP-002 is WARN:\n{o}");
+    let line = lint_line_with(&o, "blanket-noqa");
+    assert!(line.starts_with("WARN ") && line.contains(":8 ") && line.contains("(WMSUP-002)"), "{line}");
+    // and both are ordinary selectable rules
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--min-severity", "warn", "--ignore", "WMSUP"]);
+    assert_eq!((c, o.as_str()), (0, ""), "--ignore WMSUP");
+}
+
+#[test]
+fn lint_unknown_command_line_selector_is_a_usage_error() {
+    let d = TempDir::new("lint-unknown-sel");
+    d.write("p.md", &lint_no_notes_page(""));
+    for flag in ["--select", "--extend-select", "--ignore"] {
+        let (o, e, c) = run_full(&["lint", d.as_str(), "--isolated", flag, "NOPE"]);
+        assert_eq!(c, 2, "{flag} NOPE must be refused:\n{o}\n{e}");
+        assert!(e.contains("unknown selector \"NOPE\""), "{flag}: stderr must name it:\n{e}");
+        assert!(!o.contains("[page-no-notes-section]") && o.is_empty(), "{flag}: no finding may print:\n{o}");
+    }
+}
+
+#[test]
+fn lint_explicit_config_that_is_missing_or_malformed_stops_with_exit_2() {
+    let d = TempDir::new("lint-explicit-config");
+    d.write("p.md", &lint_no_notes_page(""));
+    let missing = d.join("nope.toml");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--config", missing.to_str().unwrap()]);
+    assert_eq!(c, 2, "missing --config:\n{o}\n{e}");
+    assert!(e.contains("cannot use --config") && e.contains("nope.toml") && e.contains("reading"), "{e}");
+    assert_eq!(o, "", "no findings on a refused run");
+    d.write("bad.toml", "[lint]\nselct = [\"WM\"]\n");
+    let bad = d.join("bad.toml");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--config", bad.to_str().unwrap()]);
+    assert_eq!(c, 2, "malformed --config:\n{o}\n{e}");
+    assert!(e.contains("cannot use --config") && e.contains("bad.toml") && e.contains("parsing"), "{e}");
+    assert_eq!(o, "", "no findings on a refused run");
+}
+
+#[test]
+fn lint_unknown_selector_in_a_config_file_invalidates_the_file() {
+    // Like an unknown key: CONFIG-001, built-in defaults for the WHOLE run (the file's `select`
+    // would hide the finding), exit 1. Each of the four places a selector can sit is covered.
+    for (tag, toml) in [
+        ("select", "[lint]\nselect = [\"WMLESS\", \"NOPE\"]\n"),
+        ("extend", "[lint]\nextend-select = [\"NOPE\"]\nignore = [\"WMPAGE-010\"]\n"),
+        ("ignore", "[lint]\nignore = [\"NOPE\", \"WMPAGE-010\"]\n"),
+        ("pfi", "[lint.per-file-ignores]\n\"*.md\" = [\"NOPE\", \"WMPAGE-010\"]\n"),
+    ] {
+        let d = TempDir::new(&format!("lint-config-unknown-sel-{tag}"));
+        d.write("p.md", &lint_no_notes_page(""));
+        d.write(".janitor.toml", toml);
+        let (o, e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+        assert_eq!(c, 1, "{tag}:\n{o}\n{e}");
+        assert!(o.contains("[page-no-notes-section]"), "{tag}: findings as with built-in defaults:\n{o}");
+        assert!(
+            e.contains("CONFIG-001") && e.contains(".janitor.toml") && e.contains("unknown selector \"NOPE\""),
+            "{tag}: {e}"
+        );
+        let (_o, _e, c) = run_full(&["lint", d.as_str(), "--no-fix", "--exit-zero"]);
+        assert_eq!(c, 0, "{tag}: --exit-zero");
+    }
+    // An explicit --config with an unknown selector is refused outright.
+    let d = TempDir::new("lint-config-unknown-sel-explicit");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write("c.toml", "[lint]\nselect = [\"NOPE\"]\n");
+    let cfg = d.join("c.toml");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--config", cfg.to_str().unwrap()]);
+    assert_eq!((c, o.as_str()), (2, ""), "{e}");
+    assert!(e.contains("cannot use --config") && e.contains("unknown selector \"NOPE\""), "{e}");
+}
+
+#[test]
+fn lint_per_file_ignores_from_config_suppress_only_matching_pages() {
+    let d = TempDir::new("lint-per-file");
+    std::fs::create_dir_all(d.join("skip")).unwrap();
+    std::fs::create_dir_all(d.join("keep")).unwrap();
+    d.write("skip/a.md", &lint_no_notes_page(""));
+    d.write("keep/b.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint.per-file-ignores]\n\"*/skip/*.md\" = [\"WMPAGE-010\"]\n");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    assert_eq!(c, 1, "{o}");
+    assert_eq!(o.lines().count(), 1, "exactly the keep/ finding:\n{o}");
+    assert!(o.contains("keep/b.md:0 [page-no-notes-section]"), "{o}");
+    assert!(!o.contains("skip/a.md"), "{o}");
+}
+
+#[test]
+fn lint_frontmatter_lint_ignore_suppresses_the_named_rule() {
+    let d = TempDir::new("lint-fm-ignore");
+    d.write(
+        "p.md",
+        &format!(
+            "---\nname: fm\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\nlint-ignore: [WMPAGE-010]\n---\nBody.\n"
+        ),
+    );
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--isolated", "--no-fix"]);
+    assert_eq!((c, o.as_str()), (0, ""), "lint-ignore silences the missing Notes section:\n{e}");
+}
+
+#[test]
+fn lint_extend_select_appends_to_the_config_select_without_cli_select() {
+    let d = TempDir::new("lint-extend-only");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint]\nselect = [\"WMLESS\"]\n");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    assert_eq!((c, o.as_str()), (0, ""), "control: config select hides WMPAGE");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--no-fix", "--extend-select", "WMPAGE-010"]);
+    assert_eq!(c, 1, "--extend-select adds to the file's select:\n{o}");
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+}
+
+#[test]
+fn lint_cli_ignore_replaces_the_config_ignore() {
+    // Pins today's semantics (unlike ruff, whose --ignore ADDS): a command-line --ignore REPLACES the
+    // `[lint] ignore` of the config file, so the file's ignore stops applying.
+    let d = TempDir::new("lint-ignore-replace");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint]\nignore = [\"WMPAGE-010\"]\n");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    assert_eq!((c, o.as_str()), (0, ""), "control: the config ignore applies");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--no-fix", "--ignore", "WMLESS"]);
+    assert_eq!(c, 1, "the CLI ignore replaced the file's:\n{o}");
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+}
+
+#[test]
+fn lint_statistics_with_json_prints_count_rows() {
+    let d = TempDir::new("lint-stats-json");
+    d.write("p.md", &lint_no_notes_page(""));
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--isolated", "--statistics", "--output-format", "json"]);
+    assert_eq!(c, 1, "{o}");
+    let v: serde_json::Value = serde_json::from_str(&o).expect("one JSON document");
+    let arr = v.as_array().expect("an array");
+    assert_eq!(arr.len(), 1, "{o}");
+    assert_eq!(arr[0]["count"], 1);
+    assert_eq!(arr[0]["code"], "WMPAGE-010");
+    assert_eq!(arr[0]["name"], "page-no-notes-section");
+    assert_eq!(arr[0]["fixable"], true);
+    assert_eq!(arr[0].as_object().unwrap().len(), 4, "exactly count/code/name/fixable: {o}");
+}
+
+#[test]
+fn lint_exit_zero_with_min_severity_info_reports_but_exits_zero() {
+    let d = TempDir::new("lint-exit-zero-info");
+    d.write("p.md", &lint_no_notes_page(""));
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--isolated", "--min-severity", "info"]);
+    assert_eq!(c, 1, "control: info gates:\n{o}\n{e}");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--isolated", "--min-severity", "info", "--exit-zero"]);
+    assert_eq!(c, 0, "{o}\n{e}");
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+    assert!(e.contains("at or above INFO"), "{e}");
+}
+
+#[test]
+fn lint_json_escapes_quote_backslash_and_non_ascii() {
+    let d = TempDir::new("lint-json-escape");
+    // ASCII-only file name with a double quote; the backslash and `é` come from the page CONTENT and
+    // end up in the finding message (lesson-no-meta quotes the footnote id).
+    d.write(
+        "q\"x.md",
+        &format!(
+            "---\nname: esc\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\nBody [^é\\q].\n\n## Notes and lessons learned\n\n[^é\\q]: x\n"
+        ),
+    );
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--isolated", "--no-fix", "--min-severity", "warn", "--output-format", "json"]);
+    assert_eq!(c, 1, "{o}");
+    let v: serde_json::Value = serde_json::from_str(&o).expect("valid JSON despite the quote/backslash/é");
+    let f = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["name"] == "lesson-no-meta")
+        .unwrap_or_else(|| panic!("no lesson-no-meta in {o}"));
+    assert!(f["path"].as_str().unwrap().ends_with("/q\"x.md"), "{f}");
+    assert!(f["message"].as_str().unwrap().contains("`[^é\\q]`"), "{f}");
+    assert_eq!(f["anchor"], "lesson:é\\q");
+    assert_eq!(f["severity"], "WARN");
+    assert_eq!(f["code"], "WMLESS-004");
+}
+
+#[test]
+fn lint_json_of_a_clean_page_is_an_empty_array() {
+    let d = TempDir::new("lint-json-clean");
+    d.write("p.md", &lint_clean_page(""));
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--isolated", "--output-format", "json"]);
+    assert_eq!((c, o.as_str()), (0, "[]\n"));
+}
+
+#[test]
+fn lint_summary_names_a_config_error_that_gated_the_run() {
+    let d = TempDir::new("lint-summary");
+    d.write("p.md", &lint_clean_page(""));
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--isolated"]);
+    assert_eq!((c, o.as_str()), (0, ""));
+    assert!(
+        e.starts_with("memgrep lint: 0 finding(s), none at or above ERROR (") && !e.contains("CONFIG-001"),
+        "a run without a config error keeps the old wording:\n{e}"
+    );
+    d.write(".janitor.toml", "[lint]\nselct = [\"WM\"]\n");
+    let (o, e, c) = run_full(&["lint", d.as_str()]);
+    assert_eq!((c, o.as_str()), (1, ""), "{e}");
+    let summary = e.lines().find(|l| l.contains(" finding(s), ")).expect("a summary line");
+    assert!(summary.contains("0 at or above ERROR"), "{summary}");
+    assert!(summary.ends_with("; lint config error (CONFIG-001)"), "{summary}");
+}

@@ -1448,6 +1448,59 @@ the `split` chore DOES own it (WM-SCHED-06), so the finding is a queue entry rat
 on whoever happened to touch the page. Both readings agree on the severity; only the argument for
 it changed.
 
+`WM-LINT-10` **selection-config-and-output-flags** (TRDD-3HLI7DMK) — `MUST`: `memgrep lint` accepts
+the eight flags below and behaves exactly as stated.
+
+- **Label.** A finding whose code is registered prints ` (FAMILY-NNN)` — or ` (FAMILY-NNN · safe-fix)`
+  when the registered fixer would actually change that page — AFTER the message and BEFORE the
+  trailing `⟦anchor:…⟧`. `safe-fix` `MUST NOT` be printed for a fix the engine will not make. A
+  finding outside the registry prints no label. The `SEV path:line [name] — msg` prefix is unchanged.
+- **Selection.** A selector is `ALL`, a full code (`WMPAGE-010`), a family (`WMPAGE`), any code
+  prefix (`WM`) or a kebab name (`page-no-notes-section`). `--select a,b` replaces the config
+  file's `select` (default `ALL`); `--extend-select` appends to it. Currently `--ignore` on the
+  command line REPLACES the config file's `ignore` list rather than adding to it (not yet decided,
+  TRDD-57KAZJI7). A rule is enabled when selected (or extended) and not ignored. A selector given
+  on the command line that is not `ALL` and matches no registered rule `MUST` stop the run: the
+  error names it on stderr, no finding prints, exit 2. Anything unknown in a lint config, key or
+  selector (`select`, `extend-select`, `ignore`, and the selector lists of `per-file-ignores`),
+  invalidates the whole file: see the config bullet below.
+- **`--statistics`** replaces the individual finding lines with one line per rule, most frequent
+  first: `count<TAB>CODE<TAB>[*]<TAB>name` (`[*]` when a safe fix applies, else empty). The exit
+  code is still gated by `--min-severity`.
+- **`--exit-zero`** makes the exit code 0 even when findings or a config error would gate the run.
+  Findings and the stderr summary still print, and the summary does not claim a clean run.
+- **`--output-format`** is `text` (default) or `json`. `json` prints ONE array on stdout, `[]` when
+  clean: objects with `severity`, `path`, `line`, `code`, `name`, `message`, `anchor`, `fixable`;
+  with `--statistics`, objects with `count`, `code`, `name`, `fixable`. The summary and every
+  diagnostic go to stderr only, so stdout stays one valid JSON document.
+- **`--config`** names the `.janitor.toml` to use. It `MUST` be readable and valid (an unknown key
+  or unknown selector is invalid): otherwise stderr carries `memgrep lint: cannot use --config
+  <path>: <cause>`, no finding prints, nothing is linted or fixed, exit 2.
+- **`--isolated`** ignores every `.janitor.toml` (built-in defaults plus the command-line flags);
+  combined with `--config` it is a usage error, exit 2.
+- **Discovery and suppression are ON by default.** Without `--config` or `--isolated` a
+  `.janitor.toml` is discovered (`[lint]` keys `select`, `extend-select`, `ignore`, `fixable`,
+  `unfixable`, `unsafe-fixes`, `per-file-ignores`). Currently discovery starts from the first
+  linted path and takes the nearest file at or above it, and a glob in `per-file-ignores` is
+  matched against the page path as given on the command line (both not yet decided,
+  TRDD-57KAZJI7). Anything unknown in a lint config, key or selector, invalidates the file. A
+  DISCOVERED invalid file `MUST NOT` crash or silently stop linting: stderr carries `memgrep lint:
+  CONFIG-001 invalid lint config <path>: <cause> (built-in defaults used)` naming the file and the
+  cause (the unknown selector, when that is it), the built-in defaults apply to the whole run (none
+  of the file's other settings do), the run gates like an ERROR (exit 1) and the stderr summary
+  ends with `; lint config error (CONFIG-001)`. CONFIG-001 is not a registered rule and never
+  appears on stdout. A finding is suppressed by an inline `<!-- noqa: CODE -->` comment on its
+  line, a page-level `<!-- memgrep: noqa: CODE -->` comment, or a frontmatter `lint-ignore: [CODE]`
+  list. Currently suppression comments are honoured by the lint command only, not by the write
+  gate (not yet decided, TRDD-KTD3N7H6).
+- **Suppression findings.** `unused-noqa` (`WMSUP-001`, `WARN`): a named suppression that matches no
+  finding. `blanket-noqa` (`WMSUP-002`, `WARN`): a bare `<!-- noqa -->`, which is reported and
+  never honored. Both are ordinary selectable rules.
+- **Exit codes.** 0: nothing at or above `--min-severity` (or `--exit-zero`). 1: a finding at or
+  above `--min-severity`, or a config error from a discovered file. 2: usage error (unknown
+  command-line selector, unusable `--config`, `--config` with `--isolated`, any other
+  argument error).
+
 `WM-LINT-02` **the-checks** — `lint` fires on, at minimum: `unquoted-desc` (WM-ATOM-03),
 `empty-lesson-body` (WM-LES-04), `oversized-atom` (WM-ATOM-01), `superseded-without-body`
 (WM-LES-07), `atom-dropped-props` (WM-ATOM-07), a dangling / unreferenced footnote, a one-sided
