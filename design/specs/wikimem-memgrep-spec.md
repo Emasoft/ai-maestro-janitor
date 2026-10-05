@@ -1452,7 +1452,7 @@ it changed.
 the eight flags below and behaves exactly as stated.
 
 - **Label.** A finding whose code is registered prints ` (FAMILY-NNN)` — or ` (FAMILY-NNN · safe-fix)`
-  when the registered fixer would actually change that page — AFTER the message and BEFORE the
+  when the registered fixer would clear every finding of that rule on that page (never for a finding the per-page lint does not itself produce) — AFTER the message and BEFORE the
   trailing `⟦anchor:…⟧`. `safe-fix` `MUST NOT` be printed for a fix the engine will not make. A
   finding outside the registry prints no label. The `SEV path:line [name] — msg` prefix is unchanged.
 - **Selection.** A selector is `ALL`, a full code (`WMPAGE-010`), a family (`WMPAGE`), any code
@@ -1461,8 +1461,8 @@ the eight flags below and behaves exactly as stated.
   command line REPLACES the config file's `ignore` list rather than adding to it (not yet decided,
   TRDD-57KAZJI7). A rule is enabled when selected (or extended) and not ignored. A selector given
   on the command line that is not `ALL` and matches no registered rule `MUST` stop the run: the
-  error names it on stderr, no finding prints, exit 2. Anything unknown in a lint config, key or
-  selector (`select`, `extend-select`, `ignore`, and the selector lists of `per-file-ignores`),
+  error names it on stderr, no finding prints, exit 2. An empty selector, which a trailing comma produces, is an unknown selector. Anything unknown in a lint config, key or
+  selector (`select`, `extend-select`, `ignore`, `fixable`, `unfixable`, and the selector lists of `per-file-ignores`),
   invalidates the whole file: see the config bullet below.
 - **`--statistics`** replaces the individual finding lines with one line per rule, most frequent
   first: `count<TAB>CODE<TAB>[*]<TAB>name` (`[*]` when a safe fix applies, else empty). The exit

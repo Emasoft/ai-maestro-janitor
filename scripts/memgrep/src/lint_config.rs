@@ -140,6 +140,12 @@ pub(crate) fn resolve(cli: &CliOverrides, file: Option<LintConfig>) -> LintConfi
 
 /// "ALL", a full code, a family, any code prefix, or the kebab name.
 pub(crate) fn selector_matches(sel: &str, rule: &Rule) -> bool {
+    // An empty string is a prefix of every code, so it would select or ignore EVERYTHING; a trailing
+    // comma on the command line (`--ignore "WMLESS,"`) produces one. It matches nothing, and the
+    // callers reject it as an unknown selector.
+    if sel.is_empty() {
+        return false;
+    }
     sel == "ALL" || rule.code.starts_with(sel) || rule.name == sel
 }
 
@@ -250,6 +256,15 @@ mod tests {
         }
         assert!(!selector_matches("HOOK", &r));
         assert!(!selector_matches("atom-unquoted", &r));
+    }
+
+
+    #[test]
+    fn empty_selector_matches_no_rule() {
+        assert!(!crate::rules_gen::RULES.iter().any(|r| selector_matches("", r)));
+        for sel in ["W", "ALL", "WMATOM-004"] {
+            assert!(crate::rules_gen::RULES.iter().any(|r| selector_matches(sel, r)), "{sel}");
+        }
     }
 
     #[test]

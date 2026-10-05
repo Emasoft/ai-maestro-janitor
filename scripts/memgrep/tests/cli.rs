@@ -6201,3 +6201,104 @@ fn lint_summary_names_a_config_error_that_gated_the_run() {
     assert!(summary.contains("0 at or above ERROR"), "{summary}");
     assert!(summary.ends_with("; lint config error (CONFIG-001)"), "{summary}");
 }
+
+
+#[test]
+fn lint_empty_selector_is_a_usage_error() {
+    let d = TempDir::new("lint-empty-sel");
+    d.write("p.md", &lint_no_notes_page(""));
+    // controls: no selector flag, and a real selector without a comma, both run and gate
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--isolated"]);
+    assert_eq!(c, 1, "control: no selector flag:\n{o}");
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--isolated", "--ignore", "WMLESS"]);
+    assert_eq!(c, 1, "control: --ignore WMLESS without a comma:\n{o}");
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+    for args in [
+        ["--select", ""],
+        ["--extend-select", ""],
+        ["--ignore", ""],
+        ["--ignore", "WMLESS,"],
+    ] {
+        let (o, e, c) = run_full(&["lint", d.as_str(), "--isolated", args[0], args[1]]);
+        assert_eq!(c, 2, "{args:?} must be refused:\n{o}\n{e}");
+        assert_eq!(o, "", "{args:?}: no finding may print");
+    }
+}
+
+#[test]
+fn lint_empty_or_unknown_selector_in_any_config_list_invalidates_the_file() {
+    // control: the same lists holding a real selector leave the file valid
+    let d = TempDir::new("lint-config-list-control");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint]\nignore = [\"WMLESS\"]\nfixable = [\"WMPAGE\"]\nunfixable = [\"WMLESS\"]\n");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    assert_eq!(c, 1, "{o}\n{e}");
+    assert!(!e.contains("CONFIG-001"), "control: a valid config reports no CONFIG-001:\n{e}");
+    assert!(o.contains("[page-no-notes-section]"), "control: the finding still prints:\n{o}");
+    for (tag, toml) in [
+        ("ignore", "[lint]\nignore = [\"\"]\n"),
+        ("fixable", "[lint]\nfixable = [\"NOPE\"]\n"),
+        ("unfixable", "[lint]\nunfixable = [\"\"]\n"),
+        ("pfi", "[lint.per-file-ignores]\n\"*.md\" = [\"\"]\n"),
+    ] {
+        let d = TempDir::new(&format!("lint-config-list-{tag}"));
+        d.write("p.md", &lint_no_notes_page(""));
+        d.write(".janitor.toml", toml);
+        let (o, e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+        assert_eq!(c, 1, "{tag}:\n{o}\n{e}");
+        assert!(e.contains("CONFIG-001"), "{tag}: {e}");
+        assert!(o.contains("[page-no-notes-section]"), "{tag}: the finding is still printed:\n{o}");
+    }
+}
+
+/// A page with two atoms whose descriptions are unquoted prose: `a1` short, `a2` as given.
+fn lint_two_atom_page(desc2: &str) -> String {
+    format!(
+        "---\nname: atoms\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{FIXTURE_PAGE_DESC}\"\n---\n# atoms\n^a1 [desc: some prose here, keywords: {FIXTURE_KEYWORDS}, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.\n\n^a2 [desc: {desc2}, keywords: {FIXTURE_KEYWORDS}, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.\n\n## Notes and lessons learned\n"
+    )
+}
+
+#[test]
+fn lint_safe_fix_label_is_withheld_when_the_fixer_leaves_a_finding_of_that_rule() {
+    let d = TempDir::new("lint-label-mixed");
+    // a2 is over 200 chars: the quote_desc fixer refuses it and its finding would survive the fix.
+    d.write("p.md", &lint_two_atom_page(&"long prose ".repeat(25)));
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--isolated", "--no-fix"]);
+    let lines: Vec<&str> = o.lines().filter(|l| l.contains("[atom-unquoted-desc]")).collect();
+    assert_eq!(lines.len(), 2, "{o}");
+    for (line, id) in lines.iter().zip(["a1", "a2"]) {
+        assert!(line.ends_with(&format!(" (WMATOM-004) ⟦anchor:atom:{id}⟧")), "{line}");
+        assert!(!line.contains("safe-fix"), "{line}");
+    }
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--isolated", "--no-fix", "--statistics"]);
+    assert!(o.contains("2\tWMATOM-004\t\tatom-unquoted-desc\n"), "{o}");
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--isolated", "--no-fix", "--output-format", "json"]);
+    let v: serde_json::Value = serde_json::from_str(&o).expect("one JSON document");
+    let hits: Vec<_> = v.as_array().unwrap().iter().filter(|f| f["name"] == "atom-unquoted-desc").collect();
+    assert_eq!(hits.len(), 2, "{o}");
+    assert!(hits.iter().all(|f| f["fixable"] == false), "{o}");
+}
+
+#[test]
+fn lint_safe_fix_label_is_kept_when_the_fixer_clears_every_finding_of_the_rule() {
+    // control for the test above: both atoms are short, so the fixer clears both findings
+    let d = TempDir::new("lint-label-both-fixable");
+    d.write("p.md", &lint_two_atom_page("other prose here"));
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--isolated", "--no-fix"]);
+    let lines: Vec<&str> = o.lines().filter(|l| l.contains("[atom-unquoted-desc]")).collect();
+    assert_eq!(lines.len(), 2, "{o}");
+    assert!(lines.iter().all(|l| l.contains(" · safe-fix)")), "{o}");
+}
+
+
+#[test]
+fn lint_safe_fix_label_is_never_printed_on_an_unused_noqa_finding() {
+    // lint_page_text cannot produce unused-noqa, so no fixer can be promised for it until C22.
+    let d = TempDir::new("lint-label-unused-noqa");
+    d.write("p.md", &lint_clean_page("Text. <!-- noqa: WMLESS-001 -->"));
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--isolated", "--min-severity", "warn"]);
+    let line = lint_line_with(&o, "unused-noqa");
+    assert!(line.contains("(WMSUP-001)"), "{line}");
+    assert!(!line.contains("safe-fix"), "{line}");
+}

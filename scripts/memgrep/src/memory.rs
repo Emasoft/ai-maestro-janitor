@@ -6065,6 +6065,9 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
 /// ` (FAMILY-NNN · safe-fix)` for a registered code; the `safe-fix` part only when the registered
 /// fixer would actually change that page (a label that promises a fix the engine will not make is a
 /// lie, TRDD-3HLI7DMK design note). Empty for a code outside the registry.
+/// ` (FAMILY-NNN · safe-fix)` for a registered code; the `safe-fix` part only when the registered
+/// fixer would clear every finding of that rule on that page (a label that promises a fix the engine
+/// will not make is a lie, TRDD-3HLI7DMK design note). Empty for a code outside the registry.
 fn lint_label(name: &str, safe_fix: bool) -> String {
     match crate::lint_rules::rule_by_name(name) {
         Some(r) if safe_fix => format!(" ({} · safe-fix)", r.code),
@@ -6094,11 +6097,15 @@ fn lint_config_for(
     };
     // Anything unknown in a lint config invalidates the file: an unknown KEY already does
     // (deny_unknown_fields), so an unknown selector VALUE follows the same policy (fail fast).
+    // `fixable`/`unfixable` are selector lists too; leaving them out accepted a typo there silently.
+    // An empty selector is unknown (it matches no rule), which is how a trailing comma is refused.
     let unknown_selector = |c: &crate::lint_config::LintConfig| -> Option<String> {
         c.select
             .iter()
             .chain(&c.extend_select)
             .chain(&c.ignore)
+            .chain(&c.fixable)
+            .chain(&c.unfixable)
             .chain(c.per_file_ignores.iter().flat_map(|(_, s)| s))
             .find(|s| !selector_is_known(s))
             .map(|s| format!("unknown selector \"{s}\" (matches no registered lint rule)"))
@@ -6135,6 +6142,9 @@ fn lint_config_for(
 
 /// Apply selection, per-file ignores and noqa to raw findings, add the WMSUP findings, and compute
 /// per finding whether a safe fixer would change its page (parallel `Vec<bool>`, same order).
+/// Apply selection, per-file ignores and noqa to raw findings, add the WMSUP findings, and compute
+/// per finding whether a safe fixer would clear every finding of its rule on its page (parallel
+/// `Vec<bool>`, same order).
 fn apply_lint_config(
     raw: Vec<Violation>,
     cfg: &crate::lint_config::LintConfig,
@@ -6197,14 +6207,31 @@ fn apply_lint_config(
                 });
             }
         }
+        // One evaluation per (page, rule). The label is a WHOLE-RULE check: (a) the per-page lint of
+        // the ORIGINAL text produces a finding of the rule, (b) the fixer changes the page, and (c)
+        // the per-page lint of the FIXED text produces none. (a) matters because `lint_page_text`
+        // never emits findings such as unused-noqa, so (c) alone would be vacuously true for them
+        // and print a false safe-fix; a finding the per-page lint cannot produce gets no label until
+        // C22. A per-finding answer needs the fix applied, so on a mixed page (one fixable finding,
+        // one the fixer refuses) NO finding of the rule is labelled: this under-promises on purpose
+        // rather than promise a fix that will not happen. Per-finding precision belongs to C22
+        // (TRDD-JD2QR5SQ), which applies the fixes and so knows the outcome.
         let mut cache: BTreeMap<&'static str, bool> = BTreeMap::new();
+        let mut original: Option<Vec<&'static str>> = None;
         for v in page_findings {
             let safe = match (rule_by_name(v.code), text.as_deref()) {
                 (Some(r), Some(t)) if is_fixable(cfg, r) && r.fix == crate::lint_rules::Fix::Safe => {
                     *cache.entry(r.name).or_insert_with(|| {
-                        crate::fixers::fixer_for(r.name)
-                            .and_then(|f| f(page_path, t))
-                            .is_some_and(|new| new != t)
+                        let orig = original.get_or_insert_with(|| {
+                            lint_page_text(page_path, t, false).iter().map(|f| f.code).collect()
+                        });
+                        orig.contains(&r.name)
+                            && crate::fixers::fixer_for(r.name)
+                                .and_then(|f| f(page_path, t))
+                                .is_some_and(|new| {
+                                    new != t
+                                        && !lint_page_text(page_path, &new, false).iter().any(|f| f.code == r.name)
+                                })
                     })
                 }
                 _ => false,
