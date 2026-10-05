@@ -4,7 +4,7 @@ title: A command that outlives its tool timeout is moved to the background and k
 column: todo
 status: tasked
 created: 2026-10-05T22:07:31+0200
-updated: 2026-10-05T22:07:31+0200
+updated: 2026-10-05T23:19:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -26,3 +26,8 @@ To do: establish from the Claude Code documentation and a controlled test what h
 ## Approval log
 
 - 2026-10-05T22:07:31+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Findings 2026-10-05
+
+Investigated read-only (report 20261005_230718 investigate-R3YEXX4L). VERIFIED in the Claude Code documentation and by a live check on version 2.1.285: a foreground command that reaches its tool timeout is moved to the background by design, the tool result says so and names a task id, and the session is notified again when it ends; on this version a moved command is stopped 30 minutes after the move. READ in the documentation, not run: from version 2.1.288 an interactive session has no time limit on a moved command. The recorded tool result carries the fields timedOutAfterMs and backgroundTaskId. No janitor hook reads them. NOT VERIFIED: that the PostToolUse hook fires for a moved call and carries those fields; one logging probe settles it. So the title's word unwatched is wider than the facts: the harness watches for the end; nothing watches memory or a hang in between, and nothing records which commands were still running when a host degrades. Options, least to most intervention: (A) record a moved command in a per-project log and tell the session once, after the probe; (B) a rule line for agents on long commands; (C) ending a moved command after a time, which is intervention and belongs to TRDD-DKID2PYP.
+Provenance and corrections (review, 2026-10-05): the paragraph above is from a fork's report; the session read the report in full and did not re-run it. The stop 30 minutes after the move is from the documentation and from the tool's own message, not observed: the live check ended by itself at 40 s. Not carried above: the setting that makes a timed-out command stop instead of move also disables background commands and background agents, so it is not an option; an inner timeout prefix works on this host only because GNU coreutils is installed; which signal ends a command at its limit is unknown.
