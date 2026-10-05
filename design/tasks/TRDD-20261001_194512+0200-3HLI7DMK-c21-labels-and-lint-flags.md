@@ -1,10 +1,10 @@
 ---
 trdd-id: 3HLI7DMK
 title: C21 — labels and lint flags
-column: ai_review
+column: testing
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-05T03:04:35+0200
+updated: 2026-10-05T09:55:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -19,7 +19,7 @@ blocked-by: []
 pre-block-column: 
 blocker-probe: [trddgrep, why, 3HLI7DMK]
 blocker-holds-if: not-match:READY
-implementation-commits: [453512bc, 92663adf]
+implementation-commits: [453512bc, 92663adf, 15482026]
 ---
 
 # C21 — labels and lint flags
@@ -90,3 +90,9 @@ The two cards named above: TRDD-57KAZJI7 (lint config policy) and TRDD-KTD3N7H6 
 - 2026-10-05: Still open on this card, unchanged by 92663adf: a noqa comment may be reported as unused after the autofix repaired its finding; path-form coupling in apply_lint_config; the three undecided behaviours on TRDD-57KAZJI7 and TRDD-KTD3N7H6; the installed memgrep is not reinstalled.
 2026-10-05 NEXT ACTION (replaces the ones above): owner answers on the stale doc comments; otherwise nothing on this card's code. Review of 92663adf, then the card may leave ai_review.
 2026-10-05 CORRECTION on timing: the figures "about 3.0 s against about 2.0 s" in the commit message of 92663adf are WRONG. The gate's first timing loop did not pin the binary, so both loops ran the installed pre-C20 memgrep (both printed 95 WARN, 55 INFO). Re-measured with MEMGREP_BIN pinned, three samples each, read-only lint of the three memory scopes through the wrapper: build of 92663adf 0.44, 0.51, 0.64 s (15 WARN, 135 INFO); installed pre-C20 binary 0.61, 0.51, 0.49 s (95 WARN, 55 INFO). No measurable cost from C21 or its fix at this corpus size. The commit message is not rewritten; this line is the correction.
+2026-10-05 — review of commits 453512bc and 92663adf: no defect found (selector handling, the safe-fix conditions, panic paths, the Python parsers). Follow-up committed as 15482026: the stale duplicated doc comments above two functions removed; a test that the unfixable setting removes the label, the statistics marker and the JSON flag together; a test that an invalid discovered config keeps CONFIG-001 off stdout while the finding still prints and JSON stays one array. Verified by a worker: cargo test 424 and 224 passed, 1 ignored; clippy with all targets exit 0. Limits: the second test was not shown to fail on a product change; four cosmetic blank lines remain in the test file.
+2026-10-05 — this supersedes the earlier line saying the owner answers on the stale doc comments: they are removed in 15482026.
+2026-10-05 — DECIDED (owner delegated decisions): an empty select list, or ignoring every rule, selects no rules and exits 0 with no findings; no change. Spec clause WM-LINT-10 defines the fallback to defaults, exit 1 and CONFIG-001 off stdout for an invalid discovered config; it does not define the exit code when that config is invalid and there are no findings. No test pins that case. Left as a known gap; open a card if it bites.
+2026-10-05 — on the empty-select decision above: a notice on stderr saying no rules are selected was considered and not added. An unknown selector is already reported as CONFIG-001; an empty list is an explicit request. Reasoned, not measured: no run with an empty select list was made on 2026-10-05.
+2026-10-05 — the figures 424 and 224 quoted for commit 15482026 are a worker's report; its two reports named the two test targets the other way round, and the final test file was not run a second time by the main agent.
+2026-10-05 — RESUME POINT. Column testing (moved from ai_review; the review is done and this is a step back in column order on purpose, because the code is unpublished). NAMED LIVE EVENT: the first release that installs a memgrep binary carrying commits 453512bc, 92663adf and 15482026 — pass if one lint run of the project memory with that installed binary prints the rule code in brackets on a finding line and the safe-fix label only where a fixer applies. Nothing more is developable on this card.

@@ -4,7 +4,7 @@ title: Resume after a janitor clear names the handoff of an older session becaus
 column: testing
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T09:44:59+0200
+updated: 2026-10-05T10:10:21+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -81,3 +81,10 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 2026-10-05 — the two tests that pinned the wrong behaviour were INVERTED, not deleted, and renamed so known_limit no longer appears in their names (one in the external-handoff-clear tests, one in the dispatch-phase tests). With only the new branch disabled they fail on values: the key is the older session, the fresh note is empty, and the stamp file for the cleared session does not exist.
 2026-10-05 — LIMITS: the handoff-and-clear command and a blind-send fallback write no clear record and keep the old behaviour (for the first, the newest handoff is the one just written; no test covers that path). A path that should write the record and fails (no transcript, unresolved pane, write error) still falls to the guess, with the log line. Test records are written by hand in the two-line shape. Three wrong stamps already on disk are not repaired; the stale pending record stays on disk and is ignored for matched clears. OPEN QUESTION: three other places use the newest handoff group on disk — the session summarizer (cannot disagree: it checks the key of the transcript it was told to summarize), and two places in the session-start hook (one can name a different session only when no clear record exists and injects nothing; the other can pick the newest group after a clear that wrote no record and was not traced further).
 2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: the first janitor clear on a host running a release that carries commit 868b711f — pass if the late-summary stamp written by that resume is keyed to the session that was cleared and the dispatcher log has no line 'no clear record within 10 s of the resume flag'. Until then nothing more is developable on this card.
+2026-10-05 — OWED before this is called gated: one full Python test run in isolation for commit 868b711f. Its last full run overlapped a Rust build, so the tests that call the memgrep binary proved less. That overlapped run passed; the isolated run is still owed.
+2026-10-05 — SHOULD-FIX, small and developable now: the test of the defect itself (the late-summary stamp must be keyed to the cleared session) fails, when the fix is broken, because a file is missing and not on an assertion. It should assert which stamp files exist, so a regression names the wrong session in its failure.
+2026-10-05 — this supersedes the line dated 2026-10-05 that says 'they fail on values: ... the stamp file for the cleared session does not exist': that stamp check fails on a missing file, not on an assertion (see the SHOULD-FIX line above).
+2026-10-05 — correction to the resume point above: 'nothing more is developable on this card' is wrong while the SHOULD-FIX item is open. The card stays in testing for the live event; that item is a small test-only change.
+
+2026-10-05 — review findings NOT applied, with reasons: (a) using the pane as a tiebreak when two clear records match — the closest two clears measured are 3107 seconds apart and two matches fall back to the old behaviour with a log line; add it if that log line ever appears. (b) calling the new lookup directly from its callers — one optional argument keeps the two callers and the existing test calls otherwise untouched.
+2026-10-05 — the owed run is DONE: the full Python test suite at commit 15482026 (which contains 868b711f) passed, 17951 passed and 2 skipped, with no Rust build running. A card worker was writing cards and one memory page during part of it, so it is not strictly isolated. This supersedes the words 'the isolated run is still owed' in the OWED line above.
