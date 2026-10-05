@@ -413,7 +413,10 @@ def _on_signal(signum: int, _frame: Optional[FrameType]) -> None:
     _running = False
     state.log_line("daemon", f"received signal {signum} — graceful shutdown")
 
+
 import threading  # noqa: E402  # fastedit cannot edit the top import block; stdlib, placed beside its only users
+
+import proc_scan  # noqa: E402  # same-user process size scan (TRDD-BZ3BT0NJ); beside threading, fastedit cannot edit the top import block
 
 # Thread-local switch: the rotator-tick THREAD must never write the daemon heartbeat. The
 # heartbeat is the main loop's liveness proof; if the tick thread refreshed it while the main
@@ -3439,6 +3442,90 @@ def _consume_rotator_tick_request(ticker: "_RotatorTickThread") -> bool:
     ticker.request_wedge_tick()
     return True
 
+
+_PROCESS_SIZE_WATCH_INTERVAL_S = 5.0
+
+
+def _process_size_watch_pass(
+    alerted: set[tuple[int, int]],
+    *,
+    rows: Optional[list[proc_scan.ProcRow]] = None,
+    runner: Optional[Callable[[list[str]], None]] = None,
+    opener: Optional[Callable[[str, bytes], None]] = None,
+    now: Optional[int] = None,
+) -> None:
+    """Tell the owner ONCE when a process of their own user is above the size ceiling.
+
+    WHY (incident 2026-10-05): a same-user runaway grew unseen because the memory guard only
+    looks at janitor-owned processes under system pressure. This only measures and notifies;
+    it stops, signals and slows nothing. `rows=None` scans; tests pass real rows.
+    """
+    # Stamp FIRST on every pass: a deliberately idle pass (kill switch, setting off) must
+    # not look like a dead thread to whoever reads the stamp.
+    state.atomic_write(gs.global_state_dir() / "process-size-watch.last-pass.ts", str(int(time.time())))
+    if gs.kill_switch_present() or not state.is_truthy_env(
+        "CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ENABLED", True
+    ):
+        return
+    ceiling_mb = state.coerce_int(
+        state.plugin_option("CLAUDE_PLUGIN_OPTION_PROCESS_SIZE_CEILING_MB"), 0
+    )
+    ceiling_b = ceiling_mb * (1 << 20) if ceiling_mb else proc_scan.default_ceiling_b()
+    if ceiling_b <= 0:
+        return
+    if rows is None:
+        rows = proc_scan.scan_same_user()
+    protected = frozenset({os.getpid(), os.getppid()})
+    mb = 1 << 20
+    for r in proc_scan.over_ceiling(rows, ceiling_b, protected):
+        key = (r.pid, r.start_s)
+        if key in alerted:
+            continue
+        label = proc_scan.label_from_argv(r.exe, proc_scan.argv_of(r.pid))
+        state.log_line(
+            "daemon",
+            f"process-size-watch: pid={r.pid} {label} footprint={r.footprint_b // mb}MB "
+            f"resident={r.resident_b // mb}MB ceiling={ceiling_b // mb}MB",
+        )
+        outcome = notify.push(
+            sev="CRITICAL", code="PROCESS-SIZE", project="process-size-watch",
+            summary=proc_scan.alert_summary(r.pid, label, r.start_s),
+            hint="check Activity Monitor", runner=runner, opener=opener, now=now,
+        )
+        state.log_line("daemon", f"process-size-watch: notify[PROCESS-SIZE]: {outcome}")
+        alerted.add(key)
+    # An empty scan is an error or a foreign platform, not proof the processes are gone.
+    if rows:
+        alerted.intersection_update({(r.pid, r.start_s) for r in rows})
+
+
+class _ProcessSizeWatchThread(threading.Thread):
+    """Runs the process-size watch every few seconds, independent of the main loop.
+
+    It never calls the heartbeat tick, so a stuck main loop stays detectable."""
+
+    def __init__(
+        self, pass_fn: Optional[Callable[[set[tuple[int, int]]], None]] = None
+    ) -> None:
+        super().__init__(name="process-size-watch", daemon=True)
+        self._pass_fn = pass_fn or _process_size_watch_pass
+        self._stop_evt = threading.Event()
+        self._alerted: set[tuple[int, int]] = set()
+
+    def shutdown(self, timeout: float) -> None:
+        self._stop_evt.set()
+        self.join(timeout)
+
+    def run(self) -> None:
+        _thread_state.no_heartbeat = True
+        while not self._stop_evt.wait(_PROCESS_SIZE_WATCH_INTERVAL_S):
+            try:
+                self._pass_fn(self._alerted)
+            except Exception as exc:  # noqa: BLE001
+                # The incident was a guard that silently did not run: one bad pass must
+                # not end the thread.
+                state.log_line("daemon", f"process-size-watch: pass failed: {exc}")
+
 _PLUGIN_UPDATE_LOCK_TIMEOUT_SEC = 30
 _PLUGIN_UPDATE_MAX_FAILS = 2
 _PLUGIN_UPDATE_SKIP_SEC = 6 * 3600
@@ -3776,6 +3863,8 @@ def main() -> int:
     # (incident 2026-10-03, see _RotatorTickThread). daemon=True: it can never block exit.
     ticker = _RotatorTickThread(next(t for t in tasks if t.own_thread))
     ticker.start()
+    size_watch = _ProcessSizeWatchThread()
+    size_watch.start()
     try:
         while _running:
             # Call-time knobs (enabled(), …) can change mid-run even though the
