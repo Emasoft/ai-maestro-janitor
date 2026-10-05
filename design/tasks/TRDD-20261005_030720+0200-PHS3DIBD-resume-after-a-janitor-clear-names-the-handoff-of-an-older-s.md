@@ -4,7 +4,7 @@ title: Resume after a janitor clear names the handoff of an older session becaus
 column: testing
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T10:12:28+0200
+updated: 2026-10-05T11:12:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,7 +17,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T03:07:20+0200
 parent-trdd: K9AHY1ZB
 derived: true
-implementation-commits: [124b724a, 868b711f]
+implementation-commits: [124b724a, 868b711f, f3f478ae]
 ---
 
 # Resume after a janitor clear names the handoff of an older session because the pending-summary record is never removed
@@ -89,3 +89,4 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 2026-10-05 — review findings NOT applied, with reasons: (a) using the pane as a tiebreak when two clear records match — the closest two clears measured are 3107 seconds apart and two matches fall back to the old behaviour with a log line; add it if that log line ever appears. (b) calling the new lookup directly from its callers — one optional argument keeps the two callers and the existing test calls otherwise untouched.
 2026-10-05 — the owed run is DONE: the full Python test suite at commit 15482026 (which contains 868b711f) passed, 17951 passed and 2 skipped, with no Rust build running. A card worker was writing cards and one memory page during part of it, so it is not strictly isolated. This supersedes the words 'the isolated run is still owed' in the OWED line above.
 2026-10-05 — limit of the full Python run recorded above: nobody checked which memgrep binary those tests resolved (the installed one or the repository build), so that run says nothing about the Rust changes of the same day. It discharges what was owed for the Python change 868b711f only. Whether another session on the machine ran a Rust build during it was not checked either; this session started none.
+2026-10-05 — the SHOULD-FIX assertion item is done in f3f478ae: the stamp test now fails on an assertion that names the stamps found. The proof ran on a throwaway copy of the test whose body was not compared with the committed one; only the two test files holding the inverted tests were run on that commit (251 passed), not the full suite. Still open and developable here: the three other places that use the newest handoff group, the correction of the memory atom on the summary hold, and showing that the second inverted test fails on an assertion with the fix inert.
