@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-05T15:14:09+0200
+updated: 2026-10-05T15:21:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -51,6 +51,7 @@ Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages an
 2026-10-05 — the machine was heavily loaded for hours that day (a remote-desktop process at over 200 percent of a processor, restarting under new ids); the third dry-run's type-check step timed out during it. The type checker scans only the scripts and tests folders, so no scratch folder slowed it. Load as the cause is the best reading, not a measurement.
 2026-10-05 — the owner has been told the dry-run result and asked again whether to publish; still no answer. Not published.
 2026-10-05 — correction for the owner's list: the item 'the rotator read credentials from the backup copy, not investigated' was a false alarm. It is designed behaviour of the headless daemon and is the subject of the owner question on TRDD-QQ7QCS3T. The dry-run result recorded above is for commit a6a79a28; later commits changed cards only and have not been run.
+2026-10-05 — still open and not for this release: the 7-day re-read due on TRDD-KE88RIKX from 2026-10-11; the launch-agent priority step on TRDD-JY0OBQZ4 (the owner's); the daemon fix of TRDD-D5BPUFIV has not been through the security linter locally. Correction: two commits, not three, followed the rehearsed commit a6a79a28 at the time the owner was last told; all card-only.
 
 ## Order of work adopted on 2026-10-05
 

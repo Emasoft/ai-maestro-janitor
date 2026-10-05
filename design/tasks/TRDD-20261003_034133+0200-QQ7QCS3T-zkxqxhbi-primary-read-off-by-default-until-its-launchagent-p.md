@@ -4,7 +4,7 @@ title: ZKXQXHBI primary read off by default until its LaunchAgent probe passes
 column: human_review
 status: tasked
 created: 2026-10-03T03:41:33+0200
-updated: 2026-10-05T15:14:03+0200
+updated: 2026-10-05T15:21:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,6 +33,7 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-03: default-off gate landed in 2b18348f (daemon forces HEADLESS unless JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 in the LaunchAgent env). Owner decision still pending.
 2026-10-05 — WAITING ON THE OWNER, not on an event. Question: keep the daemon's primary keychain read off by default (as shipped in v3.7.0, commit 2b18348f, opt-in by a setting), or turn it back on by default? The shipped default stands until the owner answers; this is not decided by the agent because it is a keychain default for every install.
 2026-10-05 — what the owner's answer changes, read in the code: with the default as shipped, the daemon's rotator tick never reads the primary live item and works from the mirror copy; opting in is one setting in the daemon's own environment and re-enables a read that, headless, can raise a keychain prompt. A day of confusion on 2026-10-05 (TRDD-HVGU9OBL, opened and withdrawn) came from the automatic tick's log line not saying the skip is by policy; making that line name its reason is a small developable change, not carded yet.
+2026-10-05 — the log-line change mentioned above is now carded as TRDD-A2JLFIQ5.
 
 ## Approval log
 
