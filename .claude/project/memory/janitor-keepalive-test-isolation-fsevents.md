@@ -2,7 +2,7 @@
 name: janitor-keepalive-test-isolation-fsevents
 description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / MY COMMITTED WORK WAS SILENTLY REVERTED / the repo's scripts/ got overwritten with the released version / files reverted to an old release with the exec bit cleared / PermissionError running scripts/daemon.py in tests / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / how to stop a test writing outside its boundary / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / a test wrote the LIVE control plane and JANITOR_GLOBAL_STATE_DIR did not move it / a kill-switch flag appeared from nowhere and disarmed the fleet / how to root-cause an fseventsd or mds RAM/CPU runaway / I found a daemon.py process running from a temp directory / is this the real janitor daemon or a test leftover / an orphaned daemon from the test suite stayed alive for days / a daemon process burning almost no CPU that ignored SIGTERM / ps shows a second daemon but daemon.pid names a different one"
 ocd: 2026-07-03
-lmd: 2026-08-01
+lmd: 2026-10-05
 metadata:
   node_type: memory
   type: project
@@ -164,8 +164,18 @@ The fix is to kill the process GROUP rather than the handle the suite holds (lan
 that fix is not evidence the fix failed — compare its start time against the fix's commit
 date before concluding anything.
 
+
+[^1]: [id:ATOM-BLKL-TEST, status:valid, keywords:"monkeypatch CLAUDE_PROJECT_DIR ignored flaky order dependent test wrote into real repo janitor state seen file lru_cache project_root", ocd:2026-07-17, lmd:2026-07-17]
+
+  DO NOT assume a monkeypatched CLAUDE_PROJECT_DIR isolates janitor state in tests,
+  BECAUSE state.project_root/janitor_root/state_dir/log_dir are lru-cached process-wide —
+  the FIRST resolver wins and later tests silently read/write the REAL repo's .janitor/
+  (an hour-keyed seen-file there muted a watchdog test). DO cache_clear all four in the
+  isolation fixture (pattern: test_daemon.py::_isolate_project_paths).
+
 ## See also
 
+- [[janitor-daemon-bulk-lane]]
 - [[janitor-architecture]] — the L0–L3 immortality layers this component lives in.
 - [[macos-keychain-incidents]] — the 2026-07-09 keychain-flood RECURRENCE: this keepalive had STAGED the
   pre-fix 0.31.0 flooder into DATA and kept relaunching it, so a published+cached fix never
