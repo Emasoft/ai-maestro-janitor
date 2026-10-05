@@ -5934,6 +5934,55 @@ fn lint_output_format_json_prints_one_array() {
     assert!(f["path"].as_str().unwrap().ends_with("p.md"));
 }
 
+
+#[test]
+
+fn lint_unfixable_config_removes_the_safe_fix_label_marker_and_json_flag() {
+    let d = TempDir::new("lint-unfixable");
+    d.write("p.md", &lint_no_notes_page(""));
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    assert!(lint_line_with(&o, "page-no-notes-section").contains("(WMPAGE-010 · safe-fix)"), "control:\n{o}");
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--no-fix", "--statistics"]);
+    assert_eq!(o, "1\tWMPAGE-010\t[*]\tpage-no-notes-section\n", "control");
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--no-fix", "--output-format", "json"]);
+    let v: serde_json::Value = serde_json::from_str(&o).expect("one JSON array");
+    assert_eq!(v[0]["fixable"], true, "control:\n{o}");
+
+    d.write(".janitor.toml", "[lint]\nunfixable = [\"WMPAGE-010\"]\n");
+    let (o, _e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    assert_eq!(c, 1, "the finding itself stays:\n{o}");
+    let line = lint_line_with(&o, "page-no-notes-section");
+    assert!(line.contains("(WMPAGE-010)") && !line.contains("safe-fix"), "no safe-fix label when unfixable: {line}");
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--no-fix", "--statistics"]);
+    assert_eq!(o, "1\tWMPAGE-010\t\tpage-no-notes-section\n", "no [*] marker when unfixable");
+    let (o, _e, _c) = run_full(&["lint", d.as_str(), "--no-fix", "--output-format", "json"]);
+    let v: serde_json::Value = serde_json::from_str(&o).expect("one JSON array");
+    assert_eq!(v[0]["fixable"], false, "{o}");
+}
+
+#[test]
+
+fn lint_invalid_discovered_config_keeps_config_001_off_stdout_and_json_one_array() {
+    // WM-LINT-10: CONFIG-001 goes to stderr only; stdout stays the findings (or one JSON document).
+    let d = TempDir::new("lint-config-stdout");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint]\nselect = [\"NOPE\"]\n");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--no-fix"]);
+    assert_eq!(c, 1, "exit 1 (findings present; the code does not distinguish a config error): {o}\n{e}");
+    assert!(e.contains("CONFIG-001"), "stderr names it:\n{e}");
+    assert!(!o.contains("CONFIG-001"), "never on stdout:\n{o}");
+    assert!(lint_line_with(&o, "page-no-notes-section").contains("WMPAGE-010"), "stdout still carries the finding:\n{o}");
+    let (o, e, c) = run_full(&["lint", d.as_str(), "--no-fix", "--output-format", "json"]);
+    assert_eq!(c, 1, "exit 1 (findings present; the code does not distinguish a config error): {o}\n{e}");
+    assert!(e.contains("CONFIG-001"), "stderr names it:\n{e}");
+    assert!(!o.contains("CONFIG-001"), "never on stdout:\n{o}");
+    let v: serde_json::Value = serde_json::from_str(&o).expect("stdout is ONE JSON document");
+    let arr = v.as_array().expect("an array");
+    assert_eq!(arr.len(), 1, "the default-config finding only:\n{o}");
+    assert_eq!(arr[0]["code"], "WMPAGE-010", "{o}");
+    assert_eq!(arr[0]["name"], "page-no-notes-section", "{o}");
+}
+
 #[test]
 fn lint_config_discovery_isolated_and_explicit_config() {
     let d = TempDir::new("lint-config");
@@ -6290,6 +6339,7 @@ fn lint_safe_fix_label_is_kept_when_the_fixer_clears_every_finding_of_the_rule()
     assert_eq!(lines.len(), 2, "{o}");
     assert!(lines.iter().all(|l| l.contains(" · safe-fix)")), "{o}");
 }
+
 
 
 #[test]

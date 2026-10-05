@@ -6063,9 +6063,6 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
 }
 
 /// ` (FAMILY-NNN · safe-fix)` for a registered code; the `safe-fix` part only when the registered
-/// fixer would actually change that page (a label that promises a fix the engine will not make is a
-/// lie, TRDD-3HLI7DMK design note). Empty for a code outside the registry.
-/// ` (FAMILY-NNN · safe-fix)` for a registered code; the `safe-fix` part only when the registered
 /// fixer would clear every finding of that rule on that page (a label that promises a fix the engine
 /// will not make is a lie, TRDD-3HLI7DMK design note). Empty for a code outside the registry.
 fn lint_label(name: &str, safe_fix: bool) -> String {
@@ -6140,8 +6137,6 @@ fn lint_config_for(
     Ok((resolve(&cli, loaded), err))
 }
 
-/// Apply selection, per-file ignores and noqa to raw findings, add the WMSUP findings, and compute
-/// per finding whether a safe fixer would change its page (parallel `Vec<bool>`, same order).
 /// Apply selection, per-file ignores and noqa to raw findings, add the WMSUP findings, and compute
 /// per finding whether a safe fixer would clear every finding of its rule on its page (parallel
 /// `Vec<bool>`, same order).
