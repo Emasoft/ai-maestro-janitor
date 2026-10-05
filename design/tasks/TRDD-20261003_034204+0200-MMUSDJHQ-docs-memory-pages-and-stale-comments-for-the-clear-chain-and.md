@@ -4,7 +4,7 @@ title: Docs, memory pages and stale comments for the clear chain and rotator
 column: todo
 status: tasked
 created: 2026-10-03T03:42:04+0200
-updated: 2026-10-04T09:22:53+0200
+updated: 2026-10-05T02:05:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -39,6 +39,7 @@ Parent plan: TRDD-K9AHY1ZB
 
 2026-10-03: bfefa9f8 (exec-bit sweep + derived test) is attributed here.
 RELEASE BLOCKERS (fastedit refused, owner asked about a one-off plain edit): delete the four stale comment lines in scripts/clear_trigger.py saying a failed hold write must stop the chain (superseded by the fail-open in take_summary_hold, a48d8974); delete the unused constant _LATE_SUMMARY_STAMP in scripts/dispatch.py.
+2026-10-05: worked by an agent, result PARTIAL (report: reports/board, mmusdjhq-work). DONE: the DEBOUNCE_S comment in scripts/lib/rotator_alert.py now matches the backoff at line 225 (27 tests pass). CHECKED, nothing to change: the pages jev-compaction and janitor-compaction-floor-gate (and its three sub-pages) carry no stale claim the worker could show against current code; skills/janitor-compact-context/SKILL.md has no :240 reference and already says --force does not bypass the 300k floor. NOT DONE 1: the R4 alert wording. docs_dev/20261003_060617+0200-R4b-report.md contains no intended wording, so there is nothing to apply; the intended text must come from the owner or from card 3OS6AXV3. NOT DONE 2: the atom is ATOM-RQDO-2SJE in oauth-rotation-renew-reauth-operations.md after all; its last sentence says a primary live credential UNREADABLE from the daemon context every tick is the DESIGNED headless path, not a fault, while scripts/daemon.py lines 775 to 795 push a HIGH alert OAUTH-PRIMARY-UNREADABLE for exactly that state and call it a persistent degradation only the user can fix. Both cannot be right. Not edited, because the worker and the main agent could not tell from code alone which is intended; the triage also notes that card QQ7QCS3T turned the primary read off by default. NEXT ACTION: read TRDD-7PYTX4E9 finding F1 and TRDD-QQ7QCS3T whole, decide which statement holds today, then correct the atom through memgrep with a superseding lesson or raise a bug against the daemon alert.
 
 ## Process breaches to record
 
