@@ -1,10 +1,10 @@
 ---
 trdd-id: PHS3DIBD
 title: Resume after a janitor clear names the handoff of an older session because the pending-summary record is never removed
-column: todo
+column: dev
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T03:16:13+0200
+updated: 2026-10-05T03:37:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -17,6 +17,7 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T03:07:20+0200
 parent-trdd: K9AHY1ZB
 derived: true
+implementation-commits: [124b724a]
 ---
 
 # Resume after a janitor clear names the handoff of an older session because the pending-summary record is never removed
@@ -66,3 +67,12 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 2026-10-05: The fallback orders handoff groups by the timestamp in the file name, not by file modification time (handoff_files.newest_group, read by a measurement worker; not re-read by the main session). The replay used three keys only.
 2026-10-05: This card STAYS OPEN after the fix lands. It must not move to ai_review on the lookup change alone; the umbrella keeps it under npt.
 2026-10-05: Advisor not consulted: none is available in this session and no exemption applies; the change went through a measurement worker and two adversarial review rounds.
+2026-10-05 LANDED in 124b724a: pending_summary_key takes the current time and uses the record's key only while now < expires; a missing or unparseable expires is not trusted; the two callers in dispatch.py pass the time; summary_hold_active is untouched. Eight tests added.
+2026-10-05 CORRECTION to the REJECTED line above: it overstates the difference. In the killed-hook case (no handoff written for the cleared session) the chosen fix ALSO falls back to an older session's handoff once the record expires, at most fifteen minutes after the clear. The chosen fix is better than the rejected alternative only for resumes inside those fifteen minutes. Whenever the cleared session has no keyed handoff file, the fallback is wrong under either rule.
+2026-10-05 REPLAY with the code of 124b724a on a copy of all 125 keyed handoff files of this project plus the stale record: at the real current time the lookup returns 20d63f12 (the cleared session); ten seconds after the record's captured time it returns d7518dd3 (the record's key, still inside its window). The old code returned d7518dd3 for both. The copy held no un-keyed legacy handoff file.
+2026-10-05 GATE for 124b724a, tree hash identical before and after: pytest 17914 passed, 2 skipped (17906 before plus the 8 new tests); ruff, mypy, pyright clean. No Rust source changed, no Rust run.
+2026-10-05 NOT LIVE: the heartbeat runs the installed plugin, not the repository tree. Until a publish and a plugin update the behaviour on any machine is unchanged, and a stale record already on disk keeps misdirecting resumes. On the machine where this was found the stale record was left in place; removing it is the owner's call.
+2026-10-05 LEAD for the real fix: the resume phase finds and sweeps per-pane sidecar files named resume-after-clear.<pane-key>.transcript but never reads them (worker's reading of dispatch.py, the writer of those files was not read). They may carry the identity of the cleared session, which is what the resume lacks.
+2026-10-05 TOOL DEFECT met while landing this: the edit tool (fastedit 0.5.0) rewrote both scripts with mode 0600, dropping the executable bit; it was restored before the commit. Reported upstream as issue 11 on the fastedit repository. After any fastedit write to a tracked script, check that git reports no mode change.
+2026-10-05: The two tests whose names contain known_limit pin today's wrong behaviour on purpose. When the resume is told its cleared session they must be INVERTED, not deleted.
+2026-10-05 NEXT ACTION (replaces the ones above): read the writer of the per-pane resume-after-clear sidecar files and decide whether the resume can take the cleared session's key from them; that is the root-cause fix this card stays open for.
