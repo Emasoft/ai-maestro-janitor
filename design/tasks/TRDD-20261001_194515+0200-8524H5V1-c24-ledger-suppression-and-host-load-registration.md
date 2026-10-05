@@ -4,7 +4,7 @@ title: C24 — ledger suppression and host-load registration
 column: backburner
 status: tasked
 created: 2026-10-01T19:45:15+0200
-updated: 2026-10-03T15:51:18+0200
+updated: 2026-10-05T02:06:48+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -48,3 +48,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-03 — CORRECTION (review of 3754d0b8): RECON line 4: write the detector-name to code mapping inline in _run_detector, not as a new module-level dict, or it hits the same fastedit limit.
 2026-10-03 — CORRECTION (review of 3754d0b8): Before dispatch: widen Writes to include design/specs/issue-codes.toml, the files build_issue_codes.py regenerates (scripts/lib/issue_codes_gen.py, docs/ISSUE-CODES.md, src/rules_gen.rs), tests/test_findings_ledger.py and a dispatch drift test; and confirm with the owner that the 'nothing suppressed' fallback on a malformed .janitor.toml is an accepted exception to the fail-fast rule.
 - 2026-10-03T15:51:18+0200 — column → backburner. waits on the owner's plain-edit decision (registration in module-level _DETECTORS) and on confirming the malformed-config fallback; not workable as written
+
+## STATE
+
+2026-10-05, carried over from C20 (archived TRDD-BHIS99XE): rule_sev in scripts/memgrep/src/memory.rs panics on a code name that is not in the registry (rules_gen.rs, generated from design/specs/issue-codes.toml), which aborts the whole lint run. Any code this card adds or wires must be registered first and written as a plain quoted literal, and needs a CLI test that triggers it. Second carry-over: CONFIG-001 is NOT in the registry (found by the C21 worker on 2026-10-05); C21 prints it on stderr. If this card needs CONFIG-001 as a finding, register it in issue-codes.toml and regenerate first.
