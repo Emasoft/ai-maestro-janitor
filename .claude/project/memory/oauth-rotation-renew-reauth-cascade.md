@@ -1,8 +1,8 @@
 ---
 name: oauth-rotation-renew-reauth-cascade
-description: "How the ROTATE / RENEW / REAUTHENTICATE cascade actually falls back — where rotation runs (daemon tick vs launchd), drain-first target selection, window-asymmetric switch thresholds (7d vs 5h), the RENEW_REFRESH keepalive vs RENEW_COOKIE browser-capture sub-legs, why REAUTH needs a human (passkey/2FA is OS-level), and the ~monthly reauth nudge. Symptoms: 'rotator failed to keep the session alive', '429 landed instead of rotating', 'renew shows the login page not Authorize', 'accounts won't switch', 'is the reauth step ever fully hands-free'."
+description: "How the ROTATE / RENEW / REAUTHENTICATE cascade actually falls back — where rotation runs (daemon tick vs launchd), drain-first target selection, window-asymmetric switch thresholds (7d vs 5h), the RENEW_REFRESH keepalive vs RENEW_COOKIE browser-capture sub-legs, why REAUTH needs a human (passkey/2FA is OS-level), and the ~monthly reauth nudge. Symptoms: 'rotator failed to keep the session alive', '429 landed instead of rotating', 'renew shows the login page not Authorize', 'accounts won't switch', 'is the reauth step ever fully hands-free', 'rotation is stuck with a lot of headroom', '7d wall projected in ~0 min', 'learned cap from a usage endpoint 429'."
 ocd: 2026-06-13
-lmd: 2026-09-28
+lmd: 2026-10-05
 metadata:
   node_type: memory
   type: project
@@ -73,7 +73,7 @@ switch TO — its whole job depends on the RENEW leg keeping the alternate slots
   the live keychain credential is authoritative, so a `state.json` whose `live_email`
   drifted (an out-of-band login, a `switch` from another process, a reauth that wrote the
   token but not the index) is corrected, or the candidate list would treat the REAL live
-  account as a rotation target.
+  account as a rotation target. [^11]
 
 ^ATOM-ZE05-RUNY [desc: "After a switch Claude Code adopts the new account on its next turn (no restart); _switch_blob merges claudeAiOauth, preserving mcpOAuth; ROTATE falls back to RENEW when no alternate is healthy.", keywords: claude_adopts_new_account_without_restart keychain_read_on_next_turn_macos switch_blob_merges_claude_ai_oauth mcp_oauth_preserved_on_rotation rotation_must_not_wipe_mcp_tokens no_healthy_alternate_falls_back_to_renew all_accounts_maxed_no_software_fix rotate_has_nowhere_to_go fallback_trigger_rotate_to_renew window_reset_or_fresh_login_needed, type: project, ocd: 2026-09-24, lmd: 2026-09-24]
 
@@ -233,4 +233,5 @@ instead of silently stalling.
   "unsafe" account worked instantly at 5h=3%). DO reject the 7d only at the true wall (99)
   and the cheap 5h a little earlier (97), keeping `SWITCH ≥ SAFE` per window
   (TRDD-P7WU40G9 §BUG 1).
+[^11]: [id: ATOM-FF40-TGQA, status: valid, desc: "a usage-endpoint 429 taught a false 85% weekly cap and every later reading was called a wall", keywords: "rotation_is_stuck wall_projected_in_~0_min lot_of_headroom learned_cap usage_endpoint_429 learned_caps +BURN[ false_weekly_cap stuck_alert throttled_usage_answer", ocd: 2026-10-05, lmd: 2026-10-05] DO NOT treat a 429 from the usage endpoint as evidence of an account limit or learn a cap from it, BECAUSE on 2026-10-05 five throttled answers at 5h=3% stored a false weekly cap of 85% and the rotator called every later reading a wall ("7d wall projected in ~0 min") and raised the stuck alert while the account was within limits. DO diagnose with the learned_caps key in the rotator state and the "+BURN[" text in the rotator log, and learn caps only from session rate-limit evidence (TRDD-AWIWXJIG; fix TRDD-YVC3F06V, commit 95bbddeb).
 

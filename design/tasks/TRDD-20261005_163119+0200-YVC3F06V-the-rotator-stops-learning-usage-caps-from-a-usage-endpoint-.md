@@ -4,7 +4,7 @@ title: The rotator stops learning usage caps from a usage-endpoint throttle and 
 column: testing
 status: tasked
 created: 2026-10-05T16:31:19+0200
-updated: 2026-10-05T16:37:00+0200
+updated: 2026-10-05T16:43:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,3 +29,10 @@ The proper redesign is owned by the sibling card on learning a real cap from ses
 ## Approval log
 
 - 2026-10-05T16:31:19+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Known limits
+
+(a) The drop is persisted by the save_state calls on the 200 and 429 paths and before a switch; on other paths (dead token, endpoint unreachable) it protects the in-memory decision only, so a host sheds stored caps on its first tick that reaches one of those saves.
+(b) Learning is also off on wedge ticks, which were the stronger evidence.
+(c) Alternates are no longer filtered by learned caps in target selection.
+(d) The fix reaches a running daemon only after a publish.
