@@ -2,7 +2,7 @@
 name: claude-code-plugin-rollout-staleness
 description: "the fix is published but the bug keeps happening / a session still injects the old behavior after the plugin updated / which sessions run stale hooks / an installed rule file went BACKWARD to an older version's content / why did /compact fire at the old threshold after the release / the fix is merged but the installed binary or rule is still the old one / cargo install left memgrep stale / memgrep --version reports the wrong commit — plugin code is SESSION-LOADED and a running session is a ghost of the old version until it reloads, and anything that INSTALLS (a Rust crate, a rule file, the plugin cache) needs its own delivery check on PATH / how do I tell which plugin version a session is actually running / a skill still loads from the old cached tree after reload-plugins ran / two plugin versions running in the same session / the detector still reports the pre-fix numbers after a release / the janitor daemon is dead but that might be correct because the server absorbed the chore / version-update-requested stays true forever / merged is not delivered / a self-reported version stamp lied about the actual code / why did the installed rule file revert to an older version"
 ocd: 2026-07-18
-lmd: 2026-08-28
+lmd: 2026-10-05
 metadata:
   node_type: memory
   type: project
@@ -123,13 +123,16 @@ only the new code contains, and treat a self-reported version as a hint to corro
 the proof.
 
 
-^ATOM-ARO4-DFBY [desc: "an uncommitted fix runs NOWHERE — a peer verifying it executes the cached published version, so continued symptoms are not evidence the fix failed", keywords: I_fixed_it_but_the_other_session_still_sees_the_bug a_peer_keeps_reporting_the_symptom_after_I_fixed_it is_my_fix_not_working_or_is_it_not_shipped the_heartbeat_runs_the_cached_plugin_not_my_working_tree dispatcher-stub_resolves_the_newest_cached_version uncommitted_tree_is_not_running_anywhere my_canary_will_not_flip_until_publish written_is_not_merged_is_not_delivered do_not_read_continued_symptoms_as_a_failed_fix verifying_a_fix_that_has_not_shipped another_project_measured_my_old_code, type: project, ocd: 2026-08-28, lmd: 2026-08-28]
+^ATOM-ARO4-DFBY [desc: "an uncommitted fix runs NOWHERE — a peer verifying it executes the cached published version, so continued symptoms are not evidence the fix failed", keywords: I_fixed_it_but_the_other_session_still_sees_the_bug a_peer_keeps_reporting_the_symptom_after_I_fixed_it is_my_fix_not_working_or_is_it_not_shipped the_heartbeat_runs_the_cached_plugin_not_my_working_tree dispatcher-stub_resolves_the_newest_cached_version uncommitted_tree_is_not_running_anywhere my_canary_will_not_flip_until_publish written_is_not_merged_is_not_delivered do_not_read_continued_symptoms_as_a_failed_fix verifying_a_fix_that_has_not_shipped another_project_measured_my_old_code, type: project, ocd: 2026-08-28, lmd: 2026-10-05]
 
 **Written is not merged is not delivered, and the FIRST gap is the one that fools two parties at
 once.** The heartbeat runs `dispatcher-stub.py`, which re-resolves the newest CACHED version under
 `~/.claude/plugins/cache/…/ai-maestro-janitor/`. It never looks at the working tree. So a fix that
 is green in `~/Code/…` runs on exactly zero sessions — including this project's own heartbeat —
 until `publish.py` ships a version and it lands in the cache.
+
+
+^ATOM-QCKN-E0C9 [desc: "after fixing a bug a peer reported, saying 'tell me if you still see it' misleads both sides: state the SHIP GATE, and a pure-function fix is the one exception a peer may test uncommitted", keywords: a_peer_keeps_seeing_the_bug_after_I_fixed_it tell_me_if_you_still_see_it_misleads_both_sides continued_symptoms_are_the_old_code_still_running state_the_ship_gate_with_a_fix-verification_request a_fix_blocked_from_publishing_is_not_delivered_work say_what_the_fix_is_blocked_on pure-function_fix_can_be_tested_on_an_uncommitted_tree never_point_a_peer_harness_at_an_uncommitted_tree_that_writes the_canary_will_not_flip_until_publish peer_advertised_a_dead_agent_for_seven_days side_effect_masquerading_as_a_measurement, type: project, ocd: 2026-10-05, lmd: 2026-10-05]
 
 **The trap is the canary.** After fixing a bug a downstream session reported, it is natural to say
 "tell me if you still see it". Both sides then read continued symptoms as the fix failing, when
