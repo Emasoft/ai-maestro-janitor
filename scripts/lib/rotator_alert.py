@@ -25,7 +25,7 @@ import notify  # noqa: E402  -- the existing daemon-only desktop notifier
 import state  # noqa: E402
 
 ALERT_NAME = "rotator-alert.json"
-DEBOUNCE_S = 3600  # re-notify an unchanged condition at most hourly
+DEBOUNCE_S = 3600  # 2nd notification of an unchanged condition after 1 h; later ones use REPEAT_S
 TICK_STALL_S = 600  # no completed rotator tick for this long while claude runs
 
 _ACTIONS = {
