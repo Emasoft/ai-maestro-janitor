@@ -1332,7 +1332,7 @@ def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str
         _log_probe_failure(cmd, "empty", 0, result.stderr, None)
     else:
         # A success with output ends the failure episode: the next failure must be logged again.
-        _probe_logged.clear()
+        _end_probe_episode()
     return result.stdout, ("ok" if result.returncode == 0 else "error")
 
 
@@ -1380,6 +1380,20 @@ def _log_probe_failure(cmd: list[str], outcome: str, returncode: int | None, std
         _probe_logged[key] = now
     except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change a probe result (TRDD-0QCRG2YX)
         pass
+
+
+
+def _end_probe_episode() -> None:
+    """A probe success with output ends the failure episode; never raises (TRDD-0QCRG2YX)."""
+    # WHY the recovery line: a probe that recovered by itself left no trace, so a flap was
+    # invisible in the log. The clear must run even if the write fails, hence the finally.
+    try:
+        if _probe_logged:
+            state.log_line("daemon", "iterm-probe: ok after failures (" + ", ".join(sorted(_probe_logged)) + ")")
+    except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change a probe result (TRDD-0QCRG2YX)
+        pass
+    finally:
+        _probe_logged.clear()
 
 
 def _cwd_of(pid: int) -> str | None:

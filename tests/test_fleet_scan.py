@@ -505,6 +505,33 @@ def test_run_probe_outcome_logs_an_identical_failure_once_until_a_success() -> N
     fs._run_probe_outcome(["false"])
     assert _probe_log()[len(before):].count("iterm-probe: error") == 1
 
+
+
+def test_run_probe_outcome_logs_one_line_when_a_success_ends_a_failure_episode() -> None:
+    """A success after a failure logs one recovery line naming the failure key, then nothing more."""
+    _probe_run(["false"])
+    before = _probe_log()
+    fs._run_probe_outcome(["echo", "x"])
+    recovered = _probe_log()[len(before):]
+    assert recovered.count("iterm-probe: ok after failures") == 1 and "error exit=1" in recovered
+    before = _probe_log()
+    fs._run_probe_outcome(["echo", "x"])
+    assert _probe_log() == before
+
+
+def test_run_probe_outcome_recovery_survives_an_unwritable_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A recovery line that cannot be written still returns the result and clears the episode."""
+    monkeypatch.setattr(fs.state, "log_dir", lambda: tmp_path)
+    fs._probe_logged.clear()
+    fs._run_probe_outcome(["false"])
+    assert fs._probe_logged
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / "daemon.log").mkdir()  # a directory in place of the file: opening it for append raises OSError
+    monkeypatch.setattr(fs.state, "log_dir", lambda: bad)
+    stdout, outcome = fs._run_probe_outcome(["echo", "x"])
+    assert (stdout.strip(), outcome) == ("x", "ok") and not fs._probe_logged
+
 def test_run_probe_outcome_ignores_the_error_text_when_deduping() -> None:
     """Two failures with the same exit code but different stderr text log one line."""
     _probe_run([sys.executable, "-c", "import sys; sys.stderr.write('first text'); sys.exit(3)"])
