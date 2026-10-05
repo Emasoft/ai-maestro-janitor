@@ -1,10 +1,10 @@
 ---
 trdd-id: YVC3F06V
 title: The rotator stops learning usage caps from a usage-endpoint throttle and discards the stored ones
-column: dev
+column: testing
 status: tasked
 created: 2026-10-05T16:31:19+0200
-updated: 2026-10-05T16:31:19+0200
+updated: 2026-10-05T16:37:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T16:31:19+0200
+implementation-commits: [95bbddeb]
 ---
 
 # The rotator stops learning usage caps from a usage-endpoint throttle and discards the stored ones
