@@ -1,10 +1,10 @@
 ---
 trdd-id: 0NWG4LKJ
 title: The janitor collects the anomalies it sees and opens a card for each one by itself
-column: todo
+column: design
 status: tasked
 created: 2026-10-05T22:14:00+0200
-updated: 2026-10-05T22:14:00+0200
+updated: 2026-10-05T22:14:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -32,3 +32,7 @@ To settle in design before any code: which scope a card gets when the anomaly is
 ## Approval log
 
 - 2026-10-05T22:14:00+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): the owner's sentence is a question about a design gap, not an order to build; this card sits in the design column until the owner confirms. Measured that day: 54 cards opened by hand, not 'more than fifty anomalies' (several are duplicates, one is a to-do list). 'Most were visible in the janitor's own logs' was not counted: some were; others came from reading code, from review rounds, from other sessions' transcripts and from the system's memory reports, which the janitor does not hold. The procedure the owner named includes the adversarial review and correction rounds: about a third of the hand-made cards needed corrections, so an automatic version without that step would file overstated cards at scale. Most of the anomalies needed a model's judgment across several sources, not a search of a log. The existing ticket and repair-agent path and the drift detector were not read and may already cover part of this; they are the first thing to read and the likely vehicle. Lesson for the session itself: it did not see this gap until the owner pointed at it.
