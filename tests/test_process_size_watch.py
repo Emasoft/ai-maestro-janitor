@@ -291,6 +291,49 @@ def test_stamp_is_written_by_every_pass_even_when_skipped() -> None:
 
 
 @darwin_only
+def test_stamp_is_rewritten_only_when_older_than_60s() -> None:
+    """A fresh stamp is left alone by a second pass; one aged 120 s is rewritten."""
+    import os
+
+    stamp = gs.global_state_dir() / "process-size-watch.last-pass.ts"
+    rec = _Recorder()
+    _pass(set(), [], rec)
+    before = stamp.stat().st_mtime_ns
+    _pass(set(), [], rec)
+    assert stamp.stat().st_mtime_ns == before
+    old = time.time() - 120
+    os.utime(stamp, (old, old))
+    _pass(set(), [], rec)
+    assert stamp.stat().st_mtime_ns > int(old * 1e9) + 60 * 10**9
+
+
+@darwin_only
+def test_a_failing_runner_does_not_hide_the_second_row_or_repeat_alerts() -> None:
+    """notify swallows runner errors itself, so the push cannot raise through it; with a
+    runner that raises once, both rows are marked alerted in one pass and a second pass does
+    not call the runner again."""
+    calls: list[list[str]] = []
+
+    def bad_runner(argv: list[str]) -> None:
+        calls.append(argv)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+
+    child = _spawn()
+    try:
+        r1 = _row(child.pid)
+        r2 = r1._replace(pid=child.pid + 100000, start_s=r1.start_s + 1)
+        alerted: set[tuple[int, int]] = set()
+        daemon._process_size_watch_pass(alerted, rows=[r1, r2], runner=bad_runner, opener=_Recorder().open)
+        assert alerted == {(r1.pid, r1.start_s), (r2.pid, r2.start_s)}
+        n = len(calls)
+        daemon._process_size_watch_pass(alerted, rows=[r1, r2], runner=bad_runner, opener=_Recorder().open)
+        assert len(calls) == n
+    finally:
+        _reap(child)
+
+
+@darwin_only
 def test_thread_passes_while_main_is_blocked_survives_a_raise_and_stops(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

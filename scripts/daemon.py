@@ -3461,8 +3461,16 @@ def _process_size_watch_pass(
     it stops, signals and slows nothing. `rows=None` scans; tests pass real rows.
     """
     # Stamp FIRST on every pass: a deliberately idle pass (kill switch, setting off) must
-    # not look like a dead thread to whoever reads the stamp.
-    state.atomic_write(gs.global_state_dir() / "process-size-watch.last-pass.ts", str(int(time.time())))
+    # not look like a dead thread to whoever reads the stamp. It is a liveness signal and
+    # must never be the reason the watch does nothing (a full disk would otherwise kill every
+    # pass at its first line), and one write a minute instead of one every 5 s keeps a
+    # watched state folder quiet.
+    try:
+        stamp = gs.global_state_dir() / "process-size-watch.last-pass.ts"
+        if not stamp.exists() or time.time() - stamp.stat().st_mtime > 60:
+            state.atomic_write(stamp, str(int(time.time())))
+    except OSError as exc:
+        state.log_line("daemon", f"process-size-watch: stamp write failed: {exc}")
     if gs.kill_switch_present() or not state.is_truthy_env(
         "CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ENABLED", True
     ):
@@ -3481,19 +3489,25 @@ def _process_size_watch_pass(
         key = (r.pid, r.start_s)
         if key in alerted:
             continue
-        label = proc_scan.label_from_argv(r.exe, proc_scan.argv_of(r.pid))
-        state.log_line(
-            "daemon",
-            f"process-size-watch: pid={r.pid} {label} footprint={r.footprint_b // mb}MB "
-            f"resident={r.resident_b // mb}MB ceiling={ceiling_b // mb}MB",
-        )
-        outcome = notify.push(
-            sev="CRITICAL", code="PROCESS-SIZE", project="process-size-watch",
-            summary=proc_scan.alert_summary(r.pid, label, r.start_s),
-            hint="check Activity Monitor", runner=runner, opener=opener, now=now,
-        )
-        state.log_line("daemon", f"process-size-watch: notify[PROCESS-SIZE]: {outcome}")
+        # Mark BEFORE log and push: a push that raises must not make the same process alert,
+        # log and spawn a notifier again every 5 s for as long as it lives, and must not
+        # hide the other oversized processes behind it.
         alerted.add(key)
+        try:
+            label = proc_scan.label_from_argv(r.exe, proc_scan.argv_of(r.pid))
+            state.log_line(
+                "daemon",
+                f"process-size-watch: pid={r.pid} {label} footprint={r.footprint_b // mb}MB "
+                f"resident={r.resident_b // mb}MB ceiling={ceiling_b // mb}MB",
+            )
+            outcome = notify.push(
+                sev="CRITICAL", code="PROCESS-SIZE", project="process-size-watch",
+                summary=proc_scan.alert_summary(r.pid, label, r.start_s),
+                hint="check Activity Monitor", runner=runner, opener=opener, now=now,
+            )
+            state.log_line("daemon", f"process-size-watch: notify[PROCESS-SIZE]: {outcome}")
+        except Exception as exc:  # noqa: BLE001
+            state.log_line("daemon", f"process-size-watch: notify failed: {exc}")
     # An empty scan is an error or a foreign platform, not proof the processes are gone.
     if rows:
         alerted.intersection_update({(r.pid, r.start_s) for r in rows})
