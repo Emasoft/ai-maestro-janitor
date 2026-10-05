@@ -4,7 +4,7 @@ title: The iTerm Automation alert tells the human to enable a list entry that ma
 column: dev
 status: tasked
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-05T07:46:40+0200
+updated: 2026-10-05T07:49:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -111,3 +111,5 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 — RESUME POINT. Landed, unpublished: probe failure logging (three commits) and the repetition fix (one commit). Remaining on this card, in order: (1) log the transition when a probe works again after failures, so a flap is visible; (2) the second view: start the daemon in a directory that always exists and pass one at spawn, and keep the second view's error text; (3) alert wording: state the measured outcome, give the Automation advice only when the recorded error is a permission refusal, and say that restarting iTerm cleared it here; (4) decide the fleet-size question. Nothing reaches a host until a release is published and its daemon restarts.
 2026-10-05 07:45 — DIRECT evidence the probe runs and completes after the iTerm restart: the system log shows ONE osascript run per scan living about 1.65 seconds with no retries, where before the restart each scan made THREE runs of 0.3 to 0.5 seconds. One scan showed two runs two seconds apart; not explained.
 2026-10-05 — known limit of the repetition test: it calls the three flag writers in the order the fleet scan does, written out by hand; no test goes through the fleet scan itself for this sequence, so a reordering in production would not be noticed by it.
+2026-10-05 07:45 — caution on the evidence above: the osascript runs were grouped by process id only; their parent was not checked, so another caller on the host would look the same. The scan at 07:43 showed two runs two seconds apart, which is the first retry interval: the likeliest reading is one failed attempt and a working retry. If so the channel is still marginal under the new iTerm and the alert may return. The test is whether the blocked flag reappears; at the time of writing it had not.
+2026-10-05 — open point never followed up: the privacy database's allowed Apple-events entry names the interpreter's bin path, while the process that executes is the application bundle binary inside the same framework; both daemons run that same bundle binary. Whether the privacy system treats the two paths as one client is NOT ESTABLISHED. Probably not this failure's cause, because an identity mismatch does not come and go and would not be cured by restarting iTerm; the project memory already warns that a grant follows the exact binary.
