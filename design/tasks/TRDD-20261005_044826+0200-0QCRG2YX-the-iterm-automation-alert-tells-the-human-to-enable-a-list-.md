@@ -4,7 +4,7 @@ title: The iTerm Automation alert tells the human to enable a list entry that ma
 column: dev
 status: tasked
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-05T08:10:23+0200
+updated: 2026-10-05T08:14:04+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -116,3 +116,4 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 — the recovery log line landed (unpublished): a probe that works again after logged failures writes one line naming that episode's failure keys. Blind spot: it records a probe success, not a flag that clears because the scan did not see iTerm running.
 2026-10-05 — project memory: the fleet guardian page's lesson 7 calls restarting iTerm a cheap thing to try, which is unsafe for an agent reader (it closes every session in that terminal). It could not be corrected in place because the memory write verbs cannot correct a lesson by its id (project issue 331). Lesson 8 on the same page states that it is the owner's action only, and the page description carries the same caution so the recall listing shows it.
 2026-10-05 — BOARD NOTE: this card took a whole session; its symptom is gone on the host where it was investigated; five code commits are landed and unpublished. If the second-view change is not small, this card moves to testing, waiting on a named live event: the first recurrence on a host running a release that carries the probe logging.
+2026-10-05 — second view: the agent-roster command returns identical rows from any existing folder and creates nothing (measured from three folders), so it is being given its own working directory and its error text will go to the daemon log; the returned failure string is unchanged. The root cause — a machine-wide daemon inheriting a session's folder, with about 70 child calls and the project-root fallback exposed — is split out to TRDD-LRGZV19Z, in backburner, undecided.
