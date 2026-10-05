@@ -4,7 +4,7 @@ title: Resume after a janitor clear names the handoff of an older session becaus
 column: testing
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T11:12:35+0200
+updated: 2026-10-05T15:26:43+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -90,3 +90,5 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 2026-10-05 — the owed run is DONE: the full Python test suite at commit 15482026 (which contains 868b711f) passed, 17951 passed and 2 skipped, with no Rust build running. A card worker was writing cards and one memory page during part of it, so it is not strictly isolated. This supersedes the words 'the isolated run is still owed' in the OWED line above.
 2026-10-05 — limit of the full Python run recorded above: nobody checked which memgrep binary those tests resolved (the installed one or the repository build), so that run says nothing about the Rust changes of the same day. It discharges what was owed for the Python change 868b711f only. Whether another session on the machine ran a Rust build during it was not checked either; this session started none.
 2026-10-05 — the SHOULD-FIX assertion item is done in f3f478ae: the stamp test now fails on an assertion that names the stamps found. The proof ran on a throwaway copy of the test whose body was not compared with the committed one; only the two test files holding the inverted tests were run on that commit (251 passed), not the full suite. Still open and developable here: the three other places that use the newest handoff group, the correction of the memory atom on the summary hold, and showing that the second inverted test fails on an assertion with the fix inert.
+2026-10-05 — the memory correction listed above as still open is DONE in 405a3170: the summary-hold entry of the project memory (the page on state and conventions) gained a dated lesson saying the pending record has one writer and no remover, that its key was used after expiry until 124b724a, and that since 868b711f the resume takes the cleared session from the per-pane clear record. Still open and developable here: the three other places that use the newest handoff group, and showing that the second inverted test fails on an assertion with the fix inert.
+2026-10-05 — wording correction to the earlier line on this card that says the clear-trigger chain never writes the pending record: read in the code, the record is written inside the clear trigger, but only when the daemon lane asked for a summary hold; every other chain passes through the same code and writes none. The memory lesson uses the precise form (chains other than the daemon lane never write it).
