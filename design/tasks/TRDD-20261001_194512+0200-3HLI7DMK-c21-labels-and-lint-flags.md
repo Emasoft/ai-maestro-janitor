@@ -4,7 +4,7 @@ title: C21 — labels and lint flags
 column: testing
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-05T09:55:58+0200
+updated: 2026-10-05T10:12:28+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -96,3 +96,6 @@ The two cards named above: TRDD-57KAZJI7 (lint config policy) and TRDD-KTD3N7H6 
 2026-10-05 — on the empty-select decision above: a notice on stderr saying no rules are selected was considered and not added. An unknown selector is already reported as CONFIG-001; an empty list is an explicit request. Reasoned, not measured: no run with an empty select list was made on 2026-10-05.
 2026-10-05 — the figures 424 and 224 quoted for commit 15482026 are a worker's report; its two reports named the two test targets the other way round, and the final test file was not run a second time by the main agent.
 2026-10-05 — RESUME POINT. Column testing (moved from ai_review; the review is done and this is a step back in column order on purpose, because the code is unpublished). NAMED LIVE EVENT: the first release that installs a memgrep binary carrying commits 453512bc, 92663adf and 15482026 — pass if one lint run of the project memory with that installed binary prints the rule code in brackets on a finding line and the safe-fix label only where a fixer applies. Nothing more is developable on this card.
+2026-10-05 — correction to the RESUME POINT above: 'Nothing more is developable on this card' is wrong. Developable now, both small: (a) show that the second test of 15482026 fails on a product change, not only on an inverted assertion; (b) remove the four cosmetic blank lines in the test file, which needs a plain edit the edit tool cannot make. The card stays in testing for the live event.
+2026-10-05 — the live event's pass condition, made checkable: with the installed memgrep binary of that release, lint of a scratch folder holding one page with no Notes section prints a line containing (WMPAGE-010 · safe-fix); with a config file setting unfixable to WMPAGE-010 the same line contains (WMPAGE-010) and no safe-fix. Those are the two outputs the tests of 15482026 assert on the repository build.
+2026-10-05 — the test counts are consistent after all: this card's gate line for 92663adf reads 424 unit plus 222 CLI, and 15482026 adds two CLI tests, so 424 unit plus 224 CLI. The first verifier's report had the two labels the wrong way round. Still a worker's run, not repeated by the main agent.

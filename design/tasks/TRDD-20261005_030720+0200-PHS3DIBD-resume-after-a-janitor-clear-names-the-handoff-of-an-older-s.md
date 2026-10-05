@@ -4,7 +4,7 @@ title: Resume after a janitor clear names the handoff of an older session becaus
 column: testing
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T10:10:21+0200
+updated: 2026-10-05T10:12:28+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -88,3 +88,4 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 
 2026-10-05 — review findings NOT applied, with reasons: (a) using the pane as a tiebreak when two clear records match — the closest two clears measured are 3107 seconds apart and two matches fall back to the old behaviour with a log line; add it if that log line ever appears. (b) calling the new lookup directly from its callers — one optional argument keeps the two callers and the existing test calls otherwise untouched.
 2026-10-05 — the owed run is DONE: the full Python test suite at commit 15482026 (which contains 868b711f) passed, 17951 passed and 2 skipped, with no Rust build running. A card worker was writing cards and one memory page during part of it, so it is not strictly isolated. This supersedes the words 'the isolated run is still owed' in the OWED line above.
+2026-10-05 — limit of the full Python run recorded above: nobody checked which memgrep binary those tests resolved (the installed one or the repository build), so that run says nothing about the Rust changes of the same day. It discharges what was owed for the Python change 868b711f only. Whether another session on the machine ran a Rust build during it was not checked either; this session started none.
