@@ -370,11 +370,20 @@ def record_iterm_automation_state(
     except Exception:  # noqa: BLE001 -- advisory only; never break the scan
         pass
 
+# Keys the late patch writers (`record_iterm_host_exposure`, `record_iterm_rescue_warranted`)
+# add to the flag after the base write. Register any new patch writer's key HERE.
+# WHY (TRDD-0QCRG2YX): `record_iterm_automation_state` compares the fresh base payload with the
+# stored flag; the stored one also holds these keys, so the compare never matched and every
+# scan rewrote the flag, which dispatch's whole-file hash read as a new observation (a human-only
+# alert on 45 of 47 heartbeats). The comparison must look only at what the base writer owns.
+_ITERM_PATCH_KEYS = ("iterm_only_count", "fleet_total", "rescue_warranted")
+
 
 def _iterm_payload_core(raw: str) -> str:
-    """`raw` with `rearm_evidence_age_s` stripped, re-serialized the same way
+    """`raw` reduced to the keys the base writer owns (live-clock `rearm_evidence_age_s` and
+    the patch writers' `_ITERM_PATCH_KEYS` stripped), re-serialized the same way
     `iterm_automation_payload` does — the comparable EQUALITY surface a change-detection
-    check can use without a live clock field forcing a "changed" verdict every scan.
+    check can use without a live clock or a late patch forcing a "changed" verdict every scan.
     Malformed/legacy (pre-JSON) content is returned unchanged, so it never spuriously
     compares equal to a well-formed payload and the upgrade path still rewrites once."""
     try:
@@ -382,7 +391,8 @@ def _iterm_payload_core(raw: str) -> str:
     except (json.JSONDecodeError, ValueError):
         return raw
     if isinstance(data, dict):
-        data.pop("rearm_evidence_age_s", None)
+        for key in ("rearm_evidence_age_s", *_ITERM_PATCH_KEYS):
+            data.pop(key, None)
     return json.dumps(data, sort_keys=True)
 
 

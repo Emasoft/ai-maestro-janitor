@@ -692,6 +692,80 @@ def test_rearm_evidence_age_does_not_force_a_rewrite_on_every_scan(
         "the live age field must not by itself trigger a rewrite/re-alarm"
     )
 
+def _write_rearm_log(tmp_path: Path, seconds_ago: int) -> None:
+    import datetime as dt
+    import time as _time
+
+    stamp = dt.datetime.fromtimestamp(
+        int(_time.time()) - seconds_ago, tz=dt.timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%S+0000")
+    (tmp_path / "daemon.log").write_text(f"[{stamp}] FIRED rearm → iterm\n", encoding="utf-8")
+
+
+def _daemon_beat(probe_outcome: str) -> None:
+    """The three flag writers in the order and with the argument shapes `gather_fleet` uses."""
+    fs.record_iterm_automation_state(True, probe_outcome=probe_outcome)
+    fs.record_iterm_rescue_warranted(True)
+    fs.record_iterm_host_exposure((2, 5))
+
+
+def test_unchanged_beat_after_patches_does_not_rewrite_the_flag(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """TRDD-0QCRG2YX: a second full beat (base write + both patches) with only the evidence age
+    different must leave the flag's bytes and mtime untouched."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    import global_state as gs  # type: ignore[import-not-found]
+
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+    _write_rearm_log(tmp_path, 60)
+    _daemon_beat("empty")
+    first_bytes, first_mtime = flag.read_bytes(), flag.stat().st_mtime_ns
+    first_age = fs._iterm_rearm_evidence_age_s(gs)
+
+    _write_rearm_log(tmp_path, 400)
+    assert fs._iterm_rearm_evidence_age_s(gs) != first_age
+    _daemon_beat("empty")
+
+    assert flag.read_bytes() == first_bytes
+    assert flag.stat().st_mtime_ns == first_mtime
+
+
+def test_patch_keys_survive_an_unchanged_beat(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """The patch writers' keys are still in the flag, with their values, after a second beat."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+    _write_rearm_log(tmp_path, 60)
+    _daemon_beat("empty")
+    _write_rearm_log(tmp_path, 400)
+    _daemon_beat("empty")
+
+    raw = flag.read_text(encoding="utf-8")
+    assert fs.iterm_automation_rescue_warranted(raw) is True
+    assert fs.iterm_automation_host_exposure(raw) == (2, 5)
+
+
+def test_changed_probe_outcome_after_patches_still_rewrites_the_flag(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """A different probe_outcome is a real change: the base writer rewrites and the new file
+    carries the new outcome."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    sys.modules.pop("global_state", None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+    _daemon_beat("empty")
+    _daemon_beat("empty")
+    before = flag.read_bytes()
+
+    fs.record_iterm_automation_state(True, probe_outcome="timeout")
+
+    assert flag.read_bytes() != before
+    assert '"probe_outcome": "timeout"' in flag.read_text(encoding="utf-8")
+
 
 # ---------------------------------------------------------------------------
 # TRDD-9PDH8G0W (janitor#92 peer self-correction 2026-08-08) — the UNCONDITIONAL
