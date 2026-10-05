@@ -4,7 +4,7 @@ title: re-login launch cap resets and the refused-capture account carried as dat
 column: backburner
 status: tasked
 created: 2026-10-05T10:18:33+0200
-updated: 2026-10-05T10:18:33+0200
+updated: 2026-10-05T10:58:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T10:18:33+0200
+parent-trdd: 0SU2C2IM
 ---
 
 # re-login launch cap resets and the refused-capture account carried as data
@@ -26,3 +27,5 @@ Nothing is built.
 ## Approval log
 
 - 2026-10-05T10:18:33+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-05 — the approved and mandate fields above were written by the card tool at minting; the cap-reset choice is the owner's and has not been made. The memory-page correction and carrying the refused account as data are local and developable without that decision.
+2026-10-05 — the approval tier is left at none because the card tool minted this card as a pre-approved mandate and treats a higher tier on such a card as forged. The tier does not express who decides: the decision named in the body is the owner's.

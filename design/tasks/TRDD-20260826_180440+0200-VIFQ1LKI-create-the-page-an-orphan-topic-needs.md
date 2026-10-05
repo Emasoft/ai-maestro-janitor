@@ -1,9 +1,9 @@
 ---
 trdd-id: VIFQ1LKI
 title: Create the topic page an off-topic atom needs when none exists
-column: testing
+column: todo
 created: 2026-08-26T18:04:40+0200
-updated: 2026-09-29T03:09:46+0200
+updated: 2026-10-05T10:57:06+0200
 current-owner: janitor-main-session
 task-type: feature
 project-id: ai-maestro-janitor
@@ -15,7 +15,7 @@ parent-trdd: 87RKBYJ8
 blocked-by: []
 npt: []
 eht: []
-implementation-commits: []
+implementation-commits: [91cd5534]
 relevant-rules: []
 pre-block-column: 
 status: tasked
@@ -57,6 +57,7 @@ from a real absence (measured twice on 2026-08-26; `ATOM-W99A-N60G`).
       second test drives one whose topic DOES have a page under a different name and asserts NO
       page is created
 - [ ] `uv run pytest -q`, `ruff check scripts tests`, `mypy scripts/ --ignore-missing-imports`
+2026-10-05 — Landed in 91cd5534 (in v3.7.0); the survey-then-mint race (re-survey once on a mint refusal, plus one race test and the skill's race path) is not built, so the card returns to todo; set implementation-commits to 91cd5534.
 
 ## Approval log
 

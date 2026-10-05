@@ -3,7 +3,7 @@ trdd-id: YONEH3XC
 title: TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
 column: todo
 created: 2026-09-17T20:12:13+0200
-updated: 2026-10-05T10:19:24+0200
+updated: 2026-10-05T10:56:59+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: docs
@@ -33,6 +33,7 @@ Nine cards under design/ carry the owner's bare macOS username (grep -lE '^(assi
 CPV's path rules do not flag a bare name (no home-path prefix) and every release since May shipped them, so this is not a publish blocker. But the reports-and-memory rule lists a username as a red flag for anything pushed to a shared repo, and the mono-agent kanban convention wants a session or role name in assignee/current-owner (this session's own cards use janitor-main-session).
 Fix: for each of the nine cards, trddgrep set <id> <field> janitor-main-session --no-bump (mechanical repair, no fact change) on assignee/current-owner ONLY.
 Do NOT touch created-by or approval-judge — those are provenance (who mandated the card, who judged the approval), and rewriting them falsifies history the same way the card already refuses for approval-log lines. Do NOT touch the prose Approval log lines recording who approved a MANDATE (e.g. 'MANDATE issued by the owner's bare macOS username') — those are historical facts about who approved, not a field to normalize; the Approval log is append-only and exempt from terminal-column freezes.
+2026-10-05 — still carrying the login and on no other task: one archived card (350W5II2, the tool refuses edits there), one file under tests (not inspected: may be a deliberate fixture), the write-once fields created-by and approval-judge on four cards, and the body text of five cards. On the four cards assignee and current-owner now hold the agent identity the tool accepts on new cards.
 
 
 ## Acceptance checklist

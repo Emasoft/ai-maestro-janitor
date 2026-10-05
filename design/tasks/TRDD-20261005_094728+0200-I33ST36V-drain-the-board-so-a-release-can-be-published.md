@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-05T10:12:27+0200
+updated: 2026-10-05T10:57:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -27,6 +27,7 @@ The project rule blocks a publish while work columns claim activity nobody is do
 
 (1) done on 2026-10-05: TRDD-3HLI7DMK left ai_review for testing after commit 15482026. (2) done on 2026-10-05: the full Python test run passed with no Rust build running. (3) The cards in testing have not been checked for a named live event. (4) TRDD-JSQSJ3PZ and TRDD-K9AHY1ZB sit in dev as parents the linter keeps there; each must say so in its STATE block.
 2026-10-05 — item (4) is satisfied: both TRDD-JSQSJ3PZ and TRDD-K9AHY1ZB already say in their STATE blocks that dev means waiting on prerequisite cards. Measured the same day: the last release tag is v3.7.0 and 82 commits sit after it. A rotator alert (account rotation stuck) was live that day; a publish run that meets a rate limit mid-gate is a known failure shape, so the owner is told before a publish starts.
+2026-10-05 — the publish pipeline was run in dry-run mode on commit c576a7ad and passed every gate it runs before the version bump: clean tree, lint and type-checking, 17951 tests passed and 2 skipped, plugin validation with 0 critical, 0 major, 0 minor, CI-parity, marketplace registration, version consistency. Steps from the bump on were preview only. It left no lock file, no modified file and no local tag. The result is void after any commit that changes code. Also recorded: a git lock file blocked commits for about 35 minutes that day; it was cleared by the project's own guarded function once past its 30-minute age guard, which was not lowered. The per-card judgements of 2026-10-05 rest on a worker's whole read of each card; the main agent read the workers' reports and every diff, not each card.
 
 ## Tasks
 

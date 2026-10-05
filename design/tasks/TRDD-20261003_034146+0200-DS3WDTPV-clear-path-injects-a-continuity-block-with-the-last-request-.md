@@ -4,7 +4,7 @@ title: Clear path injects a continuity block with the last request and own reply
 column: testing
 status: tasked
 created: 2026-10-03T03:41:46+0200
-updated: 2026-10-03T06:20:38+0200
+updated: 2026-10-05T10:57:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -52,3 +52,4 @@ Parent plan: TRDD-K9AHY1ZB
 ## Approval log
 
 - 2026-10-03T03:41:46+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-05 — Code is in v3.7.0 (cc48b42f). RESUME POINT. Column testing. NAMED LIVE EVENT: the first janitor clear on an installed release carrying it, with a sidecar present, where the injected handoff must show a Continuity block and a NEXT ACTION quoting the last human message and the agent's own reply.

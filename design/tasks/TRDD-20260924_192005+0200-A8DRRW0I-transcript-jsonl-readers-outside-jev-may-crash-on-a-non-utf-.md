@@ -4,12 +4,12 @@ title: Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a h
 column: backburner
 status: tasked
 created: 2026-09-24T19:20:05+0200
-updated: 2026-09-24T19:56:23+0200
-current-owner: user
+updated: 2026-10-05T10:56:57+0200
+current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
 min-approval-requirement: none
-assignee: user
+assignee: main-agent@ai-maestro-janitor
 mandate: true
 mandated-by: none
 approved: true

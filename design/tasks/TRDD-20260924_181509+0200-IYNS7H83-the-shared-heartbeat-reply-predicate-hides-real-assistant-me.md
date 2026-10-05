@@ -4,12 +4,12 @@ title: The shared heartbeat-reply predicate hides real assistant messages from t
 column: backburner
 status: tasked
 created: 2026-09-24T18:15:09+0200
-updated: 2026-09-24T18:15:18+0200
-current-owner: user
+updated: 2026-10-05T10:56:56+0200
+current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
 min-approval-requirement: none
-assignee: user
+assignee: main-agent@ai-maestro-janitor
 mandate: true
 mandated-by: none
 approved: true

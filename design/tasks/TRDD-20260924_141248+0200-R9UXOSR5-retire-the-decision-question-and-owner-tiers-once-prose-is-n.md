@@ -3,12 +3,12 @@ trdd-id: R9UXOSR5
 title: Retire the decision question and owner tiers once prose is never scored
 column: backburner
 created: 2026-09-24T14:12:48+0200
-updated: 2026-09-24T14:12:48+0200
-current-owner: user
+updated: 2026-10-05T10:56:55+0200
+current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: refactor
 min-approval-requirement: none
-assignee: user
+assignee: main-agent@ai-maestro-janitor
 mandate: true
 mandated-by: user
 approved: true
