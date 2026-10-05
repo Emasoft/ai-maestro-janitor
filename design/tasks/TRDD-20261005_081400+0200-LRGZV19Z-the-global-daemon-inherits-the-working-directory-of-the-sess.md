@@ -4,7 +4,7 @@ title: the global daemon inherits the working directory of the session that spaw
 column: backburner
 status: tasked
 created: 2026-10-05T08:14:00+0200
-updated: 2026-10-05T08:14:00+0200
+updated: 2026-10-05T08:55:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,6 +27,7 @@ A machine-wide daemon is started by whichever session first needs it, without an
 ## What is exposed
 
 About 70 child-process calls reachable from the daemon pass no working directory; only the agent-roster call was run from a deleted directory, the rest are untested. The project-root resolver runs git with no explicit directory and then falls back to the current directory, which raises in a deleted one; its results feed the findings ledger, the ticket store, the user-intent store and the requirements lookup. The launch agent sets no working directory either, so the launchd daemon runs from the filesystem root.
+The agent-roster fix falls back to the root of the drive that holds the plugin when the home directory cannot be resolved; on a host where that is a removable drive this is the same class of fault, on its rarest path.
 
 ## Why not a plain change of directory at start
 

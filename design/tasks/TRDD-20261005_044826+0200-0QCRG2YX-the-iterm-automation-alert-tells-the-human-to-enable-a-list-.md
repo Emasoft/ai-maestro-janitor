@@ -1,10 +1,10 @@
 ---
 trdd-id: 0QCRG2YX
 title: The iTerm Automation alert tells the human to enable a list entry that macOS may never have created and repeats on every heartbeat
-column: dev
+column: testing
 status: tasked
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-05T08:14:04+0200
+updated: 2026-10-05T08:55:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T04:48:26+0200
-implementation-commits: [47f2abe6, e4558fcb, d3a99c82, 33ec27f2, 2d55a99a]
+implementation-commits: [47f2abe6, e4558fcb, d3a99c82, 33ec27f2, 2d55a99a, e517ed21]
 ---
 
 # The iTerm Automation alert tells the human to enable a list entry that macOS may never have created and repeats on every heartbeat
@@ -60,6 +60,7 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 ## Approval log
 
 - 2026-10-05T04:48:26+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-05T08:55:50+0200 — column → testing. no work in progress; waits on the first recurrence under a release carrying the probe logging
 
 ## STATE
 
@@ -117,3 +118,7 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 — project memory: the fleet guardian page's lesson 7 calls restarting iTerm a cheap thing to try, which is unsafe for an agent reader (it closes every session in that terminal). It could not be corrected in place because the memory write verbs cannot correct a lesson by its id (project issue 331). Lesson 8 on the same page states that it is the owner's action only, and the page description carries the same caution so the recall listing shows it.
 2026-10-05 — BOARD NOTE: this card took a whole session; its symptom is gone on the host where it was investigated; five code commits are landed and unpublished. If the second-view change is not small, this card moves to testing, waiting on a named live event: the first recurrence on a host running a release that carries the probe logging.
 2026-10-05 — second view: the agent-roster command returns identical rows from any existing folder and creates nothing (measured from three folders), so it is being given its own working directory and its error text will go to the daemon log; the returned failure string is unchanged. The root cause — a machine-wide daemon inheriting a session's folder, with about 70 child calls and the project-root fallback exposed — is split out to TRDD-LRGZV19Z, in backburner, undecided.
+2026-10-05 08:55 — after the iTerm restart: all 23 project ledgers on the host that ever held this alert were read; none holds an entry dated after the restart, and none in the minutes around one slow scan at 08:36 (11 seconds, the duration of a failed first attempt plus retries). So the alert has not fired anywhere since the restart, and that slow scan did not set it. The slow scan and the earlier two-run scan remain signs the channel may still be marginal.
+2026-10-05 — observed: when every session restarted with iTerm, each one listed the pre-restart alert once at start, because the session-start hook replays a project's unread ledger entries and then marks them read. Other sessions therefore reported an alert whose condition had already cleared. REMAINING WORK: when the blocked flag clears, write a resolved entry to the ledger so the replay shows the alert together with its resolution (do not suppress the alert: the timeline is the ledger's purpose).
+2026-10-05 — the second view landed (unpublished): the agent-roster command runs from the home directory (measured equal to other folders), a non-absolute binary path is refused, and a failure writes its error text to the daemon log once per distinct line, reset on success. Returned values unchanged.
+2026-10-05 — RESUME POINT (supersedes the earlier one). Column testing. Landed and unpublished, six code commits: probe failure logging (three), the repetition fix, the recovery line, the second view. NAMED LIVE EVENT this card waits on: the first time the probe fails on a host running a release that carries these commits — then read the daemon log lines starting iterm-probe and agent-roster, which will state the real error. Remaining, none in progress: (1) alert wording — state the measured outcome, give the Automation advice only when the recorded error is a permission refusal, and say that an iTerm restart by the owner cleared it once; (2) the fleet-size decision — whether a changed fleet size is a new observation; (3) the resolved ledger entry described above; (4) the interpreter-path point — the allowed Apple-events entry names a different path from the binary that executes; (5) the per-project acknowledgement store against the governing card's once-per-session wording. The cause of the original failure is NOT established. Root cause of the second-view failure is tracked separately on TRDD-LRGZV19Z.
