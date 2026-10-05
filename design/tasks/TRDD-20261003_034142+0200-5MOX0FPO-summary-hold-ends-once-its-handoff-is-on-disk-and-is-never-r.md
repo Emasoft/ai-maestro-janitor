@@ -4,7 +4,7 @@ title: Summary hold ends once its handoff is on disk and is never re-taken over 
 column: testing
 status: tasked
 created: 2026-10-03T03:41:42+0200
-updated: 2026-10-03T06:20:35+0200
+updated: 2026-10-05T03:07:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -41,6 +41,7 @@ implementation-commits: [bdc81d1c, 4e2e4fa4, 767c4904, a48d8974, a5903a15]
 - **Verify**: SC; `grep -rn "summary hold active" scripts` shows only the log string.
 
 Parent plan: TRDD-K9AHY1ZB
+- 2026-10-05: DO NOT CLOSE on the 02:17 live clear. That clear resumed, but its resume named the handoff of an older session; the cause is carded as TRDD-PHS3DIBD and point 5 there suspects this card's items 2 and 3. Also still open here: the owner decision noted at the top of this STATE block. The card's own listed tests were not re-run on 2026-10-05.
 
 ## Approval log
 
