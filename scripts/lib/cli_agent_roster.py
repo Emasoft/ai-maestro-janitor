@@ -32,8 +32,10 @@ compares by `cwd`, never by `name`.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import state as _state  # sibling in scripts/lib/ — the SSOT for the subprocess-timeout scale
@@ -133,6 +135,42 @@ def second_view_verdict(*, osascript_sessions: int, cli_rows_for_host: int) -> s
         return "consistent-empty"
     return "channel-working"
 
+_last_logged_failure = ""
+
+
+def _log_roster_failure(returncode: int, stderr: str) -> None:
+    """Write one daemon-log line for a failed `claude agents --json`; never raises (TRDD-0QCRG2YX)."""
+    # WHY: the failure used to be recorded only as `exit-1` with the error text discarded, so a
+    # deleted working directory looked like any other failure. Logged once per distinct line so a
+    # persisting failure does not write on every scan.
+    global _last_logged_failure
+    try:
+        first = next((ln for ln in stderr.splitlines() if ln.strip()), "")
+        text = " ".join(first.replace(str(Path.home()), "~").split())
+        line = f"agent-roster: exit-{returncode} " + _state.sanitize_for_drift_line(text)[:200]
+        if line == _last_logged_failure:
+            return
+        _state.log_line("daemon", line)
+        _last_logged_failure = line
+    except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change the probe result (TRDD-0QCRG2YX)
+        pass
+
+def _child_cwd() -> str:
+    """An existing directory to run the child in: home, else the drive root; never raises."""
+    try:
+        home = Path.home()
+        if home.is_dir():
+            return str(home)
+    except (RuntimeError, OSError):  # no HOME and no account entry
+        pass
+    return Path(__file__).anchor
+
+
+def _reset_logged_failure() -> None:
+    """Forget the last logged failure so a later identical one logs again."""
+    global _last_logged_failure
+    _last_logged_failure = ""
+
 
 def fetch_agents(*, timeout_s: int = 15) -> tuple[list[dict[str, Any]], str]:
     """Run `claude agents --json` and return `(rows, why)`. The ONE I/O function here.
@@ -157,12 +195,21 @@ def fetch_agents(*, timeout_s: int = 15) -> tuple[list[dict[str, Any]], str]:
     binary = shutil.which("claude")
     if binary is None:
         return [], "claude-not-on-PATH"
+    # A relative path would resolve differently once the child's working directory changes below.
+    if not os.path.isabs(binary):
+        return [], "exec-failed"
 
     try:
         proc = subprocess.run(
             [binary, "agents", "--json"],
             capture_output=True,
             text=True,
+            # WHY an explicit cwd (TRDD-0QCRG2YX): the daemon inherits the directory of the session
+            # that spawned it; once that directory was deleted this command exited 1 ("The current
+            # working directory was deleted") for hours. Measured 2026-10-05 on one host: identical
+            # rows from four existing directories including home, and no new entry under the Claude
+            # projects directory.
+            cwd=_child_cwd(),
             # Scaled by the SHARED knob (1.0 in production — byte-identical there). This is a
             # direct subprocess.run with its OWN ceiling, so scaling `state.run_subprocess`
             # never reached it. Measured under suite load: this expired and returned "timeout",
@@ -179,7 +226,11 @@ def fetch_agents(*, timeout_s: int = 15) -> tuple[list[dict[str, Any]], str]:
         return [], "exec-failed"
 
     if proc.returncode != 0:
+        _log_roster_failure(proc.returncode, proc.stderr)
         return [], f"exit-{proc.returncode}"
+    # Recovered: the same failure after a healthy run is a new episode and must log again. No
+    # hourly re-log here, unlike the iTerm probe: this runs only on the blocked path of a scan.
+    _reset_logged_failure()
 
     stdout = proc.stdout.strip()
     if not stdout:
