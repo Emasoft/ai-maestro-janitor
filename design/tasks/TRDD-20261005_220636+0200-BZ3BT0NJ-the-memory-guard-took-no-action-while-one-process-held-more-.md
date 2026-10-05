@@ -4,7 +4,7 @@ title: The memory guard took no action while one process held more memory than t
 column: todo
 status: tasked
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-06T00:12:04+0200
+updated: 2026-10-06T00:14:26+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:06:36+0200
-implementation-commits: [9301f4fa, 2218ac06, 485596ca]
+implementation-commits: [9301f4fa, 2218ac06, 485596ca, eed16b64]
 ---
 
 # The memory guard took no action while one process held more memory than the machine has
@@ -39,6 +39,7 @@ To do: read what memory-guard measures and acts on, and why it returned in 0 s (
 2026-10-05 (review of the model-process measurement): 'so the scan does not under-read a process with the model loaded' is stronger than the measurement. What was measured is that the scan agrees with ps on such a process; the two read the same kind of counter, and the engine's own figure was not read, so whether both under-read memory the engine holds is not measured. The explanation of the lower ps figures as mid-load samples is the report's reading, not a measurement. The synthetic files were 17 KB, not 34 KB. The earlier 2.17 GB against 3.24 GB compared ps with a counter inside the engine, so the two measurements are not of the same kind.
 2026-10-06 (change 2): earlier lines on this card say the alert-seen file holds 39 keys that silence programs for ever, and that two keys are cut at a space. After 485596ca nothing reads that file, so no program is silenced by it any more; a fact check counted three cut keys, not two. Checked by the session: the whole diff of the change, and the last line of the full test run, 17960 passed, 2 skipped. From the worker's run: the three linters clean. The design went through two review rounds: the first form (a key with the day in it) was dropped because no simple rule turns a command line into a program path, and the first revision (a name read from the process table) was dropped because a process id from an earlier snapshot can be reused.
 2026-10-06 (review of 485596ca): known limits of the name in the low-memory line, none of them tested. A program whose path contains a space is named by the last part before the space (AI Session Meter is logged as AI). For an interpreter, the word after it is taken as a script and logged by its file name, so a positional argument that is not a script would be logged; the same rule and the same gap are in the process-size watch. The comment in the code says a few dozen lines a day, measured 32: that is from two full days of logs, not a bound. With the deduplication gone, the word ALERT is written for whatever process is above 4 GB each time memory reads low, which on this host can be a model server or a browser; the line is for reading after an incident, not a warning.
+2026-10-06 (after eed16b64): the state block lists a test for the guarded stamp branch of the watch as open; it is done. The test makes the stamp path a non-empty directory so the write fails with a real filesystem error, with no patched function, and checks that the alert still goes out once and the failure is logged (16 tests in the file, run by the session). It cannot tell a failed replace from a failed read of the stamp's age, and it does not reproduce a full disk; both go through the same guarded branch. A failed write leaves the write helper's temporary file beside the stamp, one file per daemon process, overwritten each time. One item is still open before a publish: the scan's reading during the model's generation step. 'Not ready to publish yet' in the state block is the session's recommendation, not a fact: the watch only alerts and harms nothing if it under-reads, so the owner may publish without that measurement.
 
 ## Owner decisions
 
