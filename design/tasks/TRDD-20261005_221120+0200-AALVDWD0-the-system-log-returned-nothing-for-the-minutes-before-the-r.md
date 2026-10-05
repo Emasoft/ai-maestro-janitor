@@ -4,7 +4,7 @@ title: The system log returned nothing for the minutes before the reboot
 column: todo
 status: tasked
 created: 2026-10-05T22:11:20+0200
-updated: 2026-10-05T22:11:20+0200
+updated: 2026-10-05T22:13:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -26,3 +26,7 @@ Three 'log show' queries for windows before the reboot of 2026-10-05 returned ze
 ## Approval log
 
 - 2026-10-05T22:11:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): four queries returned nothing, not three (three by process id, one unfiltered). Same anomaly as the card on a hang leaving no evidence.

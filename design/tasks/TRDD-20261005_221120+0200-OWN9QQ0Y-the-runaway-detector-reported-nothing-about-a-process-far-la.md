@@ -4,7 +4,7 @@ title: The runaway detector reported nothing about a process far larger than the
 column: todo
 status: tasked
 created: 2026-10-05T22:11:20+0200
-updated: 2026-10-05T22:11:20+0200
+updated: 2026-10-05T22:13:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,7 @@ A detector named system-daemon-runaway exists and logged nothing about a 97 GB p
 ## Approval log
 
 - 2026-10-05T22:11:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): only the detector's log file name was seen; its log was not read, so 'reported nothing' is unverified. Overlaps TRDD-BZ3BT0NJ.

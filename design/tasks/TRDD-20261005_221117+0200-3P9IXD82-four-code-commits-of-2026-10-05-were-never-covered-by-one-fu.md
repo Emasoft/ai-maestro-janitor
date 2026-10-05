@@ -4,7 +4,7 @@ title: Four code commits of 2026-10-05 were never covered by one full test run o
 column: todo
 status: tasked
 created: 2026-10-05T22:11:17+0200
-updated: 2026-10-05T22:11:17+0200
+updated: 2026-10-05T22:13:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -26,3 +26,7 @@ Each change ran its own test files. No single run covers the final tree, and lin
 ## Approval log
 
 - 2026-10-05T22:11:17+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): there were TWO code commits (95bbddeb and 5bdb9521); the others changed cards and memory only. The point stands for those two.

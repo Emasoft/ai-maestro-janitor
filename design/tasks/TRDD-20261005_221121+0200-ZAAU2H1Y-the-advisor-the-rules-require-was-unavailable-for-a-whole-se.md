@@ -4,7 +4,7 @@ title: The advisor the rules require was unavailable for a whole session
 column: todo
 status: tasked
 created: 2026-10-05T22:11:21+0200
-updated: 2026-10-05T22:11:21+0200
+updated: 2026-10-05T22:13:34+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -26,3 +26,7 @@ Five multi-file changes on 2026-10-05 went ahead with no advisor verdict because
 ## Approval log
 
 - 2026-10-05T22:11:21+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): the count of five multi-file changes was not made; two code commits touched more than one file.

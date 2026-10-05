@@ -4,7 +4,7 @@ title: Usage caps were recorded for an account that was not the live one
 column: todo
 status: tasked
 created: 2026-10-05T22:11:16+0200
-updated: 2026-10-05T22:11:16+0200
+updated: 2026-10-05T22:13:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,7 @@ The rotator state on 2026-10-05 held five 5h and five 7d cap samples of 0.0 for 
 ## Approval log
 
 - 2026-10-05T22:11:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): the account may have been the live one when the samples were written; the state shows no history, so 'not the live one' describes the day it was read, not when the caps were learned.

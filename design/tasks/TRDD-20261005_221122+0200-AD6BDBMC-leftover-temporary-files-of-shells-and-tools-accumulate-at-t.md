@@ -4,7 +4,7 @@ title: Leftover temporary files of shells and tools accumulate at the top of a h
 column: todo
 status: tasked
 created: 2026-10-05T22:11:22+0200
-updated: 2026-10-05T22:11:22+0200
+updated: 2026-10-05T22:13:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -26,3 +26,7 @@ On one host 38 leftover completion-dump temporary files and several zero-byte te
 ## Approval log
 
 - 2026-10-05T22:11:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): a shell that died between write and rename is one mechanism; two shells racing on the dump would leave the same file. Why the dump is rewritten so often was not measured.
