@@ -4,7 +4,7 @@ title: Session beacon mirrors the live token so the daemon can probe usage
 column: testing
 status: tasked
 created: 2026-10-03T03:41:14+0200
-updated: 2026-10-04T11:05:47+0200
+updated: 2026-10-05T11:12:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -41,6 +41,7 @@ implementation-commits: [415d1971]
 - **Verify**: SC.
 
 Parent plan: TRDD-JSQSJ3PZ
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Not observable in daemon.log: no live-account usage line exists in the 2026-10-04T00:53 to 2026-10-05T11:07 log, and the owner ACL step on the mirror item is not recorded as done. The card stays in testing; the check could not be made: the owner ACL step is not done and the usage probes are not logged to the daemon log by a known pattern. OPEN FINDING, moved to its own card: TRDD-HVGU9OBL.
 
 ## Approval log
 

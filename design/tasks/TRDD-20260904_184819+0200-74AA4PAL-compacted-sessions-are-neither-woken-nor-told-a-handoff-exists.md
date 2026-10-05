@@ -3,7 +3,7 @@ trdd-id: 74AA4PAL
 title: compacted sessions are neither woken nor told a handoff exists — two independent gaps
 column: testing
 created: 2026-09-04T18:48:19+0200
-updated: 2026-09-17T06:07:31+0200
+updated: 2026-10-05T11:12:08+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -158,6 +158,7 @@ split is the deferred continuity push alone. The pre-split acceptance bullet "A 
 AUTO-compacts has the handoff in its context without any nudge firing" is OES0NN3F's scope and
 conflicts with R2 there; strike or cross-reference it, do not re-verify it here. R1/R3/R4:
 outside this card's scope (silent, not deficient).
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: two auto-compactions after install (both on 2026-10-05): both pushes deferred (attended); first ended moot (flag already consumed), second shows no outcome line within 80 min; 0 'fired after deferral' lines. The card stays in testing; its event is still ahead. OPEN FINDING: a deferred push was logged on 2026-10-05 and no outcome line followed in about 80 minutes, although the code is said to log one every time; not investigated.
 
 ## Adversarial review resolution (2026-09-05) — recheck-guard question
 

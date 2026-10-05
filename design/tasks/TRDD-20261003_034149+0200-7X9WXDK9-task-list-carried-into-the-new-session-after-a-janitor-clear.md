@@ -4,7 +4,7 @@ title: Task list carried into the new session after a janitor clear
 column: testing
 status: tasked
 created: 2026-10-03T03:41:49+0200
-updated: 2026-10-03T10:51:47+0200
+updated: 2026-10-05T11:12:07+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -45,3 +45,4 @@ Parent plan: TRDD-K9AHY1ZB
 Field check after release, both parts required before complete: (a) after a janitor clear, TaskList in the new session shows the carried tasks; (b) after the new session creates its first task, the carried N.json files still exist (rules out an in-memory list written back over the folder).
 Unverified: that the transcript file stem equals the old sessionId in every case; a wrong id finds no *.json and copies nothing (fails safe).
 Possible follow-up: carry only tasks whose status is not completed (matching the Continuity block's open_tasks), so the list does not grow across repeated clears; copy2 keeps old mtimes, harmless unless Claude Code orders tasks by mtime.
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: not exercised: 5 janitor clears after install (three on 2026-10-04, two on 2026-10-05), none of the cleared sessions had a task directory, 0 carried-files log lines; needs a clear of a session with a populated task directory. The card stays in testing; the check could not be made: no cleared session held task files.

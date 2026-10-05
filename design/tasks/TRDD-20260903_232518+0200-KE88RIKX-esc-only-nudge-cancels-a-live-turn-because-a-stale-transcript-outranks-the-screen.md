@@ -3,7 +3,7 @@ trdd-id: KE88RIKX
 title: the ESC-only nudge cancels a live turn because a stale transcript outranks the screen
 column: testing
 created: 2026-09-03T23:25:18+0200
-updated: 2026-09-16T22:14:35+0200
+updated: 2026-10-05T11:12:04+0200
 current-owner: janitor-main-session
 task-type: bugfix
 priority: high
@@ -34,6 +34,7 @@ that was working — the refusal logs `REFUSED by the pane policy` instead.
 **Do NOT "restore" the old carve-out.** It reads as a deliberate exception ("an ESC-only nudge
 is authorized by a 15-minute-stale transcript the SCREEN cannot see") and it was wrong for the
 reason recorded below. The mutation probe in `## Proof` is how to re-confirm that in seconds.
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: In daemon.log 2026-10-04T00:53 to 2026-10-05T11:07 (about 34 h, not 7 days), 10 REFUSED-by-pane-policy lines at pane=working (would esc_nudge) and 0 FIRED esc_nudge at pane=working; 7 FIRED esc_nudge lines, all pane=idle. Both halves of the box hold; the 7-day window is not yet covered. The card stays in testing; remaining event: seven days of daemon log from the 3.7.0 daemon start, so re-read on or after 2026-10-11. The daemon log keeps about 34 hours, so the seven-day read needs a check each day or the rotated files kept.
 
 ## Symptom (owner report, 2026-09-03)
 

@@ -4,7 +4,7 @@ title: Daemon went silent for 31 minutes after a 687 s pass
 column: testing
 status: tasked
 created: 2026-10-03T03:41:09+0200
-updated: 2026-10-03T06:24:10+0200
+updated: 2026-10-05T11:12:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,6 +35,7 @@ Code landed as e9b7622d (rotator tick and its alarm in a dedicated daemon thread
 
 Parent plan: TRDD-JSQSJ3PZ
 2026-10-03 remaining before complete: root cause of the 00:18-00:49 stall is NOT confirmed — _consume_plugin_update_requests is the prime suspect only; confirm from daemon.log after release or link QJ5LP4W2 if it is the same cause; full uv run pytest after R4c lands; after release, rotator ticks keep a 60 s cadence in daemon.log during a long main-loop pass.
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Field check passed: from the 3.7.0 daemon start (2026-10-04T12:38) to 2026-10-05T11:07, 1313 rotator ticks, mean gap 61.7 s, 1 gap over 120 s (228 s, caused by a single 168 s tick, not a blocked loop), none over 300 s; a 105 s session-liveness pass (2026-10-04T18:11-18:13) kept ticks at 61-64 s. Before release, 39 of 472 gaps were over 120 s. The 00:18-00:49 stall root cause is still not confirmed; this shows the symptom gone, not the cause. The symptom is gone on the new daemon; the cause of the original stall is not confirmed. The card stays in testing; what remains is diagnosis of that cause, which is developable, not an event.
 
 ## Approval log
 

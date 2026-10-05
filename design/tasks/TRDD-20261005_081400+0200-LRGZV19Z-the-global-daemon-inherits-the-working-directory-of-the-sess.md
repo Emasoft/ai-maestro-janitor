@@ -4,7 +4,7 @@ title: the global daemon inherits the working directory of the session that spaw
 column: backburner
 status: tasked
 created: 2026-10-05T08:14:00+0200
-updated: 2026-10-05T08:55:50+0200
+updated: 2026-10-05T11:17:52+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -44,3 +44,4 @@ A daemon whose spawning folder is deleted keeps scanning with no child failing f
 ## Approval log
 
 - 2026-10-05T08:14:00+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-05 — premise to re-check: the daemon log shows an OS respawn on 2026-10-04 (exit for respawn when a newer version was staged, start a minute later). Two launch paths may exist (the launch agent, and a session starting the daemon when none runs); which produced a given process decides its working directory. Read the running daemon's parent process and working directory before building on this card.

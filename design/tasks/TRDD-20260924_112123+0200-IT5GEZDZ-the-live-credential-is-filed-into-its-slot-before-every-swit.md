@@ -3,7 +3,7 @@ trdd-id: IT5GEZDZ
 title: The live credential is filed into its slot before every switch away from it
 column: testing
 created: 2026-09-24T11:21:23+0200
-updated: 2026-09-27T16:28:30+0200
+updated: 2026-10-05T11:12:15+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -38,3 +38,7 @@ Handback condition: before the ai-maestro server's oauth-rotator-tick flag retur
 - [x] best-effort: a failed slot write logs and the switch proceeds; never blocks or fails the switch
 - [x] 4 new tests incl. the failing-without-it acceptance test
 - [x] live one-real-switch observation (outgoing slot fp == live fp at switch time) — runtime evidence remaining in testing
+
+## STATE
+
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: no switch observed: rotator logs cover 2026-10-05 04:08 to 11:07 only and show no account switch (the daemon log shows none either); needs one real switch with the outgoing-slot fingerprint compared to the pre-switch live fingerprint. The card stays in testing; the check could not be made: no switch has happened in the logged window.

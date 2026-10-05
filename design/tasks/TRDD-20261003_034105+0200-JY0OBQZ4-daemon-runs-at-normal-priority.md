@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: testing
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-03T06:22:33+0200
+updated: 2026-10-05T11:17:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -35,8 +35,10 @@ implementation-commits: [30d320eb]
 - **Verify**: SC.
 
 Parent plan: TRDD-JSQSJ3PZ
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Field check FAILED: the installed LaunchAgent plist still says ProcessType Background (the N2 re-stage is not done); since the 3.7.0 daemon start (2026-10-04T12:38) 8 of 1313 rotator ticks took 30 s or more, max 168 s (2026-10-05T06:09); the log is only 34 h and load level is not in it. The card stays in testing; the re-stage of the daemon's launch agent at standard priority is a host step for the owner and has not been done.
 
 ## Approval log
 
 - 2026-10-03T03:41:05+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:22:33+0200 — column → testing. code committed; only field acceptance after release remains
+2026-10-05 — possibly related: TRDD-HVGU9OBL (the primary live credential was unreadable on every logged rotator tick); a hypothesis, not a finding.

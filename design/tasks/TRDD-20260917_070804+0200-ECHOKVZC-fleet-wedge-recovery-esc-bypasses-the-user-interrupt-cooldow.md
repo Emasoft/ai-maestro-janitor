@@ -3,7 +3,7 @@ trdd-id: ECHOKVZC
 title: Fleet wedge-recovery ESC bypasses the user-interrupt cooldown because pane_actuate has no target-session transcript identity
 column: testing
 created: 2026-09-17T07:08:04+0200
-updated: 2026-09-17T19:20:35+0200
+updated: 2026-10-05T11:12:08+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -35,6 +35,7 @@ Design needed: carry the target instance's transcript path in the pane registry 
 Acceptance: a test where the target session was interrupted 60s ago receives no ESC from a fleet wedge-recovery send; a test where it was interrupted 400s ago does receive it.
 
 Origin: TRDD-PA9E2GJ1 follow-up 2026-09-17 (reports/board-drain/20260917_impl-PA9E2GJ1-followup.md, candidates 4-5). Parent: TRDD-N954KWUC's reader/policy/actuator split.
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: searched 13 pane-policy.log files (55 lines, to 2026-10-05 10:43): 0 deferred lines; needs a wedge-recovery ESC at a pane interrupted by a human in the previous 300 s. The card stays in testing; its event is still ahead.
 
 ## Approval log
 

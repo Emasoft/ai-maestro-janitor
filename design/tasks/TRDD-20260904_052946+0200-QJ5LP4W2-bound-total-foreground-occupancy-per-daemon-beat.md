@@ -3,7 +3,7 @@ trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
 column: testing
 created: 2026-09-04T05:29:46+0200
-updated: 2026-09-16T22:14:36+0200
+updated: 2026-10-05T11:12:05+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -131,6 +131,7 @@ review-after: 2026-09-17
   reasons, 3 and 4 stand, and the transferable structure (decide the budget/deferral set ONCE
   before the loop) is settled below. The consult is for choosing between 3 and 4 and for
   designing the priority floor, which has no precedent in `daemon.py`.
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Re-measure (window 2026-10-04T00:53 to 2026-10-05T11:07, about 34 h): foreground budget exceeded 60 times in the 10 h before 11:07 on 10-04 (about 6/h) and 26 times in the 22.5 h after the 3.7.0 daemon start (about 1.2/h); rotator tick gaps over 120 s: 39 of 472 before 11:07, 1 of 1312 after the 3.7.0 start (max 228 s). The replay-harness box is still open. The re-measure box is met. The card stays in testing only for its replay-harness box, which belongs to TRDD-9FONCK33.
 
 ## Why this exists — a measurement exists, the decision does not
 

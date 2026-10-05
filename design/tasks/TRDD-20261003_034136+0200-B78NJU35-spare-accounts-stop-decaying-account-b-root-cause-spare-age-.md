@@ -4,7 +4,7 @@ title: Spare accounts stop decaying (account B root cause, spare-age alert)
 column: testing
 status: tasked
 created: 2026-10-03T03:41:36+0200
-updated: 2026-10-03T11:59:36+0200
+updated: 2026-10-05T11:12:03+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,3 +36,4 @@ Parent plan: TRDD-JSQSJ3PZ
 
 Split-out follow-ups: TRDD-L2CCH9D5 (ticks killed mid-keepalive may spend a refresh grant) and TRDD-JW8CWWNH (rotator log flooded by repeated per-tick lines).
 The root-cause cure (TRDD-IT5GEZDZ, outgoing account filed at a switch) is in HEAD only and ships with the next release; until then spares keep dying on every switch.
+2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Not observable in daemon.log (0 spare-related lines in 2026-10-04T00:53 to 2026-10-05T11:07): the dead-spare probes and the spare-stale alarm are written to the rotator log and the alert path, not to daemon.log. Check the rotator log for [keepalive] refresh-failed lines about 6 h apart, then close. The card stays in testing; the check could not be made: the rotator log and the alarm record were not read for this card.
