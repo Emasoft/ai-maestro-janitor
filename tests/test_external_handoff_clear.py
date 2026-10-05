@@ -112,14 +112,83 @@ def test_pending_record_without_a_usable_expires_is_not_trusted(tmp_path):
     assert ehc.pending_summary_key(sd, 1_000) == "bbbb0002"
 
 
-def test_known_limit_unexpired_record_without_handoff_hides_a_newer_group(tmp_path):
-    """KNOWN LIMIT, pinned on purpose: while a record is unexpired its key is used even though
-    it has no handoff and a newer group exists. This is today's deliberate limit
-    (TRDD-PHS3DIBD), not the desired end state."""
+def test_the_clear_sidecar_names_the_cleared_session_over_the_pending_record(tmp_path):
+    """TRDD-PHS3DIBD. This test used to be `test_known_limit_...` and pinned the WRONG answer
+    (an unexpired record for A, with no handoff, hid B). The sidecar is written by the act of
+    clearing; the record by a summary hold that may belong to another session, so the sidecar wins."""
     sd = _project(tmp_path) / ".janitor" / "state"
     _two_keys(sd, with_a=False)
     _record(sd, {"key": "aaaa0001", "expires": 2_000})
-    assert ehc.pending_summary_key(sd, 1_000) == "aaaa0001"
+    _sidecar(sd, "p1", "bbbb0002", 1_000)
+    assert ehc.pending_summary_key(sd, 1_000, clear_ts=1_000) == "bbbb0002"
+
+def _sidecar(sd: Path, pane: str, session: str, epoch: int, *, consumed: int | None = None) -> None:
+    """Write `resume-after-clear.<pane>.transcript` in the exact two-line shape
+    `clear_trigger._persist_resume_state` writes (old transcript path, then the write epoch).
+    Written by hand: the real writer only runs inside the keystroke chain's pre-submit step.
+    `consumed` renames it as the post-clear hook does (`.consumed-<consume time>`)."""
+    name = f"resume-after-clear.{pane}.transcript" + (f".consumed-{consumed}" if consumed else "")
+    (sd / name).write_text(f"/proj/{session}-0000-4000.jsonl\n{epoch}\n", encoding="utf-8")
+
+
+def test_a_sidecar_far_from_the_clear_time_is_ignored(tmp_path):
+    """Line 2 more than the window from `clear_ts` is another clear's: same result as no sidecar."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _two_keys(sd)
+    _sidecar(sd, "p1", "aaaa0001", 1_000 - ehc._CLEAR_MATCH_WINDOW_S - 1)
+    _sidecar(sd, "p2", "aaaa0001", 1_000 + ehc._CLEAR_MATCH_WINDOW_S + 1)
+    assert ehc.cleared_session_key(sd, 1_000) == ""
+    assert ehc.pending_summary_key(sd, 1_000, clear_ts=1_000) == "bbbb0002"
+
+
+def test_two_sidecars_in_the_window_name_nothing_and_log_once(tmp_path, monkeypatch):
+    """Ambiguous: two panes within the window. Falls back to today's answer and logs once."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _two_keys(sd)
+    _sidecar(sd, "p1", "aaaa0001", 1_000)
+    _sidecar(sd, "p2", "cccc0003", 1_003)
+    logged: list = []
+    monkeypatch.setattr(ehc.state, "log_line", lambda name, msg: logged.append(msg))
+    assert ehc.cleared_session_key(sd, 1_000) == ""
+    assert ehc.pending_summary_key(sd, 1_000, clear_ts=1_000) == "bbbb0002"
+    assert len(logged) == 1, logged
+
+
+def test_the_matching_sidecar_is_found_live_and_consumed(tmp_path):
+    """Live and `.consumed-<epoch>` both match; the consume suffix is never used for matching."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _sidecar(sd, "p1", "dddd0004", 1_000)
+    assert ehc.cleared_session_key(sd, 1_000) == "dddd0004"
+    (sd / "resume-after-clear.p1.transcript").unlink()
+    _sidecar(sd, "p1", "dddd0004", 1_000, consumed=1_150)
+    assert ehc.cleared_session_key(sd, 1_000) == "dddd0004"
+
+def test_a_live_and_a_consumed_copy_of_one_clear_name_that_session(tmp_path):
+    """One clear can leave two files (live and consumed) naming the SAME session: distinct keys
+    are counted, so the answer is that session's key, not "not identified"."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _sidecar(sd, "p1", "dddd0004", 1_000)
+    _sidecar(sd, "p2", "dddd0004", 1_002, consumed=1_100)
+    assert ehc.cleared_session_key(sd, 1_000) == "dddd0004"
+
+
+def test_a_sidecar_with_an_empty_first_line_is_skipped(tmp_path):
+    """An empty transcript path names no session: skipped, so it neither answers nor makes a
+    second sidecar ambiguous."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    (sd / "resume-after-clear.p1.transcript").write_text("   \n1000\n", encoding="utf-8")
+    assert ehc.cleared_session_key(sd, 1_000) == ""
+    _sidecar(sd, "p2", "dddd0004", 1_000)
+    assert ehc.cleared_session_key(sd, 1_000) == "dddd0004"
+
+
+def test_a_malformed_sidecar_is_skipped_and_never_raises(tmp_path):
+    """Unreadable or malformed files are skipped."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    (sd / "resume-after-clear.p1.transcript").write_text("only-one-line", encoding="utf-8")
+    (sd / "resume-after-clear.p2.transcript").write_text("/x/a.jsonl\nnotanint\n", encoding="utf-8")
+    (sd / "resume-after-clear.p3.transcript").write_bytes(b"\xff\xfe\x00\n\xff")
+    assert ehc.cleared_session_key(sd, 1_000) == ""
 
 
 # --- the hold ends with its handoff (never through a release call) -----------------------

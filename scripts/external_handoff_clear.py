@@ -206,9 +206,55 @@ def summary_hold_active(sd: Path, now: int) -> bool:
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
+# Measured on the live host (37 clears): a sidecar's write epoch differs from the resume flag's
+# timestamp by 0-1 s (same function, milliseconds apart); the closest two clears are 3107 s apart.
+_CLEAR_MATCH_WINDOW_S = 10
 
-def pending_summary_key(sd: Path, now: int) -> str:
-    """The key for the handoff that is (or was just) being composed for this state dir.
+
+def cleared_session_key(sd: Path, clear_ts: int) -> str:
+    """The key of the session the clear at `clear_ts` cleared, or "" when it is not identified.
+
+    The clear trigger writes `resume-after-clear.<pane>.transcript` (line 1 the old transcript
+    path, line 2 the write epoch, an integer) just before the `/clear` keystroke; the post-clear
+    hook later renames it to `...transcript.consumed-<consume time>`. Live and consumed files
+    both count; the suffix is the consume time and is never used. A live and a consumed copy of
+    one clear name the same session, so DISTINCT keys are counted: exactly one key within the
+    window is the answer, none or several is "not identified". Never raises.
+    """
+    keys: set[str] = set()
+    try:
+        names = [
+            p
+            for p in sd.iterdir()
+            if p.name.startswith("resume-after-clear.") and ".transcript" in p.name
+        ]
+    except OSError:
+        return ""
+    for p in names:
+        try:
+            with p.open(encoding="utf-8") as fh:
+                path, epoch = fh.readline().strip(), int(fh.readline())
+            if not path:
+                continue
+            if abs(epoch - clear_ts) <= _CLEAR_MATCH_WINDOW_S:
+                keys.add(handoff_files.session_key(path))
+        except (OSError, ValueError):
+            continue
+    keys.discard("")
+    return next(iter(keys)) if len(keys) == 1 else ""
+
+
+def pending_summary_key(sd: Path, now: int, clear_ts: int | None = None) -> str:
+    """The key for the handoff of the session that was just cleared, for this state dir.
+
+    TRDD-PHS3DIBD (root cause): the resume used to GUESS the cleared session, from the pending
+    record while unexpired, else the newest handoff group on disk, and so named an older
+    session's handoff and wrote its stamp. When `clear_ts` (the resume flag's timestamp) is
+    given, the per-pane sidecar the clear trigger wrote just before the `/clear` keystroke
+    names the cleared session outright (`cleared_session_key`), and nothing else is consulted.
+    The sidecar wins over the pending record because it is written by the act of clearing;
+    the record is written by a summary hold that may belong to another session. When no single
+    sidecar matches, one line is logged and the behaviour below applies unchanged.
 
     TRDD-QZVAEWQH: `dispatch._phase_clear_resume` needs to point the resumed turn at the
     fresh keyed handoff instead of whatever SessionStart already injected. Use
@@ -222,6 +268,17 @@ def pending_summary_key(sd: Path, now: int) -> str:
     """
     import json  # noqa: PLC0415
 
+    if clear_ts is not None:
+        cleared = cleared_session_key(sd, clear_ts)
+        if cleared:
+            return cleared
+        # By design this logs for clears that wrote no sidecar (`/janitor-handoff-and-clear`
+        # and the blind-send fallback never do): it states a fact, not a fault.
+        state.log_line(
+            _LOG,
+            "no clear record within 10 s of the resume flag; using the pending record or the "
+            "newest handoff",
+        )
     try:
         rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
         key = str(rec.get("key") or "")

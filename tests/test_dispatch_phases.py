@@ -1223,12 +1223,13 @@ def test_stamp_late_summary_uses_the_newest_group_when_the_record_expired(
     assert not (sd / "late-summary-noted-aaaa0001.txt").exists()
 
 
-def test_known_limit_unexpired_record_without_handoff_gives_an_empty_note(
+def test_the_clear_sidecar_names_the_cleared_sessions_handoff_over_the_record(
     env_isolation: dict,
 ) -> None:
-    """KNOWN LIMIT, pinned on purpose: an unexpired record for A that has NO handoff hides a
-    newer group B, so the note is empty. Today's deliberate limit (TRDD-PHS3DIBD), not the
-    desired end state."""
+    """TRDD-PHS3DIBD. Formerly `test_known_limit_...` and pinned the WRONG answer: an unexpired
+    record for A that has NO handoff hid a newer group B, so the note was empty. With the
+    clear trigger's sidecar (naming B, stamped at the clear time) and the flag timestamp, the
+    note names B's handoff."""
     import handoff_files
 
     dispatch = _import_dispatch()
@@ -1237,8 +1238,79 @@ def test_known_limit_unexpired_record_without_handoff_gives_an_empty_note(
     sd = state.state_dir()
     sd.mkdir(parents=True, exist_ok=True)
     _arm_summary_hold(sd, expires_in_s=900, key="aaaa0001")
-    handoff_files.write(sd, "bbbb0002", "synthetic B", now=int(time.time()) - 100)
-    assert dispatch._fresh_summary_note(sd) == ""
+    now = int(time.time())
+    b = handoff_files.write(sd, "bbbb0002", "synthetic B", now=now - 100)
+    _write_clear_sidecar(sd, "bbbb0002", now)
+    assert str(b.resolve()) in dispatch._fresh_summary_note(sd, now)
+
+def _write_clear_sidecar(sd: Path, session: str, epoch: int) -> None:
+    """The two-line per-pane file `clear_trigger._persist_resume_state` writes just before the
+    `/clear` keystroke (old transcript path, then the write epoch). Written by hand: the real
+    writer only runs inside the keystroke chain's pre-submit step."""
+    (sd / "resume-after-clear.pX.transcript").write_text(
+        f"/proj/{session}-0000-4000.jsonl\n{epoch}\n", encoding="utf-8"
+    )
+
+
+def test_stamp_late_summary_is_keyed_to_the_cleared_session_not_the_newest_group(
+    env_isolation: dict,
+) -> None:
+    """TRDD-PHS3DIBD, the card's defect: an OLDER session's handoff group is the newest on disk,
+    no unexpired record, and the sidecar names the cleared session C (no handoff yet). The
+    resume's stamp is C's (empty path line); nothing is stamped for the older session."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    handoff_files.write(sd, "aaaa0001", "older session", now=now - 500)
+    _write_clear_sidecar(sd, "cccc0003", now)
+    dispatch._stamp_late_summary(sd, now)
+    assert (sd / "late-summary-noted-cccc0003.txt").read_text(encoding="utf-8") == "\n"
+    assert not (sd / "late-summary-noted-aaaa0001.txt").exists()
+
+
+def test_a_sidecar_naming_a_session_without_a_handoff_gives_an_empty_note(
+    env_isolation: dict,
+) -> None:
+    """The cleared session has no handoff yet: the note is empty and another session's newer
+    handoff is not named."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    handoff_files.write(sd, "bbbb0002", "synthetic B", now=now - 100)
+    _write_clear_sidecar(sd, "cccc0003", now)
+    assert dispatch._fresh_summary_note(sd, now) == ""
+
+def test_a_missing_flag_timestamp_keeps_todays_behaviour_and_logs_nothing(
+    env_isolation: dict,
+) -> None:
+    """No `resume-after-clear.ts` reads as 0: the resume must not look up a sidecar (and so
+    must not log), and names the newest group exactly as before TRDD-PHS3DIBD."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    state.atomic_write(sd / "resume-after-clear.flag", "continue TRDD-Z582IKIR")
+    _observe_clear(state)
+    now = int(time.time())
+    b = handoff_files.write(sd, "bbbb0002", "synthetic B", now=now - 100)
+    _write_clear_sidecar(sd, "cccc0003", now)
+    out = _capture_stdout(dispatch._phase_clear_resume)
+    assert str(b.resolve()) in out, out
+    assert "cccc0003" not in out, out
+    assert not (state.log_dir() / "external-clear.log").exists()
 
 
 def test_a_real_summary_landing_after_a_template_resume_is_announced_once(

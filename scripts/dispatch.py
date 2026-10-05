@@ -1814,13 +1814,16 @@ def _phase_compact_resume() -> bool:
     return True
 
 
-def _keyed_handoffs(sd: Path) -> list[Path]:
-    """Every handoff file of the cleared session's key (`pending_summary_key`), [] when none."""
+def _keyed_handoffs(sd: Path, clear_ts: int | None = None) -> list[Path]:
+    """Every handoff file of the cleared session's key (`pending_summary_key`), [] when none.
+
+    `clear_ts` (the resume flag's timestamp) lets the key come from the clear's own sidecar
+    instead of a guess (TRDD-PHS3DIBD)."""
     try:
         import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
     except ImportError:
         return []
-    key = _ehc.pending_summary_key(sd, int(time.time()))
+    key = _ehc.pending_summary_key(sd, int(time.time()), clear_ts)
     if not key:
         return []
     return _handoffs_for_key(sd, key)
@@ -1856,7 +1859,7 @@ def _latest_handoff(paths: list[Path]) -> Path:
     return max(paths, key=rank)
 
 
-def _fresh_summary_note(sd: Path) -> str:
+def _fresh_summary_note(sd: Path, clear_ts: int | None = None) -> str:
     """A one-line pointer at the freshest post-clear compacted context, when one exists on disk.
 
     TRDD-QZVAEWQH: SessionStart injects the NEWEST handoff group at hook time, but the
@@ -1868,8 +1871,9 @@ def _fresh_summary_note(sd: Path) -> str:
 
     Returns "" when no keyed handoff can be attributed to this clear — the caller then falls
     back to the generic "read the injected SessionStart handoff summary" directive alone.
+    `clear_ts` is forwarded so the cleared session is identified, not guessed (TRDD-PHS3DIBD).
     """
-    candidates = _keyed_handoffs(sd)
+    candidates = _keyed_handoffs(sd, clear_ts)
     if not candidates:
         return ""
     latest = _latest_handoff(candidates)
@@ -1887,17 +1891,18 @@ def _late_summary_stamp(sd: Path, key: str) -> Path:
     return sd / f"{_LATE_SUMMARY_STAMP_PREFIX}{key}.txt"
 
 
-def _stamp_late_summary(sd: Path) -> None:
+def _stamp_late_summary(sd: Path, clear_ts: int | None = None) -> None:
     """Record, at resume time, the real (non-template) handoff the resume already named.
 
     The stamp's existence is what arms `_phase_late_summary_drift`: without it every project
-    holding an old handoff group would announce one on its first fire.
+    holding an old handoff group would announce one on its first fire. `clear_ts` is forwarded
+    so the stamp is keyed to the CLEARED session, not the newest group on disk (TRDD-PHS3DIBD).
     """
     try:
         import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
     except ImportError:
         return
-    key = _ehc.pending_summary_key(sd, int(time.time()))
+    key = _ehc.pending_summary_key(sd, int(time.time()), clear_ts)
     if not key:
         return
     real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]
@@ -2135,11 +2140,16 @@ def _phase_clear_resume() -> bool:
     # TRDD-QZVAEWQH: appended AFTER the 280-char truncation above, which governs only the
     # ORIGINAL directive text — an absolute path truncated at 277 chars is useless, so this
     # line is built and appended separately and is never subject to that cap.
-    fresh = _fresh_summary_note(sd)
+    # TRDD-PHS3DIBD: `written_at` is the clear's own timestamp; it lets the helpers read WHICH
+    # session was cleared from the clear trigger's sidecar instead of guessing the newest.
+    # A missing or unparseable `.ts` reads as 0: pass None then, so no sidecar lookup runs and
+    # nothing is logged (today's behaviour).
+    clear_ts = written_at or None
+    fresh = _fresh_summary_note(sd, clear_ts)
     if fresh:
         note = f"{note} {fresh}"
     # Arms `_phase_late_summary_drift`: records the real summary this resume already named.
-    _stamp_late_summary(sd)
+    _stamp_late_summary(sd, clear_ts)
     # A /clear wipes the working memory of in-flight background agents from the fresh
     # context — list them so the resumed turn re-attaches to each via SendMessage.
     _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
