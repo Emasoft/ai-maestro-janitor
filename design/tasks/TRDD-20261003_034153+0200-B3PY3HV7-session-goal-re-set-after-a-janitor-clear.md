@@ -4,7 +4,7 @@ title: Session goal re-set after a janitor clear
 column: testing
 status: tasked
 created: 2026-10-03T03:41:53+0200
-updated: 2026-10-03T11:11:02+0200
+updated: 2026-10-05T10:18:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -45,3 +45,4 @@ Parent plan: TRDD-K9AHY1ZB
 - Decision 5 (resume flag): the flag cannot be skipped, SessionStart stamps clear-observed.ts (the gate phase B awaits) only while it exists. On the goal path the chain consumes flag, ts and session-id stamp right after run_chained_inject succeeds (kept on failure); the blind fallback writes no flag. Daemon goal source is the recorded pane transcript mapping, never the newest transcript.
 Gap: on the goal path the resume flag is consumed, and the late-summary note (dispatch _fresh_summary_note) only reaches the session through the janitor-resume path, so a real summary that lands after a template injection is not announced. Follow-up: have dispatch emit that note on its own.
 The sanitizer replaces the at-sign with (at) in the typed goal (literal-key typing would open the file picker); the changed text is intended, not corruption.
+2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: one janitor clear of a session with an unmet goal on an install running v3.7.0 or later; pass when one typed goal line appears and the goal shows active in the new session, with no resume command typed.

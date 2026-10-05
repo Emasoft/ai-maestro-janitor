@@ -3,7 +3,7 @@ trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
 column: testing
 created: 2026-09-24T07:42:31+0200
-updated: 2026-09-28T13:13:37+0200
+updated: 2026-10-05T10:18:49+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -43,6 +43,7 @@ On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 
 - Whether step 3 needs the owner's approval per project, or runs by default.
 - K0PMVRN6 already carries the addresses. The owner accepted that commit, but publish.py's G1b will likely refuse the release until the card is redacted.
+2026-10-05 — Outline steps 1, 2 and 4 landed in f7fb03f6 (in v3.7.0) and verified end to end; outline step 3 (install in other projects) moves to TRDD-ASHLUQ6O and this card closes.
 
 ## Approval log
 

@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: testing
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-04T20:13:09+0200
+updated: 2026-10-05T10:18:49+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,7 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T09:49:52+0200
 parent-trdd: JSQSJ3PZ
-implementation-commits: [90135636, 94bf446d, e0c9cabe, 3cb92e46, 7598cb5c, 3b96c091, 8f37dee1, 60dd828d, c91af837]
+implementation-commits: [90135636, 94bf446d, e0c9cabe, 3cb92e46, 7598cb5c, 3b96c091, 8f37dee1, 60dd828d, c91af837, cbb431b5]
 ---
 
 # Automatic re-login of a dead account slot is always on
@@ -52,3 +52,4 @@ The live account's slot is never re-captured automatically (by design, e0c9cabe/
 Memory page oauth-rotation-renew-reauth-operations still says auto-bootstrap is opt-in and default OFF (its step-3 sentence, the description and keywords of ATOM-LTOX-A05P, and lesson ATOM-DTL6-3KUL). A first correction in 8f37dee1 attached superseding lessons to the wrong atoms and was reverted in 60dd828d. Needs a correction pass that matches atom ids to bodies first, supersedes only the opt-in statements, and keeps the Verify step valid.
 2026-10-04 — Item 1 (a refused capture uses up a launch and raises no alert) is implemented in c91af837: the capture leaves a marker, the launcher refunds the attempt once and holds relaunches for six hours, and the alert names both accounts. Follow-ups in progress: clear the marker on a successful capture, refund only a charged launch, carry the account as data instead of parsing the message.
 2026-10-04 column testing (was dev). Correction to the move reason - c91af837 is NOT inside the 3.7.0 release (git merge-base against tag v3.7.0), so the refusal refund and alert first ship in 3.7.1. Of the three follow-ups listed above as in progress, two landed in cbb431b5 (the marker clears on a good capture, only a charged launch is refunded). The third, carrying the account as data instead of parsing the message, has no commit and no card. Still waiting on the owner - whether the three-launch cap resets (proposed every 24 hours). Still stale - memory page oauth-rotation-renew-reauth-operations says auto-bootstrap is opt-in. NEXT ACTION - after 3.7.1 is installed, observe one automatic re-login with no environment variable set.
+2026-10-05 — RESUME POINT. Column testing. The remaining follow-ups moved to TRDD-D10JB26H. NAMED LIVE EVENT: on an install of the first release after v3.7.0, with the auto re-login setting unset and a credential-dead spare slot holding a valid web cookie, one daemon tick logs a line starting auto-bootstrap: launch in the daemon log and the slot is re-filed. Commits c91af837 and cbb431b5 are in no release tag yet.
