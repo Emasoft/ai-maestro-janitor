@@ -4,11 +4,11 @@ title: Retire the decision question and owner tiers once prose is never scored
 column: backburner
 created: 2026-09-24T14:12:48+0200
 updated: 2026-09-24T14:12:48+0200
-current-owner: emanuelesabetta
+current-owner: user
 created-by: emanuelesabetta
 task-type: refactor
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: user
 mandate: true
 mandated-by: user
 approved: true

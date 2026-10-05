@@ -4,11 +4,11 @@ title: Jev keeps every owner and assistant message since the last compaction ver
 column: testing
 created: 2026-09-24T13:53:03+0200
 updated: 2026-09-24T19:19:53+0200
-current-owner: emanuelesabetta
+current-owner: user
 created-by: emanuelesabetta
 task-type: feature
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: user
 mandate: true
 mandated-by: none
 approved: true

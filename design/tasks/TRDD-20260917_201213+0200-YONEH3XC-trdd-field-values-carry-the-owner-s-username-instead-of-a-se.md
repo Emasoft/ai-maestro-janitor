@@ -1,9 +1,9 @@
 ---
 trdd-id: YONEH3XC
 title: TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
-column: testing
+column: todo
 created: 2026-09-17T20:12:13+0200
-updated: 2026-09-23T23:31:56+0200
+updated: 2026-10-05T10:19:24+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: docs
@@ -15,6 +15,7 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-17T20:12:13+0200
 priority: low
+status: tasked
 ---
 
 # TRDD assignee/current-owner field values carry the owner's username instead of a session or role name
@@ -39,6 +40,7 @@ Do NOT touch created-by or approval-judge — those are provenance (who mandated
 retro-fitted from commit subjects; original criteria unreadable (no STATE block)
 - [ ] TRDD assignee/current-owner fields carry a session/role label instead of the owner's username — evidence: commit e1b0c532 (subject only, not verified against original criteria)
 - [ ] docs updated to reflect the new field convention — evidence: commits 898f640d, b7602496, 40814ce8 (subjects only, not verified against original criteria)
+2026-10-05 — the login had recurred in the frontmatter of 5 newer cards (ids: D7RLXAN1, R9UXOSR5, IYNS7H83, A8DRRW0I, 350W5II2); on 2026-10-05 the assignee and current-owner fields of four of them were relabelled to user through the card tool (the tool refuses Emasoft as an identity). The created-by and approval-judge fields (write-once) and the archived card 350W5II2 were refused by the tool and still carry the login. Root cause (the card tool defaults those fields to the OS login) is unfixed and belongs upstream; until it is fixed every new card must pass an explicit author. The card returns to todo for that upstream report and the unticked documentation box.
 
 ## Owner directive 2026-09-23 (verbatim)
 

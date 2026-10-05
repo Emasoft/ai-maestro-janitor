@@ -5,11 +5,11 @@ column: backburner
 status: tasked
 created: 2026-09-24T18:15:09+0200
 updated: 2026-09-24T18:15:18+0200
-current-owner: emanuelesabetta
+current-owner: user
 created-by: emanuelesabetta
 task-type: bugfix
 min-approval-requirement: none
-assignee: emanuelesabetta
+assignee: user
 mandate: true
 mandated-by: none
 approved: true
