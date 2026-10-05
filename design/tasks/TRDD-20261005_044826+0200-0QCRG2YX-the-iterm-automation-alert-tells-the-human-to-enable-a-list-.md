@@ -4,7 +4,7 @@ title: The iTerm Automation alert tells the human to enable a list entry that ma
 column: dev
 status: tasked
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-05T05:11:58+0200
+updated: 2026-10-05T05:56:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T04:48:26+0200
+implementation-commits: [47f2abe6]
 ---
 
 # The iTerm Automation alert tells the human to enable a list entry that macOS may never have created and repeats on every heartbeat
@@ -84,4 +85,5 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 05:15 daemon.py has no chdir, no getcwd and no check that its own directory still exists; SIGTERM is handled and releases the lock and the pid file; there is no dedicated stop command.
 2026-10-05 05:15 A plain terminate signal to the session-spawned daemon, so the launchd standby would take over, was attempted at 05:15 and refused by the Claude Code permission classifier; no signal was sent.
 2026-10-05 05:15 Review of the restart proposal (adversarial fork, 05:10): the restart changes working directory and responsible process together, so its result must be read from the new daemon's flag content (probe_outcome and second_view), not from the alert's presence; no forced kill.
-2026-10-05 05:25 — review of the attempted restart: a restart is expected to cure only the second view, would destroy the only live reproduction of the osascript failure, and cannot be undone; it is NOT recommended until the probe records its real error. Fix order decided: first and alone, the probe records exit code, error text and exception type; then an explicit working directory for the second view, at daemon start and at spawn, described as fixing the second view only; alert wording states the measured outcome and drops the Automation remedy; repetition is not suppressed while the cause is unknown. The earlier idea that the daemon exits when its directory has gone is dropped: a start-time change of directory makes it unnecessary.
+2026-10-05 05:25 — review of the attempted restart: a restart is expected to cure only the second view, would destroy the only live reproduction of the osascript failure, and cannot be undone; it is NOT recommended until the probe records its real error. Fix order decided: first and alone, the probe records exit code, error text and exception type; then an explicit working directory for the second view, at daemon start and at spawn, described as fixing the second view only; alert wording states the measured outcome and drops the Automation remedy; the repetition is a separate defect with a cause read from the code (the flag is rewritten on every scan because the change comparison ignores only the evidence-age field while three other fields are patched in afterwards, and the heartbeat hashes the whole file) and gets its own change. The earlier idea that the daemon exits when its directory has gone is dropped: a start-time change of directory makes it unnecessary.
+2026-10-05 — first code change: the iTerm probe now writes its real failure to the daemon log (exit code, trailing AppleScript error number, cleaned error text, exception type, resolved osascript path; also the timeout and the exit-0-with-no-output cases). Return shapes, the flag file and the alert are unchanged. It takes effect in a daemon only after a publish and a daemon restart. Next: the second view discards its error text in the same way and runs without an explicit working directory.
