@@ -4,7 +4,7 @@ title: A worker repeats the same failing fastedit edit every five minutes for ho
 column: todo
 status: tasked
 created: 2026-10-05T22:06:37+0200
-updated: 2026-10-05T22:06:37+0200
+updated: 2026-10-05T22:07:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -26,3 +26,7 @@ To do: establish what drives the repetition (a cron, a retry loop in the worker'
 ## Approval log
 
 - 2026-10-05T22:06:37+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): the runs were seen at 18:27 and then at about five-minute intervals from 20:40 to 21:40; nothing was searched between 18:27 and 20:40. That each run loads the local model is NOT established (output and duration were not read; a refused or anchored edit may load nothing). The worker is a subagent; that it ran in the background is not established. In this repository the only deliverable is the decision on a detector; the loop itself belongs to the other project.

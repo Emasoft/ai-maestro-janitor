@@ -4,7 +4,7 @@ title: Agents are told that a fastedit edit with no target symbol on a large fil
 column: todo
 status: tasked
 created: 2026-10-05T22:06:37+0200
-updated: 2026-10-05T22:06:37+0200
+updated: 2026-10-05T22:07:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:06:37+0200
+npt: [8X7C7TU9]
 ---
 
 # Agents are told that a fastedit edit with no target symbol on a large file can exhaust the machine
@@ -26,3 +27,7 @@ To do: write the lesson in the cross-project memory (symptom words: all cores at
 ## Approval log
 
 - 2026-10-05T22:06:37+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): this card waits on TRDD-8X7C7TU9 verifying the cause; it is not workable before that. The measured sizes are 97 and 81 GB.

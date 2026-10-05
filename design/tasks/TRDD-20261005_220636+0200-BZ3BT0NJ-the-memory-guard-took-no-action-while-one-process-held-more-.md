@@ -4,7 +4,7 @@ title: The memory guard took no action while one process held more memory than t
 column: todo
 status: tasked
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-05T22:06:36+0200
+updated: 2026-10-05T22:07:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,7 @@ To do: read what memory-guard measures and acts on, and why it returned in 0 s (
 ## Approval log
 
 - 2026-10-05T22:06:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): memory-guard was seen finishing in 0 s at 21:35, 21:37 and 21:39 only; nothing is shown for 21:23 to 21:33, when the daemon itself was stalled. A per-process kill is a destructive act on another session's process: this card PROPOSES it to the owner, it does not implement it without that decision. The command that outlived its tool timeout and was moved to the background has its own card.

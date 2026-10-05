@@ -4,7 +4,7 @@ title: fastedit grows to 80 to 97 GB when it edits a large file with no target s
 column: todo
 status: tasked
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-05T22:06:36+0200
+updated: 2026-10-05T22:07:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,7 @@ To do: reproduce on a copy of a file of that size with a memory ceiling set (uli
 ## Approval log
 
 - 2026-10-05T22:06:36+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): the timing matches a fastedit run TWICE (20:42:59 and 20:46:07), not three times; the 8.7 GB process at 18:29 is not tied to any run. The 2.3 to 2.7 GB processes are PRESUMED to be fastedit, not identified. At 21:27 the shell line was 'fastedit undo' followed by a batch-edit; which of the two hung is not established. Seven fastedit invocations followed (21:33 to 21:37), all returning in 3 to 15 s with refusals, so they are weak evidence of load. The title states a mechanism the body lists as unverified: read it as the hypothesis. ulimit -v and -m are NOT enforced on macOS: a reproduction must use a watchdog that kills on resident size. Do not fix the remedy in advance: a size limit or a refusal is one proposal, to be chosen after the cause is verified.
