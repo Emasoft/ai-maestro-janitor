@@ -4,7 +4,7 @@ title: Owner warned out of band when no rotation target exists or the rotator st
 column: testing
 status: tasked
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-05T10:57:16+0200
+updated: 2026-10-05T11:01:57+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -47,3 +47,8 @@ Parent plan: TRDD-JSQSJ3PZ
 - 2026-10-03 — R4 cannot reach complete until the owner approves a one-off plain edit for the fastedit-refused R4b leftovers (dead _ACTIONS entry, LIVE_EXPIRED_GRACE_S, DEBOUNCE_S comment, 'add a spare account' alert wording), listed on TRDD-MMUSDJHQ.
 2026-10-04 — 95422abd removed LIVE_EXPIRED_GRACE_S and the live-token-expired action text. Body condition (b) 'live token past expiry and not refreshed for 5 minutes' is NOT implemented: the code comment in scripts/lib/rotator_alert.py (above the tick-stalled check) says no such condition exists on purpose. The card body still lists (b); whether (b) is dropped for good is an open decision, so this card stays in testing. Still open: alert wording and the DEBOUNCE_S comment.
 2026-10-05 — DECIDED (owner delegated decisions; the owner may reverse it): body condition (b), live token past expiry and not refreshed for five minutes, is DROPPED, not satisfied. Reason: the only expiry reading available for the live account is stale by design and would fire about eight hours after every switch; the wall it meant to catch is reported by the auth-failed marker. Reopen if a reliable expiry source appears. The line above saying the alert wording and a comment are still open is superseded: both were fixed in a71a5ac5. OBSERVED 2026-10-05, not a pass: the line 'rotator alert: account rotation is stuck' appeared in a session's heartbeat output on several fires; which condition raised it was not read. RESUME POINT. Column testing. NAMED LIVE EVENT: that alert is traced once to the condition that raised it, in the rotator alert state file, and matches condition (a), (c) or (d).
+2026-10-05 — the status line above was appended here by mistake; the card's STATE section now holds the current one.
+
+## STATE
+
+2026-10-05 — DECIDED (owner delegated decisions; the owner may reverse it): body condition (b) is DROPPED, not satisfied; reason, per a worker's reading of the code comment at the alert module: the only expiry reading for the live account is stale by design; reopen if a reliable source appears. The alert 'account rotation is stuck' was live on 2026-10-05; read from the alert state on that day: condition key rotation-stuck, first seen 2026-10-05 (read from the recent-alert debounce file; the live alert file was absent at read time, so it is not raised at this moment). That is condition (d) of this card, observed live. RESUME POINT: Column testing. The alert was observed for one condition; nothing waits on an event except the owner clearing it with the capture-all-logins command.

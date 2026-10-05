@@ -4,7 +4,7 @@ title: Daemon never refreshes the live account's slot twin
 column: testing
 status: tasked
 created: 2026-10-03T03:41:19+0200
-updated: 2026-10-04T11:05:47+0200
+updated: 2026-10-05T10:59:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -38,6 +38,7 @@ Parent plan: TRDD-JSQSJ3PZ
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-03
 
 2026-10-03: follow-ups in 2b18348f — loopback-only token-URL seam, live-account guard at _refresh_and_heal_slot and _keepalive_refresh (beacon trusted only when newer than last_switch_at).
+2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: across one full token rotation of the live account by Claude Code, the installed v3.7.0 daemon log shows no token-URL refresh for that account's slot twin, and the twin's refresh token is still valid afterwards (the rotator's list and oauth-health output show the slot not invalidated). Commits fe76d99c and 2b18348f are in v3.7.0.
 
 ## Release status
 

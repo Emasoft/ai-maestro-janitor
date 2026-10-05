@@ -3,7 +3,7 @@ trdd-id: N954KWUC
 title: one screen-state reader drives every keystroke the janitor types — read the pane, classify it, act on the transition, verify by re-reading
 column: testing
 created: 2026-09-02T21:08:51+0200
-updated: 2026-10-01T05:03:51+0200
+updated: 2026-10-05T10:59:54+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: critical
@@ -64,6 +64,7 @@ status: tasked
   each site's channel selection "byte-for-byte" — it does not on the wedge+command path, where
   the post-flush `esc_first=False` makes `build_command_plan` pick the `aimaestro` channel; the
   module docstring now documents the split.
+2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: the model-fallback detector hits an all-accounts-spent wall in some project, and a NO_HEADROOM line appears in that project's pane-policy log ending 'observed idle' or 'observed working' with no human keystroke; the rotation half was already observed and fix 0e8b97c9 is in v3.7.0.
 
 ## Directive (USER, 2026-09-02 21:07, verbatim)
 

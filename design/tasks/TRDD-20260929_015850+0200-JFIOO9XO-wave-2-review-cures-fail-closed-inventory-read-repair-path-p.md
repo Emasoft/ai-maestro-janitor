@@ -4,7 +4,7 @@ title: wave-2 review CUREs — fail-closed inventory read repair-path policy REU
 column: testing
 status: tasked
 created: 2026-09-29T01:58:50+0200
-updated: 2026-09-29T09:05:56+0200
+updated: 2026-10-05T10:59:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,6 +26,7 @@ approval-datetime: 2026-09-29T01:58:50+0200
 
 Four CUREs from the wave-2 landing review (both forks, 2026-09-29; commit 190573d8). (1) read_for_inventory fails OPEN: unwrap_or_default inventories a permission error or invalid UTF-8 page as EMPTY, so the DROP half certifies dropping every id on an unreadable page — the exact corruption class the gate exists for. Fix: NotFound inventories empty (split's not-yet-existing dest needs it), every other error refuses hard. (2) cmd_edit_cli (update-mem-topic) passes DEFAULT policy, so the card's sanctioned control-byte repair path (update-mem-topic --replace-all, the recorded repair for the AgentlensPro/ghbook 0x08 pages) refuses on the REUSE half when the repair lands inside an atom body. Fix: write_gated_with with allow_body_rewrite true — the DROP half still enforces. (3) The REUSE half has zero falsifiability: no test proves a surviving id with a changed body refuses under DEFAULT policy; a fingerprint collapse passes the suite silently disabling the half. Fix: one unit test (changed body under default refuses; same body under default passes). (4) GatePolicy doc comment says only update-mem-atom sets allow_body_rewrite but merge-mem-atom and split-mem-atom also set it — fix the comment. Verification: cargo check 0, full suite green, each fix covered by its own test where a test can discriminate.
 2026-09-29: this card now gates TRDD-XI10BA5D's close — XI10BA5D's eht lists it (correction round 2026-09-29, discharging the wave-2 review's 'wired as eht' claim that was false in the frontmatter). Directional signal added per the close-out review (the gate was one-directional until now). Also flagged: XI10BA5D's verification check-box requires reading this card's CURE content against the wave-2 fixes (the uncited-lesson-def carry and merge See-also changes already landed in 190573d8 — parts of the CURE list may be discharged); note that step 6's refuse_introduced_one_sided_links runs inside prepare_batch_gated and thus INHERITS this card's fail-open read_for_inventory defect — verifying the inventory fix must re-check step 6's link-refusal path with it.
+2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: the memgrep release built from bd445c71 (shipped in v3.7.0) is used in a real update-mem-topic --replace-all repair of a control-byte memory page, the command exits 0 and the page then passes memgrep validate, while an unreadable page still refuses with the retryable message. No live pass is recorded; its tests pass and its code is in v3.7.0.
 
 ## Approval log
 

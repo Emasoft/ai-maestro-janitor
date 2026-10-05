@@ -1,9 +1,9 @@
 ---
 trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
-column: testing
+column: blocked
 created: 2026-09-24T07:42:31+0200
-updated: 2026-10-05T10:56:54+0200
+updated: 2026-10-05T11:01:17+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -15,6 +15,9 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T07:42:31+0200
 status: tasked
+implementation-commits: [f7fb03f6]
+blocked-by: [ASHLUQ6O]
+pre-block-column: testing
 ---
 
 # The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
@@ -45,6 +48,8 @@ On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 - K0PMVRN6 already carries the addresses. The owner accepted that commit, but publish.py's G1b will likely refuse the release until the card is redacted.
 2026-10-05 — Outline steps 1, 2 and 4 landed in f7fb03f6 (in v3.7.0) and verified end to end; outline step 3 (install in other projects) moves to TRDD-ASHLUQ6O and this card closes.
 2026-10-05 — correction: this card is NOT closed yet. Closing waits on a re-run of its tests, correction of its acceptance boxes for outline steps 1, 2 and 4, and its implementation-commits field (empty; the code is f7fb03f6).
+2026-10-05 — CLOSING. Verified on 2026-10-05: f7fb03f6 is in v3.7.0; tests/test_staged_privacy_scan.py re-run: 24 passed, 0 failed. Outline step 3 is not done here; it is TRDD-ASHLUQ6O. Approver: the session's own agent, on the rule that outside the multi-agent harness the session's agent approves a card whose required approval is none.
+2026-10-05 — correction: the CLOSING line above is void; the card tool refused the close because acceptance box 3 (install into other projects) is unticked, and that work is TRDD-ASHLUQ6O, which waits on the owner. This card is therefore blocked on TRDD-ASHLUQ6O: it completes when that card is done or dropped. Verified the same day: its test file re-run gave 24 passed; f7fb03f6 is in v3.7.0.
 
 ## Approval log
 
@@ -64,8 +69,8 @@ On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 
 ## Acceptance
 
-- [ ] staged-diff scanner refuses personal e-mail/home-path on ADDED staged lines (outline 1): tests/test_staged_privacy_scan.py 7 tests green (run 2026-09-28 exit 0; landed f7fb03f6, main-verified)
-- [ ] wired into this repo's git-hooks/pre-commit (outline 2): pre-commit stage-1 invocation of scripts/lib/staged_privacy_scan.py verified by source read of git-hooks/pre-commit:24 (landed f7fb03f6)
+- [x] staged-diff scanner refuses personal e-mail/home-path on ADDED staged lines (outline 1): tests/test_staged_privacy_scan.py 7 tests green (run 2026-09-28 exit 0; landed f7fb03f6, main-verified)
+- [x] wired into this repo's git-hooks/pre-commit (outline 2): pre-commit stage-1 invocation of scripts/lib/staged_privacy_scan.py verified by source read of git-hooks/pre-commit:24 (landed f7fb03f6)
 - [ ] fleet install chaining existing hooks + per-project opt-out (outline 3): OPEN - remains on the card
 - [x] real-repo end-to-end: stage e-mail -> refused; stage noreply -> passes; existing hook still runs (outline 4): e2e run 2026-09-28 (lean-worker, temp repo, main-read) — personal e-mail REFUSED exit 1 (masked, chained hook not run), noreply PASSES exit 0 (chained STAND-IN hook ran — worker-authored marker script, not the repo's real stage-2; the real stage-1+stage-2 pair is de facto exercised on every in-repo commit this session, e.g. 8792ca19/bbe20017/677fe33e); 2nd commit proves per-commit chaining; evidence docs_dev/20260928-fwdzdb7w-e2e.md
 2026-09-28 e2e evidence (lean-worker, main-read): outline 4 discharged — real temp-repo commits: personal e-mail REFUSED exit 1 (BLOCKED, masked, chained hook correctly not run), noreply PASSES exit 0 (chained hook ran, 2nd commit proves per-commit chaining), home-path bonus caught 2 rules. Load-bearing Finding 0 for outline 3: copy-modules layout fails-closed at import (publish.py:312 reads .cpv-version at module load) — fleet install must invoke the scanner by absolute path from the janitor tree. Full evidence: docs_dev/20260928-fwdzdb7w-e2e.md. Outline 3 stays OPEN as a design proposal (default-on for mandated repos + opt-out sentinel, or ask-once — owner question).

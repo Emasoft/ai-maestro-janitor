@@ -4,7 +4,7 @@ title: Summary hold ends once its handoff is on disk and is never re-taken over 
 column: testing
 status: tasked
 created: 2026-10-03T03:41:42+0200
-updated: 2026-10-05T10:57:17+0200
+updated: 2026-10-05T11:02:12+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -44,6 +44,7 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-05: DO NOT CLOSE on the 02:17 live clear. That clear resumed, but its resume named the handoff of an older session; the cause is carded as TRDD-PHS3DIBD and point 5 there suspects this card's items 2 and 3. Also still open here: the owner decision noted at the top of this STATE block. The card's own listed tests were not re-run on 2026-10-05.
 - 2026-10-05 CORRECTION to the DO NOT CLOSE line above: this card is not the cause of the 02:17 case. The pending-summary record is written only by take_summary_hold, and the 02:17 clear left no daemon-lane log line, so it went through a chain that writes no record (the log reading is a worker's, not re-read). This card's rule of taking no hold when a handoff already exists remains one of the two reasons an old record is not replaced. Still reasons not to close: the pending owner decision above, and this card's own listed tests were not re-run on 2026-10-05.
 2026-10-05 — no answer from the owner since 2026-10-03; the shipped default stands (a template handoff ends the summary hold) and the owner may reverse it. The card's listed hold tests were re-run on 2026-10-05: 4 passed, 0 failed (four of the listed hold tests, one per test file). RESUME POINT. Column testing. NAMED LIVE EVENT: the first janitor clear on a release carrying 868b711f resumes without waiting on a summary hold.
+2026-10-05 — correction on the test evidence: the four tests named above were picked by a worker, one per listed file. The stronger evidence is the full suite, which contains every test in those files and passed (17951 passed, 2 skipped) in the publish dry-run on commit c576a7ad. What this card's live event must show, as distinct from TRDD-PHS3DIBD's: the resume after the clear is emitted with no wait on a summary hold, i.e. the dispatcher log of that fire carries no summary-hold line.
 
 ## Approval log
 

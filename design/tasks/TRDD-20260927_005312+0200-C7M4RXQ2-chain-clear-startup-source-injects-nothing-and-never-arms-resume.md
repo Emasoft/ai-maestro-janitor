@@ -3,7 +3,7 @@ trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
 column: testing
 created: 2026-09-27T00:53:12+0200
-updated: 2026-10-05T10:57:16+0200
+updated: 2026-10-05T11:02:13+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -134,3 +134,4 @@ REVIEW LOOP CLOSED. Round 9 ruled the round-8-response turn mechanical-only and 
 
 BANNER FOR THE NEXT SESSION: the adversarial-review loop on this card is CLOSED (round 9 ruled closure, round 10 confirmed it sound with the full question-by-question disposition table). Do NOT reopen it; further gate-demanded review forks on this thread's already-reviewed appends are pure process cost — the sanctioned exit applies. New substantive work on this subject is NEW material with its own normal review: (i) the owner's pointer-arm (a)/(b) answer landing — if (b), the one-line revert MUST also update round 6's 'stated as intended' language so the card does not self-contradict; (ii) the empty-hands-cue card (only if (a)); (iii) the crash-after-consume card. The card rests in TESTING on exactly two gates to complete: the owner's decision and a real-world chain-clear validation. Neither can be closed by default.
 2026-10-05 — DECIDED (owner delegated decisions; the owner may reverse it): the resume cue stays on the pointer arm, as shipped in v3.7.0. Reason: it prevents an idle agent after a startup-sourced re-entry, and its cost is at most one redundant turn; reverting is one line. The cross-hook freshness-constant test landed in b123a392. RESUME POINT. Column testing. NAMED LIVE EVENT: the next chain clear that logs source=startup; pass when the new session's context opens with the handoff body or the pointer and the clear-observed stamp is written.
+2026-10-05 — the reasons in the DECIDED line above (what the cue prevents, that reverting is one line) are a worker's reading of this card and the code; the main agent did not read the code.

@@ -1,10 +1,10 @@
 ---
 trdd-id: QQ7QCS3T
 title: ZKXQXHBI primary read off by default until its LaunchAgent probe passes
-column: testing
+column: human_review
 status: tasked
 created: 2026-10-03T03:41:33+0200
-updated: 2026-10-03T05:09:37+0200
+updated: 2026-10-05T10:59:55+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,6 +31,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 
 Parent plan: TRDD-JSQSJ3PZ
 2026-10-03: default-off gate landed in 2b18348f (daemon forces HEADLESS unless JANITOR_ROTATOR_DAEMON_PRIMARY_READ=1 in the LaunchAgent env). Owner decision still pending.
+2026-10-05 — WAITING ON THE OWNER, not on an event. Question: keep the daemon's primary keychain read off by default (as shipped in v3.7.0, commit 2b18348f, opt-in by a setting), or turn it back on by default? The shipped default stands until the owner answers; this is not decided by the agent because it is a keychain default for every install.
 
 ## Approval log
 

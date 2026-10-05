@@ -3,7 +3,7 @@ trdd-id: A70YJLXN
 title: The janitor plugin must update as soon as a new version is detected under EITHER daemon
 column: testing
 created: 2026-08-26T14:06:12+0200
-updated: 2026-09-25T13:55:30+0200
+updated: 2026-10-05T10:59:55+0200
 current-owner: janitor-main-session
 task-type: bugfix
 project-id: ai-maestro-janitor
@@ -179,6 +179,7 @@ undoing). Tests now 9: 6 on the pure predicate, 2 on the stamp round-trips (`las
 > latency table is WRONG (bad instrument). Kept unedited because the corrections only make
 > sense against what they correct, and because the wrong reading was reached by quoting the
 > right source about the adjacent chore — which is the reusable part.
+2026-10-05 — RESUME POINT. Column testing. NAMED LIVE EVENT: at the next release, with a janitor session armed and no hand update run, the last-raised stamp for the update flag exists, the installed-plugins record's user-scope update time minus the GitHub publish time is under 15 minutes, and the install time matches an absorbed tick in the ai-maestro server's last-run summary (not a hand update). v3.7.0 was installed about seven and a half minutes after it was published, but no last-raised stamp for the update flag exists, so the flag path was not shown to be the trigger; three releases have passed unmeasured since this card's wait was written.
 
 ## The two paths are not equivalent  ⛔ SUPERSEDED
 
