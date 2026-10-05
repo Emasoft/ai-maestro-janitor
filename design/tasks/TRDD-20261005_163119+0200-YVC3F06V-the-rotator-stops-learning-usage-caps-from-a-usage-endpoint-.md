@@ -1,0 +1,30 @@
+---
+trdd-id: YVC3F06V
+title: The rotator stops learning usage caps from a usage-endpoint throttle and discards the stored ones
+column: dev
+status: tasked
+created: 2026-10-05T16:31:19+0200
+updated: 2026-10-05T16:31:19+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: bugfix
+min-approval-requirement: none
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: none
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-05T16:31:19+0200
+---
+
+# The rotator stops learning usage caps from a usage-endpoint throttle and discards the stored ones
+
+Background: the OAuth rotator learned a false usage cap from a throttle of the usage endpoint (five 429 answers while the account read 5h=3%, 7d=85%), then treated every weekly reading at or above 85% as a wall. No signal available today distinguishes a real limit from an endpoint throttle, so cap learning is switched off and stored caps are discarded.
+
+Code changes: (1) cmd_auto no longer calls burn_gate.observe_wall in the live 429 branch. (2) cmd_auto pops learned_caps from state before each usage request, so stored caps are discarded on every tick. (3) The stop-failure hook comment and log line stop claiming it learns the wall.
+
+The proper redesign is owned by the sibling card on learning a real cap from session rate-limit evidence.
+
+## Approval log
+
+- 2026-10-05T16:31:19+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.

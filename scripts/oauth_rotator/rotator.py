@@ -2492,6 +2492,10 @@ def cmd_auto() -> int:
         # account as a target.
         state = _reconcile_live_email(state, live_blob)
     live_email = state.get("live_email")
+    # Stored caps all came from the untrustworthy usage-endpoint-429 signal and none can be
+    # told from a false one, so they are discarded on every tick; they persist to disk through
+    # the save_state calls that already follow in the 429 and 200 branches (TRDD-YVC3F06V).
+    state.pop("learned_caps", None)
     live_status, live_data = usage_request(live_blob)
     fh = _util(live_data, "five_hour")
     sd = _util(live_data, "seven_day")
@@ -2529,12 +2533,9 @@ def cmd_auto() -> int:
         _wedge_debounced = wedge_tick_requested()
         if _wedge_debounced:
             streak = max(streak, LIVE_429_DEBOUNCE)
-        if streak >= LIVE_429_DEBOUNCE and live_email:
-            # A DEBOUNCED 429 is a real limit — record where the wall actually was as an
-            # effective-cap sample (TRDD-FQXBURNR). The 61%-then-hard-429 incident means the
-            # cap can sit far below the configured threshold; learning it makes the next
-            # near-limit check on this account honest.
-            burn_gate.observe_wall(state, live_email, time.time())
+        # No usage cap is learned here: a 429 from the usage endpoint is not evidence of an
+        # account limit (2026-10-05: five throttled answers at 5h=3% taught a false 7d cap of
+        # 85% and every later reading was called a wall). Redesign: TRDD-AWIWXJIG.
         save_state(state)
         if streak < LIVE_429_DEBOUNCE:
             _decide("auto: live %s returned 429 (streak %d/%d) — likely a transient usage-endpoint throttle, not a real limit; deferring rotation" % (live_email or "(live)", streak, LIVE_429_DEBOUNCE))

@@ -1276,6 +1276,45 @@ def test_cmd_auto_burn_projection_alone_never_rotates_onto_a_target_spent_on_the
     assert switches == [], "a burn projection must not rotate onto a Fable-spent target"
 
 
+
+def test_usage_endpoint_429_streak_teaches_no_cap(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-YVC3F06V: a streak of usage-endpoint 429s (5h=3%, 7d=85%) must not be stored as a learned cap."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    alt = _blob("ALT", expires_ms=_ms_in(50))
+    _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                slot_blobs={"alt@x": alt},
+                usage={"LIVE": (429, None), "ALT": (200, _usage_ok(5.0))})
+    now = time.time()
+    st = rotator.load_state()
+    st["usage_samples"] = {"live@x": {"5h": [[now - 120, 3.0], [now - 60, 3.0]],
+                                      "7d": [[now - 120, 85.0], [now - 60, 85.0]]}}
+    rotator.save_state(st)
+    for _ in range(5):
+        rotator.cmd_auto()
+    assert not rotator.load_state().get("learned_caps", {}).get("live@x")
+
+
+def test_stored_caps_are_discarded_and_do_not_trip_the_burn_gate(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-YVC3F06V: a stored learned cap is dropped each tick, so a 7d=91% reading is not called a wall."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    alt = _blob("ALT", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": alt},
+                           usage={"LIVE": (200, _usage_ok(1.0) | {"seven_day": {"utilization": 91.0}}),
+                                  "ALT": (200, _usage_ok(5.0))})
+    st = rotator.load_state()
+    st["learned_caps"] = {"live@x": {"5h": [0.0, 3.0], "7d": [100.0, 85.0, 85.0]}}
+    rotator.save_state(st)
+    decided: list = []
+    monkeypatch.setattr(rotator, "_decide", lambda m, *a, **k: decided.append(m))
+    rotator.cmd_auto()
+    assert switches == []
+    assert any("within limits" in m for m in decided)
+    assert "learned_caps" not in rotator.load_state()
+
+
 def test_cmd_auto_scoped_window_below_the_bar_does_not_trigger(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CONTROL for the scoped trigger: same fleet, Fable merely WARM (60% < the 90 bar) and

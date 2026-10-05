@@ -180,11 +180,9 @@ def main() -> int:
     #
     # `auto` is the right verb rather than a forced switch: it is self-guarding (no live
     # credential, no SAFE alternate, or an anti-thrash dwell ⇒ no-op) so it can never strand
-    # the session on an account that is itself near a limit. It also calls
-    # `burn_gate.observe_wall`, which records this 429 as an effective-cap sample — so the
-    # limit we just hit LOWERS the bar at which the next proactive rotation fires. That is
-    # what turns "escape after the limit" into "rotate before it": each miss teaches the
-    # gate where the real wall is.
+    # the session on an account that is itself near a limit. It rotates only: usage-cap
+    # learning is switched off because a usage-endpoint throttle cannot be told from a real
+    # limit (TRDD-YVC3F06V); the redesign is TRDD-AWIWXJIG.
     #
     # Gated on the rotator opt-in flag: without it, `auto` would still read the live
     # credential, and on macOS a credential read can raise a keychain prompt — a user who
@@ -232,7 +230,7 @@ def main() -> int:
             )
             state.log_line(
                 "stop-failure",
-                "rate limit: fired detached rotator auto (rotate away + learn the wall)",
+                "rate limit: fired detached rotator auto (rotate away only; cap learning is off, TRDD-AWIWXJIG)",
             )
     except Exception:  # noqa: BLE001 -- recovery MUST NOT break the resume-cue capture
         pass
