@@ -3,7 +3,7 @@ trdd-id: FWDZDB7W
 title: The janitor installs a fast pre-commit privacy-leak scan in every project it runs in
 column: blocked
 created: 2026-09-24T07:42:31+0200
-updated: 2026-10-05T11:01:17+0200
+updated: 2026-10-05T11:12:46+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -74,3 +74,7 @@ On 2026-09-24 commit 2ef3b1f8 added TRDD-K0PMVRN6 to design/tasks/ carrying thre
 - [ ] fleet install chaining existing hooks + per-project opt-out (outline 3): OPEN - remains on the card
 - [x] real-repo end-to-end: stage e-mail -> refused; stage noreply -> passes; existing hook still runs (outline 4): e2e run 2026-09-28 (lean-worker, temp repo, main-read) — personal e-mail REFUSED exit 1 (masked, chained hook not run), noreply PASSES exit 0 (chained STAND-IN hook ran — worker-authored marker script, not the repo's real stage-2; the real stage-1+stage-2 pair is de facto exercised on every in-repo commit this session, e.g. 8792ca19/bbe20017/677fe33e); 2nd commit proves per-commit chaining; evidence docs_dev/20260928-fwdzdb7w-e2e.md
 2026-09-28 e2e evidence (lean-worker, main-read): outline 4 discharged — real temp-repo commits: personal e-mail REFUSED exit 1 (BLOCKED, masked, chained hook correctly not run), noreply PASSES exit 0 (chained hook ran, 2nd commit proves per-commit chaining), home-path bonus caught 2 rules. Load-bearing Finding 0 for outline 3: copy-modules layout fails-closed at import (publish.py:312 reads .cpv-version at module load) — fleet install must invoke the scanner by absolute path from the janitor tree. Full evidence: docs_dev/20260928-fwdzdb7w-e2e.md. Outline 3 stays OPEN as a design proposal (default-on for mandated repos + opt-out sentinel, or ask-once — owner question).
+
+## STATE
+
+2026-10-05 — what closes this card: the owner's answer on TRDD-ASHLUQ6O (install the staged privacy scan into the other repositories: default-on, ask once, or never). If never: ASHLUQ6O is cancelled, acceptance box 3 is struck as not wanted, and this card closes. Otherwise it closes when ASHLUQ6O completes. The question was listed for the owner in the session's status message on 2026-10-05; no answer yet.

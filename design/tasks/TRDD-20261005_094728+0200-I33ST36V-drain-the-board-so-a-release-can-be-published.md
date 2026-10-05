@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-05T11:04:21+0200
+updated: 2026-10-05T11:12:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -40,6 +40,10 @@ Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages an
 2026-10-05 — the 17 testing cards without a named event, plus TRDD-A70YJLXN, were judged one by one: 4 returned to todo, 11 keep a named event, 1 moved to human_review for an owner question, 0 closed (the closes of TRDD-PWIAEW40 and TRDD-FWDZDB7W were attempted and stopped, see those cards; both remain in testing), 3 new cards minted for split-off work (TRDD-D10JB26H, TRDD-ASHLUQ6O, TRDD-2MU62A5F). The other 24 testing cards were classified from their STATE tails only and were not re-read; any whose wait was written before v3.7.0 went out on 2026-10-04 may already be past its event.
 2026-10-05 — closes: TRDD-PWIAEW40 not closed: the card tool refused the move to complete because the card has no acceptance checklist (the close text and implementation-commits are recorded on it; a checklist must be written first), by self-approval of this session's agent — the card tool accepts a named approver without checking it, so this is recorded as self-approval, not as a second party's. TRDD-FWDZDB7W is blocked on TRDD-ASHLUQ6O, not closed. Known and unresolved: the card linter reports 67 error-level findings across the corpus, none on the cards changed on 2026-10-05; the publish gate tolerates them. The dry-run's plugin validation carried 42 warnings and the CI-parity check 3. The assignee change on four cards makes this session's agent the nominal owner of work it has not touched.
 2026-10-05 — correction to the line above: TRDD-PWIAEW40 is closed after all. The card tool first refused because the card had no acceptance checklist; three boxes stating the three facts verified that day were added and ticked, then the close was accepted, by self-approval of this session's agent.
+2026-10-05 — CORRECTION of the daemon fact above: on the host where these fixes were made the daemon IS the OS-spawned keepalive kind and does replace itself. Its log shows it exiting for respawn when 3.7.0 was staged on 2026-10-04 at 12:37 and starting on the new code a minute later. So the daemon-side fixes should run after the next update without an owner restart; confirm from the log line all the same.
+2026-10-05 — archived TRDD-PWIAEW40 carries one frozen line saying it stays in testing, written before its close succeeded; it is superseded by the lines after it and was not removed. Its derived task (the skill text) was checked on 2026-10-05: 0 hits for the removed import function name, 0 for the other removed script name and 0 for the phrase setup-token under the skills and commands folders; the rewrite of the refresh-logins skill was not re-read line by line.
+2026-10-05 — the 14 testing cards whose wait predated v3.7.0 were checked against the machine's logs by two workers: 5 passed (3 of them partial: one covers 34 hours of a 7-day window, one saw no failing tick, one leaves a second box open), 1 partial observation, 1 failed, 2 not observed, 5 could not be told; each card carries its line. The daemon log covers about 34 hours and the rotator log about 7 hours, so several checks are partial.
+2026-10-05 — waiting on the owner, three questions: the keychain-read default (TRDD-QQ7QCS3T), installing the privacy scan into other repositories (TRDD-ASHLUQ6O, which blocks TRDD-FWDZDB7W), and registering the release-age hook with its window (TRDD-BUR8AW77). Publishing is the owner's go-ahead too: the board is truthful about what is unfinished; it is not finished.
 
 ## Order of work adopted on 2026-10-05
 
