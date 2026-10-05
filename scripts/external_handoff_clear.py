@@ -207,25 +207,27 @@ def summary_hold_active(sd: Path, now: int) -> bool:
         return False
 
 
-def pending_summary_key(sd: Path) -> str:
+def pending_summary_key(sd: Path, now: int) -> str:
     """The key for the handoff that is (or was just) being composed for this state dir.
 
     TRDD-QZVAEWQH: `dispatch._phase_clear_resume` needs to point the resumed turn at the
-    fresh keyed handoff instead of whatever SessionStart already injected. Read
-    `summary-pending.json`'s own `key` field while the record is still present — the common
-    case, since a resume racing the hold or landing seconds after release both see it. Fall
-    back to the newest handoff GROUP on disk once the record is gone (a resume can land after the
-    TTL swept it). Returns "" when neither
-    source names a key, so the caller omits the extra note rather than pointing at a guess.
+    fresh keyed handoff instead of whatever SessionStart already injected. Use
+    `summary-pending.json`'s own `key` field while the record is unexpired (`now < expires`).
+    Expiry is checked because nothing removes the record and only one clear chain writes it, so
+    an expired record belongs to an older clear and would point the resumed session at another
+    session's handoff (TRDD-PHS3DIBD). A missing or unparseable `expires` is not trusted.
+    Known limit: while a record is unexpired every resume in the project reads its key.
+    Otherwise fall back to the newest handoff GROUP on disk. Returns "" when neither source
+    names a key, so the caller omits the extra note rather than pointing at a guess.
     """
     import json  # noqa: PLC0415
 
     try:
         rec = json.loads((sd / _PENDING_FILE).read_text(encoding="utf-8"))
         key = str(rec.get("key") or "")
-        if key:
+        if key and now < int(rec["expires"]):
             return key
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError, KeyError):
         pass
     group = handoff_files.newest_group(sd)
     if group:

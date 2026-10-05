@@ -1820,7 +1820,7 @@ def _keyed_handoffs(sd: Path) -> list[Path]:
         import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
     except ImportError:
         return []
-    key = _ehc.pending_summary_key(sd)
+    key = _ehc.pending_summary_key(sd, int(time.time()))
     if not key:
         return []
     return _handoffs_for_key(sd, key)
@@ -1897,7 +1897,7 @@ def _stamp_late_summary(sd: Path) -> None:
         import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
     except ImportError:
         return
-    key = _ehc.pending_summary_key(sd)
+    key = _ehc.pending_summary_key(sd, int(time.time()))
     if not key:
         return
     real = [p for p in _handoffs_for_key(sd, key) if not _is_template_handoff(p)]

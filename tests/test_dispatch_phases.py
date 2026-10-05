@@ -1161,6 +1161,86 @@ def test_fresh_summary_note_empty_when_no_keyed_handoff_exists(env_isolation: di
     assert dispatch._fresh_summary_note(sd) == ""
 
 
+def _expired_a_with_newer_b(sd: Path, handoff_files, *, with_a: bool = True) -> None:
+    """Record for key A that expired 10 s ago; handoff group B has the newer filename stamp."""
+    now = int(time.time())
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "summary-pending.json").write_text(
+        json.dumps({"key": "aaaa0001", "captured": now - 1000, "expires": now - 10}),
+        encoding="utf-8",
+    )
+    if with_a:
+        handoff_files.write(sd, "aaaa0001", "synthetic A", now=now - 500)
+    handoff_files.write(sd, "bbbb0002", "synthetic B", now=now - 100)
+
+
+def test_expired_pending_record_does_not_name_an_older_sessions_handoff(
+    env_isolation: dict,
+) -> None:
+    """TRDD-PHS3DIBD: an expired record for A must not steer the note to A's handoff."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    _expired_a_with_newer_b(sd, handoff_files)
+    note = dispatch._fresh_summary_note(sd)
+    b = sorted(sd.glob("agent-handoff-bbbb0002-*.md"))[0]
+    assert str(b.resolve()) in note, note
+    assert "aaaa0001" not in note, note
+
+
+def test_unexpired_pending_record_still_names_its_own_handoff(env_isolation: dict) -> None:
+    """Control: an unexpired record for A with A's handoff names A's file, not newer B."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    _arm_summary_hold(sd, expires_in_s=900, key="aaaa0001")
+    now = int(time.time())
+    a = handoff_files.write(sd, "aaaa0001", "synthetic A", now=now - 500)
+    handoff_files.write(sd, "bbbb0002", "synthetic B", now=now - 100)
+    assert str(a.resolve()) in dispatch._fresh_summary_note(sd)
+
+
+def test_stamp_late_summary_uses_the_newest_group_when_the_record_expired(
+    env_isolation: dict,
+) -> None:
+    """TRDD-PHS3DIBD: with an expired record for A, the late-summary stamp is B's, not A's."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    _expired_a_with_newer_b(sd, handoff_files)
+    dispatch._stamp_late_summary(sd)
+    assert (sd / "late-summary-noted-bbbb0002.txt").exists()
+    assert not (sd / "late-summary-noted-aaaa0001.txt").exists()
+
+
+def test_known_limit_unexpired_record_without_handoff_gives_an_empty_note(
+    env_isolation: dict,
+) -> None:
+    """KNOWN LIMIT, pinned on purpose: an unexpired record for A that has NO handoff hides a
+    newer group B, so the note is empty. Today's deliberate limit (TRDD-PHS3DIBD), not the
+    desired end state."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    _arm_summary_hold(sd, expires_in_s=900, key="aaaa0001")
+    handoff_files.write(sd, "bbbb0002", "synthetic B", now=int(time.time()) - 100)
+    assert dispatch._fresh_summary_note(sd) == ""
+
+
 def test_a_real_summary_landing_after_a_template_resume_is_announced_once(
     env_isolation: dict,
 ) -> None:

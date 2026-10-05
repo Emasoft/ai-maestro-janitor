@@ -47,10 +47,11 @@ def test_pending_summary_key_reads_the_live_pending_record(tmp_path):
     import json
 
     sd = _project(tmp_path) / ".janitor" / "state"
+    now = int(time.time())
     (sd / ehc._PENDING_FILE).write_text(
-        json.dumps({"key": "abcd1234", "expires": int(time.time()) + 900}), encoding="utf-8"
+        json.dumps({"key": "abcd1234", "expires": now + 900}), encoding="utf-8"
     )
-    assert ehc.pending_summary_key(sd) == "abcd1234"
+    assert ehc.pending_summary_key(sd, now) == "abcd1234"
 
 
 def test_pending_summary_key_falls_back_to_the_newest_group_once_released(tmp_path):
@@ -60,13 +61,65 @@ def test_pending_summary_key_falls_back_to_the_newest_group_once_released(tmp_pa
 
     sd = _project(tmp_path) / ".janitor" / "state"
     handoff_files.write(sd, "ffee9988", "some summary text")
-    assert ehc.pending_summary_key(sd) == "ffee9988"
+    assert ehc.pending_summary_key(sd, int(time.time())) == "ffee9988"
 
 
 def test_pending_summary_key_empty_when_neither_source_names_one(tmp_path):
     """No pending record, no handoff on disk — "" is the correct "nothing to point at"."""
     sd = _project(tmp_path) / ".janitor" / "state"
-    assert ehc.pending_summary_key(sd) == ""
+    assert ehc.pending_summary_key(sd, int(time.time())) == ""
+
+
+def _two_keys(sd: Path, *, with_a: bool = True) -> None:
+    """Handoffs with controlled FILENAME timestamps: A older (optional), B newer."""
+    import handoff_files
+
+    if with_a:
+        handoff_files.write(sd, "aaaa0001", "synthetic A", now=1_000_000)
+    handoff_files.write(sd, "bbbb0002", "synthetic B", now=1_000_100)
+
+
+def _record(sd: Path, rec: dict) -> None:
+    import json
+
+    (sd / ehc._PENDING_FILE).write_text(json.dumps(rec), encoding="utf-8")
+
+
+def test_expired_pending_record_is_ignored_for_the_newest_group(tmp_path):
+    """An expired record belongs to an older clear: the newest handoff group wins (PHS3DIBD)."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _two_keys(sd)
+    _record(sd, {"key": "aaaa0001", "expires": 2_000})
+    assert ehc.pending_summary_key(sd, 2_000) == "bbbb0002"
+    assert ehc.pending_summary_key(sd, 5_000) == "bbbb0002"
+
+
+def test_unexpired_pending_record_still_wins(tmp_path):
+    """Control: an unexpired record for A with A's handoff names A, not the newer B."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _two_keys(sd)
+    _record(sd, {"key": "aaaa0001", "expires": 2_000})
+    assert ehc.pending_summary_key(sd, 1_999) == "aaaa0001"
+
+
+def test_pending_record_without_a_usable_expires_is_not_trusted(tmp_path):
+    """A missing or unparseable `expires` falls through to the newest group."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _two_keys(sd)
+    _record(sd, {"key": "aaaa0001"})
+    assert ehc.pending_summary_key(sd, 1_000) == "bbbb0002"
+    _record(sd, {"key": "aaaa0001", "expires": "abc"})
+    assert ehc.pending_summary_key(sd, 1_000) == "bbbb0002"
+
+
+def test_known_limit_unexpired_record_without_handoff_hides_a_newer_group(tmp_path):
+    """KNOWN LIMIT, pinned on purpose: while a record is unexpired its key is used even though
+    it has no handoff and a newer group exists. This is today's deliberate limit
+    (TRDD-PHS3DIBD), not the desired end state."""
+    sd = _project(tmp_path) / ".janitor" / "state"
+    _two_keys(sd, with_a=False)
+    _record(sd, {"key": "aaaa0001", "expires": 2_000})
+    assert ehc.pending_summary_key(sd, 1_000) == "aaaa0001"
 
 
 # --- the hold ends with its handoff (never through a release call) -----------------------
