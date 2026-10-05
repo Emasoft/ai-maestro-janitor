@@ -4,7 +4,7 @@ title: The iTerm Automation alert tells the human to enable a list entry that ma
 column: dev
 status: tasked
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-05T07:49:35+0200
+updated: 2026-10-05T08:10:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T04:48:26+0200
-implementation-commits: [47f2abe6, e4558fcb, d3a99c82, 33ec27f2]
+implementation-commits: [47f2abe6, e4558fcb, d3a99c82, 33ec27f2, 2d55a99a]
 ---
 
 # The iTerm Automation alert tells the human to enable a list entry that macOS may never have created and repeats on every heartbeat
@@ -113,3 +113,6 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 — known limit of the repetition test: it calls the three flag writers in the order the fleet scan does, written out by hand; no test goes through the fleet scan itself for this sequence, so a reordering in production would not be noticed by it.
 2026-10-05 07:45 — caution on the evidence above: the osascript runs were grouped by process id only; their parent was not checked, so another caller on the host would look the same. The scan at 07:43 showed two runs two seconds apart, which is the first retry interval: the likeliest reading is one failed attempt and a working retry. If so the channel is still marginal under the new iTerm and the alert may return. The test is whether the blocked flag reappears; at the time of writing it had not.
 2026-10-05 — open point never followed up: the privacy database's allowed Apple-events entry names the interpreter's bin path, while the process that executes is the application bundle binary inside the same framework; both daemons run that same bundle binary. Whether the privacy system treats the two paths as one client is NOT ESTABLISHED. Probably not this failure's cause, because an identity mismatch does not come and go and would not be cured by restarting iTerm; the project memory already warns that a grant follows the exact binary.
+2026-10-05 — the recovery log line landed (unpublished): a probe that works again after logged failures writes one line naming that episode's failure keys. Blind spot: it records a probe success, not a flag that clears because the scan did not see iTerm running.
+2026-10-05 — project memory: the fleet guardian page's lesson 7 calls restarting iTerm a cheap thing to try, which is unsafe for an agent reader (it closes every session in that terminal). It could not be corrected in place because the memory write verbs cannot correct a lesson by its id (project issue 331). Lesson 8 on the same page states that it is the owner's action only, and the page description carries the same caution so the recall listing shows it.
+2026-10-05 — BOARD NOTE: this card took a whole session; its symptom is gone on the host where it was investigated; five code commits are landed and unpublished. If the second-view change is not small, this card moves to testing, waiting on a named live event: the first recurrence on a host running a release that carries the probe logging.
