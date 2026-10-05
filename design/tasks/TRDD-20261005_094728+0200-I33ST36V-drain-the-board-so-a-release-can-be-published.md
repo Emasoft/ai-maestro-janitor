@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-05T13:37:42+0200
+updated: 2026-10-05T15:09:42+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -47,6 +47,9 @@ Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages an
 2026-10-05 — a second publish dry-run on commit 551c4d36 passed every gate before the version bump (17951 tests passed, plugin validation clean). Afterwards another session committed 31c2e3b0 (memgrep, TRDD-7KAL6PNB) on the same branch, and the daemon fix 8a5619f7 (TRDD-D5BPUFIV) and one memory-page split were committed; both earlier dry-runs are void. A third dry-run stopped at the type-check step: pyright timed out after fifteen minutes on a heavily loaded machine. So nothing after 551c4d36 has passed the gate.
 2026-10-05 — another interactive session is working in this repository at the same time and has committed; two agents writing git in one tree is the probable cause of that morning's stale lock file (inferred, not shown). Before a real publish: confirm no other session is active here and the machine is idle.
 2026-10-05 — the owner was given the summary and the three questions on 2026-10-05 and asked whether to publish; no answer yet. An agent does not publish on its own reading.
+2026-10-05 — a fourth publish dry-run, on commit a6a79a28 (the head, which contains the other session's commit 31c2e3b0 and the daemon fix 8a5619f7), passed every gate before the version bump: ruff, mypy and pyright; 17955 tests passed and 2 skipped; plugin validation with 0 critical, 0 major, 0 minor and 42 warnings; the parity check with 0 failures. One security linter timed out under machine load and was skipped locally in that run, and three other linters are not installed locally; continuous integration enforces all four. This supersedes the line above saying nothing after 551c4d36 has passed the gate. It is void again after any commit that changes code.
+2026-10-05 — the machine was heavily loaded for hours that day (a remote-desktop process at over 200 percent of a processor, restarting under new ids); the third dry-run's type-check step timed out during it. The type checker scans only the scripts and tests folders, so no scratch folder slowed it. Load as the cause is the best reading, not a measurement.
+2026-10-05 — the owner has been told the dry-run result and asked again whether to publish; still no answer. Not published.
 
 ## Order of work adopted on 2026-10-05
 
