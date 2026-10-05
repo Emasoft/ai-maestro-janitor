@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-05T15:09:42+0200
+updated: 2026-10-05T15:14:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -50,6 +50,7 @@ Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages an
 2026-10-05 — a fourth publish dry-run, on commit a6a79a28 (the head, which contains the other session's commit 31c2e3b0 and the daemon fix 8a5619f7), passed every gate before the version bump: ruff, mypy and pyright; 17955 tests passed and 2 skipped; plugin validation with 0 critical, 0 major, 0 minor and 42 warnings; the parity check with 0 failures. One security linter timed out under machine load and was skipped locally in that run, and three other linters are not installed locally; continuous integration enforces all four. This supersedes the line above saying nothing after 551c4d36 has passed the gate. It is void again after any commit that changes code.
 2026-10-05 — the machine was heavily loaded for hours that day (a remote-desktop process at over 200 percent of a processor, restarting under new ids); the third dry-run's type-check step timed out during it. The type checker scans only the scripts and tests folders, so no scratch folder slowed it. Load as the cause is the best reading, not a measurement.
 2026-10-05 — the owner has been told the dry-run result and asked again whether to publish; still no answer. Not published.
+2026-10-05 — correction for the owner's list: the item 'the rotator read credentials from the backup copy, not investigated' was a false alarm. It is designed behaviour of the headless daemon and is the subject of the owner question on TRDD-QQ7QCS3T. The dry-run result recorded above is for commit a6a79a28; later commits changed cards only and have not been run.
 
 ## Order of work adopted on 2026-10-05
 

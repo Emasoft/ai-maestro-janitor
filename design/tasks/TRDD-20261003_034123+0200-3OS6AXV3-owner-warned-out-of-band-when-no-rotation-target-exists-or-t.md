@@ -4,7 +4,7 @@ title: Owner warned out of band when no rotation target exists or the rotator st
 column: human_review
 status: tasked
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-05T13:37:07+0200
+updated: 2026-10-05T15:14:00+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -55,3 +55,5 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — correction: 'observed live' above is too strong. The read came from the recent-alert record, which shows the rotation-stuck condition was raised at some point on 2026-10-05; the live alert file was absent, and the heartbeat stopped printing the alert after about 10:29 that day, so it may have cleared by itself. WAITING ON THE OWNER, not on an event: if the alert returns, the capture-all-logins command is the owner's action.
 2026-10-05 — possibly related: TRDD-HVGU9OBL (the primary live credential was unreadable on every logged rotator tick); a hypothesis, not a finding.
 2026-10-05 — the rotation-stuck alert was printed again by the heartbeat later the same day, so it had not cleared for good. If TRDD-HVGU9OBL turns out to be its cause, capturing logins may not be the remedy; read that card before acting on the alert.
+2026-10-05 — the 'possibly related: TRDD-HVGU9OBL' line above is WITHDRAWN: that card turned out to describe designed behaviour (the headless daemon skips the primary read on purpose and uses the mirror copy), so it is not a cause of this card's symptom.
+2026-10-05 — for the owner's action on the rotation-stuck alert, read in the code by a worker: capturing logins does not change the daemon's primary read; it can help when a spare account's stored login is unusable or an identity cannot be established, and does nothing when every account is simply at its usage limit.

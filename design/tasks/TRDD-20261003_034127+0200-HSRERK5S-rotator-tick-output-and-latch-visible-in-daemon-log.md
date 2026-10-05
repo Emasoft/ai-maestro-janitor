@@ -4,7 +4,7 @@ title: Rotator tick output and latch visible in daemon log
 column: testing
 status: tasked
 created: 2026-10-03T03:41:27+0200
-updated: 2026-10-05T11:17:27+0200
+updated: 2026-10-05T15:13:52+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -37,3 +37,4 @@ Parent plan: TRDD-JSQSJ3PZ
 
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Field check passed: since the 3.7.0 daemon start (2026-10-04T12:38) daemon.log carries 5 abnormal-tick lines (rc=0 with a non-empty stderr tail, keychain lookup timeouts, all on 2026-10-05); 0 before release. No tick with rc != 0 has occurred yet, so that branch is unobserved. The card stays in testing; remaining event: the first rotator tick with a non-zero return code shows its code and stderr tail in the daemon log.
 2026-10-05 — possibly related: TRDD-HVGU9OBL (the primary live credential was unreadable on every logged rotator tick); a hypothesis, not a finding.
+2026-10-05 — the 'possibly related: TRDD-HVGU9OBL' line above is WITHDRAWN: that card turned out to describe designed behaviour (the headless daemon skips the primary read on purpose and uses the mirror copy), so it is not a cause of this card's symptom.

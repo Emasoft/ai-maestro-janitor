@@ -4,7 +4,7 @@ title: the integrity re-pin chore reports a healthy pin as stuck
 column: testing
 status: tasked
 created: 2026-10-05T13:10:40+0200
-updated: 2026-10-05T15:09:40+0200
+updated: 2026-10-05T15:14:06+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -54,3 +54,4 @@ Origin: written by the janitor repair agent working the ticket, which died befor
 2026-10-05 — GATED: a publish dry-run on commit a6a79a28 passed every gate before the version bump, including pyright and an uninterrupted full suite (17955 passed, 2 skipped). The line above saying NOT gated is superseded. In that run one security linter timed out and was skipped locally; continuous integration still enforces it.
 2026-10-05 — two deviations by the main agent, recorded as such: a second repair agent was dispatched on a ticket marker that named no ticket, with the ticket id filled in from an earlier fire, while the first agent was in fact still working; and it was then sent a message beyond the ticket id, telling it the fix existed. Both were outside the heartbeat protocol as written. The second agent had reported nothing by the time the first closed the ticket.
 2026-10-05 — not live: the false stuck-anchor report can recur until a release carrying 8a5619f7 is installed, because the running daemon is the installed 3.7.0.
+2026-10-05 — end of the second repair agent: it was still alive after the ticket closed and was stopped by the main agent through the session's own task stop. The working tree was identical before and after the stop, so it wrote no second fix; whether it wrote janitor state outside the tree was not checked. The ticket file is in the closed folder. The fix has never been through the security linter locally (it was skipped in the gated run); continuous integration runs it.

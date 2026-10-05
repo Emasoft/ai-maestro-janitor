@@ -3,7 +3,7 @@ trdd-id: OOZP38MN
 title: An expiring live token reads as network down and forces an unprobed degraded rotate
 column: testing
 created: 2026-09-24T08:11:40+0200
-updated: 2026-10-05T11:12:14+0200
+updated: 2026-10-05T15:13:58+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -36,3 +36,4 @@ when the live token is under 30 s from expiry, usage_probe returns status 0 (EXP
 ## STATE
 
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: still no observation: rotator logs only cover 2026-10-05 04:08 to 11:07 (earlier lines rotated away); that window held 407 ticks, 0 rotations and 0 LOCALLY EXPIRED lines; see TRDD-HVGU9OBL for the credential finding. The card stays in testing; the check could not be made: no rotator log exists for 2026-10-04 12:35 to 2026-10-05 04:08 and no real expiry tick has been logged.
+2026-10-05 — the open finding referred to above (TRDD-HVGU9OBL) is closed as explained: the headless daemon skips the primary read by design and uses the mirror copy. It is not a defect and does not bear on this card's event.

@@ -4,7 +4,7 @@ title: Daemon runs at normal priority
 column: testing
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-05T11:17:35+0200
+updated: 2026-10-05T15:13:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,6 +36,7 @@ implementation-commits: [30d320eb]
 
 Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Field check FAILED: the installed LaunchAgent plist still says ProcessType Background (the N2 re-stage is not done); since the 3.7.0 daemon start (2026-10-04T12:38) 8 of 1313 rotator ticks took 30 s or more, max 168 s (2026-10-05T06:09); the log is only 34 h and load level is not in it. The card stays in testing; the re-stage of the daemon's launch agent at standard priority is a host step for the owner and has not been done.
+2026-10-05 — the 'possibly related: TRDD-HVGU9OBL' line above is WITHDRAWN: that card turned out to describe designed behaviour (the headless daemon skips the primary read on purpose and uses the mirror copy), so it is not a cause of this card's symptom.
 
 ## Approval log
 
