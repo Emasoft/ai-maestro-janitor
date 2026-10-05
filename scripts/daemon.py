@@ -2598,6 +2598,16 @@ def task_integrity_repin() -> None:
     def _log(msg: str) -> None:
         state.log_line("daemon", f"  integrity-repin: {msg}")
 
+    # Every reason certify gave for REFUSING this fire. certify returns None both when it
+    # refuses AND when the pin already names the version the stub would exec — and it is
+    # silent only in the second case (its documented contract: the steady state is not
+    # logged). Collecting its reasons is how the two are told apart below.
+    refusals: list[str] = []
+
+    def _refused(msg: str) -> None:
+        refusals.append(msg)
+        _log(msg)
+
     try:
         import version_update_lib as vu  # noqa: PLC0415 — heavy; only on this chore's fire
 
@@ -2607,18 +2617,27 @@ def task_integrity_repin() -> None:
         # gate fail CLOSED, leaving the existing pin untouched rather than advancing it on
         # evidence we do not have.
         published = vu.resolve_latest_published(plugin_root, on_failure=_log)
-        newly_pinned = vu.certify_newest_if_clean(
-            # resolve_cache_parent, NOT plugin_root.parent — from the staged DATA closure the
-            # latter lists zero versions and certify's empty-installed path is its ONE silent
-            # return. That is precisely how the month-long freeze stayed invisible.
-            vu.resolve_cache_parent(plugin_root), published or None, log=_log,
-        )
+        # resolve_cache_parent, NOT plugin_root.parent — from the staged DATA closure the
+        # latter lists zero versions and certify's empty-installed path is a silent
+        # return. That is precisely how the month-long freeze stayed invisible.
+        cache_parent = vu.resolve_cache_parent(plugin_root)
+        newly_pinned = vu.certify_newest_if_clean(cache_parent, published or None, log=_refused)
+        if not newly_pinned and not refusals and not vu.list_installed_versions(cache_parent):
+            # certify's OTHER silent return: nothing cached at all. That is the frozen-anchor
+            # shape, not a current pin, so it must count as a decline — and say why.
+            _refused(f"C3 re-pin declined — no cached versions under {cache_parent}")
     except Exception as exc:  # noqa: BLE001 — an integrity chore must never kill the daemon
         _log(f"skipped: {exc}")
         return
 
-    if newly_pinned:
-        _log(f"certified last-good={newly_pinned} (C3 manifest-HMAC trust anchor refreshed)")
+    if newly_pinned or not refusals:
+        # A pin that is ALREADY CURRENT ends a decline streak exactly as a fresh pin does.
+        # It used to fall through to the counter below, so every anchor was reported stuck
+        # (SELFINT-004) three fires — 18 h — after it was successfully certified: ticket
+        # T-JWYHOMMV, where the pin named the running 3.7.0 and "the reason logged above"
+        # did not exist. Do not count a None from certify without a refusal reason.
+        if newly_pinned:
+            _log(f"certified last-good={newly_pinned} (C3 manifest-HMAC trust anchor refreshed)")
         with contextlib.suppress(Exception):
             declines_path.unlink()
         return
