@@ -2,7 +2,7 @@
 name: memory-system-tooling-and-protocol
 description: "how does the memgrep engine work / what are the memgrep subcommands / how do I recall / find / links / reindex / what do the three memory skills do / MEMORIZE RECALL UPDATE / what is the update invariant / how does a superseded memory get demoted to a lesson / what do the memory heartbeat detectors do / memory-scope-leak memory-librarian memorize-nudge why-in-commits / what is the wikimem layer / hub aspect component tiers / the link law every link is bidirectional / how do I install the memory system in a new project / memgrep binary is stale on this host / cargo install does not roll forward with the plugin update"
 ocd: 2026-06-13
-lmd: 2026-09-06
+lmd: 2026-10-05
 metadata:
   node_type: memory
   type: project
@@ -202,7 +202,7 @@ proportional to the task. The full data model lives in the write skill's
 
 ## Install procedure — adopt the system in a new project/plugin
 
-^JWEHPGUJ [desc: "Adopting the memory system in a new project: cargo-install memgrep once, create scope dirs lazily, keep PROJECT memory/ git-tracked, gitignore its SQLite sidecar, wire detectors via /janitor-arm.", keywords: how_do_i_install_the_memory_system_in_a_new_project how_to_adopt_the_memory_system memgrep_binary_missing_cargo_install memgrep_command_not_found recall_fell_back_to_plain_grep recall_degrades_to_grep_until_memgrep_installed project_scope_gitignore_invariant gitignore_the_memgrep_index_sidecar wire_heartbeat_detectors_janitor_arm recall_discipline_rule_installed_at_session_start, type: project, ocd: 2026-06-13, lmd: 2026-09-06]
+^JWEHPGUJ [desc: "Adopting the memory system in a new project, part 1: cargo-install memgrep once, and create the LOCAL/USER/PROJECT scope dirs lazily.", keywords: how_do_i_install_the_memory_system_in_a_new_project how_to_adopt_the_memory_system memgrep_binary_missing_cargo_install memgrep_command_not_found recall_fell_back_to_plain_grep recall_degrades_to_grep_until_memgrep_installed mkdir_scope_dir_lazily where_do_local_user_project_memory_live memgrep_not_on_PATH_cargo_bin first_write_to_a_scope_creates_its_dir, type: project, ocd: 2026-06-13, lmd: 2026-10-05]
 1. **Install the engine once** (memgrep is a Rust binary that ships in this
    plugin). If `command -v memgrep` is empty:
    `cargo install --path "$CLAUDE_PLUGIN_ROOT/scripts/memgrep"` (or
@@ -212,6 +212,9 @@ proportional to the task. The full data model lives in the write skill's
 2. **Create the scope dir(s) lazily** — `mkdir -p "$MEMDIR"` for whichever scope
    you first write to (the skills do this on demand). LOCAL and USER live under
    `$HOME/.claude/`; PROJECT lives at `<repo-root>/memory/`.
+
+^ATOM-O352-2L8X [desc: "Adopting the memory system, part 2: PROJECT memory must stay git-tracked, gitignore the memgrep SQLite sidecar, the recall rule installed at session start, and wiring detectors via /janitor-arm.", keywords: project_memory_swallowed_by_gitignore project_scope_gitignore_invariant gitignore_the_memgrep_index_sidecar memgrep_index_db_committed_by_mistake local_memory_tree_committed_inside_repo memory_scope_leak_detector_fires recall_discipline_rule_installed_at_session_start wire_heartbeat_detectors_janitor_arm memory_librarian_proposals_where harness_memory_directive_is_write_side_source, type: project, ocd: 2026-10-05, lmd: 2026-10-05]
+
 3. **PROJECT-scope gitignore invariant:** PROJECT `<repo-root>/memory/` MUST be
    git-TRACKED (it is the shared, pushed corpus) — make sure no `.gitignore` rule
    swallows it. Conversely, a LOCAL-shaped `projects/<slug>/memory/` tree must
