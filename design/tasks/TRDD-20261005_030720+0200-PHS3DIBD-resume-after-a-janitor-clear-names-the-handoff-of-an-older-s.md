@@ -4,7 +4,7 @@ title: Resume after a janitor clear names the handoff of an older session becaus
 column: todo
 status: tasked
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T03:07:20+0200
+updated: 2026-10-05T03:12:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T03:07:20+0200
 parent-trdd: K9AHY1ZB
+derived: true
 ---
 
 # Resume after a janitor clear names the handoff of an older session because the pending-summary record is never removed
@@ -47,3 +48,14 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 ## Approval log
 
 - 2026-10-05T03:07:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-05: Cause point 3 was first written on one grep for a constant name, which cannot prove absence. It has now been checked by reading the whole record lifecycle and by a replay (report in reports_dev, file name 20261005_031047+0200-summary-pending-lifecycle.md). Result: confirmed. The record has exactly one write site (external_handoff_clear.py line 149, reached only through take_summary_hold on the daemon lane) and no remove, rename or sweep anywhere in scripts/. The docstring phrase "after the TTL swept it" in pending_summary_key refers to nothing that exists.
+2026-10-05: Cause point 5 is CORRECTED. It is not that TRDD-5MOX0FPO stopped the record being replaced. The 02:17 clear ran through the clear_trigger sidecar chain, and that chain never writes the record at all; only the daemon lane's take_summary_hold does, and it skips the write when a keyed handoff already exists. So a record left by one daemon-lane clear stays on disk through every later clear made by another chain.
+2026-10-05: summary_hold_active DOES check expires (an expired record means no hold, the file is kept). pending_summary_key does NOT. That asymmetry is the defect.
+2026-10-05: REPLAY (scratch copy of the state folder): with the stale record present pending_summary_key returns d7518dd3; with only that record removed it returns 20d63f12, the cleared session. So the stale record alone explains the wrong pointer.
+2026-10-05: NOT explained: two stamp files, late-summary-noted-fbf69020.txt and late-summary-noted-24952884.txt, were written 3 ms apart at 01:15 during the clear of a third session (4574d0c4). That fits the late-summary drift phase looping over existing stamps and rewriting them; why their content had changed was not determined. Any fix must say what happens to stamps already written under a wrong key.
+2026-10-05: The memory wiki (ATOM-LMFJ-JEWP and its lesson 17) describes the hold ending when a handoff exists and says nothing about the record being deleted or about the expires gap. It needs a correction once this card is fixed.
+2026-10-05: The first listed test needs a handoff on disk for the stale key A as well as the newer group for key B; with no A handoff the note is empty today and the test would fail for the wrong reason.
+2026-10-05 NEXT ACTION: put forward a fix in pending_summary_key for review: the record's key is used only while the record is unexpired and well formed, and never when a handoff group of a different key has a filename timestamp newer than the record's captured time; otherwise the newest handoff group decides. No change to summary_hold_active.

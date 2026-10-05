@@ -4,7 +4,7 @@ title: Janitor clear keeps what native compaction keeps and resumes in one push
 column: dev
 status: tasked
 created: 2026-10-03T03:41:40+0200
-updated: 2026-10-05T01:33:37+0200
+updated: 2026-10-05T03:12:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -16,7 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-03T03:41:40+0200
 project-id: ai-maestro-janitor
-npt: [5MOX0FPO, DS3WDTPV]
+npt: [5MOX0FPO, DS3WDTPV, PHS3DIBD]
 eht: [7X9WXDK9, B3PY3HV7, MMUSDJHQ]
 blocked-by: []
 pre-block-column: 
@@ -336,6 +336,8 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-04 column testing (was dev). Correction to the move reason recorded in the approval log - it called 7X9WXDK9, B3PY3HV7 and MMUSDJHQ parked, but 7X9WXDK9 and B3PY3HV7 are in testing and MMUSDJHQ is in todo. Verified with git merge-base against tag v3.7.0 - bdc81d1c, a5903a15 and cc48b42f are inside the 3.7.0 release. The mover first read this STATE through a truncated diff and re-read it whole afterwards. Still open and not code in flight - the real-file 22.09 replay in tests_dev, implementation-commits on 5MOX0FPO (a5903a15) and DS3WDTPV (cc48b42f), and the clear-path field acceptance. NEXT ACTION - record those two implementation-commits, run the replay, then observe the field acceptance after 3.7.1 is installed.
 2026-10-05 column blocked (was testing for about two hours on 2026-10-04; that move raised ORDER-NPT-VIOLATED because a parent may not pass dev while its prerequisite cards are unfinished). blocked-by lists the same cards as npt. pre-block-column set to dev, the lint-clean place for a parent to wait. Probe measured 2026-10-05: trddgrep why prints the word READY for a card whose prerequisites are satisfied (seen on BHIS99XE) and does not print it for a blocked card (seen on 3HLI7DMK). The NEXT ACTION above is unchanged.
 2026-10-05 later: column dev (was blocked since 2026-10-04). The line above saying the probe was measured is WRONG: BHIS99XE was not a blocked card. Valid test on two scratch cards: after the blocker was closed, trddgrep why on the blocked card printed BLOCKED with no locally-resolvable blocker, never READY, and the card stayed in blocked, so the probe would never clear. blocked-by is cleared; npt still lists the prerequisite cards. dev here means waiting on those cards, not code in flight. The NEXT ACTION above is unchanged.
+2026-10-05: TRDD-PHS3DIBD added to blocked-by. The clear chain resumed a cleared session with a pointer to an older session's handoff (observed 02:17 to 02:20 on 2026-10-05); the umbrella must not unblock while that is open.
+2026-10-05 CORRECTION to the line above: blocked-by is back to empty and TRDD-PHS3DIBD is listed under npt instead, next to the two other prerequisite cards. A non-empty blocked-by on a card in dev is a lint error (GRAPH-BLOCKED-NOT-BLOCKED); this umbrella carries its open prerequisites in npt.
 
 ## Release status
 
