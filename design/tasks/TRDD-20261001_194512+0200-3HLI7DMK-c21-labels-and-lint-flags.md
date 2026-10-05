@@ -1,10 +1,10 @@
 ---
 trdd-id: 3HLI7DMK
 title: C21 — labels and lint flags
-column: ai_review
+column: dev
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-05T02:36:51+0200
+updated: 2026-10-05T02:44:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -67,3 +67,16 @@ The two cards named above: TRDD-57KAZJI7 (lint config policy) and TRDD-KTD3N7H6 
 - 2026-10-05: The commit message of 453512bc says a refused --config stops "before any page is linted or fixed". That holds by reading the code (line above), not by any test.
 - 2026-10-05: A worker of the second pass left a folder named c21-mem-copy2 outside the repository; it may hold a copy of PROJECT memory pages. Not touched. The owner decides what to do with it.
 - 2026-10-05: NEXT ACTION (replaces the one above): read the rest of the memory.rs diff of 453512bc; answer whether the rule registry includes Python-side codes; then decide the memgrep reinstall separately.
+- 2026-10-05 REVIEW: the whole memory.rs diff of 453512bc and the body of lint_paths_with were read. The code matches spec clause WM-LINT-10 as written. No defect found in the C21 change itself.
+- 2026-10-05 REVIEW: confirmed by reading lint_paths_with: with fixing on, every page is normalized (user symlink root reconciled, then normalize_page_until_clean per page) BEFORE findings are collected, and that step does not consult select, ignore, noqa or lint-ignore. This replaces the earlier line that inferred it from call order.
+- 2026-10-05 REVIEW: the fixer dry-run in apply_lint_config passes the page text to the fixer and compares the returned text; the fixer bodies were not read, so "writes nothing" holds for apply_lint_config, not proven for each fixer.
+- 2026-10-05 REVIEW, registry question answered by measurement: the memgrep rule table holds only memgrep's own 46 codes. As selectors, WMPAGE and MGPERF are accepted; MEMGREP, MEMCORP, HOOK, WFSEC, DEP and SELFINT are refused as unknown (exit 2 on the command line). So a janitor-side code placed inside the [lint] table of a .janitor.toml invalidates that file for memgrep lint.
+- 2026-10-05 REVIEW, measured: a .janitor.toml in the Python suppression layer's own shape (a suppress array of tables and a posture table, no lint table) is accepted by memgrep lint with no config error. The two layers can share one file as long as janitor-side codes stay out of the lint table. Recorded on TRDD-57KAZJI7.
+- 2026-10-05 NEXT ACTION (replaces the ones above): none on this card's code. It waits in ai_review for the decisions on TRDD-57KAZJI7 and TRDD-KTD3N7H6 and for the separate memgrep reinstall decision.
+- 2026-10-05 CORRECTION: the line above beginning "REVIEW: the whole memory.rs diff" said "No defect found in the C21 change itself". That is WITHDRAWN. Two defects were reproduced on the build of 453512bc.
+- 2026-10-05 DEFECT 1 (reproduced): an empty selector matches every rule, because an empty string is a prefix of every code. On a page with one ERROR, lint exits 1; with --ignore "" or with --ignore "WMLESS," (clap splits on the comma and yields an empty element) it prints nothing and exits 0. The fixable and unfixable config lists are also not validated for unknown selectors.
+- 2026-10-05 DEFECT 2 (reproduced): the safe-fix label is decided once per rule per page. On a page with two unquoted atom descriptions, one short and one over 200 characters, both lines print safe-fix although the fixer refuses the long one. That contradicts WM-LINT-10.
+- 2026-10-05 DECISION: both are fixed on this card before C22 builds on it. An empty selector becomes an unknown selector (exit 2 on the command line, CONFIG-001 in a config; a trailing comma is not tolerated). The safe-fix label is printed for a rule on a page only when the fixer's output, re-linted, has no finding of that rule left; per-finding precision is left to C22 (TRDD-JD2QR5SQ). The fix writes src/lint_config.rs, src/memory.rs, tests/cli.rs and the spec; memory.rs and tests/cli.rs are on C22's exclusive Writes list, and C22 is blocked on this card, so there is no live conflict.
+- 2026-10-05: Read but NOT examined, left open on this card: a noqa comment may be reported as unused after the autofix repaired its finding; apply_lint_config compares page paths in the form rel() prints, which may differ from the form of cross-page findings; per-file-ignores globs match that same displayed path.
+- 2026-10-05: Advisor not consulted for this fix: the fable-advisor agent type is not available in this session (headroom check passed, no advisor agent or tool is listed). The fix went through a measurement agent and an adversarial review instead.
+- 2026-10-05 NEXT ACTION (replaces the ones above): implement the two fixes per the DECISION line, gate, commit; then return this card to ai_review.
