@@ -1291,21 +1291,27 @@ def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str
 
     The real failure (exit code, stderr, exception type) is also written to the daemon
     log (TRDD-0QCRG2YX: a daemon probe failed for hours while the same script worked from
-    a shell, and nothing recorded why). Return values are unchanged. ``errors="replace"``
-    keeps undecodable child output from turning into a spurious "error".
+    a shell, and nothing recorded why). Return values are unchanged except in one case:
+    child output that is not valid UTF-8 used to raise inside subprocess and return
+    ``("", "error")``; it is now decoded with replacement characters (``errors="replace"``)
+    and returned with outcome ``"ok"`` when the exit code is 0.
     """
+    global _last_probe_failure_line
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        _log_probe_failure(cmd, "timeout", _probe_failure_detail(None, exc.stderr, None))
+        _log_probe_failure(cmd, "timeout", None, exc.stderr, None)
         return "", "timeout"
     except Exception as exc:  # noqa: BLE001 -- a probe failure must never break the scan
-        _log_probe_failure(cmd, "error", _probe_failure_detail(None, None, exc))
+        _log_probe_failure(cmd, "error", None, None, exc)
         return "", "error"
     if result.returncode != 0:
-        _log_probe_failure(cmd, "error", _probe_failure_detail(result.returncode, result.stderr, None))
+        _log_probe_failure(cmd, "error", result.returncode, result.stderr, None)
     elif not result.stdout.strip():
-        _log_probe_failure(cmd, "empty", _probe_failure_detail(0, result.stderr, None))
+        _log_probe_failure(cmd, "empty", 0, result.stderr, None)
+    else:
+        # A success with output ends the failure episode: the next failure must be logged again.
+        _last_probe_failure_line = ""
     return result.stdout, ("ok" if result.returncode == 0 else "error")
 
 
@@ -1322,26 +1328,37 @@ def _probe_failure_detail(returncode: int | None, stderr: str | bytes | None, ex
         raw = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr or "")
         text = " ".join(raw.split())
         head = "deadline-exceeded" if returncode is None else f"exit={returncode}"
-        # Extract the AppleScript error number BEFORE truncation: it sits at the end.
-        m = re.search(r"\((-\d+)\)$", text)
-        if m:
-            head += f" code={m.group(1)}"
+        # Extract the AppleScript error number BEFORE truncation; take the LAST one, it is the
+        # final error even when the message carries more text after it.
+        codes = re.findall(r"\((-\d+)\)", text)
+        if codes:
+            head += f" code={codes[-1]}"
         head += " stderr="
     home = str(Path.home())
     text = " ".join(text.replace(home, "~").split())
     return head + state.sanitize_for_drift_line(text)[:200]
 
 
-def _log_probe_failure(cmd: list[str], outcome: str, detail: str) -> None:
+def _log_probe_failure(cmd: list[str], outcome: str, returncode: int | None, stderr: str | bytes | None, exc: BaseException | None) -> None:
     """Record one failed probe in the daemon log; never raises."""
-    binary = (shutil.which(cmd[0]) if cmd else None) or "not-found"
+    global _last_probe_failure_line
     try:
-        state.log_line("daemon", f"iterm-probe: {outcome} bin={binary} {detail}")
-    except OSError:
-        # The line is diagnostic only, _run_probe_outcome promises never to raise, and a log
-        # that cannot be written (disk full, permissions) must not turn a probe result into a
-        # failed scan (TRDD-0QCRG2YX).
+        binary = (shutil.which(cmd[0]) if cmd else None) or "not-found"
+        line = f"iterm-probe: {outcome} bin={binary} {_probe_failure_detail(returncode, stderr, exc)}"
+        # Dedupe: while Automation is blocked the probe fails 3x per scan every 120 s, ~2160
+        # near-identical lines a day into a 1 MiB rotating log that would push out everything
+        # else. Log only when the line differs from the last one this process logged.
+        if line == _last_probe_failure_line:
+            return
+        state.log_line("daemon", line)
+        _last_probe_failure_line = line
+    except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change a probe result (TRDD-0QCRG2YX)
         pass
+
+
+
+#: Last failure line written to the daemon log by `_log_probe_failure`; "" after a successful probe.
+_last_probe_failure_line = ""
 
 
 def _cwd_of(pid: int) -> str | None:

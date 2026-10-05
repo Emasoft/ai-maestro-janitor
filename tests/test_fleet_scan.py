@@ -430,6 +430,8 @@ def _probe_log() -> str:
 
 def _probe_run(cmd: list[str], **kw: float) -> tuple[tuple[str, str], str]:
     # The daemon log is shared across tests: return only the lines this call wrote.
+    # Each call starts from a clean dedupe state, or an identical earlier failure would hide this one.
+    fs._last_probe_failure_line = ""
     before = _probe_log()
     res = fs._run_probe_outcome(cmd, **kw)
     return res, _probe_log()[len(before):]
@@ -438,15 +440,13 @@ def _probe_run(cmd: list[str], **kw: float) -> tuple[tuple[str, str], str]:
 def test_run_probe_outcome_logs_exit_code_and_stderr() -> None:
     """A failing child's exit code and stderr reach the daemon log; the outcome is unchanged."""
     # A python child, not `sh -c "... >&2"`: the suite sandbox refuses shell strings with redirection.
-    (_, outcome), log = _probe_run([sys.executable, "-c", "import sys; sys.exit(boom)"])
+    (_, outcome), log = _probe_run([sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"])
     assert outcome == "error"
-    assert "iterm-probe: error" in log and "exit=1" in log and "boom" in log
+    assert "iterm-probe: error" in log and "exit=3" in log and "boom" in log
 
 
 def test_run_probe_outcome_logs_exception_type_for_missing_binary() -> None:
     """An unrunnable binary is logged with its exception type and bin=not-found."""
-    fs._run_probe_outcome(["/no/such/binary/at/all"])
-    log = _probe_log()
     _, log = _probe_run(["/no/such/binary/at/all"])
     assert "exception=FileNotFoundError" in log and "bin=not-found" in log
 
@@ -477,21 +477,37 @@ def test_run_probe_outcome_survives_an_empty_command() -> None:
     assert fs._run_probe_outcome([]) == ("", "error")
 
 
-def test_run_probe_outcome_survives_an_unwritable_log() -> None:
+def test_run_probe_outcome_survives_an_unwritable_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A log that cannot be written does not change the result of a failing probe."""
-    log = fs.state.log_dir() / "daemon.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    aside = log.with_name("daemon.log.aside")
-    had_log = log.exists()
-    if had_log:
-        log.rename(aside)
-    log.mkdir()  # a directory in place of the file: opening it for append raises OSError
-    try:
-        assert fs._run_probe_outcome(["false"]) == ("", "error")
-    finally:
-        log.rmdir()
-        if had_log:
-            aside.rename(log)
+    # Own log dir: the session-shared daemon.log must never be replaced by a directory.
+    monkeypatch.setattr(fs.state, "log_dir", lambda: tmp_path)
+    (tmp_path / "daemon.log").mkdir()  # a directory in place of the file: opening it for append raises OSError
+    fs._last_probe_failure_line = ""
+    assert fs._run_probe_outcome(["false"]) == ("", "error")
+
+
+
+def test_run_probe_outcome_decodes_invalid_utf8_stdout_as_ok() -> None:
+    """A child that writes an invalid UTF-8 byte and exits 0 returns ok and does not raise."""
+    (stdout, outcome), _ = _probe_run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'a\\xffb')"])
+    assert outcome == "ok" and stdout.startswith("a") and stdout.endswith("b")
+
+
+def test_run_probe_outcome_logs_an_identical_failure_once_until_a_success() -> None:
+    """Two identical failures in a row log one line; a success with output re-arms the log."""
+    _, log = _probe_run(["false"])
+    assert log.count("iterm-probe: error") == 1
+    before = _probe_log()
+    fs._run_probe_outcome(["false"])
+    assert _probe_log() == before
+    fs._run_probe_outcome(["echo", "x"])
+    fs._run_probe_outcome(["false"])
+    assert _probe_log()[len(before):].count("iterm-probe: error") == 1
+
+
+def test_log_probe_failure_never_raises_when_the_detail_cannot_be_built() -> None:
+    """A stderr object the detail builder chokes on is swallowed (real failure, no patching)."""
+    fs._log_probe_failure(["false"], "error", 1, object(), None)  # type: ignore[arg-type]
 
 
 def test_probe_failure_detail_cleans_and_caps_stderr() -> None:
@@ -506,6 +522,18 @@ def test_probe_failure_detail_cleans_and_caps_stderr() -> None:
 def test_probe_failure_detail_accepts_invalid_utf8_bytes() -> None:
     """Undecodable stderr bytes do not raise."""
     assert "exit=1" in fs._probe_failure_detail(1, b"bad \xff byte", None)
+
+
+def test_probe_failure_detail_finds_the_code_before_trailing_text() -> None:
+    """An error number followed by more sentences is still extracted."""
+    out = fs._probe_failure_detail(1, "execution error: Not allowed (-1743). Try again later. Second sentence.", None)
+    assert "code=-1743" in out
+
+
+def test_probe_failure_detail_takes_the_last_code() -> None:
+    """With two error numbers in stderr the last one wins."""
+    out = fs._probe_failure_detail(1, "first (-1) then (-1743) and done", None)
+    assert "code=-1743" in out and "code=-1 " not in out
 
 
 def test_flag_carries_the_probe_outcome(
