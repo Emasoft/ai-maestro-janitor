@@ -422,6 +422,92 @@ def test_run_probe_outcome_timeout_on_exceeded_deadline() -> None:
     assert outcome == "timeout"
 
 
+
+def _probe_log() -> str:
+    path = fs.state.log_dir() / "daemon.log"
+    return path.read_text() if path.exists() else ""
+
+
+def _probe_run(cmd: list[str], **kw: float) -> tuple[tuple[str, str], str]:
+    # The daemon log is shared across tests: return only the lines this call wrote.
+    before = _probe_log()
+    res = fs._run_probe_outcome(cmd, **kw)
+    return res, _probe_log()[len(before):]
+
+
+def test_run_probe_outcome_logs_exit_code_and_stderr() -> None:
+    """A failing child's exit code and stderr reach the daemon log; the outcome is unchanged."""
+    # A python child, not `sh -c "... >&2"`: the suite sandbox refuses shell strings with redirection.
+    (_, outcome), log = _probe_run([sys.executable, "-c", "import sys; sys.exit(boom)"])
+    assert outcome == "error"
+    assert "iterm-probe: error" in log and "exit=1" in log and "boom" in log
+
+
+def test_run_probe_outcome_logs_exception_type_for_missing_binary() -> None:
+    """An unrunnable binary is logged with its exception type and bin=not-found."""
+    fs._run_probe_outcome(["/no/such/binary/at/all"])
+    log = _probe_log()
+    _, log = _probe_run(["/no/such/binary/at/all"])
+    assert "exception=FileNotFoundError" in log and "bin=not-found" in log
+
+
+def test_run_probe_outcome_logs_timeout() -> None:
+    """An exceeded deadline returns timeout and writes a timeout line."""
+    (_, outcome), log = _probe_run(["sleep", "5"], timeout=0.05)
+    assert outcome == "timeout"
+    assert "iterm-probe: timeout" in log
+
+
+def test_run_probe_outcome_logs_empty_success() -> None:
+    """Exit 0 with no output logs an empty line and still returns ok."""
+    (stdout, outcome), log = _probe_run(["true"])
+    assert (stdout, outcome) == ("", "ok")
+    assert "iterm-probe: empty" in log
+
+
+def test_run_probe_outcome_logs_nothing_on_success() -> None:
+    """A child that prints something returns ok and writes no probe line."""
+    (stdout, outcome), log = _probe_run(["echo", "x"])
+    assert (stdout.strip(), outcome) == ("x", "ok")
+    assert log == ""
+
+
+def test_run_probe_outcome_survives_an_empty_command() -> None:
+    """An empty command returns ("", "error") instead of raising from the failure logger."""
+    assert fs._run_probe_outcome([]) == ("", "error")
+
+
+def test_run_probe_outcome_survives_an_unwritable_log() -> None:
+    """A log that cannot be written does not change the result of a failing probe."""
+    log = fs.state.log_dir() / "daemon.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    aside = log.with_name("daemon.log.aside")
+    had_log = log.exists()
+    if had_log:
+        log.rename(aside)
+    log.mkdir()  # a directory in place of the file: opening it for append raises OSError
+    try:
+        assert fs._run_probe_outcome(["false"]) == ("", "error")
+    finally:
+        log.rmdir()
+        if had_log:
+            aside.rename(log)
+
+
+def test_probe_failure_detail_cleans_and_caps_stderr() -> None:
+    """Multi-line stderr with the home path and a trailing error number becomes one capped line."""
+    home = str(Path.home())
+    err = (f"{home}/x.scpt: " + "word\n" * 120) + "execution error: Not allowed (-1743)"
+    out = fs._probe_failure_detail(1, err, None)
+    assert "\n" not in out and "code=-1743" in out and "~" in out and home not in out
+    assert len(out.split(" stderr=", 1)[1]) <= 200
+
+
+def test_probe_failure_detail_accepts_invalid_utf8_bytes() -> None:
+    """Undecodable stderr bytes do not raise."""
+    assert "exit=1" in fs._probe_failure_detail(1, b"bad \xff byte", None)
+
+
 def test_flag_carries_the_probe_outcome(
     tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
 ) -> None:

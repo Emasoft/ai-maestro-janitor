@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -1286,14 +1288,60 @@ def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str
     was denied", "osascript hung past the deadline", and "osascript is not installed"
     were all indistinguishable at the call site — the exact ambiguity the iTerm-blocked
     alarm has had to hedge around with two-cause language ever since. Never raises.
+
+    The real failure (exit code, stderr, exception type) is also written to the daemon
+    log (TRDD-0QCRG2YX: a daemon probe failed for hours while the same script worked from
+    a shell, and nothing recorded why). Return values are unchanged. ``errors="replace"``
+    keeps undecodable child output from turning into a spurious "error".
     """
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        _log_probe_failure(cmd, "timeout", _probe_failure_detail(None, exc.stderr, None))
         return "", "timeout"
-    except Exception:  # noqa: BLE001 -- a probe failure must never break the scan
+    except Exception as exc:  # noqa: BLE001 -- a probe failure must never break the scan
+        _log_probe_failure(cmd, "error", _probe_failure_detail(None, None, exc))
         return "", "error"
+    if result.returncode != 0:
+        _log_probe_failure(cmd, "error", _probe_failure_detail(result.returncode, result.stderr, None))
+    elif not result.stdout.strip():
+        _log_probe_failure(cmd, "empty", _probe_failure_detail(0, result.stderr, None))
     return result.stdout, ("ok" if result.returncode == 0 else "error")
+
+
+def _probe_failure_detail(returncode: int | None, stderr: str | bytes | None, exc: BaseException | None) -> str:
+    """One log-safe line describing why an osascript probe failed (TRDD-0QCRG2YX).
+
+    WHY: the probe used to report only "ok"/"error"/"timeout", so a refused Apple event
+    and a Python exception looked identical in the daemon log. Pure and total: never raises.
+    A returncode of None without an exception means the deadline was exceeded.
+    """
+    if exc is not None:
+        head, text = "", f"exception={type(exc).__name__}: {exc}"
+    else:
+        raw = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr or "")
+        text = " ".join(raw.split())
+        head = "deadline-exceeded" if returncode is None else f"exit={returncode}"
+        # Extract the AppleScript error number BEFORE truncation: it sits at the end.
+        m = re.search(r"\((-\d+)\)$", text)
+        if m:
+            head += f" code={m.group(1)}"
+        head += " stderr="
+    home = str(Path.home())
+    text = " ".join(text.replace(home, "~").split())
+    return head + state.sanitize_for_drift_line(text)[:200]
+
+
+def _log_probe_failure(cmd: list[str], outcome: str, detail: str) -> None:
+    """Record one failed probe in the daemon log; never raises."""
+    binary = (shutil.which(cmd[0]) if cmd else None) or "not-found"
+    try:
+        state.log_line("daemon", f"iterm-probe: {outcome} bin={binary} {detail}")
+    except OSError:
+        # The line is diagnostic only, _run_probe_outcome promises never to raise, and a log
+        # that cannot be written (disk full, permissions) must not turn a probe result into a
+        # failed scan (TRDD-0QCRG2YX).
+        pass
 
 
 def _cwd_of(pid: int) -> str | None:
