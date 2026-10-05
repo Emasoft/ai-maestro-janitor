@@ -4,7 +4,7 @@ title: A heartbeat line that repeats with identical text is silenced for ever by
 column: todo
 status: tasked
 created: 2026-10-05T23:16:34+0200
-updated: 2026-10-05T23:19:43+0200
+updated: 2026-10-05T23:31:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,4 @@ Goal: investigate, verify and fix the root cause. READ in scripts/dispatch.py (t
 ## Corrections
 
 2026-10-05 (review): this dedupe was introduced by TRDD-7ZMQSXO6 (archived, complete, 2026-09-16), whose criterion was that a line surfaced in the immediately preceding fire is not repeated in the next one; its log records the seen file as append-only with a known ceiling. Suppression for ever goes beyond that criterion; this card is the follow-up, not a duplicate. The table in the report has sixteen rows, not about a dozen. 'Six error texts will never be logged again' is a reading of the seen file and of the code, not an observed loss. Leftover seen files of things that no longer run, to remove when this is fixed: host-load-seen.txt (the detector is unregistered, TRDD-8524H5V1) and marketplace-refresh-failing-seen.txt (the detector was retired 2026-09-17). The findings on this card are from a fork's report; the session checked only that the function has no forget.
+2026-10-05 (second review): TRDD-7ZMQSXO6 was completed on 2026-09-17; 2026-09-16 is the day its dedupe landed.

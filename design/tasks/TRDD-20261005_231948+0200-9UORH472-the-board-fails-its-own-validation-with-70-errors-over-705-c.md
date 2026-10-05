@@ -4,7 +4,7 @@ title: The board fails its own validation with 70 errors over 705 cards
 column: todo
 status: tasked
 created: 2026-10-05T23:19:48+0200
-updated: 2026-10-05T23:19:48+0200
+updated: 2026-10-05T23:31:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,7 @@ Goal: investigate each error card by card and repair or re-column it; never by a
 ## Approval log
 
 - 2026-10-05T23:19:48+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review): the list in the body does not add up to 70 as written. The 13 cards that are complete but still in the tasks folder carry two errors each (the folder mismatch and the open boxes), and the blockers that are not card ids are 7 rows over 6 cards (9ZPU69UC has two). This card is an umbrella, not one atomic task: each repair is a per-card judgment recorded on that card, the tool's automatic fix is never looped over the list, and a move of a card between lifecycle folders is decided card by card. The question of how a wait on a human decision is written belongs to the card tool, which is another project's.
