@@ -428,10 +428,11 @@ def _probe_log() -> str:
     return path.read_text() if path.exists() else ""
 
 
+
 def _probe_run(cmd: list[str], **kw: float) -> tuple[tuple[str, str], str]:
     # The daemon log is shared across tests: return only the lines this call wrote.
     # Each call starts from a clean dedupe state, or an identical earlier failure would hide this one.
-    fs._last_probe_failure_line = ""
+    fs._probe_logged.clear()
     before = _probe_log()
     res = fs._run_probe_outcome(cmd, **kw)
     return res, _probe_log()[len(before):]
@@ -477,14 +478,14 @@ def test_run_probe_outcome_survives_an_empty_command() -> None:
     assert fs._run_probe_outcome([]) == ("", "error")
 
 
+
 def test_run_probe_outcome_survives_an_unwritable_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A log that cannot be written does not change the result of a failing probe."""
     # Own log dir: the session-shared daemon.log must never be replaced by a directory.
     monkeypatch.setattr(fs.state, "log_dir", lambda: tmp_path)
     (tmp_path / "daemon.log").mkdir()  # a directory in place of the file: opening it for append raises OSError
-    fs._last_probe_failure_line = ""
+    fs._probe_logged.clear()
     assert fs._run_probe_outcome(["false"]) == ("", "error")
-
 
 
 def test_run_probe_outcome_decodes_invalid_utf8_stdout_as_ok() -> None:
@@ -501,6 +502,36 @@ def test_run_probe_outcome_logs_an_identical_failure_once_until_a_success() -> N
     fs._run_probe_outcome(["false"])
     assert _probe_log() == before
     fs._run_probe_outcome(["echo", "x"])
+    fs._run_probe_outcome(["false"])
+    assert _probe_log()[len(before):].count("iterm-probe: error") == 1
+
+def test_run_probe_outcome_ignores_the_error_text_when_deduping() -> None:
+    """Two failures with the same exit code but different stderr text log one line."""
+    _probe_run([sys.executable, "-c", "import sys; sys.stderr.write('first text'); sys.exit(3)"])
+    before = _probe_log()
+    fs._run_probe_outcome([sys.executable, "-c", "import sys; sys.stderr.write('other text'); sys.exit(3)"])
+    assert _probe_log() == before
+
+
+def test_run_probe_outcome_remembers_every_failure_of_the_episode() -> None:
+    """Failures with different exit codes log once each; repeating the pair logs nothing more."""
+    three = [sys.executable, "-c", "import sys; sys.exit(3)"]
+    four = [sys.executable, "-c", "import sys; sys.exit(4)"]
+    _probe_run(three)
+    fs._run_probe_outcome(four)
+    before = _probe_log()
+    assert before.count("iterm-probe: error") >= 2
+    fs._run_probe_outcome(three)
+    fs._run_probe_outcome(four)
+    assert _probe_log() == before
+
+
+def test_run_probe_outcome_logs_a_persisting_failure_again_after_the_interval() -> None:
+    """The same failure is written again once the relog interval has passed."""
+    _probe_run(["false"])
+    before = _probe_log()
+    for key in fs._probe_logged:
+        fs._probe_logged[key] -= fs._PROBE_RELOG_INTERVAL_S + 1
     fs._run_probe_outcome(["false"])
     assert _probe_log()[len(before):].count("iterm-probe: error") == 1
 

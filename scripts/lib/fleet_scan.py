@@ -1276,6 +1276,18 @@ def probe_iterm_sessions(
     return sessions, outcome, attempts
 
 
+
+#: Failure keys already written to the daemon log in the current failure episode, each with the
+#: `time.monotonic()` of its last write; cleared by a probe success with output.
+_probe_logged: dict[str, float] = {}
+
+#: Seconds after which a failure that is still persisting is written again. The daemon log
+#: rotates at 1 MiB, so a diagnostic written once and then evicted is useless to an
+#: investigator who arrives days later; hourly is 24 lines a day against the ~2160 the
+#: dedupe replaced.
+_PROBE_RELOG_INTERVAL_S = 3600
+
+
 def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str]:
     """Like ``_run``, but distinguishes HOW an empty result happened (TRDD-EZ3PMQYX,
     janitor#233): a nonzero exit or an unrunnable binary is ``"error"``, an exceeded
@@ -1290,13 +1302,12 @@ def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str
     alarm has had to hedge around with two-cause language ever since. Never raises.
 
     The real failure (exit code, stderr, exception type) is also written to the daemon
-    log (TRDD-0QCRG2YX: a daemon probe failed for hours while the same script worked from
+    log (TRDD-0QCRG2YX: a daemon probe kept failing while the same script worked from
     a shell, and nothing recorded why). Return values are unchanged except in one case:
     child output that is not valid UTF-8 used to raise inside subprocess and return
     ``("", "error")``; it is now decoded with replacement characters (``errors="replace"``)
     and returned with outcome ``"ok"`` when the exit code is 0.
     """
-    global _last_probe_failure_line
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired as exc:
@@ -1311,7 +1322,7 @@ def _run_probe_outcome(cmd: list[str], *, timeout: float = 10) -> tuple[str, str
         _log_probe_failure(cmd, "empty", 0, result.stderr, None)
     else:
         # A success with output ends the failure episode: the next failure must be logged again.
-        _last_probe_failure_line = ""
+        _probe_logged.clear()
     return result.stdout, ("ok" if result.returncode == 0 else "error")
 
 
@@ -1341,24 +1352,24 @@ def _probe_failure_detail(returncode: int | None, stderr: str | bytes | None, ex
 
 def _log_probe_failure(cmd: list[str], outcome: str, returncode: int | None, stderr: str | bytes | None, exc: BaseException | None) -> None:
     """Record one failed probe in the daemon log; never raises."""
-    global _last_probe_failure_line
     try:
         binary = (shutil.which(cmd[0]) if cmd else None) or "not-found"
-        line = f"iterm-probe: {outcome} bin={binary} {_probe_failure_detail(returncode, stderr, exc)}"
+        detail = _probe_failure_detail(returncode, stderr, exc)
+        line = f"iterm-probe: {outcome} bin={binary} {detail}"
         # Dedupe: while Automation is blocked the probe fails 3x per scan every 120 s, ~2160
         # near-identical lines a day into a 1 MiB rotating log that would push out everything
-        # else. Log only when the line differs from the last one this process logged.
-        if line == _last_probe_failure_line:
+        # else. The key is outcome + exit code / exception type + error number only: the error
+        # text is untrusted and may vary per run, the full line is still what gets written.
+        # The set of keys (not just the last) keeps a scan whose attempts differ from alternating.
+        key = f"{outcome} {re.split(r' stderr=|: ', detail, maxsplit=1)[0]}"
+        now = time.monotonic()
+        last = _probe_logged.get(key)
+        if last is not None and now - last <= _PROBE_RELOG_INTERVAL_S:
             return
         state.log_line("daemon", line)
-        _last_probe_failure_line = line
+        _probe_logged[key] = now
     except Exception:  # noqa: BLE001 -- a diagnostic line must never break the scan or change a probe result (TRDD-0QCRG2YX)
         pass
-
-
-
-#: Last failure line written to the daemon log by `_log_probe_failure`; "" after a successful probe.
-_last_probe_failure_line = ""
 
 
 def _cwd_of(pid: int) -> str | None:
