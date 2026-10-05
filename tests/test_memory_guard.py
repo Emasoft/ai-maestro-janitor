@@ -255,27 +255,32 @@ def test_select_refused_alert_ignores_killable_janitor_runaway() -> None:
                                    min_rss_kb=_4GIB_KB) is None
 
 
-def test_daemon_alerts_refused_hog_once_with_disk_metric(
+def test_daemon_alerts_refused_hog_on_every_beat_without_arguments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Under pressure with only an UNKILLABLE hog: no kill, ONE emit_once-deduped alert
-    carrying the S7 dual disk label; a second beat does not re-alert the same program."""
+    """Under pressure with only an UNKILLABLE hog: no kill, one alert line per beat with the disk label and no arguments."""
     daemon = _import_daemon(tmp_path, monkeypatch)
+    monkeypatch.setenv("JANITOR_LOG_DIR", str(tmp_path / "logs"))
+    for fn in (daemon.state.project_root, daemon.state.janitor_root,
+               daemon.state.state_dir, daemon.state.log_dir):
+        fn.cache_clear()
     monkeypatch.setattr(daemon.mg, "free_memory_mb", lambda: 100)  # pressure
     hog = mg.ProcRow(pid=901, ppid=1, rss_kb=39 * 1024 * 1024, etime_s=999_999,
-                     command="/System/Library/.../fseventsd")
+                     command="/usr/local/bin/python3.12 /x/y/tool.py --token SECRETMARKER")
     monkeypatch.setattr(daemon.mg, "snapshot_processes", lambda p: [hog])
     killed: list[int] = []
     monkeypatch.setattr(daemon.mg, "kill_process", lambda pid: killed.append(pid) or True)
     # No live diskutil subprocess in tests — pin the S7 label.
-    monkeypatch.setattr(
-        daemon.dp, "disk_pressure",
-        lambda path="/": daemon.dp.DiskPressure(writable_gb=13.9, purgeable_gb=None),
-    )
+    disk = daemon.dp.DiskPressure(writable_gb=13.9, purgeable_gb=None)
+    monkeypatch.setattr(daemon.dp, "disk_pressure", lambda path="/": disk)
+    daemon.task_memory_guard()
     daemon.task_memory_guard()
     assert killed == [], "the never-kill invariant must hold for the hog"
-    seen = tmp_path / "gs" / "memory-guard-alert-seen.txt"
-    assert seen.is_file(), "the alert must have fired (emit_once seen-file created)"
-    first = seen.read_text(encoding="utf-8")
-    daemon.task_memory_guard()  # same hog next beat → deduped, no new seen entry
-    assert seen.read_text(encoding="utf-8") == first
+    log = (tmp_path / "logs" / "daemon.log").read_text(encoding="utf-8")
+    alerts = [ln for ln in log.splitlines() if "memory-guard ALERT" in ln]
+    assert len(alerts) == 2
+    for ln in alerts:
+        assert "python3.12 tool.py" in ln
+        assert disk.label in ln
+    assert "SECRETMARKER" not in log and "--token" not in log
+    assert not (tmp_path / "gs" / "memory-guard-alert-seen.txt").exists()

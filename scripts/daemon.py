@@ -985,9 +985,17 @@ def task_memory_guard() -> None:
             f"{snapshot}",
         )
         # S6 (TRDD-1T53EKTN): standing down must not mean SILENCE about a giant we
-        # rightly won't kill — the 39 GB fseventsd grew unnoticed exactly here. Alert
-        # (once per distinct hog, emit_once-deduped) with the S7 dual disk metric so a
-        # human can judge whether "low disk" is real or purgeable-covered.
+        # rightly won't kill — the 39 GB fseventsd grew unnoticed exactly here. The
+        # alert carries the S7 dual disk metric so a human can judge whether "low
+        # disk" is real or purgeable-covered. It is logged on EVERY run of this
+        # branch: it used to be deduplicated by a key of program path plus threshold
+        # that was never forgotten, so a program that alerted once was silent for
+        # ever (39 programs by 2026-10-05, TRDD-BZ3BT0NJ). The branch runs only when
+        # free memory is under the floor and nothing is killable, at most once per
+        # run of the task, so logging every time costs at most a few dozen lines a
+        # day (measured: 32 on the busiest day). The name carries no arguments
+        # because a command line can hold secrets and the line is now written on
+        # every run.
         alert_rss_kb = state.coerce_int(
             state.plugin_option("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ALERT_RSS_KB"),
             mg.DEFAULT_ALERT_RSS_KB,
@@ -997,21 +1005,17 @@ def task_memory_guard() -> None:
                 rows, protected_pids=protected, min_etime_s=min_age, min_rss_kb=alert_rss_kb
             )
             if hog is not None:
-                seen = gs.global_state_dir() / "memory-guard-alert-seen.txt"
-                # Key on the program, not the pid: the same runaway respawning under a
-                # new pid is the SAME problem and must not re-alert every beat.
-                key = f"{hog.command.split()[0] if hog.command else '?'}:{alert_rss_kb}"
-                msg = dedupe.emit_once(
-                    seen,
-                    key,
-                    "memory-guard ALERT: unkillable runaway "
-                    f"pid={hog.pid} rss={hog.rss_kb // 1024}MB age={hog.etime_s}s "
-                    f"cmd={hog.command!r} — the never-kill invariant holds (not "
-                    f"janitor-owned); a HUMAN must decide. Disk: {dp.disk_pressure().label}. "
+                parts = hog.command.split()
+                name = proc_scan.label_from_argv(os.path.basename(parts[0]), parts) if parts else "?"
+                state.log_line(
+                    "daemon",
+                    "memory-guard ALERT: memory is low and the largest process above "
+                    "the alert bar is one the guard will not kill: "
+                    f"pid={hog.pid} {name} rss={hog.rss_kb // 1024}MB age={hog.etime_s}s. "
+                    "The never-kill invariant holds (not janitor-owned); a human "
+                    f"decides. Disk: {dp.disk_pressure().label}. "
                     f"Free memory was {free_mb}MB; snapshot: {snapshot}",
                 )
-                if msg:
-                    state.log_line("daemon", msg)
         return
     killed = mg.kill_process(victim.pid)
     state.log_line(
