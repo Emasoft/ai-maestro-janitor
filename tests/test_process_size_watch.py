@@ -307,6 +307,29 @@ def test_stamp_is_rewritten_only_when_older_than_60s() -> None:
     assert stamp.stat().st_mtime_ns > int(old * 1e9) + 60 * 10**9
 
 
+
+@darwin_only
+def test_an_unwritable_stamp_does_not_stop_the_pass_or_the_alert(tmp_path: Path) -> None:
+    """A stamp path that is a non-empty directory (aged 120 s) makes the rewrite fail with an
+    OSError; the pass still alerts once and logs the failure."""
+    import os
+
+    stamp = gs.global_state_dir() / "process-size-watch.last-pass.ts"
+    stamp.mkdir()
+    (stamp / "keep").write_text("x")
+    old = time.time() - 120
+    os.utime(stamp, (old, old))  # older than 60 s, so the pass attempts the rewrite
+    rec = _Recorder()
+    child = _spawn()
+    try:
+        _pass(set(), [_row(child.pid)], rec)
+    finally:
+        _reap(child)
+    assert len(rec.argvs) == 1
+    assert "process-size-watch: stamp write failed" in (tmp_path / "logs" / "daemon.log").read_text()
+    assert stamp.is_dir()
+
+
 @darwin_only
 def test_a_failing_runner_does_not_hide_the_second_row_or_repeat_alerts() -> None:
     """notify swallows runner errors itself, so the push cannot raise through it; with a
