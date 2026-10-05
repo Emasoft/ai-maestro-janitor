@@ -4,7 +4,7 @@ title: The memory guard took no action while one process held more memory than t
 column: todo
 status: tasked
 created: 2026-10-05T22:06:36+0200
-updated: 2026-10-05T22:40:00+0200
+updated: 2026-10-05T22:41:55+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,6 +32,7 @@ To do: read what memory-guard measures and acts on, and why it returned in 0 s (
 ## Corrections
 
 2026-10-05 (review): memory-guard was seen finishing in 0 s at 21:35, 21:37 and 21:39 only; nothing is shown for 21:23 to 21:33, when the daemon itself was stalled. A per-process kill is a destructive act on another session's process: this card PROPOSES it to the owner, it does not implement it without that decision. The command that outlived its tool timeout and was moved to the background has its own card.
+2026-10-05 (review of the reading of the owner's policy): 'otherwise keeps away from processes that are not the janitor's own' is the session's addition; the owner said to reduce intervention to a minimum, not to zero. 'Suspending is the intervention that fits' conflicts with the fact stated in the same section that a frozen process keeps its memory: for a memory runaway, suspending stops growth and does not relieve the machine, so that sentence is withdrawn until measured. Candidates to measure, none chosen yet: a size limit set on a child process at launch, which stops growth before the machine is starved and loses one edit that the session retries; ending the process after verifying that its work can be restarted. Missing from the facts to verify: what the owning session loses of its in-flight turn (context and goals, in the owner's words) when its tool is stopped; a bound on how long a process may stay suspended; who resumes it if the guard itself dies. To check against the policy: the guard's existing rule that ends janitor helpers older than an hour restarts nothing.
 
 ## Owner decisions
 
