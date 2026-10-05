@@ -1,10 +1,10 @@
 ---
 trdd-id: Y8HAQJZY
-title: The rotator calls a live token exhausted for the last half hour before Claude Code renews it
+title: The rotator calls a live token exhausted for about 24 minutes before its mirror copy is replaced
 column: backburner
 status: tasked
 created: 2026-10-05T18:47:02+0200
-updated: 2026-10-05T18:47:02+0200
+updated: 2026-10-05T18:47:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,3 +30,7 @@ Open design question for the owner: should local expiry trip a rotation at all w
 ## Approval log
 
 - 2026-10-05T18:47:02+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-05 (review of this card): what renews the credential was NOT investigated, so the earlier title and the words 'renewed anyway', 'newer', 'once per token lifetime' and 'a swap that was not needed' are inferences, not measurements. Measured: two episodes, 10:08:15 to 10:32:22 and 18:04:00 to 18:27:49, 24 ticks each; each ended on the tick after a log line saying the beacon updated the mirror to the live credential, and the fingerprint prefix in that line differed between the two episodes. Two readings stay open and imply different fixes: (1) the mirror was current and the real token was replaced shortly before its expiry, so the trigger is early but true; (2) the mirror was stale and the real token had been replaced earlier, so the trigger is false. What would separate them: the expiresAt of the mirror against the time of the beacon rewrite, or a tick that can read the primary item during an episode. That an episode begins when the copy comes within the grace is consistent with the timing, not measured. The marker being cleared and re-written each tick is from reading the code (clear when the beacon fingerprint matches the mirror, re-mark at the end of a still-stuck tick), not observed on disk. The test test_cmd_auto_proactive_swap_on_locally_expiring_live pins the pre-expiry swap as intended behaviour, so changing it is a design change, not a bug fix.
