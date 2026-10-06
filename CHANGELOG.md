@@ -2,6 +2,81 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.0] — 2026-10-06
+
+### Bug Fixes
+
+- Seed an overview stub that passes memgrep lint WMPAGE-004 ([#333](https://github.com/Emasoft/ai-maestro-janitor/issues/333)) (5b96fc7)
+- Hold the seeded overview stub to the authoring phrase floor ([#334](https://github.com/Emasoft/ai-maestro-janitor/issues/334)) (e40a894)
+- Seeded overview stub meets the lint floor with an honest description (#333, #334) (8976954)
+- Rotation toggle OFF never overwrites an earlier DISABLED file ([#321](https://github.com/Emasoft/ai-maestro-janitor/issues/321)) (cb236ce)
+- Memory-corpus tickets are never dispatched to an agent that refuses them, stale ones close ([#324](https://github.com/Emasoft/ai-maestro-janitor/issues/324)) (27974a1)
+- MEMCORP-001 catalog text covers every ERROR lint class the detector files under it ([#336](https://github.com/Emasoft/ai-maestro-janitor/issues/336)) (3b56824)
+- The heartbeat detector no longer leaks memgrep's lint summary onto stderr ([#326](https://github.com/Emasoft/ai-maestro-janitor/issues/326)) (6e95fb5)
+- Auto-recall skips harness task notifications ([#326](https://github.com/Emasoft/ai-maestro-janitor/issues/326)) (ecb8cc7)
+- The split pass skips over-cap component pages instead of stopping on them ([#326](https://github.com/Emasoft/ai-maestro-janitor/issues/326)) (9ad6b9f)
+- A verbatim atom that cannot be shortened is judged once, not weekly ([#326](https://github.com/Emasoft/ai-maestro-janitor/issues/326)) (16d832e)
+- Update-mem-atom refuses a call that changes nothing instead of reporting success ([#322](https://github.com/Emasoft/ai-maestro-janitor/issues/322)) (84541ac)
+- Lessons authored by memgrep are addressable by their own id; add --status; document page-description edit ([#331](https://github.com/Emasoft/ai-maestro-janitor/issues/331)) (6eabe6b)
+- Atom-keywords-duplicated refusal states the two delimiting conventions ([#323](https://github.com/Emasoft/ai-maestro-janitor/issues/323)) (cf64735)
+- **memory-repair:** A page-description rewrite must not shrink the recall surface ([#331](https://github.com/Emasoft/ai-maestro-janitor/issues/331)) (8586f04)
+- **issue-catalog:** A ticket that opens incomplete carries an "Incomplete:" checklist (janitor#336) (8f5a687)
+- **issue-catalog:** Log "opened incomplete" only when a ticket is actually opened (janitor#336) (522f2d0)
+- **issue-catalog:** Unmet-rules list survives the cap, one row per gap, plain bullets (janitor#336) (fc73c8d)
+- **trdd-state-reconciliation:** A wrapped obituary sentence and "zero hits" exempt dead-symbol citations (janitor#332) (abee9ac)
+- **dispatch:** A drift block whose finding has an OPEN ticket is not re-printed every fire (janitor#326) (6f513d5)
+- **trdd-state-reconciliation:** A live imperative sharing a sentence with an obituary verb still fires (janitor#332) (14db6c8)
+- **dispatch:** Harden ticketed-drift suppression - content hash, allowlist, no marker leaks, one ledger row (janitor#326) (65e0b9b)
+- **dispatch:** Record a ledger row for every changed ticketed block (janitor#326) (47484d0)
+- **dispatch:** Persist the ticketed-hash prune so a reopened ticket gets a fresh baseline (janitor#326) (13c9c33)
+- **dispatch:** Build the surfaced body with tickets.strip_key_markers; end-to-end marker opt-in test (janitor#326) (6099a56)
+- **trdd-state-reconciliation:** 'drop-in' is not the imperative drop (janitor#332) (afc8e00)
+
+### Documentation
+
+- **trdd:** Close 3HLI7DMK on a rebuilt memgrep, unblock JD2QR5SQ and EMZUVIBK, add OHE6WLVM and 8H00AA9F (TRDD-3HLI7DMK, TRDD-JD2QR5SQ, TRDD-EMZUVIBK, TRDD-OHE6WLVM, TRDD-8H00AA9F) (285fece)
+- **trdd:** C22 plan v2 with opt-in --apply-fixes, suppression decision, installer gap card (TRDD-JD2QR5SQ, TRDD-KTD3N7H6, TRDD-EMZUVIBK, TRDD-V5V1CBLM) (6a83454)
+- **trdd:** C22 resume block after S1, EMZUVIBK formally blocked, fastedit refusal note (TRDD-JD2QR5SQ, TRDD-EMZUVIBK, TRDD-6NMQ95TQ) (524a544)
+- **trdd:** C22 resume block moves to S3 and carries the S2 notes for S4 (TRDD-JD2QR5SQ) (be3a93a)
+- **trdd:** C22 next action is S3 and S4 merged, so no no-op flag is committed (TRDD-JD2QR5SQ) (e0cb84a)
+- **trdd:** C22 next action is the seeded S6 check; S3+S4 notes and three fastedit refusals recorded (TRDD-JD2QR5SQ, TRDD-6NMQ95TQ) (4ecdbc3)
+- **trdd:** C22 to testing after the S6 pass and the memgrep install; per-scope ledger gap carded (TRDD-JD2QR5SQ, TRDD-1T0W2ZVW) (bc10292)
+- **trdd:** C22 field use is blocked by the fastedit freeze; refusals marked worker-reported; isolation wording corrected (TRDD-JD2QR5SQ, TRDD-6NMQ95TQ) (9d4dc38)
+- **trdd:** Field check of seven testing cards: PHS3DIBD complete, three to human_review, IT5GEZDZ blocked on a new fail-silent card (TRDD-PHS3DIBD, TRDD-5MOX0FPO, TRDD-JY0OBQZ4, TRDD-G9Z8PXCM, TRDD-IT5GEZDZ, TRDD-NGLPQ7SW, TRDD-P2ZN1AC8, TRDD-HL3WBA2Q, TRDD-DS3WDTPV, TRDD-JD2QR5SQ, TRDD-6NMQ95TQ) (a268903)
+- **trdd:** The card changes of the field check that a2689034 left out (TRDD-5MOX0FPO, TRDD-JY0OBQZ4, TRDD-G9Z8PXCM, TRDD-IT5GEZDZ, TRDD-NGLPQ7SW, TRDD-P2ZN1AC8, TRDD-HL3WBA2Q, TRDD-DS3WDTPV, TRDD-JD2QR5SQ, TRDD-6NMQ95TQ) (b7262f0)
+- **trdd:** P2ZN1AC8 adds the fifteen-minute pending-record window as a leftover of PHS3DIBD (TRDD-P2ZN1AC8) (c3a997d)
+- Add TRDD-FQVEILVK — fix or implement every open GitHub issue of the janitor repo (e729c6b)
+- **trdd:** One card per open GitHub issue for the sweep, 28 new and 2 existing owners (TRDD-FQVEILVK) (c67b608)
+- **trdd:** #332 owned by 6ESS2MGE (Y8DB5F0M superseded); #306's reopened symptom owned by RAEGS1D5 (TRDD-FQVEILVK, TRDD-6ESS2MGE, TRDD-Y8DB5F0M, TRDD-RAEGS1D5) (bed631a)
+- **rules:** No design/refused/ folder; failed-card archive per 3P-ZON-06 4.0.0 ([#309](https://github.com/Emasoft/ai-maestro-janitor/issues/309)) (237cf47)
+- **trdd:** WFYJX2XU records why #320's warnings need a validator change (TRDD-WFYJX2XU) (cf1cb07)
+- Update-mem-topic help shows how to extend a page description ([#331](https://github.com/Emasoft/ai-maestro-janitor/issues/331)) (15344f0)
+- **trdd:** Record main commit ids on the 8 issue-sweep owner cards (TRDD-FQVEILVK) (4f29d82)
+- **trdd:** Issue-sweep cards leave todo; STATE head blocks name the next action (TRDD-FQVEILVK) (97c456a)
+- **trdd:** Sweep cards state what testing means and where follow-ups live (TRDD-FQVEILVK) (d6b061e)
+- Update-mem-atom refuses a no-op call, fix the three stale spots ([#322](https://github.com/Emasoft/ai-maestro-janitor/issues/322)) (349acb2)
+- **dispatch:** Name the unlocked ticketed-block-hashes race with a ponytail marker (janitor#326) (26c42b4)
+- **trdd:** Pre-release card update for the issue sweep (TRDD-FQVEILVK) (4ecfeb9)
+- **memory-repair:** Fold the #331 recall-surface rule into the desc-trim section (janitor#331) (bdbf5b1)
+
+### Features
+
+- **memgrep:** Fixer list and once-only refusal ledger for the lint apply pass (TRDD-JD2QR5SQ) (b7a22bb)
+- **memgrep:** Plan_page_fix decides the safe fixes for one page and whether the gate accepts them (TRDD-JD2QR5SQ) (435051c)
+- **memgrep:** Lint --apply-fixes applies safe fixers through the write gate, --diff previews them (TRDD-JD2QR5SQ) (1f2a289)
+- One command flips both sides of OAuth rotation ([#321](https://github.com/Emasoft/ai-maestro-janitor/issues/321)) (3352594)
+- Lint flags a section pasted twice, page-duplicated-section WMPAGE-012 ([#315](https://github.com/Emasoft/ai-maestro-janitor/issues/315)) (00e80ac)
+
+### Miscellaneous Tasks
+
+- **memgrep:** Bump crate to 0.2.0, the CLI contract changed ([#331](https://github.com/Emasoft/ai-maestro-janitor/issues/331)) (a050657)
+
+### Testing
+
+- Run the real overview seeder output through memgrep lint ([#335](https://github.com/Emasoft/ai-maestro-janitor/issues/335)) (dd449dd)
+- CLAUDE.md wikimem index stays byte-identical across consecutive runs ([#328](https://github.com/Emasoft/ai-maestro-janitor/issues/328)) (980c389)
+- Pin that a janitor clear injects the cleared session's Jev compaction, never an older handoff ([#306](https://github.com/Emasoft/ai-maestro-janitor/issues/306)) (6f5acdb)
+- Register page-duplicated-section in the gate-coverage table; spec names update-mem-atom --status (#315, #331, #322) (6f45acf)
 ## [3.7.5] — 2026-10-06
 
 ### Bug Fixes
@@ -16,6 +91,10 @@ All notable changes to this project will be documented in this file.
 - **trdd:** 6NMQ95TQ gets a real NEXT ACTION and an honest file-mode note; 9438CGJZ states why each 5 s hook stays and how a kill would be noticed (TRDD-6NMQ95TQ, TRDD-9438CGJZ) (2f56e2f)
 - **trdd:** HYTKG53C root cause and fix recorded, collision card, YELTOX2S blocked on the fastedit card (TRDD-HYTKG53C, TRDD-LH84WTL5, TRDD-2O7JA0TG, TRDD-YELTOX2S, TRDD-6NMQ95TQ) (41aeecd)
 - **trdd:** Follow-ups for the v3.7.5 fixes: mode-fix card, collision caveats, live-check notes (TRDD-Y6WFN5L9, TRDD-HYTKG53C, TRDD-LH84WTL5, TRDD-2O7JA0TG, TRDD-CWKM5218, TRDD-KVUVV9D2, TRDD-9438CGJZ) (9a0134e)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.7.5 (4daacfd)
 
 ### Testing
 
