@@ -436,6 +436,43 @@ def test_prose_frontmatter_mismatch_surfaces(repo: Path):
     assert "prose-frontmatter-mismatch" in out
 
 
+
+def test_closeable_plus_other_class_reports_only_the_other_class(repo: Path):
+    """A card that is closeable AND prose-mismatched is still reported, labelled by the
+    other class; "closeable" is absent from stdout and "closeable-candidate" from the report
+    (its header carries the boilerplate "NOT closeable"); one ledger note (janitor#332)."""
+    uid = "aaaaaaaa"
+    _write_trdd(repo, uid, column="dev", blocked_by="[]",
+                body="\n## STATE\nwe are BLOCKED on the upstream API\n")
+    _commit_all(repo, f"feat: ship (TRDD-{uid})")
+    _tag(repo, "v0.1.0")
+
+    out = _run(repo)
+    assert f"TRDD-{uid}" in out
+    assert "prose-frontmatter-mismatch" in out
+    assert "closeable" not in out
+    report = next((repo / "reports" / "trdd-reconciliation").glob("*-board.md")).read_text()
+    assert f"TRDD-{uid}" in report
+    assert "prose-frontmatter-mismatch" in report
+    assert "closeable-candidate" not in report
+    assert [n["ref"] for n in _closeable_notes(repo)] == [f"TRDD-{uid}"]
+
+
+def test_only_closeable_cards_write_no_closeable_text_to_reports(repo: Path):
+    """With only closeable cards on the board, reports/trdd-reconciliation/ holds no
+    closeable-candidate text (it does not exist at all), while each card gets a note."""
+    for uid in ("aaaaaaaa", "bbbbbbbb"):
+        _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+        _commit_all(repo, f"feat: ship (TRDD-{uid})")
+    _tag(repo, "v0.1.0")
+
+    _run(repo)
+    report_dir = repo / "reports" / "trdd-reconciliation"
+    texts = [p.read_text() for p in report_dir.glob("*")] if report_dir.exists() else []
+    assert all("closeable-candidate" not in t for t in texts)
+    assert len(_closeable_notes(repo)) == 2
+
+
 # ── Check 5 — STATE block cites a symbol the tree no longer has (TRDD-FDV1RQEB) ──
 #
 # Real git end-to-end (the pure predicate itself is exhaustively covered in
