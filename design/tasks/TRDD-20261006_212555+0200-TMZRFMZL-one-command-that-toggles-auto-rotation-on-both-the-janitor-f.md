@@ -4,7 +4,7 @@ title: One command that toggles auto-rotation on both the janitor flag and the s
 column: todo
 status: tasked
 created: 2026-10-06T21:25:55+0200
-updated: 2026-10-06T21:25:55+0200
+updated: 2026-10-06T22:04:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:25:55+0200
+implementation-commits: [33525949, cb236ce6]
 ---
 
 # One command that toggles auto-rotation on both the janitor flag and the server flag file
@@ -24,3 +25,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#321 (opened 2026-09-29). Part of
 ## Approval log
 
 - 2026-10-06T21:25:55+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+landed on main as 33525949,cb236ce6; ships in the next release; issue stays open until then.

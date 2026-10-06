@@ -4,7 +4,7 @@ title: MEMCORP-001 tickets are routed to an agent that refuses ticket work and d
 column: todo
 status: tasked
 created: 2026-10-06T21:26:00+0200
-updated: 2026-10-06T21:26:00+0200
+updated: 2026-10-06T22:04:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:26:00+0200
+implementation-commits: [27974a16]
 ---
 
 # MEMCORP-001 tickets are routed to an agent that refuses ticket work and dispatched without re-validation
@@ -24,3 +25,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#324 (opened 2026-09-30). Part of
 ## Approval log
 
 - 2026-10-06T21:26:00+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+landed on main as 27974a16; ships in the next release; issue stays open until then.

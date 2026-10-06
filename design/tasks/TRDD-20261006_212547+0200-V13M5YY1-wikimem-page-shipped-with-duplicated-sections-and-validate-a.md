@@ -4,7 +4,7 @@ title: Wikimem page shipped with duplicated sections and validate and lint canno
 column: todo
 status: tasked
 created: 2026-10-06T21:25:47+0200
-updated: 2026-10-06T21:25:47+0200
+updated: 2026-10-06T22:04:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:25:47+0200
+implementation-commits: [00e80ac2, 6f45acf8]
 ---
 
 # Wikimem page shipped with duplicated sections and validate and lint cannot see body duplication
@@ -24,3 +25,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#315 (opened 2026-09-28). Part of
 ## Approval log
 
 - 2026-10-06T21:25:47+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+landed on main as 00e80ac2,6f45acf8; ships in the next release; issue stays open until then.

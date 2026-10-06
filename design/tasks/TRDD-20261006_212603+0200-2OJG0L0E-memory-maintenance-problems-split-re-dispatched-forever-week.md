@@ -4,7 +4,7 @@ title: Memory maintenance problems split re-dispatched forever, weekly verbatim 
 column: todo
 status: tasked
 created: 2026-10-06T21:26:03+0200
-updated: 2026-10-06T21:26:03+0200
+updated: 2026-10-06T22:04:57+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:26:03+0200
+implementation-commits: [6e95fb5e, ecb8cc7f, 9ad6b9f6, 16d832ef]
 ---
 
 # Memory maintenance problems split re-dispatched forever, weekly verbatim re-arm, lint count spam, autorecall on notifications
@@ -24,3 +25,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#326 (opened 2026-10-02). Part of
 ## Approval log
 
 - 2026-10-06T21:26:03+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+landed on main as 6e95fb5e,ecb8cc7f,9ad6b9f6,16d832ef; ships in the next release; issue stays open until then.Follow-ups for #326 still in progress.

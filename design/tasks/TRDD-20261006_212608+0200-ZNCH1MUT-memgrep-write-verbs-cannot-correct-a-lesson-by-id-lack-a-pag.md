@@ -4,7 +4,7 @@ title: memgrep write verbs cannot correct a lesson by id, lack a page descriptio
 column: todo
 status: tasked
 created: 2026-10-06T21:26:08+0200
-updated: 2026-10-06T21:26:08+0200
+updated: 2026-10-06T22:04:57+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:26:08+0200
+implementation-commits: [6eabe6b7, 15344f01, 6f45acf8]
 ---
 
 # memgrep write verbs cannot correct a lesson by id, lack a page description verb and have an undocumented stdin contract
@@ -24,3 +25,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#331 (opened 2026-10-05). Part of
 ## Approval log
 
 - 2026-10-06T21:26:08+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+landed on main as 6eabe6b7,15344f01,6f45acf8; ships in the next release; issue stays open until then.Follow-ups for #331 still in progress.
