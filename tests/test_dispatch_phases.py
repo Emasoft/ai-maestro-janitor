@@ -54,6 +54,15 @@ def env_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     # keep-going gate's user-idle check flip nondeterministically per host/run.
     monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
 
+    # Pane isolation (TRDD-HYTKG53C): the keep-going gate now reads PER-PANE presence when a
+    # terminal pane key resolves, so a host terminal id leaking in (iTerm/tmux/kitty/WezTerm)
+    # would make every test host-dependent. Delete all four so the default is the no-key
+    # machine-global path; pane tests pin one var explicitly.
+    import state as _state_for_env
+
+    for _, _var in _state_for_env._PANE_ID_ENV_VARS:
+        monkeypatch.delenv(_var, raising=False)
+
     # Force-reload so module-level path resolution picks up the env.
     for mod in ("dispatch", "global_state", "state"):
         if mod in sys.modules:
@@ -1733,6 +1742,98 @@ def test_phase_keep_going_nudge_default_on_no_flag(env_isolation: dict) -> None:
     assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT], (
         f"default-on nudge expected, got {out!r}"
     )
+
+
+
+def _write_pane_presence(state, *, ago_s: int) -> None:
+    """Write THIS pane's presence file (the way the UserPromptSubmit hook does) `ago_s` ago."""
+    key = state.terminal_pane_key()
+    assert key is not None
+    now = int(time.time())
+    path = state.per_pane_presence_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"last_user_input_epoch": now - ago_s, "source": "test", "written_at_epoch": now}
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_keep_going_pane_idle_global_active_nudges(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This pane idle 3700s while another pane typed 30s ago (global file) -> nudge fires."""
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_active(state, ago_s=30)
+    _write_pane_presence(state, ago_s=3700)
+    _add_pending_agent(state, "test-agent", stale=True)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.splitlines()[0] == "[janitor-resume]", f"expected nudge, got {out!r}"
+
+
+def test_keep_going_pane_active_global_stale_suppresses(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This pane active 30s ago while the global file is stale -> nudge suppressed."""
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_idle(state, ago_s=3700)
+    _write_pane_presence(state, ago_s=30)
+    _add_pending_agent(state, "test-agent", stale=True)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "[janitor-resume]" not in out, f"expected suppression, got {out!r}"
+
+
+def test_keep_going_pane_file_absent_is_idle_not_global(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pane key resolves but its file is absent, global active 30s ago -> idle, nudge fires."""
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_active(state, ago_s=30)
+    _add_pending_agent(state, "test-agent", stale=True)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.splitlines()[0] == "[janitor-resume]", f"expected nudge, got {out!r}"
+
+
+def test_last_user_prompt_epoch_ignores_global_when_pane_key_resolves(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a pane key, `_last_user_prompt_epoch` reads the pane file, never the newer global one."""
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_user_active(state, ago_s=30)
+    assert dispatch._last_user_prompt_epoch() is None
+    _write_pane_presence(state, ago_s=3700)
+    epoch = dispatch._last_user_prompt_epoch()
+    assert epoch is not None and int(time.time()) - epoch >= 3700
+
+
+def test_keep_going_no_pane_key_uses_global_file(env_isolation: dict) -> None:
+    """No pane env var resolves -> the machine-global presence file decides (active -> suppressed)."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    assert state.terminal_pane_key() is None
+    _make_user_active(state, ago_s=30)
+    _add_pending_agent(state, "test-agent", stale=True)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert "[janitor-resume]" not in out, f"expected suppression, got {out!r}"
 
 
 def test_phase_keep_going_nudge_has_NO_off_switch(

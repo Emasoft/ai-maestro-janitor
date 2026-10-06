@@ -3589,16 +3589,33 @@ _KEEP_GOING_AGENT_STALE_DEFAULT = 900
 
 
 def _user_idle_seconds(now: int) -> int | None:
-    """Seconds since the last genuine user prompt, or None when unreadable/absent.
+    """Seconds since the last genuine user prompt in THIS pane, or None when unreadable/absent.
 
-    Reads the cross-plugin breadcrumb `state.user_presence_path()`
-    (`last_user_input_epoch`, bumped only by a real user prompt — never a cron
-    `[janitor-...]` fire). None covers every "cannot tell" case (missing file, corrupt
-    JSON, wrong shape, non-int/bool field) so the caller can fail OPEN to idle without
-    pretending it knows a real value.
+    Source: `_presence_last_input_epoch` (bumped only by a real user prompt — never a cron
+    `[janitor-...]` fire). None covers every "cannot tell" case so the caller can fail OPEN to
+    idle without pretending it knows a real value.
     """
+    epoch = _presence_last_input_epoch()
+    return None if epoch is None else max(0, now - epoch)
+
+
+
+def _presence_last_input_epoch() -> int | None:
+    """`last_user_input_epoch` of the presence breadcrumb that speaks for THIS session, or
+    None when unreadable/absent/malformed (callers fail OPEN to idle).
+
+    PER-PANE (owner directive 2026-07-16, state.terminal_pane_key): when this pane's key
+    resolves, ONLY its per-pane file is read. The machine-global file is bumped by a prompt in
+    ANY session, so reading it muted every session's keep-going nudge while the owner typed
+    anywhere (measured 2026-10-06: 2530 "keep-going: suppressed" lines in dispatch.log). There
+    is deliberately NO global fallback when a key resolves: an absent pane file means the user
+    never typed here (idle), and falling back would re-introduce the cross-pane mute. Only a
+    terminal exporting no pane id (Apple Terminal, headless) uses the global file.
+    """
+    key = state.terminal_pane_key()
+    path = state.per_pane_presence_path(key) if key is not None else state.user_presence_path()
     try:
-        raw = json.loads(state.user_presence_path().read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(raw, dict):
@@ -3606,7 +3623,7 @@ def _user_idle_seconds(now: int) -> int | None:
     value = raw.get("last_user_input_epoch")
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         return None
-    return max(0, now - value)
+    return value
 
 
 def _keep_going_user_idle_threshold() -> int:
@@ -3686,21 +3703,11 @@ _BOARD_NUDGE_STAMP_FILE = "keep-going-board-nudge-stamp.json"
 
 
 def _last_user_prompt_epoch() -> int | None:
-    """Raw `last_user_input_epoch` from the cross-plugin presence breadcrumb, or None when
-    unreadable/absent/malformed. Same source as `_user_idle_seconds`, but returns the
-    epoch itself rather than an elapsed count, so `_board_nudge_signature_changed` can
-    tell whether a NEW user prompt landed since the last board nudge, independent of the
-    caller's own `now`."""
-    try:
-        raw = json.loads(state.user_presence_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    value = raw.get("last_user_input_epoch")
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        return None
-    return value
+    """Raw `last_user_input_epoch` from this pane's presence breadcrumb (`_presence_last_input_epoch`),
+    or None when unreadable/absent/malformed. Returns the epoch itself rather than an elapsed
+    count, so `_board_nudge_signature_changed` can tell whether a NEW user prompt landed since
+    the last board nudge, independent of the caller's own `now`."""
+    return _presence_last_input_epoch()
 
 
 def _board_nudge_signature_changed(
