@@ -156,3 +156,24 @@ def test_detector_output_carries_no_marker_unless_dispatch_asks(monkeypatch: pyt
     assert issue_catalog.key_marker("MEMGREP-001", WHERE_A) == ""
     monkeypatch.setenv(tickets.EMIT_ENV, "1")
     assert tickets.KEY_MARKER_RE.fullmatch(issue_catalog.key_marker("MEMGREP-001", WHERE_A))
+
+
+# --- review fixes (janitor#326) ---------------------------------------------------------------
+
+
+def _rows(ledger: list[dict]) -> list[dict]:
+    return [e for e in ledger if e["code"].startswith("TICKETED-")]
+
+
+def test_every_content_change_records_its_own_ledger_row(project: Path, ledger: list[dict]) -> None:
+    """A worsened finding shown once must also be RECORDED: if that one fire is missed, the ledger is the
+    only trace. One row per (key, content hash): first suppression and each change; same content adds none."""
+    _open(WHERE_A)
+    dispatch._quiet_filter(DET, _keyed(WHERE_A))
+    dispatch._quiet_filter(DET, _keyed(WHERE_A, extra="  - one more gap\n"))
+    assert len(_rows(ledger)) == 2
+    dispatch._quiet_filter(DET, _keyed(WHERE_A, extra="  - one more gap\n"))
+    dispatch._quiet_filter(DET, _keyed(WHERE_A, extra="  - one more gap\n"))
+    assert len(_rows(ledger)) == 2
+
+

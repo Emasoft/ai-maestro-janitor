@@ -723,9 +723,9 @@ def _drop_ticketed_blocks(detector: str, text: str) -> str:
     Suppression is content-aware: the block is hidden only while its hash equals the one stored when
     it was first suppressed for that key. WHY: an open ticket says "a gap exists", not "this many
     gaps"; content-blind suppression kept a WORSENING supply-chain finding hidden for as long as the
-    old ticket stayed open. A changed block is shown once and becomes the new baseline. The ledger row
-    is written only when a (key, hash) is first suppressed — the ledger does not dedupe, so one row
-    per fire would flood it.
+    old ticket stayed open. A changed block is shown once and becomes the new baseline. One ledger row
+    is written per new (key, hash) — first suppression and each content change — never per fire: the
+    ledger does not dedupe, so a row per fire would flood it.
     """
     if "⟦ticket-key:" not in text:
         return text
@@ -752,22 +752,23 @@ def _drop_ticketed_blocks(detector: str, text: str) -> str:
     suppressed = "\n".join(kept) + "\n" if kept else ""
     if seen.get(key) == digest:
         return suppressed
-    first_suppression = key not in seen
+    changed = key in seen
     seen[key] = digest
     try:
         state.atomic_write(seen_file, json.dumps(seen))
     except OSError:
         state.log_line("dispatch", "ticketed-block hash store not writable")
-    if not first_suppression:
-        return surfaced  # the block changed while its ticket is open: show it once
-    msg = " ".join(b.strip() for b in body if b.strip() and b not in kept)
+    # WHY a row for EVERY new (key, hash), not only the first: a changed (worsened) block is shown once
+    # on stdout, and if that single fire is missed the ledger is the only trace of the worse state.
+    # Same content never reaches here again (the early return above), so this cannot flood.
+    msg =" ".join(b.strip() for b in body if b.strip() and b not in kept)
     try:
         findings_ledger.record(
             sev="LOW", code=f"TICKETED-{detector.upper()}", src=detector, msg=msg, ref="",
         )
     except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
         state.log_line("dispatch", f"ticketed-suppress could not record from '{detector}'")
-    return suppressed
+    return surfaced if changed else suppressed  # a changed block is shown once
 
 
 def _quiet_filter(detector: str, text: str) -> str:
