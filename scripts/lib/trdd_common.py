@@ -832,24 +832,6 @@ class TrddRecord:
     declares_blocker: bool = False
     # Frontmatter `created:` date — the last-resort "time in testing" clock (see `testing_age_days`).
     created: date | None = None
-    # True when the card's deliverable IS a design/ file (`task-type: docs`, or a `Writes` line
-    # naming design/specs or design/requirements): a design/-only commit then genuinely ships it.
-    design_deliverable: bool = False
-
-
-# A `Writes (exclusive): <paths>` declaration in a card body.
-_WRITES_LINE_RE = re.compile(r"^[ \t]*Writes\b[^:\n]*:(.*)$", re.IGNORECASE | re.MULTILINE)
-_FM_TASK_TYPE_RE = re.compile(r"^task-type:[ \t]*(\S+)", re.MULTILINE)
-
-
-def _has_design_deliverable(block: str, body: str) -> bool:
-    tm = _FM_TASK_TYPE_RE.search(block)
-    if tm and tm.group(1).strip().lower() == "docs":
-        return True
-    return any(
-        "design/specs" in m.group(1) or "design/requirements" in m.group(1)
-        for m in _WRITES_LINE_RE.finditer(body)
-    )
 
 
 def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
@@ -859,13 +841,11 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
     impl_commits: list[str] = []
     declares_blocker = False
     created: date | None = None
-    design_deliverable = False
     fm = FRONTMATTER_RE.match(text)
     body = text
     if fm:
         block = fm.group(1)
         body = text[fm.end():]
-        design_deliverable = _has_design_deliverable(block, body)
         cm = FM_CREATED_RE.search(block)
         created = _first_iso_date(cm.group(1)) if cm else None
         bm = FM_BLOCKED_BY_RE.search(block)
@@ -884,7 +864,6 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
         impl_commits=impl_commits,
         body=body,
         created=created,
-        design_deliverable=design_deliverable,
     )
 
 
@@ -1700,7 +1679,6 @@ def reconcile(
     work_idle_threshold_days: float = DEFAULT_WORK_IDLE_DAYS,
     commit_at_head=None,
     today: date | None = None,
-    commit_ships_code=None,
 ) -> ReconcileVerdict:
     """Run every check on one record; return the consolidated verdict.
 
@@ -1754,17 +1732,7 @@ def reconcile(
         # card nobody is watching is still flagged.
         if has_remaining:
             fired.append("partially-shipped-review")
-        #
-        # A commit whose files are ALL under design/ only minted or edited cards (janitor#332,
-        # TRDD-8BNV75TV round 2): a release tagging it proves no code shipped, so it cannot make
-        # the card closeable. Cards whose deliverable IS a design/ file are exempt, else their
-        # one real commit would be discarded. `commit_ships_code=None` keeps every older caller
-        # unchanged (all commits count).
-        elif not waiting_on_live_event(record, today) and (
-            commit_ships_code is None
-            or record.design_deliverable
-            or any(commit_ships_code(sha) for sha in shipped_commits)
-        ):
+        elif not waiting_on_live_event(record, today):
             fired.append("closeable-candidate")
     if prose_mismatch:
         fired.append("prose-frontmatter-mismatch")
