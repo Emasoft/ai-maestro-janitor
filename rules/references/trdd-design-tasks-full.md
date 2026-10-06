@@ -642,13 +642,12 @@ reorder the whole board around cards nobody actually touched.
 
 ## Folder lifecycle — proposals, tasks, archived, refused
 
-A TRDD lives in exactly one of four folders, by lifecycle state:
+A TRDD lives in exactly one of three folders, by lifecycle state (there is no `design/refused/` folder: a proposal a judge DECLINED stays in `design/proposals/` with `column: refused`, kept as an audit record, never deleted, editable and re-proposable; owner ruling 2026-09-24, janitor#309):
 
 | Folder | Lifecycle state (`column:`) | Meaning |
 |---|---|---|
 | `design/proposals/` | `proposal` | Authored, awaiting approval. **NOT** authorized to execute. |
 | `design/tasks/` | `planned` (then every downstream `column:` — `todo`, `dispatch`, `dev`, `testing`, …) | Approved/authorized. In the execution pipeline. |
-| `design/refused/` | `refused` | A proposal a judge **DECLINED**. Kept as an audit record; never deleted. |
 | `design/archived/` | `completed` (only when `release-via: none`/absent) · `cancelled` · `superseded` · `published` · `live` | TRDDs that reached a terminal-DONE state — finished, withdrawn, replaced, or SHIPPED. Kept; never deleted. **`published`/`live` archive AS THEMSELVES** — rewriting `published → completed` on archive would destroy the fact that it shipped, so a `complete` TRDD carrying `release-via: publish`/`deploy` is NOT archived yet; it archives once it reaches `published`/`live`. **`failed` is NOT here** — it stays in `design/tasks/` (retryable). |
 
 `proposal`, `planned`, `refused`, `cancelled`, `completed`, and
@@ -659,7 +658,7 @@ owner advances the TRDD through the normal v2 flow (`todo` → `dispatch`
 
 **Lineage rule (which terminal folder?):** the dividing line is *did a
 judge decline it?* — **not** *was it ever approved*. Only a DECLINED
-proposal goes to `design/refused/`. Everything else that ends —
+proposal gets `column: refused` and stays in `design/proposals/`. Everything else that ends —
 completed, cancelled, superseded, published, or live — goes to `design/archived/`,
 **whether or not it was ever approved**. A proposal made obsolete by a
 newer TRDD is superseded, never refused: nobody judged it, it was
@@ -730,7 +729,7 @@ Never delete a refused proposal — it is the audit trail.
 1. Edit frontmatter: `column: proposal` → `column: refused`; bump `updated:`.
 2. Append to `## Approval log`:
    `- <ISO> — REFUSED by <approver>. <one-line reason>.`
-3. `git mv` the file into `design/refused/` (create the folder if absent).
+3. Leave the file in `design/proposals/` (no move; no `design/refused/` folder exists).
 4. Commit (`docs: refuse TRDD-<short> → refused`).
 
 A refused proposal is terminal — re-attempting the idea means a **new**

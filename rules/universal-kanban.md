@@ -54,7 +54,7 @@ BRACKET values sit outside the board — `proposal`, `planned`,
 in `trdd-design-tasks.md`. `proposal`/`planned` are the intake
 antechamber ahead of `backburner`; terminal values leave the board,
 each archived AS ITSELF (3P-ZON-05) into `design/archived/`
-(`refused` into `design/refused/`).
+(except `refused`: a refused card stays in `design/proposals/`, owner ruling 2026-09-24).
 
 **Pre-3.0.0 cards are grandfathered** (3P-KAN-21): entered `todo`,
 `design` or `backburner` on or before 2026-08-23 ⇒ conformant under
@@ -80,7 +80,9 @@ In a standalone project there is exactly ONE schedule and ONE worker:
   parallel `dev` cards is a sign of context-thrash, not throughput.
 - **Exception columns are signals to the USER.** `blocked` cards list
   their `blocked-by:`; `failed` cards stay on the board (retryable —
-  never archived as failed); `superseded` cards leave the board on the
+  never archived automatically or routinely; only an EXPRESS give-up decision by the USER or
+  main agent archives one, definitively, 3P-ZON-06 spec 4.0.0; `cancelled` is the non-archiving
+  way out); `superseded` cards leave the board on the
   next archival pass.
 
 ## Rendering the board

@@ -37,7 +37,7 @@ frontmatter carrying the structured state and a body carrying the prose. A TRDD 
    | `local` | `<project-root>/.claude/local/design/` | gitignored, never committed |
    | `user` | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/design/` | host-only, never pushed |
 
-   All three share the SAME four lifecycle folders (`proposals/ tasks/ archived/ refused/`),
+   All three share the SAME three lifecycle folders (`proposals/ tasks/ archived/`; no `refused/` folder, refused is a `column:`),
    plus `requirements/`/`specs/` (no lifecycle of their own). PROJECT `design/` MUST NOT be
    gitignored; LOCAL/USER need no entry. LOCAL moved in-tree 2026-09 (TRDD-WY198OIP,
    ai-maestro#163) — migration history: the reference.
