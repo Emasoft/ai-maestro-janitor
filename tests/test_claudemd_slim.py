@@ -330,6 +330,21 @@ def test_cli_index_inserts_then_is_idempotent(tmp_path: Path) -> None:
     assert claude_md.stat().st_mtime_ns == sig
 
 
+def test_cli_index_consecutive_runs_leave_claude_md_byte_identical(tmp_path: Path) -> None:
+    """janitor#328: the header's `generated=` timestamp differs on every run, so CLAUDE.md stays
+    byte-identical only because the digest (over the rendered body, never the timestamp) gates
+    the write. Run across a clock tick: a regression that rewrote on each run would change
+    `generated=` and fail here."""
+    _corpus(tmp_path)
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# P — https://github.com/o/r\n\nnarrative stays\n", encoding="utf-8")
+    assert _run_cli(tmp_path, "index").returncode == 0
+    first = claude_md.read_bytes()
+    time.sleep(1.1)  # `generated=` has one-second resolution
+    assert _run_cli(tmp_path, "index").returncode == 0
+    assert claude_md.read_bytes() == first
+
+
 def test_cli_check_exit_codes(tmp_path: Path) -> None:
     _corpus(tmp_path)
     claude_md = tmp_path / "CLAUDE.md"
