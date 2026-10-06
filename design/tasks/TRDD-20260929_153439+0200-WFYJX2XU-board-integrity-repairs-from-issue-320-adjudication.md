@@ -24,7 +24,7 @@ ai-maestro-janitor#320 adjudicated 4 GRAPH-FALSE-COMPLETE findings (terminal-col
 
 ## Repairs (each names the REAL edit site)
 1. I6ZZWVDN (backburner, LIVE) — rewrite its citation of SLFMG704 (archived, terminal-frozen, untouchable) from open-obligation shape to provenance-citation shape. The parent is frozen; the child's body is the only legal edit site.
-2. 2C8XFOW9 (blocked, LIVE) — rewrite its citation of EQ792YPX (archived, terminal-frozen) the same way: successor-work provenance, not an open obligation. If the false-complete WARN on the parent persists after the child-side fix, the validator's parent-side state needs the owner's call (carve-out or exception).
+2. 2C8XFOW9 (column `blocked`, LIVE) — rewrite its citation of EQ792YPX (archived, terminal-frozen) the same way: successor-work provenance, not an open obligation. If the false-complete WARN on the parent persists after the child-side fix, the validator's parent-side state needs the owner's call (carve-out or exception).
 3. ULEGRT01 (ERROR-severity false-complete, open child TK1H3LSA) — adjudicate: read both cards, decide child-side provenance fix vs validator disposition; ERROR severity makes this the first repair.
 
 ## Proposed, awaiting owner (NOT decided here)

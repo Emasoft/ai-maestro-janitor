@@ -3,7 +3,7 @@ trdd-id: FFXGPZEI
 title: rename last-run stamps to last-attempt so the wrong inference cannot be spelled
 column: backburner
 created: 2026-08-30T02:18:14+0200
-updated: 2026-09-04T05:19:00+0200
+updated: 2026-10-07T01:17:38+0200
 current-owner: janitor-main-session
 task-type: refactor
 scope: project
@@ -18,6 +18,10 @@ external-refs: [TRDD-H8WRCW0I, TRDD-COQN6KVA, TRDD-5EHBPH6G, janitor#297]
 ---
 
 # `last-run-*.ts` invites the one inference it cannot support
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
+
+Held in backburner by cross-repo readers (other plugins and the ai-maestro server that consume the stamp filenames), which are not card ids, so `blocked-by: []` and column backburner are the correct form; this is not a card-to-card block. The prerequisite TRDD-COQN6KVA is column complete (archived).
 
 ## The proposal (peer suggestion, AMAMA 2026-08-30)
 
@@ -125,7 +129,7 @@ chosen between.
 
 ## Acceptance
 
-- [ ] TRDD-COQN6KVA (the outcome stamp) has landed — this rename is unsafe before it
+- [x] TRDD-COQN6KVA (the outcome stamp) has landed — this rename is unsafe before it
 - [ ] every reader across the fleet is enumerated, INCLUDING outside this repo, and the
       cross-repo ones are coordinated before the rename lands here. **This is the only real
       blocker**; if it turns out there are none, this card is small

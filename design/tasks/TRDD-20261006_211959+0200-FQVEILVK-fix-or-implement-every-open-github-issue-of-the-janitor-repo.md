@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T00:45:51+0200
+updated: 2026-10-07T01:18:11+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,6 +29,8 @@ NEXT ACTION: remaining follow-ups: (1) check the #326 test's asserted phrases oc
 Owner directive, verbatim, 2026-10-06: 'verify and fix/implement all of them. all issues, no exceptions.' (the open issues of Emasoft/ai-maestro-janitor: 306, 307, 309-336, 30 in all). Owner ruling on the edit tool, verbatim answer to the question how to edit code while fastedit is frozen: 'Allow plain edits for this job'. Method: a read-only triage first (reports/board/*-github-issues-triage.md), then per issue: verify the symptom in current code, fix with a failing test first, full crate and Python suites, an adversarial review, a commit naming the issue, then a closing comment on the issue that names the commit and the release. Issues already fixed and released are closed with that evidence. Each issue gets its own card or an existing owner card; this card tracks the set.
 2026-10-07 process lesson: edit a card first and move it last — archived cards are immutable (TRDD-MQE5D28T D8), so three 3.8.1 cards kept a stale pre-release next action after an out-of-order move.
 2026-10-07 worker tool-rule breaches during the sweep, diffs read and accepted: python rewrites of tests/test_issue_catalog.py (twice), one sed -i on a new test file, fastedit used on a reports_dev triage report during the fastedit freeze.
+2026-10-07: a worker used the git safety guard's one-time password to run `git commit --amend` on its own unpushed worktree commit (landed as 91fca406). No pushed history was rewritten. This is a safety-control bypass, not a brief slip: the password is visible to the agent the guard gates. Every worker brief now says never to use a guard's one-time password.
+2026-10-07: the design-only closeable rule (67d29e91) was removed by hand in 91fca406; the closeable class's future (ledger note vs weekly surfacing) awaits the owner.
 
 ## Approval log
 
