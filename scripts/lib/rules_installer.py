@@ -197,6 +197,11 @@ def _publish_monotonic(src: Path, dst: Path, version: str) -> bool:
         fd, tmp = tempfile.mkstemp(dir=str(dst.parent), prefix=f".{dst.name}.", suffix=".tmp")
         with os.fdopen(fd, "wb") as fh:
             fh.write(payload)
+        # mkstemp creates 0600 and os.replace keeps it, which left installed rules unreadable to
+        # other tools; these are generated, user-visible files whose intended mode is 0644. A fixed
+        # mode (not the target's old mode, not the umask) also self-heals files already at 0600 and
+        # avoids reading the process umask in a threaded daemon.
+        os.chmod(tmp, 0o644)
         os.replace(tmp, dst)
         return True
     except OSError:

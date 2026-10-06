@@ -476,5 +476,17 @@ def test_detector_nudges_only_when_opted_in_and_stale():
         assert run_detector(root) == ""  # deduped on repeat
 
 
+
+@pytest.mark.parametrize("start_mode", [0o644, 0o600])
+def test_atomic_replace_leaves_claude_md_world_readable(tmp_path, start_mode):
+    """_atomic_replace ends at 0644 whatever the target was (mkstemp 0600 must not leak)."""
+    target = tmp_path / "CLAUDE.md"
+    target.write_text("old")
+    os.chmod(target, start_mode)
+    _load_module()._atomic_replace(target, "new")
+    assert target.read_text() == "new"
+    assert os.stat(target).st_mode & 0o777 == 0o644
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

@@ -832,3 +832,13 @@ def test_janitor_memory_repair_still_points_at_the_pre_transaction_reference():
         "janitor-memory-repair/SKILL.md points at "
         "references/pre-transaction-verb-fixes.md but the file does not exist."
     )
+
+
+
+def test_publish_monotonic_installs_rule_world_readable(tmp_path):
+    """_publish_monotonic leaves the installed rule at 0644 (mkstemp 0600 must not leak)."""
+    src = tmp_path / "src.md"
+    src.write_text("rule body\n")
+    dst = tmp_path / _DST_NAME
+    assert rules_installer._publish_monotonic(src, dst, "1.0.0")
+    assert dst.stat().st_mode & 0o777 == 0o644

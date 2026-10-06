@@ -414,6 +414,11 @@ def _atomic_replace(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
+        # mkstemp creates 0600 and os.replace keeps it, which left CLAUDE.md unreadable to other
+        # tools; this is a generated, user-visible file whose intended mode is 0644. A fixed mode
+        # (not the target's old mode, not the umask) also self-heals files already at 0600 and
+        # avoids reading the process umask in a threaded daemon.
+        os.chmod(tmp, 0o644)
         os.replace(tmp, path)
     except BaseException:
         try:
