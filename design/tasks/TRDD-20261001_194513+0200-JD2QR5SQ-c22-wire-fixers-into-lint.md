@@ -1,10 +1,10 @@
 ---
 trdd-id: JD2QR5SQ
 title: C22 — wire fixers into lint
-column: dev
+column: testing
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-06T20:19:56+0200
+updated: 2026-10-06T21:00:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -25,7 +25,7 @@ blocker-holds-if: not-match:READY
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-NEXT ACTION: S6 — the seeded manual check: copy the three memory scopes to a scratch dir with a scratch JANITOR_GLOBAL_STATE_DIR, seed one finding per fixer-backed rule (WMATOM-004, WMATOM-007, WMATOM-008, WMATOM-017, WMPAGE-005, WMPAGE-010, WMSUP-001) plus one gate refusal, run the in-repo binary scripts/memgrep/target/release/memgrep explicitly (the one on PATH predates S1), with JANITOR_GLOBAL_STATE_DIR, MEMGREP_USER_MEM_ROOT and WIKIMEM_PROJECT_SCOPE_PATH all pointing into the scratch copy so nothing reaches the real scopes, the copies kept in the session scratchpad because memory pages can hold private data, and the expected diff written down before the run; lint --diff, then --apply-fixes twice, then diff -r against the unseeded copy: the diff must be exactly the seeded repairs and the ledger exactly one line. Done so far: S1 b7a22bb4, S2 435051cf, S3+S4 1f2a2896 (lint --apply-fixes and --diff, spec WM-LINT-09/10). After S6: the install rule below, then move the card to testing.
+NEXT ACTION: field use. The card is in testing: it completes when a dependent (C30 TRDD-I4MOD020, C31 TRDD-OLNPXGBC or C32 TRDD-1HXEAHY7) runs lint --apply-fixes on a real scope and the per-scope lock and ledger are seen working (see TRDD-1T0W2ZVW), and after the known residue below is removed. No code edit on this card until the owner lifts the fastedit freeze of 2026-10-06.
 
 SUPERSEDED in the body and in the older STATE lines: the Task, Verify and Writes lines that say lint_paths_with, default-on fixing, --unsafe-fixes, --show-fixes and a three-file write set; and every older note that assumes lint applies fixers by default or that this card makes labels per-finding. PLAN v2 (2026-10-06 lines) wins.
 
@@ -39,6 +39,7 @@ Known gap from S1: a fixer_for arm whose name matches no rule is not detected by
 
 Notes from S2 for S4: (a) remove the allow(dead_code) attributes on PageFix, plan_page_fix (memory.rs) and in src/fixers/mod.rs once S4 calls them; (b) prepare_batch_gated runs the scope-wide one-sided-link check, so --apply-fixes over a whole scope costs roughly one scope scan per changed page; (c) the reason 'gate: non-lint' is asserted by a test built on an in-atom unused noqa comment, and its cause there (a changed atom body) is inferred, not asserted; it also covers id-set and introduced-link refusals; (d) three stray double blank lines remain in memory.rs from S2 because fastedit cannot target blank lines between items; (e) the S2 commit message's crate counts (435 unit, 224 cli) were the worker's at commit time and were re-run by the main agent afterwards with the same result.
 Notes from S3+S4 (1f2a2896): the content fixers run BEFORE the normalization and a PROJECT page needing both is still fixed with no ledger line (test lint_apply_fixes_on_a_project_page_needing_normalization_fixes_it); a refused plan keeps the exit code, a write refused at write time exits 2; --diff and --apply-fixes are both skipped under an invalid config and --diff never writes; KNOWN RESIDUE: three /// lines describing --diff sit above lint_label's doc comment in memory.rs (around line 6095) because fastedit refused to remove them (two attempts: replace was a silent no-op, and delete left the attached docs; the main agent checked the committed diff, which adds only those three lines near lint_label); the allow(dead_code) attributes on PageFix and plan_page_fix are now unneeded and remain for the same reason, as does fixers/mod.rs's module-wide allow; a worker used Python string replaces on memory.rs and cli.rs to remove orphan lines fastedit left, against the project rule, and the committed diff was read in full.
+2026-10-06 S6 PASS (reports/board/20261006_205907+0200-c22-s6.md): on seeded scratch copies of the three scopes, --diff showed 7 fix hunks and 1 refusal and wrote nothing; --apply-fixes twice gave exactly the expected repairs, a no-op second run and one ledger line; the three real memory roots were byte-identical before and after (343 files). Limits: the scratch copies were not recognised as scopes, so every page shared the out-of-scope lock and ledger (per-scope locking on a real root is untested, carded as TRDD-1T0W2ZVW), and no real page needed the normalization, so the fix-then-normalize order was exercised only by the CLI test. The tested release binary was built from the working tree just before commit 1f2a2896; the later changes were the spec and an undone edit, and the installed binary reports 4ecdbc3, which contains all of S1 to S4. INSTALLED 2026-10-06 about 21:03: the previous binary (build 4daacfd) is backed up at builds_dev/memgrep-pre-C22-4daacfd; cargo install --path scripts/memgrep exit 0; the bare memgrep reports 4ecdbc3, lists --apply-fixes and --diff, recall works on the real project index, and lint --no-fix on the project memory gives 116 findings, the same as before.
 
 Derived from TRDD-DSN035UN (approved plan v4, 2026-10-01), card C22, wave W2.
 
@@ -55,6 +56,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:46:11+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 3HLI7DMK, I23YCEW7, 4G427D8M, 9SUZ48E8, QBU0HSM9, KSCAFSLD, RLD015QB, RUJQ7WSX per DSN035UN wave order
 - 2026-10-06T20:03:31+0200 — column → todo by main-agent@ai-maestro-janitor. only blocker 3HLI7DMK complete Cleared blocked-by (--clear-blocker override).
 - 2026-10-06T20:14:44+0200 — column → dev. plan v2 settled, work starts
+- 2026-10-06T21:00:59+0200 — column → testing. S1 to S4 committed, S6 passed, binary installed; field use remains
 
 ## STATE
 
