@@ -4,7 +4,7 @@ title: Suppression comments are honoured by the lint command but not by the writ
 column: backburner
 status: tasked
 created: 2026-10-05T02:12:18+0200
-updated: 2026-10-05T02:12:18+0200
+updated: 2026-10-06T20:14:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,7 @@ Found 2026-10-05 while reviewing C21 (TRDD-3HLI7DMK). Facts read in source. C21 
 ## Approval log
 
 - 2026-10-05T02:12:18+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-06 DECISION (taken by C22, TRDD-JD2QR5SQ): suppression is a lint-command concept only; lint_page_text, the write gate and the fixer oracle stay raw, because a comment inside a page must not waive a gate-floor error on a write. Known cost: lint can exit 0 on a suppressed floor finding that every write verb still refuses. Follow-ups left on this card: lint prints a note when a suppressed finding is a gate-floor rule; the spec states the disagreement; unused-suppression selectors of cross-page rules.

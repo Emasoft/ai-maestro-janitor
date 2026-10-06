@@ -4,7 +4,7 @@ title: C34 — memgrep perf budget
 column: todo
 status: tasked
 created: 2026-10-01T19:45:21+0200
-updated: 2026-10-06T20:03:31+0200
+updated: 2026-10-06T20:14:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -36,3 +36,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01T19:45:21+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-01T19:46:41+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on 3HLI7DMK per DSN035UN wave order
 - 2026-10-06T20:03:31+0200 — column → todo by main-agent@ai-maestro-janitor. only blocker 3HLI7DMK complete Cleared blocked-by (--clear-blocker override).
+
+## STATE
+
+2026-10-06: do not start while TRDD-JD2QR5SQ is in dev; both write scripts/memgrep/tests/cli.rs.
