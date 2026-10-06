@@ -732,8 +732,8 @@ def _drop_ticketed_blocks(detector: str, text: str) -> str:
     lines = text.splitlines()
     last = max((i for i, ln in enumerate(lines) if ln.strip()), default=-1)
     m = tickets.KEY_MARKER_RE.fullmatch(lines[last].strip()) if last >= 0 else None
-    body = [ln for ln in lines if tickets.KEY_MARKER_RE.fullmatch(ln.strip()) is None]
-    surfaced = "\n".join(body) + "\n" if body else ""
+    surfaced = tickets.strip_key_markers(text)
+    body = surfaced.splitlines()
     if m is None or detector not in _TICKET_KEY_DETECTORS or not _heartbeat_is_quiet():
         return surfaced
     key = m.group(1)

@@ -10,6 +10,8 @@ never reaches any other reader of detector stdout.
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -190,5 +192,28 @@ def test_a_reopened_ticket_starts_a_fresh_baseline(project: Path, ledger: list[d
     tickets.save(t)
     assert dispatch._quiet_filter(DET, _keyed(WHERE_A)) == ""
     assert len(_rows(ledger)) == 2, "reopen = a fresh first suppression, recorded"
+
+
+def _run_pmp(proj: Path, emit: bool) -> str:
+    env = {**os.environ, "HOME": str(proj / "home"), "CLAUDE_PROJECT_DIR": str(proj)}
+    env.pop(tickets.EMIT_ENV, None)
+    if emit:
+        env[tickets.EMIT_ENV] = "1"
+    (proj / "home").mkdir(parents=True, exist_ok=True)
+    (proj / "package.json").write_text('{"name": "x", "dependencies": {"left-pad": "1.3.0"}}\n', encoding="utf-8")
+    r = subprocess.run(
+        [str(ROOT / "scripts" / "detectors" / "package-manager-policy.py"), "--one-shot"],
+        env=env, capture_output=True, text=True, timeout=300, check=False,
+    )
+    return r.stdout
+
+
+def test_the_real_detector_emits_a_marker_only_when_asked(tmp_path: Path) -> None:
+    """End to end on the real detector: a raw reader (/janitor-audit, weekly-audit, a shell) never sets
+    the env and must see no marker; dispatch sets it and must get one."""
+    raw = _run_pmp(tmp_path / "raw", emit=False)
+    assert "supply-chain hardening gap" in raw, "the fixture project must trigger the detector"
+    assert "⟦ticket-key:" not in raw
+    assert "⟦ticket-key:" in _run_pmp(tmp_path / "emit", emit=True)
 
 
