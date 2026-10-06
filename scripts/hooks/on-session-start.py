@@ -236,7 +236,14 @@ def _seed_overview_if_absent(state, memory_bridge, scope_name: str, scope_root: 
         body = (
             "---\n"
             f"name: {stem}\n"
-            f'description: "{scope_name} memory scope entry point for {project_name}"\n'
+            # WHY several `/`-separated phrases: memgrep lint WMPAGE-004 (ERROR) counts them, and a
+            # one-phrase stub failed the janitor's own lint, which opened a repair ticket per new
+            # project (janitor#333). The scope name is in every phrase set so LOCAL and USER stubs
+            # are not identical (cross-page duplicate-description rules).
+            f'description: "{scope_name} memory scope entry point for {project_name} / '
+            f"where do I start reading the {scope_name} memory of {project_name} / "
+            f"empty seeded {scope_name} overview stub / "
+            f'how to recall {scope_name} notes by symptom"\n'
             f"ocd: {now}\n"
             f"lmd: {now}\n"
             "metadata: {node_type: memory, type: overview, tier: hub}\n"
