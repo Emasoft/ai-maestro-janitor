@@ -47,6 +47,7 @@ pub(crate) const RULES: &[Rule] = &[
     Rule { code: "WMPAGE-009", name: "page-unclosed-fence", family: "WMPAGE", sev: Severity::Error, fix: Fix::None, gate_floor: true, summary: "unclosed code fence swallows every atom and heading below it" },
     Rule { code: "WMPAGE-010", name: "page-no-notes-section", family: "WMPAGE", sev: Severity::Error, fix: Fix::Safe, gate_floor: false, summary: "missing `## Notes and lessons learned` section" },
     Rule { code: "WMPAGE-011", name: "stray-display-bracket", family: "WMPAGE", sev: Severity::Info, fix: Fix::None, gate_floor: false, summary: "line carries `⟦`/`⟧`, recall's display escaping of `[`/`]`" },
+    Rule { code: "WMPAGE-012", name: "page-duplicated-section", family: "WMPAGE", sev: Severity::Warn, fix: Fix::None, gate_floor: false, summary: "a section repeats an earlier one verbatim (same heading, same body)" },
     Rule { code: "WMSUP-001", name: "unused-noqa", family: "WMSUP", sev: Severity::Warn, fix: Fix::Safe, gate_floor: false, summary: "a suppression comment matches no finding" },
     Rule { code: "WMSUP-002", name: "blanket-noqa", family: "WMSUP", sev: Severity::Warn, fix: Fix::None, gate_floor: false, summary: "bare `<!-- noqa -->` with no codes" },
 ];

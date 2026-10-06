@@ -652,6 +652,18 @@ why = "A SOURCE page that contains display-escaped brackets was probably pasted 
 fix_text = "Replace `⟦`/`⟧` with ASCII `[`/`]`."
 
 [[issue]]
+code = "WMPAGE-012"
+name = "page-duplicated-section"
+family = "WMPAGE"
+severity = "WARN"
+fix = "none"
+gate_floor = false
+emitter = "memgrep"
+summary = "a section repeats an earlier one verbatim (same heading, same body)"
+why = "A section pasted twice passes every grammar check and ships doubled content to every cloner (janitor#315)."
+fix_text = "Delete the duplicate section."
+
+[[issue]]
 code = "WMATOM-001"
 name = "atom-dup-id"
 family = "WMATOM"

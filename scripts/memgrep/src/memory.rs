@@ -7783,6 +7783,50 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
         }
     }
 
+    // janitor#315: a section copied twice (same heading AND same non-empty body) passed every
+    // grammar check — validate/lint only parsed frontmatter and atoms, never body prose — and
+    // shipped to every cloner. Fence-aware, keyed on heading + body so a legitimately repeated
+    // heading ("Example") with different content is not flagged. The finding names the line only,
+    // never the section text (no-leak sweep).
+    {
+        let mut fence: Option<Fence> = None;
+        let mut sections: Vec<(usize, String, String)> = Vec::new(); // (line, heading, body)
+        for (i, line) in text.lines().enumerate() {
+            if fence_step(line, &mut fence) {
+                if let Some(s) = sections.last_mut() {
+                    s.2.push_str(line);
+                    s.2.push('\n');
+                }
+                continue;
+            }
+            if fence.is_none() && line.trim_start().starts_with('#') {
+                sections.push((i + 1, line.trim().to_string(), String::new()));
+            } else if let Some(s) = sections.last_mut() {
+                s.2.push_str(line.trim_end());
+                s.2.push('\n');
+            }
+        }
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        for (line, heading, body) in sections {
+            let body = body.trim().to_string();
+            if body.is_empty() {
+                continue;
+            }
+            if !seen.insert((heading, body)) {
+                violations.push(Violation {
+                    sev: rule_sev("page-duplicated-section"),
+                    path: p.clone(),
+                    line,
+                    msg: "this section repeats an earlier section verbatim (same heading, same \
+                     body) — a copy pasted twice; remove one"
+                        .into(),
+                    code: "page-duplicated-section",
+                    anchor: String::new(),
+                });
+            }
+        }
+    }
+
     // Atom-level: an unquoted-prose `desc:` (breaks grep / the in-body filter), props the parser
     // silently DROPS, a missing recall surface, non-ISO dates, and an oversized body (must be
     // decomposed). `atoms_for_lint` segments exactly as the recall resolver does.
@@ -15641,6 +15685,32 @@ mod xi9_span_tests {
         let (m, last) = locate_atom_body_matching(page, &|id: &str| id == "ATOM-60ZD-6UGR")
             .expect("footnote lesson must be located");
         assert_eq!(last, m, "a consecutive footnote's span must be empty (marker line only)");
+    }
+}
+
+#[cfg(test)]
+mod gh315_duplicate_section_tests {
+    use super::*;
+
+    fn dup_lines(page: &str) -> Vec<usize> {
+        lint_page_text(Path::new("fixture/g315.md"), page, false)
+            .into_iter()
+            .filter(|v| v.code == "page-duplicated-section")
+            .map(|v| v.line)
+            .collect()
+    }
+
+    /// janitor#315: a section pasted twice (heading + body) is reported on the second copy; a
+    /// repeated heading with DIFFERENT content, and a copy inside a code fence, are not.
+    #[test]
+    fn verbatim_duplicate_section_is_flagged_but_look_alikes_are_not() {
+        let head = "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n";
+        let dup = format!("{head}### Constants\nline one\nline two\n\n### Constants\nline one\nline two\n\n## Notes and lessons learned\n");
+        assert_eq!(dup_lines(&dup), vec![11], "second copy flagged");
+        let differs = format!("{head}### Example\nA\n\n### Example\nB\n\n## Notes and lessons learned\n");
+        assert!(dup_lines(&differs).is_empty(), "same heading, different body is legitimate");
+        let fenced = format!("{head}### X\n```\n### X\nbody\n```\n\n## Notes and lessons learned\n");
+        assert!(dup_lines(&fenced).is_empty(), "a heading-looking line in a fence is not a section");
     }
 }
 

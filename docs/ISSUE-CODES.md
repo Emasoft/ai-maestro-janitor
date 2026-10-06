@@ -332,7 +332,7 @@ unattended access to your repository.
 
 ## All codes by family
 
-88 code(s) across every emitter.
+89 code(s) across every emitter.
 
 ### AICTX
 
@@ -524,6 +524,7 @@ unattended access to your repository.
 | `WMPAGE-009` | ERROR | none | memgrep | unclosed code fence swallows every atom and heading below it |
 | `WMPAGE-010` | ERROR | safe | memgrep | missing `## Notes and lessons learned` section |
 | `WMPAGE-011` | INFO | none | memgrep | line carries `⟦`/`⟧`, recall's display escaping of `[`/`]` |
+| `WMPAGE-012` | WARN | none | memgrep | a section repeats an earlier one verbatim (same heading, same body) |
 
 ### WMSUP
 
