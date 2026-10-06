@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.2] — 2026-10-06
+
+### Documentation
+
+- **trdd:** Record the 2026-10-06 review follow-ups (TRDD-DS3WDTPV, TRDD-K60FT7PJ, TRDD-CWKM5218, TRDD-PAHO6KWK, TRDD-SRL4TO0P) (dadd72a)
+
+### Testing
+
+- Make two tests pass on the Linux CI runner (v3.7.1 CI failure) (2d3b3ae)
 ## [3.7.1] — 2026-10-06
 
 ### Bug Fixes
@@ -146,6 +155,10 @@ All notable changes to this project will be documented in this file.
 - **memgrep:** Six SAFE fixers for wikimem lint findings (TRDD-4G427D8M, TRDD-9SUZ48E8, TRDD-QBU0HSM9, TRDD-KSCAFSLD, TRDD-RLD015QB, TRDD-RUJQ7WSX) (9fb1375)
 - **memgrep:** Lint labels, rule selection, statistics, json, config and noqa (TRDD-3HLI7DMK) (453512b)
 - **daemon:** A process-size watch alerts the owner about an oversized process and stops nothing (TRDD-BZ3BT0NJ) (9301f4f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.7.1 (89d21dd)
 
 ### Refactor
 
