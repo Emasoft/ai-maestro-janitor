@@ -232,6 +232,23 @@ def _commit_touches_impl(sha: str, root: Path, trdd_prefix: str) -> bool:
     return any(not f.startswith(trdd_prefix) for f in files)
 
 
+def _commit_ships_code(sha: str, root: Path) -> bool:
+    """False iff every file `sha` changed is under `design/` (it only minted or edited cards).
+
+    janitor#332 / TRDD-8BNV75TV round 2: such a commit tagged in a release says nothing about the
+    card's code shipping. Fails OPEN (True) on any git error, like `_commit_touches_impl`.
+    """
+    proc = state.run_subprocess(
+        ["git", "-C", str(root), "show", "--name-only", "--format=", sha],
+        timeout=8,
+        detector_name="trdd-state-reconciliation",
+    )
+    if proc is None or proc.returncode != 0:
+        return True
+    files = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    return not files or any(not f.startswith("design/") for f in files)
+
+
 def _corpus_at_head(root: Path, *, timeout_s: float = 15) -> str | None:
     """Concatenated text content of every tracked file under `scripts/` at HEAD, loaded in
     ONE `git archive` call — the seam `_tokens_absent_at_head` uses so the many token
@@ -692,6 +709,13 @@ def main() -> int:
             head_cache[sha] = _commit_at_head(sha, root)
         return head_cache[sha]
 
+    ships_cache: dict[str, bool] = {}
+
+    def commit_ships_code(sha: str) -> bool:
+        if sha not in ships_cache:
+            ships_cache[sha] = _commit_ships_code(sha, root)
+        return ships_cache[sha]
+
     rows: list[dict] = []
     for rec in records:
         # Only a NON-terminal TRDD can be "shipped but open" or "stale-blocked".
@@ -727,6 +751,7 @@ def main() -> int:
             rec, commit_in_released_tag, column_of,
             idle_days=idle_by_uid.get(rec.uid or ""),
             commit_at_head=commit_at_head,
+            commit_ships_code=commit_ships_code,
         )
         if not verdict.fires:
             continue
