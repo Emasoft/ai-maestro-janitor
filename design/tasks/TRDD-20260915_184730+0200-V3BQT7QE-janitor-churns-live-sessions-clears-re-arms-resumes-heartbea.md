@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: testing
 created: 2026-09-15T18:47:30+0200
-updated: 2026-10-06T21:26:38+0200
+updated: 2026-10-06T22:08:06+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: audit
@@ -19,7 +19,7 @@ scope: project
 project-id: ai-maestro-janitor
 npt: []
 eht: [PA9E2GJ1, 7ZMQSXO6, NEVQOHGS, I8AAJ3PG, 0KOIJ3SK]
-implementation-commits: [30994579, 505f22ee, dcd5ba79, 87fc61f2, 55c74f62]
+implementation-commits: [30994579, 505f22ee, dcd5ba79, 87fc61f2, 55c74f62, 6f5acdb0]
 ---
 
 # Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
