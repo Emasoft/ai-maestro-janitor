@@ -278,9 +278,16 @@ def next_action(fields: dict[str, Any]) -> str | None:
     head = f"The user's last message was «{fields['last_user']}». "
     if not fields.get("own_reply"):
         return head + "You had not replied yet: answer it."
+    # Why: the old "ask it again and stop" left resumed sessions idle (29 min measured) because
+    # quiet heartbeats never wake them. Work is limited to the task already in flight and
+    # excludes the action the question gates.
     return (
-        head + f"Your reply was «{fields['own_reply']}». If your reply asked the user "
-        "something, ask it again and stop. Otherwise continue from it."
+        head + f"Your reply was «{fields['own_reply']}». "
+        "Continue the task that was already in flight. If your reply asked the user something, "
+        "keep doing the steps of that task that do not depend on the answer, then ask the "
+        "question again at the end of your reply. Never take the action the question asks "
+        "permission for, nor anything destructive, irreversible or outward-facing that depends "
+        "on the answer."
     )
 
 

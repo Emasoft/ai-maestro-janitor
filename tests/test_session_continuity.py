@@ -90,6 +90,16 @@ def test_incident_shape_next_action_quotes_the_closing_question_never_the_heartb
     assert "janitor heartbeat" not in action
 
 
+
+def test_next_action_continues_in_flight_work_instead_of_asking_and_stopping():
+    """A closing question must not park the resumed session: it keeps working, then re-asks."""
+    action = sc.next_action({"last_user": "have you fixed X?", "own_reply": "Fixed. Shall I publish?"})
+    assert action is not None
+    assert "and stop" not in action
+    assert "keep doing the steps of that task that do not depend on the answer" in action
+    assert "Never take the action the question asks permission for" in action
+
+
 @pytest.mark.parametrize(
     "noise",
     [
