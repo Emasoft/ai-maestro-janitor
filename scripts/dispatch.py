@@ -744,7 +744,20 @@ def _drop_ticketed_blocks(detector: str, text: str) -> str:
     except (OSError, ValueError):
         seen = {}
     # Keep only keys whose ticket is still open, so a reopened finding starts a fresh baseline.
-    seen = {k: v for k, v in seen.items() if k in open_keys}
+    live = {k: v for k, v in seen.items() if k in open_keys}
+
+    def _persist(store: dict) -> None:
+        try:
+            state.atomic_write(seen_file, json.dumps(store))
+        except OSError:
+            state.log_line("dispatch", "ticketed-block hash store not writable")
+
+    # WHY the prune is persisted whenever it removed a key (not only on a change): otherwise the stale
+    # digest of a closed ticket survives on disk, and when the same key's ticket is reopened with
+    # unchanged content the finding is hidden at once with no baseline and no ledger row.
+    if len(live) != len(seen):
+        _persist(live)
+    seen = live
     if key not in open_keys:
         return surfaced
     digest = hashlib.sha256("\n".join(ln.strip() for ln in body if ln.strip()).encode()).hexdigest()[:16]
@@ -754,10 +767,7 @@ def _drop_ticketed_blocks(detector: str, text: str) -> str:
         return suppressed
     changed = key in seen
     seen[key] = digest
-    try:
-        state.atomic_write(seen_file, json.dumps(seen))
-    except OSError:
-        state.log_line("dispatch", "ticketed-block hash store not writable")
+    _persist(seen)
     # WHY a row for EVERY new (key, hash), not only the first: a changed (worsened) block is shown once
     # on stdout, and if that single fire is missed the ledger is the only trace of the worse state.
     # Same content never reaches here again (the early return above), so this cannot flood.

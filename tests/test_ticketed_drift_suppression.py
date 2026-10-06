@@ -177,3 +177,18 @@ def test_every_content_change_records_its_own_ledger_row(project: Path, ledger: 
     assert len(_rows(ledger)) == 2
 
 
+def test_a_reopened_ticket_starts_a_fresh_baseline(project: Path, ledger: list[dict]) -> None:
+    """The prune must be PERSISTED: otherwise a closed-then-reopened ticket's stale digest hides the
+    reopened finding (same content) with no ledger row."""
+    t = tickets.load(_open(WHERE_A))
+    assert t is not None
+    assert dispatch._quiet_filter(DET, _keyed(WHERE_A)) == ""
+    t.status = tickets.RESOLVED
+    tickets.save(t)
+    assert "index at /proj/a is corrupt" in dispatch._quiet_filter(DET, _keyed(WHERE_A))  # closed: shown, prunes
+    t.status = tickets.OPEN
+    tickets.save(t)
+    assert dispatch._quiet_filter(DET, _keyed(WHERE_A)) == ""
+    assert len(_rows(ledger)) == 2, "reopen = a fresh first suppression, recorded"
+
+
