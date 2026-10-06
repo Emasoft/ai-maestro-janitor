@@ -23,7 +23,7 @@ implementation-commits: [6e95fb5e, ecb8cc7f, 9ad6b9f6, 16d832ef, 6f513d53, 65e0b
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
 Shipped in v3.8.0; GitHub issue #326 closed https://github.com/Emasoft/ai-maestro-janitor/issues/326#issuecomment-6025976532. Landed on main as 6e95fb5e,ecb8cc7f,9ad6b9f6,16d832ef,6f513d53,65e0b9bc,47484d08,13c9c336,6099a561,26c42b4e. Follow-ups for #326 landed on main: ticketed drift suppression, content-hash aware, with one detector keyed (package-manager-policy). It takes effect only after its PROJECT proposal is approved. KNOWN LIMITS: (1) the ticketed-block-hashes store is unlocked, so concurrent fires can race (named by a ponytail comment in the code); (2) a stale digest can hide an identical reopened finding if no fire ran between the ticket close and the reopen.
-NEXT ACTION: prove or test acceptance item 1 (component over-cap split re-dispatch); until then this card stays in testing.
+NEXT ACTION: move to complete once v3.8.1 is released and CI is green. Ships in v3.8.1.
 FOLLOW-UP LOCATION: landed on main as 6e95fb5e,ecb8cc7f,9ad6b9f6,16d832ef,6f513d53,65e0b9bc,47484d08,13c9c336,6099a561,26c42b4e (the follow-up worktree is merged).
 
 
@@ -39,7 +39,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#326 (opened 2026-10-02). Part of
 
 ## Acceptance
 
-- [ ] The split chore is no longer re-dispatched on a scope it can never act on (component over-cap pages: refusal recorded or re-tier acted on, pass continues to atom-level work). NOT PROVEN by a test: 9ad6b9f6 is a SKILL.md instruction change only.
+- [x] The split chore is no longer re-dispatched on a scope it can never act on (component over-cap pages: refusal recorded or re-tier acted on, pass continues to atom-level work). Proof: 3aacd967 (test in tests/test_memory_chore_claim_step.py pinning that an over-cap component page is skipped, not re-dispatched), 9ad6b9f6.
 - [x] A verbatim atom that cannot be shortened is judged once, not weekly. Proof: 16d832ef; tests/test_split_atom_refusal.py::test_a_split_atom_refusal_suppresses_dispatch, test_the_refusal_never_expires_on_a_clock, test_editing_the_page_re_arms_the_chore.
 - [x] An unchanged memgrep lint count no longer reaches heartbeat stdout. Proof: 6e95fb5e; tests/test_run_lint_stderr_echo.py::test_run_lint_with_echo_off_keeps_the_summary_off_stderr.
 - [x] Auto-recall skips harness task notifications. Proof: ecb8cc7f; tests/test_autorecall_hook.py::test_on_harness_notification_prompt_is_noop.

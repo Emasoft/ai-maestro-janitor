@@ -23,7 +23,7 @@ implementation-commits: [00e80ac2, 6f45acf8]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
 Shipped in v3.8.0; GitHub issue #315 closed https://github.com/Emasoft/ai-maestro-janitor/issues/315#issuecomment-6025973258. Landed on main as 00e80ac2,6f45acf8.
-NEXT ACTION: decide whether validate must also see a pasted-twice section (acceptance item 2); until then this card stays in testing.
+NEXT ACTION: move to complete once v3.8.1 is released and CI is green. Ships in v3.8.1.
 
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#315 (opened 2026-09-28). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: A project wikimem page carried two full copies of two sections. Neither validate nor lint detects duplicated body sections, and a hand repair left part of the duplicate in place. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
@@ -40,5 +40,5 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#315 (opened 2026-09-28). Part of
 ## Acceptance
 
 - [x] lint reports a section pasted twice (WMPAGE-012, WARN). Proof: 00e80ac2, 6f45acf8; scripts/memgrep/src/memory.rs::verbatim_duplicate_section_is_flagged_but_look_alikes_are_not; tests/test_memory_lint_gate_coverage.py page-duplicated-section row.
-- [ ] validate also reports a pasted-twice section (the card title says validate and lint cannot see it). NOT PROVEN: the fix is a WARN-only lint rule; memgrep validate (0.2.0) on a page with a duplicated section printed NONE on 2026-10-06.
+- [x] validate also reports a pasted-twice section (non-blocking WARN, exit code unchanged). Proof: 88f6b1f8; spec WM-CLI-05; memgrep validate prints one WARN line per section pasted twice (same check as lint WMPAGE-012).
 - [x] A closing comment on the issue names the commit and the release. Proof: https://github.com/Emasoft/ai-maestro-janitor/issues/315#issuecomment-6025973258

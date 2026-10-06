@@ -23,7 +23,7 @@ implementation-commits: [6eabe6b7, 15344f01, 6f45acf8, a0506578, 8586f043]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
 Shipped in v3.8.0; GitHub issue #331 closed https://github.com/Emasoft/ai-maestro-janitor/issues/331#issuecomment-6025977220. Landed on main as 6eabe6b7,15344f01,6f45acf8,a0506578,8586f043. Follow-ups for #331 landed on main (a0506578 memgrep crate 0.1.0 to 0.2.0; 8586f043 repair skill page-description rewrite must prove no recall loss, a skill instruction only with no automated test).
-NEXT ACTION: add an automated check for acceptance item 4 or have the owner accept the skill-instruction-only rule; until then this card stays in testing.
+NEXT ACTION: move to complete once v3.8.1 is released and CI is green. Ships in v3.8.1.
 FOLLOW-UP LOCATION: landed on main as 6eabe6b7,15344f01,6f45acf8,a0506578,8586f043 (the follow-up worktree is merged).
 NOTE: the #331 repair-skill rule (a page-description rewrite must prove no recall loss) is a skill instruction only, with no automated test.
 
@@ -42,5 +42,5 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#331 (opened 2026-10-05). Part of
 - [x] A lesson can be corrected under its own id (update-mem-atom --status). Proof: 6eabe6b7; scripts/memgrep/tests/cli.rs::update_atom_status_supersedes_a_lesson_by_its_own_id.
 - [x] A page description can be extended through a verb. Proof: 6eabe6b7, 15344f01; scripts/memgrep/tests/cli.rs::update_topic_can_extend_the_page_description.
 - [x] The stdin contract is documented. Proof: 349acb2d (hook advice, SKILL.md, spec WM-CLI-17), a0506578 (crate 0.2.0).
-- [ ] A repair rewrite of a page description cannot shrink the recall surface. NOT PROVEN by code: 8586f043 and bdbf5b16 are a repair-skill instruction only, with no automated test.
+- [x] A repair rewrite of a page description cannot shrink the recall surface. Proof: 164bd7ea, daa6a60b (pytest pins the repair recall-surface rule and that the SKILL.md pointer names an existing heading of references/repair-background.md, renamed Description trims keep recall); 8586f043, bdbf5b16.
 - [x] A closing comment on the issue names the commit and the release. Proof: https://github.com/Emasoft/ai-maestro-janitor/issues/331#issuecomment-6025977220
