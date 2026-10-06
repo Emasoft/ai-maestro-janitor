@@ -48,3 +48,20 @@ def test_card_writing_a_spec_with_a_design_only_commit_is_still_closeable():
 def test_card_writing_only_code_paths_gets_no_design_exemption():
     body = "Writes (exclusive): scripts/lib/x.py"
     assert "closeable-candidate" not in _verdict(body=body, ships_code=lambda sha: False).fired
+
+
+def _check3(line: str) -> bool:
+    text = (
+        "---\ntrdd-id: TESTID01\ntitle: T\ncolumn: dev\nblocked-by: []\n---\n"
+        f"\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-10-07\n{line}\n"
+    )
+    return tc.check3_prose_frontmatter_mismatch(tc.parse_record_text(text, uid="TESTID01"))
+
+
+def test_check3_flags_this_card_blocked_after_an_unrelated_earlier_id():
+    assert _check3("Unblocked by TRDD-AAAAAAAA; this card is still blocked on TRDD-BBBBBBBB") is True
+
+
+def test_check3_skips_another_card_that_is_the_subject_of_blocked():
+    assert _check3("TRDD-AAAAAAAA is blocked on the upstream fix") is False
+    assert _check3("see TRDD-AAAAAAAA (blocked on the upstream fix)") is False

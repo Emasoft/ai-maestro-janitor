@@ -1118,6 +1118,13 @@ _BLOCKED_NOT_LIVE_BEFORE_RE = re.compile(
 )
 
 
+# What may sit between a card id and "blocked" for that id to be the subject of the word.
+_SUBJECT_TAIL_RE = re.compile(
+    r"[`)\]]*[ \t:,-]*\(?[ \t]*(?:(?:is|are|was|were|stays?|remains?|still|currently|now|also)[ \t]+)*$",
+    re.IGNORECASE,
+)
+
+
 def _declares_own_block(line: str, own_uid: str | None) -> bool:
     """True iff `line` has a blocked-prose match that is a live declaration about THIS card.
 
@@ -1128,7 +1135,15 @@ def _declares_own_block(line: str, own_uid: str | None) -> bool:
     """
     for m in _BLOCKED_PROSE_RE.finditer(line):
         before = line[: m.start()]
-        if any(uid.upper() != (own_uid or "").upper() for uid in extract_trdd_refs(before)):
+        # Skip only when ANOTHER card is the SUBJECT of "blocked" - the nearest id directly
+        # precedes it ("TRDD-X is blocked", "TRDD-X (blocked"). Round 2, janitor#332: skipping on
+        # ANY earlier id hid "Unblocked by TRDD-A; this card is still blocked on TRDD-B".
+        refs = list(_TRDD_REF_RE.finditer(before))
+        if (
+            refs
+            and refs[-1].group(1).upper() != (own_uid or "").upper()
+            and _SUBJECT_TAIL_RE.match(before[refs[-1].end():])
+        ):
             continue
         if _BLOCKED_NOT_LIVE_BEFORE_RE.search(before):
             continue
