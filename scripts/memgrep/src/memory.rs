@@ -6243,6 +6243,68 @@ fn apply_lint_config(
     (sorted_v, sorted_f)
 }
 
+
+/// Outcome of planning the `--apply-fixes` fix of one page (TRDD-JD2QR5SQ S2).
+#[allow(dead_code)]
+pub(crate) struct PageFix {
+    pub text: String,
+    /// Rule codes the fixers changed; empty on refusal.
+    pub fixed: Vec<&'static str>,
+    /// Rule codes the fixers would have changed when the plan was refused; empty otherwise.
+    pub attempted: Vec<&'static str>,
+    pub refusal: Option<String>,
+}
+
+// Why: the `--apply-fixes` pass of TRDD-JD2QR5SQ plans here and writes only through write_gated.
+// Suppression stays a lint-command concept (TRDD-KTD3N7H6), so a rule with any noqa/lint-ignore
+// suppressed finding on the page is never auto-fixed. The gate check is read-only. The gate refusal
+// reason lists only the gate-floor codes found in the proposed text, never the gate's error text,
+// so the once-only unfixed ledger sees the same bytes on every run.
+#[allow(dead_code)]
+pub(crate) fn plan_page_fix(path: &Path, text: &str, cfg: &crate::lint_config::LintConfig) -> PageFix {
+    use crate::lint_config::{is_enabled, is_fixable};
+    use crate::lint_rules::rule_by_name;
+    let noqa = crate::noqa::parse(text);
+    let raw = lint_page_text(path, text, false);
+    let eligible: Vec<_> = crate::fixers::registered()
+        .into_iter()
+        .filter(|(r, _)| {
+            is_enabled(cfg, r, path)
+                && is_fixable(cfg, r)
+                && !raw.iter().any(|v| v.code == r.name && crate::noqa::suppresses(&noqa, r, v.line))
+        })
+        .collect();
+    let unchanged = |refusal: Option<String>, attempted: Vec<&'static str>| PageFix {
+        text: text.to_string(),
+        fixed: Vec::new(),
+        attempted,
+        refusal,
+    };
+    let out = crate::fix_engine::fix_page(path, text, &eligible, false);
+    if !out.converged {
+        return unchanged(Some("not-converged".into()), out.fixed);
+    }
+    if out.text == text {
+        return unchanged(None, Vec::new());
+    }
+    if crate::pre_write::prepare_batch_gated(&[(path, out.text.as_str())], &crate::pre_write::GatePolicy::default())
+        .is_err()
+    {
+        let mut codes: Vec<&str> = lint_page_text(path, &out.text, false)
+            .iter()
+            .filter(|v| rule_by_name(v.code).is_some_and(|r| r.gate_floor))
+            .map(|v| rule_by_name(v.code).map_or(v.code, |r| r.code))
+            .collect();
+        codes.sort_unstable();
+        codes.dedup();
+        // Why "non-lint": the gate also refuses for reasons no lint rule names (a changed atom body);
+        // an empty list would read "gate: " and hide that, and the reason must stay byte-stable.
+        let reason = if codes.is_empty() { "non-lint".to_string() } else { codes.join(",") };
+        return unchanged(Some(format!("gate: {reason}")), out.fixed);
+    }
+    PageFix { text: out.text, fixed: out.fixed, attempted: Vec::new(), refusal: None }
+}
+
 /// `--statistics` text: `count<TAB>CODE<TAB>fix<TAB>name`, most frequent first (ruff's table shape).
 fn lint_statistics(violations: &[Violation], fixable: &[bool]) -> Vec<(usize, String, String, bool)> {
     let mut counts: BTreeMap<&str, (usize, bool)> = BTreeMap::new();
@@ -14286,6 +14348,138 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             !v.is_empty(),
             "--no-fix still REPORTS — an unrepaired page is exactly what the watcher must see"
         );
+    }
+
+
+    const PLAN_PAGE: &str = "---\nname: p\ndescription: \"alpha / beta / gamma / delta\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n^a1 [desc:\"d\", keywords: k1 k2 k3, ocd: 2026-01-01, lmd: 2026-01-01]\nBody.\n";
+
+    /// C22 S2: `plan_page_fix` fixes WMPAGE-010 by default, and leaves the page alone when the rule
+    /// is ignored in the config or suppressed by a noqa comment on the page.
+    #[test]
+    fn plan_skips_deselected_ignored_and_suppressed_rules() {
+        let state = edit_test_tmpdir("plan-skip-state");
+        let dir = edit_test_tmpdir("plan-skip");
+        unsafe {
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", dir.join("user"));
+        }
+        let page = dir.join("p.md");
+        std::fs::write(&page, PLAN_PAGE).unwrap();
+        let default = crate::lint_config::LintConfig::default();
+        let suppressed = format!("{PLAN_PAGE}<!-- memgrep: noqa: WMPAGE-010 -->\n");
+        let fm_ignored = PLAN_PAGE.replace("\n---\n# p", "\nlint-ignore: [WMPAGE-010]\n---\n# p");
+        let ignore = crate::lint_config::LintConfig { ignore: vec!["WMPAGE-010".into()], ..Default::default() };
+        let select = crate::lint_config::LintConfig { select: vec!["WMATOM".into()], ..Default::default() };
+
+        let a = plan_page_fix(&page, PLAN_PAGE, &default);
+        let b = plan_page_fix(&page, PLAN_PAGE, &ignore);
+        let c = plan_page_fix(&page, &suppressed, &default);
+        let d = plan_page_fix(&page, PLAN_PAGE, &select);
+        let e = plan_page_fix(&page, &fm_ignored, &default);
+
+        unsafe {
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(a.refusal, None);
+        assert_eq!(a.fixed, vec!["WMPAGE-010"]);
+        assert_eq!(a.text, format!("{PLAN_PAGE}\n## Notes and lessons learned\n"));
+        assert_eq!((b.text.as_str(), b.fixed.len(), b.refusal), (PLAN_PAGE, 0, None));
+        assert_eq!((c.text.as_str(), c.fixed.len(), c.refusal), (suppressed.as_str(), 0, None));
+        assert_eq!((d.text.as_str(), d.fixed.len(), d.refusal), (PLAN_PAGE, 0, None));
+        assert_eq!((e.text.as_str(), e.fixed.len(), e.refusal), (fm_ignored.as_str(), 0, None));
+    }
+
+    /// C22 S2: a page whose fix would pass the fixer but still carries an unrepairable gate-floor
+    /// error (atom without keywords) is refused with a `gate:` reason and returned unchanged.
+    #[test]
+    fn plan_refuses_a_floor_error_page() {
+        let state = edit_test_tmpdir("plan-floor-state");
+        let dir = edit_test_tmpdir("plan-floor");
+        unsafe {
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", dir.join("user"));
+        }
+        let text = PLAN_PAGE.replace(" keywords: k1 k2 k3,", "");
+        let page = dir.join("p.md");
+        std::fs::write(&page, &text).unwrap();
+
+        let r = plan_page_fix(&page, &text, &crate::lint_config::LintConfig::default());
+        unsafe {
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(r.refusal.as_deref(), Some("gate: WMATOM-010"));
+        assert_eq!(r.attempted, vec!["WMPAGE-010"]);
+        assert_eq!(r.text, text);
+        assert!(r.fixed.is_empty());
+    }
+
+
+    /// C22 S2: a pre-existing defect on a sibling page must not make the gate refuse a clean fix.
+    #[test]
+    fn plan_is_not_refused_for_a_defect_on_a_sibling_page() {
+        let state = edit_test_tmpdir("plan-sib-state");
+        let dir = edit_test_tmpdir("plan-sib");
+        unsafe {
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", dir.join("user"));
+        }
+        let page = dir.join("p.md");
+        std::fs::write(&page, PLAN_PAGE).unwrap();
+        let sibling = PLAN_PAGE.replace("name: p", "name: q").replace("Body.", "See [[p]].");
+        std::fs::write(dir.join("q.md"), sibling).unwrap();
+
+        let scope_lint = lint_paths_with(std::slice::from_ref(&dir), false, false);
+        let r = plan_page_fix(&page, PLAN_PAGE, &crate::lint_config::LintConfig::default());
+        unsafe {
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let found: Vec<String> = scope_lint.iter().map(|v| format!("{}:{}", v.path, v.code)).collect();
+        assert!(
+            scope_lint.iter().any(|v| v.path.ends_with("q.md") && v.code.contains("link")),
+            "the sibling defect must be real: {found:?}"
+        );
+        assert_eq!(r.refusal, None);
+        assert_eq!(r.text, format!("{PLAN_PAGE}\n## Notes and lessons learned\n"));
+    }
+
+
+    /// C22 S2: a gate refusal with no lint floor code (here a changed atom body) reads "gate: non-lint".
+    #[test]
+    fn plan_gate_refusal_without_a_lint_floor_code_says_non_lint() {
+        let state = edit_test_tmpdir("plan-nl-state");
+        let dir = edit_test_tmpdir("plan-nl");
+        unsafe {
+            crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state);
+            crate::scoped_env::set_var("MEMGREP_USER_MEM_ROOT", dir.join("user"));
+        }
+        let text = PLAN_PAGE.replace("Body.", "Body. <!-- noqa: WMATOM-010 -->");
+        let page = dir.join("p.md");
+        std::fs::write(&page, &text).unwrap();
+
+        let r = plan_page_fix(&page, &text, &crate::lint_config::LintConfig::default());
+        unsafe {
+            crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR");
+            crate::scoped_env::remove_var("MEMGREP_USER_MEM_ROOT");
+        }
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(r.refusal.as_deref(), Some("gate: non-lint"));
+        assert_eq!(r.text, text);
+        assert!(r.fixed.is_empty());
+        assert!(!r.attempted.is_empty());
     }
 
     #[test]
