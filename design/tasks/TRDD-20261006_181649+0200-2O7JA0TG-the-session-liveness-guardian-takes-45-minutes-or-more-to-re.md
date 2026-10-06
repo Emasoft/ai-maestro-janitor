@@ -4,7 +4,7 @@ title: The session-liveness guardian waits three heartbeat intervals before re-a
 column: todo
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-06T18:44:49+0200
+updated: 2026-10-06T19:19:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -41,3 +41,4 @@ A session left with no live heartbeat cron after a clear (failed startup arm, th
 
 NEXT ACTION (2026-10-06, second): measure how often transcript-staleness false positives would fire with a shorter window when clear-observed.ts is newer than the last heartbeat-fires.log entry; propose the window rule. Constraint: no needless mid-session re-arms.
 2026-10-06: the stale window is max(15 min, 3 x cadence) (fleet_scan.py:45, :665-677): 45 min at */15, 15 min at */5; the measured 51 min also includes the typing gate.
+2026-10-06: related: since 79255d6e an idle session with a live cron is re-engaged by the keep-going nudge; this card remains for the cron-less case only (guardian latency).

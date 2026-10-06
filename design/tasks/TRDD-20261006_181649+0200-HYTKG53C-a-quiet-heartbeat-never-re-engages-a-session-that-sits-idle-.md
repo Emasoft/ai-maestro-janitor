@@ -1,10 +1,10 @@
 ---
 trdd-id: HYTKG53C
 title: A quiet heartbeat never re-engages a session that sits idle with work still in flight
-column: todo
+column: testing
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-06T18:44:50+0200
+updated: 2026-10-06T19:19:19+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -18,6 +18,7 @@ approval-datetime: 2026-10-06T18:16:49+0200
 parent-trdd: K60FT7PJ
 derived: true
 derived-kind: eht
+implementation-commits: [79255d6e]
 ---
 
 # A quiet heartbeat never re-engages a session that sits idle with work still in flight
@@ -39,4 +40,5 @@ A quiet heartbeat fire makes the session reply only 'janitor heartbeat' with no 
 
 ## STATE
 
-NEXT ACTION (2026-10-06, last): design with the advisor; the cue must respect RULE 1 (only work already assigned) and the owner's cost concerns (each wake is a full model turn).
+2026-10-06 (superseded by the line below): design with the advisor.
+2026-10-06: ROOT CAUSE found by the advisor and verified in dispatch.log: the wake already exists (_phase_keep_going_nudge, dispatch.py ~3767-3972) but its user-idle check read the machine-global presence file, which a prompt in ANY session bumps, so every session's nudge was muted while the owner typed anywhere (2530 "keep-going: suppressed (user active" lines; all five quiet fires of the 29 min idle). Fixed in 79255d6e: both presence readers use the per-pane file when a pane key resolves (absent = idle, no global fallback), global only with no pane id. No new detector, no heartbeat-rule change, no new token. NEXT ACTION: none on code. NAMED LIVE CHECK after the release carrying 79255d6e: with the owner typing in another pane, an idle session whose last reply ended on a question gets [janitor-resume] within two fires and dispatch.log shows a keep-going line without "suppressed (user active"; also check one session in another project and note any nudge onto a card it does not own.
