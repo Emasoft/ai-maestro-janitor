@@ -202,6 +202,24 @@ def test_on_cron_prompt_is_noop(tmp_path):
     assert out.strip() == ""
 
 
+@pytest.mark.parametrize(
+    "notification",
+    [
+        "<task-notification>\n<task-id>01kk1mab</task-id>\n<summary>zarvox flux compensator done</summary>\n</task-notification>",
+        "[SYSTEM NOTIFICATION - NOT USER INPUT] zarvox flux compensator background task finished",
+    ],
+)
+def test_on_harness_notification_prompt_is_noop(tmp_path, notification):
+    """janitor#326: a harness `<task-notification>` / `[SYSTEM NOTIFICATION - NOT USER INPUT]`
+    event is not a user prompt; recalling on its XML injected a jargon warning plus the invite
+    every time. Even with a matching note in the corpus the hook must inject nothing."""
+    memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
+    _write_note(memdir, "n1", "zarvox flux compensator failed unexpectedly")
+    rc, out, _err = _run_hook(_prompt(notification), _ON, tmp_path / "proj", tmp_path / "home")
+    assert rc == 0
+    assert out.strip() == ""
+
+
 def test_on_slash_command_is_noop(tmp_path):
     """A slash command prompt is skipped (handled by other hooks, not a question)."""
     memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")

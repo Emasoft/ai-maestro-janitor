@@ -337,6 +337,11 @@ def main() -> int:
     # is a user question, and recalling on them would inject noise every tick.
     if stripped.startswith("[janitor-") or stripped.startswith("/"):
         return 0
+    # Harness-injected events (background-task completions) arrive on this hook as "prompts"
+    # but nobody asked anything (janitor#326): recalling on their XML only produced the
+    # "reads like the ANSWER's jargon" warning plus the invite, burning context per event.
+    if stripped.startswith(("<task-notification>", "[SYSTEM NOTIFICATION")):
+        return 0
     # Triviality guard (issue #45): now that recall is ON by default it fires on
     # every turn, so a very short prompt ("yes", "do it", "push") — which carries no
     # recall signal — is skipped, or it would inject notes on bare confirmations.
