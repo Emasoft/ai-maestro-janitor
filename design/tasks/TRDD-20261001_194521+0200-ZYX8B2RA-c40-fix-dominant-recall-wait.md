@@ -4,7 +4,7 @@ title: C40 — fix dominant recall wait
 column: todo
 status: tasked
 created: 2026-10-01T19:45:21+0200
-updated: 2026-10-06T05:09:06+0200
+updated: 2026-10-06T15:08:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -68,3 +68,4 @@ IF YES: add, after the use_index block in cmd_recall_cli and in the find functio
 IF NO: move the two uncommitted tests out of scripts/memgrep/tests/cli.rs into tests_dev so the crate suite is green, and leave this card blocked.
 WORKING TREE: scripts/memgrep/tests/cli.rs holds two uncommitted tests that fail until the fix lands, so the crate suite is red in the working tree. A publish must not start in that state.
 OPEN, unmeasured: recall time on an idle host; the hook's end-to-end time against its 4 s limit.
+2026-10-06 OWNER DECISION: plain edit NOT allowed (owner, verbatim: 'the answer is no. if the trddgrep tool is not flexible enough to make the changes you need, open an issue on Emasoft/ai-maestro'). Applied the IF-NO branch: the two failing tests (recall_use_index_with_two_roots_searches_both, find_use_index_with_two_roots_searches_both) were removed from scripts/memgrep/tests/cli.rs by git stash (stash message names this card) and saved as tests_dev/20261006-ZYX8B2RA-two-root-use-index-tests.patch; the crate suite no longer carries them. NEXT ACTION: the source fix waits on fastedit accepting the edit (fastedit is the Emasoft/fastedit repo, not ai-maestro; trddgrep was not the refusing tool).

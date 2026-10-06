@@ -4,7 +4,7 @@ title: The burn gate docstring still describes usage cap learning as active
 column: todo
 status: tasked
 created: 2026-10-05T22:11:16+0200
-updated: 2026-10-05T22:11:16+0200
+updated: 2026-10-06T15:08:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -26,3 +26,4 @@ scripts/oauth_rotator/burn_gate.py opens with a description of learned caps that
 ## Approval log
 
 - 2026-10-05T22:11:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-06 — owner refused plain edits after a fastedit refusal (verbatim: 'the answer is no. if the trddgrep tool is not flexible enough to make the changes you need, open an issue on Emasoft/ai-maestro'). The burn_gate.py docstring fix stays undone until fastedit accepts the edit.
