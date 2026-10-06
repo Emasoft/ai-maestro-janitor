@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.5] — 2026-10-06
+
+### Bug Fixes
+
+- **heartbeat:** The keep-going nudge reads THIS pane's presence, so typing in one session no longer mutes every other session's wake (TRDD-HYTKG53C) (79255d6)
+- The CLAUDE.md writer and the rules installer leave their files at 0644, not 0600 (1edf766)
+- The two atomic writers keep a mode the user chose and heal only the bug's 0600 (113121d)
+
+### Documentation
+
+- **trdd:** 9438CGJZ marks the host-stall cause as inferred, names its live check and why other 5 s hooks stay; 6NMQ95TQ records the recurring fastedit 0600 mode (TRDD-9438CGJZ, TRDD-6NMQ95TQ) (4559d81)
+- **trdd:** 6NMQ95TQ gets a real NEXT ACTION and an honest file-mode note; 9438CGJZ states why each 5 s hook stays and how a kill would be noticed (TRDD-6NMQ95TQ, TRDD-9438CGJZ) (2f56e2f)
+- **trdd:** HYTKG53C root cause and fix recorded, collision card, YELTOX2S blocked on the fastedit card (TRDD-HYTKG53C, TRDD-LH84WTL5, TRDD-2O7JA0TG, TRDD-YELTOX2S, TRDD-6NMQ95TQ) (41aeecd)
+- **trdd:** Follow-ups for the v3.7.5 fixes: mode-fix card, collision caveats, live-check notes (TRDD-Y6WFN5L9, TRDD-HYTKG53C, TRDD-LH84WTL5, TRDD-2O7JA0TG, TRDD-CWKM5218, TRDD-KVUVV9D2, TRDD-9438CGJZ) (9a0134e)
+
+### Testing
+
+- Clear the terminal pane id env vars for every test (TRDD-HYTKG53C) (459df2e)
 ## [3.7.4] — 2026-10-06
 
 ### Bug Fixes
@@ -13,6 +31,10 @@ All notable changes to this project will be documented in this file.
 - **trdd:** Record v3.7.3 on the resume cards and the CPV card; standard current-owner on the three derived cards (TRDD-KVUVV9D2, TRDD-2O7JA0TG, TRDD-HYTKG53C, TRDD-CWKM5218, TRDD-DS3WDTPV) (528c823)
 - **trdd:** Correct the DS3WDTPV install note, give CWKM5218 a NEXT ACTION, record v3.7.3 green and installed (TRDD-DS3WDTPV, TRDD-CWKM5218, TRDD-KVUVV9D2) (0bd878d)
 - **trdd:** 9438CGJZ to testing after dd779c12; runnable CPV NEXT ACTION (TRDD-9438CGJZ, TRDD-CWKM5218) (fa6b5d6)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.7.4 (892a1f8)
 ## [3.7.3] — 2026-10-06
 
 ### Bug Fixes
