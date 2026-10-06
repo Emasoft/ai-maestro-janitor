@@ -114,7 +114,8 @@ def test_wedge_request_runs_the_tick_now_with_the_env() -> None:
         assert daemon._consume_rotator_tick_request(t) is True
         assert _wait(lambda: bool(seen), 5), "wedge request did not run the tick"
         assert seen == ["1"]
-        assert "JANITOR_ROTATOR_WEDGE_TICK" not in os.environ
+        # The thread pops the env var after the body returns, so wait for it instead of racing it.
+        assert _wait(lambda: "JANITOR_ROTATOR_WEDGE_TICK" not in os.environ, 5), "wedge env not cleared after the tick"
         assert gs.rotator_tick_requested_present() is False
     finally:
         t.shutdown(5)
