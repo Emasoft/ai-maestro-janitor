@@ -7,7 +7,6 @@
 - Claim exit codes
 - desc: quoting grammar (TRDD-3SOO1RWE)
 - desc-trim keyword incident (747b8bef)
-- Page description never shrinks the recall surface (janitor#331)
 - Superseded-atom delimiter mechanics
 - Why `publish-globally` is NOT a repair defect
 - Execution context and what this is
@@ -60,9 +59,7 @@ subcommand from a desc with no keyword carrying it — the recall surface lost t
 symptom entirely. This is why every desc trim must check the cut clause is still
 in `keywords:` before committing.
 
-## Page description never shrinks the recall surface (janitor#331)
-
-Recall ranks on description + title + tags only, so a phrase dropped from a page's
+Page description never shrinks the recall surface (janitor#331). Recall ranks on description + title + tags only, so a phrase dropped from a page's
 `description` makes the page unfindable by that phrase. When rewriting a page description:
 keep every distinctive symptom/error/name phrase of the old one (reword, do not cut), then
 PROVE it afterwards — for each phrase you removed or reshaped, `memgrep recall "<phrase>"
