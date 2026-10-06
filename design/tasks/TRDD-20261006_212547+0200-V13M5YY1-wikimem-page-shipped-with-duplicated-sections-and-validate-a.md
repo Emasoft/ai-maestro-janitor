@@ -4,7 +4,7 @@ title: Wikimem page shipped with duplicated sections and validate and lint canno
 column: testing
 status: tasked
 created: 2026-10-06T21:25:47+0200
-updated: 2026-10-06T22:08:20+0200
+updated: 2026-10-06T23:46:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -22,9 +22,9 @@ implementation-commits: [00e80ac2, 6f45acf8]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-landed on main as 00e80ac2,6f45acf8; ships in the next release; issue stays open until then.
-NEXT ACTION: close the GitHub issue citing the main SHAs once the next publish.py release ships.
-COLUMN MEANING: testing here means merged on main and full suite green (18,020 passed at 6f45acf8), awaiting the sweep release tracked on TRDD-FQVEILVK; nobody is testing it. `complete` was refused (no acceptance checklist): add the checklist and move to complete when that release ships.
+Shipped in v3.8.0; GitHub issue #315 closed https://github.com/Emasoft/ai-maestro-janitor/issues/315#issuecomment-6025973258. Landed on main as 00e80ac2,6f45acf8.
+NEXT ACTION: decide whether validate must also see a pasted-twice section (acceptance item 2); until then this card stays in testing.
+
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#315 (opened 2026-09-28). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: A project wikimem page carried two full copies of two sections. Neither validate nor lint detects duplicated body sections, and a hand repair left part of the duplicate in place. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 
@@ -36,3 +36,9 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#315 (opened 2026-09-28). Part of
 
 
 
+
+## Acceptance
+
+- [x] lint reports a section pasted twice (WMPAGE-012, WARN). Proof: 00e80ac2, 6f45acf8; scripts/memgrep/src/memory.rs::verbatim_duplicate_section_is_flagged_but_look_alikes_are_not; tests/test_memory_lint_gate_coverage.py page-duplicated-section row.
+- [ ] validate also reports a pasted-twice section (the card title says validate and lint cannot see it). NOT PROVEN: the fix is a WARN-only lint rule; memgrep validate (0.2.0) on a page with a duplicated section printed NONE on 2026-10-06.
+- [x] A closing comment on the issue names the commit and the release. Proof: https://github.com/Emasoft/ai-maestro-janitor/issues/315#issuecomment-6025973258

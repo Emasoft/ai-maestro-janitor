@@ -22,9 +22,9 @@ implementation-commits: [980c3891]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-landed on main as 980c3891; ships in the next release; issue stays open until then.
-NEXT ACTION: close the GitHub issue citing the main SHAs once the next publish.py release ships.
-COLUMN MEANING: testing here means merged on main and full suite green (18,020 passed at 6f45acf8), awaiting the sweep release tracked on TRDD-FQVEILVK; nobody is testing it. `complete` was refused (no acceptance checklist): add the checklist and move to complete when that release ships.
+Shipped in v3.8.0 (980c3891 pins byte-identical consecutive runs of the index block); GitHub issue #328 left open, comment https://github.com/Emasoft/ai-maestro-janitor/issues/328#issuecomment-6025980705.
+NEXT ACTION: wait for the owner's decision on whether a generated index block belongs in CLAUDE.md; close #328 and move this card to complete only after that decision.
+Issue left open for the owner's decision on whether a generated index block belongs in CLAUDE.md; the card stays in testing.
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#328 (opened 2026-10-03). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: The session start hook writes an auto-generated index block with a fresh timestamp into the tracked CLAUDE.md, so it always shows as modified and a by-name add sweeps the block into a commit. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 

@@ -4,7 +4,7 @@ title: atom-keywords-duplicated refusal reports only a count and two phrase conv
 column: testing
 status: tasked
 created: 2026-10-06T21:25:58+0200
-updated: 2026-10-06T22:08:21+0200
+updated: 2026-10-06T23:46:43+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -22,9 +22,9 @@ implementation-commits: [cf64735b]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-landed on main as cf64735b; ships in the next release; issue stays open until then.
-NEXT ACTION: close the GitHub issue citing the main SHAs once the next publish.py release ships.
-COLUMN MEANING: testing here means merged on main and full suite green (18,020 passed at 6f45acf8), awaiting the sweep release tracked on TRDD-FQVEILVK; nobody is testing it. `complete` was refused (no acceptance checklist): add the checklist and move to complete when that release ships.
+Shipped in v3.8.0; GitHub issue #323 closed https://github.com/Emasoft/ai-maestro-janitor/issues/323#issuecomment-6025975300. Landed on main as cf64735b.
+NEXT ACTION: owner to accept the decline of naming the duplicated keywords (acceptance item 2) or rule otherwise; until then this card stays in testing.
+
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#323 (opened 2026-09-29). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: The refusal names only the number of duplicate keywords, not which ones, and two conventions for delimiting phrases coexist, so a grammar mistake becomes an unexplained wall. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 
@@ -36,3 +36,9 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#323 (opened 2026-09-29). Part of
 
 
 
+
+## Acceptance
+
+- [x] The duplicate-keyword refusal states the two keyword-delimiting conventions. Proof: cf64735b; scripts/memgrep/src/memory.rs::keywords_duplicated_message_states_the_two_conventions_without_echoing_keywords.
+- [ ] The refusal names WHICH keywords are duplicated, not only the count. NOT DONE: declined because refusals never quote page content (closing comment); needs the owner to accept the decline or rule otherwise.
+- [x] A closing comment on the issue names the commit and the release. Proof: https://github.com/Emasoft/ai-maestro-janitor/issues/323#issuecomment-6025975300

@@ -3,7 +3,7 @@ trdd-id: 6ESS2MGE
 title: Advisory findings reach the agent or the owner instead of dying in the ledger
 column: design
 created: 2026-09-24T08:11:58+0200
-updated: 2026-10-06T23:11:24+0200
+updated: 2026-10-06T23:47:34+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -24,6 +24,7 @@ GitHub #332 (weekly audit drift) is owned by this card and STAYS OPEN after the 
 NEXT ACTION: after the sweep release ships, work the board-hygiene items card by card; close #332 only when each class is fixed or shown to need no action. The routing design in the body is still undecided (column design).
 
 dispatch.py's _ADVISORY_DETECTORS (trdd-reminder, dirty-tree, gitignore-coverage, github-issues-watch, gh-reply-watch, and others) are quiet-filtered to the findings ledger, so new GitHub issues #306 and #307 (2026-09-22/23), 29 dirty-tree hits and 15 trdd-reminder hits in one week (ledger counts, 2026-09-17 to 2026-09-24) never reached anyone. The 2026-08-12 owner rule ("a fire prints janitor heartbeat, and ONLY adds to it when something genuinely needs the human") and the 2026-09-24 directive (TRDD-WZKFSQ2N) now conflict. OWNER DECISION needed on routing. TRDD-ADIGRD0T is the agent-facing half.
+v3.8.0 shipped the weekly re-report fix (abee9ac5, 14db6c88, afc8e000); remaining audit items tracked on #332
 
 ## Approval log
 
