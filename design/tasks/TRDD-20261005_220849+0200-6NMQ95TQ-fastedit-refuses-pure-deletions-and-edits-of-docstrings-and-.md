@@ -4,7 +4,7 @@ title: fastedit refuses pure deletions and edits of docstrings and module consta
 column: todo
 status: tasked
 created: 2026-10-05T22:08:49+0200
-updated: 2026-10-06T15:11:30+0200
+updated: 2026-10-06T16:39:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -27,3 +27,5 @@ Observed three times in one day in this repository: fastedit refused a pure dele
 
 - 2026-10-05T22:08:49+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 2026-10-06 FOURTH REFUSAL CLASS: a one-line insertion inside a function body (cmd_recall_cli and the find function of scripts/memgrep/src/memory.rs, card ZYX8B2RA) was refused six times across two workers. The owner refused the plain-edit fallback on 2026-10-06. ZYX8B2RA now waits on this card.
+2026-10-06: further fastedit defect, reported as Emasoft/fastedit#15: fastedit diff shows every hunk since the oldest backup still in the undo history, not only the last edit (measured on scratch files, fastedit 0.5.0: two edits then diff shows both; after an undo the baseline follows the undo history), and its help does not state the baseline. A different subject from this card; recorded here only as a pointer.
+
