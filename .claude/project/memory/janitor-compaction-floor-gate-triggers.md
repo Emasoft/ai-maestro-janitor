@@ -2,7 +2,7 @@
 name: janitor-compaction-floor-gate-triggers
 description: "the janitor compacted my context over and over / it keeps compacting every 10 minutes forever / compacting barely shrank anything / why is the context still huge right after a compaction / what should the auto-compact threshold be / who compacts my context now that auto-compact is off / how do I turn auto-compact back on / claude stopped responding near the context limit / why did the janitor clear my session / what survives a clear now / the clear cooldown is too long / cache expired but nothing happened / why did the janitor not clear after the cache died / a busy session never gets cleared / prompt is too long / context window full and nothing happened / what is the compaction threshold now / infinite compact loop / auto compact fires again and again / does a cooldown end a loop or just defer it / what is the floor vs the threshold / skills missing after compaction"
 ocd: 2026-07-17
-lmd: 2026-09-04
+lmd: 2026-10-06
 metadata:
   node_type: memory
   type: project
@@ -18,7 +18,7 @@ cooldown, the post-clear payload order), plus the original v0.49.0 floor-gate lo
 bug and its fix. Split out of [[janitor-compaction-floor-gate]] (the hub overview) 2026-09-02 —
 every fact below is unchanged from that page.
 
-^ATOM-Q656-7J9E [desc: "2026-08-23: the HARNESS no longer compacts — autoCompactEnabled false, so a full window is a HARD ERROR and only the janitor's triggers prevent it", keywords: auto_compaction_disabled autoCompactEnabled_false who_compacts_my_context_now janitor_compacts_instead_of_claude_code context_limit_error_instead_of_compacting session_stops_at_the_context_boundary llm-externalizer_compaction_only context_pressure_trigger busy_session_never_gets_cleared how_do_I_turn_auto_compact_back_on prompt_is_too_long context_window_full_and_nothing_happened claude_stopped_responding_near_the_limit my_long_session_died_suddenly TRIGGER_CONTEXT_PRESSURE CLAUDE_CODE_AUTO_COMPACT_WINDOW CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER high_water_mark_vs_floor min_context_is_not_protection why_did_my_active_session_never_compact idle_only_triggers_miss_busy_sessions who_owns_compaction_now harness_vs_janitor_compaction disable_auto_compact_settings_json, type: project, ocd: 2026-08-23, lmd: 2026-08-23]
+^ATOM-Q656-7J9E [desc: "2026-08-23: the HARNESS no longer compacts — autoCompactEnabled false, so a full window is a HARD ERROR and only the janitor's triggers prevent it", keywords: auto_compaction_disabled autoCompactEnabled_false who_compacts_my_context_now janitor_compacts_instead_of_claude_code context_limit_error_instead_of_compacting session_stops_at_the_context_boundary llm-externalizer_compaction_only context_pressure_trigger busy_session_never_gets_cleared how_do_I_turn_auto_compact_back_on prompt_is_too_long context_window_full_and_nothing_happened claude_stopped_responding_near_the_limit my_long_session_died_suddenly TRIGGER_CONTEXT_PRESSURE CLAUDE_CODE_AUTO_COMPACT_WINDOW CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER high_water_mark_vs_floor min_context_is_not_protection why_did_my_active_session_never_compact idle_only_triggers_miss_busy_sessions who_owns_compaction_now harness_vs_janitor_compaction disable_auto_compact_settings_json, type: project, ocd: 2026-08-23, lmd: 2026-10-06]
 
 **The harness does not compact any more.** `"autoCompactEnabled": false` is set in
 `~/.claude/settings.json` (owner, 2026-08-23, TRDD-79LXF6PJ). Every compaction is the janitor's
@@ -32,6 +32,9 @@ hand). So the janitor's triggers are the ONLY thing between a session and a hard
 were IDLE or CACHE conditions. **A busy session — working, cache warm, never idle — was
 structurally unreachable by every one of them.** `min_context_tokens()` is a FLOOR ("nothing worth
 reclaiming"), never a high-water mark; reading it as protection is the trap.
+
+
+^ATOM-ISJL-VC54 [desc: "TRIGGER_CONTEXT_PRESSURE is the survival trigger — checked first, outranked only by awaiting_user, high-water resolved from CLEAR_CONTEXT_HIGH_WATER then AUTO_COMPACT_WINDOW, and 0 means no backstop", keywords: TRIGGER_CONTEXT_PRESSURE_checked_first context_pressure_trigger_priority awaiting_user_still_wins_over_pressure high_water_resolution_order CLAUDE_PLUGIN_OPTION_CLEAR_CONTEXT_HIGH_WATER_unset CLAUDE_CODE_AUTO_COMPACT_WINDOW_fallback high_water_0_means_disabled busy_session_has_no_backstop why_no_hardcoded_high_water_default windows_differ_5x_between_models is_my_session_covered_by_the_pressure_trigger survival_trigger_vs_economy_triggers context_limit_error_recoverable_by_user discarded_question_not_recoverable, type: project, ocd: 2026-10-06, lmd: 2026-10-06]
 
 `TRIGGER_CONTEXT_PRESSURE` closes that and is checked FIRST — the other four are economies (avoid
 a cold-cache write), this one is survival. It does NOT outrank the safety vetoes: `awaiting_user`
