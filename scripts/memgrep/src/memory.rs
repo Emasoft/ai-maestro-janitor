@@ -4223,6 +4223,18 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
         _ => None,
     };
     let rewrite_body = explicit_body.is_some();
+    // janitor#322: a call with no body flag AND no metadata flag changes nothing, yet used to
+    // print "updated atom" (exit 0) — a caller piping a body on stdin believed it landed. Stdin
+    // is deliberately never the body (A3 above), so the only honest answer is a loud refusal
+    // that names the flag to pass. Decided without reading stdin, so it can never block.
+    if !rewrite_body && a.desc.is_none() && new_keywords.is_none() && a.trdd.is_none() {
+        anyhow::bail!(
+            "nothing to update on `{}`: no --body/--body-file/--desc/--keywords/--trdd given. \
+             stdin is NEVER the new body implicitly — to replace the body pass `--body -` \
+             (reads stdin), `--body TEXT` or `--body-file F` (#322)",
+            a.atom
+        );
+    }
     let body = explicit_body.unwrap_or_default();
 
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();

@@ -3669,6 +3669,44 @@ fn update_atom_with_stdin_but_no_body_flag_leaves_the_body_untouched() {
     assert_ne!(before, std::fs::read(&page).unwrap(), "the desc edit really landed");
 }
 
+/// janitor#322 (silent data-loss class): `printf 'new body' | memgrep update-mem-atom --page P
+/// --atom A` — stdin but NO body flag and NO metadata flag — used to print "updated atom" and
+/// exit 0 while the body was never replaced. A call that changes nothing must refuse, naming
+/// the flag the caller forgot, and leave the page byte-identical.
+#[test]
+fn update_atom_with_only_stdin_and_nothing_to_change_refuses_loudly() {
+    let d = TempDir::new("updateatom-nothing-to-update");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "The original clean body.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+    let before = std::fs::read(&page).unwrap();
+
+    let (out, err, code) = run_stdin_full(
+        &["update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &atom_id],
+        "new body the caller believes will be written",
+    );
+    assert_ne!(code, 0, "a no-op update must not report success: stdout={out}");
+    assert!(
+        err.contains("--body"),
+        "the refusal must name the missing body flag: {err}"
+    );
+    assert_eq!(before, std::fs::read(&page).unwrap(), "the page must be byte-identical");
+}
+
 /// TRDD-XI10BA5D A3: the EXPLICIT stdin path keeps working — `--body -` replaces the body with
 /// the piped text (and only that text).
 #[test]
