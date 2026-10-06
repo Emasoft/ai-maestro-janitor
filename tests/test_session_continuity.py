@@ -98,6 +98,7 @@ def test_next_action_continues_in_flight_work_instead_of_asking_and_stopping():
     assert "and stop" not in action
     assert "keep doing the steps of that task that do not depend on the answer" in action
     assert "Never take the action the question asks permission for" in action
+    assert "If no task was in flight, or your question asked what to work on, ask it again and wait." in action
 
 
 @pytest.mark.parametrize(

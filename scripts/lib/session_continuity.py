@@ -280,14 +280,16 @@ def next_action(fields: dict[str, Any]) -> str | None:
         return head + "You had not replied yet: answer it."
     # Why: the old "ask it again and stop" left resumed sessions idle (29 min measured) because
     # quiet heartbeats never wake them. Work is limited to the task already in flight and
-    # excludes the action the question gates.
+    # excludes the action the question gates. The no-task case keeps the old ask-and-wait so a
+    # session with no assignment never picks work itself (RULE 1).
     return (
         head + f"Your reply was «{fields['own_reply']}». "
         "Continue the task that was already in flight. If your reply asked the user something, "
         "keep doing the steps of that task that do not depend on the answer, then ask the "
         "question again at the end of your reply. Never take the action the question asks "
         "permission for, nor anything destructive, irreversible or outward-facing that depends "
-        "on the answer."
+        "on the answer. If no task was in flight, or your question asked what to work on, ask "
+        "it again and wait."
     )
 
 
