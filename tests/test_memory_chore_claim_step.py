@@ -110,3 +110,47 @@ def test_split_skill_skips_over_cap_components_instead_of_stopping() -> None:
     assert (
         "skipping `tier: component` (the scheduler surfaces those; never stop on one)" in text
     ), "split SKILL.md lost the rule that an over-cap component page is skipped, not stopped on"
+
+
+def test_repair_skill_page_description_rule_keeps_and_proves_every_symptom_phrase() -> None:
+    """janitor#331: a page-description rewrite keeps every symptom phrase, proven by recall.
+
+    Recall ranks on description + title + tags only, so a dropped phrase makes the page
+    unfindable by it. The rule text lives in references/repair-background.md; SKILL.md
+    carries the one-line pointer.
+    """
+    skill = _flat(_skill_text("janitor-memory-repair"))
+    assert "losing no recall phrase" in skill, "repair SKILL.md lost the no-recall-loss clause"
+    background = _flat(
+        (SKILLS_DIR / "janitor-memory-repair/references/repair-background.md").read_text(
+            encoding="utf-8"
+        )
+    )
+    for required in (
+        "keep every distinctive symptom/error/name phrase",
+        'memgrep recall "<phrase>"',
+        "must still list this page",
+    ):
+        assert required in background, f"repair-background.md lost the #331 rule text: {required!r}"
+
+
+def test_repair_skill_page_description_pointer_names_an_existing_heading() -> None:
+    """janitor#331: SKILL.md's `(repair-background § <heading>)` pointer must name a real heading.
+
+    bdbf5b16 folded the section the pointer named ("page description") into another one and
+    left the pointer dangling.
+    """
+    headings = [
+        ln[3:].strip()
+        for ln in (SKILLS_DIR / "janitor-memory-repair/references/repair-background.md")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if ln.startswith("## ")
+    ]
+    skill_lines = _skill_text("janitor-memory-repair").splitlines()
+    pointer_lines = [ln for ln in skill_lines if "losing no recall phrase" in ln]
+    assert pointer_lines, "the page-description pointer line vanished from repair SKILL.md"
+    for ln in pointer_lines:
+        assert any(f"repair-background § {h}" in ln for h in headings), (
+            f"pointer does not name an existing repair-background.md heading: {ln.strip()!r}"
+        )
