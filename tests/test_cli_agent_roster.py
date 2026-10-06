@@ -260,13 +260,16 @@ def test_fetch_agents_works_when_the_inherited_working_directory_was_deleted(tmp
     """A process whose own working directory was removed still gets the roster (TRDD-0QCRG2YX)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    # Behaves like the real CLI: `pwd -P` fails from a deleted directory (`ls .` does not).
+    # Behaves like the real CLI: getcwd() fails from a deleted directory (`ls .` does not).
+    # WHY /bin/pwd, not the `pwd` builtin: dash (the Linux /bin/sh) answers `pwd -P` from its cached
+    # logical path and succeeds from a deleted directory, so the control saw rc=0 on the CI runner.
+    # The external pwd calls getcwd() on every platform, as node's process.cwd() does in the real CLI.
     _write_shim(
         bin_dir,
         "#!/bin/sh\n"
         # Control mode only: wait (builtins only) until the test has removed the shell's directory.
         'while [ -n "$WAIT_FOR" ] && [ ! -e "$WAIT_FOR" ]; do :; done\n'
-        "pwd -P >/dev/null 2>&1 || { echo 'error: The current working directory was deleted' >&2; exit 1; }\n"
+        "/bin/pwd -P >/dev/null 2>&1 || { echo 'error: The current working directory was deleted' >&2; exit 1; }\n"
         "echo '[{\"pid\": 1, \"cwd\": \"/x\", \"kind\": \"interactive\", \"sessionId\": \"s\", \"name\": \"n\"}]'\n",
     )
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}", "JANITOR_LOG_DIR": str(tmp_path / "logs")}
