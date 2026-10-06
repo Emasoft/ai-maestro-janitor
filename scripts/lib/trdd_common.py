@@ -830,8 +830,8 @@ class TrddRecord:
     # `publish-of-7ceab3f`). `blocked_by` above holds only the resolvable TRDD ids, so it is
     # empty for the majority of this board's real blockers; Check 6 needs the raw fact.
     declares_blocker: bool = False
-    # Frontmatter `updated:` date — the last-resort "time in testing" clock (see `testing_age_days`).
-    updated: date | None = None
+    # Frontmatter `created:` date — the last-resort "time in testing" clock (see `testing_age_days`).
+    created: date | None = None
     # True when the card's deliverable IS a design/ file (`task-type: docs`, or a `Writes` line
     # naming design/specs or design/requirements): a design/-only commit then genuinely ships it.
     design_deliverable: bool = False
@@ -858,7 +858,7 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
     blocked_by: list[str] = []
     impl_commits: list[str] = []
     declares_blocker = False
-    updated: date | None = None
+    created: date | None = None
     design_deliverable = False
     fm = FRONTMATTER_RE.match(text)
     body = text
@@ -866,8 +866,8 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
         block = fm.group(1)
         body = text[fm.end():]
         design_deliverable = _has_design_deliverable(block, body)
-        um = FM_UPDATED_RE.search(block)
-        updated = _first_iso_date(um.group(1)) if um else None
+        cm = FM_CREATED_RE.search(block)
+        created = _first_iso_date(cm.group(1)) if cm else None
         bm = FM_BLOCKED_BY_RE.search(block)
         if bm:
             blocked_by = blocked_by_ids(bm.group(1))
@@ -883,7 +883,7 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
         declares_blocker=declares_blocker,
         impl_commits=impl_commits,
         body=body,
-        updated=updated,
+        created=created,
         design_deliverable=design_deliverable,
     )
 
@@ -1652,12 +1652,13 @@ def testing_age_days(record: TrddRecord, today: date) -> int | None:
     """Days the card has been in `testing`, or None when unknowable.
 
     Best available clock: the newest dated `column -> testing` line of the `## Approval log`
-    (the real move); failing that the frontmatter `updated:` date, which is only an UPPER
-    bound on recency (any edit bumps it), so it can under-report the age but never over-report.
+    (the real move); failing that the frontmatter `created:` date. NOT `updated:` (round 2,
+    janitor#332): any edit resets it, so a weekly note kept every card under the ceiling forever.
+    `created:` can only overstate the age, which flags more cards - the safe side for a ceiling.
     """
     log = _APPROVAL_LOG_RE.search(record.body)
     moves = _iso_dates(" ".join(_MOVED_TO_TESTING_RE.findall(log.group(0)))) if log else []
-    since = max(moves) if moves else record.updated
+    since = max(moves) if moves else record.created
     return (today - since).days if since else None
 
 

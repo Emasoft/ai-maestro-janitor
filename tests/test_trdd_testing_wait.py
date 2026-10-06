@@ -18,10 +18,13 @@ _TODAY = date(2026, 10, 7)
 _LIVE = "waiting for a live rotation event that cannot be forced."
 
 
-def _testing_reconcile(state: str, *, updated: str = "2026-10-01", log: str = ""):
+def _testing_reconcile(
+    state: str, *, updated: str = "2026-10-01", created: str = "2026-09-30", log: str = ""
+):
     text = (
         "---\ntrdd-id: TESTID01\ntitle: T\ncolumn: testing\nblocked-by: []\n"
-        f"implementation-commits: [abc1234]\nupdated: {updated}T00:00:00+0200\n---\n"
+        f"implementation-commits: [abc1234]\ncreated: {created}T00:00:00+0200\n"
+        f"updated: {updated}T00:00:00+0200\n---\n"
         f"\n{_STATE_HDR}\n{state}\n\n## Approval log\n\n{log}"
     )
     rec = tc.parse_record_text(text, uid="TESTID01")
@@ -62,6 +65,8 @@ def test_testing_card_over_the_ceiling_is_flagged_despite_a_recent_field_check()
     assert "testing-too-long" in v.fired
 
 
-def test_testing_age_falls_back_to_updated_when_the_log_has_no_move():
-    assert "testing-too-long" in _testing_reconcile(_LIVE, updated="2026-07-01").fired
-    assert "testing-too-long" not in _testing_reconcile(_LIVE, updated="2026-10-01").fired
+def test_testing_age_falls_back_to_created_not_updated_when_the_log_has_no_move():
+    """`updated:` is reset by any edit (a weekly note), so it must never be the clock."""
+    old = _testing_reconcile(_LIVE, created="2026-08-08", updated="2026-10-06")
+    assert "testing-too-long" in old.fired
+    assert "testing-too-long" not in _testing_reconcile(_LIVE, created="2026-10-01").fired
