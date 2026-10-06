@@ -4,7 +4,7 @@ title: An idle session after a clear or compaction is never woken because quiet 
 column: todo
 status: tasked
 created: 2026-10-06T16:49:44+0200
-updated: 2026-10-06T17:51:49+0200
+updated: 2026-10-06T18:16:55+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T16:49:44+0200
+eht: [KVUVV9D2, 2O7JA0TG, HYTKG53C]
 ---
 
 # An idle session after a clear or compaction is never woken because quiet heartbeats do nothing and two clear paths emit no resume cue
@@ -44,3 +45,4 @@ To do: design (with the advisor) and fix: a quiet fire that finds an unconsumed 
 ## STATE
 
 2026-10-06 NEXT ACTION: split this card into three derived cards (quiet-fire wake; source=clear assuming a live cron; unobserved clear), read L32WC0H7 and the session-liveness guardian first, then design with the advisor. The 2026-10-06 review findings sit under Approval log (they are not approvals).
+2026-10-06: split into KVUVV9D2 (unobserved clear, first), 2O7JA0TG (guardian re-arm latency, second), HYTKG53C (quiet fire never re-engages, last), per the ownership measurement reports/continuity-build/20261006_180000+0200-k60ft7pj-ownership-measure.md. Correction: cause B's 'until the user typed /janitor-arm' was most likely the daemon guardian's injected /janitor-arm at 16:26:14 (INFERRED: no log shows the user typing).
