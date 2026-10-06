@@ -4,7 +4,7 @@ title: A quiet heartbeat never re-engages a session that sits idle with work sti
 column: testing
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-06T19:19:19+0200
+updated: 2026-10-06T19:23:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -42,3 +42,4 @@ A quiet heartbeat fire makes the session reply only 'janitor heartbeat' with no 
 
 2026-10-06 (superseded by the line below): design with the advisor.
 2026-10-06: ROOT CAUSE found by the advisor and verified in dispatch.log: the wake already exists (_phase_keep_going_nudge, dispatch.py ~3767-3972) but its user-idle check read the machine-global presence file, which a prompt in ANY session bumps, so every session's nudge was muted while the owner typed anywhere (2530 "keep-going: suppressed (user active" lines; all five quiet fires of the 29 min idle). Fixed in 79255d6e: both presence readers use the per-pane file when a pane key resolves (absent = idle, no global fallback), global only with no pane id. No new detector, no heartbeat-rule change, no new token. NEXT ACTION: none on code. NAMED LIVE CHECK after the release carrying 79255d6e: with the owner typing in another pane, an idle session whose last reply ended on a question gets [janitor-resume] within two fires and dispatch.log shows a keep-going line without "suppressed (user active"; also check one session in another project and note any nudge onto a card it does not own.
+2026-10-06: shipped in v3.7.5 (carries 79255d6e). The owner was told of the same-project collision risk (TRDD-LH84WTL5) before publishing and had not replied; the release went out on the standing "publish as soon as possible" instruction for the resume problem. Caveat for the live check: task-notification turns count as user presence (the hook filters only [janitor-...] prompts), so a session whose background agents keep reporting will still log "suppressed (user active"; run the check in a quiet session in another pane (e.g. the WEBDESIGN or ORCHESTRATOR agent session) while the owner types elsewhere.

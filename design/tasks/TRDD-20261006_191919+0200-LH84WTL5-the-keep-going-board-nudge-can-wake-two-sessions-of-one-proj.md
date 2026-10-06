@@ -4,7 +4,7 @@ title: The keep-going board nudge can wake two sessions of one project onto the 
 column: todo
 status: tasked
 created: 2026-10-06T19:19:19+0200
-updated: 2026-10-06T19:19:24+0200
+updated: 2026-10-06T19:23:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,4 @@ _board_workable_ids (dispatch.py) counts every open dev/todo card regardless of 
 ## STATE
 
 NEXT ACTION: measure how often two janitor-armed sessions share one project root on this host (fleet scan), then propose the smallest guard.
+2026-10-06: caveat on the fix ideas: "suppress while another session of the same project shows recent presence" would re-create at project scope the mute that 79255d6e removed; prefer a per-project nudge lease. Shipped state: v3.7.5 carries 79255d6e without a guard; owner informed, no reply at release time.
