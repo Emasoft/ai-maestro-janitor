@@ -4,7 +4,7 @@ title: An idle session after a clear or compaction is never woken because quiet 
 column: todo
 status: tasked
 created: 2026-10-06T16:49:44+0200
-updated: 2026-10-06T16:49:44+0200
+updated: 2026-10-06T17:25:51+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,3 +32,10 @@ To do: design (with the advisor) and fix: a quiet fire that finds an unconsumed 
 ## Approval log
 
 - 2026-10-06T16:49:44+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-06 review (a): This card holds three tasks (quiet-fire wake, source=clear assuming a live cron, unobserved clear); split into three derived cards before dev, one task each.
+2026-10-06 review (b): Cause B overstated: "no live cron existed (the startup's re-arm never ran)" is INFERRED; measured only that the recorded cron id was gone when /janitor-arm ran later.
+2026-10-06 review (c): Cause C co-cause: SessionStart did run and inject the handoff (the agent quoted "ask it again and stop"), so the clear-observed stamp was the missing part, and the old wording (fixed in 10a763b8) contributed to the 53 min idle.
+2026-10-06 review (d): Check first whether the daemon's session-liveness guardian (task_session_liveness) or TRDD-L32WC0H7 already owns noticing a session whose heartbeat stopped (cause B); if so this is that guardian's defect.
+2026-10-06 review (e): Any quiet-fire wake also changes the shipped rule rules/janitor-heartbeat-protocol.md (quiet fire = reply only "janitor heartbeat", no tool calls).
+2026-10-06 review (f): Case D (not yet carded elsewhere): the NEXT ACTION can quote the /janitor-arm chatter as "your reply" instead of the substantive reply, which now also makes "was a task in flight" harder to judge.
+2026-10-06 review (g): The To-do should state the problem, not the mechanism; the fix design goes through the advisor first.
