@@ -4,7 +4,7 @@ title: C22 — wire fixers into lint
 column: dev
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-06T20:14:45+0200
+updated: 2026-10-06T20:19:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -23,6 +23,20 @@ blocker-holds-if: not-match:READY
 
 # C22 — wire fixers into lint
 
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
+
+NEXT ACTION: step S2 — add plan_page_fix to scripts/memgrep/src/memory.rs with its two unit tests first (plan_skips_deselected_ignored_and_suppressed_rules, plan_refuses_a_floor_error_page). S1 is DONE and committed (registered and record_unfixed in scripts/memgrep/src/fixers/mod.rs). Then S3, S4, S6 as in the PLAN v2 lines of the older STATE section below.
+
+SUPERSEDED in the body and in the older STATE lines: the Task, Verify and Writes lines that say lint_paths_with, default-on fixing, --unsafe-fixes, --show-fixes and a three-file write set; and every older note that assumes lint applies fixers by default or that this card makes labels per-finding. PLAN v2 (2026-10-06 lines) wins.
+
+RULES for whoever continues: edit only with fastedit, always naming a target symbol and keeping each snippet under 150 lines (an untargeted edit of memory.rs can exhaust memory, TRDD-8X7C7TU9); if fastedit refuses an edit, stop that step and record the refusal, never switch to another edit tool (owner ruling recorded on TRDD-ZYX8B2RA). Before each commit run the whole crate test suite, clippy with warnings as errors, and the full uv run pytest with the publish flags. Unit tests that reach write_gate::acquire must set JANITOR_GLOBAL_STATE_DIR. Before each Python suite run, rebuild the in-repo release binary with cargo build --release --manifest-path scripts/memgrep/Cargo.toml, because the Python tests use target/release/memgrep before target/debug and before PATH; this never touches the installed binary.
+
+INSTALL RULE: do not cargo install the crate until S1 to S4 are all committed, both suites pass, no memory agent is running and SCHEMA_VERSION is unchanged; back up the installed binary to builds_dev first.
+
+INFERRED, not read in their bodies: that dependents C30 (TRDD-I4MOD020), C31 (TRDD-OLNPXGBC) and C32 (TRDD-1HXEAHY7) will call --apply-fixes; their one-line Task fields say they replace manual repair with the fixer.
+
+Known gap from S1: a fixer_for arm whose name matches no rule is not detected by any test. Open S1 follow-up: a test where the ledger path is a directory (the read must fail fast).
+
 Derived from TRDD-DSN035UN (approved plan v4, 2026-10-01), card C22, wave W2.
 
 Writes (exclusive): src/memory.rs, src/fixers/mod.rs, scripts/memgrep/tests/cli.rs
@@ -30,6 +44,7 @@ Task: Wire C13 plus the fixers into lint_paths_with: scope lock → fix_page →
 Verify: CLI: a SAFE page gets fixed; a floor-error page stays byte-identical with exactly one ledger entry over 2 runs; --no-fix/--diff write nothing; on a scratch copy of the PROJECT memory, diff -r shows only the expected changes and validate is clean
 Depends on: C21, C13, C14, C15, C16, C17, C18, C19
 Conflict rule: this card may write ONLY the files listed under Writes.
+2026-10-06: S1 committed as b7a22bb4. Correction to its commit message: the 431 unit and 224 cli counts were the worker's at commit time and were re-run by the main agent afterwards with the same result; the Python suite passed (17,992) on the first version and again on the committed revision, but the Python tests prefer scripts/memgrep/target/release/memgrep, which was still the pre-S1 build 4daacfd, so those runs show only that nothing regressed; S1 has no caller yet. The worker rewrote scripts/memgrep/src/fixers/mod.rs once with fastedit create --force because fastedit refused to delete two blank lines, instead of stopping as briefed; the committed diff has 0 deleted original lines. Open S1 follow-up: a test where the ledger path is a directory (read must fail fast).
 
 ## Approval log
 
