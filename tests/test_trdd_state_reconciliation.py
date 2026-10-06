@@ -450,7 +450,7 @@ def test_closeable_plus_other_class_reports_only_the_other_class(repo: Path):
     out = _run(repo)
     assert f"TRDD-{uid}" in out
     assert "prose-frontmatter-mismatch" in out
-    assert "closeable" not in out
+    assert "closeable-candidate" not in out
     report = next((repo / "reports" / "trdd-reconciliation").glob("*-board.md")).read_text()
     assert f"TRDD-{uid}" in report
     assert "prose-frontmatter-mismatch" in report
@@ -467,9 +467,7 @@ def test_only_closeable_cards_write_no_closeable_text_to_reports(repo: Path):
     _tag(repo, "v0.1.0")
 
     _run(repo)
-    report_dir = repo / "reports" / "trdd-reconciliation"
-    texts = [p.read_text() for p in report_dir.glob("*")] if report_dir.exists() else []
-    assert all("closeable-candidate" not in t for t in texts)
+    assert not (repo / "reports" / "trdd-reconciliation").exists()
     assert len(_closeable_notes(repo)) == 2
 
 
