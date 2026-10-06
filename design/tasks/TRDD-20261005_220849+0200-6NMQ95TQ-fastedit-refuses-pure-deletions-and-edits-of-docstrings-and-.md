@@ -4,7 +4,7 @@ title: fastedit refuses pure deletions and edits of docstrings and module consta
 column: todo
 status: tasked
 created: 2026-10-05T22:08:49+0200
-updated: 2026-10-06T19:05:54+0200
+updated: 2026-10-06T19:07:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -32,4 +32,5 @@ Observed three times in one day in this repository: fastedit refused a pure dele
 
 ## STATE
 
-2026-10-06: the fastedit file-mode defect (Emasoft/fastedit#11: rewritten files get mode 0600) recurred on hooks/hooks.json and a test file (fastedit create --force); modes restored to 0644 before commit dd779c12. Workers using fastedit must check file modes after a write.
+2026-10-06: hooks/hooks.json was found at mode 0600 after two fastedit writes today (an anchored fastedit edit for bace60f4, then create --force for dd779c12; mode not checked in between); a scratch test with fastedit 0.5.0 kept 0644 for create --force and edit, so the trigger is unknown. 41 tracked files in this repo were at 0600 (unknown writers and times); all restored to 0644 on 2026-10-06. Reported as a correction on Emasoft/fastedit#11. The dd779c12 commit message overstates (says both files).
+2026-10-06 NEXT ACTION: the refused edits are reported upstream as Emasoft/fastedit#14 (and the diff baseline as #15; file modes on #11, recurrence commented 2026-10-06). Wait for fixes there; this card's blocked dependents (TRDD-ZYX8B2RA, TRDD-YELTOX2S) resume when a fastedit release accepts the six recorded edits. Re-test those edits against each new fastedit release.
