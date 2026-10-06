@@ -1159,7 +1159,10 @@ placeholder heredoc beside `--desc` silently replaced an atom body; the id-set r
 body rewrite because the id survives). A body channel aimed at an empty-body footnote-lesson
 refuses BEFORE reading stdin, so `--body -` cannot hang. `--desc`/`--keywords` are each optional
 and, when omitted, the current value is kept unchanged (this is a targeted rewrite, not
-`new-mem-atom`'s all-fields-required authoring). `--dry-run` prints the rewritten marker + body
+`new-mem-atom`'s all-fields-required authoring). `--status valid|superseded` sets the `status:`
+prop of the atom or of a lesson addressed by its own `ATOM-…` id (janitor#331); a call with no body
+flag and no `--desc`/`--keywords`/`--trdd`/`--status` changes nothing and is refused rather than
+reported as an update (janitor#322). `--dry-run` prints the rewritten marker + body
 and writes nothing — the preview every mutating verb below also carries, because a corpus-mutating
 command that changes structure (not just one field) earns a look-before-you-leap.
 

@@ -178,6 +178,8 @@ _CODE_COVERAGE: dict[str, str | None] = {
     "link-one-sided": None,
     "link-downward-cross-scope": None,
     "stray-display-bracket": None,
+    # janitor#315: WARN-only detection of a pasted-twice section; no chore repairs it (fix=none).
+    "page-duplicated-section": None,
     # Orphaned BY DESIGN, not by oversight. `page-unclosed-fence` exists to explain a
     # SILENT read failure to whoever is standing in front of it: an odd fence count makes
     # every walker swallow the rest of the page, so atoms below it vanish from lint, from
@@ -241,7 +243,8 @@ def test_classification_table_matches_the_source_exactly():
     # 36 -> 37: `control-byte-in-page` (TRDD-XI10BA5D A1), classified ORPHANED — see its row.
     # 37 -> 38: `atom-oversized-critical` (TRDD-XI10BA5D step B), classified ORPHANED at the
     # chore layer — it drains through step B's MEMCORP-002 ticket path instead — see its row.
-    assert len(_CODE_COVERAGE) == 38
+    # 38 -> 39: `page-duplicated-section` (janitor#315), WARN-only, no chore — see its row.
+    assert len(_CODE_COVERAGE) == 39
 
 
 def test_covered_codes_name_a_real_content_has_work_intervention():
