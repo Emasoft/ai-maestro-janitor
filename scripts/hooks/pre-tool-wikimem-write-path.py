@@ -65,7 +65,7 @@ atom/page/lesson is impossible by construction, and each validates + reindexes a
   memgrep new-mem-atom      --page <path> --desc "..." --keywords "..."  # a new fact (body on stdin)
   memgrep update-mem-atom   --page <path> --lesson --atom <id> --keywords "..."  # a [^N] lesson
   memgrep update-mem-topic  --page <path> --old-file F1 --new-file F2   # CAS replace of exact text
-  memgrep update-mem-atom   --page <path> --atom <id>                   # rewrite ONE atom, id kept
+  memgrep update-mem-atom   --page <path> --atom <id> --body-file F     # rewrite ONE atom, id kept (a call changing nothing is refused)
   memgrep migrate-mem-atom  <atom> --from <page> --to <page>            # move an atom + its lessons
 
 Also available: `delete-mem-topic`/`delete-mem-atom` (remove, never bypassing the recall

@@ -1156,7 +1156,9 @@ stdin path), or `--body-file <PATH>`; `--body` and `--body-file` are mutually ex
 metadata-only call (no body flag) leaves the body byte-identical even when stdin carries bytes —
 never implicitly from stdin (TRDD-XI10BA5D A3, the 2026-09-24 data-loss near-miss where a
 placeholder heredoc beside `--desc` silently replaced an atom body; the id-set rule cannot see a
-body rewrite because the id survives). A body channel aimed at an empty-body footnote-lesson
+body rewrite because the id survives). A call that would change nothing — no body flag and none
+of `--desc`/`--keywords`/`--trdd`/`--status` — is REFUSED with a non-zero exit naming `--body -`/
+`--body-file` (janitor#322; it used to print "updated atom" and exit 0 with nothing written). A body channel aimed at an empty-body footnote-lesson
 refuses BEFORE reading stdin, so `--body -` cannot hang. `--desc`/`--keywords` are each optional
 and, when omitted, the current value is kept unchanged (this is a targeted rewrite, not
 `new-mem-atom`'s all-fields-required authoring). `--status valid|superseded` sets the `status:`
