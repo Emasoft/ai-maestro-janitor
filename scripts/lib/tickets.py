@@ -57,6 +57,11 @@ class Kind:
     agent: str  # the subagent_type the cron turn spawns
     severity: str  # default severity when the producer does not override
     summary: str  # human label for the console
+    # False = the ticket is a RECORD only; the scheduler never names an agent for it. janitor#324:
+    # memory-corpus tickets were routed to an agent that refuses ticket work (it only runs
+    # claim-based chores), and the one that accepts tickets cannot run the transaction-gated repair.
+    # The remedy for that kind is the memory-maintenance pipeline's own claimable dispatch.
+    dispatch: bool = True
 
 
 KIND_REGISTRY: dict[str, Kind] = {
@@ -66,7 +71,7 @@ KIND_REGISTRY: dict[str, Kind] = {
     "daemon-crash-loop": Kind(HARNESS, "janitor-repair-agent", "critical", "the global daemon keeps dying"),
     "self-integrity": Kind(HARNESS, "janitor-repair-agent", "critical", "the janitor's own files failed attestation"),
     "state-corruption": Kind(HARNESS, "janitor-repair-agent", "high", "a janitor state file is unreadable"),
-    "memory-corpus": Kind(HARNESS, "janitor-memory-subconscious-agent", "medium", "the wikimem corpus needs repair"),
+    "memory-corpus": Kind(HARNESS, "", "medium", "the wikimem corpus needs repair", dispatch=False),
     # ---- PROJECT: the USER's repo. PROPOSE ONLY — never dispatched without an approved TRDD. ----
     "security-workflow": Kind(PROJECT, "janitor-security-agent", "high", "a GitHub Actions workflow is vulnerable"),
     "branch-protection": Kind(PROJECT, "janitor-security-agent", "high", "the branch-protection baseline has drifted"),
@@ -243,7 +248,11 @@ def select_due(tickets: list[Ticket], *, now: int, per_fire: int, budget_left: i
     slots = min(per_fire, budget_left, max(0, per_fire - inflight))
     if slots <= 0:
         return []
-    ready = [t for t in tickets if t.status in DISPATCHABLE and t.not_before <= now and t.kind in KIND_REGISTRY]
+    ready = [
+        t for t in tickets
+        if t.status in DISPATCHABLE and t.not_before <= now and t.kind in KIND_REGISTRY
+        and KIND_REGISTRY[t.kind].dispatch
+    ]
     ready.sort(key=lambda t: (-SEVERITY_RANK.get(t.severity, 0), t.opened_at))
     return ready[:slots]
 

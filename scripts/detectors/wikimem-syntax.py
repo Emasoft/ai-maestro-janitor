@@ -79,6 +79,7 @@ import global_state  # noqa: E402
 import issue_catalog  # noqa: E402
 import memory_scopes  # noqa: E402
 import state  # noqa: E402
+import tickets  # noqa: E402
 import wikimem_syntax_lint as lint  # noqa: E402
 
 # The one rule (janitor#138) whose remedy the blanket "/janitor-memory-update" line
@@ -329,6 +330,55 @@ def _memcorp_002_comment() -> str:
     )
 
 
+def _issue_for(f: lint.Finding) -> str | None:
+    """The MEMCORP code a finding tickets under, or None. MEMCORP-002 collects EXACTLY
+    `atom-oversized-critical` (A3); every other ERROR-tier finding goes to 001."""
+    if f.sev == "ERROR":
+        return "MEMCORP-001"
+    if f.sev == "WARN" and f.code == "atom-oversized-critical":
+        return "MEMCORP-002"
+    return None
+
+
+def _ticket_key(issue: str, scope: str, relpath: str, f: lint.Finding) -> str:
+    return f"{issue}:{scope}:{relpath}:{f.code}:{f.anchor}"
+
+
+def _live_keys(findings: list[lint.Finding], roots: list[tuple[str, Path]]) -> set[str]:
+    """Dedupe keys of every finding that WOULD ticket right now, regardless of the USER-scope
+    claim (a finding another project holds is still live)."""
+    keys: set[str] = set()
+    for f in findings:
+        issue = _issue_for(f)
+        if not f.code or _held(f.path) or issue is None:
+            continue
+        scope, relpath = _scope_of(f.path, roots)
+        keys.add(_ticket_key(issue, scope, relpath, f))
+    return keys
+
+
+def _close_stale_tickets(*, live_keys: set[str], now: int) -> int:
+    """Close OPEN memory-corpus tickets this detector filed whose finding no longer reproduces.
+
+    janitor#324: an open ticket was never re-validated, so a page fixed after the ticket was
+    filed kept its ticket (and, before memory-corpus stopped being dispatched, was sent to an
+    agent for a condition that was already gone). `invalid` is the terminal state for "proven
+    not a defect"; it is not `resolved`, which would claim a fix this code did not make.
+    """
+    closed = 0
+    for t in tickets.load_all():
+        if (
+            t.kind != "memory-corpus"
+            or t.origin != "wikimem-syntax"
+            or t.status != tickets.OPEN
+            or t.dedupe_key in live_keys
+        ):
+            continue
+        tickets.save(tickets.mark_invalid(t, now=now, why="finding no longer reproduces in the lint pass"))
+        closed += 1
+    return closed
+
+
 def _file_tickets(
     findings: list[lint.Finding], *, roots: list[tuple[str, Path]] | None = None
 ) -> int:
@@ -362,14 +412,10 @@ def _file_tickets(
         if not f.code or _held(f.path):
             continue
         scope, relpath = _scope_of(f.path, roots)
-        # MEMCORP-002 collects EXACTLY this code (A3); everything else ERROR-tier goes to 001.
-        if f.sev == "ERROR":
-            issue = "MEMCORP-001"
-        elif f.sev == "WARN" and f.code == "atom-oversized-critical":
-            issue = "MEMCORP-002"
-        else:
+        issue = _issue_for(f)
+        if issue is None:
             continue  # INFO never tickets (spec req 3); other WARNs never ticket (A3)
-        key = f"{issue}:{scope}:{relpath}:{f.code}:{f.anchor}"
+        key = _ticket_key(issue, scope, relpath, f)
         if scope == "USER" and not claim_user_key(key):
             continue  # another project already holds this finding machine-wide
         where = f"{scope}:{relpath}:{f.line}" if scope else f"{f.path}:{f.line}"
@@ -417,6 +463,9 @@ def main() -> int:
         # 2x-size WARN has no ERROR to report but still owes its MEMCORP-002 ticket, so the
         # early-return that used to precede ticketing cannot gate the ticket path on ERRORs.
         _file_tickets(findings)
+        _close_stale_tickets(
+            live_keys=_live_keys(findings, memory_scopes.resolve_scope_dirs()), now=int(time.time())
+        )
         if not errors:
             return 0
         sigs = _signatures(errors)
