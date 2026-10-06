@@ -100,7 +100,7 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   mirror error.
 - **Missing `## Notes and lessons learned`** → append the empty section.
 - **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
-  search will use (findability — the page stays found by recall).
+  search will use, losing no recall phrase (repair-background § page description).
 - **A page's OWN one-sided link** → a PRE-REPLACE fix, run live before the whole-page
   write (details + `--base-sha256` and refusal handling in
   [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —

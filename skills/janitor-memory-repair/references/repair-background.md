@@ -7,6 +7,7 @@
 - Claim exit codes
 - desc: quoting grammar (TRDD-3SOO1RWE)
 - desc-trim keyword incident (747b8bef)
+- Page description never shrinks the recall surface (janitor#331)
 - Superseded-atom delimiter mechanics
 - Why `publish-globally` is NOT a repair defect
 - Execution context and what this is
@@ -58,6 +59,16 @@ Review of commit 747b8bef, 2026-09-06: 16 desc trims, one dropped the `fact`
 subcommand from a desc with no keyword carrying it — the recall surface lost that
 symptom entirely. This is why every desc trim must check the cut clause is still
 in `keywords:` before committing.
+
+## Page description never shrinks the recall surface (janitor#331)
+
+Recall ranks on description + title + tags only, so a phrase dropped from a page's
+`description` makes the page unfindable by that phrase. When rewriting a page description:
+keep every distinctive symptom/error/name phrase of the old one (reword, do not cut), then
+PROVE it afterwards — for each phrase you removed or reshaped, `memgrep recall "<phrase>"
+"$SCOPE_ROOT"` must still list this page; if not, put the phrase back. A recall check, not a
+move-to-keywords rule, because it proves the outcome whatever field carries the phrase (the
+atom-level `desc:` trim has its own keywords rule, above).
 
 ## Superseded-atom delimiter mechanics
 
@@ -115,7 +126,7 @@ per-heading anchors:
   - [Page anatomy](../../janitor-memory-write/references/wikimem-model.md#page-anatomy)
   - [Atoms — first-class body elements (block-properties)](../../janitor-memory-write/references/wikimem-model.md#atoms--first-class-body-elements-block-properties)
 
-This file's own `## Table of contents` above already names the same 10
+This file's own `## Table of contents` above already names the same 11
 repair-background sections; these are the same entries as clickable per-heading anchors,
 for a reader who wants to jump straight to one of them:
 
@@ -124,6 +135,7 @@ for a reader who wants to jump straight to one of them:
   - [Claim exit codes](#claim-exit-codes)
   - [desc: quoting grammar (TRDD-3SOO1RWE)](#desc-quoting-grammar-trdd-3soo1rwe)
   - [desc-trim keyword incident (747b8bef)](#desc-trim-keyword-incident-747b8bef)
+  - [Page description never shrinks the recall surface (janitor#331)](#page-description-never-shrinks-the-recall-surface-janitor331)
   - [Superseded-atom delimiter mechanics](#superseded-atom-delimiter-mechanics)
   - [Why `publish-globally` is NOT a repair defect](#why-publish-globally-is-not-a-repair-defect)
   - [Execution context and what this is](#execution-context-and-what-this-is)
