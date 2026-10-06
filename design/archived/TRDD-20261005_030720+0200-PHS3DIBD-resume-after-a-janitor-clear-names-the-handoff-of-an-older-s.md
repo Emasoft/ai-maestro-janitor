@@ -1,10 +1,10 @@
 ---
 trdd-id: PHS3DIBD
 title: Resume after a janitor clear names the handoff of an older session because the pending-summary record is never removed
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T03:07:20+0200
-updated: 2026-10-05T15:26:43+0200
+updated: 2026-10-06T21:09:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -50,6 +50,7 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 
 - 2026-10-05T03:07:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-05T09:44:59+0200 — column → testing. code landed; waits on the first janitor clear on a release carrying it
+- 2026-10-06T21:09:58+0200 — COMPLETE by main-agent@ai-maestro-janitor. named live event observed 2026-10-06; acceptance checklist complete.
 
 ## STATE
 
@@ -92,3 +93,15 @@ Which fix: (a) `pending_summary_key` ignores an expired record; (b) the record i
 2026-10-05 — the SHOULD-FIX assertion item is done in f3f478ae: the stamp test now fails on an assertion that names the stamps found. The proof ran on a throwaway copy of the test whose body was not compared with the committed one; only the two test files holding the inverted tests were run on that commit (251 passed), not the full suite. Still open and developable here: the three other places that use the newest handoff group, the correction of the memory atom on the summary hold, and showing that the second inverted test fails on an assertion with the fix inert.
 2026-10-05 — the memory correction listed above as still open is DONE in 405a3170: the summary-hold entry of the project memory (the page on state and conventions) gained a dated lesson saying the pending record has one writer and no remover, that its key was used after expiry until 124b724a, and that since 868b711f the resume takes the cleared session from the per-pane clear record. Still open and developable here: the three other places that use the newest handoff group, and showing that the second inverted test fails on an assertion with the fix inert.
 2026-10-05 — wording correction to the earlier line on this card that says the clear-trigger chain never writes the pending record: read in the code, the record is written inside the clear trigger, but only when the daemon lane asked for a summary hold; every other chain passes through the same code and writes none. The memory lesson uses the precise form (chains other than the daemon lane never write it).
+2026-10-06 FIELD CHECK MET: the janitor clear at 19:27:44 (plugin 3.7.4, which carries 868b711f) resumed from the handoff of the cleared session 2d2f13c8 (late-summary-noted-2d2f13c8.txt, agent-handoff-2d2f13c8-20261006_192745); dispatch.log has no 'no clear record within 10 s of the resume flag' line; the resume cue was emitted 24 s after the clear. The main agent also saw the resume directive name that handoff at the start of its own session. Source: reports/board/20261006_210400+0200-testing-field-check.md.
+2026-10-06: one race seen on the same clear: the SessionStart hook injected an older handoff before the cleared session's handoff landed, and the 19:28 resume cue then pointed at the right one (agent-handoff-2d2f13c8-20261006_192745); not this card's defect, recorded for the record.
+2026-10-06: the open leftovers (clear chains with no record, summary-pending file never removed, stale stamps, handoff-and-clear and blind-send paths, newest-group pick in the session-start hook) had no owner card; they are now owned by TRDD-P2ZN1AC8 (backburner). Closing this card.
+
+## Acceptance
+
+- [x] With an expired pending record for key A and a newer handoff group for key B, the resume note names B's handoff (test in 124b724a; full suite 17914 passed).
+- [x] A live unexpired record for key A names A's own handoff (control test, 124b724a).
+- [x] The resume reads which session was cleared from the per-pane clear record written before the clear keystroke (868b711f), and the two tests that pinned the old behaviour were inverted.
+- [x] The late-summary stamp test fails on an assertion naming the stamps found (f3f478ae).
+- [x] Named live event: the first janitor clear on a release carrying 868b711f (19:27:44 on 2026-10-06, plugin 3.7.4) stamped late-summary-noted-2d2f13c8, the cleared session, and the resume cue named that session's handoff (field check reports/board/20261006_210400+0200-testing-field-check.md).
+- [x] Leftovers that no card owned are carded as TRDD-P2ZN1AC8.
