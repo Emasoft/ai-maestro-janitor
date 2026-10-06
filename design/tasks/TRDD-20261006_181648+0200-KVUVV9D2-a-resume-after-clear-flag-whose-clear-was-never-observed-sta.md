@@ -4,7 +4,7 @@ title: A resume-after-clear flag whose clear was never observed stays unarmed un
 column: testing
 status: tasked
 created: 2026-10-06T18:16:48+0200
-updated: 2026-10-06T18:44:50+0200
+updated: 2026-10-06T18:54:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -41,3 +41,4 @@ A resume-after-clear flag whose /clear was never observed (no clear-observed sta
 2026-10-06 NEXT ACTION: none on code; wait for the named live check (a /clear on a loaded host gets clear-observed.ts stamped) after the release carrying bace60f4.
 2026-10-06: root cause measured (reports/continuity-build/20261006_181911+0200-kvuvv9d2-measure.md): the 5 s SessionStart timeout killed on-session-start.py (6.7 s on a loaded host) before it stamped clear-observed.ts; the 90 s post-clear hook still injected the handoff. Fixed in bace60f4: timeout 30 s, test tests/test_session_start_hook_timeout.py. Rejected with reasons in the commit message: moving the stamp to the post-clear hook, a second writer, a dispatch fallback on a new session id. Not covered here: the model never ran the heartbeat stub in the new session (TRDD-HYTKG53C).
 2026-10-06: shipped in v3.7.3 (14e56db3). The named live check needs a session started after the local update, because hooks.json is read at session start.
+2026-10-06: v3.7.3 CI green and installed on the dev host (plugin update 3.7.2 -> 3.7.3).

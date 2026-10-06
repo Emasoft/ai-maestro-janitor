@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: testing
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-06T18:44:55+0200
+updated: 2026-10-06T18:54:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,3 +37,4 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 ## STATE
 
 2026-10-06: v3.7.2 and v3.7.3 were also published with CPV_SKIP_GITHUB_INTEGRITY=1 (three releases so far); the cause of the abort on this host is still unknown.
+2026-10-06 NEXT ACTION: investigate why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI (compare the uvx install path and ~/.cache/cpv manifests with a CI run), or close this point if Emasoft/claude-plugins-validation#243 resolves it.
