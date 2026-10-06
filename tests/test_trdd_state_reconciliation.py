@@ -18,6 +18,7 @@ Load-bearing cases:
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -117,6 +118,14 @@ def _run(root: Path, session: str = "sess") -> str:
     assert res.returncode == 0, res.stderr
     return res.stdout
 
+def _closeable_notes(root: Path) -> list[dict]:
+    """The TRDD-CLOSEABLE notes in the project findings ledger (janitor#332)."""
+    ledger = root / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    if not ledger.exists():
+        return []
+    rows = [json.loads(ln) for ln in ledger.read_text().splitlines() if ln.strip()]
+    return [r for r in rows if r["code"] == "TRDD-CLOSEABLE"]
+
 
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
@@ -130,17 +139,46 @@ def repo(tmp_path: Path) -> Path:
 
 def test_shipped_and_clean_is_closeable_candidate(repo: Path):
     """A non-terminal TRDD whose `TRDD-<id>`-subject commit is in a released tag,
-    with NO remaining work, surfaces as a closeable-candidate."""
+    with NO remaining work, is recorded as ONE closeable ledger note — and is NOT
+    a drift line or report row (janitor#332)."""
     uid = "aaaaaaaa"
     _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
     _commit_all(repo, f"feat: ship it (TRDD-{uid})")
     _tag(repo, "v0.1.0")
 
     out = _run(repo)
-    assert "[trdd-state-reconciliation]" in out
-    assert f"TRDD-{uid}" in out
-    assert "closeable-candidate" in out
-    assert "partially-shipped-review" not in out
+    assert "closeable" not in out
+    assert not (repo / "reports" / "trdd-reconciliation").exists()
+    notes = _closeable_notes(repo)
+    assert [n["ref"] for n in notes] == [f"TRDD-{uid}"]
+
+def test_closeable_second_run_records_nothing(repo: Path):
+    """janitor#332 (b): a second run with no new citing commit records no new note."""
+    uid = "aaaaaaab"
+    _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: ship it (TRDD-{uid})")
+    _tag(repo, "v0.1.1")
+
+    _run(repo)
+    assert len(_closeable_notes(repo)) == 1
+    out = _run(repo)
+    assert out.strip() == ""
+    assert len(_closeable_notes(repo)) == 1
+
+def test_closeable_new_citing_sha_records_one_new_note(repo: Path):
+    """janitor#332 (c): a NEW commit citing the card (a SHA not seen before) records
+    exactly one more note."""
+    uid = "aaaaaaac"
+    _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: ship it (TRDD-{uid})")
+    _tag(repo, "v0.1.2")
+    _run(repo)
+    assert len(_closeable_notes(repo)) == 1
+
+    _commit_all(repo, f"fix: follow-up (TRDD-{uid})")
+    _tag(repo, "v0.1.3")
+    _run(repo)
+    assert len(_closeable_notes(repo)) == 2
 
 
 def test_shipped_via_implementation_commits_field(repo: Path):
@@ -155,16 +193,15 @@ def test_shipped_via_implementation_commits_field(repo: Path):
     _commit_all(repo, "chore: record impl commit")
     _tag(repo, "v0.2.0")
 
-    out = _run(repo)
-    assert f"TRDD-{uid}" in out
-    assert "closeable-candidate" in out
+    _run(repo)
+    assert [n["ref"] for n in _closeable_notes(repo)] == [f"TRDD-{uid}"]
 
 
 def test_spec_only_authoring_commit_does_not_read_as_shipped(repo: Path):
     """TRDD-7C787DUS regression: a backburner TRDD whose ONLY `TRDD-<id>`-subject
     commit touches just its own spec under design/tasks/ (its `docs: add` authoring
     commit) must NOT read as shipped — even in a released tag. A genuinely-shipped
-    sibling (a real code commit) proves the detector ran and emitted."""
+    sibling (a real code commit) proves the detector ran and recorded."""
     real = "11111111"
     spec = "22222222"
     # genuine implementation — touches code (default), in the tag → shipped.
@@ -175,10 +212,9 @@ def test_spec_only_authoring_commit_does_not_read_as_shipped(repo: Path):
     _commit_all(repo, f"docs: add TRDD-{spec} -- spec only", spec_only=True)
     _tag(repo, "v0.9.0")
 
-    out = _run(repo)
-    assert f"TRDD-{real}" in out            # genuine implementation surfaces
-    assert "closeable-candidate" in out
-    assert f"TRDD-{spec}" not in out        # spec-only authoring commit excluded
+    _run(repo)
+    # genuine implementation recorded; spec-only authoring commit excluded
+    assert [n["ref"] for n in _closeable_notes(repo)] == [f"TRDD-{real}"]
 
 
 # ── the load-bearing regression: shipped-but-blocked → review, NOT closeable ──
@@ -314,8 +350,7 @@ def test_check1_wins_when_commit_is_both_tagged_and_at_head(repo: Path):
     _tag(repo, "v0.10.0")
 
     out = _run(repo)
-    assert f"TRDD-{uid}" in out
-    assert "closeable-candidate" in out
+    assert [n["ref"] for n in _closeable_notes(repo)] == [f"TRDD-{uid}"]
     assert "shipped-unreleased-review" not in out
 
 
@@ -360,8 +395,7 @@ def test_writes_a_candidate_report(repo: Path):
     reports/trdd-reconciliation/ naming the flagged TRDD + its verdict."""
     uid = "aaaaaaaa"
     _write_trdd(repo, uid, column="dev", body="\n# body\nshipped.\n")
-    _commit_all(repo, f"feat: ship (TRDD-{uid})")
-    _tag(repo, "v0.6.0")
+    _commit_all(repo, f"feat: ship (TRDD-{uid})")  # untagged → shipped-unreleased-review
 
     _run(repo)
     report_dir = repo / "reports" / "trdd-reconciliation"
@@ -369,7 +403,7 @@ def test_writes_a_candidate_report(repo: Path):
     assert reports, "a candidate report must be written"
     text = reports[0].read_text()
     assert f"TRDD-{uid}" in text
-    assert "closeable-candidate" in text
+    assert "shipped-unreleased-review" in text
     assert "SURFACE-ONLY" in text
 
 
@@ -382,7 +416,6 @@ def test_seen_file_dedupe_no_renag_same_verdict(repo: Path):
     uid = "aaaaaaaa"
     _write_trdd(repo, uid, column="dev", body="\n# body\nshipped.\n")
     _commit_all(repo, f"feat: ship (TRDD-{uid})")
-    _tag(repo, "v0.7.0")
 
     first = _run(repo)
     assert f"TRDD-{uid}" in first
@@ -639,11 +672,11 @@ def test_terminal_column_with_blocked_prose_and_shipped_commit_never_flagged(rep
                       f"(TRDD-{published}) (TRDD-{complete})")
     _tag(repo, "v0.10.0")
 
-    out = _run(repo)
-    assert f"TRDD-{open_uid}" in out          # the open sibling surfaces
-    assert "closeable-candidate" in out
-    assert f"TRDD-{published}" not in out      # terminal → never flagged
-    assert f"TRDD-{complete}" not in out
+    _run(repo)
+    refs = [n["ref"] for n in _closeable_notes(repo)]
+    assert refs == [f"TRDD-{open_uid}"]        # only the open sibling is recorded
+    assert f"TRDD-{published}" not in refs     # terminal → never flagged
+    assert f"TRDD-{complete}" not in refs
 
 
 def test_prose_block_inside_code_tag_or_script_name_not_flagged(repo: Path):
@@ -700,25 +733,23 @@ def test_commit_subject_embedded_id_token_not_attributed_as_shipped(repo: Path):
     )
     _tag(repo, "v0.11.0")
 
-    out = _run(repo)
-    assert f"TRDD-{cited_uid}" in out          # real citation → attributed → shipped
-    assert "closeable-candidate" in out
-    assert f"TRDD-{embedded_uid}" not in out    # embedded-in-code token → not attributed
+    _run(repo)
+    refs = [n["ref"] for n in _closeable_notes(repo)]
+    assert refs == [f"TRDD-{cited_uid}"]       # real citation → attributed; embedded id is not
 
 
 def test_casual_hash_citation_in_commit_subject_is_attributed(repo: Path):
     """issue #65 class (b) guard: the canonical-citation tightening must KEEP the
     casual `#<id8>` commit-subject citation shape (a documented TRDD reference
     form), not only `TRDD-<id8>`. A TRDD whose shipping commit cites it as
-    `#<id8>` in a released tag surfaces as a closeable-candidate."""
+    `#<id8>` in a released tag is recorded as a closeable ledger note."""
     uid = "d4c3b2a1"
     _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
     _commit_all(repo, f"feat: ship the thing for #{uid} fully")
     _tag(repo, "v0.12.0")
 
-    out = _run(repo)
-    assert f"TRDD-{uid}" in out
-    assert "closeable-candidate" in out
+    _run(repo)
+    assert [n["ref"] for n in _closeable_notes(repo)] == [f"TRDD-{uid}"]
 
 
 # --- janitor#255: the deadness predicate was "substring appeared in a diff" --------
