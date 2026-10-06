@@ -24,6 +24,7 @@ implementation-commits: [84541ac7, 6f45acf8]
 
 landed on main as 84541ac7,6f45acf8; ships in the next release; issue stays open until then.
 NEXT ACTION: close the GitHub issue citing the main SHAs once the next publish.py release ships.
+COLUMN MEANING: testing here means merged on main and full suite green (18,020 passed at 6f45acf8), awaiting the sweep release tracked on TRDD-FQVEILVK; nobody is testing it. `complete` was refused (no acceptance checklist): add the checklist and move to complete when that release ships.
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#322 (opened 2026-09-29). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: Piping a new body into update-mem-atom prints an updated message and exits 0, yet the file is unchanged, because stdin is ignored unless a body flag is given. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 

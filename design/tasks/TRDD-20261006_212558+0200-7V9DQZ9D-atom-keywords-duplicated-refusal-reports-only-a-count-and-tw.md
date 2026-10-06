@@ -24,6 +24,7 @@ implementation-commits: [cf64735b]
 
 landed on main as cf64735b; ships in the next release; issue stays open until then.
 NEXT ACTION: close the GitHub issue citing the main SHAs once the next publish.py release ships.
+COLUMN MEANING: testing here means merged on main and full suite green (18,020 passed at 6f45acf8), awaiting the sweep release tracked on TRDD-FQVEILVK; nobody is testing it. `complete` was refused (no acceptance checklist): add the checklist and move to complete when that release ships.
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#323 (opened 2026-09-29). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: The refusal names only the number of duplicate keywords, not which ones, and two conventions for delimiting phrases coexist, so a grammar mistake becomes an unexplained wall. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 

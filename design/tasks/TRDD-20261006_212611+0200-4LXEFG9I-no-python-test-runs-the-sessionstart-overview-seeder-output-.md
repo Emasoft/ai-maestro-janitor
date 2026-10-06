@@ -24,6 +24,7 @@ implementation-commits: [dd449ddd]
 
 landed on main as dd449ddd; ships in the next release; issue stays open until then.
 NEXT ACTION: close the GitHub issue citing the main SHAs once the next publish.py release ships.
+COLUMN MEANING: testing here means merged on main and full suite green (18,020 passed at 6f45acf8), awaiting the sweep release tracked on TRDD-FQVEILVK; nobody is testing it. `complete` was refused (no acceptance checklist): add the checklist and move to complete when that release ships.
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#335 (opened 2026-10-06). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: No test names the overview seeder function, so nothing checks that the page it writes is accepted by memgrep lint, and its template currently fails. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 

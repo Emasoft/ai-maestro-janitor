@@ -24,6 +24,7 @@ implementation-commits: [3b568247]
 
 landed on main as 3b568247; ships in the next release; issue stays open until then. Follow-ups for #336 still in progress.
 NEXT ACTION: follow-up worker (worktree branch from main 6f45acf8, report under that worktree's reports/issue-sweep/) builds the leftover; merge, then release.
+FOLLOW-UP LOCATION: worktree <repo>/.claude/worktrees/agent-a6a3620c9a8b90c72, branch worktree-agent-a6a3620c9a8b90c72; its report lands in that worktree's reports/issue-sweep/.
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#336 (opened 2026-10-06). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: The catalog entry describes link and structural damage, but the detector files every error severity lint finding under that code, including a merely short description. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
 
