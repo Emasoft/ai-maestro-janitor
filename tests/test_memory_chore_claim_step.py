@@ -93,3 +93,20 @@ def test_skill_does_not_hand_the_agent_a_scope_to_pick(skill_name: str) -> None:
         f"{skill_name}/SKILL.md still offers a scope to pick: {offenders}. The scope comes "
         "from memory_dispatch_claim.py, or the pass does not run."
     )
+
+
+def _flat(text: str) -> str:
+    """Collapse line wraps so a required sentence is matched whatever its wrapping."""
+    return " ".join(text.split())
+
+
+def test_split_skill_skips_over_cap_components_instead_of_stopping() -> None:
+    """janitor#326 (9ad6b9f6): step 1 skips `tier: component` pages, never stops on one.
+
+    Without the instruction the agent picks the largest over-cap page, hits a component
+    nobody but a human can re-tier, and every later run re-dispatches into the same wall.
+    """
+    text = _flat(_skill_text("janitor-memory-split"))
+    assert (
+        "skipping `tier: component` (the scheduler surfaces those; never stop on one)" in text
+    ), "split SKILL.md lost the rule that an over-cap component page is skipped, not stopped on"
