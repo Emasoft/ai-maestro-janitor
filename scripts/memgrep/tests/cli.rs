@@ -3669,6 +3669,83 @@ fn update_atom_with_stdin_but_no_body_flag_leaves_the_body_untouched() {
     assert_ne!(before, std::fs::read(&page).unwrap(), "the desc edit really landed");
 }
 
+/// janitor#331 (1): a LESSON found to overstate a fact must be correctable under its own id —
+/// `update-mem-atom --atom <lesson-id> --status superseded` flips that lesson's `status:` in
+/// place (once, no duplicate key) and leaves its inline text and the atom alone.
+#[test]
+fn update_atom_status_supersedes_a_lesson_by_its_own_id() {
+    let d = TempDir::new("updateatom-lesson-status");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let atom_out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(), "--keywords", FIXTURE_KEYWORDS,
+            "--desc", FIXTURE_DESC,
+        ],
+        "The original clean body.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+    let lesson_out = run_stdin(
+        &[
+            "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--keywords", FIXTURE_KEYWORDS,
+        ],
+        "DO NOT overstate, BECAUSE it misleads. DO verify first.",
+    );
+    let lesson_id = lesson_out.split_whitespace().next().unwrap().to_string();
+
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-atom", "--page", page.to_str().unwrap(), "--atom", &lesson_id,
+            "--status", "superseded",
+        ],
+        "",
+    );
+    assert_eq!(code, 0, "superseding a lesson by its id must work: {err}");
+    let text = std::fs::read_to_string(&page).unwrap();
+    let line = text.lines().find(|l| l.contains(&lesson_id) && l.starts_with("[^")).unwrap();
+    assert!(line.contains("status: superseded"), "status flipped: {line}");
+    assert_eq!(line.matches("status:").count(), 1, "no duplicate status key: {line}");
+    assert!(line.contains("DO NOT overstate"), "inline lesson text preserved: {line}");
+    assert!(text.contains("The original clean body."), "the atom is untouched");
+}
+
+/// janitor#331 (2): a page's `description:` (the recall surface) is edited with
+/// `update-mem-topic` — an exact-text replace that works on the frontmatter line.
+#[test]
+fn update_topic_can_extend_the_page_description() {
+    let d = TempDir::new("updatetopic-desc");
+    let page = d.join("p.md");
+    run_env(
+        &[
+            "new-page", "--tier", "component",
+            "--name", "p", "--description", FIXTURE_PAGE_DESC, "--type", "reference",
+        ],
+        "WIKIMEM_LOCAL_SCOPE_PATH",
+        d.as_str(),
+    );
+    let old = d.join("old.txt");
+    let new = d.join("new.txt");
+    std::fs::write(&old, FIXTURE_PAGE_DESC).unwrap();
+    std::fs::write(&new, format!("{FIXTURE_PAGE_DESC} / a brand new symptom phrase")).unwrap();
+    let (_, err, code) = run_stdin_full(
+        &[
+            "update-mem-topic", "--page", page.to_str().unwrap(),
+            "--old-file", old.to_str().unwrap(), "--new-file", new.to_str().unwrap(),
+        ],
+        "",
+    );
+    assert_eq!(code, 0, "description edit must succeed: {err}");
+    assert!(std::fs::read_to_string(&page).unwrap().contains("a brand new symptom phrase"));
+}
+
 /// janitor#322 (silent data-loss class): `printf 'new body' | memgrep update-mem-atom --page P
 /// --atom A` — stdin but NO body flag and NO metadata flag — used to print "updated atom" and
 /// exit 0 while the body was never replaced. A call that changes nothing must refuse, naming

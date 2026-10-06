@@ -4074,6 +4074,10 @@ struct UpdateAtomArgs {
     /// path for long/multi-line bodies. Same contract as `--body`: no flag, no body rewrite.
     #[arg(long = "body-file")]
     body_file: Option<PathBuf>,
+    /// Set the atom's (or a lesson's, addressed by its own `ATOM-…` id) `status:` — the way to
+    /// retire a lesson that turned out to overstate a fact (janitor#331). Not valid with `--lesson`.
+    #[arg(long = "status", value_parser = ["valid", "superseded"])]
+    status: Option<String>,
     /// Also descend into hidden files/dirs when reindexing the scope (default off).
     #[arg(long = "hidden")]
     hidden: bool,
@@ -4124,6 +4128,10 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
         std::iter::once("memgrep update-mem-atom".to_string()).chain(args.iter().cloned()),
     );
     if a.lesson {
+        // The lesson path never reads `--status`; refuse rather than silently drop it.
+        if a.status.is_some() {
+            anyhow::bail!("--status cannot be combined with --lesson");
+        }
         let keywords = a.keywords.as_deref().ok_or_else(|| {
             anyhow::anyhow!("--lesson requires --keywords (a lesson with none is unrecallable)")
         })?;
@@ -4227,9 +4235,14 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
     // print "updated atom" (exit 0) — a caller piping a body on stdin believed it landed. Stdin
     // is deliberately never the body (A3 above), so the only honest answer is a loud refusal
     // that names the flag to pass. Decided without reading stdin, so it can never block.
-    if !rewrite_body && a.desc.is_none() && new_keywords.is_none() && a.trdd.is_none() {
+    if !rewrite_body
+        && a.desc.is_none()
+        && new_keywords.is_none()
+        && a.trdd.is_none()
+        && a.status.is_none()
+    {
         anyhow::bail!(
-            "nothing to update on `{}`: no --body/--body-file/--desc/--keywords/--trdd given. \
+            "nothing to update on `{}`: no --body/--body-file/--desc/--keywords/--trdd/--status given. \
              stdin is NEVER the new body implicitly — to replace the body pass `--body -` \
              (reads stdin), `--body TEXT` or `--body-file F` (#322)",
             a.atom
@@ -4300,7 +4313,7 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
         _ => {
             let props_raw = footnote_label.clone().unwrap_or_default();
             let id = props_raw.split("id:").nth(1)
-                .map(|s| s.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .map(|s| s.trim_start().split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                     .next().unwrap_or("").to_string())
                 .unwrap_or_default();
             (0usize, 0usize, id, props_raw)
@@ -4365,7 +4378,14 @@ pub fn cmd_update_atom_cli(args: &[String]) -> Result<()> {
         if matches!(k.as_str(), "desc" | "keywords" | "type" | "trdd" | "ocd" | "lmd") {
             continue;
         }
+        // `--status` replaces the carried value (pushed once below) — never a duplicate key.
+        if k == "status" && a.status.is_some() {
+            continue;
+        }
         out_props.push((k.clone(), v.join(" ")));
+    }
+    if let Some(s) = a.status.as_deref() {
+        out_props.push(("status".to_string(), s.to_string()));
     }
     let out_props_ref: Vec<(&str, String)> =
         out_props.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
@@ -4632,15 +4652,19 @@ pub(crate) fn locate_atom_body_matching(
                     after.starts_with(':').then(|| {
                         // The lesson's corpus id is the `id:ATOM-…` prop, not the `[^N]` label —
                         // `is_match` compares against the id the caller queried.
+                        // `trim_start`: `add-lesson` writes `id: ATOM-…` (with a space, the
+                        // canonical render) while hand-written fixtures use `id:ATOM-…`. Matching
+                        // only the second form made every lesson the verb itself authored
+                        // un-addressable by its own id (janitor#331 part 1).
                         rest[close + 1..]
                             .split("id:")
                             .nth(1)
-                            .map(|s| s.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                            .map(|s| s.trim_start().split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                                 .next().unwrap_or("").to_string())
                             .unwrap_or_else(|| rest[..close].trim().to_string())
                     })
                 })
-                .filter(|_| line.contains("id:ATOM-"))
+                .filter(|id| id.starts_with("ATOM-"))
         } else {
             None
         };
@@ -15722,7 +15746,9 @@ fn footnote_block_marker(line: &str) -> Option<String> {
                 d -= 1;
                 if d == 0 {
                     let props = &after[..m];
-                    return props.contains("id:ATOM-").then(|| props.to_string());
+                    // Same `id: ATOM-` vs `id:ATOM-` spacing tolerance as the locator (#331).
+                    let has_id = props.split("id:").skip(1).any(|s| s.trim_start().starts_with("ATOM-"));
+                    return has_id.then(|| props.to_string());
                 }
             }
             _ => {}
