@@ -31,11 +31,14 @@ def _hook():  # noqa: ANN202
     return mod
 
 
-def test_seeded_overview_stubs_pass_memgrep_lint_at_authoring_floor(
+GENERIC_FORMS = ("where do i start", "how does", "how to ", "replace this", "seeded by", "janitor#")
+
+
+def test_seeded_overview_stubs_pass_memgrep_lint_with_honest_description(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Seed LOCAL and USER stubs into one corpus; lint reports zero findings. The phrase floor is
-    the authoring floor (15): a stub the plugin writes today is new authoring, not legacy."""
+    """Seed LOCAL and USER stubs into one corpus; default lint reports zero findings, and the
+    description stays small and free of generic questions (a padded stub outranks real pages)."""
     import memory_bridge  # noqa: PLC0415
     import state  # noqa: PLC0415
 
@@ -51,9 +54,18 @@ def test_seeded_overview_stubs_pass_memgrep_lint_at_authoring_floor(
         root.mkdir()
         hook._seed_overview_if_absent(state, memory_bridge, scope, root)
         assert list(root.glob("*-overview.md")), f"{scope} stub was not written"
+    descs = []
+    for scope in ("local", "user"):
+        text = next((corpus / scope).glob("*-overview.md")).read_text(encoding="utf-8")
+        desc = next(ln for ln in text.splitlines() if ln.startswith("description:"))
+        descs.append(desc)
+        phrases = [p for p in desc.removeprefix("description:").strip('" ').split(" / ") if p.strip()]
+        assert 4 <= len(phrases) <= 6, phrases
+        assert all(scope in p.lower() for p in phrases), phrases
+        assert not [g for g in GENERIC_FORMS if g in desc.lower()], desc
+    assert descs[0] != descs[1]
+    # DEFAULT lint configuration: the stub meets the lint floor (4), not the authoring floor.
     env = {k: v for k, v in os.environ.items() if not k.startswith("MEMGREP_")}
-    # Hold the stub to the authoring floor (janitor#334), not the lenient legacy lint floor.
-    env["MEMGREP_LINT_MIN_PAGE_PHRASES"] = "15"
     res = subprocess.run(  # noqa: S603
         [str(MEMGREP), "lint", str(corpus / "local"), str(corpus / "user")],
         capture_output=True, text=True, env=env, check=False,
