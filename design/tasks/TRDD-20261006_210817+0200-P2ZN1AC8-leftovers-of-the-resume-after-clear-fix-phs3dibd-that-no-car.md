@@ -4,7 +4,7 @@ title: Leftovers of the resume-after-clear fix (PHS3DIBD) that no card owns
 column: backburner
 status: tasked
 created: 2026-10-06T21:08:17+0200
-updated: 2026-10-06T21:08:17+0200
+updated: 2026-10-06T21:11:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,7 @@ Left open by TRDD-PHS3DIBD when it closed on 2026-10-06; no other card owns them
 ## Approval log
 
 - 2026-10-06T21:08:17+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-06: one more leftover from TRDD-PHS3DIBD's KNOWN LIMIT line: for up to fifteen minutes after a daemon-lane clear the pending record is unexpired, and a resume that does not find a per-pane clear record (the handoff-and-clear command and the blind-send fallback listed above) reads that record's key, which can name another session. Covered for the normal clear path by 868b711f; open for those two paths. The PHS3DIBD test 'no record and no handoff gives no note' exists as test_pending_summary_key_empty_when_neither_source_names_one and test_fresh_summary_note_empty_when_no_keyed_handoff_exists.
