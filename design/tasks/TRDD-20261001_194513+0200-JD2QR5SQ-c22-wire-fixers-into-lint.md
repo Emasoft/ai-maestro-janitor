@@ -25,7 +25,7 @@ blocker-holds-if: not-match:READY
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-NEXT ACTION: step S3 — add the flags --apply-fixes and --diff to memgrep lint in their dry-run form only (--diff prints the planned change to stderr and writes nothing; --apply-fixes with --no-fix exits 2), and name both flags in design/specs/wikimem-memgrep-spec.md in the same commit so tests/test_wikimem_spec_drift.py stays green. S1 is committed as b7a22bb4 and S2 as 435051cf (plan_page_fix and PageFix in scripts/memgrep/src/memory.rs). Then S4 and S6 as in the PLAN v2 lines below.
+NEXT ACTION: S3 and S4 are merged (2026-10-06, after review): implement --apply-fixes fully (scope lock held through the write and the ledger, plan_page_fix, pre_write::write_gated, one ledger line per refusal keyed by the canonical page path) and --diff (previews what --apply-fixes would change and writes nothing), with the spec and the tests in one commit; no flag that does nothing is ever committed. A refusal does not change lint's exit code. S1 is committed as b7a22bb4 and S2 as 435051cf. Then S6 (seeded manual check). Normalization outside the lock is an existing race owned by C42 (TRDD-MIU9H3ZC), not by this card.
 
 SUPERSEDED in the body and in the older STATE lines: the Task, Verify and Writes lines that say lint_paths_with, default-on fixing, --unsafe-fixes, --show-fixes and a three-file write set; and every older note that assumes lint applies fixers by default or that this card makes labels per-finding. PLAN v2 (2026-10-06 lines) wins.
 
