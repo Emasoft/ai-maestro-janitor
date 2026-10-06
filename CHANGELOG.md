@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.4] — 2026-10-06
+
+### Bug Fixes
+
+- **hooks:** Give the STATE-injection and watchpaths SessionStart hooks 30 s too (TRDD-9438CGJZ) (dd779c1)
+
+### Documentation
+
+- **trdd:** Record v3.7.3 on the resume cards and the CPV card; standard current-owner on the three derived cards (TRDD-KVUVV9D2, TRDD-2O7JA0TG, TRDD-HYTKG53C, TRDD-CWKM5218, TRDD-DS3WDTPV) (528c823)
+- **trdd:** Correct the DS3WDTPV install note, give CWKM5218 a NEXT ACTION, record v3.7.3 green and installed (TRDD-DS3WDTPV, TRDD-CWKM5218, TRDD-KVUVV9D2) (0bd878d)
+- **trdd:** 9438CGJZ to testing after dd779c12; runnable CPV NEXT ACTION (TRDD-9438CGJZ, TRDD-CWKM5218) (fa6b5d6)
 ## [3.7.3] — 2026-10-06
 
 ### Bug Fixes
@@ -13,6 +24,10 @@ All notable changes to this project will be documented in this file.
 - **trdd:** Correct over-claims from the 3.7.1 follow-ups, add STATE blocks and the lint-triage card (TRDD-CWKM5218, TRDD-K60FT7PJ, TRDD-PAHO6KWK, TRDD-SRL4TO0P, TRDD-DS3WDTPV, TRDD-BIQELG5J) (10f4b65)
 - **trdd:** Split TRDD-K60FT7PJ into three derived cards (TRDD-KVUVV9D2, TRDD-2O7JA0TG, TRDD-HYTKG53C) (2161d42)
 - **trdd:** KVUVV9D2 to testing after bace60f4, K60FT7PJ superseded, sibling-hook card, pending GitHub-config proposal (TRDD-KVUVV9D2, TRDD-K60FT7PJ, TRDD-2O7JA0TG, TRDD-HYTKG53C, TRDD-9438CGJZ, TRDD-JZPYMTE0) (011946f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.7.3 (14e56db)
 ## [3.7.2] — 2026-10-06
 
 ### Documentation
