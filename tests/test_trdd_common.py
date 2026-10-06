@@ -865,6 +865,22 @@ def test_check5_obituary_elsewhere_does_not_shield_a_genuine_stale_next_action()
     assert [(f.token, f.severity) for f in findings] == [("should_emit_renew", "high")]
 
 
+def test_check5_obituary_sentence_wrapped_over_lines_is_still_an_obituary():
+    """One obituary SENTENCE hard-wrapped over several lines is exempt on every line, not only
+    on the line carrying the marker, and "zero hits" counts as a marker (janitor#332:
+    TRDD-AR9IUGIJ re-fired the finding every week). A following sentence stays a separate one."""
+    body = (
+        "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+        "`should_emit_renew`, `commit_tier` and\n"
+        "`last_rearm_ts` return **zero hits** anywhere under `scripts/`. They went in\n"
+        "`af499ee3 feat(cadence)!: one arm per session`.\n"
+        "NEXT ACTION: tune `commit_tier` once measured.\n"
+    )
+    rec = _record(column="dev", body=body)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("should_emit_renew", "commit_tier"))
+    assert [(f.token, f.severity) for f in findings] == [("commit_tier", "high")]
+
+
 def test_extract_state_block_stops_at_next_top_heading():
     """The STATE block ends at the next top-level '## ' heading, not at EOF."""
     body = (

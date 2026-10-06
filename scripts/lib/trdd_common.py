@@ -1142,7 +1142,9 @@ _BACKTICK_TOKEN_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{4,})`")
 # (TRDD-Q4AMWYCY). Deliberately narrow (the exact vocabulary the spec named) —
 # widening this risks swallowing a genuine "should be removed" instruction.
 _OBITUARY_VERB_RE = re.compile(
-    r"\b(?:deleted|removed|retired|gutted|gone)\b|no longer exists?",
+    # `zero hits` (janitor#332): "X return zero hits under scripts/" is how a card records a
+    # verified deletion; TRDD-AR9IUGIJ's obituary used it and re-fired every week.
+    r"\b(?:deleted|removed|retired|gutted|gone)\b|no longer exists?|\bzero\s+hits\b",
     re.IGNORECASE,
 )
 # A commit SHA (7-40 hex chars) on the token's own line — citing the commit
@@ -1192,20 +1194,29 @@ def extract_state_block(body: str) -> str:
     return body[start:end]
 
 
-def _line_span(text: str, pos: int) -> tuple[int, int]:
-    """The `(start, end)` offsets of the single line in `text` that contains `pos`.
+# A sentence boundary: terminal punctuation before whitespace/end, a blank line, or the newline
+# that precedes a list bullet (a bullet is its own unit even without a full stop).
+_SENTENCE_BOUNDARY_RE = re.compile(
+    r"[.!?](?=\s|$)|\n[ \t]*\n|\n(?=[ \t]*(?:[-*+]|\d+[.)])[ \t])"
+)
 
-    `end` excludes the trailing newline (if any) — the line's own text only.
-    Used to check a citation for an obituary marker LINE-SCOPED, not
-    paragraph-scoped (TRDD-Q4AMWYCY): widening the window to the paragraph
-    would silence a genuine stale NEXT ACTION that merely sits near an
-    unrelated obituary.
+
+def _sentence_span(text: str, pos: int) -> tuple[int, int]:
+    """The `(start, end)` offsets of the sentence in `text` that contains `pos`.
+
+    Used to check a citation for an obituary marker SENTENCE-scoped (janitor#332): a
+    hard-wrapped obituary sentence is one statement, so its deletion verb / SHA on line 3
+    must exempt a token on line 1. It is still NOT paragraph-scoped (TRDD-Q4AMWYCY): a
+    genuine stale NEXT ACTION in a separate sentence under an unrelated obituary must fire.
     """
-    start = text.rfind("\n", 0, pos) + 1
-    end = text.find("\n", pos)
-    if end == -1:
-        end = len(text)
-    return (start, end)
+    lo, hi = 0, len(text)
+    for m in _SENTENCE_BOUNDARY_RE.finditer(text):
+        if m.end() <= pos:
+            lo = m.end()
+        elif m.start() >= pos:
+            hi = m.start()
+            break
+    return (lo, hi)
 
 
 def _is_obituary_line(line: str) -> bool:
@@ -1333,12 +1344,13 @@ def check5_dead_symbol_citations(record: TrddRecord, token_is_dead) -> list[Dead
     (e.g. a worked-example illustration) only misleads (`low`). A token cited more
     than once takes the HIGHEST severity of any of its occurrences.
 
-    An occurrence whose OWN LINE is an obituary — it already names a deletion
-    verb or a commit SHA — is excluded entirely (TRDD-Q4AMWYCY): the card has
-    already said the thing this check exists to tell it, so counting that
-    occurrence would only produce dismissible noise. This is line-scoped, not
-    paragraph-scoped, on purpose: a genuine stale NEXT ACTION a few lines below
-    an unrelated obituary must still fire. A token with SOME genuine (non-
+    An occurrence whose OWN SENTENCE is an obituary — it already names a deletion
+    verb or a commit SHA — is excluded entirely (TRDD-Q4AMWYCY, widened from
+    line to sentence by janitor#332): the card has already said the thing this
+    check exists to tell it, so counting that occurrence would only produce
+    dismissible noise. This is sentence-scoped, not paragraph-scoped, on
+    purpose: a genuine stale NEXT ACTION a few lines below an unrelated
+    obituary must still fire. A token with SOME genuine (non-
     obituary) occurrence still fires normally on those occurrences.
 
     Returns [] for a terminal TRDD (mirrors every other check's terminal guard) or
@@ -1355,8 +1367,8 @@ def check5_dead_symbol_citations(record: TrddRecord, token_is_dead) -> list[Dead
     in_next_action: dict[str, bool] = {}
     for m in _BACKTICK_TOKEN_RE.finditer(state_block):
         token = m.group(1)
-        line_lo, line_hi = _line_span(state_block, m.start())
-        if _is_obituary_line(state_block[line_lo:line_hi]):
+        sent_lo, sent_hi = _sentence_span(state_block, m.start())
+        if _is_obituary_line(state_block[sent_lo:sent_hi]):
             continue
         hit_in_na = bool(na_span and na_span[0] <= m.start() < na_span[1])
         if token not in in_next_action:
