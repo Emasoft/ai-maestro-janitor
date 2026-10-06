@@ -1,10 +1,10 @@
 ---
 trdd-id: V13M5YY1
 title: Wikimem page shipped with duplicated sections and validate and lint cannot see body duplication
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-06T21:25:47+0200
-updated: 2026-10-06T23:46:40+0200
+updated: 2026-10-07T00:25:04+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,11 +27,13 @@ NEXT ACTION: move to complete once v3.8.1 is released and CI is green. Ships in 
 
 
 Source: GitHub issue Emasoft/ai-maestro-janitor#315 (opened 2026-09-28). Part of the issue sweep TRDD-FQVEILVK. Symptom, in plain words: A project wikimem page carried two full copies of two sections. Neither validate nor lint detects duplicated body sections, and a hand repair left part of the duplicate in place. Acceptance: the symptom is gone in a test that failed before the fix, or the issue is shown obsolete or already fixed with evidence; a closing comment on the issue names the commit and the release.
+Note: the memgrep crate version stayed 0.2.0 although validate's output gained WARN lines in v3.8.1 (additive; exit code unchanged).
 
 ## Approval log
 
 - 2026-10-06T21:25:47+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-06T22:08:20+0200 — column → testing by main-agent@ai-maestro-janitor.
+- 2026-10-07T00:25:04+0200 — COMPLETE by main-agent@ai-maestro-janitor. shipped in v3.8.1; acceptance items proven; self-approved by this standalone session.
 
 
 

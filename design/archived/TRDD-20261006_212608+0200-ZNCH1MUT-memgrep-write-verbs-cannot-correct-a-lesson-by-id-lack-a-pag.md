@@ -1,10 +1,10 @@
 ---
 trdd-id: ZNCH1MUT
 title: memgrep write verbs cannot correct a lesson by id, lack a page description verb and have an undocumented stdin contract
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-06T21:26:08+0200
-updated: 2026-10-06T23:46:49+0200
+updated: 2026-10-07T00:25:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,6 +32,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#331 (opened 2026-10-05). Part of
 ## Approval log
 
 - 2026-10-06T21:26:08+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T00:25:05+0200 — COMPLETE by main-agent@ai-maestro-janitor. shipped in v3.8.1; acceptance items proven; self-approved by this standalone session.
 
 
 

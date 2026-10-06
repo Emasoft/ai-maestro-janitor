@@ -1,10 +1,10 @@
 ---
 trdd-id: 2OJG0L0E
 title: Memory maintenance problems split re-dispatched forever, weekly verbatim re-arm, lint count spam, autorecall on notifications
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-06T21:26:03+0200
-updated: 2026-10-06T23:46:46+0200
+updated: 2026-10-07T00:25:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,6 +32,7 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#326 (opened 2026-10-02). Part of
 ## Approval log
 
 - 2026-10-06T21:26:03+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T00:25:05+0200 — COMPLETE by main-agent@ai-maestro-janitor. shipped in v3.8.1; acceptance items proven; self-approved by this standalone session.
 
 
 

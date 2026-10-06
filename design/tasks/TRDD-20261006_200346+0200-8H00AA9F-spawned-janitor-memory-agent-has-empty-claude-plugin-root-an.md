@@ -4,7 +4,7 @@ title: spawned janitor memory agent has empty CLAUDE_PLUGIN_ROOT and runs 3.7.0 
 column: backburner
 status: tasked
 created: 2026-10-06T20:03:46+0200
-updated: 2026-10-06T20:03:46+0200
+updated: 2026-10-07T00:25:16+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,4 @@ Symptom: in a spawned janitor memory agent's shell CLAUDE_PLUGIN_ROOT was empty,
 ## Approval log
 
 - 2026-10-06T20:03:46+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-07: recurred — the memory split agent again saw CLAUDE_PLUGIN_ROOT empty and fell back to the newest cache (3.8.0, which happened to be the installed version); no harm.
