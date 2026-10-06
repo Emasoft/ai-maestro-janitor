@@ -1,10 +1,10 @@
 ---
 trdd-id: SRL4TO0P
-title: CI Tests job failed on 2026-10-04 at tests/test_handoff_files.py line 166 and nobody looked
+title: CI Tests job failed on 2026-10-04 at tests/test_handoff_files.py line 166
 column: todo
 status: tasked
 created: 2026-10-06T17:25:57+0200
-updated: 2026-10-06T17:25:57+0200
+updated: 2026-10-06T17:51:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,8 @@ The GitHub CI run for the 3.7.0 release on 2026-10-04 failed in the Tests job: t
 ## Approval log
 
 - 2026-10-06T17:25:57+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+
+## STATE
+
+2026-10-06: the failure did NOT recur in the v3.7.1 CI run (its two failures were other, Linux-only tests, fixed in 2d3b3aec). Check whether it recurs in v3.7.2 CI before investigating.

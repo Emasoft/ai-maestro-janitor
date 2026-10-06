@@ -4,7 +4,7 @@ title: Clear path injects a continuity block with the last request and own reply
 column: testing
 status: tasked
 created: 2026-10-03T03:41:46+0200
-updated: 2026-10-06T17:25:49+0200
+updated: 2026-10-06T17:50:05+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -60,3 +60,4 @@ Parent plan: TRDD-K9AHY1ZB
 2026-10-05 — Code is in v3.7.0 (cc48b42f). RESUME POINT. Column testing. NAMED LIVE EVENT: the first janitor clear on an installed release carrying it, with a sidecar present, where the injected handoff must show a Continuity block and a NEXT ACTION quoting the last human message and the agent's own reply.
 2026-10-06: NEXT ACTION wording changed in 10a763b8 (plus a no-task clause in the next commit): a resumed session no longer re-asks and stops; it continues the task in flight, doing only steps that do not depend on the answer, never the action the question gates; with no task in flight it asks again and waits. Measured cause: a 29 min idle on 2026-10-06. NAMED LIVE CHECK: after the release, a janitor clear whose last reply ended on a question is followed by a turn that makes at least one work tool call. Other idle causes: TRDD-K60FT7PJ.
 2026-10-06: b8cbfe61 added the no-task clause (with no task in flight, ask again and wait). Both commits ship in v3.7.1. Sessions already running keep the old SessionStart hook until they reload, so the named live check must use a session started after the update.
+2026-10-06: v3.7.2 published (82a81908). NEXT: when its CI is green, update the janitor plugin from the ai-maestro-plugins marketplace at user scope on the dev host (the claude plugin update command), then perform the named live check.

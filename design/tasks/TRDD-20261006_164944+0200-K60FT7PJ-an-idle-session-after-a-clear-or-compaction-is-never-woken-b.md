@@ -4,7 +4,7 @@ title: An idle session after a clear or compaction is never woken because quiet 
 column: todo
 status: tasked
 created: 2026-10-06T16:49:44+0200
-updated: 2026-10-06T17:25:51+0200
+updated: 2026-10-06T17:51:49+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,3 +39,8 @@ To do: design (with the advisor) and fix: a quiet fire that finds an unconsumed 
 2026-10-06 review (e): Any quiet-fire wake also changes the shipped rule rules/janitor-heartbeat-protocol.md (quiet fire = reply only "janitor heartbeat", no tool calls).
 2026-10-06 review (f): Case D (not yet carded elsewhere): the NEXT ACTION can quote the /janitor-arm chatter as "your reply" instead of the substantive reply, which now also makes "was a task in flight" harder to judge.
 2026-10-06 review (g): The To-do should state the problem, not the mechanism; the fix design goes through the advisor first.
+
+
+## STATE
+
+2026-10-06 NEXT ACTION: split this card into three derived cards (quiet-fire wake; source=clear assuming a live cron; unobserved clear), read L32WC0H7 and the session-liveness guardian first, then design with the advisor. The 2026-10-06 review findings sit under Approval log (they are not approvals).

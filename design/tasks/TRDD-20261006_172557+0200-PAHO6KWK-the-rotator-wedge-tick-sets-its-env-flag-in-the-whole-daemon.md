@@ -19,7 +19,7 @@ approval-datetime: 2026-10-06T17:25:57+0200
 
 # The rotator wedge tick sets its env flag in the whole daemon process so other threads' subprocesses inherit it
 
-scripts/daemon.py ~3422-3426: the tick thread sets os.environ["JANITOR_ROTATOR_WEDGE_TICK"]="1" around task.run() and pops it in a finally. os.environ is process-global: while a wedge tick runs, every subprocess any other daemon thread starts (main-loop chores, the process-size watch's ps) inherits JANITOR_ROTATOR_WEDGE_TICK=1, and mutating the environment while another thread forks is not thread-safe. Fix: pass the flag only in the rotator subprocess env (env={**os.environ, "JANITOR_ROTATOR_WEDGE_TICK": "1"}) instead of mutating os.environ; a test that fails before (another thread's subprocess sees the flag) and passes after. Found by the review of a4426a8e (the test race fix), 2026-10-06.
+scripts/daemon.py ~3422-3426: the tick thread sets os.environ["JANITOR_ROTATOR_WEDGE_TICK"]="1" around task.run() and pops it in a finally. os.environ is process-global: while a wedge tick runs, every subprocess started with the inherited environment by any other daemon thread inherits (which threads shell out while a wedge tick runs, e.g. the process-size watch, is INFERRED, not read) JANITOR_ROTATOR_WEDGE_TICK=1, and mutating the environment while another thread forks is not thread-safe. Fix: pass the flag only in the rotator subprocess env (env={**os.environ, "JANITOR_ROTATOR_WEDGE_TICK": "1"}) instead of mutating os.environ; a test that fails before (another thread's subprocess sees the flag) and passes after. Found by the review of a4426a8e (the test race fix), 2026-10-06.
 
 ## Approval log
 
