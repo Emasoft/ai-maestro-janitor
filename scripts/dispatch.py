@@ -746,6 +746,9 @@ def _drop_ticketed_blocks(detector: str, text: str) -> str:
     # Keep only keys whose ticket is still open, so a reopened finding starts a fresh baseline.
     live = {k: v for k, v in seen.items() if k in open_keys}
 
+    # ponytail: ticketed-block-hashes.json is read-modify-write with NO cross-session lock. atomic_write
+    # prevents a torn file, but two sessions firing together can lose an update (cost: one duplicate
+    # ledger row or one missed baseline, never a hidden NEW finding). Upgrade: take the scope lock.
     def _persist(store: dict) -> None:
         try:
             state.atomic_write(seen_file, json.dumps(store))
