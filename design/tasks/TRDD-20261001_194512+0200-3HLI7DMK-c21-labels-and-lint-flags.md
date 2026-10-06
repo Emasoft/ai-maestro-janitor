@@ -4,7 +4,7 @@ title: C21 — labels and lint flags
 column: testing
 status: tasked
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-06T16:38:32+0200
+updated: 2026-10-06T16:43:57+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -100,4 +100,4 @@ The two cards named above: TRDD-57KAZJI7 (lint config policy) and TRDD-KTD3N7H6 
 2026-10-05 — the live event's pass condition, made checkable: with the installed memgrep binary of that release, lint of a scratch folder holding one page with no Notes section prints a line containing (WMPAGE-010 · safe-fix); with a config file setting unfixable to WMPAGE-010 the same line contains (WMPAGE-010) and no safe-fix. Those are the two outputs the tests of 15482026 assert on the repository build.
 2026-10-05 — the test counts are consistent after all: this card's gate line for 92663adf reads 424 unit plus 222 CLI, and 15482026 adds two CLI tests, so 424 unit plus 224 CLI. The first verifier's report had the two labels the wrong way round. Still a worker's run, not repeated by the main agent.
 2026-10-06: the owner refused a plain edit after a fastedit refusal, verbatim: "the answer is no. if the trddgrep tool is not flexible enough to make the changes you need, open an issue on Emasoft/ai-maestro". The two reproduced defects (empty selector, per-page safe-fix label) are fixed through fastedit only; a refused edit is recorded on TRDD-6NMQ95TQ and reported upstream, never routed to another write tool.
-2026-10-06 CORRECTION: the line above beginning "2026-10-06: the owner refused a plain edit" is VOID. Both defects were already fixed in 92663adf and 15482026 (2026-10-05, recorded in the gate lines above), no edit on this card was refused, and nothing was reported upstream for it. The line came from a truncated read of this card. The card's state is unchanged: it waits in testing for the named live event.
+2026-10-06 CORRECTION: the line above beginning "2026-10-06: the owner refused a plain edit" is VOID. Both defects were already fixed in 92663adf and 15482026 (2026-10-05, recorded in the gate lines above); the line came from a truncated read of this card. The card's state is unchanged: it waits in testing for the named live event.
