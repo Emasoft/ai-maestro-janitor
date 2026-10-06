@@ -705,43 +705,69 @@ def _heartbeat_is_quiet() -> bool:
     return not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE", False)
 
 
+# janitor#326: the only detectors whose ticket-key marker is honoured (see _drop_ticketed_blocks).
+_TICKET_KEY_DETECTORS = frozenset({"package-manager-policy"})
+
+
 def _drop_ticketed_blocks(detector: str, text: str) -> str:
     """janitor#326: strip `⟦ticket-key:…⟧` marker lines; in quiet mode also drop the block each one
     closes when an OPEN ticket holds that key (the finding is already being worked, repeating it
     every fire is the nag the owner asked to end).
 
-    A block is the lines since the previous marker. Applies to ANY detector, advisory or not — the
-    loud ones (workflow-security, package-manager-policy) are exactly the ones that repeat. A line
-    with no marker is untouched (fail open: an unkeyed finding is never hidden), and a bare
-    `[janitor-…]` action marker inside a dropped block is kept, as everywhere in this filter.
-    Dropped lines are recorded in the ledger, not discarded.
+    A marker is honoured ONLY from a detector on `_TICKET_KEY_DETECTORS` and ONLY as the last
+    non-blank line of its output (the one block it closes); any other marker is stripped and never
+    suppresses — a detector that echoes third-party text could otherwise forge a marker and hide a
+    finding behind someone else's open ticket. A line with no marker is untouched (fail open), and a
+    bare `[janitor-…]` action marker inside a dropped block is kept, as everywhere in this filter.
+
+    Suppression is content-aware: the block is hidden only while its hash equals the one stored when
+    it was first suppressed for that key. WHY: an open ticket says "a gap exists", not "this many
+    gaps"; content-blind suppression kept a WORSENING supply-chain finding hidden for as long as the
+    old ticket stayed open. A changed block is shown once and becomes the new baseline. The ledger row
+    is written only when a (key, hash) is first suppressed — the ledger does not dedupe, so one row
+    per fire would flood it.
     """
     if "⟦ticket-key:" not in text:
         return text
-    quiet = _heartbeat_is_quiet()
-    open_keys = tickets.open_dedupe_keys() if quiet else set()
-    out: list[str] = []
-    block: list[str] = []
-    for line in text.splitlines():
-        m = tickets.KEY_MARKER_RE.fullmatch(line.strip())
-        if m is None:
-            block.append(line)
-            continue
-        if m.group(1) in open_keys:
-            kept = [b for b in block if _RESERVED_MARKER_RE.fullmatch(b.strip())]
-            out.extend(kept)
-            msg = " ".join(b.strip() for b in block if b.strip() and b not in kept)
-            try:
-                findings_ledger.record(
-                    sev="LOW", code=f"TICKETED-{detector.upper()}", src=detector, msg=msg, ref="",
-                )
-            except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
-                state.log_line("dispatch", f"ticketed-suppress could not record from '{detector}'")
-        else:
-            out.extend(block)
-        block = []
-    out.extend(block)
-    return "\n".join(out) + "\n" if out else ""
+    lines = text.splitlines()
+    last = max((i for i, ln in enumerate(lines) if ln.strip()), default=-1)
+    m = tickets.KEY_MARKER_RE.fullmatch(lines[last].strip()) if last >= 0 else None
+    body = [ln for ln in lines if tickets.KEY_MARKER_RE.fullmatch(ln.strip()) is None]
+    surfaced = "\n".join(body) + "\n" if body else ""
+    if m is None or detector not in _TICKET_KEY_DETECTORS or not _heartbeat_is_quiet():
+        return surfaced
+    key = m.group(1)
+    open_keys = tickets.open_dedupe_keys()
+    seen_file = state.state_dir() / "ticketed-block-hashes.json"
+    try:
+        seen = json.loads(seen_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seen = {}
+    # Keep only keys whose ticket is still open, so a reopened finding starts a fresh baseline.
+    seen = {k: v for k, v in seen.items() if k in open_keys}
+    if key not in open_keys:
+        return surfaced
+    digest = hashlib.sha256("\n".join(ln.strip() for ln in body if ln.strip()).encode()).hexdigest()[:16]
+    kept = [b for b in body if _RESERVED_MARKER_RE.fullmatch(b.strip())]
+    suppressed = "\n".join(kept) + "\n" if kept else ""
+    if seen.get(key) == digest:
+        return suppressed
+    first_suppression = key not in seen
+    seen[key] = digest
+    try:
+        state.atomic_write(seen_file, json.dumps(seen))
+    except OSError:
+        state.log_line("dispatch", "ticketed-block hash store not writable")
+    if not first_suppression:
+        return surfaced  # the block changed while its ticket is open: show it once
+    msg = " ".join(b.strip() for b in body if b.strip() and b not in kept)
+    try:
+        findings_ledger.record(
+            sev="LOW", code=f"TICKETED-{detector.upper()}", src=detector, msg=msg, ref="",
+        )
+    except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
+        state.log_line("dispatch", f"ticketed-suppress could not record from '{detector}'")
+    return suppressed
 
 
 def _quiet_filter(detector: str, text: str) -> str:
@@ -1181,6 +1207,8 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
         # stderr stays inherited -- it never carries drift lines.
         proc = subprocess.run(
             [str(script), "--one-shot"],
+            # Opt in to ticket-key markers: dispatch is the one reader that strips them (janitor#326).
+            env={**os.environ, tickets.EMIT_ENV: "1"},
             stdout=subprocess.PIPE,
             text=True,
             check=False,

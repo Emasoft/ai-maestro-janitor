@@ -213,7 +213,12 @@ def dedupe_key_for(code: str, where: str) -> str:
 def key_marker(code: str, where: str) -> str:
     """The marker line a detector appends to a drift block that duplicates the finding
     `raise_issue(code, where=where)` tickets (janitor#326). Same key derivation as the ticket layer,
-    so the quiet filter's match against an open ticket's `dedupe_key` cannot drift from the raise."""
+    so the quiet filter's match against an open ticket's `dedupe_key` cannot drift from the raise.
+
+    Returns "" unless dispatch asked for markers (`tickets.EMIT_ENV`): any other reader of the
+    detector's stdout (audit skill, weekly-audit issue, direct run) must never see the plumbing."""
+    if not state.is_truthy_env(tickets.EMIT_ENV, False):
+        return ""
     return tickets.key_marker(dedupe_key_for(code, where))
 
 

@@ -366,9 +366,22 @@ def load_all(state_dir: Path | None = None) -> list[Ticket]:
 # suppression, so an unkeyed finding can never be hidden.
 KEY_MARKER_RE = re.compile(r"⟦ticket-key:(.+)⟧")
 
+# The marker is plumbing between a detector and dispatch, but detector stdout is ALSO read raw by
+# /janitor-audit, the weekly-audit workflow and direct runs, where a leaked marker lands in a report
+# or issue body. So a detector emits it only when dispatch (the one consumer that strips it) sets
+# this env var on the detector subprocess; every other reader gets marker-free output by construction.
+EMIT_ENV = "JANITOR_EMIT_TICKET_KEYS"
+
 
 def key_marker(dedupe_key: str) -> str:
     return f"⟦ticket-key:{_clean(dedupe_key, 200)}⟧"
+
+
+def strip_key_markers(text: str) -> str:
+    """Remove every marker line (the shared helper for any consumer of raw detector stdout)."""
+    return "".join(
+        line for line in text.splitlines(keepends=True) if KEY_MARKER_RE.fullmatch(line.strip()) is None
+    )
 
 
 def open_dedupe_keys(state_dir: Path | None = None) -> set[str]:
