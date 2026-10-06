@@ -861,3 +861,13 @@ def test_a_refused_card_is_not_reminded_about_as_pending(project: Path) -> None:
     prop = _proposals(project)[0]
     prop.write_text(prop.read_text(encoding="utf-8").replace("column: proposal", "column: refused"), encoding="utf-8")
     assert ticket_proposal.pending() == []
+
+
+def test_MEMCORP_001_text_covers_every_ERROR_lint_class_not_only_link_damage() -> None:
+    """janitor#336: the detector files EVERY ERROR-severity lint finding under MEMCORP-001 (e.g. a
+    description with too few phrases), so the catalog text must not claim it is only link/structure damage."""
+    issue = issue_catalog.ISSUE_CATALOG["MEMCORP-001"]
+    assert "ERROR" in issue.what
+    assert "specific rule" in issue.what.lower()
+    assert "structural damage" not in issue.title
+    assert "links do not resolve" not in issue.why.split(".")[0]

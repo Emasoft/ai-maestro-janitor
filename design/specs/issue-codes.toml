@@ -248,10 +248,10 @@ fix = "none"
 gate_floor = false
 emitter = "janitor:memory-librarian"
 kind = "memory-corpus"
-summary = "the wikimem corpus in {scope} has structural damage: {detail}"
-what = "Pages are malformed, links dangle, or footnote refs do not resolve."
-why = "A corpus whose links do not resolve cannot be navigated, and the LINK LAW (every link is bidirectional) is what makes recall work at all."
-fix_text = "Run the memory curator's repair pass under the edit transaction, which proves no knowledge was lost before it commits."
+summary = "a wikimem page in {scope} fails an ERROR-level lint rule: {detail}"
+what = "A wikimem page fails an ERROR-severity memgrep lint rule. The specific rule is named in the ticket's `Found:` line. Classes include malformed pages, dangling or one-sided links, unresolved footnote refs, and recall-surface defects such as a missing `ocd:`/`lmd:` or a description with too few phrases."
+why = "ERROR-level findings make a page unparseable, ambiguous or invisible to recall. For the link classes, a corpus whose links do not resolve cannot be navigated, and the LINK LAW (every link is bidirectional) is what makes recall work at all; for the recall-surface classes the page cannot be found from the symptom a future session will have."
+fix_text = "Read the named rule in `Found:` and apply the remedy that fits THAT rule (the `remedy:` in the detail names the chore). Edits go through the memory curator's transaction, which proves no knowledge was lost before it commits."
 
 [[issue]]
 code = "MEMCORP-002"

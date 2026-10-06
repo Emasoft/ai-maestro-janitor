@@ -25,7 +25,7 @@ unattended access to your repository.
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
 | `DAEMON-001` | daemon-supervisor | critical | the global janitor daemon has died and respawned {count} times in the guard window |
-| `MEMCORP-001` | memory-librarian | medium | the wikimem corpus in {scope} has structural damage: {detail} |
+| `MEMCORP-001` | memory-librarian | medium | a wikimem page in {scope} fails an ERROR-level lint rule: {detail} |
 | `MEMCORP-002` | wikimem-syntax | medium | an atom is over 2x the size budget: {where} |
 | `MEMGREP-001` | memgrep-validate | high | the FTS index in {scope} does not match its content table |
 | `MEMGREP-002` | memgrep-validate | critical | the memgrep database in {scope} fails SQLite's own integrity check |
@@ -51,12 +51,12 @@ unattended access to your repository.
 - **Why it matters:** The daemon owns every user-scope mutation — plugin updates, OAuth keepalive, the fleet guardian. With it dead, unattended sessions stop recovering from rate limits.
 - **Fix attempted:** Read the daemon log for the exception, reproduce it, and fix the crash. If the cause is a bad plugin version, the last-good rollback is already available — verify it engaged.
 
-### `MEMCORP-001` — the wikimem corpus in {scope} has structural damage: {detail}
+### `MEMCORP-001` — a wikimem page in {scope} fails an ERROR-level lint rule: {detail}
 
 - **Scanner:** `memory-librarian` · **Severity:** `medium` · **Kind:** `memory-corpus`
-- **What it is:** Pages are malformed, links dangle, or footnote refs do not resolve.
-- **Why it matters:** A corpus whose links do not resolve cannot be navigated, and the LINK LAW (every link is bidirectional) is what makes recall work at all.
-- **Fix attempted:** Run the memory curator's repair pass under the edit transaction, which proves no knowledge was lost before it commits.
+- **What it is:** A wikimem page fails an ERROR-severity memgrep lint rule. The specific rule is named in the ticket's `Found:` line. Classes include malformed pages, dangling or one-sided links, unresolved footnote refs, and recall-surface defects such as a missing `ocd:`/`lmd:` or a description with too few phrases.
+- **Why it matters:** ERROR-level findings make a page unparseable, ambiguous or invisible to recall. For the link classes, a corpus whose links do not resolve cannot be navigated, and the LINK LAW (every link is bidirectional) is what makes recall work at all; for the recall-surface classes the page cannot be found from the symptom a future session will have.
+- **Fix attempted:** Read the named rule in `Found:` and apply the remedy that fits THAT rule (the `remedy:` in the detail names the chore). Edits go through the memory curator's transaction, which proves no knowledge was lost before it commits.
 
 ### `MEMCORP-002` — an atom is over 2x the size budget: {where}
 
@@ -400,7 +400,7 @@ unattended access to your repository.
 
 | Code | Severity | Fix | Emitter | Summary |
 |---|---|---|---|---|
-| `MEMCORP-001` | MEDIUM | none | janitor:memory-librarian | the wikimem corpus in {scope} has structural damage: {detail} |
+| `MEMCORP-001` | MEDIUM | none | janitor:memory-librarian | a wikimem page in {scope} fails an ERROR-level lint rule: {detail} |
 | `MEMCORP-002` | MEDIUM | none | janitor:wikimem-syntax | an atom is over 2x the size budget: {where} |
 
 ### MEMGREP
