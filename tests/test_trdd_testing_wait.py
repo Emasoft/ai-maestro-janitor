@@ -33,6 +33,18 @@ def test_testing_card_waiting_on_live_event_with_recent_field_check_is_not_close
     assert "closeable-candidate" not in v.fired
 
 
+def test_the_real_board_phrasings_of_a_pending_event_are_recognised():
+    """Wording measured on the real board: 'remaining event:', 'NAMED LIVE EVENT', 'stays in testing'."""
+    for pending in (
+        "2026-10-05 — FIELD CHECK, from a worker's read of the logs: passed for the abnormal lines, "
+        "5 of them since the daemon start, 0 before release. The card stays in testing; "
+        "remaining event: a tick with rc != 0.",
+        "RESUME POINT. Column testing. NAMED EVENT: one full token rotation of the account.",
+    ):
+        state = pending + "\n2026-10-05 — FIELD CHECK: nothing yet."
+        assert "closeable-candidate" not in _testing_reconcile(state).fired, pending
+
+
 def test_testing_card_with_an_old_field_check_is_still_closeable():
     v = _testing_reconcile(f"{_LIVE}\nfield check 2026-08-01: 0 lines yet.")
     assert "closeable-candidate" in v.fired

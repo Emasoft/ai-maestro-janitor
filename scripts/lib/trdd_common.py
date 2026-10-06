@@ -1618,7 +1618,9 @@ MAX_TESTING_DAYS = 40
 
 _LIVE_EVENT_RE = re.compile(
     r"\b(?:live|field|real)\b[^\n]{0,60}\b(?:event|observation|observe[ds]?|firing)\b"
-    r"|\bwaiting[ \t]+(?:on|for)\b[^\n]{0,40}\b(?:live|field|real)\b",
+    r"|\bwaiting[ \t]+(?:on|for)\b[^\n]{0,40}\b(?:live|field|real)\b"
+    # The phrasings the real board's testing cards use for a still-pending closing event.
+    r"|\bremaining[ \t]+event\b|\bnamed[ \t]+(?:live[ \t]+)?event\b",
     re.IGNORECASE,
 )
 _FIELD_CHECK_LINE_RE = re.compile(r"^.*\bfield[ \t-]check\b.*$", re.IGNORECASE | re.MULTILINE)
