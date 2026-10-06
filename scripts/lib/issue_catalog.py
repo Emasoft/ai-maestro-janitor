@@ -307,7 +307,6 @@ def raise_issue(
     # and never rewrite an existing detail, so the checklist cannot repeat or grow on the heartbeat.
     unmet = _unmet_rules(issue, title, detail, fields, evidence)
     if unmet:
-        state.log_line("issue-catalog", f"{code} opened incomplete: {len(unmet)} unmet rule(s)")
         tail = "\n\n**Incomplete:**\n" + "\n".join(f"- [ ] {u}" for u in unmet)
         # The cap is applied downstream; trim the prose, never the checklist.
         detail = detail[: tickets.DETAIL_CAP - len(tail)] + tail
@@ -331,6 +330,9 @@ def raise_issue(
             return Raised(code=code, domain=tickets.HARNESS, ok=False, why=why)
         first_time = why.startswith("opened")
         if first_time:
+            # Logged only at birth: raise_issue runs every heartbeat and a re-raise opens nothing.
+            if unmet:
+                state.log_line("issue-catalog", f"{code} opened incomplete: {len(unmet)} unmet rule(s)")
             # Findings-ledger sink (TRDD-FENWWB4E): index the finding EVENT (once, at
             # birth — the ticket layer already dedupes re-raises) in the affected
             # project's per-project mailbox, ref'd by the ticket id so a later session
@@ -372,6 +374,8 @@ def raise_issue(
             why=f"previously refused (TRDD-{uid}) — suppressed until the evidence changes",
         )
     if is_new:
+        if unmet:
+            state.log_line("issue-catalog", f"{code} opened incomplete: {len(unmet)} unmet rule(s)")
         # Findings-ledger sink (TRDD-FENWWB4E) — same once-at-birth indexing as the
         # HARNESS branch, ref'd by the proposal TRDD id.
         findings_ledger.record(

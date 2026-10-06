@@ -941,3 +941,14 @@ def test_re_raising_an_incomplete_finding_adds_the_checklist_once(project: Path)
     assert done.ticket_id == first.ticket_id
     t2 = tickets.load(first.ticket_id)
     assert t2 is not None and t2.detail == stored and t2.seen_count == 5
+
+
+def test_an_incomplete_finding_logs_once_not_on_every_re_raise(project: Path) -> None:
+    """The "opened incomplete" line is about an OPENING: a heartbeat re-raise opens nothing and must
+    not log it again (HARNESS and PROJECT domains alike)."""
+    for code in ("MEMGREP-004", "MEMCORP-002"):
+        for i in range(3):
+            issue_catalog.raise_issue(code, dedupe_key=f"k-{code}", now=NOW + 300 * i)
+    log = (state.log_dir() / "issue-catalog.log").read_text(encoding="utf-8")
+    for code in ("MEMGREP-004", "MEMCORP-002"):
+        assert log.count(f"{code} opened incomplete") == 1
