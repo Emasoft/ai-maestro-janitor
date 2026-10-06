@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.1] — 2026-10-06
+
+### Bug Fixes
+
+- **memgrep:** Validate reports a section pasted twice as a WARN (janitor#315) (88f6b1f)
+- **memory-repair:** Pin the recall-surface rule and repair its stale pointer (janitor#331) (164bd7e)
+- **memory-repair:** Shorten the merged heading so SKILL.md stays under the token cap (janitor#331) (daa6a60)
+
+### Documentation
+
+- **trdd:** Close 10 sweep cards shipped in v3.8.0; 4 stay in testing on unproven items (TRDD-FQVEILVK) (ce20f42)
+- **trdd:** The four sweep gap cards carry their proof; #323 decline recorded (TRDD-FQVEILVK) (b84716f)
+
+### Testing
+
+- Pin the split-chore rule that an over-cap component page is skipped (janitor#326) (3aacd96)
 ## [3.8.0] — 2026-10-06
 
 ### Bug Fixes
@@ -70,6 +86,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - **memgrep:** Bump crate to 0.2.0, the CLI contract changed ([#331](https://github.com/Emasoft/ai-maestro-janitor/issues/331)) (a050657)
+- Bump version to 3.8.0 (ea9e80b)
 
 ### Testing
 
