@@ -1,10 +1,10 @@
 ---
 trdd-id: 9438CGJZ
 title: SessionStart hooks share a 5 s budget a loaded host exceeds, so the STATE injection and watchpaths hooks are killed silently
-column: todo
+column: testing
 status: tasked
 created: 2026-10-06T18:33:18+0200
-updated: 2026-10-06T18:33:22+0200
+updated: 2026-10-06T18:57:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T18:33:18+0200
+implementation-commits: [dd779c12]
 ---
 
 # SessionStart hooks share a 5 s budget a loaded host exceeds, so the STATE injection and watchpaths hooks are killed silently
@@ -28,3 +29,4 @@ On 2026-10-05 (ORCHESTRATOR /clear, transcript 05acb47b) every SessionStart hook
 ## STATE
 
 NEXT ACTION: measure SessionStart hook start-up cost on this host (cold and warm) per hook.
+2026-10-06: measured (reports/continuity-build/20261006_185535+0200-sessionstart-hook-cost.md): warm cost 0.04-0.16 s per SessionStart hook, parallel worst 0.16 s, no contention; so the 2026-10-05 5.5-6.7 s was host load, not hook work. Fixed in dd779c12: trdd-state and watchpaths timeouts 5 -> 30 s, test parametrized over the three hooks. NEXT ACTION: none on code; named live check on a loaded host after the release carrying dd779c12.

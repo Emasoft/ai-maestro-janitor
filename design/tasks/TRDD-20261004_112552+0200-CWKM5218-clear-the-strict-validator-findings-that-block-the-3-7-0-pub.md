@@ -37,4 +37,4 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 ## STATE
 
 2026-10-06: v3.7.2 and v3.7.3 were also published with CPV_SKIP_GITHUB_INTEGRITY=1 (three releases so far); the cause of the abort on this host is still unknown.
-2026-10-06 NEXT ACTION: investigate why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI (compare the uvx install path and ~/.cache/cpv manifests with a CI run), or close this point if Emasoft/claude-plugins-validation#243 resolves it.
+2026-10-06 NEXT ACTION: find why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI: add a diagnostic CI step that prints the uvx install path and the ~/.cache/cpv manifest names, or reproduce here with ~/.cache/cpv moved aside; or close this point if Emasoft/claude-plugins-validation#243 resolves it.
