@@ -111,8 +111,8 @@ find "$SCOPE_ROOT" -type f -name '*.md' \
   | while IFS= read -r f; do printf '%s\t%s\n' "$(wc -c < "$f")" "$f"; done | sort -rn
 ```
 
-Pick the **single largest** over-cap page as `$PAGE` (rel-path `$REL` under
-`$SCOPE_ROOT`). Never batch multiple pages: one page per run.
+Pick the **single largest** over-cap page as `$PAGE` (rel-path `$REL`), one per run, skipping
+`tier: component` (the scheduler surfaces those; never stop on one).
 
 **Empty list ⇒ NOT done.** This chore also splits over-budget ATOMS — same job, smaller
 scale, same marker. `memgrep lint "$SCOPE_ROOT" | grep -F '[atom-oversized]'`. On a hit,
