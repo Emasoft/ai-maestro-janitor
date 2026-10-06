@@ -1,10 +1,10 @@
 ---
 trdd-id: Y8DB5F0M
 title: Weekly janitor audit 2026-10-05 found drift to triage
-column: todo
-status: tasked
+column: superseded
+status: archived
 created: 2026-10-06T21:26:09+0200
-updated: 2026-10-06T21:26:09+0200
+updated: 2026-10-06T21:28:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: audit
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:26:09+0200
+superseded-by: [6ESS2MGE]
 ---
 
 # Weekly janitor audit 2026-10-05 found drift to triage
@@ -24,3 +25,5 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#332 (opened 2026-10-05). Part of
 ## Approval log
 
 - 2026-10-06T21:26:09+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-06 cross-reference: duplicate of TRDD-6ESS2MGE, which owns GitHub #332.
+- 2026-10-06T21:28:40+0200 — SUPERSEDED by main-agent@ai-maestro-janitor. duplicate owner of #332; TRDD-6ESS2MGE owns it.

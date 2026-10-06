@@ -3,7 +3,7 @@ trdd-id: RAEGS1D5
 title: Jev compaction replaces the janitor's automatic compaction
 column: human_review
 created: 2026-09-22T21:32:55+0200
-updated: 2026-10-01T04:13:46+0200
+updated: 2026-10-06T21:28:40+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: feature
@@ -42,6 +42,7 @@ V3+V12 re-stamped on HEAD 2e3fff3a 2026-09-27: 4/4 rows pass via scripts_dev/jev
 Review-fork remediations on the 5acd3565 stamp, applied: (1) provenance clause corrected - the 17561/2 full suite ran on the pre-37b0741f tree (the run started before that commit existed); SIX docs-only commits (2045940d, ba52e9fd, 2e3fff3a, 5acd3565, 22a46a19, 8ad79a9f) separate it from HEAD, and 'both legs current at HEAD' holds through that docs-only-chain argument, now stated; the matrix ran at 2e3fff3a. (2) Evidence durability: the /tmp driver log held only exit codes, so the two un-orchestrator-verified V3 rows (d30bf250, 35e1e917) were RE-RUN by the orchestrator - both v3_pass=true, 4.2s/7977B and live_state_touched=false, JSON assertions now durable at reports_dev/jev-v3v12-orchestrator-reverify-20260927.json. Remaining worker-verified-only: V12's four assertions (run_v12.py output not re-run). Verdict: the stamp stands conditionally until cited; these clauses make it citable except for the V12 leg.
 Review round 2 nit on f77a4805: 'durable' overstated — the re-verify JSON and worker report live in gitignored reports_dev/ (machine-local, unverifiable from a fresh clone). Read every evidence citation on this card as machine-local unless the content is quoted into the card itself.
 Review round 2: 09251aba stands, no changes required on this card. Round-2 verdict recorded here for the audit trail only.
+2026-10-06 GitHub #306 reopen (symptom: after an automatic /clear the Jev-compacted context does not yet reliably reach the new session first; the issue closes when the release carrying both fixes is installed). Observed by the main agent at the start of its session: that session began after a janitor clear at 19:27 on 2026-10-06, and its injected SessionStart context contained the line 'READ FIRST: <path>/.janitor/state/jev-compacted-2d2f13c8.md holds every message since the last compaction verbatim' and a '## Compacted context (Jev compaction)' block; the file existed. One observation, not a release verification.
 
 
 
