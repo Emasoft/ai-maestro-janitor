@@ -5875,6 +5875,16 @@ struct LintArgs {
     /// (TRDD-VJL1YTCG Part C); this flag is how a watcher declines to do the librarian's work.
     #[arg(long = "no-fix")]
     no_fix: bool,
+    /// Apply the registered safe content fixers through the write gate, under the scope lock, before
+    /// the normalization and the report (TRDD-JD2QR5SQ). A refused plan is recorded once in the
+    /// unfixed ledger instead. Refused with `--no-fix` (report-only contradicts it) and with `--diff`
+    /// (which previews and must write nothing): clap exits 2.
+    #[arg(long = "apply-fixes", conflicts_with_all = ["no_fix", "diff"])]
+    apply_fixes: bool,
+    /// Print to stderr the change `--apply-fixes` would make, and write NOTHING: no normalization,
+    /// no fix, no ledger.
+    #[arg(long = "diff")]
+    diff: bool,
     /// Exit non-zero only when a finding is at or above this severity. Findings BELOW it are still
     /// PRINTED — the flag gates the gate, never the report. Defaults to `error`: that is the set a
     /// write can be blocked on without blocking work whose fix lives in a different file (link
@@ -5972,10 +5982,30 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     // already sorted by (severity, path, line). The DEFAULT path calls the unchanged
     // `lint_paths` verbatim — so "adding --no-fix changed nothing for anyone who didn't pass it"
     // is visible here, not merely asserted.
-    let violations = if a.no_fix {
-        lint_paths_with(&a.paths, a.hidden, false)
-    } else {
-        lint_paths(&a.paths, a.hidden)
+    // Why an invalid config turns --apply-fixes off: the lenient fallback lints with DEFAULT rules,
+    // so applying fixes under them could rewrite pages the user's real config ignores. The run then
+    // behaves as plain lint (and exits as it does) rather than writing under the wrong rules.
+    if a.apply_fixes && config_error.is_some() {
+        eprintln!("memgrep lint: --apply-fixes skipped: the lint config is invalid");
+    }
+    // Why --diff is skipped the same way: a preview under the lenient DEFAULT rules would show fixes
+    // the user's real config may ignore, while --apply-fixes is already off. The two flags must agree.
+    if a.diff && config_error.is_some() {
+        eprintln!("memgrep lint: --diff skipped: the lint config is invalid");
+    }
+    let pass = match (&config_error, a.apply_fixes, a.diff) {
+        (None, true, _) => FixPass::Apply(&cfg),
+        (None, _, true) => FixPass::Diff(&cfg),
+        _ => FixPass::Off,
+    };
+    // Why --diff takes the report-only path: it must write NOTHING, and `lint_paths` runs the
+    // publish-globally normalization. A --diff skipped by an invalid config is `Off` too, so
+    // `a.diff` must still select the no-write path here, or the skipped preview would write.
+    let violations = match pass {
+        FixPass::Off if a.no_fix || a.diff => lint_paths_with(&a.paths, a.hidden, false),
+        FixPass::Off => lint_paths(&a.paths, a.hidden),
+        FixPass::Diff(_) => lint_paths_pass(&a.paths, a.hidden, false, pass),
+        FixPass::Apply(_) => lint_paths_pass(&a.paths, a.hidden, true, pass),
     };
     let (violations, fixable) = apply_lint_config(violations, &cfg, &a.paths, a.hidden);
     if let Some((path, err)) = &config_error {
@@ -6062,6 +6092,9 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     }
 }
 
+/// `--diff`: for every canonical page the lint run visits, print to STDERR what `--apply-fixes`
+/// would change (`--- <path>` then `-`/`+` lines of the differing middle) or `refused <path>: <why>`.
+/// Writes nothing. Page enumeration mirrors `lint_paths_with` (non-pages skipped, one view per file).
 /// ` (FAMILY-NNN · safe-fix)` for a registered code; the `safe-fix` part only when the registered
 /// fixer would clear every finding of that rule on that page (a label that promises a fix the engine
 /// will not make is a lie, TRDD-3HLI7DMK design note). Empty for a code outside the registry.
@@ -7016,9 +7049,24 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
     lint_paths_with(paths, hidden, true)
 }
 
+
+/// Which content-fixer action the page walk of `lint_paths_pass` takes (TRDD-JD2QR5SQ).
+#[derive(Clone, Copy)]
+enum FixPass<'a> {
+    Off,
+    /// Print what `Apply` would change to stderr; write nothing.
+    Diff(&'a crate::lint_config::LintConfig),
+    /// Plan, gate and write the safe fixes; record refusals in the once-only ledger.
+    Apply(&'a crate::lint_config::LintConfig),
+}
+
 /// `fix = false` is REPORT-ONLY: same findings, no writes. See `LintArgs::no_fix` for why that
 /// mode exists and who is allowed to want it.
 fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation> {
+    lint_paths_pass(paths, hidden, fix, FixPass::Off)
+}
+
+fn lint_paths_pass(paths: &[PathBuf], hidden: bool, fix: bool, pass: FixPass) -> Vec<Violation> {
     // A NON-PAGE is not a lint target, however the path arrived. `collect_md` filters the
     // index/report family on a directory WALK, but an EXPLICITLY named file bypasses that ("the
     // caller asked for it") — right for index/recall, wrong here: grading MEMORY.md or a
@@ -7055,6 +7103,16 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
     // Gated on `fix` (TRDD-VJL1YTCG Part C). The gate wraps the WHOLE block, root reconciliation
     // included: a report-only pass that still reconciled the USER symlink root would write on
     // exactly the schedule this flag exists to take writes off.
+    // The content fixers run on the SAME page walk as the normalization below, BEFORE it, and only
+    // when `pass` asks (TRDD-JD2QR5SQ): plain lint never reaches `fix_page_pass`.
+    let mut passed: BTreeSet<PathBuf> = BTreeSet::new();
+    if !matches!(pass, FixPass::Off) {
+        for p in collect_md(&paths, hidden) {
+            if passed.insert(p.canonicalize().unwrap_or_else(|_| p.clone())) {
+                fix_page_pass(&p, pass);
+            }
+        }
+    }
     if fix {
         let _ = reconcile_user_symlink_root();
         for p in collect_md(&paths, hidden) {
@@ -7262,6 +7320,59 @@ fn lint_paths_with(paths: &[PathBuf], hidden: bool, fix: bool) -> Vec<Violation>
             .cmp(&(b.sev, &b.path, b.line))
     });
     violations
+}
+
+
+/// One page of the `--diff` / `--apply-fixes` walk (TRDD-JD2QR5SQ). `Diff` prints the change to
+/// stderr and writes nothing. `Apply` writes through the write gate under the scope lock; a
+/// refusal goes to the once-only ledger instead. Any I/O failure aborts with exit 2: a half-applied
+/// fix pass must not look like a clean one. The normalization is NOT previewed by `Diff`: only its
+/// writing form exists.
+fn fix_page_pass(page: &Path, pass: FixPass) {
+    let die = |msg: String| -> ! {
+        eprintln!("memgrep lint: {msg}");
+        std::process::exit(2);
+    };
+    // Canonical path: the ledger's once-only match is on the page string, so one page must have
+    // one spelling however the caller named it (relative, /tmp vs /private/tmp).
+    let page = page.canonicalize().unwrap_or_else(|_| page.to_path_buf());
+    let root = write_gate::scope_root_for(&page);
+    // Held until the end of this function: the ledger's once-only property (record_unfixed takes no
+    // lock of its own) relies on this scope lock, and the read below must see what we then write.
+    let _guard = match pass {
+        FixPass::Apply(_) => Some(write_gate::acquire(&root).unwrap_or_else(|e| die(format!("{}: {e}", page.display())))),
+        _ => None,
+    };
+    let Some(text) = md::read_text(&page) else { return };
+    let (FixPass::Diff(cfg) | FixPass::Apply(cfg)) = pass else { return };
+    let fix = plan_page_fix(&page, &text, cfg);
+    if matches!(pass, FixPass::Apply(_)) {
+        match &fix.refusal {
+            Some(why) => {
+                let ledger = write_gate::lock_path_for(&root).with_extension("unfixed.tsv");
+                if let Err(e) = crate::fixers::record_unfixed(&ledger, &page.to_string_lossy(), why) {
+                    die(format!("{}: cannot record the refused fix: {e}", page.display()));
+                }
+            }
+            None if fix.text != text => {
+                if let Err(e) = crate::pre_write::write_gated(&page, &fix.text) {
+                    die(format!("{}: {e}", page.display()));
+                }
+            }
+            None => {}
+        }
+        return;
+    }
+    if let Some(why) = &fix.refusal {
+        eprintln!("refused {}: {why}", page.display());
+    } else if fix.text != text {
+        let (old, new): (Vec<&str>, Vec<&str>) = (text.lines().collect(), fix.text.lines().collect());
+        let pre = old.iter().zip(&new).take_while(|(o, n)| o == n).count();
+        let suf = old[pre..].iter().rev().zip(new[pre..].iter().rev()).take_while(|(o, n)| o == n).count();
+        eprintln!("--- {}", page.display());
+        old[pre..old.len() - suf].iter().for_each(|l| eprintln!("-{l}"));
+        new[pre..new.len() - suf].iter().for_each(|l| eprintln!("+{l}"));
+    }
 }
 
 /// The PER-PAGE half of `lint_paths_with`, extracted mechanically (TRDD-XI10BA5D A2 step 1):

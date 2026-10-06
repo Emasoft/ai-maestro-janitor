@@ -1391,6 +1391,10 @@ TRDD-RY0IJBJI: "autofix this always, no exceptions"). Lint is the only verb that
 nobody is writing, so it is where "always" has to live — reconciliation reachable only from the
 write path leaves an unwritten page one-sided forever, maintained by traffic rather than enforced.
 
+Content fixers (the registered safe fixes of rules such as `page-no-notes-section`) never run by
+default: only `--apply-fixes` runs them, and the `publish-globally` normalization above stays
+unconditional (TRDD-RY0IJBJI).
+
 The reason is DATA INTEGRITY, not tidiness (owner ruling 2026-08-29): executing a memgrep
 command or edit against a malformed page **corrupts it and loses data**, so fixing both BEFORE and
 AFTER a wikimem page edit is `MUST`, no exceptions. Autofix on a frequent cadence is therefore a
@@ -1449,7 +1453,7 @@ on whoever happened to touch the page. Both readings agree on the severity; only
 it changed.
 
 `WM-LINT-10` **selection-config-and-output-flags** (TRDD-3HLI7DMK) — `MUST`: `memgrep lint` accepts
-the eight flags below and behaves exactly as stated.
+the ten flags below and behaves exactly as stated.
 
 - **Label.** A finding whose code is registered prints ` (FAMILY-NNN)` — or ` (FAMILY-NNN · safe-fix)`
   when the registered fixer would clear every finding of that rule on that page (never for a finding the per-page lint does not itself produce) — AFTER the message and BEFORE the
@@ -1478,6 +1482,21 @@ the eight flags below and behaves exactly as stated.
   <path>: <cause>`, no finding prints, nothing is linted or fixed, exit 2.
 - **`--isolated`** ignores every `.janitor.toml` (built-in defaults plus the command-line flags);
   combined with `--config` it is a usage error, exit 2.
+- **`--apply-fixes`** runs the registered content fixers on every page the run visits, before the
+  normalization and the report. Per page, under the scope write lock: it plans the fixes of the
+  enabled, fixable rules (a rule with a suppressed finding on that page is skipped), and writes the
+  result through the write gate. A plan the gate or the fixers refuse leaves the page byte-identical
+  and is recorded once, as `<canonical page path><TAB><reason>`, in the unfixed ledger next to the
+  scope lock file in the state directory (`<lock name>.unfixed.tsv`); a repeat run adds no second
+  line, however the page was named. A refused plan is recorded in the ledger and `MUST NOT` change the exit code, which the remaining
+  findings dictate; a write that fails, or that the gate refuses when it re-checks at write time, aborts the run with exit 2. When the discovered config is invalid the fix pass is skipped for both `--apply-fixes` and `--diff` (stderr says so)
+  and the run is plain lint. `--apply-fixes` with `--no-fix` or with `--diff` is a usage error,
+  exit 2. The ledger is written only under `--apply-fixes`.
+- **`--diff`** prints to stderr the change `--apply-fixes` would make and writes nothing: no
+  normalization, no fix, no ledger. Per page, a `--- <path>` line then the differing lines as `-`
+  and `+` lines, or `refused <path>: <reason>` for a refused plan; a page with nothing to change
+  prints nothing. It previews the content fixers only, not the `publish-globally` normalization
+  (that has only a writing form). The findings report on stdout is the `--no-fix` report.
 - **Discovery and suppression are ON by default.** Without `--config` or `--isolated` a
   `.janitor.toml` is discovered (`[lint]` keys `select`, `extend-select`, `ignore`, `fixable`,
   `unfixable`, `unsafe-fixes`, `per-file-ignores`). Currently discovery starts from the first

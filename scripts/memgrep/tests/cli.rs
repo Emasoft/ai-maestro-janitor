@@ -5876,6 +5876,251 @@ fn lint_label_omits_safe_fix_when_the_fixer_would_change_nothing() {
     assert!(line.ends_with(" (WMATOM-004) ⟦anchor:atom:a1⟧"), "no safe-fix label expected: {line}");
 }
 
+
+/// Files under `dir` (recursive) whose path ends with `suffix`: the once-only ledger lives in the
+/// state dir under a name this test must not hardcode.
+fn files_ending(dir: &std::path::Path, suffix: &str) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_ending(&p, suffix));
+        } else if p.to_string_lossy().ends_with(suffix) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// `lint` with a private state dir, so the ledger the run may write is findable and isolated.
+fn lint_in_state(args: &[&str], state: &TempDir) -> (String, String, i32) {
+    run_full_env(args, "JANITOR_GLOBAL_STATE_DIR", state.as_str())
+}
+
+/// A page whose only atom has no keywords: the Notes fix is safe on its own but the write gate
+/// refuses the result (WMATOM-010 is a gate-floor error).
+const LINT_REFUSED_PAGE: &str = "---\nname: p\ndescription: \"alpha / beta / gamma / delta\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n# p\n^a1 [desc:\"d\", ocd: 2026-01-01, lmd: 2026-01-01]\nBody.\n";
+
+fn ledger_lines(state: &TempDir) -> Vec<String> {
+    files_ending(&state.path, ".unfixed.tsv")
+        .iter()
+        .flat_map(|f| std::fs::read_to_string(f).unwrap().lines().map(String::from).collect::<Vec<_>>())
+        .collect()
+}
+
+#[test]
+fn lint_diff_shows_the_fix_and_writes_nothing() {
+    let d = TempDir::new("lint-diff");
+    let state = TempDir::new("lint-diff-state");
+    d.write("p.md", &lint_no_notes_page(""));
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    let (_o, e, _c) = lint_in_state(&["lint", "--diff", d.as_str()], &state);
+    assert!(e.lines().any(|l| l.starts_with("--- ")), "no diff header in:\n{e}");
+    assert!(e.lines().any(|l| l == "+## Notes and lessons learned"), "no added Notes line in:\n{e}");
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before, "--diff must not write the page");
+    assert!(files_ending(&state.path, ".unfixed.tsv").is_empty(), "--diff must write no ledger");
+}
+
+#[test]
+fn lint_diff_on_a_clean_page_prints_no_diff() {
+    let d = TempDir::new("lint-diff-clean");
+    let state = TempDir::new("lint-diff-clean-state");
+    d.write("p.md", &lint_clean_page(""));
+    let (_o, e, c) = lint_in_state(&["lint", "--diff", d.as_str()], &state);
+    assert_eq!(c, 0, "{e}");
+    assert!(e.lines().all(|l| l.starts_with("memgrep lint:")), "only the summary line expected:\n{e}");
+}
+
+#[test]
+fn lint_diff_on_a_refused_page_names_the_refusal() {
+    let d = TempDir::new("lint-diff-refused");
+    let state = TempDir::new("lint-diff-refused-state");
+    d.write("p.md", LINT_REFUSED_PAGE);
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    let (_o, e, _c) = lint_in_state(&["lint", "--diff", d.as_str()], &state);
+    let page = std::fs::canonicalize(d.join("p.md")).unwrap();
+    assert!(e.contains(&format!("refused {}: gate: WMATOM-010", page.display())), "{e}");
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before);
+    assert!(files_ending(&state.path, ".unfixed.tsv").is_empty());
+}
+
+#[test]
+fn lint_diff_previews_the_content_fixers_only_not_the_normalization() {
+    // A PROJECT page missing both its Notes section and `publish-globally:`. The normalization has
+    // only a writing form, so --diff must show the Notes hunk alone and leave the bytes untouched.
+    let d = TempDir::new("lint-diff-norm");
+    let control = TempDir::new("lint-diff-norm-control");
+    let user = TempDir::new("lint-diff-norm-user");
+    let state = TempDir::new("lint-diff-norm-state");
+    d.write("p.md", &lint_no_notes_page(""));
+    control.write("p.md", &lint_no_notes_page(""));
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let run = |args: &[&str], scope: &TempDir| {
+        memgrep_cmd(bin)
+            .args(args)
+            .env("JANITOR_GLOBAL_STATE_DIR", state.as_str())
+            .env("WIKIMEM_PROJECT_SCOPE_PATH", scope.as_str())
+            .env("MEMGREP_USER_MEM_ROOT", user.as_str())
+            .output()
+            .unwrap()
+    };
+    // Control: plain lint on an identical copy MUST change the bytes, else this fixture does not
+    // actually need the normalization and the assertions below would be vacuous.
+    run(&["lint", control.as_str()], &control);
+    assert_ne!(std::fs::read(control.join("p.md")).unwrap(), before, "fixture needs the normalization");
+    let out = run(&["lint", "--diff", d.as_str()], &d);
+    let e = String::from_utf8_lossy(&out.stderr);
+    assert!(e.lines().any(|l| l == "+## Notes and lessons learned"), "{e}");
+    assert!(!e.contains("publish-globally:"), "the normalization must not be previewed:\n{e}");
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before);
+}
+
+#[test]
+fn lint_apply_fixes_on_a_project_page_needing_normalization_fixes_it() {
+    let d = TempDir::new("lint-apply-norm");
+    let user = TempDir::new("lint-apply-norm-user");
+    let state = TempDir::new("lint-apply-norm-state");
+    d.write("p.md", &lint_no_notes_page(""));
+    let out = memgrep_cmd(env!("CARGO_BIN_EXE_memgrep"))
+        .args(["lint", "--apply-fixes", d.as_str()])
+        .env("JANITOR_GLOBAL_STATE_DIR", state.as_str())
+        .env("WIKIMEM_PROJECT_SCOPE_PATH", d.as_str())
+        .env("MEMGREP_USER_MEM_ROOT", user.as_str())
+        .output()
+        .unwrap();
+    let after = std::fs::read_to_string(d.join("p.md")).unwrap();
+    let e = String::from_utf8_lossy(&out.stderr);
+    assert!(after.contains("## Notes and lessons learned"), "{after}\n{e}");
+    assert!(after.contains("publish-globally:"), "{after}\n{e}");
+    assert!(ledger_lines(&state).is_empty(), "{:?}", ledger_lines(&state));
+}
+
+#[test]
+fn lint_apply_fixes_with_diff_is_a_usage_error() {
+    let d = TempDir::new("lint-apply-diff");
+    d.write("p.md", &lint_no_notes_page(""));
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    let (_o, _e, c) = run_full(&["lint", "--apply-fixes", "--diff", d.as_str()]);
+    assert_eq!(c, 2);
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before);
+}
+
+#[test]
+fn lint_apply_fixes_with_no_fix_is_a_usage_error() {
+    let d = TempDir::new("lint-apply-nofix");
+    d.write("p.md", &lint_no_notes_page(""));
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    let (_o, _e, c) = run_full(&["lint", "--apply-fixes", "--no-fix", d.as_str()]);
+    assert_eq!(c, 2);
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before);
+}
+
+#[test]
+fn lint_plain_lint_leaves_a_fixable_page_byte_identical() {
+    let d = TempDir::new("lint-plain-fixable");
+    let state = TempDir::new("lint-plain-fixable-state");
+    d.write("p.md", &lint_no_notes_page(""));
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    let (o, _e, _c) = lint_in_state(&["lint", d.as_str()], &state);
+    assert!(o.contains("[page-no-notes-section]"), "{o}");
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before);
+    assert!(files_ending(&state.path, ".unfixed.tsv").is_empty());
+}
+
+#[test]
+fn lint_apply_fixes_fixes_a_safe_page() {
+    let d = TempDir::new("lint-apply-safe");
+    let state = TempDir::new("lint-apply-safe-state");
+    d.write("p.md", &lint_no_notes_page(""));
+    let (o, e, c) = lint_in_state(&["lint", "--apply-fixes", d.as_str()], &state);
+    let after = std::fs::read_to_string(d.join("p.md")).unwrap();
+    assert!(after.contains("## Notes and lessons learned"), "{after}");
+    assert!(!o.contains("[page-no-notes-section]"), "the fixed finding must be gone:\n{o}");
+    assert_eq!(c, 0, "{e}");
+}
+
+#[test]
+fn lint_apply_fixes_floor_error_page_is_byte_identical_with_one_ledger_line_after_two_runs() {
+    let d = TempDir::new("lint-apply-refused");
+    let state = TempDir::new("lint-apply-refused-state");
+    d.write("p.md", LINT_REFUSED_PAGE);
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    let (_o, _e, plain) = lint_in_state(&["lint", "--no-fix", d.as_str()], &state);
+    let (_o, _e, c1) = lint_in_state(&["lint", "--apply-fixes", d.as_str()], &state);
+    // The same page named through a different spelling must not add a second ledger line.
+    let dirname = d.path.file_name().unwrap().to_str().unwrap();
+    let other = format!("{}/../{}", d.as_str(), dirname);
+    let (_o, _e, c2) = lint_in_state(&["lint", "--apply-fixes", &other], &state);
+    assert_eq!((c1, c2), (plain, plain), "a refusal must not change the exit code");
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before);
+    let page = std::fs::canonicalize(d.join("p.md")).unwrap();
+    assert_eq!(ledger_lines(&state), vec![format!("{}\tgate: WMATOM-010", page.display())]);
+}
+
+#[test]
+fn lint_apply_fixes_in_one_run_fixes_the_safe_page_and_records_the_refused_one() {
+    let d = TempDir::new("lint-apply-two");
+    let state = TempDir::new("lint-apply-two-state");
+    d.write("a-refused.md", LINT_REFUSED_PAGE);
+    d.write("b-safe.md", &lint_no_notes_page(""));
+    let before = std::fs::read(d.join("a-refused.md")).unwrap();
+    let (_o, _e, _c) = lint_in_state(&["lint", "--apply-fixes", d.as_str()], &state);
+    assert_eq!(std::fs::read(d.join("a-refused.md")).unwrap(), before);
+    assert!(std::fs::read_to_string(d.join("b-safe.md")).unwrap().contains("## Notes and lessons learned"));
+    assert_eq!(ledger_lines(&state).len(), 1);
+}
+
+#[test]
+fn lint_apply_fixes_does_not_fix_an_ignored_rule() {
+    let d = TempDir::new("lint-apply-ignored");
+    let state = TempDir::new("lint-apply-ignored-state");
+    d.write("p.md", &lint_no_notes_page(""));
+    d.write(".janitor.toml", "[lint]\nignore = [\"WMPAGE-010\"]\n");
+    let before = std::fs::read(d.join("p.md")).unwrap();
+    lint_in_state(&["lint", "--apply-fixes", d.as_str()], &state);
+    assert_eq!(std::fs::read(d.join("p.md")).unwrap(), before);
+}
+
+#[test]
+fn lint_apply_fixes_unusable_config_leaves_pages_byte_identical() {
+    let a = TempDir::new("lint-apply-badcfg-a");
+    let b = TempDir::new("lint-apply-badcfg-b");
+    let state = TempDir::new("lint-apply-badcfg-state");
+    for d in [&a, &b] {
+        d.write("p.md", &lint_no_notes_page(""));
+        d.write(".janitor.toml", "[lint]\nselct = [\"WM\"]\n");
+    }
+    let before = std::fs::read(b.join("p.md")).unwrap();
+    let (_o, _e, plain) = lint_in_state(&["lint", a.as_str()], &state);
+    let (_o, _e, apply) = lint_in_state(&["lint", "--apply-fixes", b.as_str()], &state);
+    assert_ne!(apply, 0);
+    assert_eq!(apply, plain);
+    assert_eq!(std::fs::read(b.join("p.md")).unwrap(), before);
+    assert!(files_ending(&state.path, ".unfixed.tsv").is_empty());
+}
+
+
+#[test]
+fn lint_diff_with_an_invalid_config_writes_nothing_and_prints_no_preview() {
+    let a = TempDir::new("lint-diff-badcfg-a");
+    let b = TempDir::new("lint-diff-badcfg-b");
+    let state = TempDir::new("lint-diff-badcfg-state");
+    for d in [&a, &b] {
+        d.write("p.md", &lint_no_notes_page(""));
+        d.write(".janitor.toml", "[lint]\nselct = [\"WM\"]\n");
+    }
+    let before = std::fs::read(b.join("p.md")).unwrap();
+    let (_o, _e, plain) = lint_in_state(&["lint", "--no-fix", a.as_str()], &state);
+    let (_o, e, diff) = lint_in_state(&["lint", "--diff", b.as_str()], &state);
+    assert_ne!(diff, 0);
+    assert_eq!(diff, plain);
+    assert_eq!(std::fs::read(b.join("p.md")).unwrap(), before);
+    assert!(e.contains("--diff skipped"), "{e}");
+    assert!(!e.lines().any(|l| l.starts_with("--- ")), "{e}");
+    assert!(files_ending(&state.path, ".unfixed.tsv").is_empty());
+}
+
 #[test]
 fn lint_select_ignore_and_extend_select_choose_the_rules() {
     let d = TempDir::new("lint-select");
