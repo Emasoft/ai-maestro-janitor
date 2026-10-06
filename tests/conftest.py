@@ -1299,3 +1299,23 @@ def _pin_hid_probe_unavailable(monkeypatch):
     # consults the probe, so an unpinned run is safe (`pinned` kept for debuggability).
     del pinned
     yield
+
+
+
+# Same four names as `state._PANE_ID_ENV_VARS` (scripts/lib/state.py); tests/test_pane_state.py
+# asserts the two lists are equal so they cannot drift.
+_PANE_ID_ENV_NAMES = ("TMUX_PANE", "ITERM_SESSION_ID", "KITTY_WINDOW_ID", "WEZTERM_PANE")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_terminal_pane_env(monkeypatch):
+    """Delete the host terminal's pane-id env vars for EVERY test.
+
+    Since 79255d6e (TRDD-HYTKG53C) user presence is PER-PANE: when `state.terminal_pane_key()`
+    resolves, the code reads a per-pane presence file instead of the machine-global one. A test
+    run from iTerm/tmux/kitty/WezTerm would otherwise read a per-pane file it never wrote, so a
+    host terminal's pane id must not decide test outcomes. Tests that need a pane key set it
+    themselves with monkeypatch.setenv (function-scoped autouse runs before the test body).
+    """
+    for name in _PANE_ID_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
