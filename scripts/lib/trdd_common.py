@@ -1141,6 +1141,10 @@ _BACKTICK_TOKEN_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{4,})`")
 # RECORDING the death rather than relying on the symbol still existing
 # (TRDD-Q4AMWYCY). Deliberately narrow (the exact vocabulary the spec named) —
 # widening this risks swallowing a genuine "should be removed" instruction.
+# An imperative deletion verb BEFORE the token in its sentence ("delete `x` once the removed caller
+# is gone") makes the sentence a pending instruction, not an obituary, even though it also carries
+# a past-tense obituary word. `\b` keeps past tenses ("deleted") from matching. janitor#332 follow-up.
+_IMPERATIVE_BEFORE_TOKEN_RE = re.compile(r"\b(?:delete|remove|drop|rename|retire|kill)\b", re.IGNORECASE)
 _OBITUARY_VERB_RE = re.compile(
     # `zero hits` (janitor#332): "X return zero hits under scripts/" is how a card records a
     # verified deletion; TRDD-AR9IUGIJ's obituary used it and re-fired every week.
@@ -1368,7 +1372,9 @@ def check5_dead_symbol_citations(record: TrddRecord, token_is_dead) -> list[Dead
     for m in _BACKTICK_TOKEN_RE.finditer(state_block):
         token = m.group(1)
         sent_lo, sent_hi = _sentence_span(state_block, m.start())
-        if _is_obituary_line(state_block[sent_lo:sent_hi]):
+        if _is_obituary_line(state_block[sent_lo:sent_hi]) and not _IMPERATIVE_BEFORE_TOKEN_RE.search(
+            state_block[sent_lo : m.start()]
+        ):
             continue
         hit_in_na = bool(na_span and na_span[0] <= m.start() < na_span[1])
         if token not in in_next_action:

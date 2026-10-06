@@ -881,6 +881,20 @@ def test_check5_obituary_sentence_wrapped_over_lines_is_still_an_obituary():
     assert [(f.token, f.severity) for f in findings] == [("commit_tier", "high")]
 
 
+def test_check5_live_instruction_sharing_a_sentence_with_an_obituary_verb_still_fires():
+    """A live instruction ("delete `foo_bar` once the removed caller is gone") shares its sentence
+    with the obituary words `removed`/`gone`, yet it is a pending TODO naming the token, not a
+    record of a deletion. It must still fire HIGH (janitor#332 widened the exemption to the whole
+    sentence; this guards the over-exemption)."""
+    body = (
+        "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+        "NEXT ACTION: delete `foo_bar` once the removed caller is gone.\n"
+    )
+    rec = _record(column="dev", body=body)
+    findings = tc.check5_dead_symbol_citations(rec, _dead("foo_bar"))
+    assert [(f.token, f.severity) for f in findings] == [("foo_bar", "high")]
+
+
 def test_extract_state_block_stops_at_next_top_heading():
     """The STATE block ends at the next top-level '## ' heading, not at EOF."""
     body = (
