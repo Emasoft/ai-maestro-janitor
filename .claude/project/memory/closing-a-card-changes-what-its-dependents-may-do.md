@@ -2,7 +2,7 @@
 name: closing-a-card-changes-what-its-dependents-may-do
 description: "closing a TRDD broke another card's task / a chore that edits card X became forbidden when X went complete / terminal freeze blocks a cleanup I had planned / I closed a card and only then found the dependent / which cards break if I mark this one complete / what to check before closing a card / is it safe to close this TRDD / pre-close dependency check / undeclared dependency on a card's column / a card whose task is edit card X declares nothing / blocked-by and eht are not the only dependencies / rule 12 forbids the collapse I wanted to do / can I revert a close to unblock a chore / is a readability collapse a body edit / grep for dependents before a terminal transition / who references this TRDD / closing a card is not a local act"
 ocd: 2026-09-05
-lmd: 2026-09-05
+lmd: 2026-10-06
 publish-globally: true
 metadata:
   node_type: memory
@@ -34,12 +34,15 @@ would not wait on a readability chore, so "do it first" would have re-imposed by
 coupling a human removed by decision.
 
 
-^ATOM-FRF1-8340 [desc: "Incident 2026-09-05: closing ZQ02QG1L (mechanically correct) FORECLOSED 34GB6XUI's task as written — the card is not dead, it has four paths, and the consequence was deductive not measured", keywords: the_incident_that_produced_this_page ZQ02QG1L_close_foreclosed_34GB6XUI closing_a_card_with_an_undeclared_dependent_worked_example pre-block-column_restore_was_mechanical the_card_is_not_dead_only_its_task_as_written four_options_after_a_task_is_foreclosed cancel_re-scope_exception_or_evaporated was_the_close_premature_because_work_remained chore_about_the_card_versus_work_of_the_card deduction_is_not_a_measurement, trdd: TRDD-34GB6XUI, ocd: 2026-09-05, lmd: 2026-09-05]
+^ATOM-FRF1-8340 [desc: "Incident 2026-09-05: closing ZQ02QG1L blocked to complete restored pre-block-column mechanically and FORECLOSED 34GB6XUI's task as written (a 404-line collapse)", keywords: the_incident_that_produced_this_page ZQ02QG1L_close_foreclosed_34GB6XUI closing_a_card_with_an_undeclared_dependent_worked_example pre-block-column_restore_was_mechanical mechanical_restore_replayed_an_old_completeness_judgment closed_a_blocked_card_and_it_went_complete what_happened_2026-09-05_card_close collapse_of_404_lines_task_foreclosed blocked_to_complete_restore_broke_a_dependent incident_walkthrough_closing_ZQ02QG1L, trdd: TRDD-34GB6XUI, ocd: 2026-09-05, lmd: 2026-10-06]
 **THE INCIDENT, 2026-09-05.** I closed TRDD-ZQ02QG1L `blocked` → `complete`: its blocker had
 gone terminal, so `pre-block-column: complete` was restored MECHANICALLY — replaying a
 completeness judgment made a day earlier, before the dependent was a live consideration. That
 **FORECLOSED TRDD-34GB6XUI's TASK AS WRITTEN**, whose whole job was collapsing ZQ02QG1L's 404
 lines into its surviving facts.
+
+
+^ATOM-R5Y3-UUU7 [desc: "After a close forecloses a dependent's task the card is not dead: four paths remain, the consequence was deduced not measured, and the close-was-premature objection fails", keywords: the_card_is_not_dead_only_its_task_as_written four_options_after_a_task_is_foreclosed cancel_re-scope_exception_or_evaporated was_the_close_premature_because_work_remained chore_about_the_card_versus_work_of_the_card deduction_is_not_a_measurement what_can_I_do_when_a_close_foreclosed_a_dependent should_I_cancel_the_foreclosed_card seek_a_USER-level_freeze_exception task_evaporated_because_nobody_works_from_a_terminal_card close_was_premature_objection is_a_foreclosed_task_really_dead, trdd: TRDD-34GB6XUI, ocd: 2026-10-06, lmd: 2026-10-06]
 
 **"Foreclosed", not "killed": the card is not dead.** Four paths remain — cancel it; re-scope so
 the surviving facts land in a NEW card; seek a USER-level freeze exception; or recognise the task
