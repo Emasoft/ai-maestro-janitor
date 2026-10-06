@@ -48,7 +48,14 @@ def _set_server(on: bool) -> None:
         flag.touch()
     elif flag.exists():
         stamp = datetime.date.today().strftime("%Y%m%d")
-        flag.rename(flag.with_name(f"{flag.name}.DISABLED-{stamp}-janitor-toggle"))
+        # os.rename silently REPLACES an existing target on POSIX, so a second "off" the same
+        # day would destroy the first renamed file; pick a free name (-2, -3, ...) instead.
+        target = flag.with_name(f"{flag.name}.DISABLED-{stamp}-janitor-toggle")
+        n = 2
+        while target.exists():
+            target = flag.with_name(f"{flag.name}.DISABLED-{stamp}-janitor-toggle-{n}")
+            n += 1
+        flag.rename(target)
 
 
 def main(argv: list[str]) -> int:

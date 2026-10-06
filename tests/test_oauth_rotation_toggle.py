@@ -72,6 +72,16 @@ def test_disagreeing_sides_are_fixed_to_requested_state(dirs: tuple[Path, Path])
     assert janitor_flag(data).is_file() and server_flag(home).is_file()
 
 
+def test_repeated_off_same_day_keeps_every_disabled_file(dirs: tuple[Path, Path]) -> None:
+    """on, off, on, off on one day leaves two distinct DISABLED files and no server flag."""
+    data, home = dirs
+    for action in ("on", "off", "on", "off"):
+        assert run(data, home, action).returncode == 0
+    disabled = list(server_flag(home).parent.glob("oauth-rotator-tick.enabled.DISABLED-*"))
+    assert len(disabled) == 2
+    assert not server_flag(home).exists()
+
+
 def test_idempotent(dirs: tuple[Path, Path]) -> None:
     """Running the same action twice succeeds both times."""
     data, home = dirs
