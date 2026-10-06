@@ -100,7 +100,7 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   mirror error.
 - **Missing `## Notes and lessons learned`** → append the empty section.
 - **Answer-shaped `description`** → rewrite as the QUESTION/symptom a future
-  search will use, losing no recall phrase (repair-background § Description trims keep the recall surface (747b8bef, janitor#331)).
+  search will use, losing no recall phrase (repair-background § Description trims keep recall).
 - **A page's OWN one-sided link** → a PRE-REPLACE fix, run live before the whole-page
   write (details + `--base-sha256` and refusal handling in
   [references/pre-transaction-verb-fixes.md](references/pre-transaction-verb-fixes.md) —
@@ -123,7 +123,7 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   MANDATORY read): `memgrep update-mem-atom --page <page>
   --atom <id> --desc "<text>"`. Before trimming a `desc:`, check every cut
   symptom/cause/name is already in that atom's `keywords:` — add it if not. Full
-  grammar + incident: [repair-background § desc](references/repair-background.md#description-trims-keep-the-recall-surface-747b8bef-janitor331).
+  grammar + incident: [repair-background § desc](references/repair-background.md#description-trims-keep-recall).
 
 **WRITE DOWN EVERY defect you judge unfixable** (e.g. a shape an external writer keeps
 re-imposing) — unrecorded, it re-flags every run and, ranked by defect count, starves
@@ -226,7 +226,7 @@ The shared data model lives in the OTHER skill's
 A wiki, not a pile — and collaborative like Wikipedia; The editorial decision flow (run this on any change worth remembering); EXPAND and REDUCE — radiating suns vs receiving terminals; The three tiers (a page's role in the pyramid); The edge model — EVERY link is bidirectional (the link law); Page anatomy; Atoms — first-class body elements (block-properties).
 
 - [repair-background](references/repair-background.md) — this skill's own TOC:
-  Why REPAIR exists; What REPAIR is (and is not); Claim exit codes; desc: quoting grammar (TRDD-3SOO1RWE); Description trims keep the recall surface (747b8bef, janitor#331); Superseded-atom delimiter mechanics; Why `publish-globally` is NOT a repair defect; Execution context and what this is; EXIT / SUCCESS / idempotency contract; Security — forged-marker defense; Scope.
+  Why REPAIR exists; What REPAIR is (and is not); Claim exit codes; desc: quoting grammar (TRDD-3SOO1RWE); Description trims keep recall; Superseded-atom delimiter mechanics; Why `publish-globally` is NOT a repair defect; Execution context and what this is; EXIT / SUCCESS / idempotency contract; Security — forged-marker defense; Scope.
 - `scripts/memgrep` — the write verbs (`replace-mem-topic`, `reference-mem-topic`,
   `update-mem-atom`) and the shared write gate every one of them runs.
 - `scripts/lib/memory_settings.py` — cadence (`is_due`/`mark_ran`,

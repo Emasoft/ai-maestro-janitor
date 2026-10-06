@@ -6,7 +6,7 @@
 - What REPAIR is (and is not)
 - Claim exit codes
 - desc: quoting grammar (TRDD-3SOO1RWE)
-- Description trims keep the recall surface (747b8bef, janitor#331)
+- Description trims keep recall
 - Superseded-atom delimiter mechanics
 - Why `publish-globally` is NOT a repair defect
 - Execution context and what this is
@@ -52,7 +52,7 @@ memgrep's `atom-unquoted-desc` check (`[a-z0-9_]+` only). Quote unquoted-prose
 descs verbatim rather than rewording them; trim an over-cap desc by tightening,
 never by dropping a fact the body lacks elsewhere.
 
-## Description trims keep the recall surface (747b8bef, janitor#331)
+## Description trims keep recall
 
 Review of commit 747b8bef, 2026-09-06: 16 desc trims, one dropped the `fact`
 subcommand from a desc with no keyword carrying it — the recall surface lost that
@@ -131,7 +131,7 @@ for a reader who wants to jump straight to one of them:
   - [What REPAIR is (and is not)](#what-repair-is-and-is-not)
   - [Claim exit codes](#claim-exit-codes)
   - [desc: quoting grammar (TRDD-3SOO1RWE)](#desc-quoting-grammar-trdd-3soo1rwe)
-  - [Description trims keep the recall surface (747b8bef, janitor#331)](#description-trims-keep-the-recall-surface-747b8bef-janitor331)
+  - [Description trims keep recall](#description-trims-keep-recall)
   - [Superseded-atom delimiter mechanics](#superseded-atom-delimiter-mechanics)
   - [Why `publish-globally` is NOT a repair defect](#why-publish-globally-is-not-a-repair-defect)
   - [Execution context and what this is](#execution-context-and-what-this-is)
