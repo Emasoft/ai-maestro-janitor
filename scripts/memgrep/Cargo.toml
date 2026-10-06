@@ -1,6 +1,8 @@
 [package]
 name = "memgrep"
-version = "0.1.0"
+# 0.2.0: CLI contract changed (update-mem-atom --status, refusal of a no-op update, lint rule
+# WMPAGE-012). The index SCHEMA_VERSION is deliberately untouched.
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
