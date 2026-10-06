@@ -240,10 +240,25 @@ def _seed_overview_if_absent(state, memory_bridge, scope_name: str, scope_root: 
             # one-phrase stub failed the janitor's own lint, which opened a repair ticket per new
             # project (janitor#333). The scope name is in every phrase set so LOCAL and USER stubs
             # are not identical (cross-page duplicate-description rules).
+            # janitor#334: this stub is NEW authoring, not legacy, so it meets the write-time
+            # floor (memgrep min_page_phrases = 15), not the lenient lint floor (4) that exists
+            # only for pages written before the gate. It bypasses the write verbs, so nothing
+            # else enforces that floor on it.
             f'description: "{scope_name} memory scope entry point for {project_name} / '
             f"where do I start reading the {scope_name} memory of {project_name} / "
             f"empty seeded {scope_name} overview stub / "
-            f'how to recall {scope_name} notes by symptom"\n'
+            f"how to recall {scope_name} notes by symptom / "
+            f"what is in the {scope_name} memory of {project_name} / "
+            f"{project_name} {scope_name} memory index / "
+            f"first page to open in the {scope_name} memory scope / "
+            f"no {scope_name} knowledge written yet / "
+            f"replace this placeholder with real {scope_name} knowledge / "
+            f"{scope_name} memory is empty / "
+            f"entry point for {project_name} {scope_name} recall / "
+            f"overview page missing in {scope_name} scope / "
+            f"how does {project_name} {scope_name} memory work / "
+            f"where are the {scope_name} notes of {project_name} / "
+            f'seeded by SessionStart janitor#129"\n'
             f"ocd: {now}\n"
             f"lmd: {now}\n"
             "metadata: {node_type: memory, type: overview, tier: hub}\n"
