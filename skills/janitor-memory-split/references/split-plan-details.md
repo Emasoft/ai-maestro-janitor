@@ -174,6 +174,22 @@ CAS-guarded, so they carry the full crash-safety themselves.
 atom over budget re-dispatches this chore forever, which is the failure the write-side gate
 was originally built to prevent.
 
+**An atom that CANNOT be brought under budget without losing fidelity is judged ONCE.** A
+verbatim owner quote or a quoted multi-step procedure (the page's own lesson often says "do not
+decompose") is a legitimate over-budget atom. Skip it, and when EVERY over-budget atom left on
+the page is of that kind, record it so the gate stops re-dispatching (janitor#326):
+
+```bash
+uv run --script "$PLUGIN/scripts/memory_refusal_cli.py" record \
+  --intervention split-atom --scope "$SCOPE" --root "$SCOPE_ROOT" \
+  --page "$PAGE" --reason "<one line: which atom(s), why they cannot be shortened>"
+```
+
+This refusal is page-granular and never expires on a clock: it re-arms only when the page's
+bytes change. Before picking an atom, skip pages that `memory_refusal_cli.py check
+--intervention split-atom …` reports as refused. Record only when no decomposable over-budget
+atom remains on the page, or the next over-budget atom would never be judged.
+
 **The `## Superseded` carve-out applies exactly as it does to the write gate**: a body below
 that delimiter is protocol-frozen history. Leave it alone even when it is over budget —
 rewriting retired facts destroys the record they exist to be.

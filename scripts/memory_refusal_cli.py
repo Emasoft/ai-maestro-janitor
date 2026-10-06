@@ -86,7 +86,10 @@ def main() -> int:
             print("REFUSED: could not read every named page — nothing recorded")
             return 1
         print(f"recorded: {memory_refusals.candidate_key(root, list(pages))} will not re-dispatch")
-        print("  it re-arms automatically when those pages change, and after 7 days")
+        if args.intervention in memory_refusals._NEVER_EXPIRES:
+            print("  it re-arms automatically when those pages change, never on a clock")
+        else:
+            print("  it re-arms automatically when those pages change, and after 7 days")
         return 0
 
     if args.cmd == "check":

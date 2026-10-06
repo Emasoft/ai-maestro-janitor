@@ -46,6 +46,17 @@ REFUSALS_MAX = 200
 # The re-check backstop. Deliberately the SAME 7 days `consolidate_has_work` already uses for its
 # fingerprint gate — two different expiries for the same class of doubt would be a coin flip.
 DEFAULT_TTL_S = 7 * 86400
+# Interventions whose verdict depends ONLY on the judged page's bytes, never on LLM variance or
+# a clock: a verbatim-quote atom that cannot be shortened without breaking fidelity stays that
+# way until the page is edited, and the content hash already re-arms on any edit. A TTL there
+# only re-buys the identical "no" (~300k tokens a week, janitor#326), so these never expire.
+_NEVER_EXPIRES = frozenset({"split-atom"})
+
+
+def _ttl_for(intervention: str, ttl_s: int | None) -> float:
+    if ttl_s is not None:
+        return ttl_s
+    return float("inf") if intervention in _NEVER_EXPIRES else DEFAULT_TTL_S
 
 
 def _ledger_path(intervention: str, scope: str, root: Path | str) -> Path:
@@ -150,7 +161,7 @@ def refusal(
     paths: Sequence[Path | str],
     *,
     now: int | None = None,
-    ttl_s: int = DEFAULT_TTL_S,
+    ttl_s: int | None = None,
 ) -> dict | None:
     """The live refusal covering this candidate, or None (⇒ dispatch).
 
@@ -168,7 +179,7 @@ def refusal(
         age = ts - int(entry.get("ts", 0))
     except (TypeError, ValueError):
         return None
-    return None if age >= ttl_s else entry
+    return None if age >= _ttl_for(intervention, ttl_s) else entry
 
 
 def is_refused(
@@ -178,7 +189,7 @@ def is_refused(
     paths: Sequence[Path | str],
     *,
     now: int | None = None,
-    ttl_s: int = DEFAULT_TTL_S,
+    ttl_s: int | None = None,
 ) -> bool:
     """True iff this exact candidate, unchanged, was already judged and declined."""
     return refusal(intervention, scope, root, paths, now=now, ttl_s=ttl_s) is not None

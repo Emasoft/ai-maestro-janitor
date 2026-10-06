@@ -298,6 +298,8 @@ def split_has_work(
     root: Path,
     *,
     max_bytes: int,
+    scope: str | None = None,
+    now: int | None = None,
     last_stats: dict[str, list[int]] | None = None,
     stamp_age_s: float | None = None,
     recheck_after_s: float = _DEFAULT_RECHECK_S,
@@ -358,7 +360,15 @@ def split_has_work(
     # unknown to any session running an older cached copy of the heartbeat-protocol rule,
     # so the fire would print a token nobody acts on. Checked LAST because it is the only
     # branch here that spawns a subprocess; the stat-only page scan short-circuits first.
-    return bool(oversized_atom_pages(root))
+    #
+    # janitor#326: a page whose over-budget atoms were all judged un-decomposable (a verbatim
+    # quote) carries a page-granular `split-atom` refusal; it is skipped until the page's bytes
+    # change. Without `scope` the ledger cannot be read, so nothing is suppressed (fail-open).
+    for page, _line in oversized_atom_pages(root):
+        if scope is not None and memory_refusals.is_refused("split-atom", scope, root, [page], now=now):
+            continue
+        return True
+    return False
 
 
 def corpus_fingerprint(root: Path) -> str | None:
@@ -1581,7 +1591,8 @@ def content_has_work(
         if split_max_bytes <= 0:
             return True  # cap unreadable/disabled → fail-open (do not suppress)
         return split_has_work(
-            root, max_bytes=split_max_bytes, last_stats=last_stats, stamp_age_s=stamp_age_s,
+            root, max_bytes=split_max_bytes, scope=scope,
+            last_stats=last_stats, stamp_age_s=stamp_age_s,
         )
     if intervention == "consolidate":
         # STRUCTURAL gate (subject-sameness stays agent-discovered) + the UNCHANGED-CORPUS
