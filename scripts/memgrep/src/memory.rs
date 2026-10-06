@@ -7412,6 +7412,46 @@ fn fix_page_pass(page: &Path, pass: FixPass) {
     }
 }
 
+/// The message of the `page-duplicated-section` finding, shared by `lint` and `validate` so the
+/// two verbs can never word the same defect differently. Names no section text (no-leak sweep).
+pub(crate) const DUPLICATED_SECTION_MSG: &str = "this section repeats an earlier section \
+     verbatim (same heading, same body) — a copy pasted twice; remove one";
+
+/// 1-based line of every section that repeats an earlier one (janitor#315). A section copied twice
+/// (same heading AND same non-empty body) passed every grammar check — the checks parsed
+/// frontmatter and atoms, never body prose — and shipped to every cloner. Fence-aware, keyed on
+/// heading + body so a legitimately repeated heading ("Example") with different content is not
+/// flagged. ONE definition: `lint_page_text` and `validate` both call it, so the check cannot
+/// drift between the two verbs. Returns lines only, never the section text (no-leak sweep).
+pub(crate) fn duplicated_section_lines(text: &str) -> Vec<usize> {
+    let mut fence: Option<Fence> = None;
+    let mut sections: Vec<(usize, String, String)> = Vec::new(); // (line, heading, body)
+    for (i, line) in text.lines().enumerate() {
+        if fence_step(line, &mut fence) {
+            if let Some(s) = sections.last_mut() {
+                s.2.push_str(line);
+                s.2.push('\n');
+            }
+            continue;
+        }
+        if fence.is_none() && line.trim_start().starts_with('#') {
+            sections.push((i + 1, line.trim().to_string(), String::new()));
+        } else if let Some(s) = sections.last_mut() {
+            s.2.push_str(line.trim_end());
+            s.2.push('\n');
+        }
+    }
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut dups = Vec::new();
+    for (line, heading, body) in sections {
+        let body = body.trim().to_string();
+        if !body.is_empty() && !seen.insert((heading, body)) {
+            dups.push(line);
+        }
+    }
+    dups
+}
+
 /// The PER-PAGE half of `lint_paths_with`, extracted mechanically (TRDD-XI10BA5D A2 step 1):
 /// every check that examines ONE page's text. `lint_paths_with` keeps the path filtering, the
 /// fix-gated normalize pass, file reading, and the cross-page passes (corpus-unique atom ids,
@@ -7788,43 +7828,15 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
     // shipped to every cloner. Fence-aware, keyed on heading + body so a legitimately repeated
     // heading ("Example") with different content is not flagged. The finding names the line only,
     // never the section text (no-leak sweep).
-    {
-        let mut fence: Option<Fence> = None;
-        let mut sections: Vec<(usize, String, String)> = Vec::new(); // (line, heading, body)
-        for (i, line) in text.lines().enumerate() {
-            if fence_step(line, &mut fence) {
-                if let Some(s) = sections.last_mut() {
-                    s.2.push_str(line);
-                    s.2.push('\n');
-                }
-                continue;
-            }
-            if fence.is_none() && line.trim_start().starts_with('#') {
-                sections.push((i + 1, line.trim().to_string(), String::new()));
-            } else if let Some(s) = sections.last_mut() {
-                s.2.push_str(line.trim_end());
-                s.2.push('\n');
-            }
-        }
-        let mut seen: HashSet<(String, String)> = HashSet::new();
-        for (line, heading, body) in sections {
-            let body = body.trim().to_string();
-            if body.is_empty() {
-                continue;
-            }
-            if !seen.insert((heading, body)) {
-                violations.push(Violation {
-                    sev: rule_sev("page-duplicated-section"),
-                    path: p.clone(),
-                    line,
-                    msg: "this section repeats an earlier section verbatim (same heading, same \
-                     body) — a copy pasted twice; remove one"
-                        .into(),
-                    code: "page-duplicated-section",
-                    anchor: String::new(),
-                });
-            }
-        }
+    for line in duplicated_section_lines(text) {
+        violations.push(Violation {
+            sev: rule_sev("page-duplicated-section"),
+            path: p.clone(),
+            line,
+            msg: DUPLICATED_SECTION_MSG.into(),
+            code: "page-duplicated-section",
+            anchor: String::new(),
+        });
     }
 
     // Atom-level: an unquoted-prose `desc:` (breaks grep / the in-body filter), props the parser

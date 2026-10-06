@@ -6712,3 +6712,33 @@ fn lint_safe_fix_label_is_never_printed_on_an_unused_noqa_finding() {
     assert!(line.contains("(WMSUP-001)"), "{line}");
     assert!(!line.contains("safe-fix"), "{line}");
 }
+
+/// janitor#315: `validate` reports a section pasted twice (it was blind to body duplication), as a
+/// non-blocking WARN line: exit stays 0, and the section text is never echoed.
+#[test]
+fn validate_reports_a_section_pasted_twice_without_failing() {
+    let d = TempDir::new("validate-dup-section");
+    let head = "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n";
+    d.write(
+        "p.md",
+        &format!("{head}### Constants\nsecret-ish line one\n\n### Constants\nsecret-ish line one\n"),
+    );
+    for target in [d.as_str().to_string(), d.join("p.md").to_str().unwrap().to_string()] {
+        let (o, code) = run_with_code(&["validate", &target]);
+        assert_eq!(code, 0, "a duplicated section is a WARN, it must not gate: {o}");
+        assert!(o.contains("[page-duplicated-section]"), "validate must name the rule: {o}");
+        assert!(o.contains("p.md:10"), "validate must point at the second copy: {o}");
+        assert!(!o.contains("secret-ish"), "the section text must never be echoed: {o}");
+    }
+}
+
+/// janitor#315 counterpart: a page with no repeated section yields no page finding from `validate`.
+#[test]
+fn validate_is_silent_about_a_page_with_no_repeated_section() {
+    let d = TempDir::new("validate-clean-page");
+    let head = "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n";
+    d.write("p.md", &format!("{head}### Example\nA\n\n### Example\nB\n"));
+    let (o, code) = run_with_code(&["validate", d.as_str()]);
+    assert_eq!(code, 0, "{o}");
+    assert!(!o.contains("page-duplicated-section"), "{o}");
+}

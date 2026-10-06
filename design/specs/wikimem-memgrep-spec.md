@@ -1242,7 +1242,11 @@ does not appear as a `Commands:`/`Options:` entry the way a normal flag does; ru
 with no query to see its own usage hint.
 
 `WM-CLI-05` **index-sidecar** — the corpus is indexed into a SQLite sidecar (`.memgrep/`);
-`index`/`reindex` build/refresh it; `validate` checks index/page health. The file watcher
+`index`/`reindex` build/refresh it; `validate` checks index/page health. Besides the index
+status line, `validate` prints one `WARN <page>:<line> [page-duplicated-section]` line per section
+repeated verbatim (same heading, same body; janitor#315, the same check as lint rule WMPAGE-012).
+It is a WARN and does NOT affect the exit code: the spec defines no duplicated-section floor
+(`gate_floor=false`), so it must not newly block a `validate && lint` write loop. The file watcher
 debounces ~500 ms behind writes — a consumer `MUST NOT` re-query in the same turn it wrote.
 
 `index`/`reindex` share three flags:

@@ -363,6 +363,23 @@ pub fn cmd_validate_cli(args: &[String]) -> Result<()> {
                 }
             }
         }
+        // janitor#315: validate only inspected the SQLite sidecar, so a page carrying a section
+        // pasted twice passed it clean. Report it as a WARN line — never counted in `failed`: the
+        // spec lists no duplicated-section floor (gate_floor=false on WMPAGE-012), so a WARN must
+        // not newly block `validate && lint` write loops. The janitor's index-health detector
+        // only matches `^FAIL`, so these lines are inert to it.
+        for page in crate::memory::collect_md(std::slice::from_ref(root), false) {
+            let Ok(text) = std::fs::read_to_string(&page) else {
+                continue;
+            };
+            for line in crate::memory::duplicated_section_lines(&text) {
+                println!(
+                    "WARN  {}:{line} [page-duplicated-section] {} (WMPAGE-012)",
+                    page.display(),
+                    crate::memory::DUPLICATED_SECTION_MSG
+                );
+            }
+        }
     }
     if failed > 0 {
         std::process::exit(1);
