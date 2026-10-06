@@ -1069,7 +1069,7 @@ def check3_prose_frontmatter_mismatch(record: TrddRecord) -> bool:
     )
 
 
-_ISO_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+_ISO_DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")  # not \b: it must also match "2026-08-08T10:…"
 
 
 def _iso_dates(text: str) -> list[date]:
@@ -1606,6 +1606,52 @@ def _commit_never_at_head(sha: str) -> bool:  # noqa: ARG001 - fixed seam signat
     return False
 
 
+#: A `testing` card whose STATE names a pending live event is "correctly waiting" only while a
+#: dated field check is this fresh. Two weeks: a weekly detector sees at least one fresh check
+#: per wait, and a check older than that no longer shows anyone is still looking.
+FIELD_CHECK_FRESH_DAYS = 14
+
+#: Hard ceiling on time in `testing`. Dated field-check notes silence the closeable flag, so
+#: without a ceiling a card could be kept quiet forever by appending a note every two weeks;
+#: past this it is flagged "waiting too long - decide" whatever the notes say.
+MAX_TESTING_DAYS = 40
+
+_LIVE_EVENT_RE = re.compile(
+    r"\b(?:live|field|real)\b[^\n]{0,60}\b(?:event|observation|observe[ds]?|firing)\b"
+    r"|\bwaiting[ \t]+(?:on|for)\b[^\n]{0,40}\b(?:live|field|real)\b",
+    re.IGNORECASE,
+)
+_FIELD_CHECK_LINE_RE = re.compile(r"^.*\bfield[ \t-]check\b.*$", re.IGNORECASE | re.MULTILINE)
+_MOVED_TO_TESTING_RE = re.compile(r"^.*(?:->|→)[ \t]*testing\b.*$", re.IGNORECASE | re.MULTILINE)
+
+
+def testing_age_days(record: TrddRecord, today: date) -> int | None:
+    """Days the card has been in `testing`, or None when unknowable.
+
+    Best available clock: the newest dated `column -> testing` line of the `## Approval log`
+    (the real move); failing that the frontmatter `updated:` date, which is only an UPPER
+    bound on recency (any edit bumps it), so it can under-report the age but never over-report.
+    """
+    log = _APPROVAL_LOG_RE.search(record.body)
+    moves = _iso_dates(" ".join(_MOVED_TO_TESTING_RE.findall(log.group(0)))) if log else []
+    since = max(moves) if moves else record.updated
+    return (today - since).days if since else None
+
+
+def waiting_on_live_event(record: TrddRecord, today: date) -> bool:
+    """True iff a `testing` card's STATE names a pending live event AND records a fresh field check."""
+    if record.column != "testing":
+        return False
+    state = extract_state_block(record.body)
+    if not _LIVE_EVENT_RE.search(state):
+        return False
+    return any(
+        (today - d).days <= FIELD_CHECK_FRESH_DAYS
+        for line in _FIELD_CHECK_LINE_RE.findall(state)
+        for d in _iso_dates(line)
+    )
+
+
 def reconcile(
     record: TrddRecord,
     commit_in_released_tag,
@@ -1614,6 +1660,7 @@ def reconcile(
     idle_days: float | None = None,
     work_idle_threshold_days: float = DEFAULT_WORK_IDLE_DAYS,
     commit_at_head=None,
+    today: date | None = None,
 ) -> ReconcileVerdict:
     """Run every check on one record; return the consolidated verdict.
 
@@ -1652,13 +1699,23 @@ def reconcile(
     prose_mismatch = check3_prose_frontmatter_mismatch(record)
     stale_blockers = check4_stale_blockers(record, column_of)
 
+    today = today or date.today()
     fired: list[str] = []
     if shipped:
         # Check 2 gates the Check-1 verdict: shipped+remaining is a WEAKER
         # "review", shipped+clean is the STRONG "closeable". This is the
         # load-bearing distinction (3b9b2040 / ab232dbd) — never call a
         # still-working TRDD "closeable".
-        fired.append("partially-shipped-review" if has_remaining else "closeable-candidate")
+        #
+        # A `testing` card correctly waiting on a live event that cannot be forced (janitor#332,
+        # TRDD-8BNV75TV) is not closeable: a commit in a released tag only proves the code
+        # landed, and the card's own STATE says the closing evidence has not happened yet.
+        # Flagging it weekly re-surfaced the same ~16 cards. Fresh field check required, so a
+        # card nobody is watching is still flagged.
+        if has_remaining:
+            fired.append("partially-shipped-review")
+        elif not waiting_on_live_event(record, today):
+            fired.append("closeable-candidate")
     if prose_mismatch:
         fired.append("prose-frontmatter-mismatch")
     if stale_blockers:
@@ -1671,6 +1728,10 @@ def reconcile(
     )
     if idle_work:
         fired.append("work-column-without-work")
+    if record.column == "testing":
+        testing_days = testing_age_days(record, today)
+        if testing_days is not None and testing_days > MAX_TESTING_DAYS:
+            fired.append("testing-too-long")
 
     # Check 8 (TRDD-4ZSYW21E): only evaluated when Check 1 did NOT already fire, so a card
     # whose commits ARE in a released tag always reports Check 1's stronger verdict, never
