@@ -4,7 +4,7 @@ title: trddgrep new refused a card and the reason was never read
 column: todo
 status: tasked
 created: 2026-10-05T22:11:22+0200
-updated: 2026-10-05T22:11:22+0200
+updated: 2026-10-06T15:11:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,4 @@ One of fifteen creations on 2026-10-05 printed 'refusing' and was retried with a
 ## Approval log
 
 - 2026-10-05T22:11:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-06 PREMISE REFUTED by reproduction: `trddgrep new --title 'repro: colon' …` prints 'trddgrep: refusing to create — title must not contain a colon (grep-first frontmatter rule)'. The refusal already names the rule; the 2026-10-05 retry-on-a-guess was the agent not reading the message, not a tool defect. Nothing to file.

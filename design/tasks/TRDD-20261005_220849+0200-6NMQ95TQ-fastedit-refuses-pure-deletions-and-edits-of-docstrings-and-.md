@@ -4,7 +4,7 @@ title: fastedit refuses pure deletions and edits of docstrings and module consta
 column: todo
 status: tasked
 created: 2026-10-05T22:08:49+0200
-updated: 2026-10-05T22:08:49+0200
+updated: 2026-10-06T15:11:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -26,3 +26,4 @@ Observed three times in one day in this repository: fastedit refused a pure dele
 ## Approval log
 
 - 2026-10-05T22:08:49+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-06 FOURTH REFUSAL CLASS: a one-line insertion inside a function body (cmd_recall_cli and the find function of scripts/memgrep/src/memory.rs, card ZYX8B2RA) was refused six times across two workers. The owner refused the plain-edit fallback on 2026-10-06. ZYX8B2RA now waits on this card.

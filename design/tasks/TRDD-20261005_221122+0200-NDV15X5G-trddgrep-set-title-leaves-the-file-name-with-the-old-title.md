@@ -4,7 +4,7 @@ title: trddgrep set title leaves the file name with the old title
 column: todo
 status: tasked
 created: 2026-10-05T22:11:22+0200
-updated: 2026-10-05T22:11:22+0200
+updated: 2026-10-06T15:11:29+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,4 @@ After a title change the slug in the file name still carries the first title. Lo
 ## Approval log
 
 - 2026-10-05T22:11:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-06 REPRODUCED on a scratch corpus: `trddgrep set <id> title <new>` rewrote title: and left the file name with the first title's slug (TRDD-…-XLPYKAWC-repro-b.md after retitling to 'repro renamed'). Filed upstream as Emasoft/ai-maestro#171 per the owner's instruction of 2026-10-06. NEXT ACTION: wait for #171; nothing to change in this repo.
