@@ -20,7 +20,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -830,6 +830,8 @@ class TrddRecord:
     # `publish-of-7ceab3f`). `blocked_by` above holds only the resolvable TRDD ids, so it is
     # empty for the majority of this board's real blockers; Check 6 needs the raw fact.
     declares_blocker: bool = False
+    # Frontmatter `updated:` date — the last-resort "time in testing" clock (see `testing_age_days`).
+    updated: date | None = None
 
 
 def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
@@ -838,11 +840,14 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
     blocked_by: list[str] = []
     impl_commits: list[str] = []
     declares_blocker = False
+    updated: date | None = None
     fm = FRONTMATTER_RE.match(text)
     body = text
     if fm:
         block = fm.group(1)
         body = text[fm.end():]
+        um = FM_UPDATED_RE.search(block)
+        updated = _first_iso_date(um.group(1)) if um else None
         bm = FM_BLOCKED_BY_RE.search(block)
         if bm:
             blocked_by = blocked_by_ids(bm.group(1))
@@ -858,6 +863,7 @@ def parse_record_text(text: str, *, uid: str | None) -> TrddRecord:
         declares_blocker=declares_blocker,
         impl_commits=impl_commits,
         body=body,
+        updated=updated,
     )
 
 
@@ -1050,7 +1056,63 @@ def check3_prose_frontmatter_mismatch(record: TrddRecord) -> bool:
         return False
     # Mask inline-code before the scan so 'block' inside `code`/code-tags/script
     # names is not read as a live block declaration (issue #65 class b).
-    return bool(_BLOCKED_PROSE_RE.search(_mask_inline_code(record.body)))
+    #
+    # SCOPE (janitor#332 / TRDD-8BNV75TV): 8 of 10 flags on the real board were false because
+    # the word was matched ANYWHERE in the body — it described other cards, past transitions
+    # in the append-only `## Approval log`, a count of cards, or the card's own subject. Only
+    # a declaration about THIS card counts, so scan the STATE head block alone; a card with
+    # no STATE block falls back to the body minus its Approval log (never silent).
+    scope = extract_state_block(record.body) or _APPROVAL_LOG_RE.sub("", record.body)
+    return any(
+        _declares_own_block(line, record.uid)
+        for line in _mask_inline_code(scope).splitlines()
+    )
+
+
+_ISO_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+
+
+def _iso_dates(text: str) -> list[date]:
+    """Every valid `YYYY-MM-DD` in `text`; an impossible date (2026-13-45) is skipped."""
+    out: list[date] = []
+    for m in _ISO_DATE_RE.finditer(text):
+        try:
+            out.append(date.fromisoformat(m.group(1)))
+        except ValueError:
+            continue
+    return out
+
+
+def _first_iso_date(text: str) -> date | None:
+    dates = _iso_dates(text)
+    return dates[0] if dates else None
+
+
+# `## Approval log` section: up to the next top-level heading or EOF. Append-only history of
+# past transitions ("column -> blocked by …"), never a statement of the card's current state.
+_APPROVAL_LOG_RE = re.compile(r"^##[ \t]+Approval log\b.*?(?=^##[ \t]+\S|\Z)", re.MULTILINE | re.DOTALL)
+# What may sit right before the word to make it history or a tally, not a live declaration.
+_BLOCKED_NOT_LIVE_BEFORE_RE = re.compile(
+    r"(?:\b\d+|\bwas|\bwere|\bhad been|\bfirst|\bonce|->|→|=>)[ \t]*$", re.IGNORECASE
+)
+
+
+def _declares_own_block(line: str, own_uid: str | None) -> bool:
+    """True iff `line` has a blocked-prose match that is a live declaration about THIS card.
+
+    A match is skipped when ANOTHER card id precedes it on the line (that card is the subject
+    of "blocked"; an id AFTER the match is the blocker, so "this card is blocked on
+    TRDD-XXXXXXXX" stays a true positive), or when it is a count ("11 blocked") or past tense
+    ("was blocked", "column -> blocked").
+    """
+    for m in _BLOCKED_PROSE_RE.finditer(line):
+        before = line[: m.start()]
+        if any(uid.upper() != (own_uid or "").upper() for uid in extract_trdd_refs(before)):
+            continue
+        if _BLOCKED_NOT_LIVE_BEFORE_RE.search(before):
+            continue
+        return True
+    return False
 
 
 def check4_stale_blockers(record: TrddRecord, column_of) -> list[str]:

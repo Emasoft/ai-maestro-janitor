@@ -1131,3 +1131,49 @@ def test_design_folders_match_the_owner_ruling_no_refused_zone(tmp_path):
         ["proposals", "tasks", "archived", *tc.NON_TASK_FOLDERS]
     )
     assert not (root / "refused").exists()
+
+
+# ── janitor#332 / TRDD-8BNV75TV — Check 3 scope and the closeable-candidate live-event skip ──
+
+_STATE_HDR = "## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-10-07"
+_LOG_BLOCKED = "## Approval log\n\n- 2026-10-05T00:00:00+0200 — column -> blocked by main-agent@x\n"
+
+
+def _c3(body: str, column: str = "todo") -> bool:
+    return tc.check3_prose_frontmatter_mismatch(_record(column=column, body=body))
+
+
+def test_check3_ignores_another_cards_state_in_the_state_block():
+    assert _c3(f"\n{_STATE_HDR}\nTRDD-ABCDEFGH is blocked on the owner decision.\n") is False
+
+
+def test_check3_ignores_approval_log_transitions():
+    assert _c3(f"\n{_STATE_HDR}\nall fine.\n\n{_LOG_BLOCKED}") is False
+    assert _c3(f"\n# Title\n\nall fine.\n\n{_LOG_BLOCKED}") is False  # no STATE block: fallback
+
+
+def test_check3_ignores_a_count_of_blocked_cards():
+    assert _c3(f"\n{_STATE_HDR}\n11 blocked with no runnable probe.\n") is False
+
+
+def test_check3_ignores_the_cards_own_subject_outside_state():
+    body = f"\n# trddgrep shows blocked cards badly\n\n{_STATE_HDR}\nnothing waiting.\n"
+    assert _c3(body) is False
+
+
+def test_check3_ignores_past_tense_history():
+    assert _c3(f"\n{_STATE_HDR}\nThis section first blocked the card; it was blocked until 10-03.\n") is False
+
+
+def test_check3_still_flags_this_card_blocked_in_state():
+    assert _c3(f"\n{_STATE_HDR}\nthis card is blocked on X.\n") is True
+
+
+def test_check3_a_named_other_card_as_the_blocker_is_still_a_true_positive():
+    assert _c3(f"\n{_STATE_HDR}\nthis card is blocked on TRDD-6NMQ95TQ.\n") is True
+    assert _c3("\n# T\n\nthis card is blocked on TRDD-6NMQ95TQ.\n") is True  # no STATE block
+
+
+def test_check3_without_a_state_block_scans_the_body_minus_the_approval_log():
+    assert _c3("\n# T\n\npublish is BLOCKED on GROUP B\n") is True
+    assert _c3("\n# T\n\nTRDD-ABCDEFGH is blocked, LIVE.\n") is False
