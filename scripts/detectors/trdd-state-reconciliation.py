@@ -728,8 +728,32 @@ def main() -> int:
             idle_days=idle_by_uid.get(rec.uid or ""),
             commit_at_head=commit_at_head,
         )
-        if not verdict.fires:
+        # janitor#332: "closeable-candidate" is NOT a board-drift row. A detector cannot prove a
+        # card is done — triage measured 32 flagged / 1 really closeable (~97% noise), so listing
+        # it weekly in the report + drift line trained readers to skip the whole detector. It is
+        # a one-time ledger note per card instead, re-recorded only when a NEW citing SHA appears
+        # (the seen-file holds the per-card SHA set). The other classes are untouched.
+        fired = [f for f in verdict.fired if f != "closeable-candidate"]
+        if "closeable-candidate" in verdict.fired and verdict.uid is not None:
+            # No short-circuit: every SHA must be marked seen, not just the first new one.
+            new_shas = [
+                sha for sha in verdict.shipped_commits
+                if dedupe.emit_once(seen, f"closeable@{verdict.uid}@{sha}", "x") is not None
+            ]
+            if new_shas:
+                findings_ledger.record(
+                    sev="LOW",
+                    code="TRDD-CLOSEABLE",
+                    src="trdd-state-reconciliation",
+                    msg=(
+                        f"TRDD-{verdict.uid} may be closeable: {len(new_shas)} new commit(s) "
+                        f"in a released tag, e.g. {new_shas[0][:12]} — verify, not proof"
+                    ),
+                    ref=f"TRDD-{verdict.uid}",
+                )
+        if not fired:
             continue
+        verdict = dataclasses.replace(verdict, fired=fired, label=fired[0])
 
         shipped_tags: set[str] = set()
         for sha in verdict.shipped_commits:
