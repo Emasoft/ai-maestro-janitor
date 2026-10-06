@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-06T21:19:59+0200
+updated: 2026-10-06T21:26:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,3 +24,8 @@ Owner directive, verbatim, 2026-10-06: 'verify and fix/implement all of them. al
 ## Approval log
 
 - 2026-10-06T21:19:59+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-06 issue to card map: #306=V3BQT7QE, #307=O92E8RM7, #309=KAXQH0J5, #310=M0JACXNW, #311=ECHE9N4I, #312=1T9034NC, #313=K2PEAYHR, #314=LP0ZCOIS, #315=V13M5YY1, #316=IRBTX41Q, #317=0LNV06LT, #318=2AVXCT2L, #319=SFWYVPGC, #320=WFYJX2XU, #321=TMZRFMZL, #322=8COB99QQ, #323=7V9DQZ9D, #324=4TECXZXP, #325=M6QJ3IUN, #326=2OJG0L0E, #327=EMMXG7GW, #328=Q23COADS, #329=C9O4DJ7T, #330=7KI11RH7, #331=ZNCH1MUT, #332=Y8DB5F0M, #333=KKDYNB56, #334=9Z2MGBA5, #335=4LXEFG9I, #336=0YVUX6RE.
+fastedit itself stays frozen; the plain-edit exception covers this sweep only.

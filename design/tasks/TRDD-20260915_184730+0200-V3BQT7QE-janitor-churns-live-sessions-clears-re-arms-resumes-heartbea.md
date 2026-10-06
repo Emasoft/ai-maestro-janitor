@@ -3,7 +3,7 @@ trdd-id: V3BQT7QE
 title: Janitor churns live sessions -- clears, re-arms, resumes, heartbeat and chore cost, late compaction (owner complaint 2026-09-15)
 column: testing
 created: 2026-09-15T18:47:30+0200
-updated: 2026-09-17T14:45:21+0200
+updated: 2026-10-06T21:26:38+0200
 current-owner: janitor-main-session
 created-by: Emasoft
 task-type: audit
@@ -81,6 +81,7 @@ compact point 866k = 900000 window - 34k overhead; #306's /compact injection com
 
 NEXT ACTION (2026-09-16): R, C-b, E-2 landed and 3.5.1 published (60bedabc); CI Smoke went red on two hooks that lost their exec bit (fixed 18dbb9dd + gate test 0ec065c1); children re-filed as eht [PA9E2GJ1, 7ZMQSXO6, NEVQOHGS] (3 drafts covered, 2 landed). Next: publish 3.5.2 with the CI fix, upgrade the local plugin on green CI, watch the first re-dispatched memory chore complete under e24aaf08 (19 claims sat orphaned since ~09-02), then move this card to testing — its remaining work lives in the three children.
 Column dev is true only while a session is actively dispatching workers on this card; at handoff re-column to todo.
+2026-10-06: owned issue Emasoft/ai-maestro-janitor#306 is in the issue sweep TRDD-FQVEILVK.
 
 ## ⏵ STATE (authoritative — supersedes the body)
 

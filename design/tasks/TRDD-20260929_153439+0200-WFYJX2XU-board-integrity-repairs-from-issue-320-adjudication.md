@@ -4,7 +4,7 @@ title: Board-integrity repairs from issue 320 adjudication
 column: backburner
 status: tasked
 created: 2026-09-29T15:34:39+0200
-updated: 2026-09-29T15:40:49+0200
+updated: 2026-10-06T21:26:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -38,3 +38,7 @@ Discharges the ISSUE-320 REPAIR CARRIER line on TRDD-XI10BA5D (record-review REO
 ## Approval log
 
 - 2026-09-29T15:34:39+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## STATE
+
+2026-10-06: owned issue Emasoft/ai-maestro-janitor#320 is in the issue sweep TRDD-FQVEILVK.
