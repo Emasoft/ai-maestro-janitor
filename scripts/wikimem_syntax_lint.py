@@ -131,6 +131,7 @@ def run_lint(
     *,
     extra_args: list[str] | None = None,
     read_only: bool = False,
+    echo_stderr: bool = True,
 ) -> tuple[int, str, list[Finding]]:
     """Run `memgrep lint` over `paths` (default: the three scopes) → (exit code, stdout, findings).
 
@@ -164,7 +165,11 @@ def run_lint(
             "the installed memgrep does not support `lint --no-fix` (read-only lint). "
             "Rebuild it: `cargo install --path scripts/memgrep`"
         )
-    if proc.stderr:
+    # `echo_stderr=False` for the heartbeat detector (janitor#326): dispatch.py leaves a detector's
+    # stderr inherited, so memgrep's unconditional `lint: N finding(s), none at or above ERROR`
+    # summary reached the conversation on every fire with an unchanged count. Real ERRORs are
+    # reported by the detector's own deduped drift line, so the summary carries nothing new there.
+    if proc.stderr and echo_stderr:
         print(proc.stderr, end="", file=sys.stderr)
     return proc.returncode, proc.stdout, parse_findings(proc.stdout)
 

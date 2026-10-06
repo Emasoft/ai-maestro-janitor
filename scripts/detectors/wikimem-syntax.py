@@ -457,7 +457,7 @@ def main() -> int:
         # ticket paths (ERROR→001, atom-oversized-critical→002), so tickets always file from the
         # findings of the FINAL pass over the POST-fix bytes — an auto-fix between passes can
         # never produce a phantom ticket.
-        _code, _stdout, findings = lint.run_lint()
+        _code, _stdout, findings = lint.run_lint(echo_stderr=False)
         errors = [f for f in findings if f.sev == "ERROR"]
         # Tickets file FIRST and regardless of the drift line: a corpus whose only finding is a
         # 2x-size WARN has no ERROR to report but still owes its MEMCORP-002 ticket, so the
