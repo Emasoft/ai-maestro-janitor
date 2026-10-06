@@ -1246,7 +1246,9 @@ with no query to see its own usage hint.
 status line, `validate` prints one `WARN <page>:<line> [page-duplicated-section]` line per section
 repeated verbatim (same heading, same body; janitor#315, the same check as lint rule WMPAGE-012).
 It is a WARN and does NOT affect the exit code: the spec defines no duplicated-section floor
-(`gate_floor=false`), so it must not newly block a `validate && lint` write loop. The file watcher
+(`gate_floor=false`), so it must not newly block a `validate && lint` write loop. Lint owns the
+body checks; `validate`'s `page-duplicated-section` WARN is a convenience mirror of lint WMPAGE-012,
+and a `NONE` line from `validate` means "no index failure", not "the pages are clean". The file watcher
 debounces ~500 ms behind writes — a consumer `MUST NOT` re-query in the same turn it wrote.
 
 `index`/`reindex` share three flags:
