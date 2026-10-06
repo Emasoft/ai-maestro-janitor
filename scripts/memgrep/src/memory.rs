@@ -7895,7 +7895,10 @@ pub(crate) fn lint_page_text(path: &Path, text: &str, fix: bool) -> Vec<Violatio
                 msg: format!(
                     "atom `^{}` repeats {} keyphrase(s) — a repeat inflates \
                      the count without adding a way to REACH the atom, which is the only \
-                     thing the count stands for",
+                     thing the count stands for. Atom `keywords:` are SPACE-separated tokens \
+                     (join the words of one phrase with `_`; a shared plain word such as `state` \
+                     counts as a repeat), unlike a page `description:`, whose phrases are \
+                     `/`-separated (janitor#323)",
                     a.id,
                     kw_dupes.len()
                 ),
@@ -15638,6 +15641,25 @@ mod xi9_span_tests {
         let (m, last) = locate_atom_body_matching(page, &|id: &str| id == "ATOM-60ZD-6UGR")
             .expect("footnote lesson must be located");
         assert_eq!(last, m, "a consecutive footnote's span must be empty (marker line only)");
+    }
+}
+
+#[cfg(test)]
+mod gh323_message_tests {
+    use super::*;
+
+    /// janitor#323 ask 2: the duplicate-keyword refusal states the delimiting convention (atom
+    /// keywords are SPACE-separated tokens, words inside a phrase joined by `_`; page descriptions
+    /// are the `/`-separated ones) without echoing any keyword (the no-leak sweep stays green).
+    #[test]
+    fn keywords_duplicated_message_states_the_two_conventions_without_echoing_keywords() {
+        let page = "---\nname: p\ndescription: \"d\"\nocd: c\nlmd: l\n---\n^ATOM-K [keywords: kwcanary kwcanary kwcanary]\nbody\n\n## Notes and lessons learned\n";
+        let v = lint_page_text(Path::new("fixture/g323.md"), page, false)
+            .into_iter()
+            .find(|v| v.code == "atom-keywords-duplicated")
+            .expect("dup finding");
+        assert!(v.msg.contains('_') && v.msg.contains("`/`"), "convention clause missing: {}", v.msg);
+        assert!(!v.msg.contains("kwcanary"), "must not echo the keyword: {}", v.msg);
     }
 }
 
