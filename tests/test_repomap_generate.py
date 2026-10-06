@@ -477,15 +477,20 @@ def test_detector_nudges_only_when_opted_in_and_stale():
 
 
 
-@pytest.mark.parametrize("start_mode", [0o644, 0o600])
-def test_atomic_replace_leaves_claude_md_world_readable(tmp_path, start_mode):
-    """_atomic_replace ends at 0644 whatever the target was (mkstemp 0600 must not leak)."""
+@pytest.mark.parametrize(
+    ("start_mode", "want"),
+    [(None, 0o644), (0o644, 0o644), (0o600, 0o644), (0o640, 0o640), (0o444, 0o444)],
+)
+def test_atomic_replace_keeps_chosen_mode_and_heals_0600(tmp_path, start_mode, want):
+    """_atomic_replace keeps a mode the user chose; 0600 and a new file end at 0644."""
     target = tmp_path / "CLAUDE.md"
-    target.write_text("old")
-    os.chmod(target, start_mode)
+    if start_mode is not None:
+        target.write_text("old")
+        os.chmod(target, start_mode)
     _load_module()._atomic_replace(target, "new")
+    assert os.stat(target).st_mode & 0o777 == want
+    os.chmod(target, 0o644)
     assert target.read_text() == "new"
-    assert os.stat(target).st_mode & 0o777 == 0o644
 
 
 if __name__ == "__main__":

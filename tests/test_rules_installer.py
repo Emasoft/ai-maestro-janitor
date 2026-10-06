@@ -835,10 +835,14 @@ def test_janitor_memory_repair_still_points_at_the_pre_transaction_reference():
 
 
 
-def test_publish_monotonic_installs_rule_world_readable(tmp_path):
-    """_publish_monotonic leaves the installed rule at 0644 (mkstemp 0600 must not leak)."""
+def test_publish_monotonic_keeps_chosen_mode_and_heals_0600(tmp_path):
+    """_publish_monotonic keeps a mode the user chose; 0600 and a new file end at 0644."""
     src = tmp_path / "src.md"
     src.write_text("rule body\n")
-    dst = tmp_path / _DST_NAME
-    assert rules_installer._publish_monotonic(src, dst, "1.0.0")
-    assert dst.stat().st_mode & 0o777 == 0o644
+    for start_mode, want in [(None, 0o644), (0o644, 0o644), (0o600, 0o644), (0o640, 0o640), (0o444, 0o444)]:
+        dst = tmp_path / f"{start_mode}-{_DST_NAME}"
+        if start_mode is not None:
+            dst.write_text("old\n")
+            dst.chmod(start_mode)
+        assert rules_installer._publish_monotonic(src, dst, "1.0.0")
+        assert dst.stat().st_mode & 0o777 == want, start_mode
