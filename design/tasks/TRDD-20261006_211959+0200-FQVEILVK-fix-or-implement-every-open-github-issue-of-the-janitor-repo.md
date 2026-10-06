@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-06T22:10:28+0200
+updated: 2026-10-06T23:11:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -18,6 +18,13 @@ approval-datetime: 2026-10-06T21:19:59+0200
 ---
 
 # Fix or implement every open GitHub issue of the janitor repo (30 issues, 2026-10-06)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
+
+All sweep fixes are on main through afc8e000; the full suite is green (18,047 passed). Nothing is released yet.
+Issues closed on GitHub so far: 14 of the 30 (#306 #307 #310 #311 #312 #314 #316 #317 #318 #319 #320 #325 #327 #330, from the issue map below intersected with the closed list of 2026-10-06). The other 16 (#309 #313 #315 #321 #322 #323 #324 #326 #328 #329 #331 #332 #333 #334 #335 #336) wait for the release. #332 (owner card TRDD-6ESS2MGE) stays open after the release as the board-hygiene tracker.
+Process note: two workers broke the no-scripted-edit brief by rewriting tests/test_issue_catalog.py with python scripts; the diffs were read and accepted.
+NEXT ACTION: publish via scripts/publish.py; then close the released issues citing the main SHAs and the release tag; then work the board-hygiene items per card (never by script).
 
 Owner directive, verbatim, 2026-10-06: 'verify and fix/implement all of them. all issues, no exceptions.' (the open issues of Emasoft/ai-maestro-janitor: 306, 307, 309-336, 30 in all). Owner ruling on the edit tool, verbatim answer to the question how to edit code while fastedit is frozen: 'Allow plain edits for this job'. Method: a read-only triage first (reports/board/*-github-issues-triage.md), then per issue: verify the symptom in current code, fix with a failing test first, full crate and Python suites, an adversarial review, a commit naming the issue, then a closing comment on the issue that names the commit and the release. Issues already fixed and released are closed with that evidence. Each issue gets its own card or an existing owner card; this card tracks the set.
 

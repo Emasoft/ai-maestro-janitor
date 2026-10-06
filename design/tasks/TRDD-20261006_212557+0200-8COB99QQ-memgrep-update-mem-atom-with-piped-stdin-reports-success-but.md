@@ -4,7 +4,7 @@ title: memgrep update-mem-atom with piped stdin reports success but writes nothi
 column: testing
 status: tasked
 created: 2026-10-06T21:25:57+0200
-updated: 2026-10-06T22:08:21+0200
+updated: 2026-10-06T23:10:27+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,14 +15,14 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:25:57+0200
-implementation-commits: [84541ac7, 6f45acf8]
+implementation-commits: [84541ac7, 6f45acf8, 349acb2d]
 ---
 
 # memgrep update-mem-atom with piped stdin reports success but writes nothing
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-landed on main as 84541ac7,6f45acf8; ships in the next release; issue stays open until then.
+landed on main as 84541ac7,6f45acf8,349acb2d; ships in the next release; issue stays open until then. 349acb2d adds the no-op refusal to the hook advice, SKILL.md and spec WM-CLI-17.
 NEXT ACTION: close the GitHub issue citing the main SHAs once the next publish.py release ships.
 COLUMN MEANING: testing here means merged on main and full suite green (18,020 passed at 6f45acf8), awaiting the sweep release tracked on TRDD-FQVEILVK; nobody is testing it. `complete` was refused (no acceptance checklist): add the checklist and move to complete when that release ships.
 

@@ -3,7 +3,7 @@ trdd-id: BMITQ2MN
 title: Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault
 column: blocked
 created: 2026-09-09T16:37:29+0200
-updated: 2026-09-24T07:37:23+0200
+updated: 2026-10-06T23:10:54+0200
 current-owner: ai-maestro-janitor session
 task-type: feature
 scope: project
@@ -107,6 +107,7 @@ theirs and must go through an issue or PR, never a direct edit.
 the human's own terminal action, never the plugin's. Fixture e-mail domains moved to the
 reserved `.test` TLD (`9ef139d0`) after `publish.py`'s G1b gate correctly refused `x.com`-style
 example addresses. Released as **3.5.0** at `61191d32`, tag on the final commit.
+- 2026-10-06 correction: extract_token no longer exists (zero hits under scripts/ and tests/ on 2026-10-06); setup_token_blob no longer exists (zero hits under scripts/ and tests/ on 2026-10-06, whole-word match; a differently named test-local helper remains in tests/test_oauth_rotator.py).
 
 ## Why
 
