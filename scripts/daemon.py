@@ -4057,6 +4057,8 @@ def main() -> int:
     finally:
         # _run_workload kills the tick child within ~10 s once `_running` is False.
         ticker.shutdown(15)
+        # Daemon thread: without an explicit stop, a pass mid-scan or mid-notify at exit is killed part-way.
+        size_watch.shutdown(5)
         if exit_reason == "kill-switch":
             # A DELIBERATE stop, so the OS keepalive must go — launchd `KeepAlive: true`
             # / `ThrottleInterval: 30` and systemd `Restart=always` would otherwise
