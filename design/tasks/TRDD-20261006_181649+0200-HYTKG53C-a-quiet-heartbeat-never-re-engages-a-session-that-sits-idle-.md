@@ -4,8 +4,8 @@ title: A quiet heartbeat never re-engages a session that sits idle with work sti
 column: todo
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-06T18:16:55+0200
-current-owner: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
+updated: 2026-10-06T18:44:50+0200
+current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
 min-approval-requirement: none
