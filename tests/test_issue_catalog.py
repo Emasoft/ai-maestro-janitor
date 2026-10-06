@@ -873,9 +873,9 @@ def test_MEMCORP_001_text_covers_every_ERROR_lint_class_not_only_link_damage() -
     assert "links do not resolve" not in issue.why.split(".")[0]
 
 
-# --- janitor#336: a ticket that opens incomplete says so, as a checklist in its own detail ----------
-# `tickets._clean` defangs `[`/`]`, so a rendered checkbox reads `⟦ ⟧` in the stored detail; the tests
-# therefore count the list lines under the "Incomplete:" heading instead of matching the bracket glyphs.
+# --- janitor#336: a ticket that opens incomplete says so, as a list of unmet rules in its own detail ---
+# The list is plain `- ` bullets: `tickets._clean` defangs `[`/`]` into `⟦`/`⟧`, so a `- [ ]` task box
+# would be stored as an untickable `- ⟦ ⟧`. The tests count the bullet lines under "Incomplete:".
 
 
 def _checklist(detail: str) -> list[str]:
@@ -889,7 +889,7 @@ def _complete_ticket(**over: object) -> issue_catalog.Raised:
     return issue_catalog.raise_issue("MEMGREP-004", **kw)  # type: ignore[arg-type]
 
 
-def test_a_complete_ticket_gets_no_checklist(project: Path) -> None:
+def test_a_complete_ticket_gets_no_unmet_list(project: Path) -> None:
     """Every fact present and nothing unfilled: the detail is left exactly as composed."""
     t = tickets.load(_complete_ticket().ticket_id)
     assert t is not None and "Incomplete:" not in t.detail
@@ -921,7 +921,7 @@ def test_a_located_code_without_evidence_is_listed_as_unmet(project: Path) -> No
 
 def test_a_machine_wide_code_is_never_flagged_for_where_or_evidence(project: Path) -> None:
     """Rule (b) follows the entry's own declaration: MEMGREP-004 has no `{where}`/`{found}` slot, so
-    omitting where/found/evidence must not produce a checklist."""
+    omitting where/found/evidence must not produce an unmet list."""
     t = tickets.load(issue_catalog.raise_issue("MEMGREP-004", scope="user", table="notes", column="id", now=NOW).ticket_id)
     assert t is not None and "Incomplete:" not in t.detail
 
@@ -952,3 +952,28 @@ def test_an_incomplete_finding_logs_once_not_on_every_re_raise(project: Path) ->
     log = (state.log_dir() / "issue-catalog.log").read_text(encoding="utf-8")
     for code in ("MEMGREP-004", "MEMCORP-002"):
         assert log.count(f"{code} opened incomplete") == 1
+
+
+def test_the_unmet_list_is_plain_bullets_not_task_boxes(project: Path) -> None:
+    """janitor#336: `- [ ]` is stored as `- ⟦ ⟧` (not tickable), so the list uses plain bullets."""
+    t = tickets.load(_complete_ticket(table="").ticket_id)
+    assert t is not None
+    tail = t.detail.partition("Incomplete:")[2]
+    assert "⟦" not in tail and "⟧" not in tail and _checklist(t.detail)
+
+
+def test_a_missing_where_is_listed_once_not_as_marker_plus_field_rule(project: Path) -> None:
+    """janitor#336: a missing `where` renders as `<?where?>` AND trips the field rule: one gap, one row."""
+    t = tickets.load(issue_catalog.raise_issue("MEMCORP-002", evidence=["a.md"], now=NOW).ticket_id)
+    assert t is not None
+    assert len([i for i in _checklist(t.detail) if "where" in i.lower()]) == 1
+
+
+def test_the_unmet_list_survives_the_cap_with_many_unfilled_markers(project: Path) -> None:
+    """janitor#336: with more marker rows than the cap holds the tail alone exceeds it, the prose slice
+    index goes negative and the downstream cap used to cut the list's last rules (here EVIDENCE)."""
+    found = "".join(f"<?{c}?>" for c in "abcdefghijklmnopqrstuvwxyz0123456789")
+    t = tickets.load(issue_catalog.raise_issue("MEMCORP-002", found=found, now=NOW).ticket_id)
+    assert t is not None and len(t.detail) <= tickets.DETAIL_CAP
+    items = _checklist(t.detail)
+    assert any("where" in i.lower() for i in items) and "evidence" in items[-1].lower()

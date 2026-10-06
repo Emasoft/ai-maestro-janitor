@@ -240,17 +240,24 @@ class Raised:
 
 
 _UNFILLED_RE = re.compile(r"<\?[^<>]*\?>")
+_MARKER_ROW = "fill the unresolved field "
 
 
 def _unmet_rules(issue: Issue, title: str, detail: str, fields: dict[str, str], evidence: list[str] | None) -> list[str]:
     """The completeness rules one composed ticket fails. Rule (b) follows the ENTRY'S OWN declaration:
     a field is required only when the title template has its `{slot}`, so a machine-wide code with no
     `{where}` is never flagged for lacking one."""
-    unmet = [f"fill the unresolved field `{m}` and say what it should have been" for m in sorted(set(_UNFILLED_RE.findall(f"{title}\n{detail}")))]
     located = "{where}" in issue.title
-    if located and not fields.get("where"):
+    where_rule = located and not fields.get("where")
+    found_rule = "{found}" in issue.title and not fields.get("found")
+    # janitor#336: a missing where/found field renders as a `<?where?>`/`<?found?>` marker AND trips its
+    # field rule below; listing both is two rows for one gap, so the marker row yields to the field rule.
+    covered = {m for m, on in (("<?where?>", where_rule), ("<?found?>", found_rule)) if on}
+    markers = sorted(set(_UNFILLED_RE.findall(f"{title}\n{detail}")) - covered)
+    unmet = [f"{_MARKER_ROW}`{m}` and say what it should have been" for m in markers]
+    if where_rule:
         unmet.append("state WHERE the finding is (the location the title refers to)")
-    if "{found}" in issue.title and not fields.get("found"):
+    if found_rule:
         unmet.append("state what was FOUND (the specific rule, file or line)")
     if located and not evidence:
         unmet.append("attach EVIDENCE: the paths a reader can open to see it")
@@ -304,12 +311,25 @@ def raise_issue(
     detail = "\n".join(parts)
     # janitor#336: a ticket must open with its facts, but never be dropped for lacking them. Unmet
     # rules are appended HERE, once, at composition: re-raises dedupe inside open_ticket/propose
-    # and never rewrite an existing detail, so the checklist cannot repeat or grow on the heartbeat.
+    # and never rewrite an existing detail, so the list of unmet rules cannot repeat or grow on the heartbeat.
     unmet = _unmet_rules(issue, title, detail, fields, evidence)
     if unmet:
-        tail = "\n\n**Incomplete:**\n" + "\n".join(f"- [ ] {u}" for u in unmet)
-        # The cap is applied downstream; trim the prose, never the checklist.
-        detail = detail[: tickets.DETAIL_CAP - len(tail)] + tail
+        def _tail(rows: list[str]) -> str:
+            # Plain `- ` bullets, not `- [ ]`: `tickets._clean` stores `[ ]` as `⟦ ⟧`, which is no task box.
+            return "\n\n**Incomplete:**\n" + "\n".join(f"- {u}" for u in rows)
+
+        tail = _tail(unmet)
+        if len(tail) > tickets.DETAIL_CAP:
+            # A `found` of up to _FIELD_CAP chars can carry dozens of markers, one row each, so the tail
+            # alone can exceed the cap and the downstream `_clean` cut would drop the LAST (field) rules.
+            # Collapse the marker rows into one count row; the remaining rows are few and fixed-size.
+            rest = [u for u in unmet if not u.startswith(_MARKER_ROW)]
+            n = len(unmet) - len(rest)
+            tail = _tail([f"fill the {n} unresolved `<?…?>` fields named in the text above", *rest])
+        # `_clean` counts characters and maps `[`/`]` to single characters, so len() is the right measure.
+        # The cap is applied downstream; trim the prose, never the list. max(0, …): a negative slice end
+        # would count from the right and keep nearly all the prose.
+        detail = detail[: max(0, tickets.DETAIL_CAP - len(tail))] + tail
     key = _finding_key(code, issue, fields, dedupe_key)
     ev = list(evidence or [])
     org = origin or issue.scanner
