@@ -2,11 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.3] — 2026-10-06
+
+### Bug Fixes
+
+- **hooks:** Give on-session-start.py 30 s so a loaded host does not kill it before it records a clear (TRDD-KVUVV9D2) (bace60f)
+
+### Documentation
+
+- **trdd:** Correct over-claims from the 3.7.1 follow-ups, add STATE blocks and the lint-triage card (TRDD-CWKM5218, TRDD-K60FT7PJ, TRDD-PAHO6KWK, TRDD-SRL4TO0P, TRDD-DS3WDTPV, TRDD-BIQELG5J) (10f4b65)
+- **trdd:** Split TRDD-K60FT7PJ into three derived cards (TRDD-KVUVV9D2, TRDD-2O7JA0TG, TRDD-HYTKG53C) (2161d42)
+- **trdd:** KVUVV9D2 to testing after bace60f4, K60FT7PJ superseded, sibling-hook card, pending GitHub-config proposal (TRDD-KVUVV9D2, TRDD-K60FT7PJ, TRDD-2O7JA0TG, TRDD-HYTKG53C, TRDD-9438CGJZ, TRDD-JZPYMTE0) (011946f)
 ## [3.7.2] — 2026-10-06
 
 ### Documentation
 
 - **trdd:** Record the 2026-10-06 review follow-ups (TRDD-DS3WDTPV, TRDD-K60FT7PJ, TRDD-CWKM5218, TRDD-PAHO6KWK, TRDD-SRL4TO0P) (dadd72a)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.7.2 (82a8190)
 
 ### Testing
 
