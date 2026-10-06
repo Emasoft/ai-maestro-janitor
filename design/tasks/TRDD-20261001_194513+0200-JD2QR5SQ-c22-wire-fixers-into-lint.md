@@ -25,7 +25,7 @@ blocker-holds-if: not-match:READY
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-NEXT ACTION: step S2 — add plan_page_fix to scripts/memgrep/src/memory.rs with its two unit tests first (plan_skips_deselected_ignored_and_suppressed_rules, plan_refuses_a_floor_error_page). S1 is DONE and committed (registered and record_unfixed in scripts/memgrep/src/fixers/mod.rs). Then S3, S4, S6 as in the PLAN v2 lines of the older STATE section below.
+NEXT ACTION: step S3 — add the flags --apply-fixes and --diff to memgrep lint in their dry-run form only (--diff prints the planned change to stderr and writes nothing; --apply-fixes with --no-fix exits 2), and name both flags in design/specs/wikimem-memgrep-spec.md in the same commit so tests/test_wikimem_spec_drift.py stays green. S1 is committed as b7a22bb4 and S2 as 435051cf (plan_page_fix and PageFix in scripts/memgrep/src/memory.rs). Then S4 and S6 as in the PLAN v2 lines below.
 
 SUPERSEDED in the body and in the older STATE lines: the Task, Verify and Writes lines that say lint_paths_with, default-on fixing, --unsafe-fixes, --show-fixes and a three-file write set; and every older note that assumes lint applies fixers by default or that this card makes labels per-finding. PLAN v2 (2026-10-06 lines) wins.
 
@@ -37,6 +37,8 @@ INFERRED, not read in their bodies: that dependents C30 (TRDD-I4MOD020), C31 (TR
 
 Known gap from S1: a fixer_for arm whose name matches no rule is not detected by any test. Open S1 follow-up: a test where the ledger path is a directory (the read must fail fast).
 
+Notes from S2 for S4: (a) remove the allow(dead_code) attributes on PageFix, plan_page_fix (memory.rs) and in src/fixers/mod.rs once S4 calls them; (b) prepare_batch_gated runs the scope-wide one-sided-link check, so --apply-fixes over a whole scope costs roughly one scope scan per changed page; (c) the reason 'gate: non-lint' is asserted by a test built on an in-atom unused noqa comment, and its cause there (a changed atom body) is inferred, not asserted; it also covers id-set and introduced-link refusals; (d) three stray double blank lines remain in memory.rs from S2 because fastedit cannot target blank lines between items; (e) the S2 commit message's crate counts (435 unit, 224 cli) were the worker's at commit time and were re-run by the main agent afterwards with the same result.
+
 Derived from TRDD-DSN035UN (approved plan v4, 2026-10-01), card C22, wave W2.
 
 Writes (exclusive): src/memory.rs, src/fixers/mod.rs, scripts/memgrep/tests/cli.rs
@@ -44,7 +46,7 @@ Task: Wire C13 plus the fixers into lint_paths_with: scope lock → fix_page →
 Verify: CLI: a SAFE page gets fixed; a floor-error page stays byte-identical with exactly one ledger entry over 2 runs; --no-fix/--diff write nothing; on a scratch copy of the PROJECT memory, diff -r shows only the expected changes and validate is clean
 Depends on: C21, C13, C14, C15, C16, C17, C18, C19
 Conflict rule: this card may write ONLY the files listed under Writes.
-2026-10-06: S1 committed as b7a22bb4. Correction to its commit message: the 431 unit and 224 cli counts were the worker's at commit time and were re-run by the main agent afterwards with the same result; the Python suite passed (17,992) on the first version and again on the committed revision, but the Python tests prefer scripts/memgrep/target/release/memgrep, which was still the pre-S1 build 4daacfd, so those runs show only that nothing regressed; S1 has no caller yet. The worker rewrote scripts/memgrep/src/fixers/mod.rs once with fastedit create --force because fastedit refused to delete two blank lines, instead of stopping as briefed; the committed diff has 0 deleted original lines. Open S1 follow-up: a test where the ledger path is a directory (read must fail fast).
+2026-10-06: S1 committed as b7a22bb4. Correction to its commit message: the 431 unit and 224 cli counts were the worker's at commit time and were re-run by the main agent afterwards with the same result; the Python suite passed (17,992) on the first version and again on the committed revision, but the Python tests prefer scripts/memgrep/target/release/memgrep, which was still the pre-S1 build 4daacfd, so those runs show only that nothing regressed; S1 has no caller yet. The worker rewrote scripts/memgrep/src/fixers/mod.rs once with fastedit create --force because fastedit refused to delete two blank lines, instead of stopping as briefed; the committed diff has 0 deleted original lines.
 
 ## Approval log
 
