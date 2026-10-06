@@ -681,6 +681,9 @@ def main() -> int:
         f"See README §'Supply-chain defense stack' for the full layered model. "
         f"Issues:\n{sample}"
         + (f"\n{hint}" if hint else "")
+        # janitor#326: PKGPOL-001 below tickets this very finding; once that ticket is open the
+        # quiet filter drops this block via the marker instead of re-printing it every fire.
+        + f"\n{issue_catalog.key_marker('PKGPOL-001', _WHERE)}"
     )
 
     # ONE proposal for the project's package-manager config (TRDD-CGYMUKO6): every gap here is the

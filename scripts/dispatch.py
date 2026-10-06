@@ -69,6 +69,7 @@ import memory_dispatch_claim  # noqa: E402  -- TRDD-LDSCQ0NU relay-time claim-po
 import memory_scopes  # noqa: E402  -- shared project_slug rule (TRDD-6P0KUSO9 transcript resolution)
 import session_liveness  # noqa: E402  -- SSOT for the `FIRED rearm → iterm` evidence parse
 import state  # noqa: E402
+import tickets  # noqa: E402  -- janitor#326 open-ticket lookup for the quiet filter
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
 import user_intent  # noqa: E402  -- TRDD-6P0KUSO9 recently_interrupted cooldown check
 import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD-T198DT1W)
@@ -704,6 +705,45 @@ def _heartbeat_is_quiet() -> bool:
     return not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_VERBOSE", False)
 
 
+def _drop_ticketed_blocks(detector: str, text: str) -> str:
+    """janitor#326: strip `⟦ticket-key:…⟧` marker lines; in quiet mode also drop the block each one
+    closes when an OPEN ticket holds that key (the finding is already being worked, repeating it
+    every fire is the nag the owner asked to end).
+
+    A block is the lines since the previous marker. Applies to ANY detector, advisory or not — the
+    loud ones (workflow-security, package-manager-policy) are exactly the ones that repeat. A line
+    with no marker is untouched (fail open: an unkeyed finding is never hidden), and a bare
+    `[janitor-…]` action marker inside a dropped block is kept, as everywhere in this filter.
+    Dropped lines are recorded in the ledger, not discarded.
+    """
+    if "⟦ticket-key:" not in text:
+        return text
+    quiet = _heartbeat_is_quiet()
+    open_keys = tickets.open_dedupe_keys() if quiet else set()
+    out: list[str] = []
+    block: list[str] = []
+    for line in text.splitlines():
+        m = tickets.KEY_MARKER_RE.fullmatch(line.strip())
+        if m is None:
+            block.append(line)
+            continue
+        if m.group(1) in open_keys:
+            kept = [b for b in block if _RESERVED_MARKER_RE.fullmatch(b.strip())]
+            out.extend(kept)
+            msg = " ".join(b.strip() for b in block if b.strip() and b not in kept)
+            try:
+                findings_ledger.record(
+                    sev="LOW", code=f"TICKETED-{detector.upper()}", src=detector, msg=msg, ref="",
+                )
+            except Exception:  # noqa: BLE001 - a ledger failure must never break the heartbeat
+                state.log_line("dispatch", f"ticketed-suppress could not record from '{detector}'")
+        else:
+            out.extend(block)
+        block = []
+    out.extend(block)
+    return "\n".join(out) + "\n" if out else ""
+
+
 def _quiet_filter(detector: str, text: str) -> str:
     """Drop this detector's advisory lines from stdout, recording them in the ledger.
 
@@ -715,6 +755,7 @@ def _quiet_filter(detector: str, text: str) -> str:
     that was never written down is just a lost finding, and this whole change would
     then be trading noise for blindness.
     """
+    text = _drop_ticketed_blocks(detector, text)
     if not text or not _heartbeat_is_quiet() or detector not in _ADVISORY_DETECTORS:
         return text
     # Two independent disqualifications from the urgency override, kept separate because their

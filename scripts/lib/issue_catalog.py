@@ -210,6 +210,13 @@ def dedupe_key_for(code: str, where: str) -> str:
     return ticket_proposal._dedupe_key(f"{code}:{tickets._clean(where, _FIELD_CAP)}")
 
 
+def key_marker(code: str, where: str) -> str:
+    """The marker line a detector appends to a drift block that duplicates the finding
+    `raise_issue(code, where=where)` tickets (janitor#326). Same key derivation as the ticket layer,
+    so the quiet filter's match against an open ticket's `dedupe_key` cannot drift from the raise."""
+    return tickets.key_marker(dedupe_key_for(code, where))
+
+
 @dataclass(frozen=True)
 class Raised:
     """The outcome of `raise_issue`. `line` is a ready-to-print heartbeat line (empty when silent).

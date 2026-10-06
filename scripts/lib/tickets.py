@@ -31,6 +31,7 @@ INSTRUCTIONS never come from the ticket, only from the `kind → skill` registry
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sys
 import time
@@ -356,6 +357,23 @@ def load_all(state_dir: Path | None = None) -> list[Ticket]:
         except (OSError, ValueError, TypeError):
             continue
     return out
+
+
+# janitor#326: a detector's own drift line carries no finding identity, so the quiet filter could
+# not tell that an OPEN ticket already covers it and the line repeated on every fire. A detector
+# ends such a block with this standalone marker line carrying the ticket's dedupe key; the filter
+# (dispatch._quiet_filter) drops the block while an open ticket holds that key. No marker = no
+# suppression, so an unkeyed finding can never be hidden.
+KEY_MARKER_RE = re.compile(r"⟦ticket-key:(.+)⟧")
+
+
+def key_marker(dedupe_key: str) -> str:
+    return f"⟦ticket-key:{_clean(dedupe_key, 200)}⟧"
+
+
+def open_dedupe_keys(state_dir: Path | None = None) -> set[str]:
+    """Dedupe keys of every non-terminal ticket — same predicate as ticket_proposal.propose."""
+    return {t.dedupe_key for t in load_all(state_dir) if t.status not in TERMINAL}
 
 
 def load(ticket_id: str, state_dir: Path | None = None) -> Ticket | None:
