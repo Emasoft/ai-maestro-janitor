@@ -5181,6 +5181,7 @@ pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
         \x20 memgrep update-mem-topic --page .claude/project/memory/rotator.md --old-file /tmp/old.txt --new-file /tmp/new.txt\n\
         \x20 # the old text occurs more than once — opt in explicitly instead of narrowing the anchor\n\
         \x20 memgrep update-mem-topic --page p.md --old-file /tmp/old.txt --new-file /tmp/new.txt --replace-all\n\
+        \x20 # extend the page's frontmatter `description:` (the recall surface): OLD = the current description text, NEW = it plus the added ` / phrase`\n\
         \x20 # guard against a page mutated since you last read it\n\
         \x20 memgrep update-mem-topic --page p.md --old-file /tmp/old.txt --new-file /tmp/new.txt --base-sha256 $(sha256sum p.md | cut -d' ' -f1)\n"
 )]
