@@ -1,10 +1,10 @@
 ---
 trdd-id: 3HLI7DMK
 title: C21 — labels and lint flags
-column: testing
-status: tasked
+column: complete
+status: archived
 created: 2026-10-01T19:45:12+0200
-updated: 2026-10-06T16:43:57+0200
+updated: 2026-10-06T20:03:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -39,6 +39,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01 — DESIGN NOTE (review finding 4): print the safe-fix label on a finding only when the registered fixer would actually change that page (e.g. atom-unquoted-desc over 200 chars has no fix) — a label that promises a fix the engine will not make is a lie.
 - 2026-10-05T01:56:08+0200 — column → todo by main-agent@ai-maestro-janitor. its only open blocker C20 (BHIS99XE) was completed on 2026-10-05; OWGEOJ0D and 7SMPCPNT were already complete Cleared blocked-by (--clear-blocker override).
 - 2026-10-05T01:56:39+0200 — column → dev by main-agent@ai-maestro-janitor. a worker starts the implementation on 2026-10-05 per plan DSN035UN card C21
+- 2026-10-06T20:03:31+0200 — COMPLETE by main-agent@ai-maestro-janitor. acceptance met 2026-10-06, see STATE.
 
 ## STATE
 
@@ -101,3 +102,9 @@ The two cards named above: TRDD-57KAZJI7 (lint config policy) and TRDD-KTD3N7H6 
 2026-10-05 — the test counts are consistent after all: this card's gate line for 92663adf reads 424 unit plus 222 CLI, and 15482026 adds two CLI tests, so 424 unit plus 224 CLI. The first verifier's report had the two labels the wrong way round. Still a worker's run, not repeated by the main agent.
 2026-10-06: the owner refused a plain edit after a fastedit refusal, verbatim: "the answer is no. if the trddgrep tool is not flexible enough to make the changes you need, open an issue on Emasoft/ai-maestro". The two reproduced defects (empty selector, per-page safe-fix label) are fixed through fastedit only; a refused edit is recorded on TRDD-6NMQ95TQ and reported upstream, never routed to another write tool.
 2026-10-06 CORRECTION: the line above beginning "2026-10-06: the owner refused a plain edit" is VOID. Both defects were already fixed in 92663adf and 15482026 (2026-10-05, recorded in the gate lines above); the line came from a truncated read of this card. The card's state is unchanged: it waits in testing for the named live event.
+2026-10-06 ACCEPTANCE MET (report reports/board/20261006_200227+0200-3HLI7DMK-rebuild-check.md). The memgrep on PATH was rebuilt from repo HEAD 4daacfd7 with cargo install --path scripts/memgrep; memgrep --version prints memgrep 0.1.0 (4daacfd, 2026-10-06); the old binary is kept at builds_dev/memgrep-pre-3HLI7DMK-20261005. (a) A scratch page with no Notes section lints to a line ending (WMPAGE-010 · safe-fix). (b) With .janitor.toml [lint] unfixable = [WMPAGE-010] the same line ends (WMPAGE-010) with no safe-fix. (c) Lint of .claude/project/memory exits 0 with 116 findings (0 ERROR, 7 WARN, 109 INFO), every line carries a FAMILY-NNN code; safe-fix appears on 0 lines there, so the only-where-a-fixer-applies half rests on (a) versus (b). CORRECTION of the premise of the RESUME POINT: no plugin release installs memgrep (the plugin ships Rust source only and plugin.json tells the user to run cargo install), so the binary was stale only because nobody rebuilt it, and waiting for a release that installs it could never have been satisfied. v3.7.5 (tag on 4daacfd7) is the first release carrying the three commits in source.
+
+## Acceptance
+
+- [x] One lint run of the project memory with the rebuilt memgrep prints the rule code on every finding line (116 findings, all carry FAMILY-NNN).
+- [x] A page with no Notes section lints to a line ending (WMPAGE-010 · safe-fix); with unfixable = [WMPAGE-010] in .janitor.toml the line ends (WMPAGE-010) with no safe-fix.
