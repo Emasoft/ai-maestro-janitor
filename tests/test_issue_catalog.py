@@ -871,3 +871,73 @@ def test_MEMCORP_001_text_covers_every_ERROR_lint_class_not_only_link_damage() -
     assert "specific rule" in issue.what.lower()
     assert "structural damage" not in issue.title
     assert "links do not resolve" not in issue.why.split(".")[0]
+
+
+# --- janitor#336: a ticket that opens incomplete says so, as a checklist in its own detail ----------
+# `tickets._clean` defangs `[`/`]`, so a rendered checkbox reads `⟦ ⟧` in the stored detail; the tests
+# therefore count the list lines under the "Incomplete:" heading instead of matching the bracket glyphs.
+
+
+def _checklist(detail: str) -> list[str]:
+    head, sep, tail = detail.partition("Incomplete:")
+    return [ln for ln in tail.splitlines() if ln.startswith("- ")] if sep else []
+
+
+def _complete_ticket(**over: object) -> issue_catalog.Raised:
+    kw: dict[str, object] = dict(scope="user", table="notes", column="id", now=NOW)
+    kw.update(over)
+    return issue_catalog.raise_issue("MEMGREP-004", **kw)  # type: ignore[arg-type]
+
+
+def test_a_complete_ticket_gets_no_checklist(project: Path) -> None:
+    """Every fact present and nothing unfilled: the detail is left exactly as composed."""
+    t = tickets.load(_complete_ticket().ticket_id)
+    assert t is not None and "Incomplete:" not in t.detail
+
+
+def test_an_unfilled_marker_is_listed_as_unmet(project: Path) -> None:
+    """Rule (a): a `<?key?>` left in the title/detail still opens the ticket but names the gap."""
+    t = tickets.load(_complete_ticket(table="").ticket_id)
+    assert t is not None and "<?table?>" in t.title
+    items = _checklist(t.detail)
+    assert len(items) == 1 and "<?table?>" in items[0]
+
+
+def test_a_located_code_without_where_is_listed_as_unmet(project: Path) -> None:
+    """Rule (b1): MEMCORP-002's title declares `{where}`; with none given the ticket cannot say where."""
+    t = tickets.load(issue_catalog.raise_issue("MEMCORP-002", evidence=["a.md"], now=NOW).ticket_id)
+    assert t is not None
+    items = _checklist(t.detail)
+    assert any("where" in i.lower() for i in items)
+
+
+def test_a_located_code_without_evidence_is_listed_as_unmet(project: Path) -> None:
+    """Rule (b2): a code that declares `{where}` points at a place, so no evidence paths means nothing to open."""
+    t = tickets.load(issue_catalog.raise_issue("MEMCORP-002", where="user:atom-1", now=NOW).ticket_id)
+    assert t is not None
+    items = _checklist(t.detail)
+    assert len(items) == 1 and "evidence" in items[0].lower()
+
+
+def test_a_machine_wide_code_is_never_flagged_for_where_or_evidence(project: Path) -> None:
+    """Rule (b) follows the entry's own declaration: MEMGREP-004 has no `{where}`/`{found}` slot, so
+    omitting where/found/evidence must not produce a checklist."""
+    t = tickets.load(issue_catalog.raise_issue("MEMGREP-004", scope="user", table="notes", column="id", now=NOW).ticket_id)
+    assert t is not None and "Incomplete:" not in t.detail
+
+
+def test_re_raising_an_incomplete_finding_adds_the_checklist_once(project: Path) -> None:
+    """The heartbeat re-raises every 5 minutes: the stored detail must not grow, and a later COMPLETE
+    raise must neither add nor strip anything (re-raise only bumps seen_count)."""
+    first = issue_catalog.raise_issue("MEMCORP-002", dedupe_key="k", now=NOW)
+    t = tickets.load(first.ticket_id)
+    assert t is not None
+    stored = t.detail
+    assert stored.count("Incomplete:") == 1
+    for i in range(1, 4):
+        again = issue_catalog.raise_issue("MEMCORP-002", dedupe_key="k", now=NOW + 300 * i)
+        assert again.ticket_id == first.ticket_id
+    done = issue_catalog.raise_issue("MEMCORP-002", where="user:atom-1", evidence=["a.md"], dedupe_key="k", now=NOW + 2000)
+    assert done.ticket_id == first.ticket_id
+    t2 = tickets.load(first.ticket_id)
+    assert t2 is not None and t2.detail == stored and t2.seen_count == 5

@@ -239,6 +239,24 @@ class Raised:
     first_seen: bool = False
 
 
+_UNFILLED_RE = re.compile(r"<\?[^<>]*\?>")
+
+
+def _unmet_rules(issue: Issue, title: str, detail: str, fields: dict[str, str], evidence: list[str] | None) -> list[str]:
+    """The completeness rules one composed ticket fails. Rule (b) follows the ENTRY'S OWN declaration:
+    a field is required only when the title template has its `{slot}`, so a machine-wide code with no
+    `{where}` is never flagged for lacking one."""
+    unmet = [f"fill the unresolved field `{m}` and say what it should have been" for m in sorted(set(_UNFILLED_RE.findall(f"{title}\n{detail}")))]
+    located = "{where}" in issue.title
+    if located and not fields.get("where"):
+        unmet.append("state WHERE the finding is (the location the title refers to)")
+    if "{found}" in issue.title and not fields.get("found"):
+        unmet.append("state what was FOUND (the specific rule, file or line)")
+    if located and not evidence:
+        unmet.append("attach EVIDENCE: the paths a reader can open to see it")
+    return unmet
+
+
 def raise_issue(
     code: str,
     *,
@@ -284,6 +302,15 @@ def raise_issue(
     if fields.get("found"):
         parts += ["", f"**Found:** {fields['found']}"]
     detail = "\n".join(parts)
+    # janitor#336: a ticket must open with its facts, but never be dropped for lacking them. Unmet
+    # rules are appended HERE, once, at composition: re-raises dedupe inside open_ticket/propose
+    # and never rewrite an existing detail, so the checklist cannot repeat or grow on the heartbeat.
+    unmet = _unmet_rules(issue, title, detail, fields, evidence)
+    if unmet:
+        state.log_line("issue-catalog", f"{code} opened incomplete: {len(unmet)} unmet rule(s)")
+        tail = "\n\n**Incomplete:**\n" + "\n".join(f"- [ ] {u}" for u in unmet)
+        # The cap is applied downstream; trim the prose, never the checklist.
+        detail = detail[: tickets.DETAIL_CAP - len(tail)] + tail
     key = _finding_key(code, issue, fields, dedupe_key)
     ev = list(evidence or [])
     org = origin or issue.scanner
