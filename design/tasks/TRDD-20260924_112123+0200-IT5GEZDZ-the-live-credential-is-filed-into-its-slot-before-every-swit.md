@@ -1,9 +1,9 @@
 ---
 trdd-id: IT5GEZDZ
 title: The live credential is filed into its slot before every switch away from it
-column: testing
+column: blocked
 created: 2026-09-24T11:21:23+0200
-updated: 2026-10-05T11:12:15+0200
+updated: 2026-10-06T21:08:46+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -15,6 +15,8 @@ approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T11:21:23+0200
 status: tasked
+blocked-by: [NGLPQ7SW]
+pre-block-column: testing
 ---
 
 # The live credential is filed into its slot before every switch away from it
@@ -26,6 +28,7 @@ Release 1 of TRDD-RAEGS1D5; mirror rules on TRDD-4XND73XD. Depends on the daemon
 - 2026-09-24T11:21:23+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-09-27T16:11:04+0200 — column → testing by user. owner batch acceptance 2026-09-27 ('complete all TRDDs'); mirror landed e00e2c7c re-verified by main; live-switch observation remains as testing evidence
 REVIEW ROUND 1 (2026-09-27, adversarial fork on e00e2c7c) — 4 findings resolved: (a) race: mirror reads pre-switch live by construction (same-thread sequential before the new live write); the cross-process refresh window is bounded by the attribution guards, and the blob-identity guard is parked as a live-observation cure only if a misattributed slot is ever observed. (b) fp material VERIFIED in source: fingerprint() hashes the accessToken (rotator.py:1028-1030), so a Claude Code refresh changes the fp and the mirror fires — the silent-never-fire risk is closed. (c) ms-vs-s VERIFIED in source: slot meta stores raw expiresAt ms at every capture site (1598, 2047, 2558; token mint at 1526 is *1000), matching the live blob — the newer-guard compares like units; the review's 'decorative guard' scenario is impossible. (d) except Exception narrowed to ImportError (44c86ca8) — a broken harness_backend now crashes loudly instead of silently meaning 'janitor owns'. Live-switch observation remains the testing evidence.
+- 2026-10-06T21:08:46+0200 — column → blocked by main-agent@ai-maestro-janitor. blocked by TRDD-NGLPQ7SW: headless switch fails silently to file the outgoing credential
 
 ## Review corrections 2026-09-24
 
@@ -42,3 +45,4 @@ Handback condition: before the ai-maestro server's oauth-rotator-tick flag retur
 ## STATE
 
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: no switch observed: rotator logs cover 2026-10-05 04:08 to 11:07 only and show no account switch (the daemon log shows none either); needs one real switch with the outgoing-slot fingerprint compared to the pre-switch live fingerprint. The card stays in testing; the check could not be made: no switch has happened in the logged window.
+2026-10-06 FIELD CHECK NOT MET: two real switches (17:22:16 on 3.7.2, 20:18:14 on 3.7.5) logged no '[switch] filed the outgoing live credential' line and no refusal line. Both ran headless: the primary live credential was skipped by policy and the -livebak mirror was used, so, per the code, read_live_blob returns None and the filing step exits early without a log line (rotator.py around 2074-2096). The daemon's headless switch can therefore never satisfy this acceptance. Decision needed: either file from the mirror in the headless path, log the skip, or accept that only a session-context switch files the slot. Source: reports/board/20261006_210400+0200-testing-field-check.md.

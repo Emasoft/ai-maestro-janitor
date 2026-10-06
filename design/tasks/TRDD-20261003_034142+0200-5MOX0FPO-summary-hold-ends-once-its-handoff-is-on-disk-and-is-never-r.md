@@ -1,10 +1,10 @@
 ---
 trdd-id: 5MOX0FPO
 title: Summary hold ends once its handoff is on disk and is never re-taken over one
-column: testing
+column: human_review
 status: tasked
 created: 2026-10-03T03:41:42+0200
-updated: 2026-10-05T11:02:12+0200
+updated: 2026-10-06T21:08:28+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -45,7 +45,9 @@ Parent plan: TRDD-K9AHY1ZB
 - 2026-10-05 CORRECTION to the DO NOT CLOSE line above: this card is not the cause of the 02:17 case. The pending-summary record is written only by take_summary_hold, and the 02:17 clear left no daemon-lane log line, so it went through a chain that writes no record (the log reading is a worker's, not re-read). This card's rule of taking no hold when a handoff already exists remains one of the two reasons an old record is not replaced. Still reasons not to close: the pending owner decision above, and this card's own listed tests were not re-run on 2026-10-05.
 2026-10-05 — no answer from the owner since 2026-10-03; the shipped default stands (a template handoff ends the summary hold) and the owner may reverse it. The card's listed hold tests were re-run on 2026-10-05: 4 passed, 0 failed (four of the listed hold tests, one per test file). RESUME POINT. Column testing. NAMED LIVE EVENT: the first janitor clear on a release carrying 868b711f resumes without waiting on a summary hold.
 2026-10-05 — correction on the test evidence: the four tests named above were picked by a worker, one per listed file. The stronger evidence is the full suite, which contains every test in those files and passed (17951 passed, 2 skipped) in the publish dry-run on commit c576a7ad. What this card's live event must show, as distinct from TRDD-PHS3DIBD's: the resume after the clear is emitted with no wait on a summary hold, i.e. the dispatcher log of that fire carries no summary-hold line.
+2026-10-06 FIELD CHECK: the evidence condition is met as far as the logs show (no summary-hold line was logged; the 19:27:44 clear on 3.7.4 shows no 'summary hold active' line, the last ones are from 2026-10-03, and chain OK at 19:28:06), but the card still waits on the owner's decision about the template-ends-hold default, so it moved to human_review. Source: reports/board/20261006_210400+0200-testing-field-check.md.
 
 ## Approval log
 
 - 2026-10-03T03:41:42+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-06T21:08:28+0200 — column → human_review by main-agent@ai-maestro-janitor. field evidence in; waits on an owner decision or host step, see STATE

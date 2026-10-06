@@ -1,10 +1,10 @@
 ---
 trdd-id: G9Z8PXCM
 title: Session beacon mirrors the live token so the daemon can probe usage
-column: testing
+column: human_review
 status: tasked
 created: 2026-10-03T03:41:14+0200
-updated: 2026-10-05T15:13:55+0200
+updated: 2026-10-06T21:08:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -43,11 +43,13 @@ implementation-commits: [415d1971]
 Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Not observable in daemon.log: no live-account usage line exists in the 2026-10-04T00:53 to 2026-10-05T11:07 log, and the owner ACL step on the mirror item is not recorded as done. The card stays in testing; the check could not be made: the owner ACL step is not done and the usage probes are not logged to the daemon log by a known pattern. OPEN FINDING, moved to its own card: TRDD-HVGU9OBL.
 2026-10-05 — the open finding referred to above (TRDD-HVGU9OBL) is closed as explained: the headless daemon skips the primary read by design and uses the mirror copy. It is not a defect and does not bear on this card's event.
+2026-10-06 FIELD CHECK NOT YET CHECKABLE: daemon.log has no usage, beacon or livebak line; rotator ticks still log 'identity untrusted, using the -livebak MIRROR'. The gate is the owner's attribute-only look at the -livebak item, not recorded as done. Source: reports/board/20261006_210400+0200-testing-field-check.md.
 
 ## Approval log
 
 - 2026-10-03T03:41:14+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:22:35+0200 — column → testing. code committed; only field acceptance after release remains
+- 2026-10-06T21:08:32+0200 — column → human_review by main-agent@ai-maestro-janitor. field evidence in; waits on an owner decision or host step, see STATE
 
 ## Review notes
 

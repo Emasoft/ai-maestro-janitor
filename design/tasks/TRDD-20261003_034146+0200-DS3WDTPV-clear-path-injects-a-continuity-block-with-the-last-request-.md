@@ -4,7 +4,7 @@ title: Clear path injects a continuity block with the last request and own reply
 column: testing
 status: tasked
 created: 2026-10-03T03:41:46+0200
-updated: 2026-10-06T18:44:50+0200
+updated: 2026-10-06T21:05:40+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -62,3 +62,4 @@ Parent plan: TRDD-K9AHY1ZB
 2026-10-06: b8cbfe61 added the no-task clause (with no task in flight, ask again and wait). Both commits ship in v3.7.1. Sessions already running keep the old SessionStart hook until they reload, so the named live check must use a session started after the update.
 2026-10-06: v3.7.2 published (82a81908). NEXT: when its CI is green, update the janitor plugin from the ai-maestro-plugins marketplace at user scope on the dev host (the claude plugin update command), then perform the named live check.
 2026-10-06: this card's fixes (10a763b8, b8cbfe61) shipped in v3.7.1/v3.7.2 and are installed on the dev host since the 3.7.2 update; v3.7.3 (CI green, installed) adds only bace60f4 (TRDD-KVUVV9D2). The named live check can run in any session started after the 3.7.2 install.
+2026-10-06 FIELD CHECK NOT YET CHECKABLE: the 19:27:44 clear came after the fix, but the injected continuity text is not logged anywhere and the handoff file has no continuity heading, so the observation needs a clear whose last reply ended on a question, read from the new session's first turn. Source: reports/board/20261006_210400+0200-testing-field-check.md.

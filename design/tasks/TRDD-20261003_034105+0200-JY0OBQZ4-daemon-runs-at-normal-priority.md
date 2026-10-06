@@ -1,10 +1,10 @@
 ---
 trdd-id: JY0OBQZ4
 title: Daemon runs at normal priority
-column: testing
+column: human_review
 status: tasked
 created: 2026-10-03T03:41:05+0200
-updated: 2026-10-05T15:13:53+0200
+updated: 2026-10-06T21:08:30+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -37,9 +37,11 @@ implementation-commits: [30d320eb]
 Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Field check FAILED: the installed LaunchAgent plist still says ProcessType Background (the N2 re-stage is not done); since the 3.7.0 daemon start (2026-10-04T12:38) 8 of 1313 rotator ticks took 30 s or more, max 168 s (2026-10-05T06:09); the log is only 34 h and load level is not in it. The card stays in testing; the re-stage of the daemon's launch agent at standard priority is a host step for the owner and has not been done.
 2026-10-05 — the 'possibly related: TRDD-HVGU9OBL' line above is WITHDRAWN: that card turned out to describe designed behaviour (the headless daemon skips the primary read on purpose and uses the mirror copy), so it is not a cause of this card's symptom.
+2026-10-06 FIELD CHECK NOT MET: the LaunchAgent plist still sets ProcessType Background (the host re-stage step is not done) and the 3.7.5 daemon started 19:47 runs at priority 4; of 66 rotator ticks since then, 4 took 30 s or more (48, 48, 86 and 141 s). Needs the owner's host re-stage. Source: reports/board/20261006_210400+0200-testing-field-check.md.
 
 ## Approval log
 
 - 2026-10-03T03:41:05+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-03T06:22:33+0200 — column → testing. code committed; only field acceptance after release remains
 2026-10-05 — possibly related: TRDD-HVGU9OBL (the primary live credential was unreadable on every logged rotator tick); a hypothesis, not a finding.
+- 2026-10-06T21:08:30+0200 — column → human_review by main-agent@ai-maestro-janitor. field evidence in; waits on an owner decision or host step, see STATE
