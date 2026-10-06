@@ -895,6 +895,18 @@ def test_check5_live_instruction_sharing_a_sentence_with_an_obituary_verb_still_
     assert [(f.token, f.severity) for f in findings] == [("foo_bar", "high")]
 
 
+def test_check5_drop_in_replacement_obituary_stays_exempt():
+    """"drop-in" is an adjective, not the imperative `drop`: an obituary sentence such as "the drop-in
+    replacement for `foo_bar` was removed in abc1234" records a deletion and must stay exempt
+    (janitor#332). A real imperative `drop` before the token must still fire."""
+    head = "\n## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-08-12\n\n"
+    obituary = head + "NEXT ACTION: none. The drop-in replacement for `foo_bar` was removed in abc1234.\n"
+    assert tc.check5_dead_symbol_citations(_record(column="dev", body=obituary), _dead("foo_bar")) == []
+    live = head + "NEXT ACTION: drop `foo_bar` once the removed caller is gone.\n"
+    findings = tc.check5_dead_symbol_citations(_record(column="dev", body=live), _dead("foo_bar"))
+    assert [(f.token, f.severity) for f in findings] == [("foo_bar", "high")]
+
+
 def test_extract_state_block_stops_at_next_top_heading():
     """The STATE block ends at the next top-level '## ' heading, not at EOF."""
     body = (

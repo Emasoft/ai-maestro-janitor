@@ -1144,7 +1144,9 @@ _BACKTICK_TOKEN_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{4,})`")
 # An imperative deletion verb BEFORE the token in its sentence ("delete `x` once the removed caller
 # is gone") makes the sentence a pending instruction, not an obituary, even though it also carries
 # a past-tense obituary word. `\b` keeps past tenses ("deleted") from matching. janitor#332 follow-up.
-_IMPERATIVE_BEFORE_TOKEN_RE = re.compile(r"\b(?:delete|remove|drop|rename|retire|kill)\b", re.IGNORECASE)
+# `drop(?!-)`: `\b` treats "-" as a boundary, so "drop-in replacement" (an adjective inside an
+# obituary sentence) matched as the imperative `drop` and re-fired the finding (janitor#332).
+_IMPERATIVE_BEFORE_TOKEN_RE = re.compile(r"\b(?:delete|remove|drop(?!-)|rename|retire|kill)\b", re.IGNORECASE)
 _OBITUARY_VERB_RE = re.compile(
     # `zero hits` (janitor#332): "X return zero hits under scripts/" is how a card records a
     # verified deletion; TRDD-AR9IUGIJ's obituary used it and re-fired every week.
