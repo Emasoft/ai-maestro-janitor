@@ -4,7 +4,7 @@ title: Board-integrity repairs from issue 320 adjudication
 column: backburner
 status: tasked
 created: 2026-09-29T15:34:39+0200
-updated: 2026-10-06T21:26:38+0200
+updated: 2026-10-06T21:31:02+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -42,3 +42,4 @@ Discharges the ISSUE-320 REPAIR CARRIER line on TRDD-XI10BA5D (record-review REO
 ## STATE
 
 2026-10-06: owned issue Emasoft/ai-maestro-janitor#320 is in the issue sweep TRDD-FQVEILVK.
+2026-10-06: the warning is keyed on the frozen parents' npt/eht, so child-side repairs cannot clear it; the children are real open work; validator change requested as Emasoft/ai-maestro#174.
