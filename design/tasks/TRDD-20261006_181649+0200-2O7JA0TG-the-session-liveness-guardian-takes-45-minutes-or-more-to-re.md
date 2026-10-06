@@ -1,10 +1,10 @@
 ---
 trdd-id: 2O7JA0TG
-title: The session-liveness guardian takes 45 minutes or more to re-arm a session left with no heartbeat after a clear
+title: The session-liveness guardian waits three heartbeat intervals before re-arming a session left with no heartbeat after a clear
 column: todo
 status: tasked
 created: 2026-10-06T18:16:49+0200
-updated: 2026-10-06T18:16:55+0200
+updated: 2026-10-06T18:33:09+0200
 current-owner: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -16,6 +16,8 @@ approved: true
 approval-judge: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 approval-datetime: 2026-10-06T18:16:49+0200
 parent-trdd: K60FT7PJ
+derived: true
+derived-kind: eht
 ---
 
 # The session-liveness guardian takes 45 minutes or more to re-arm a session left with no heartbeat after a clear
@@ -38,3 +40,4 @@ A session left with no live heartbeat cron after a clear (failed startup arm, th
 ## STATE
 
 NEXT ACTION (2026-10-06, second): measure how often transcript-staleness false positives would fire with a shorter window when clear-observed.ts is newer than the last heartbeat-fires.log entry; propose the window rule. Constraint: no needless mid-session re-arms.
+2026-10-06: the stale window is max(15 min, 3 x cadence) (fleet_scan.py:45, :665-677): 45 min at */15, 15 min at */5; the measured 51 min also includes the typing gate.

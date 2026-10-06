@@ -1,10 +1,10 @@
 ---
 trdd-id: K60FT7PJ
 title: An idle session after a clear or compaction is never woken because quiet heartbeats do nothing and two clear paths emit no resume cue
-column: todo
-status: tasked
+column: superseded
+status: archived
 created: 2026-10-06T16:49:44+0200
-updated: 2026-10-06T18:16:55+0200
+updated: 2026-10-06T18:33:18+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -16,6 +16,7 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T16:49:44+0200
 eht: [KVUVV9D2, 2O7JA0TG, HYTKG53C]
+superseded-by: [KVUVV9D2]
 ---
 
 # An idle session after a clear or compaction is never woken because quiet heartbeats do nothing and two clear paths emit no resume cue
@@ -40,6 +41,7 @@ To do: design (with the advisor) and fix: a quiet fire that finds an unconsumed 
 2026-10-06 review (e): Any quiet-fire wake also changes the shipped rule rules/janitor-heartbeat-protocol.md (quiet fire = reply only "janitor heartbeat", no tool calls).
 2026-10-06 review (f): Case D (not yet carded elsewhere): the NEXT ACTION can quote the /janitor-arm chatter as "your reply" instead of the substantive reply, which now also makes "was a task in flight" harder to judge.
 2026-10-06 review (g): The To-do should state the problem, not the mechanism; the fix design goes through the advisor first.
+- 2026-10-06T18:33:18+0200 — SUPERSEDED by main-agent@ai-maestro-janitor. umbrella only; work lives in derived cards KVUVV9D2, 2O7JA0TG, HYTKG53C.
 
 
 ## STATE

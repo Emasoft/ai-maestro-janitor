@@ -16,6 +16,8 @@ approved: true
 approval-judge: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 approval-datetime: 2026-10-06T18:16:49+0200
 parent-trdd: K60FT7PJ
+derived: true
+derived-kind: eht
 ---
 
 # A quiet heartbeat never re-engages a session that sits idle with work still in flight

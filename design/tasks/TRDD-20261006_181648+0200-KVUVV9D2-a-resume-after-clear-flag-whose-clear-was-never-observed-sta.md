@@ -1,10 +1,10 @@
 ---
 trdd-id: KVUVV9D2
 title: A resume-after-clear flag whose clear was never observed stays unarmed until the 24 h sweep
-column: todo
+column: testing
 status: tasked
 created: 2026-10-06T18:16:48+0200
-updated: 2026-10-06T18:16:54+0200
+updated: 2026-10-06T18:33:08+0200
 current-owner: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -16,6 +16,9 @@ approved: true
 approval-judge: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 approval-datetime: 2026-10-06T18:16:48+0200
 parent-trdd: K60FT7PJ
+derived: true
+derived-kind: eht
+implementation-commits: [bace60f4]
 ---
 
 # A resume-after-clear flag whose clear was never observed stays unarmed until the 24 h sweep
@@ -35,4 +38,5 @@ A resume-after-clear flag whose /clear was never observed (no clear-observed sta
 
 ## STATE
 
-NEXT ACTION (2026-10-06, go first): write a failing test for _phase_clear_resume where the flag is older than a few minutes, clear-observed is older than the flag, and the session transcript is newer than the flag (evidence the clear happened); then propose the minimal fix in that NOT-armed branch.
+2026-10-06 NEXT ACTION: none on code; wait for the named live check (a /clear on a loaded host gets clear-observed.ts stamped) after the release carrying bace60f4.
+2026-10-06: root cause measured (reports/continuity-build/20261006_181911+0200-kvuvv9d2-measure.md): the 5 s SessionStart timeout killed on-session-start.py (6.7 s on a loaded host) before it stamped clear-observed.ts; the 90 s post-clear hook still injected the handoff. Fixed in bace60f4: timeout 30 s, test tests/test_session_start_hook_timeout.py. Rejected with reasons in the commit message: moving the stamp to the post-clear hook, a second writer, a dispatch fallback on a new session id. Not covered here: the model never ran the heartbeat stub in the new session (TRDD-HYTKG53C).
