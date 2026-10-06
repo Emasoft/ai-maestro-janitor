@@ -4,7 +4,7 @@ title: trdd-state-reconciliation flags testing cards that are correctly waiting 
 column: backburner
 status: tasked
 created: 2026-10-07T00:45:39+0200
-updated: 2026-10-07T00:45:39+0200
+updated: 2026-10-07T01:53:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,12 @@ Proposed fix, tests first: skip a testing card whose STATE names a pending live 
 ## Approval log
 
 - 2026-10-07T00:45:39+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation commits
+
+8d1f1929 (closeable becomes a one-time ledger note), 9bc0cf20 (merge of that branch), a5930dfc (tests: mixed-class and no-closeable-in-report guards).
+
+## Known gaps (accepted)
+
+emit_once marks the SHA seen BEFORE findings_ledger.record writes: a failed ledger write loses that card's closeable note until a new citing SHA appears. Accepted, rare.
+The findings ledger keeps the last 500 lines, so the first live run's ~34 closeable notes evict the oldest ledger entries.
