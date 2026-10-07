@@ -1148,7 +1148,7 @@ already carries `status:` (chain by superseding its successor, never re-supersed
 This is the WM-LES-09 lesson-free path — `add-lesson --supersedes` (WM-CLI-04) stays the path for
 a supersession that records a mistake.
 
-`WM-CLI-17` **update-mem-atom** — `memgrep update-mem-atom --page <PAGE> --atom <ID>` rewrites ONE
+`WM-CLI-26` **update-mem-atom** — `memgrep update-mem-atom --page <PAGE> --atom <ID>` rewrites ONE
 atom's body/`desc`/`keywords` in place: the id, `ocd`, and `type` are untouched, and every `[^N]`
 reference into the atom stays valid because the marker never moves or renumbers. The new body
 reaches the verb ONLY through an explicit channel — `--body <TEXT>`, `--body -` (stdin, the one
