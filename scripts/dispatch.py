@@ -911,19 +911,14 @@ def _dedupe_drift_line(name: str, line: str) -> str | None:
     return None
 
 
-
-
-# Membership is a CONTRACT the tests check only loosely (the detector file merely contains
-# `emit_once`), so adding an ungated print to a member makes that line print on EVERY fire --
-# re-verify membership whenever a member detector is edited (TRDD-37H7QFSF).
-
-
-
 # Detectors whose EVERY printed drift line is gated by their own `dedupe.emit_once` and which
 # `emit_forget` on clearance. WHY exempt (TRDD-37H7QFSF): the dispatcher cross-fire dedupe
 # cannot see that such a condition cleared, so it swallowed the line when it returned; the
 # detector already prints each (re)appearance exactly once, so a second dedupe here only hides
 # it. Detectors with any ungated print (orphaned-memory-maint) stay out.
+# Membership is a CONTRACT the tests check only loosely (the detector file merely contains
+# `emit_once`), so adding an ungated print to a member makes that line print on EVERY fire --
+# re-verify membership whenever a member detector is edited.
 _SELF_DEDUPING_DETECTORS = frozenset({
     "oauth-login-needed",
     "stale-index-lock",
