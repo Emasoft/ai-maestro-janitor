@@ -58,6 +58,25 @@ def test_clean_tick_writes_no_line(tmp_path: Path) -> None:
     """A clean silent tick (rc=0, empty stderr) writes no rotator-tick line."""
     assert "rotator tick" not in _tick(tmp_path, "print(\"ok\")")
 
+def test_retried_tick_that_recovers_still_logs_the_first_attempts_reason(tmp_path: Path) -> None:
+    """45ZUV5ZD: attempt 1 exits 1 with stderr, attempt 2 succeeds: the retry line carries the reason."""
+    flag = tmp_path / "first-done"
+    body = (
+        "import sys, pathlib\n"
+        f"f = pathlib.Path({str(flag)!r})\n"
+        "if not f.exists():\n"
+        "    f.write_text('x')\n"
+        "    print('keychain refused the read', file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+    )
+    script = tmp_path / "flaky.py"
+    script.write_text(body)
+    result = daemon._run_workload([sys.executable, str(script)], timeout=20, max_attempts=2)
+    assert result is not None and result.returncode == 0
+    log = (tmp_path / "logs" / "daemon.log").read_text()
+    assert "exited 1 (attempt 1/2)" in log
+    assert "keychain refused the read" in log
+
 
 def test_email_and_token_in_stderr_never_reach_the_log(tmp_path: Path) -> None:
     """An e-mail address or sk-ant token in stderr is masked in daemon.log."""
