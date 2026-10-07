@@ -1744,6 +1744,19 @@ def test_phase_keep_going_nudge_default_on_no_flag(env_isolation: dict) -> None:
     )
 
 
+def test_keep_going_emit_writes_one_log_line(env_isolation: dict) -> None:
+    """An emitted keep-going nudge logs exactly one "nudge emitted" line, stdout cue unchanged."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    _make_idle_and_stale(state)
+    out = _capture_stdout(dispatch._phase_keep_going_nudge)
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE_ONE_STALE_AGENT]
+    log = (state.log_dir() / "dispatch.log").read_text(encoding="utf-8")
+    assert log.count("keep-going: nudge emitted") == 1, log
+
+
 
 def _write_pane_presence(state, *, ago_s: int) -> None:
     """Write THIS pane's presence file (the way the UserPromptSubmit hook does) `ago_s` ago."""
