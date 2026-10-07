@@ -1,10 +1,10 @@
 ---
 trdd-id: 2AVXCT2L
 title: amp identity guard help text says cd to the agent directory resolves identity but it does not
-column: todo
+column: blocked
 status: tasked
 created: 2026-10-06T21:25:52+0200
-updated: 2026-10-06T21:25:52+0200
+updated: 2026-10-07T07:48:10+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T21:25:52+0200
+blocked-by: [Emasoft/ai-maestro#172]
+pre-block-column: todo
 ---
 
 # amp identity guard help text says cd to the agent directory resolves identity but it does not
@@ -24,3 +26,5 @@ Source: GitHub issue Emasoft/ai-maestro-janitor#318 (opened 2026-09-28). Part of
 ## Approval log
 
 - 2026-10-06T21:25:52+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T07:48:00+0200 — column → blocked by main-agent@ai-maestro-janitor. refusal text lives in ai-maestro#172; issue 318 closed with that pointer
+2026-10-07: moved to blocked (pre-block-column todo), blocked-by Emasoft/ai-maestro#172: the refusal text lives in ai-maestro; issue 318 closed with that pointer.
