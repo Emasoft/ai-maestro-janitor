@@ -1,10 +1,10 @@
 ---
 trdd-id: QX59MA4H
 title: C33 — hook-timeout-scan detector
-column: blocked
+column: todo
 status: tasked
 created: 2026-10-01T19:45:20+0200
-updated: 2026-10-07T05:15:50+0200
+updated: 2026-10-07T10:07:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,8 +15,8 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-01T19:45:20+0200
-blocked-by: [B9YPSF02]
-pre-block-column: todo
+blocked-by: []
+pre-block-column: 
 blocker-probe: [trddgrep, why, QX59MA4H]
 blocker-holds-if: not-match:READY
 ---
@@ -38,6 +38,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-01 — detection shape from C00/U4: scan session transcripts (~/.claude/projects/<slug>/*.jsonl) for lines with type=attachment and attachment.type=hook_cancelled and attachment.timedOut=true; fields hookName, hookEvent, command, durationMs, timeoutMs. The text "timed out after" does NOT identify hook timeouts. Emit HOOK-001 once per (session, hookName) with durationMs/timeoutMs.
 - 2026-10-01 — SCOPE EXTENDED (absorbs superseded C1B, TRDD-B9YPSF02): besides HOOK-001 from hook_cancelled/timedOut=true, also emit HOOK-002 hook-near-timeout from hook_success/hook_cancelled entries whose durationMs >= 80% of the hook timeout (timeoutMs when the record has it, else the timeout configured for that exact command in hooks/hooks.json; skip hooks with no known timeout). Dedupe one HOOK-002 per (hook command, hour). Reference implementation of the threshold and dedupe: reports/dsn035un/c1b-superseded/hook_timing.py (local).
 - 2026-10-01 — MAPPING (wave-1 review finding 3): hook_success.command holds the literal ${CLAUDE_PLUGIN_ROOT} text; match on the script path relative to the plugin root against the janitor own hooks/hooks.json entries. HOOK-002 covers janitor hooks only (other plugins have no timeout in success records and their hooks.json is not ours to parse); HOOK-001 covers every plugin via hook_cancelled.timeoutMs.
+- 2026-10-07T10:07:58+0200 — column → todo by main-agent@ai-maestro-janitor. blocker B9YPSF02 was superseded and archived 2026-10-01 and its scope absorbed into this card Cleared blocked-by (--clear-blocker override).
 
 ## STATE
 
