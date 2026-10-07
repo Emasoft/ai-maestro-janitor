@@ -141,13 +141,16 @@ def test_startup_with_fresh_flag_and_sidecar_stamps_but_injects_nothing(tmp_path
     A second stamp overwriting an earlier clear's `clear-observed.ts` seconds later is an
     overwrite with the same epoch — expected-harmless (see
     `_stamp_clear_observation`'s docstring), so a future reader does not re-litigate it."""
+    # Load-proof: bound the stamp by this run's own start, not a fixed "now - 5" window — under
+    # host load the hook subprocess took >5 s and the 3.8.10 push was refused (2026-10-07).
+    t0 = int(time.time())
     sd, out = _seed_and_run(
         tmp_path, source="startup", seed={"flag": True, "sidecar": True}
     )
     stamp = sd / "clear-observed.ts"
     assert stamp.is_file(), "the startup chain-clear must record the observation" + _diagnosis(sd)
     observed = int(stamp.read_text(encoding="utf-8").strip())
-    assert int(time.time()) - 5 <= observed <= int(time.time()) + 1, f"stale epoch: {observed}"
+    assert t0 <= observed <= int(time.time()) + 1, f"stale epoch: {observed}"
     session_id = sd / "resume-after-clear.session-id.txt"
     assert session_id.is_file(), "the observing session id must be stamped" + _diagnosis(sd)
     assert session_id.read_text(encoding="utf-8").strip() == "sid-1"
