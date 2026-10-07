@@ -703,6 +703,69 @@ class TestTopKindTotals(unittest.TestCase):
         kind_map = {1_000_000: "resume"}
         self.assertEqual(token_meter.top_kind_totals(recs, now=1_000_000, kind_map=kind_map), [("resume", 10)])
 
+class TestTailDamageAndBoundary(unittest.TestCase):
+    """TRDD-A8DRRW0I stage B: the tail readers survive a damaged tail and a seek that lands
+    exactly on a line boundary."""
+
+    def test_damaged_tail_reads_usage_on_both_sides(self):
+        """A raw 0xFF byte line, a non-object line and a half-written last line do not
+        hide the real usage records before and after them."""
+        with TemporaryDirectory() as d:
+            p = Path(d) / "t.jsonl"
+            p.write_bytes(
+                b"\n".join(
+                    [
+                        _user(_HB).encode(),
+                        _assistant(text="a", usage={"input_tokens": 1, "output_tokens": 3}, msg_id="a").encode(),
+                        b'{"type": "assistant", "text": "bad \xff byte"}',
+                        b"[1, 2, 3]",
+                        _assistant(text="b", usage={"input_tokens": 2, "output_tokens": 4}, msg_id="b").encode(),
+                        b'{"type": "assistant", "message": {"usage": {"input_tok',
+                    ]
+                )
+            )
+            u = token_meter.tail_turn_usage(p)
+            assert u is not None
+            self.assertTrue(u.is_heartbeat)
+            self.assertEqual((u.input_tokens, u.output_tokens, u.assistant_messages), (3, 7, 2))
+            self.assertEqual(token_meter.latest_context_size(p), 2)
+
+    def test_window_starting_on_line_boundary_keeps_first_record(self):
+        """A tail window that starts exactly at a line's first byte still reads that line."""
+        with TemporaryDirectory() as d:
+            p = Path(d) / "t.jsonl"
+            filler = _assistant(text="old", usage={"input_tokens": 9, "output_tokens": 9}, msg_id="old")
+            trigger = _user(_HB)
+            reply = _assistant(text="ok", usage={"input_tokens": 7, "output_tokens": 3}, msg_id="r")
+            p.write_text("\n".join([filler, trigger, reply]) + "\n", encoding="utf-8")
+            saved = token_meter._TAIL_BYTES
+            token_meter._TAIL_BYTES = len((trigger + "\n" + reply + "\n").encode())
+            try:
+                u = token_meter.tail_turn_usage(p)
+            finally:
+                token_meter._TAIL_BYTES = saved
+            assert u is not None
+            self.assertTrue(u.is_heartbeat)
+            self.assertEqual(u.output_tokens, 3)
+
+    def test_zero_byte_file_is_empty_not_an_error(self):
+        """An empty transcript is a known-empty context (0), not an exception."""
+        with TemporaryDirectory() as d:
+            p = Path(d) / "t.jsonl"
+            p.write_bytes(b"")
+            self.assertIsNone(token_meter.tail_turn_usage(p))
+            self.assertIsNone(token_meter.detect_fire_kind(p))
+            self.assertEqual(token_meter.latest_context_entry(p), (0, None))
+
+    def test_file_shorter_than_window_reads_everything(self):
+        """A file smaller than the tail window is read from byte 0, first record included."""
+        with TemporaryDirectory() as d:
+            p = _write(Path(d), _user(_HB), _assistant(text="ok", usage={"input_tokens": 7, "output_tokens": 3}))
+            u = token_meter.tail_turn_usage(p)
+            assert u is not None
+            self.assertTrue(u.is_heartbeat)
+            self.assertEqual(u.output_tokens, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

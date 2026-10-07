@@ -37,6 +37,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import jsonl_walk  # noqa: E402  -- sibling lib: byte-safe tail read (TRDD-A8DRRW0I)
 import token_baseline  # noqa: E402  -- sibling lib: weighted-cost + rolling-window primitives
 import token_history  # noqa: E402  -- sibling lib: parse_ts (ISO-8601 with `Z` or a numeric offset)
 
@@ -82,18 +83,14 @@ class TurnUsage:
         }
 
 
-def _read_tail_lines(path: Path, max_bytes: int = _TAIL_BYTES) -> list[str]:
-    """Return the text lines in the last `max_bytes` of `path` (file order).
+def _read_tail_entries(path: Path) -> list[dict]:
+    """Parsed JSON-object entries in the last `_TAIL_BYTES` of `path` (file order). Raises OSError for a missing/unreadable file.
 
-    The first line may be a partial JSON fragment when the file is larger than
-    the window — the caller drops it via a json-parse failure.
+    Delegates to `jsonl_walk.read_jsonl_tail`, which drops the seek-cut first fragment and survives a
+    non-UTF-8 byte, a non-object line or a half-written last line (TRDD-A8DRRW0I). Malformed-line
+    positions are not needed by any caller here.
     """
-    size = path.stat().st_size
-    with path.open("rb") as f:
-        if size > max_bytes:
-            f.seek(size - max_bytes)
-        data = f.read()
-    return data.decode("utf-8", errors="replace").splitlines()
+    return jsonl_walk.read_jsonl_tail(path, _TAIL_BYTES, malformed_lines=[])
 
 
 def _is_tool_result(entry: dict) -> bool:
@@ -185,21 +182,9 @@ def detect_fire_kind(transcript_path: str | os.PathLike[str]) -> Optional[str]:
     if not p.is_file():
         return None
     try:
-        lines = _read_tail_lines(p)
+        entries = _read_tail_entries(p)
     except OSError:
         return None
-
-    entries: list[dict] = []
-    for line in lines:
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            obj = json.loads(s)
-        except ValueError:
-            continue
-        if isinstance(obj, dict):
-            entries.append(obj)
     if not entries:
         return None
 
@@ -235,21 +220,9 @@ def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsa
     if not p.is_file():
         return None
     try:
-        lines = _read_tail_lines(p)
+        entries = _read_tail_entries(p)
     except OSError:
         return None
-
-    entries: list[dict] = []
-    for line in lines:
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            obj = json.loads(s)
-        except ValueError:
-            continue  # partial first line / non-JSON noise
-        if isinstance(obj, dict):
-            entries.append(obj)
     if not entries:
         return None
 
@@ -336,18 +309,11 @@ def latest_context_entry(transcript_path: str | os.PathLike[str]) -> Optional[tu
         return None
     try:
         size = p.stat().st_size
-        lines = _read_tail_lines(p)
+        entries = _read_tail_entries(p)
     except OSError:
         return None
-    for line in reversed(lines):
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            obj = json.loads(s)
-        except ValueError:
-            continue
-        if not isinstance(obj, dict) or obj.get("type") != "assistant":
+    for obj in reversed(entries):
+        if obj.get("type") != "assistant":
             continue
         msg = obj.get("message")
         if not isinstance(msg, dict):
