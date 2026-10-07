@@ -2,7 +2,7 @@
 trdd-id: I6ZZWVDN
 title: Measure the janitor's remaining two injected blocks — SessionStart compact and StopFailure rate_limit
 column: todo
-review-after: 2026-11-07
+
 created: 2026-08-02T06:24:29+0200
 updated: 2026-10-07T04:30:11+0200
 current-owner: claude-ai-maestro-janitor

@@ -4,7 +4,7 @@ title: Automatic re-login of a dead account slot is always on
 column: testing
 status: tasked
 created: 2026-10-04T09:49:52+0200
-updated: 2026-10-05T10:18:49+0200
+updated: 2026-10-07T04:34:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -53,3 +53,7 @@ Memory page oauth-rotation-renew-reauth-operations still says auto-bootstrap is 
 2026-10-04 — Item 1 (a refused capture uses up a launch and raises no alert) is implemented in c91af837: the capture leaves a marker, the launcher refunds the attempt once and holds relaunches for six hours, and the alert names both accounts. Follow-ups in progress: clear the marker on a successful capture, refund only a charged launch, carry the account as data instead of parsing the message.
 2026-10-04 column testing (was dev). Correction to the move reason - c91af837 is NOT inside the 3.7.0 release (git merge-base against tag v3.7.0), so the refusal refund and alert first ship in 3.7.1. Of the three follow-ups listed above as in progress, two landed in cbb431b5 (the marker clears on a good capture, only a charged launch is refunded). The third, carrying the account as data instead of parsing the message, has no commit and no card. Still waiting on the owner - whether the three-launch cap resets (proposed every 24 hours). Still stale - memory page oauth-rotation-renew-reauth-operations says auto-bootstrap is opt-in. NEXT ACTION - after 3.7.1 is installed, observe one automatic re-login with no environment variable set.
 2026-10-05 — RESUME POINT. Column testing. The remaining follow-ups moved to TRDD-D10JB26H. NAMED LIVE EVENT: on an install of the first release after v3.7.0, with the auto re-login setting unset and a credential-dead spare slot holding a valid web cookie, one daemon tick logs a line starting auto-bootstrap: launch in the daemon log and the slot is re-filed. Commits c91af837 and cbb431b5 are in no release tag yet.
+
+## STATE
+
+2026-10-07: the 'no release tag yet' wording is stale. git tag --contains c91af837 lists ai-maestro-janitor--v3.7.1 and v3.7.2 (checked 2026-10-07 by a worker). The card still waits on its live event: a credential-dead spare slot holding a valid web cookie, one daemon tick logging auto-bootstrap: launch.

@@ -2,7 +2,7 @@
 trdd-id: 8BXMNQ4T
 title: verified actuation blocks the single-threaded daemon beat — measure the multiplier before choosing a mechanism
 column: todo
-review-after: 2026-11-07
+
 created: 2026-09-03T21:42:15+0200
 updated: 2026-10-07T04:30:08+0200
 current-owner: janitor-main-session
