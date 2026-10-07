@@ -14406,6 +14406,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// override must therefore win INSIDE `scope_layer`, which is what the second half asserts.
     #[test]
     fn scope_derives_the_path_and_the_env_override_relocates_the_root() {
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", edit_test_tmpdir("scope-derive-state")) };
         let home = edit_test_tmpdir("scope-derive-project");
         let user_root = edit_test_tmpdir("scope-derive-user");
         std::fs::create_dir_all(&home).unwrap();
@@ -14462,6 +14463,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// inside that same call. There is no window in which the page exists published-but-unlinked.
     #[test]
     fn new_page_public_project_creates_the_flag_and_the_symlink_in_one_write() {
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", edit_test_tmpdir("newpage-public-state")) };
         let scope = edit_test_tmpdir("newpage-public");
         let memdir = scope.join(".claude/project/memory");
         std::fs::create_dir_all(&memdir).unwrap();
@@ -15764,6 +15766,7 @@ mod xi9_cli_tests {
 
     #[test]
     fn update_lesson_desc_edits_footnote_without_stdin() {
+        isolate_state("edits");
         let dir = std::env::temp_dir().join(format!("xi9-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir");
         let page = dir.join("p.md");
@@ -15785,6 +15788,7 @@ mod xi9_cli_tests {
 
     #[test]
     fn update_lesson_desc_preserves_inline_body() {
+        isolate_state("inline");
         // T-H97PEEQZ regression: a desc-only edit of a footnote-lesson with an INLINE body
         // must keep that body. The pre-fix rebuild emitted props-only and silently deleted
         // the DO-NOT/BECAUSE/DO text — three real corpus lessons were damaged this way
@@ -15818,6 +15822,7 @@ mod xi9_cli_tests {
 
     #[test]
     fn update_lesson_desc_round_trips_props_only_footnote() {
+        isolate_state("props");
         // A footnote with NO inline body must round-trip props-only — the re-attach path must
         // not fabricate a trailing space or leak the next footnote's text.
         // A2 step 5 wave 1: the two sibling footnotes carry a MINIMAL one-word body each so the
@@ -15841,6 +15846,16 @@ mod xi9_cli_tests {
         );
         assert!(!t.contains("] \n[^"), "no trailing space fabricated before the next footnote");
     }
+
+
+    /// WHY: cmd_update_atom_cli takes the write gate, whose lock lives in the global-state dir; without
+    /// this per-thread override it is the REAL one (TRDD-DGBZVZPP). Dies with the test thread.
+    fn isolate_state(tag: &str) {
+        let state = std::env::temp_dir().join(format!("xi9-state-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&state).expect("mkdir state");
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state) };
+    }
+
 }
 
 /// TRDD-XI9UYD4E: parse a `[^N]: [id:ATOM-…, …]` footnote-lesson marker line — the

@@ -6186,6 +6186,56 @@ fn lint_apply_fixes_in_one_run_fixes_the_safe_page_and_records_the_refused_one()
     assert_eq!(ledger_lines(&state).len(), 1);
 }
 
+
+/// TRDD-1T0W2ZVW: on a root `scope_root_for` recognises (a directory named `memory`), `lint
+/// --apply-fixes` must use the PER-SCOPE lock and ledger `memory-maint-<sha256(root)[..16]>` and
+/// never the shared `memory-maint-out-of-scope` pair that every unrecognised root falls back to.
+/// Every state and scope variable points at scratch, so no real store is touched.
+#[test]
+fn lint_apply_fixes_on_a_recognised_scope_uses_the_per_scope_lock_and_ledger() {
+    use sha2::Digest as _;
+    let root = TempDir::new("lint-scope-lock");
+    let user = TempDir::new("lint-scope-lock-user");
+    let local = TempDir::new("lint-scope-lock-local");
+    let state = TempDir::new("lint-scope-lock-state");
+    let mem = root.join("memory");
+    std::fs::create_dir_all(&mem).unwrap();
+    std::fs::write(mem.join("a-refused.md"), LINT_REFUSED_PAGE).unwrap();
+    std::fs::write(mem.join("b-safe.md"), lint_no_notes_page("")).unwrap();
+    let out = memgrep_cmd(env!("CARGO_BIN_EXE_memgrep"))
+        .args(["lint", "--apply-fixes", mem.to_str().unwrap()])
+        .env("JANITOR_GLOBAL_STATE_DIR", state.as_str())
+        .env("WIKIMEM_PROJECT_SCOPE_PATH", mem.to_str().unwrap())
+        .env("WIKIMEM_LOCAL_SCOPE_PATH", local.as_str())
+        .env("MEMGREP_USER_MEM_ROOT", user.as_str())
+        .output()
+        .unwrap();
+    let e = String::from_utf8_lossy(&out.stderr);
+    // The scope root is the canonical path (scope_root_for canonicalizes: /var -> /private/var).
+    let canon = std::fs::canonicalize(&mem).unwrap();
+    let hex: String = sha2::Sha256::digest(canon.display().to_string().as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let stem = format!("memory-maint-{}", &hex[..16]);
+    let names = |suffix: &str| -> Vec<String> {
+        let mut v: Vec<String> = files_ending(&state.path, suffix)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(names(".lock"), vec![format!("{stem}.lock")], "{e}");
+    assert_eq!(names(".unfixed.tsv"), vec![format!("{stem}.unfixed.tsv")], "{e}");
+    assert!(
+        !state.join("memory-maint-out-of-scope.lock").exists(),
+        "a recognised scope must not fall back to the shared out-of-scope lock"
+    );
+    assert_eq!(ledger_lines(&state).len(), 1, "one refused page, one ledger line");
+    assert!(std::fs::read_to_string(mem.join("b-safe.md")).unwrap().contains("## Notes and lessons learned"));
+}
+
 #[test]
 fn lint_apply_fixes_does_not_fix_an_ignored_rule() {
     let d = TempDir::new("lint-apply-ignored");

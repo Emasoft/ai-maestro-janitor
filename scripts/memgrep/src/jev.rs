@@ -178,7 +178,8 @@ impl Provider {
 
 /// Env read, the crate idiom: unset OR empty both mean absent.
 fn env_opt(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.is_empty())
+    // Via scoped_env so a test overrides it per thread (TRDD-DGBZVZPP); release = std::env::var.
+    crate::scoped_env::var(name).ok().filter(|v| !v.is_empty())
 }
 
 /// Resolve which provider to use: explicit `--api` > `$JEV_API` > first key found among env
@@ -1014,12 +1015,13 @@ mod tests {
     // concurrent reads). Every call below happens under ENV_LOCK, the serialization the crate's
     // own single-threaded env reads rely on here.
     fn set_env(k: &str, v: &str) {
-        // SAFETY: caller holds ENV_LOCK; no other thread in this test process touches `k`.
-        unsafe { std::env::set_var(k, v) }
+        // Per-thread override (TRDD-DGBZVZPP): std::env::set_var is process-global and clippy-disallowed.
+        // SAFETY: scoped_env::set_var touches no process state.
+        unsafe { crate::scoped_env::set_var(k, v) }
     }
     fn unset_env(k: &str) {
-        // SAFETY: caller holds ENV_LOCK; no other thread in this test process touches `k`.
-        unsafe { std::env::remove_var(k) }
+        // SAFETY: scoped_env::remove_var touches no process state.
+        unsafe { crate::scoped_env::remove_var(k) }
     }
 
     /// Read one whole HTTP request (headers plus the `Content-Length` body) off `s`.

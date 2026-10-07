@@ -430,6 +430,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("memgrep_ref_{tag}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // WHY: every caller drives a write command whose write gate locks in the global-state dir;
+        // without this override that is the REAL one (TRDD-DGBZVZPP). Per-thread, dies with the test.
+        let state = std::env::temp_dir().join(format!("memgrep_ref_{tag}_{}_state", std::process::id()));
+        std::fs::create_dir_all(&state).unwrap();
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state) };
         dir
     }
 

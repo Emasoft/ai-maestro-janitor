@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "std::env::set_var", reason = "process-global, parallel tests race on it; use crate::scoped_env::set_var (per-thread override), TRDD-DGBZVZPP" },
+    { path = "std::env::remove_var", reason = "process-global, parallel tests race on it; use crate::scoped_env::remove_var (per-thread override), TRDD-DGBZVZPP" },
+]
