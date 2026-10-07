@@ -4,7 +4,7 @@ title: A crashed xdist worker deadlocks the push gate test run instead of failin
 column: todo
 status: tasked
 created: 2026-10-07T14:51:15+0200
-updated: 2026-10-07T14:51:15+0200
+updated: 2026-10-07T14:56:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -28,3 +28,4 @@ Acceptance: a worker crash fails the gate within a bounded time, proven by a rea
 ## Approval log
 
 - 2026-10-07T14:51:15+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+2026-10-07T14:56:30+0200: the gate runs `uv run --extra dev pytest tests/ -x -q --tb=short -n auto --dist loadgroup --timeout=300 --timeout-method=thread` (scripts/publish.py _PYTEST_CMD, line 225); the pre-push hook is git-hooks/pre-push (line 48 runs `uv run python scripts/publish.py --gate`). The only outer wall-clock limit on the hook's pytest run is _TEST_SUITE_TIMEOUT_SEC = 3600 s (scripts/publish.py:185, applied at :1475 and :1733); the hook itself has no timeout. It did not end the 13:43 hang because the run was stopped by hand before 3600 s elapsed (stop time not recorded, so this is inferred). The crashed test was not identified, because the log did not name it. The acceptance test must run the deadlock scenario in a child pytest process with its own hard timeout, so a regression cannot deadlock the suite that runs it.
