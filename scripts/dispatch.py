@@ -907,6 +907,25 @@ def _dedupe_drift_line(name: str, line: str) -> str | None:
     return None
 
 
+
+def _forget_absent_drift_keys(name: str, present: set[str]) -> None:
+    """Forget every seen key of detector `name` that this fire did not emit.
+
+    WHY (TRDD-37H7QFSF): `emit_once` is permanent by key, so a line that printed, cleared for
+    a fire, then came back stayed silent forever -- the reader never learned it had returned.
+    Absence is detected per fire (the detector ran and did not emit the line), never by a
+    time-based expiry, so consecutive repeats stay deduped."""
+    seen_file = state.state_dir() / _DRIFT_SEEN_FILE_NAME
+    try:
+        seen = seen_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    prefix = f"{name}:"
+    for key in seen:
+        if key.startswith(prefix) and key not in present:
+            dedupe.emit_forget(seen_file, key)
+
+
 def _dedupe_drift_text(name: str, text: str) -> str:
     """Apply `_dedupe_drift_line` to every line of `text`, dropping suppressed repeats.
 
@@ -915,17 +934,21 @@ def _dedupe_drift_text(name: str, text: str) -> str:
     INCREASED versus the previous fire -- never at zero, never when a condition cleared
     (the count going down or staying flat says nothing new the reader needs). The
     previous count is read from and written to a per-detector state file so the
-    comparison survives across fires (TRDD-7ZMQSXO6)."""
-    if not text:
-        return text
+    comparison survives across fires (TRDD-7ZMQSXO6). `text` may be empty: a detector that
+    ran and emitted nothing clears its seen keys (TRDD-37H7QFSF)."""
     kept: list[str] = []
     suppressed = 0
+    present: set[str] = set()
     for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not _RESERVED_MARKER_RE.fullmatch(stripped):
+            present.add(f"{name}:{_drift_dedupe_key(stripped)}")
         out_line = _dedupe_drift_line(name, line)
         if out_line is not None:
             kept.append(out_line)
         else:
             suppressed += 1
+    _forget_absent_drift_keys(name, present)
     count_file = state.state_dir() / f"drift-lines-suppressed-count-{name}.txt"
     previous = state.read_int_state(count_file, 0)
     if suppressed > previous:
@@ -1261,6 +1284,11 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
             out = _suppress_stale_memory_markers(out, force=cooldown_active)
         sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _defang_foreign_markers(name, out))))
         sys.stdout.flush()
+    elif proc.returncode == 0:
+        # WHY (TRDD-37H7QFSF): a detector that ran cleanly and emitted nothing is the "condition
+        # cleared" fire -- forget its seen keys so the same line prints again if it returns.
+        # A non-zero exit or a timeout is NOT proof of absence, so those never clear.
+        _dedupe_drift_text(name, "")
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")
         _record_default_outcome(name, f"error:rc={proc.returncode}", started)
