@@ -2,11 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.10] — 2026-10-07
+
+### Bug Fixes
+
+- **design-tracked:** Re-append the design negations when a later root rule hides design/ (TRDD-58Q791FL) (d8313b8)
+- **dispatch:** The resume cue names the same read-first file as the SessionStart injection (TRDD-D7RLXAN1) (0ee31a2)
+- **dispatch:** Prefer the Jev read-first file only when it is not older than the handoff (TRDD-D7RLXAN1) (170b6dc)
+- **dispatch:** Prefer the Jev read-first file when the handoff is its byte copy (TRDD-D7RLXAN1) (63af9ce)
+- **publish:** A crashed xdist worker fails the pytest gate instead of hanging it (TRDD-9KKPFYTP) (a420ccf)
+- **publish:** The pytest session helper also reaps its group on SIGTERM and SIGHUP (TRDD-9KKPFYTP) (4afb25f)
+
+### Documentation
+
+- **trdd:** Card for running the real GitHub 404 test on CI (3d89077)
+- **trdd:** Retract 58Q791FL's excluded-parent flaw, measured as not happening (TRDD-58Q791FL) (ed2d94e)
+- **trdd:** Record 58Q791FL's later-rule case the repair misses (TRDD-58Q791FL) (4104a49)
+- **trdd:** KPS76TQ3's read-only-git lead is ruled out (GIT_OPTIONAL_LOCKS=0 already set) (TRDD-KPS76TQ3) (c5444c2)
+- **trdd:** 2PYQ8VVA step-4 vs push-hook validator difference measured (TRDD-2PYQ8VVA) (a3b5ea2)
+
+### Miscellaneous Tasks
+
+- **trdd:** Record implementation commits and move KJAFABDU to testing (TRDD-58Q791FL, TRDD-KJAFABDU) (50f976c)
+- **trdd:** D7RLXAN1 records the one-target fix 0ee31a20 (TRDD-D7RLXAN1) (4808c59)
+- **trdd:** D7RLXAN1 corrects the third-clear verdict and lists the open items (TRDD-D7RLXAN1) (eb966a2)
+- Give the pytest step the workflow token so the real GitHub 404 test runs (TRDD-MC64BQC1) (7f8c27a)
+- **trdd:** MC64BQC1 to testing with its fix commit, D7RLXAN1 records the resume-cue commits (TRDD-MC64BQC1, TRDD-D7RLXAN1) (62a0863)
+- Pass the GitHub token only to the real-404 test under its own name (TRDD-MC64BQC1) (29c685a)
+- **trdd:** MC64BQC1 records the scoped-token commit (TRDD-MC64BQC1) (7a8092e)
+- **trdd:** 9KKPFYTP to testing with measurements and fix commit (TRDD-9KKPFYTP) (02da59e)
+- **trdd:** 9KKPFYTP records step-1 measurements (TRDD-9KKPFYTP) (2574c72)
+- **trdd:** KPS76TQ3 orphan index.lock from timed-out git calls (TRDD-KPS76TQ3) (e33e876)
+- **trdd:** FQVEILVK records the 9KKPFYTP edit-rule breach (TRDD-FQVEILVK) (7ddaea3)
+
+### Testing
+
+- **jev:** Assert scoring overlap instead of wall-clock speedup (TRDD-KJAFABDU) (80af265)
+- **jev:** Make the scoring-overlap test deterministic with a barrier (TRDD-KJAFABDU) (0b5b93e)
 ## [3.8.9] — 2026-10-07
 
 ### Documentation
 
 - **trdd:** Record the 3.8.8 publish follow-ups (TRDD-FQVEILVK) (d2572ca)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.9 (0a4c0e6)
 
 ### Testing
 
