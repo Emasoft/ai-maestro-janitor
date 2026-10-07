@@ -2435,6 +2435,7 @@ def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     if dry_run:
         cprint(f"  Would run: git-cliff --bump --tag {tag} -o CHANGELOG.md")
         return
+    _drop_unpublished_stale_tags(root, [t for t in (tag, _dependency_tag_name(root, new_ver)) if t])
     run(
         ["git-cliff", "--bump", "--tag", tag, "-o", "CHANGELOG.md"],
         cwd=root,
@@ -2690,6 +2691,24 @@ def _stale_tag_plan(root: Path, tag: str) -> tuple[_TagVerdict, list[str]]:
         return "refuse", lines
     return "retag", [f"  {YELLOW}Tag {tag} is stale (points at {tagged[:8]}, HEAD is {head[:8]}) — "
                      f"re-pointing it (interrupted-publish recovery).{NC}"]
+
+def _drop_unpublished_stale_tags(root: Path, tags: list[str]) -> None:
+    """Delete each LOCAL tag that origin PROVABLY does not have, before git-cliff runs.
+
+    WHY (TRDD-TNNII9S8): an interrupted publish leaves `v<N>` locally. git-cliff
+    treats a tag it can see as an already-released version, so `--bump --tag v<N>`
+    rendered TWO `## [<N>]` sections. Step 10 (`stage_commit_and_push`) re-mints the
+    tag at the bump commit afterwards, so dropping it here loses nothing.
+
+    Only `_remote_tag_state(...) is False` authorizes the delete. A tag ON origin is
+    published history and a tag whose remote state is unknown (None) is unproven:
+    both are left for step 10's `_stale_tag_plan`, which refuses on them.
+    """
+    for tag in tags:
+        if _local_tag_exists(root, tag) and _remote_tag_state(root, tag) is False:
+            cprint(f"  {YELLOW}Dropping stale unpublished local tag {tag} so git-cliff "
+                   f"does not count it as a release (step 10 re-creates it).{NC}")
+            run(["git", "tag", "-d", tag], cwd=root)
 
 
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:

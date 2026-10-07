@@ -89,6 +89,18 @@ def repo_with_origin(tmp_path: Path) -> tuple[Path, Path]:
     _git(repo, "push", "-q", "origin", "main")
     return repo, origin
 
+def _changelog_repo(repo: Path) -> None:
+    """Give `repo` the real cliff.toml and a stale `v1.0.0` tag one commit behind HEAD."""
+    (repo / "cliff.toml").write_text(
+        (Path(__file__).resolve().parent.parent / "cliff.toml").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    _git(repo, "add", "--", "cliff.toml")
+    _git(repo, "commit", "-q", "-m", "feat: first")
+    _git(repo, "tag", "-a", "v1.0.0", "-m", "Release v1.0.0")  # the interrupted run's tag
+    (repo / "b.txt").write_text("later work\n", encoding="utf-8")
+    _git(repo, "add", "--", "b.txt")
+    _git(repo, "commit", "-q", "-m", "feat: later work")  # conventional, so cliff renders it
+
 
 def test_rev_parse_commit_peels_an_annotated_tag_to_its_commit(repo_with_origin) -> None:
     """`_rev_parse_commit` must return the COMMIT an annotated tag points at, not the tag object's own sha."""
@@ -279,3 +291,28 @@ def test_unreadable_comparison_leaves_the_tag_alone(repo_with_origin, monkeypatc
     # Restored implementation confirms nothing moved.
     monkeypatch.undo()
     assert publish._rev_parse_commit(repo, "v1.0.0") == first
+
+
+@pytest.mark.real_subprocess("git-cliff")
+def test_changelog_has_one_section_when_a_stale_unpublished_tag_exists(repo_with_origin) -> None:
+    """TNNII9S8: git-cliff must not see an unpublished stale tag and emit two `## [1.0.0]` sections."""
+    repo, _ = repo_with_origin
+    _changelog_repo(repo)
+
+    publish.stage_changelog(repo, "1.0.0", False)
+
+    text = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert text.count("## [1.0.0]") == 1, text
+    assert not publish._local_tag_exists(repo, "v1.0.0"), "stale tag must be dropped for step 10 to re-mint"
+
+
+@pytest.mark.real_subprocess("git-cliff")
+def test_changelog_step_keeps_a_tag_that_is_published_on_origin(repo_with_origin) -> None:
+    """Only PROVEN-unpublished tags are dropped; a published tag stays for step 10 to BLOCK on."""
+    repo, _ = repo_with_origin
+    _changelog_repo(repo)
+    _git(repo, "push", "-q", "origin", "v1.0.0")
+
+    publish.stage_changelog(repo, "1.0.0", False)
+
+    assert publish._local_tag_exists(repo, "v1.0.0")
