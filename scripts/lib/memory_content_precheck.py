@@ -1136,6 +1136,13 @@ def atomize_defect(text: str) -> str:
     if any(memory_edit_verify._ATOM_MARKER_RE.match(ln) for ln in text.splitlines()):
         return ""  # >=1 marker → the skill skips it ("already atomized")
     _fm, body = _split_page(text)
+    # WHY (TRDD-BRW49ELM): the SessionStart-seeded empty overview stub carries one prose line,
+    # so `_has_substantive_body` is true and the heartbeat dispatched a full agent run that
+    # abstained with zero changes. The stub says so itself; decline it HERE (the single
+    # candidacy predicate) so gate and candidate lister agree. Must stay in sync with the
+    # seed text in scripts/hooks/on-session-start.py.
+    if "was seeded empty by SessionStart" in body:
+        return ""
     if not _has_substantive_body(body):
         return ""  # free-prose-leaf-no-distinct-facts — nothing markable
     return "free-prose"
