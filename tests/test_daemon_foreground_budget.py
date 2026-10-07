@@ -162,3 +162,133 @@ def test_zero_budget_defers_every_non_floor_task_immediately(
     daemon._run_due_tasks([a, tick], yielded=set())
     assert a._last_run() == 0, "non-floor task must be deferred even before any run"
     assert tick._last_run() > 0, "floor task is unaffected by a 0 budget"
+
+
+
+# --- overrun watch (card 6CF3L7IJ): record a budget overrun WHILE the body still runs ---
+
+
+def _log_text() -> str:
+    p = state.log_dir() / "daemon.log"
+    return p.read_text() if p.exists() else ""
+
+
+def _wait_for(pred: Any, deadline_s: float = 10.0) -> bool:
+    """Poll, never sleep a fixed time: the assertion must hold on a loaded host."""
+    end = time.time() + deadline_s
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.02)
+    return pred()
+
+
+@pytest.fixture
+def overrun_watch(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    monkeypatch.setattr(daemon, "_FOREGROUND_BUDGET_SEC", 0.2)
+    monkeypatch.setattr(daemon, "_OVERRUN_WATCH_INTERVAL_S", 0.05)
+    watch = daemon._OverrunWatchThread()
+    watch.start()
+    yield watch
+    watch.shutdown(5)
+    daemon._overrun_runs.clear()
+
+
+def test_overrun_line_and_stamp_appear_before_body_returns(overrun_watch: Any, isolated_env: Path) -> None:
+    """The 'still running' line and the stamp exist while the body is still inside fn()."""
+    seen: dict[str, Any] = {}
+
+    def body() -> None:
+        stamp = isolated_env / "task-overrun.slow-one.ts"
+        seen["ok"] = _wait_for(lambda: "task 'slow-one' still running" in _log_text() and stamp.exists())
+        seen["stamp"] = stamp.read_text() if stamp.exists() else ""
+        time.sleep(0.4)  # extra wakes: the line must still appear only once
+        seen["done_logged"] = "task 'slow-one' done" in _log_text()
+
+    daemon.Task("slow-one", 0, body).run()
+    assert seen["ok"], "line and stamp must exist before the body returns"
+    assert not seen["done_logged"]
+    pid, name, start = seen["stamp"].split(" ")
+    assert (int(pid), name) == (__import__("os").getpid(), "slow-one") and int(start) > 0
+    assert _log_text().count("task 'slow-one' still running") == 1
+    assert "(budget 0.2s)" in _log_text()
+    assert not (isolated_env / "task-overrun.slow-one.ts").exists(), "stamp removed after the run"
+
+
+def test_fast_task_produces_no_overrun_line_or_stamp(overrun_watch: Any, isolated_env: Path) -> None:
+    """A body under budget leaves neither a line nor a stamp."""
+    daemon.Task("quick", 0, lambda: time.sleep(0.01)).run()
+    time.sleep(0.2)  # negative assertion: give the watch several wakes to (wrongly) fire
+    assert "still running" not in _log_text()
+    assert not list(isolated_env.glob("task-overrun.*"))
+
+
+def test_raising_body_still_clears_registration(overrun_watch: Any) -> None:
+    """An exception in the body must not leave the run registered."""
+
+    def boom() -> None:
+        raise RuntimeError("x")
+
+    daemon.Task("boomer", 0, boom).run()
+    assert daemon._overrun_runs == {}
+
+
+def test_own_thread_task_is_covered(overrun_watch: Any) -> None:
+    """A Task.run on another thread (the rotator tick's shape) is reported too."""
+    import threading
+
+    t = threading.Thread(
+        target=daemon.Task("oauth-rotator-tick", 0, lambda: time.sleep(0.6), own_thread=True).run
+    )
+    t.start()
+    assert _wait_for(lambda: "task 'oauth-rotator-tick' still running" in _log_text())
+    t.join()
+
+
+def test_bulk_task_produces_no_overrun_line(overrun_watch: Any) -> None:
+    """The bulk child path calls task.fn(), never Task.run, so nothing is registered."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(daemon._run_task_child)))
+    called = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert "fn" in called and "run" not in called
+    assert daemon._run_task_child("noop-overrun-bulk") == 0
+    time.sleep(0.2)
+    assert daemon._overrun_runs == {}
+    assert "still running" not in _log_text()
+
+
+def test_watch_thread_survives_a_failing_pass(
+    overrun_watch: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One exception inside a pass is logged once and the thread keeps watching."""
+    real = daemon._overrun_stamp_path
+    calls = {"n": 0}
+
+    def flaky(name: str) -> Path:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("boom")
+        return real(name)
+
+    monkeypatch.setattr(daemon, "_overrun_stamp_path", flaky)
+    daemon.Task("flaky-run", 0, lambda: _wait_for(lambda: "task 'flaky-run' still running" in _log_text())).run()
+    assert "overrun-watch: pass failed" in _log_text()
+    assert _log_text().count("overrun-watch: pass failed") == 1
+    assert "task 'flaky-run' still running" in _log_text()
+    assert overrun_watch.is_alive()
+
+
+def test_start_sweep_removes_stamp_with_dead_pid_keeps_own(isolated_env: Path) -> None:
+    """A stamp from a previous daemon (dead pid) is removed at start; this daemon's stays."""
+    import os
+
+    dead = isolated_env / "task-overrun.old.ts"
+    mine = isolated_env / "task-overrun.mine.ts"
+    dead.write_text("999999 old 1700000000")
+    mine.write_text(f"{os.getpid()} mine 1700000000")
+    daemon._overrun_sweep_stale()
+    assert not dead.exists()
+    assert mine.exists()

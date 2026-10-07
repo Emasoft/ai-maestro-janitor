@@ -2920,12 +2920,18 @@ class Task:
         state.log_line("daemon", f"task '{self.name}' starting")
         t0 = time.time()
         failed = False
+        # WHY (6CF3L7IJ): lets `_OverrunWatchThread` report this run WHILE it is going; the
+        # budget line in `_run_due_tasks` only appears after the body returns. Bulk-lane
+        # children never come through here (`_run_task_child` calls `fn()`), so they are excluded.
+        _overrun_register(self.name, t0)
         try:
             self.fn()
         except Exception as exc:  # noqa: BLE001 - never propagate a task error
             failed = True
             state.log_line("daemon", f"task '{self.name}' raised: {exc}")
         finally:
+            # First, so nothing below can leave a finished run registered.
+            _overrun_clear(self.name)
             # Wall-clock elapsed, kept as a float — the budget accumulator (below)
             # under-counted by up to 0.999s per body under the old int truncation,
             # and N sub-second bodies (e.g. reap-only passes) never accrued at all.
@@ -3563,6 +3569,98 @@ class _ProcessSizeWatchThread(threading.Thread):
                 # not end the thread.
                 state.log_line("daemon", f"process-size-watch: pass failed: {exc}")
 
+_OVERRUN_WATCH_INTERVAL_S = 5.0
+# thread id -> (task name, start epoch) of every `Task.run` in flight; guarded by the lock.
+_overrun_runs: dict[int, tuple[str, float]] = {}
+_overrun_lock = threading.Lock()
+
+
+def _overrun_stamp_path(name: str) -> Path:
+    return gs.global_state_dir() / f"task-overrun.{name}.ts"
+
+
+def _overrun_register(name: str, t0: float) -> None:
+    with _overrun_lock:
+        _overrun_runs[threading.get_ident()] = (name, t0)
+
+
+def _overrun_clear(name: str) -> None:
+    """Drop this thread's run and its stamp. Called from `Task.run`'s `finally`, so it must
+    never raise: a stamp that cannot be removed is only a stale diagnostic file."""
+    with _overrun_lock:
+        _overrun_runs.pop(threading.get_ident(), None)
+        with contextlib.suppress(OSError):
+            _overrun_stamp_path(name).unlink()
+
+def _overrun_sweep_stale() -> None:
+    """At daemon start, drop stamps left by a previous daemon (first field is its pid).
+
+    WHY: a daemon killed mid-overrun never ran `_overrun_clear`, and a stamp that outlives
+    its run would claim a stall that is over. Stamp = `<pid> <task> <start epoch>`."""
+    for stamp in gs.global_state_dir().glob("task-overrun.*.ts"):
+        try:
+            owner = stamp.read_text(encoding="utf-8").split(" ", 1)[0]
+            if owner != str(os.getpid()):
+                stamp.unlink()
+        except OSError as exc:
+            state.log_line("daemon", f"overrun-watch: stale stamp sweep failed: {exc}")
+
+
+class _OverrunWatchThread(threading.Thread):
+    """Records a task run that outlives the foreground budget WHILE it is still running.
+
+    WHY (card 6CF3L7IJ): the 30 s budget is only reported after a long body returns, so a
+    731 s stall left no trace while it happened. This only observes: it kills, interrupts
+    and reschedules nothing. It never calls the heartbeat tick (`no_heartbeat`), so a stuck
+    main loop stays detectable. Covers every `Task.run`, including the own-thread rotator
+    tick, because registration happens inside `Task.run` itself."""
+
+    def __init__(self) -> None:
+        super().__init__(name="overrun-watch", daemon=True)
+        self._stop_evt = threading.Event()
+        self._reported: set[tuple[int, float]] = set()
+        self._failure_logged = False
+
+    def shutdown(self, timeout: float) -> None:
+        self._stop_evt.set()
+        self.join(timeout)
+
+    def _pass(self) -> None:
+        now = time.time()
+        with _overrun_lock:
+            snapshot = dict(_overrun_runs)
+        self._reported.intersection_update({(ident, t0) for ident, (_, t0) in snapshot.items()})
+        for ident, (name, t0) in snapshot.items():
+            if now - t0 < _FOREGROUND_BUDGET_SEC:
+                continue
+            # Re-check under the lock `_overrun_clear` takes: a run that ended after the
+            # snapshot must not get a stamp written after its removal (stale stamp).
+            with _overrun_lock:
+                if _overrun_runs.get(ident) != (name, t0):
+                    continue
+                state.atomic_write(_overrun_stamp_path(name), f"{os.getpid()} {name} {int(t0)}")
+            if (ident, t0) in self._reported:
+                continue
+            self._reported.add((ident, t0))
+            state.log_line(
+                "daemon",
+                f"task '{name}' still running after {int(now - t0)}s "
+                f"(budget {_FOREGROUND_BUDGET_SEC}s)",
+            )
+
+    def run(self) -> None:
+        _thread_state.no_heartbeat = True
+        while not self._stop_evt.wait(_OVERRUN_WATCH_INTERVAL_S):
+            try:
+                self._pass()
+            except Exception as exc:  # noqa: BLE001
+                # A broken watch must never reach the main loop; say so once, keep waking
+                # on the normal interval (no tight retry loop, no log flood).
+                if not self._failure_logged:
+                    self._failure_logged = True
+                    with contextlib.suppress(Exception):
+                        state.log_line("daemon", f"overrun-watch: pass failed: {exc}")
+
 _PLUGIN_UPDATE_LOCK_TIMEOUT_SEC = 30
 _PLUGIN_UPDATE_MAX_FAILS = 2
 _PLUGIN_UPDATE_SKIP_SEC = 6 * 3600
@@ -3902,6 +4000,10 @@ def main() -> int:
     ticker.start()
     size_watch = _ProcessSizeWatchThread()
     size_watch.start()
+    # WHY (6CF3L7IJ): observes task runs that outlive the foreground budget while they run.
+    _overrun_sweep_stale()
+    overrun_watch = _OverrunWatchThread()
+    overrun_watch.start()
     try:
         while _running:
             # Call-time knobs (enabled(), …) can change mid-run even though the
@@ -4078,6 +4180,7 @@ def main() -> int:
         ticker.shutdown(15)
         # Daemon thread: without an explicit stop, a pass mid-scan or mid-notify at exit is killed part-way.
         size_watch.shutdown(5)
+        overrun_watch.shutdown(5)
         if exit_reason == "kill-switch":
             # A DELIBERATE stop, so the OS keepalive must go — launchd `KeepAlive: true`
             # / `ThrottleInterval: 30` and systemd `Restart=always` would otherwise
