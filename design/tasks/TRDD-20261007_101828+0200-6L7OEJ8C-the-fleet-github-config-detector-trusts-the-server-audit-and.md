@@ -4,7 +4,7 @@ title: The fleet GitHub-config detector trusts the server audit and re-raises NO
 column: todo
 status: tasked
 created: 2026-10-07T10:18:28+0200
-updated: 2026-10-07T10:18:28+0200
+updated: 2026-10-07T10:19:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -30,6 +30,7 @@ scripts/detectors/fleet-github-config.py::_read_findings takes the newer of two 
 ## Task
 
 In the detector, before surfacing or proposing a NO_PR_REVIEW finding for the current repo, drop it when require_pull_request_for(slug) is False. Failing test first: a server findings file newer than the local one that carries NO_PR_REVIEW for the current repo, with the repo's PRRD saying false, yields no line and no proposal; with the PRRD saying true it still does.
+2026-10-07 review additions, part of this task: (1) apply the predicate to EVERY slug the detector surfaces or proposes for, in one place, and print how many server findings were dropped; (2) an undetermined predicate must NOT drop a finding: require_pull_request_for returns False on an unknown login or any exception, so the detector needs a tri-state (stated false or confirmed own repo = drop; could not determine = keep) with a test for the undetermined case; (3) say what happens to fleet-github-config-seen.txt and the suppressed-count file when a finding is dropped; (4) compare generated_at as numbers when both parse as numbers, since a string compare of an ISO value against an epoch integer ignores time; (5) the claim that the server audit ignores the ruling rests on its output file only, its code was not read. Also noted: the janitor's own findings file is from 2026-10-04 and its audit last-run stamp from July, because the server owns the chore; if the server stops, the detector reads a stale local file with zero findings.
 
 ## Not in this card
 
