@@ -1240,9 +1240,15 @@ def _run(cmd: list[str], *, timeout: int = 10) -> str:
 #:
 #: The deadlines GROW rather than repeat, because the failure being retried is CONTENTION: a
 #: second 15 s slice under the same load is the least informative thing to spend. Three attempts
-#: total, worst case ~90 s of deadline plus ~6 s of backoff, and ONLY on the rare path where
-#: iTerm is up (a host with no iTerm never probes at all).
-_ITERM_PROBE_TIMEOUTS = (15.0, 30.0, 45.0)
+#: total, and ONLY on the rare path where iTerm is up (a host with no iTerm never probes at all).
+#:
+#: Raised from (15, 30, 45) to (30, 60, 90) on 2026-10-07 on the owner's instruction: "the
+#: janitor continue notifying that the osascript goes timeouting because there are too many
+#: sessions of iterm to enumerate.. what is the problem? just increase the timeout!" The old
+#: ladder still timed out on a host with about 35 sessions at load average 40 to 60. New worst
+#: case: 30 + 60 + 90 = 180 s of deadline plus 2 + 4 = 6 s of backoff = 186 s, reached only when
+#: every attempt fails.
+_ITERM_PROBE_TIMEOUTS = (30.0, 60.0, 90.0)
 #: Backoff BETWEEN attempts. Deliberately short: this runs inside a heartbeat scan, and the point
 #: is to outlast a scheduling spike, not to wait out a genuine denial (which never recovers).
 _ITERM_PROBE_BACKOFF_S = (2.0, 4.0)
