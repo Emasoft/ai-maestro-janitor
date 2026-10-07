@@ -14,7 +14,9 @@ Modes:
   --patch/--minor/--major Force a specific bump type (overrides auto-detection).
 
 Pipeline stages (all fail-fast — any non-zero exit aborts):
-   0. Bypass guard — reject CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
+   0. Bypass guard — reject PLUGIN_SKIP_*, CPV_SKIP_*, SKIP_*, NO_VERIFY env vars
+      (only PLUGIN_SKIP_GITHUB_INTEGRITY and CPV_SKIP_GH_AUTH_CHECK are exempt;
+      the legacy CPV_SKIP_GITHUB_INTEGRITY is now refused)
    1. Check working tree is clean
    2. Lint files (ruff scripts/ tests/ + mypy scripts/ + pyright — ruff and
       pyright are parity with ci.yml Lint job; mypy is gate-only, catching a
@@ -1500,9 +1502,10 @@ def stage_bypass_guard() -> None:
     Two explicit infrastructure exemptions remain — both are read-only
     overrides used by CPV's own integrity / auth subsystems and never
     skip a gate:
-        * ``CPV_SKIP_GITHUB_INTEGRITY=1`` — used to bypass GitHub-anchored
+        * ``PLUGIN_SKIP_GITHUB_INTEGRITY=1`` — used to bypass GitHub-anchored
           integrity check (see cpv_integrity.py). The integrity check is
-          a defence against tampering, NOT a publish gate.
+          a defence against tampering, NOT a publish gate. The legacy name
+          ``CPV_SKIP_GITHUB_INTEGRITY`` is now refused like any other skip var.
         * ``CPV_SKIP_GH_AUTH_CHECK=1`` — used by `_ensure_gh_auth` to bypass
           the `gh auth status` round-trip on flaky networks. Auth still
           has to work for the actual `git push` / `gh release create`;
@@ -1513,7 +1516,11 @@ def stage_bypass_guard() -> None:
     """
     cprint(f"\n{BOLD}[0/11] Checking for bypass attempts...{NC}")
     # Explicit infrastructure exemptions — see docstring above.
-    exemptions = {"CPV_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
+    # WHY: CPV renamed CPV_SKIP_GITHUB_INTEGRITY to PLUGIN_SKIP_GITHUB_INTEGRITY
+    # (CPV card TRDD-bbff5bc5); 5.16.2 honours the new name, so exempting only the
+    # old one left the working name refused at step 0. The exemption exists only
+    # because CPV's self-integrity check misreads a uvx install (TRDD-CWKM5218).
+    exemptions = {"PLUGIN_SKIP_GITHUB_INTEGRITY", "CPV_SKIP_GH_AUTH_CHECK"}
     forbidden_prefixes = ("PLUGIN_SKIP_", "CPV_SKIP_", "SKIP_")
     forbidden_exact = {"NO_VERIFY"}
     attempted = [
