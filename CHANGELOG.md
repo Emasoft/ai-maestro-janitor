@@ -2,6 +2,64 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.7] — 2026-10-07
+
+### Bug Fixes
+
+- **memgrep:** Forbid process-wide env setters in tests and isolate the last unisolated tests (TRDD-DGBZVZPP) (64fb9de)
+- **detectors:** Hook-timeout-scan survives non-object lines, caps its output, and is on the roster (TRDD-QX59MA4H) (fa5b8a2)
+- **detectors:** Hook-timeout-scan prints killed-hook lines before near-timeout ones (TRDD-QX59MA4H) (9580685)
+- **detectors:** Fleet-github-config drops NO_PR_REVIEW where the repo's own rule says no pull request (TRDD-6L7OEJ8C) (ba7f26c)
+- **detectors:** Fleet-github-config survives a malformed payload and a future-dated one (TRDD-6L7OEJ8C) (bd80987)
+- **memgrep:** Merge/split verbs refuse downward cross-scope pairs (TRDD-DAL802TI) (b5e8ae5)
+- **detectors:** Fleet-github-config logs a rejected future-dated or malformed payload (TRDD-6L7OEJ8C) (3904fe8)
+- **memgrep:** Cross-scope guard classifies canonical-then-raw (TRDD-DAL802TI) (2a600af)
+- **daemon:** The overrun watch does no disk I/O under its lock and measures with the monotonic clock (TRDD-6CF3L7IJ) (4dd4e3b)
+- **daemon:** A failing overrun stamp write no longer swallows the still-running line (TRDD-6CF3L7IJ) (7dddf71)
+- **memgrep:** Clear two clippy errors in the symlink-alias split test (TRDD-20JQQVDQ) (dbf2f0c)
+
+### Documentation
+
+- **trdd:** FQVEILVK says 3.8.6 is published and what a resumed session does first (TRDD-FQVEILVK) (996e0ab)
+- **trdd:** FQVEILVK marks the 3.8.5 clauses as history and the stopped agents as done (TRDD-FQVEILVK) (b2d117c)
+- **trdd:** Keep the plain-edit decision current on FQVEILVK (TRDD-FQVEILVK) (6daec19)
+- **trdd:** FQVEILVK records that 3.8.6 is installed (TRDD-FQVEILVK) (d625489)
+- **trdd:** FQVEILVK records the items the pre-clear review found on no card (TRDD-FQVEILVK) (e143eee)
+- **trdd:** FQVEILVK's next action points at the review's four items (TRDD-FQVEILVK) (77c4f87)
+- **trdd:** QX59MA4H leaves blocked for todo, its blocker was archived (TRDD-QX59MA4H) (a1f3403)
+- Add TRDD-6L7OEJ8C — the fleet config detector re-raises NO_PR_REVIEW from the server audit (1ef7267)
+- **trdd:** 6L7OEJ8C takes the review's conditions and proposal 0JTGLSXE is refused (TRDD-6L7OEJ8C) (55dfbed)
+- **trdd:** 6L7OEJ8C corrects its own additions after review (TRDD-6L7OEJ8C) (7b06370)
+- **trdd:** FQVEILVK records the foreign memgrep edits and today's merges (TRDD-FQVEILVK) (8e7d379)
+- **trdd:** FQVEILVK's next action points at the foreign-edits line (TRDD-FQVEILVK) (9181d51)
+- Add TRDD-20JQQVDQ — the memgrep guard fails open on a relative not-yet-existing split target (9764705)
+- **trdd:** 20JQQVDQ takes the review's corrections (TRDD-20JQQVDQ) (95a295b)
+- **trdd:** 20JQQVDQ's symptom heading matches its evidence (TRDD-20JQQVDQ) (7fd8665)
+- **trdd:** FQVEILVK says the foreign memgrep edits are committed and lists what landed since (TRDD-FQVEILVK) (42575ea)
+- **trdd:** Record that dbf2f0c9 is a gate fix, not 20JQQVDQ's fix, and the accepted edit breach (TRDD-FQVEILVK) (310e0c0)
+
+### Features
+
+- **detectors:** Hook-timeout-scan emits HOOK-001 and HOOK-002 (TRDD-QX59MA4H) (ab1548c)
+- **daemon:** Record a task that outlives the foreground budget while it runs (TRDD-6CF3L7IJ) (109d364)
+
+### Miscellaneous Tasks
+
+- **memory:** Merge the CPV .claude gitignore false-positive page into the CPV publish-blocker page (0af97dc)
+- **memory:** Split an over-budget atom on the CPV and release pipeline page (7817d49)
+- **memory:** Drop memory-system's duplicate See also heading and retitle the CPV line in MEMORY.md (927288d)
+- **memory:** Give the merged CPV gitignore stub page its metadata block (280b6f2)
+
+### Testing
+
+- **memgrep:** Lint --apply-fixes uses the per-scope lock and ledger on a recognised scope (TRDD-1T0W2ZVW) (610f569)
+- **memgrep:** Pin cross-scope guard classification through a symlink alias (TRDD-DAL802TI) (ab7e60c)
+- **memgrep:** Report the unix-only alias pin as a skip on non-unix (TRDD-DAL802TI) (b69a5d3)
+
+### Merge
+
+- B9 Rust batch — env-setter ban and per-scope lock test (TRDD-DGBZVZPP, TRDD-1T0W2ZVW) (8d227ce)
+- B10 hook-timeout-scan detector (TRDD-QX59MA4H) (4e9a469)
 ## [3.8.6] — 2026-10-07
 
 ### Bug Fixes
@@ -19,6 +77,10 @@ All notable changes to this project will be documented in this file.
 - **trdd:** FQVEILVK names the built branches and records the plain-edit decision (TRDD-FQVEILVK) (56ed704)
 - **trdd:** FQVEILVK records the red CI on 3.8.5 and that 3.8.6 is the install target (TRDD-FQVEILVK) (db91196)
 - **trdd:** Record 3.8.5 and the 3.8.6 content on the board (TRDD-FQVEILVK) (a6830fa)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.6 (e8e0e98)
 
 ### Styling
 
