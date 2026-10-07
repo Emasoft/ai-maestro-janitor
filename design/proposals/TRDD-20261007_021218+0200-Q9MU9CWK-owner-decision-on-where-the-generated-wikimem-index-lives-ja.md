@@ -1,37 +1,29 @@
 ---
-trdd-id: UHMB7BZW
-title: Generated wikimem index block must not live in the git-tracked CLAUDE.md
-column: approval
-status: tasked
-created: 2026-10-07T02:08:27+0200
-updated: 2026-10-07T02:11:35+0200
+trdd-id: Q9MU9CWK
+title: Owner decision on where the generated wikimem index lives (janitor#328)
+column: proposal
+status: proposed
+created: 2026-10-07T02:12:18+0200
+updated: 2026-10-07T02:12:49+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
 min-approval-requirement: user
 assignee: main-agent@ai-maestro-janitor
-mandate: true
-mandated-by: none
 approved: false
-approval-judge: main-agent@ai-maestro-janitor
-approval-datetime: 2026-10-07T02:08:27+0200
 relevant-rules: [7.1, 10.1]
-
 ---
 
-# Generated wikimem index block must not live in the git-tracked CLAUDE.md
+# Owner decision on where the generated wikimem index lives (janitor#328)
 
 ## Approval log
 
-- 2026-10-07T02:08:27+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
-- 2026-10-07T02:10:38+0200 — column → approval. owner decision on golden PRRD rules G7.1/G10.1
-
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
+## STATE
 
 NEXT ACTION: owner picks (a), (b) or (c). (b) and (c) then need: verify the mechanism against current Claude Code docs, consult the fable advisor, tests first.
 OWNER DECISION NEEDED — three options: (a) keep G7.1/G10.1 and close #328 with a comment stating that CLAUDE.md still changes whenever PROJECT memory changes because the PRRD requires the index there; (b) keep G7.1/G10.1 and narrow the block so it changes only when a ROOT topic changes (G10.1 requires root topics only), cutting most of the residual churn without a rules change; (c) amend G7.1/G10.1 and move the block out of the tracked file — stating whether the project-map fence, which G10.1 also requires, moves too, since it has the same tracked-file problem.
-CONFLICT TO RESOLVE FIRST: PRRD G7.1 lists the janitor-generated wikimem index fence as one of the five elements CLAUDE.md MUST contain, and G10.1 requires every root topic to appear in the CLAUDE.md wikimem index. Both are GOLDEN (user-only). Moving the block out needs a user-approved proposal amending G7.1 and G10.1 before implementation.
-Candidate mechanisms to evaluate: (a) a gitignored CLAUDE.local.md that Claude Code loads natively; (b) an import line in CLAUDE.md of a gitignored generated file; (c) a SessionStart hook injecting the index as additional context with no file at all. The implementer must verify against current Claude Code docs which is loaded.
+Replaces TRDD-UHMB7BZW, which was minted pre-approved by the main session and could not be moved back to proposals.
+Golden PRRD rules G7.1 and G10.1 require the wikimem index fence in CLAUDE.md and are user-only, so no agent may decide this.
 
 ## Background
 
@@ -41,9 +33,9 @@ Still true: the block changes whenever PROJECT memory changes, so the tracked fi
 
 ## Acceptance
 
-- [ ] The block is no longer written into any tracked file
-- [ ] An existing block in a tracked CLAUDE.md is removed once (migration) without touching other content
-- [ ] Claude still sees the index at session start (verified live)
-- [ ] A test pins that the plugin never writes into a tracked file
 - [ ] Owner chose (a), (b) or (c), recorded verbatim in this card
+- [ ] If (b) or (c): the block changes only on root-topic changes (b) or is no longer written into any tracked file (c)
+- [ ] If (c): an existing block in a tracked CLAUDE.md is removed once (migration) without touching other content
+- [ ] If (b) or (c): Claude still sees the index at session start (verified live)
+- [ ] If (b) or (c): a test pins the chosen behaviour
 - [ ] janitor#328 closed with a comment naming the commits
