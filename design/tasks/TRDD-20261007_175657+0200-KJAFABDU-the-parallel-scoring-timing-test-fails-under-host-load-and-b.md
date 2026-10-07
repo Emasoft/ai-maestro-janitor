@@ -1,10 +1,10 @@
 ---
 trdd-id: KJAFABDU
 title: The parallel-scoring timing test fails under host load and blocks pushes
-column: todo
+column: testing
 status: tasked
 created: 2026-10-07T17:56:57+0200
-updated: 2026-10-07T17:56:57+0200
+updated: 2026-10-07T19:05:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T17:56:57+0200
+implementation-commits: [80af265f]
 ---
 
 # The parallel-scoring timing test fails under host load and blocks pushes
