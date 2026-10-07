@@ -341,7 +341,7 @@ Gate `3c48d054`'s daemon primary read behind an opt-in env var. R2 makes it unne
 2026-10-05 CORRECTION to the line above: blocked-by is back to empty and TRDD-PHS3DIBD is listed under npt instead, next to the two other prerequisite cards. A non-empty blocked-by on a card in dev is a lint error (GRAPH-BLOCKED-NOT-BLOCKED); this umbrella carries its open prerequisites in npt.
 2026-10-05 — prerequisite TRDD-PHS3DIBD has its root-cause fix landed (unpublished) and is in testing, waiting on the first janitor clear on a release that carries it. This umbrella stays blocked on that same live event and on its other prerequisites; it is NOT unblocked.
 2026-10-07: moved dev -> blocked before the 3.8.2 release; open blockers 5MOX0FPO, DS3WDTPV; the shipped parts of this umbrella ship independently.
-2026-10-07: This card does not gate the 3.8.2 release: its blockers are released or wait on the release themselves. Restore to dev is manual (no unblock-when): clear blocked-by when the children finish. TRDD-5MOX0FPO is probably done (its NEXT ACTION deletes `_release_summary_hold`, which is already gone from the tree) and waits for a human close; once closed, DS3WDTPV is the only blocker.
+2026-10-07: This card does not gate the 3.8.2 release: it is blocked, not in a work column. Restore to dev is manual: clear blocked-by when the children finish. Blockers: 5MOX0FPO (human_review; the symbol its NEXT ACTION would delete, `_release_summary_hold`, is absent from scripts/ and tests/ — a human judges whether its acceptance is met) and DS3WDTPV (testing).
 
 ## Release status
 
