@@ -992,13 +992,25 @@ def human_activity_age(root: str, now: int) -> int | None:
 
 def transcript_human_idle(path: str, now: int) -> int | None:
     """Seconds since the newest HUMAN (or agent-typed) turn of ONE named transcript, ``None``
-    when the file is absent. TRDD-QONEBKGK: the handoff composer is handed the PREVIOUS
-    session's transcript path, which is no longer the project's newest file after a clear, so
-    the project-wide ``human_activity_age`` would measure the wrong session."""
+    when the file is absent OR its read window holds no prompt record at all. TRDD-QONEBKGK:
+    the handoff composer is handed the PREVIOUS session's transcript path, which is no longer
+    the project's newest file after a clear, so the project-wide ``human_activity_age`` would
+    measure the wrong session."""
     mtime_age = _age(path, now)
     if mtime_age is None:
         return None
-    return human_activity_age_from_tail(_tail_lines(path), now=now, fallback_age=mtime_age)
+    tail = _tail_lines(path)
+    # WHY: with no prompt in the window an unattended run would otherwise report its last
+    # assistant/tool line (or the file mtime) as "idle", which understates real idle; unknown
+    # is the honest answer, so the caller prints "idle unknown".
+    for raw in tail:
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and _is_prompt_record(rec):
+            return human_activity_age_from_tail(tail, now=now, fallback_age=mtime_age)
+    return None
 
 
 def transcript_age(root: str, now: int) -> int | None:

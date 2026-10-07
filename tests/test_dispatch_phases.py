@@ -4325,6 +4325,36 @@ def test_outcome_stamp_distinguishes_decline_from_completion(
     assert "error:rc=3" in _outcome("fake-broken")
 
 
+
+def test_drift_line_reprints_after_the_condition_cleared_for_a_fire(
+    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRDD-37H7QFSF: present,present,present prints the line once (consecutive repeats stay
+    deduped); present,ABSENT,present prints it twice (absence is detected per fire, never by
+    time). Driven through `_run_detector`, the production path."""
+    dispatch = _import_dispatch()
+    monkeypatch.setattr(dispatch, "_HERE", tmp_path)
+    monkeypatch.setattr(dispatch, "_detector_is_due", lambda name, interval: True)
+    flag = tmp_path / "present.flag"
+    _fake_detector(
+        tmp_path / "detectors", "fake-drift",
+        f"import os\nif os.path.exists({str(flag)!r}):\n    print('[fake] thing is wrong')",
+    )
+
+    def fire(present: bool) -> str:
+        flag.unlink(missing_ok=True)
+        if present:
+            flag.write_text("x", encoding="utf-8")
+        return _capture_stdout(lambda: dispatch._run_detector("fake-drift", interval=1))
+
+    line = "[fake] thing is wrong"
+    steady = [fire(True) for _ in range(3)]
+    assert sum(line in out for out in steady) == 1, steady
+
+    flapping = [fire(False), fire(True)]
+    assert line in flapping[1], "a line that cleared for a fire must print again when it returns"
+
+
 def test_keep_going_nudge_payload_carries_the_board(env_isolation: dict) -> None:
     """End-to-end: the emitted [janitor-resume] payload names the open cards."""
     dispatch = _import_dispatch()

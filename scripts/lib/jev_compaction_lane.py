@@ -1132,6 +1132,12 @@ def run_compact(
     except subprocess.TimeoutExpired:
         return None, True
     if proc.returncode == EXIT_OK:
+        # WHY (TRDD-JIYBKY27): the auth-finding dedupe key was written once and never cleared,
+        # so a SECOND distinct auth failure after the key had worked again stayed silent. A
+        # successful compaction proves the key/credits recovered, so forget every auth key
+        # here -- this is the ONE function both real callers share, so the clear cannot be
+        # missed by one of them. The seen-file holds only auth keys (AUTH_SEEN_FILE).
+        (sd / AUTH_SEEN_FILE).unlink(missing_ok=True)
         # TRDD-DQXMND59 stage 3b item A: moved here from `run_compact_with_fallback`'s own
         # success branch (the ONE function both real callers share) -- see this function's own
         # docstring for why the hook losing both records was the bug.
