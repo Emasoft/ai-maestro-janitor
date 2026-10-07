@@ -157,6 +157,58 @@ def test_atomize_refused_page_is_omitted(tmp_path):
     assert out.strip() == ""
 
 
+
+def test_atomize_declines_a_scope_holding_only_the_seeded_overview_stub(tmp_path):
+    """TRDD-BRW49ELM: the SessionStart-seeded empty overview stub is not an atomize
+    candidate. Its one prose line made `_has_substantive_body` true, so the heartbeat
+    dispatched a full agent run that abstained with zero changes."""
+    (tmp_path / "proj-local-overview.md").write_text(
+        "---\nname: proj-local-overview\n"
+        "description: \"LOCAL memory scope entry point for proj / empty LOCAL overview stub of proj\"\n"
+        "ocd: 2026-10-05T02:17:30+0200\nlmd: 2026-10-05T02:17:30+0200\n"
+        "metadata: {node_type: memory, type: overview, tier: hub}\n---\n\n"
+        "# proj — LOCAL memory overview\n\n"
+        "This is the entry point for the LOCAL-scope memory of **proj**. It was seeded empty by "
+        "SessionStart because no `*-overview.md` page existed yet in this scope (janitor#129) — "
+        "replace this stub the first time you write real LOCAL-scope knowledge here.\n\n"
+        "Recall by symptom: `memgrep recall \"<symptom>\" /x`.\n\n"
+        "## Notes and lessons learned\n",
+        encoding="utf-8",
+    )
+    code, out = _cli("--intervention", "atomize", "--scope", "LOCAL", "--root", str(tmp_path))
+    assert code == 0
+    assert out.strip() == ""
+
+
+
+def test_atomize_still_lists_a_seeded_stub_that_gained_real_facts(tmp_path):
+    """TRDD-BRW49ELM: only a PURE stub declines; a stub later filled with real facts (seed
+    lines still present) is still a free-prose candidate."""
+    (tmp_path / "proj-local-overview.md").write_text(
+        "---\nname: proj-local-overview\ndescription: \"LOCAL overview of proj\"\n"
+        "ocd: 2026-10-05T02:17:30+0200\nlmd: 2026-10-05T02:17:30+0200\n"
+        "metadata: {node_type: memory, type: overview, tier: hub}\n---\n\n"
+        "# proj — LOCAL memory overview\n\n"
+        "It was seeded empty by SessionStart because no page existed.\n\n"
+        "The local build needs the vendored toolchain pinned to 1.8.\n\n"
+        "## Notes and lessons learned\n",
+        encoding="utf-8",
+    )
+    code, out = _cli("--intervention", "atomize", "--scope", "LOCAL", "--root", str(tmp_path))
+    assert code == 0
+    assert out.strip() == "proj-local-overview.md\tfree-prose"
+
+
+def test_seed_stub_parts_are_still_in_the_session_start_hook():
+    """The stub-decline constant must track the text the hook really seeds (read as text,
+    not imported)."""
+    import memory_content_precheck
+
+    hook = (ROOT / "scripts" / "hooks" / "on-session-start.py").read_text(encoding="utf-8")
+    for part in memory_content_precheck._SEED_STUB_PARTS:
+        assert part in hook
+
+
 # --------------------------------------------------------------------------- #
 # --intervention consolidate
 # --------------------------------------------------------------------------- #

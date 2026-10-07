@@ -411,3 +411,60 @@ def test_min_shared_words_gate_falsified_single_rare_word_would_pair_without_it(
         mod._MIN_SHARED_CONTENT_WORDS = original  # restore — GREEN again
 
     assert frozenset({"a", "b"}) not in mod._find_content_similarity_pairs(cards)
+
+
+
+def _seen_keys(root: Path) -> list[str]:
+    seen = root / ".janitor" / "state" / "trdd-cross-card-blindspot-seen.txt"
+    return seen.read_text().splitlines() if seen.exists() else []
+
+
+def test_a_cleared_pair_is_forgotten_and_reported_again_when_it_returns(repo: Path):
+    """TRDD-61PLV7WS: present -> printed once; present again -> silent; cross-linked (cleared)
+    run forgets the seen key; the pair returning is printed again."""
+    mod = _load_blindspot_module()
+    uid_a, uid_b = "aaaaaaaa", "bbbbbbbb"
+    key = mod._ref_pair_key("janitor#241", uid_a, uid_b)
+    _write_trdd(repo, uid_a, external_refs="[janitor#241]")
+    _write_trdd(repo, uid_b, external_refs="[janitor#241]")
+
+    assert f"TRDD-{uid_a} & TRDD-{uid_b}" in _run(repo)  # printed once
+    assert _run(repo).strip() == ""  # present again: silent
+    assert key in _seen_keys(repo)
+
+    _write_trdd(repo, uid_a, external_refs=f"[janitor#241, TRDD-{uid_b}]")  # cross-link: cleared
+    assert _run(repo).strip() == ""
+    assert key not in _seen_keys(repo)  # forgotten
+
+    _write_trdd(repo, uid_a, external_refs="[janitor#241]")  # the pair returns
+    assert f"TRDD-{uid_a} & TRDD-{uid_b}" in _run(repo)
+
+
+def test_a_scan_with_an_unreadable_card_forgets_nothing(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    """TRDD-61PLV7WS: when any card cannot be read the scan is incomplete, so a pair that
+    merely LOOKS cleared keeps its seen key (not detected != cleared). The read failure is
+    injected by patching Path.read_text for that one card (in-process main())."""
+    mod = _load_blindspot_module()
+    uid_a, uid_b, uid_c = "aaaaaaaa", "bbbbbbbb", "cccccccc"
+    key = mod._ref_pair_key("janitor#241", uid_a, uid_b)
+    _write_trdd(repo, uid_a, external_refs="[janitor#241]")
+    _write_trdd(repo, uid_b, external_refs="[janitor#241]")
+    unreadable = _write_trdd(repo, uid_c)
+    _run(repo)
+    assert key in _seen_keys(repo)
+
+    _write_trdd(repo, uid_a, external_refs=f"[janitor#241, TRDD-{uid_b}]")  # would clear the pair
+    real_read_text = Path.read_text
+
+    def flaky_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self == unreadable:
+            raise OSError("injected read failure")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
+    monkeypatch.setenv("JANITOR_FORCE_AI_MAESTRO", "1")
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_TRDD_PATH", raising=False)
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+    assert mod.main() == 0
+    monkeypatch.undo()
+    assert key in _seen_keys(repo)
