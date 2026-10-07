@@ -62,3 +62,22 @@ def test_fast_recall_records_nothing(tmp_path: Path) -> None:
     hook._recall(str(fast), "some long enough query", ["/x.md"], str(project))
 
     assert _records(project) == []
+
+def test_repeated_timeouts_on_one_day_record_one_row_and_a_new_day_a_second(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Two forced timeouts on the same day give ONE ledger row; a changed date gives a second."""
+    hook = _load_hook()
+    project = tmp_path / "proj"
+    project.mkdir()
+    monkeypatch.setattr(hook, "_TIMEOUT_S", 0.01)
+    slow = _slow_memgrep(tmp_path)
+
+    monkeypatch.setattr(hook, "_today", lambda: "2026-10-07")
+    hook._recall(slow, "some long enough query", ["/x.md"], str(project))
+    hook._recall(slow, "some long enough query", ["/x.md"], str(project))
+    assert [r["code"] for r in _records(project)] == ["HOOK-003"]
+
+    monkeypatch.setattr(hook, "_today", lambda: "2026-10-08")
+    hook._recall(slow, "some long enough query", ["/x.md"], str(project))
+    assert [r["code"] for r in _records(project)] == ["HOOK-003", "HOOK-003"]

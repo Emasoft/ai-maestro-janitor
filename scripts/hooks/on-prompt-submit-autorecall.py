@@ -212,6 +212,12 @@ def _user_memdir() -> Path:
 
     return memory_scopes.resolve_user_dir()
 
+def _today() -> str:
+    """Local calendar day, the HOOK-003 once-a-day key (a named seam so a test can move the date)."""
+    import time  # noqa: PLC0415 -- only reached on the timeout path
+
+    return time.strftime("%Y-%m-%d")
+
 
 def _recall(memgrep: str, query: str, note_paths: list[str], project_dir: str | None = None) -> str:
     """Run `memgrep recall <query> <note-files…> --top N --use-index` and return
@@ -246,15 +252,20 @@ def _recall(memgrep: str, query: str, note_paths: list[str], project_dir: str | 
         # this branch, so the normal path does no extra I/O; any ledger fault is swallowed
         # because a bookkeeping failure must never break the user prompt.
         try:
+            import dedupe  # noqa: PLC0415 -- only on the timeout path
             import findings_ledger  # noqa: PLC0415 -- only on the timeout path
 
-            findings_ledger.record(
-                sev="MEDIUM",
-                code="HOOK-003",
-                src="janitor:autorecall",
-                msg=f"memgrep recall exceeded its {_TIMEOUT_S:g}s internal limit",
-                project_dir=project_dir,
-            )
+            # findings_ledger.record appends a row on EVERY call, so a recall that times out
+            # on every prompt would add one row per prompt; gate it to once per local day.
+            seen = findings_ledger.state_dir_for(project_dir) / "autorecall-hook003-seen.txt"
+            if dedupe.emit_once(seen, f"HOOK-003:{_today()}", "x"):
+                findings_ledger.record(
+                    sev="MEDIUM",
+                    code="HOOK-003",
+                    src="janitor:autorecall",
+                    msg=f"memgrep recall exceeded its {_TIMEOUT_S:g}s internal limit",
+                    project_dir=project_dir,
+                )
         except Exception:  # noqa: BLE001 -- fail open, see WHY above
             pass
         return ""
