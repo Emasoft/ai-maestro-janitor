@@ -1277,8 +1277,70 @@ mod tests {
             "--into".to_string(), into.to_str().unwrap().to_string(),
             "--name".to_string(), "split-off-page".to_string(),
             "--description".to_string(),
-            "cross-scope guard fixture / refusal test description / padded to floor one / padded to floor two".to_string(),
+            "cross-scope guard fixture / refusal test description / padded to floor one / padded to floor two / padded to floor three / padded to floor four / padded to floor five / padded to floor six / padded to floor seven / padded to floor eight / padded to floor nine / padded to floor ten / padded to floor eleven / padded to floor twelve / padded to floor thirteen".to_string(),
         ]
+    }
+
+    #[test]
+
+    #[test]
+    fn split_topic_refuses_through_a_symlink_alias_of_the_scope_dir() {
+        // Pins the canonical-then-raw classification (TRDD-DAL802TI fix-up 2a600afb): the
+        // scope dir is reached through a symlink whose raw spelling carries NO scope substring,
+        // so a raw-only classification returns None and fails open — the exact fail-open the
+        // fix-up closed. Existing page -> canonicalize resolves the alias -> substring match.
+        let user_root = uniq_split("alias-user");
+        let alias_root = uniq_split("alias-link");
+        let user_dir = user_root.join(".claude/plugins/data/x/memory");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&user_dir, &alias_root)
+            .expect("symlink supported on this platform");
+        let state_dir = user_root.join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+
+        let user_page_real = user_dir.join("user-page.md");
+        std::fs::write(
+            &user_page_real,
+            "---\nname: scope-test-page\ndescription: \"cross-scope guard fixture\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             ^ATOM-GUARD-001 [keywords: guard_fixture]\n\nguard fixture body\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        // TRUE alias: the symlink ITSELF points at the scope dir, so the invoked raw path
+        // (`<alias>/user-page.md`) carries NO scope substring — a raw-only classification
+        // returns None and fails open; canonicalize resolves into the real USER dir.
+        // Alias spelling <alias>/user-page.md carries NO scope substring (the symlink target
+        // is the memory dir itself); canonicalize resolves into the real USER store.
+        #[cfg(unix)]
+        let user_page = alias_root.join("user-page.md");
+        #[cfg(not(unix))]
+        let user_page = user_page_real.clone();
+        let neutral_dest = alias_root.join("neutral-dest.md");
+        let before = std::fs::read_to_string(&user_page).unwrap();
+
+        // Downward check via alias: split from the aliased USER page into a LOCAL-shaped dest.
+        let local_root = uniq_split("alias-local");
+        let local_dir = local_root.join(".claude/projects/y/memory");
+        std::fs::create_dir_all(&local_dir).unwrap();
+        let args = cross_scope_split_args(&user_page, &local_dir.join("split-off.md"));
+        let res;
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir); }
+        res = cmd_split_topic_cli(&args);
+        unsafe { crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR"); }
+        #[cfg(unix)]
+        let after = std::fs::read_to_string(&user_page_real).unwrap();
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+
+        #[cfg(unix)]
+        {
+            let err = res.expect_err("split through a symlink alias must still be refused");
+            assert!(err.to_string().contains("link DOWN"), "must name the downward link: {err}");
+            assert_eq!(after, before, "source page untouched");
+            assert!(!neutral_dest.exists());
+        }
+        #[cfg(not(unix))]
+        res.unwrap_or_else(|_| ());
     }
 
     #[test]

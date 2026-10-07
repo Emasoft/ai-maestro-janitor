@@ -6758,8 +6758,9 @@ pub(crate) fn downward_reason(to: ScopeLayer) -> &'static str {
 /// cross-scope moves still go through `migrate-mem-atom`, one atom at a time. NOT a gate
 /// constraint: the pre-write gate's link arm deliberately skips cross-scope edges, and a
 /// plain-words tombstone would be gate-clean — refusing is the stricter policy the verbs choose.
-/// Classifies each path CANONICALLY when it exists — the same resolution the lint's link graph
-/// uses, so a `..` segment or a symlink alias classifies like the edge lint will see — falling
+/// Classifies each path CANONICALLY when it exists — byte-for-byte the closure the lint's
+/// link graph uses for edge endpoints (memory.rs `canon`, check-4 block), so a `..` segment
+/// or a symlink alias classifies like the edge lint will see — falling
 /// back to the RAW spelling only for a not-yet-existing page (split's `--into`), whose scope
 /// substrings still match on the raw string. (`scope_layer` matches override roots on canonical
 /// forms and hardcoded roots on the raw string — the raw spelling alone would MISS an aliased or
