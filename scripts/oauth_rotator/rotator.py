@@ -1614,6 +1614,9 @@ def delete_plaintext_slot_files() -> list[str]:
     return removed
 
 
+_PS_TIMEOUT_S = 10
+
+
 def claude_running() -> bool:
     """True iff a real Claude Code CLI process is running.
 
@@ -1630,9 +1633,15 @@ def claude_running() -> bool:
     (argv[0] basename ``python3``) and ``claude-<x>`` binaries (basename
     ``claude-x`` != ``claude``) are likewise excluded.
     """
-    # timeout: under background-QoS starvation an unbounded `ps` hung the whole tick for
-    # 100+ s (TRDD-G9Z8PXCM R1); a TimeoutExpired fails the tick loudly instead.
-    proc = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True, timeout=10)
+    # This guard only answers "is there anything to do": a wrong True costs one idempotent,
+    # lock-guarded tick, while a raise costs the whole beat under load (two lost ticks on
+    # 2026-10-05, TRDD-JOXQQL4J). The timeout itself stays because an unbounded `ps` hung the
+    # tick for 100+ s (TRDD-G9Z8PXCM R1).
+    try:
+        proc = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True, timeout=_PS_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        print(f"rotator: ps -eo args= timed out after {_PS_TIMEOUT_S}s - assuming Claude is running", file=sys.stderr)
+        return True
     for line in proc.stdout.splitlines():
         line = line.strip()
         if not line:

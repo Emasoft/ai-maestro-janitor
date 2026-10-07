@@ -3592,3 +3592,35 @@ def test_refresh_failure_log_carries_http_status_and_error_code_only(
     assert "http=400 error=invalid_grant" in log
     assert "SECRET-DESCRIPTION" not in log and "SPENT-REFRESH" not in log
     assert causes == [rotator.REFRESH_FAIL_CREDENTIAL_DEAD]
+
+
+
+def _fake_ps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    """Install a real executable `ps` first on PATH running the given shell body."""
+    ps = tmp_path / "ps"
+    ps.write_text("#!/bin/sh\n" + body + "\n")
+    ps.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+
+@pytest.mark.no_timeout_scale  # the timeout IS the subject (conftest scales subprocess timeouts otherwise)
+def test_claude_running_assumes_true_when_ps_times_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A ps slower than the timeout yields True (assume running) instead of raising."""
+    _fake_ps(tmp_path, monkeypatch, "sleep 5")
+    monkeypatch.setattr(rotator, "_PS_TIMEOUT_S", 1, raising=False)
+    assert rotator.claude_running() is True
+    assert "assuming Claude is running" in capsys.readouterr().err
+
+
+def test_claude_running_true_for_claude_argv0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ps listing a `claude` process answers True."""
+    _fake_ps(tmp_path, monkeypatch, "echo \"claude --continue\"")
+    assert rotator.claude_running() is True
+
+
+def test_claude_running_false_for_rotator_own_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ps listing only the rotator's own tick process answers False."""
+    _fake_ps(tmp_path, monkeypatch, "echo \"python3 /x/rotator.py tick --only-if-claude-running\"")
+    assert rotator.claude_running() is False
