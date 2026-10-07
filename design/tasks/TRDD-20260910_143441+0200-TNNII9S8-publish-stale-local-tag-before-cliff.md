@@ -1,13 +1,15 @@
 ---
 trdd-id: TNNII9S8
 title: publish.py must reconcile stale local tags before generating the changelog
-column: backburner
+column: testing
 created: 2026-09-10T14:34:41+0200
-updated: 2026-09-10T14:34:41+0200
+updated: 2026-10-07T08:45:11+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
 project-id: ai-maestro-janitor
+implementation-commits: [266fd249, b175178f]
+status: tasked
 ---
 
 # publish.py must reconcile stale local tags before generating the changelog
@@ -49,3 +51,8 @@ In `scripts/publish.py`, run the stale-tag decision (currently step 10's `_stale
 - [ ] Full gate green (ruff, mypy, pyright, pytest) after the fix.
 
 ## Notes and lessons learned
+2026-10-07: the bug was still present (git-cliff ran before the stale-tag step, duplicate changelog section reproduced); publish.py now drops a local tag before git-cliff only when origin provably lacks it (_remote_tag_state is False; a failed query gives None and leaves the tag for step 10 to refuse).
+
+## Approval log
+
+- 2026-10-07T08:45:11+0200 — column → testing by main-agent@ai-maestro-janitor. B7 merged and gated at b175178f

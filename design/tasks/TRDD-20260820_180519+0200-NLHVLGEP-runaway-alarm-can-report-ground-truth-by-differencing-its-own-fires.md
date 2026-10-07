@@ -1,17 +1,19 @@
 ---
 trdd-id: NLHVLGEP
 title: The runaway alarm can report ground truth by differencing cumulative CPU time across its own two fires
-column: backburner
+column: testing
 created: 2026-08-20T18:05:19+0200
-updated: 2026-08-20T18:05:19+0200
+updated: 2026-10-07T08:45:10+0200
 current-owner: janitor-main-session
 task-type: feature
 priority: normal
-approval-tier: 0
 scope: project
 external-refs: [TRDD-JEEQCHFG, TRDD-8QSLYMGU]
 npt: []
 eht: []
+min-approval-requirement: none
+implementation-commits: [ac63bb09, b175178f]
+status: tasked
 ---
 
 # Report the measured burn, not an estimate of it
@@ -56,3 +58,8 @@ alarm spans, which is also exactly the window the streak gate already requires.
 - [ ] pytest, ruff, mypy, pyright clean
 
 ## Approval log
+- 2026-10-07T08:45:10+0200 — column → testing by main-agent@ai-maestro-janitor. B7 merged and gated at b175178f
+
+## Implementation notes
+
+2026-10-07: the runaway alarm states burn measured between two fires from CPU time; thresholds unchanged and pinned by a test; follow-up: a recycled pid with MORE CPU time than the stored sample gives a wrong figure (guard by storing the process start time); the figure only appears in the alarm text, it never triggers it.
