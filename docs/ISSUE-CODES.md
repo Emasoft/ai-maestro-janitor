@@ -380,7 +380,7 @@ unattended access to your repository.
 | Code | Severity | Fix | Emitter | Summary |
 |---|---|---|---|---|
 | `HOOK-001` | HIGH | none | janitor:hook-timeout-scan | a hook was killed by the harness for exceeding its timeout |
-| `HOOK-002` | MEDIUM | none | janitor:hook-run | a hook used 80% or more of its timeout budget |
+| `HOOK-002` | MEDIUM | none | janitor:hook-timeout-scan | a hook used 80% or more of its timeout budget |
 | `HOOK-003` | MEDIUM | none | janitor:autorecall | a hook's own internal limit tripped (e.g. autorecall's 4 s recall) |
 
 ### HOST

@@ -24,6 +24,8 @@ Findings name the hook and the session id, never a path (the home path carries t
 
 NOT DONE HERE (still owed, TRDD-U32EVMI9): replaying a cancelled guard's own check over the
 recorded input to tell a harmless cancellation from a real miss.
+Subagent transcripts in subfolders and sessions run from a worktree (different slug) are not
+scanned.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ _NAME = "hook-timeout-scan"
 _THRESHOLD = 0.8
 _MAX_AGE_S = 86400
 _TAIL_BYTES = 4 * 1024 * 1024
+_MAX_PRINTED = 5
 _ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}/"
 
 
@@ -87,7 +90,11 @@ def _records(path: Path):
             rec = json.loads(raw.decode("utf-8", errors="replace"))
         except ValueError:  # torn last line or garbage: skip, never crash
             continue
-        att = rec.get("attachment") if isinstance(rec, dict) else None
+        # WHY: a line can be valid JSON yet not an object (a string or list that merely
+        # mentions hook_); rec.get below would raise AttributeError and kill the detector.
+        if not isinstance(rec, dict):
+            continue
+        att = rec.get("attachment")
         if rec.get("type") == "attachment" and isinstance(att, dict):
             yield rec, att
 
@@ -114,6 +121,7 @@ def main() -> int:
     plugin_root = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent.parent)
     now = int(time.time())
     seen = state.state_dir() / "hook-timeout-scan-seen.txt"
+    lines: list[str] = []
 
     try:
         configured = _configured_timeouts(plugin_root)
@@ -138,13 +146,17 @@ def main() -> int:
 
             if att.get("type") == "hook_cancelled" and att.get("timedOut") is True:
                 if dedupe.emit_once(seen, f"HOOK-001@{sid}@{hook}", "x"):
+                    ran = f"{dur}ms" if dur is not None else "duration unknown"
+                    spent = f"{ran} of {tmo}ms" if tmo is not None else f"{ran}, timeout unknown"
                     line = findings_ledger.record(
                         sev="HIGH", code="HOOK-001", src=_NAME,
-                        msg=f"hook {hook} was killed for exceeding its timeout "
-                            f"({dur}ms of {tmo}ms) in session {sid}",
+                        msg=f"hook {hook} was killed for exceeding its timeout ({spent}) in session {sid}",
                     )
                     if line:
-                        print(line)
+                        lines.append(line)
+                # WHY: a killed hook is fully described by HOOK-001; its duration sits at the
+                # budget by construction, so falling through would add a redundant HOOK-002.
+                continue
 
             if att.get("type") not in ("hook_success", "hook_cancelled") or not isinstance(dur, (int, float)):
                 continue
@@ -160,7 +172,14 @@ def main() -> int:
                     msg=f"hook {hook} ({rel}) used {dur / budget_ms:.0%} of its {budget_ms / 1000:g}s budget",
                 )
                 if line:
-                    print(line)
+                    lines.append(line)
+
+    # WHY: every finding is already in the ledger; stdout reaches the agent's context, so a
+    # flood (one stuck hook across many sessions) is capped to keep that channel bounded.
+    for line in lines[:_MAX_PRINTED]:
+        print(line)
+    if len(lines) > _MAX_PRINTED:
+        print(f"{_NAME}: {len(lines) - _MAX_PRINTED} more recorded, see /janitor-findings")
 
     state.rotate_log_if_big(_NAME)
     return 0

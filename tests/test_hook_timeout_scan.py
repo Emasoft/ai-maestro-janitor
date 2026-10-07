@@ -172,6 +172,52 @@ def test_invalid_utf8_byte_and_torn_last_line_do_not_crash(tmp_path: Path) -> No
     assert e.codes().count("HOOK-001") == 1
 
 
+
+def test_valid_json_non_object_lines_do_not_crash(tmp_path: Path) -> None:
+    """A JSON string, list and number that mention hook_ are skipped, the real record still counts."""
+    e = _Env(tmp_path)
+    _write(
+        e.transcript(),
+        json.dumps("mentions \"hook_cancelled\""),
+        json.dumps(["hook_cancelled"]),
+        "12345 \"hook_\"",
+        json.dumps(7),
+        _cancelled(),
+    )
+    e.run()
+    assert e.codes().count("HOOK-001") == 1
+
+
+
+def test_timed_out_record_gives_hook_001_only_not_hook_002(tmp_path: Path) -> None:
+    """A janitor hook killed at its full budget is one HOOK-001, never also a HOOK-002."""
+    e = _Env(tmp_path)
+    _write(e.transcript(), _cancelled())
+    e.run()
+    assert e.codes() == ["HOOK-001"]
+
+
+def test_flood_prints_five_lines_plus_summary_but_records_all(tmp_path: Path) -> None:
+    """8 distinct findings: all 8 recorded, 5 printed plus one summary line, a rerun prints nothing."""
+    e = _Env(tmp_path)
+    _write(e.transcript(), *(_cancelled(session=f"sess-{i}") for i in range(8)))
+    out = e.run().splitlines()
+    assert len(out) == 6
+    assert out[5] == "hook-timeout-scan: 3 more recorded, see /janitor-findings"
+    assert e.codes().count("HOOK-001") == 8
+    assert e.run() == ""
+
+
+def test_missing_timeout_ms_says_timeout_unknown_not_none(tmp_path: Path) -> None:
+    """A timed-out hook_cancelled with no timeoutMs reports an unknown timeout, never the text None."""
+    e = _Env(tmp_path)
+    _write(e.transcript(), _rec("hook_cancelled", timedOut=True))
+    out = e.run()
+    assert "HOOK-001" in out
+    assert "None" not in out
+    assert "timeout unknown" in out
+
+
 def test_findings_never_name_a_home_or_transcript_path(tmp_path: Path) -> None:
     """Ledger and stdout carry the hook name and session id only, never a filesystem path."""
     e = _Env(tmp_path)
