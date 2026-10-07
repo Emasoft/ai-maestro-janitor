@@ -4,7 +4,7 @@ title: The CLAUDE.md writer and the rules installer left their files at mode 060
 column: testing
 status: tasked
 created: 2026-10-06T19:23:42+0200
-updated: 2026-10-06T19:23:50+0200
+updated: 2026-10-07T04:31:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,3 +29,4 @@ scripts/repomap_generate.py _atomic_replace (every project's CLAUDE.md wikimem i
 ## STATE
 
 2026-10-06 NEXT ACTION: none on code. NAMED LIVE CHECK after the release carrying 113121d2 (v3.7.5): the next CLAUDE.md index refresh leaves the file at its previous mode (not 0600), and a rule file reinstalled at a new version is 0644. Open question above stays with TRDD-6NMQ95TQ.
+2026-10-07 live check (a worker's read of the logs, not re-read by the main agent): verdict: behavioural check NOT YET OBSERVABLE, code PROVEN installed; card stays in testing. Requirement 1 (0644 for a new or 0600 target, else keep the mode) PROVEN present: installed 3.8.2 scripts/lib/rules_installer.py lines 205-208 'old = os.stat(dst).st_mode & 0o777' ... 'os.chmod(tmp, 0o644 if old in (None, 0o600) else old)' and scripts/repomap_generate.py lines 422-425 with the same two statements; repo and installed rules_installer.py lines 195-210 identical; tests/test_repomap_generate.py:482 parametrises (None,0o644),(0o644,0o644),(0o600,0o644),(0o640,0o640),(0o444,0o444), tests not run; tag v3.7.5 (2026-10-06 19:33:05) contains 113121d2 and 1edf766d. Requirement 2 (next CLAUDE.md index refresh keeps the previous mode) NOT YET OBSERVABLE: of 40 CLAUDE.md files carrying the index marker, the non-worktree mtimes are janitor 2026-10-05 10:16:47 (mode 644), AgentlensPro 2026-10-03 (mode 600), emasoft-complete-ios-app-authoring 2026-10-01 (mode 600), autonomous-agent 2026-09-29 (644), all before the fix release; worktree copies (mode 644, mtimes to 2026-10-07 03:43) are git checkout output and do not count. Requirement 3 (a rule file reinstalled at a new version is 0644) NOT YET OBSERVABLE: all 9 janitor-stamped rules in the user rules dir are still mode 600 with mtimes 2026-09-12 to 2026-10-04; 15 of 24 rule files at 600, 9 at 644, the same count as the card's measurement, so no healing occurred; the bundled rules carry no stamp so versions could not be compared that way; 6 of the 600 files carry no janitor stamp (another writer owns them, no claim made). The open item of 41 tracked repo files at 0600 with an unknown writer was not checked and stays with TRDD-6NMQ95TQ. No log line records rule installs. Still waits on: (a) one repomap_generate run on a project whose CLAUDE.md is mode 600 (for example AgentlensPro), expecting 0644 afterwards; (b) one stamped rule version bump, expecting 0644.

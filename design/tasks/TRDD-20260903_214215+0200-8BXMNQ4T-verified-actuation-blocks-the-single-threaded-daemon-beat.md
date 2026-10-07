@@ -1,10 +1,10 @@
 ---
 trdd-id: 8BXMNQ4T
 title: verified actuation blocks the single-threaded daemon beat — measure the multiplier before choosing a mechanism
-column: backburner
-review-after: 2026-10-05
+column: todo
+review-after: 2026-11-07
 created: 2026-09-03T21:42:15+0200
-updated: 2026-09-05T07:14:40+0200
+updated: 2026-10-07T04:30:08+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: high
@@ -19,6 +19,7 @@ npt: []
 eht: []
 implementation-commits: []
 created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-03)
+status: tasked
 ---
 
 # Verified actuation blocks the single-threaded daemon beat
@@ -163,6 +164,7 @@ created-by: TRDD-N954KWUC P3 follow-up (advisor + review-fork finding, 2026-09-0
     Every sentence anywhere on this card that treats a rotation window as hypothetical on this
     host is superseded by it.
   - The first two results tables below, and every conclusion drawn from them.
+2026-10-07: TRIGGER MET. daemon.log line 5464: [2026-10-06T17:30:46+0200] rotation-esc: DONE ESC -> iterm for ai-maestro (retry attempt 3 on screen, rotation 497s ago). The card's own rule ('Re-column to todo the moment a completed rotation-esc line appears') applies: re-columned to todo, review-after removed. NEXT ACTION: read the beat-to-beat deltas of daemon.log around 2026-10-06T17:30 before the log rotates (daemon.log.1 is already about 1 MiB), compare with the control in this STATE, record the measured cost of one completed actuation.
 
 ## What changed and why it costs
 
@@ -693,3 +695,7 @@ card sits in `todo` for a month.
   briefly `[x]` with honest annotations explaining they were only partly satisfied. That
   is the same defect corrected one card earlier on TRDD-L46IG69Y, and the argument
   against it is that card's own line: *nothing evaluates a condition written as prose.*
+
+## Approval log
+
+- 2026-10-07T04:30:08+0200 — column → todo by main-agent@ai-maestro-janitor. trigger met: completed rotation-esc line in daemon.log 2026-10-06T17:30:46

@@ -1,10 +1,10 @@
 ---
 trdd-id: I6ZZWVDN
 title: Measure the janitor's remaining two injected blocks — SessionStart compact and StopFailure rate_limit
-column: backburner
-review-after: 2026-09-11
+column: todo
+review-after: 2026-11-07
 created: 2026-08-02T06:24:29+0200
-updated: 2026-08-12T11:20:00+0200
+updated: 2026-10-07T04:30:11+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 severity: MEDIUM
@@ -13,6 +13,7 @@ release-via: none
 parent-trdd: null
 relevant-rules: []
 implementation-commits: []
+status: tasked
 ---
 
 # Measure the janitor's remaining two injected blocks (SessionStart:compact, StopFailure:rate_limit)
@@ -96,6 +97,7 @@ bullet on a card whose own scope (hand the cache-thrash finding to OTHER plugins
 It is the janitor's OWN remaining cost, so it does not belong on a cross-project handoff card —
 and an NPT written as a bullet is a task nobody can see on the board (rule 9: derived tasks are
 their own depth-1 TRDDs).
+2026-10-07: premise stale. stop-failure.log (project log dir) now shows 185 'rate limit: fired detached rotator auto' lines, last at line 2514 [2026-10-06T03:56:18+0200] session fccb077b; dated lines 09-27 x8, 09-28 x108, 09-29 x18, 10-03 x10, 10-06 x3. Not verified: that this branch is the StopFailure rate_limit matcher this card measures, and that agentlenspro still holds those sessions. NEXT ACTION: run agentlenspro get_cache_break_report --full for session fccb077b and record verdict (a), (b) or (c) of the Verification section.
 
 ## What was measured, and what was not
 
@@ -139,3 +141,7 @@ the named block has LEFT `topOffenders`.
 - `release-via: none` — a measurement ships nothing by itself.
 
 ## Notes and lessons learned
+
+## Approval log
+
+- 2026-10-07T04:30:11+0200 — column → todo by main-agent@ai-maestro-janitor. premise stale: the blocking event (a same-day rate-limit fire) has occurred; measurement can proceed

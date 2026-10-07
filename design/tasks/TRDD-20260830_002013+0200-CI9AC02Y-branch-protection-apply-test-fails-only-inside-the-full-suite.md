@@ -2,9 +2,9 @@
 trdd-id: CI9AC02Y
 title: test_apply_warns_when_viewer_not_admin passes alone and fails inside the full suite
 column: backburner
-review-after: 2026-09-15
+review-after: 2026-11-07
 created: 2026-08-30T00:20:13+0200
-updated: 2026-09-01T21:05:00+0200
+updated: 2026-10-07T04:30:12+0200
 current-owner: janitor-main-session
 task-type: bugfix
 scope: project
@@ -108,3 +108,4 @@ conditional in a way nobody states out loud. The defect is the dependence, not t
 - TRDD-A8DRPZFM (`complete`) built the write-guard that made the live-daemon attribution legible
   here. This card is a NEW instance, not a reopening: terminal cards are frozen, and the guard did
   its job — it reported the mutations; it was never meant to prevent them.
+- 2026-10-07 review-after renewed to 2026-11-07: no recurrence seen; full suite passed 17951 (publish dry-run c576a7ad, 2026-10-05, from TRDD-PWIAEW40) and 18071 on main; weak evidence, because no run is shown to overlap a branch-protection chore beat. Do not close on green runs.

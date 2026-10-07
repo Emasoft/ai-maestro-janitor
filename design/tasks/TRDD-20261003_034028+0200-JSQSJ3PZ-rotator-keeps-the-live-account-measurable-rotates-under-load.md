@@ -4,7 +4,7 @@ title: Rotator keeps the live account measurable, rotates under load, and warns 
 column: blocked
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-07T04:18:50+0200
+updated: 2026-10-07T04:31:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -346,6 +346,7 @@ TRDD-L2CCH9D5 and TRDD-JW8CWWNH (filed 2026-10-03 from R8) are non-blocking back
 2026-10-07: durable copy of the HSRERK5S evidence, because the rotated daemon log is outside git. Two lines, quoted: '[2026-10-05T14:41:58+0200] [s:79d33458] rotator tick rc=1 stderr: icate' and '[2026-10-05T15:56:37+0200] [s:79d33458] rotator tick rc=1 stderr: icate', each followed by a traceback tail ending 'subprocess.TimeoutExpired: Command ps -eo args= timed out after 10 seconds'. The emitting line exists once in scripts/ (daemon.py, _log_rotator_tick_result) and is the same in the 3.7.0 and 3.8.2 installs.
 2026-10-07: correction to the HSRERK5S checklist, which is frozen: its first item cites 5 lines with rc=0 and a stderr tail; the count measured today is 37 (31 in the rotated log, 6 in the current one). Its claim of 0 such lines before the 3.7.0 release cannot be checked any more, because the oldest surviving log line is from 2026-10-05.
 2026-10-07: two open observations from the HSRERK5S review, neither owned by a card yet. (a) R5 logs the LAST 300 characters of stderr; for a Python traceback that is where the exception sits, but a failure whose cause is printed earlier would be logged without it. (b) The two rc=1 ticks were a ps call timing out after 10 seconds inside the rotator on 2026-10-05; whether that is the load problem this card tracks has not been checked.
+2026-10-07 clarification of the first 2026-10-07 HSRERK5S line above: TRDD-3OS6AXV3 is the only remaining EFFECTS card; the card stays blocked by its four prerequisite cards JY0OBQZ4, G9Z8PXCM, HL3WBA2Q and IT5GEZDZ, which blocked-by lists. Checked after the write: the 15:56:37 traceback is identical to the 14:41:58 one, and the oldest line of the rotated daemon log is 2026-10-05T00:32:12, so the claim about no lines before the 3.7.0 release cannot be checked. The count 37 covers all rc=0 lines with a stderr tail in both surviving logs, a wider measure than the frozen checklist's 5. Observation (b) is answered: the ps timeout is in claude_running(), the same call that fails the alert evaluation on TRDD-JOXQQL4J, which now owns it; observation (a) is owned by the new stderr-tail card.
 
 ## Release status
 

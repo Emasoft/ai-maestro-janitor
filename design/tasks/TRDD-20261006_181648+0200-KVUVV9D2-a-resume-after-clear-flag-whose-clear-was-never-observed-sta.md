@@ -4,7 +4,7 @@ title: A resume-after-clear flag whose clear was never observed stays unarmed un
 column: testing
 status: tasked
 created: 2026-10-06T18:16:48+0200
-updated: 2026-10-06T19:23:51+0200
+updated: 2026-10-07T04:30:41+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: lean-worker#cd372946-645f-4e16-a8a0-7013e0d8c5b6
 task-type: bugfix
@@ -43,3 +43,4 @@ A resume-after-clear flag whose /clear was never observed (no clear-observed sta
 2026-10-06: shipped in v3.7.3 (14e56db3). The named live check needs a session started after the local update, because hooks.json is read at session start.
 2026-10-06: v3.7.3 CI green and installed on the dev host (plugin update 3.7.2 -> 3.7.3).
 2026-10-06: live check needs a session started after the v3.7.4 install (hooks.json is read at session start).
+2026-10-07 live check (a worker's read of the logs, not re-read by the main agent): code requirement PROVEN: commit bace60f4 sets the SessionStart hook timeout to 30 s; installed hooks.json has timeout 5 in plugin cache 3.7.0, 3.7.1, 3.7.2 and timeout 30 in 3.7.3, 3.7.4, 3.7.5, 3.8.0, 3.8.1, 3.8.2; installed 3.8.2 scripts/hooks/on-session-start.py:467 still stamps clear-observed.ts. Live requirement NOT YET OBSERVABLE: every SessionStart on this project since 2026-10-05 logs the old plugin root, quote .janitor/logs/session-start.log:3595 [2026-10-07T03:52:24+0200] [s:932fc367] entered (plugin_root=<home>/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/3.7.0), 18 such entries at 3.7.0 as newest and none for 3.7.3 or later; cause: the long-lived Claude process keeps the hooks config it loaded at start and a /clear does not reload it. The latest clear did stamp clear-observed.ts (1791337944 = 2026-10-07T03:52:24+0200; hook took about 1 s, dispatch.log:6765 'post-clear resume cue emitted (age 48s)'), which does not prove the fix because a 1 s hook is under the old 5 s limit too. Original symptom: 'swept an abandoned pre-/clear resume flag' appears once, dispatch.log:3319 on 2026-09-08, none since, not discriminating. Not run: tests/test_session_start_hook_timeout.py (presence only); parent card K60FT7PJ not read. Still waits on: a restart of the Claude session (not only a /clear) so it reads the 3.7.3+ hooks.json, confirmed by the next 'entered (plugin_root=' line naming 3.7.3 or later, then a /clear where on-session-start runs over 5 s and clear-observed.ts is still stamped followed by 'post-clear resume cue emitted'.

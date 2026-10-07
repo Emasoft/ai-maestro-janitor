@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: todo
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-07T03:00:03+0200
+updated: 2026-10-07T04:31:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -43,3 +43,4 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: find why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI (diagnostic CI step, or reproduce with ~/.cache/cpv moved aside); the 3.7.1 CI run that was awaited has long since happened.
 2026-10-07: v3.8.2 was published with CPV_SKIP_GITHUB_INTEGRITY=1, the latest of at least six such releases (3.7.1-3.7.5 recorded; 3.8.0 and 3.8.1 not checked); run-1 evidence: of 3446 listed files, the 50 printed were all 'deleted locally', none 'differs' (3396 not printed).
 2026-10-07 TIME BOMB: CPV says the CPV_ name is deprecated in favour of PLUGIN_SKIP_GITHUB_INTEGRITY and will be removed in a future major release; publish.py's bypass guard refuses every PLUGIN_SKIP_ variable, so once CPV drops the legacy name this host cannot publish until either the uvx integrity abort is fixed or publish.py exempts the new name.
+2026-10-07 investigation (reports/board/20261007_042510+0200-tooling-problems.md, gitignored; facts copied here): the validator pinned at v5.16.2 in publish.py and both workflows reads PLUGIN_SKIP_GITHUB_INTEGRITY first and still honours CPV_SKIP_GITHUB_INTEGRITY with a deprecation notice; publish.py's bypass guard exempted only the old name and refused the new one at step 0. Fix in progress on a worktree branch: exempt the new name, refuse the old one, four tests for the guard, which had none. Believed cause of the 3446-file mismatch, from reading the validator's code only: run through uvx it takes the install directory as the plugin root, so every manifest file reads as deleted locally. STILL UNEXPLAINED: why CI passes the same command with no exemption. Do not publish with the new name until one validate run shows steps 0 and 4 pass.

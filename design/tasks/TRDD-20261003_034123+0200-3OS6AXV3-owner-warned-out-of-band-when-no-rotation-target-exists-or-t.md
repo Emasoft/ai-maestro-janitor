@@ -4,7 +4,7 @@ title: Owner warned out of band when no rotation target exists or the rotator st
 column: human_review
 status: tasked
 created: 2026-10-03T03:41:23+0200
-updated: 2026-10-05T15:14:00+0200
+updated: 2026-10-07T04:30:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -57,3 +57,4 @@ Parent plan: TRDD-JSQSJ3PZ
 2026-10-05 — the rotation-stuck alert was printed again by the heartbeat later the same day, so it had not cleared for good. If TRDD-HVGU9OBL turns out to be its cause, capturing logins may not be the remedy; read that card before acting on the alert.
 2026-10-05 — the 'possibly related: TRDD-HVGU9OBL' line above is WITHDRAWN: that card turned out to describe designed behaviour (the headless daemon skips the primary read on purpose and uses the mirror copy), so it is not a cause of this card's symptom.
 2026-10-05 — for the owner's action on the rotation-stuck alert, read in the code by a worker: capturing logins does not change the daemon's primary read; it can help when a spare account's stored login is unusable or an identity cannot be established, and does nothing when every account is simply at its usage limit.
+2026-10-07: the owner question 'allow a one-off plain edit for the R4b leftovers' is moot: the leftovers landed in 95422abd and a71a5ac5, and the owner ruled 'Allow plain edits for this job' on 2026-10-06 (card FQVEILVK). Remaining owner item: condition (b) was dropped by delegated decision on 2026-10-05; the owner may reverse it.

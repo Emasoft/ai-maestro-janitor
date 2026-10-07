@@ -1,10 +1,10 @@
 ---
 trdd-id: JOXQQL4J
 title: The rotator alert evaluation fails when ps is slow and a load stall is reported as a stopped rotator
-column: todo
+column: dev
 status: tasked
 created: 2026-10-05T22:08:50+0200
-updated: 2026-10-05T22:08:50+0200
+updated: 2026-10-07T04:31:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,3 +26,4 @@ Observed under very high load: the daemon logged 'rotator-alert: evaluation fail
 ## Approval log
 
 - 2026-10-05T22:08:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T04:31:38+0200 — column → dev by main-agent@ai-maestro-janitor. fix is on a worktree branch, not merged yet

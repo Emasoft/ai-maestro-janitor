@@ -1,9 +1,9 @@
 ---
 trdd-id: D7RLXAN1
 title: Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
-column: testing
+column: todo
 created: 2026-09-24T13:53:03+0200
-updated: 2026-10-05T10:57:16+0200
+updated: 2026-10-07T04:31:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: feature
@@ -31,6 +31,8 @@ status: tasked
 UPDATED 2026-09-24: column -> testing, implementation-commits: [c7779d84]. Acceptance (a)(b)(c)(e)(f) PASS, (d) measured (b2bf5b7b 126 KB ~31.5k tok 2 Reads, d30bf250 169 KB ~42k tok 2 Reads -- above the 20-35k estimate Q1 was accepted on --, 4eb7bf5d 65 KB ~16k 1 Read, fd5cc3e0 62 KB ~15k 1 Read); the two-file option (~35 KB of kept items/pointers out of the mandatory read) is the next lever if the read cost matters, unbuilt. Risk added: nothing yet checks a resumed session actually obeys READ FIRST. NEXT ACTION: 350W5II2 can now unblock (its blocker-probe reads this card's column).
 2026-09-24 -- the heartbeat stagger and hook-timeout follow-ups landed in 7ed4cdeb and 9efd5df3.
 2026-10-05 — RESUME POINT. Column testing. The lines above saying the change is not yet committed are superseded: it is c7779d84, in v3.7.0. Acceptance (c) moved to TRDD-2MU62A5F. NAMED LIVE EVENT: the next janitor clear whose summary comes from Jev, of a session with a compact boundary; pass when the resumed session's transcript shows a read of the file named on its READ FIRST line before any other action.
+2026-10-07 live check (a worker's read of the logs, not re-read by the main agent): verdict: NOT PROVEN, the named live event happened on 2026-10-05 at 15:27-15:28 and FAILED the pass condition (the resumed session's transcript shows a read of the READ FIRST file before any other action). Of 9 Jev clears 2026-10-05 to 2026-10-07 whose transcripts remain, exactly one source had a compact boundary: session e2241980 (2 compact_boundary lines; clear-trigger.log:241 [2026-10-05T15:27:51+0200] [s:e2241980] clear landing at 678926 tokens (67% of window), :242 chain: OK — chain complete), receiver 1f607a9a. The receiver ran 7 other actions first (arm_prepare, CronDelete, CronCreate, arm_record, dispatcher stub, handoff read, ListAgents, a stat/line-count/git command), then its only read of the 1301-line full copy was 'tldr body --from 1000 --to 1301' (302 lines, 23%); lines 1-999 were never read. Behaviour samples without a boundary (do not count toward the pass): receiver 135a8d6d read the 1545-line copy in full in 3 ranges but after 5 bootstrap calls; 554b08f0 one grep and 25 lines of 1128; 74eb4890 and 662d1d50 only size and line counts; fccb077b, d9cbd437, 2d2f13c8 and 932fc367 no call naming the copy: 1 full read out of 9 receivers, 7 never read it. Code part PROVEN present in installed 3.8.2: lib/jev_compaction.py:82 ItemKind includes control, :231 split_conversation, :190 _CONVERSATION_KINDS; the CLI never scores prose (jev_compact.py:656, :686; 47 of 47 jev-compacted files hold the 'Conversation since the last compaction (verbatim, never scored)' header); the hook and lane pass tail=() on Jev only (on-session-start-post-clear-compact.py:361 and :454); the code shipped no later than v3.6.1 (git tag --contains c7779d84), so the STATE 'in v3.7.0' is imprecise. Not done: dead-code retirement (DECISION_QUESTION still at jev_compaction.py:276, owned by TRDD-R9UXOSR5). Not verified: change 4 header text, tests 1 to 12 not re-run, what the receiver said about its choice. Full copies are 56 to 148 KB, which plausibly explains why most receivers did not read them. The STATE risk 'nothing yet checks a resumed session obeys READ FIRST' is now measured: it largely does not. Card waits on a decision on how READ FIRST is enforced or relaxed, then one more qualifying clear.
+2026-10-07: second failing case, observed by the main agent on itself: after the clear of 2026-10-07 03:52 the resumed session read lines 1 to 170 of the 988-line copy of the cleared context and stopped, because the handoff's next action said to wait for the owner. Two of two observed clears did not read the copy in full, so the READ FIRST line does not achieve its purpose as shipped. NEXT ACTION: redesign (ideas, none chosen: have the SessionStart injection carry the unread remainder's size and a single command that prints it; or make the copy short enough to read in one call), failing test first.
 
 ## Owner directive (verbatim, 2026-09-24)
 "its not good. assistant prose and user prose (the messages exchanges) should be all kept intact. modify the jev prompt to ensure that."
@@ -99,6 +101,7 @@ TRDD-IYNS7H83 -- the shared heartbeat-reply predicate (transcript_roles.is_heart
 - 2026-09-24T14:19:34+0200 — column → design_human_review by emanuelesabetta. AI review done (advisor: SOUND WITH CHANGES, fixes A-E folded in); awaiting owner answers to Q1-Q3 before implementation
 - 2026-09-24T17:32:35+0200 — column → dev by emanuelesabetta. Q1-Q3 decided under the owner's full-authority grant; implementing with advisor fixes A-E
 - 2026-09-24T18:13:52+0200 — column → testing by emanuelesabetta. implementation landed in c7779d84; moving to testing for acceptance/verification follow-through
+- 2026-10-07T04:31:24+0200 — column → todo by main-agent@ai-maestro-janitor. live acceptance failed twice; needs a redesign
 
 
 

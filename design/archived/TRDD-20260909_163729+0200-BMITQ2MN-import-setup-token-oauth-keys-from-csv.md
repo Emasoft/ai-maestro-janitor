@@ -1,9 +1,9 @@
 ---
 trdd-id: BMITQ2MN
 title: Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault
-column: blocked
+column: superseded
 created: 2026-09-09T16:37:29+0200
-updated: 2026-10-06T23:10:54+0200
+updated: 2026-10-07T04:29:40+0200
 current-owner: ai-maestro-janitor session
 task-type: feature
 scope: project
@@ -12,15 +12,17 @@ min-approval-requirement: none
 implementation-commits: [f4457513, 780c811d, 1c797cfe, 9ef139d0]
 relevant-rules: []
 labels: [fleet-ask]
-pre-block-column: testing
-blocked-by: [ai-maestro:TRDD-UIDK2SDL]
+pre-block-column: 
+blocked-by: []
+status: archived
+superseded-by: [PWIAEW40]
 ---
 
 # Bulk-import long-lived setup-token OAuth keys from a CSV into the rotator vault
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-09-09
 
-**Shipped and committed** as `f4457513` (5 files, +1161/-72). Gate at commit time: 39 tests
+**SUPERSEDED 2026-10-07 by TRDD-PWIAEW40: the importer was removed in 20216dd7 (v3.7.0) on the owner decision of 2026-09-24; the unticked Acceptance boxes below are not met and will not be. Historical text follows.** Shipped and committed as `f4457513` (5 files, +1161/-72). Gate at commit time: 39 tests
 pass, ruff clean, mypy clean, pyright 0 errors.
 
 **What exists:**
@@ -372,6 +374,8 @@ every subject line.
   was carried across eight rounds on a direct owner instruction with no card; this TRDD is the
   retroactive record and the home for the outstanding decisions above.
 - 2026-09-16T12:35:31+0200 — column → blocked. the remaining half is ai-maestro's to write (external repo); parked as fleet-ask (triage 2026-09-16)
+- 2026-10-07 - superseded by TRDD-PWIAEW40 (importer removed in 20216dd7, published in v3.7.0); owner decision of 2026-09-24 quoted above; the ai-maestro half (blocked-by TRDD-UIDK2SDL in that repo) is moot; unticked Acceptance boxes are discharged by supersession, not met.
+- 2026-10-07T04:29:40+0200 — SUPERSEDED by main-agent@ai-maestro-janitor. owner removed the setup-token importer; see PWIAEW40. Cleared blocked-by (--clear-blocker override).
 
 ## Owner decisions 2026-09-24 (verbatim)
 
