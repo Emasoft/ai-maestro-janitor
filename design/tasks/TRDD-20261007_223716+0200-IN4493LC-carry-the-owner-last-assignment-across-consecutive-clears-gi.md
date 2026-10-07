@@ -4,7 +4,7 @@ title: Carry the owner last assignment across consecutive clears (GitHub issue 3
 column: dev
 status: tasked
 created: 2026-10-07T22:37:16+0200
-updated: 2026-10-07T22:37:16+0200
+updated: 2026-10-07T22:38:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -32,3 +32,7 @@ PARKED: TRDD-A8DRRW0I wave 2 until 3.8.11 is out; wave 1 commits 1c045352 and 22
 ## Approval log
 
 - 2026-10-07T22:37:16+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Review findings to build in
+
+2026-10-07 — review of this plan (adopted; build these into the worker brief): (1) keep the LAST THREE human messages with timestamps, oldest first, not one, and call them 'the owner's most recent messages', never 'standing assignment' — the last message is often a question or a stop order (this session's last two were questions; the assignment was 'check the issues on github. in particular issue 338. and fix that NOW'); (2) key the record PER SESSION LINEAGE, not per project: two sessions of one project share .janitor/state, so store it under the cleared session id and carry it to the new id at each clear (the hook already has old and new ids, see carry_task_dir); (3) show the age in words and say 'at that time' for the carried reply; (4) take test record shapes for /janitor-arm, /janitor-resume, command-name and local-command-caveat records from a REAL cleared-and-resumed transcript, and confirm transcript_roles.classify_record does not class them human; (5) clip the nudge quote to about 160 chars; (6) the full worker brief is in this session's transcript (eb2288ee, the refused Agent call 'Fix issue 338 carry owner assignment'): reuse its sanitizer, one-reader-function and atomic-write requirements; (7) OWNER DECISION to put in the closing report, not to act on: the global rule 'no work without an explicit assignment' treats a quoted message from an earlier session as context, so some agents will still decline; one sentence in that rule saying a janitor handoff quoting the owner's verbatim message counts as that assignment would settle it; (8) two clears in a row: measure per clear in the ai-maestro project's clear-trigger.log the timestamp, trigger, context size and idle time, and each resumed session's context at its first turn against min_context; (9) 3.8.11 will be the first full-suite run over a8 stage A, wave 0, 1c045352 and 22c798b4 together.
