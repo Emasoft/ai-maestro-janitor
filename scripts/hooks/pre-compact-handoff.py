@@ -100,11 +100,14 @@ _plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
 if _plugin_root:
     sys.path.insert(0, str(Path(_plugin_root) / "scripts"))
 tr: Any = None
+jw: Any = None
 _TRANSCRIPT_ROLES_IMPORT_ERROR: str | None = None
 try:
     try:
+        from lib import jsonl_walk as jw  # stdlib-only shared tail reader (never jev_compaction)
         from lib import transcript_roles as tr  # hook context: scripts/ on sys.path
     except ImportError:
+        import jsonl_walk as jw  # type: ignore[no-redef]
         import transcript_roles as tr  # type: ignore[no-redef]  # detector/test context: scripts/lib on sys.path
 except Exception as _exc:  # noqa: BLE001 - a sibling module-load fault must degrade, not crash
     _TRANSCRIPT_ROLES_IMPORT_ERROR = str(_exc)
@@ -422,28 +425,22 @@ def _extract_text(content: object) -> str:
     return ""
 
 
-def _tail_lines(path: Path, size: int, tail_bytes: int) -> list[str] | None:
-    """The last `tail_bytes` of `path`, decoded and split into lines. None on any OSError.
+def _tail_entries(path: Path, tail_bytes: int) -> list[dict[str, Any]] | None:
+    """The parsed JSON-object entries of the last `tail_bytes` of `path`. None on any OSError.
 
-    Shared by `_recent_turns`'s normal tail read and its backward-seek extension below —
-    same seek/decode/drop-partial-first-line contract either way.
+    Shared by `_recent_turns`'s normal tail read and its backward-seek extension below, via
+    `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I stage B): the shared walk drops the seek-cut
+    first line only when the seek really cut one (the old unconditional `lines[1:]` also
+    dropped a whole first turn when the seek landed on a line boundary).
     """
     try:
-        with path.open("rb") as fh:
-            seeked = size > tail_bytes
-            if seeked:
-                fh.seek(size - tail_bytes)
-            raw = fh.read()
+        return jw.read_jsonl_tail(path, tail_bytes, malformed_lines=[])
     except OSError:
         return None
-    lines = raw.decode("utf-8", errors="replace").splitlines()
-    if seeked and lines:
-        lines = lines[1:]  # drop the probably-partial first line after the tail seek
-    return lines
 
 
-def _extract_turns(lines: list[str]) -> list[tuple[str, str]]:
-    """Parse transcript JSONL `lines` into (role, text) conversation turns, oldest-first.
+def _extract_turns(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Convert parsed transcript JSONL `entries` into (role, text) conversation turns, oldest-first.
 
     TRDD-91D2VHW3 (card 2b): the old isMeta/isSidechain/isCompactSummary + heartbeat-prefix
     filter let OTHER `type: "user"` record classes through unfiltered — a task-notification
@@ -465,16 +462,7 @@ def _extract_turns(lines: list[str]) -> list[tuple[str, str]]:
     and external_clear already skip on) are dropped.
     """
     turns: list[tuple[str, str]] = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(obj, dict):
-            continue
+    for obj in entries:
         rec_type = obj.get("type")
         if rec_type not in ("user", "assistant"):
             continue
@@ -538,7 +526,7 @@ def _seek_last_human_turn(path: Path, size: int, already_read_bytes: int) -> tup
         if time.monotonic() - started > _MAX_BACKWARD_SEEK_SECONDS:
             raise _SeekTimedOut
         budget = min(budget * 2, _MAX_BACKWARD_SEEK_BYTES, size)
-        lines = _tail_lines(path, size, budget)
+        lines = _tail_entries(path, budget)
         if lines is None:
             return None
         humans = [t for t in _extract_turns(lines) if t[0] == "user"]
@@ -589,7 +577,7 @@ def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str
         size = path.stat().st_size
     except OSError:
         return None
-    lines = _tail_lines(path, size, _TAIL_BYTES)
+    lines = _tail_entries(path, _TAIL_BYTES)
     if lines is None:
         return None
     turns = _extract_turns(lines)

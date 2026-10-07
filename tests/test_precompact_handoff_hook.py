@@ -911,6 +911,83 @@ def test_recent_turns_skips_malformed_lines(tmp_path: Path) -> None:
     assert ("user", "good one") in turns
     assert ("assistant", "good answer") in turns
 
+def test_recent_turns_survive_a_damaged_tail(tmp_path: Path) -> None:
+    """A raw 0xFF byte line, a non-object JSON line and a half-written last line never raise;
+    real turns on both sides of the damage still appear (TRDD-A8DRRW0I stage B)."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    tx.write_bytes(
+        json.dumps(_umsg("before damage")).encode() + b"\n"
+        + b'{"type": "assistant", "message": {"role": "assistant", "content": "bad \xff byte"}}\n'
+        + b"[1, 2, 3]\n"
+        + json.dumps(_amsg("after damage")).encode() + b"\n"
+        + b'{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "half writ'
+    )
+    turns = hook._recent_turns(str(tx), n=10)
+    assert turns is not None
+    assert ("user", "before damage") in turns
+    assert ("assistant", "after damage") in turns
+
+
+def test_recent_turns_keeps_first_turn_when_seek_lands_on_a_line_boundary(tmp_path: Path) -> None:
+    """The tail window starts exactly at a line boundary: that first whole turn is kept, not
+    dropped as if it were a seek-cut fragment."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    l0 = json.dumps(_umsg("zero")).encode() + b"\n"
+    l1 = json.dumps(_umsg("first")).encode() + b"\n"
+    l2 = json.dumps(_amsg("second")).encode() + b"\n"
+    tx.write_bytes(l0 + l1 + l2)
+    hook._TAIL_BYTES = len(l1) + len(l2)
+    turns = hook._recent_turns(str(tx), n=10)
+    assert turns == [("user", "first"), ("assistant", "second")]
+
+def test_recent_turns_backward_seek_stops_at_the_cap_with_none_found(tmp_path: Path) -> None:
+    """No human turn inside the capped doubling window: the walk stops at the byte cap and
+    returns the 'none found' placeholder (no endless loop)."""
+    hook = _hook()
+    hook._TAIL_BYTES = 1000
+    hook._MAX_BACKWARD_SEEK_BYTES = 4000
+    tx = tmp_path / "t.jsonl"
+    hb = _umsg("[janitor-heartbeat]\n/path/to/stub")
+    _write_jsonl(tx, [_umsg("ancient owner ask"), *([hb, _amsg("work " + "x" * 60)] * 120)])
+    assert tx.stat().st_size > 4000 * 2
+    turns = hook._recent_turns(str(tx))
+    assert turns is not None
+    assert turns[0] == ("note", "(last owner message is older than the recent window)")
+
+
+def test_recent_turns_backward_seek_widens_across_damage(tmp_path: Path) -> None:
+    """Damage lines inside the first window do not stop the widening: the older owner turn and
+    real turns on both sides of the damage still appear."""
+    hook = _hook()
+    hook._TAIL_BYTES = 1000
+    tx = tmp_path / "t.jsonl"
+    hb = json.dumps(_umsg("[janitor-heartbeat]\n/path/to/stub")).encode()
+    body = b"\n".join(
+        [json.dumps(_umsg("old owner ask")).encode()]
+        + [hb, json.dumps(_amsg("work " + "x" * 60)).encode()] * 20
+        + [b"[1, 2, 3]", b'{"type": "assistant", "message": {"content": "bad \xff"}}']
+        + [hb, json.dumps(_amsg("tail answer")).encode()] * 3
+    )
+    tx.write_bytes(body + b"\n")
+    turns = hook._recent_turns(str(tx))
+    assert turns is not None
+    assert turns[0] == ("user (older — outside the recent window)", "old owner ask")
+    assert ("assistant", "tail answer") in turns
+
+
+def test_recent_turns_empty_and_short_files(tmp_path: Path) -> None:
+    """A zero-byte transcript gives None; a file shorter than the window still yields its turns."""
+    hook = _hook()
+    empty = tmp_path / "empty.jsonl"
+    empty.write_bytes(b"")
+    assert hook._recent_turns(str(empty)) is None
+    short = tmp_path / "short.jsonl"
+    _write_jsonl(short, [_umsg("hi"), _amsg("hello")])
+    assert short.stat().st_size < hook._TAIL_BYTES
+    assert hook._recent_turns(str(short)) == [("user", "hi"), ("assistant", "hello")]
+
 
 # ---------- recent memory atoms (filesystem-derived) -----------------------
 
