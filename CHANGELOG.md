@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.6] — 2026-10-07
+
+### Bug Fixes
+
+- **autorecall:** Record HOOK-003 when the internal recall limit trips (TRDD-QXG8SRVD) (60bac60)
+- **autorecall:** Record HOOK-003 at most once a day (TRDD-QXG8SRVD) (d3fc5f0)
+- **dispatch:** The quiet-fire progress line no longer counts a stalled worker as running (TRDD-4P8R2JLQ) (edcb2a9)
+- **memgrep:** Split-mem-atom warns when the original atom's desc/keywords are left unchanged (TRDD-J6BET92S) (7f308b2)
+- **memory:** The claim step drops an aged-out pending record whose candidates are already gone (TRDD-K5F7US68) (86a4817)
+- **memory:** An unknown candidate answer never expires a queued chore (TRDD-K5F7US68) (1b2071a)
+
+### Documentation
+
+- **trdd:** FQVEILVK says 3.8.5 is published and what remains for 3.8.6 (TRDD-FQVEILVK) (e8b0369)
+- **trdd:** FQVEILVK names the built branches and records the plain-edit decision (TRDD-FQVEILVK) (56ed704)
+- **trdd:** FQVEILVK records the red CI on 3.8.5 and that 3.8.6 is the install target (TRDD-FQVEILVK) (db91196)
+- **trdd:** Record 3.8.5 and the 3.8.6 content on the board (TRDD-FQVEILVK) (a6830fa)
+
+### Styling
+
+- **dispatch:** One comment block above the dedupe exemption set (TRDD-37H7QFSF) (6f67494)
+
+### Testing
+
+- **memory:** The lint-code drift guard reads the rule registry (TRDD-CGA3U0BN) (0977cf1)
+- **memory:** Sharpen the orphaned reasons and guard the registry parser count (TRDD-CGA3U0BN) (269a6d7)
+- **publish:** Skip the two git-cliff tests where the tool is not installed (TRDD-TNNII9S8) (556b78b)
+- **dispatch:** A stalled worker excluded from the count still prints its silent line (TRDD-4P8R2JLQ) (2d306d7)
 ## [3.8.5] — 2026-10-07
 
 ### Bug Fixes
@@ -30,6 +58,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **runaway:** The alarm reports burn measured between two fires (TRDD-NLHVLGEP) (ac63bb0)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.5 (a0ad1e7)
 
 ### Testing
 
