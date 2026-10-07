@@ -20,11 +20,16 @@ All notable changes to this project will be documented in this file.
 - **trdd:** Record B10b plain-Edit breach accepted, follow-up 3eeaf8e6 (TRDD-FQVEILVK) (8732ad0)
 - **trdd:** Add TRDD-58Q791FL - enforce design tracked and reports gitignored (e7068d7)
 - **trdd:** TRDD-58Q791FL records implementation commit de7475f3 and moves to testing (66fc7bf)
+- **trdd:** Turn 58Q791FL's second quoted directive into a sentence (TRDD-58Q791FL) (58841f0)
 
 ### Features
 
 - **detectors:** Memgrep-binary-stale reports a memgrep build older than the installed plugin's memgrep source (TRDD-V5V1CBLM) (c5ec956)
 - **detectors:** Enforce design/ tracked and reports/ gitignored (TRDD-58Q791FL) (de7475f)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.8 (e976da4)
 ## [3.8.7] — 2026-10-07
 
 ### Bug Fixes
