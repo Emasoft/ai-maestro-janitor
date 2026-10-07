@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T05:35:09+0200
+updated: 2026-10-07T07:01:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -42,6 +42,7 @@ NEXT ACTION: #332's drift classes, card by card (idle cards, reminders, check3, 
 2026-10-07 owner directive, verbatim: 'finish to implement all TRDDs and to fix all issues on github, publish and install.' The session publishes the merged fixes through scripts/publish.py and installs them, then continues through the todo column.
 2026-10-07: stays in dev across this publish on purpose: it is the umbrella for the issue sweep, issues 328 and 332 are open and being worked, and no code of its own is half-landed in this release.
 2026-10-07: the iTerm session enumeration deadlines were raised from 15, 30, 45 s to 30, 60, 90 s on the owner's instruction (9d35df27, merge 1cc4c2e7). Known consequences, from the worker's read of the callers: when every attempt fails the daemon main loop can wait up to 186 s on one scan (its 30 s budget defers later tasks, it does not interrupt), and the peer-freeze-recovery detector, limited to 120 s, would be cut and lose that scan. The alarm that reaches the owner is written after ONE scan with zero sessions; no consecutive-scan threshold exists, so a timeout that clears on the next scan still notifies. Changing that threshold was offered to the owner and not made.
+2026-10-07: board triage of 383 cards (278 open) done; batches B1 to B3 merged on main and gated (ten fixes, three cards found already resolved); not yet released.
 
 ## Approval log
 

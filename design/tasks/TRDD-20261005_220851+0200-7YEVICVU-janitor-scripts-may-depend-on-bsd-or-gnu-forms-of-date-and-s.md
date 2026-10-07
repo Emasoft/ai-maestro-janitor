@@ -1,10 +1,10 @@
 ---
 trdd-id: 7YEVICVU
 title: Janitor scripts may depend on BSD or GNU forms of date and stat that differ between hosts
-column: todo
+column: testing
 status: tasked
 created: 2026-10-05T22:08:51+0200
-updated: 2026-10-05T22:08:51+0200
+updated: 2026-10-07T07:01:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:08:51+0200
+implementation-commits: [e15775d4]
 ---
 
 # Janitor scripts may depend on BSD or GNU forms of date and stat that differ between hosts
@@ -26,3 +27,8 @@ Observed in ad hoc shell checks on one host: 'date -r <epoch>' and 'stat -f <for
 ## Approval log
 
 - 2026-10-05T22:08:51+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T07:01:32+0200 — column → testing by main-agent@ai-maestro-janitor. batch B1-B3 merged on main, gated
+
+## STATE
+
+2026-10-07 merged on main (e15775d4): the snippet uses python3 one-liners for the newest .md mtime and the ISO date; the BSD stat format flag is BSD-only and on GNU coreutils it prints file-system info instead of failing, so the old fallback never ran. New test tests/test_shipped_markdown_portable_shell.py blocks the pattern. Not in a release yet.

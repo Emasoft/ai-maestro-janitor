@@ -1,10 +1,10 @@
 ---
 trdd-id: 5CCRBM1H
 title: The new stuck alert text exists inline in code and again as a literal in a test
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T22:11:22+0200
-updated: 2026-10-05T22:11:22+0200
+updated: 2026-10-07T07:01:46+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:11:22+0200
+implementation-commits: [ff6f0b91]
 ---
 
 # The new stuck alert text exists inline in code and again as a literal in a test
@@ -26,3 +27,12 @@ Commit 5bdb9521 put the text inline because fastedit could not add a module cons
 ## Approval log
 
 - 2026-10-05T22:11:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T07:01:46+0200 — COMPLETE by main-agent@ai-maestro-janitor. resolved, evidence in STATE.
+
+## STATE
+
+2026-10-07 merged on main (ff6f0b91): the all-accounts-maxed text is one module constant, used by rotator_alert and imported by its test.
+
+## Acceptance checklist
+
+- [x] The all-accounts-maxed text is one module constant used by rotator_alert and imported by its test; merged ff6f0b91; pytest 18087 passed, 2 skipped on main at the B3 merge.

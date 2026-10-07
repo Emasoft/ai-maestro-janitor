@@ -1,9 +1,9 @@
 ---
 trdd-id: JIYBKY27
 title: Jev auth-rejected finding text and dedupe key are wrong for 402 credits errors
-column: backburner
+column: testing
 created: 2026-09-24T00:05:54+0200
-updated: 2026-09-24T00:05:54+0200
+updated: 2026-10-07T07:01:31+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: bugfix
@@ -14,6 +14,8 @@ mandated-by: none
 approved: true
 approval-judge: janitor-main-session
 approval-datetime: 2026-09-24T00:05:54+0200
+implementation-commits: [0ec8951b]
+status: tasked
 ---
 
 # Jev auth-rejected finding text and dedupe key are wrong for 402 credits errors
@@ -38,3 +40,8 @@ the dedupe on something stable (status code, not the full reason string).
 ## Approval log
 
 - 2026-09-24T00:05:54+0200 — MANDATE issued by janitor-main-session (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T07:01:31+0200 — column → testing by main-agent@ai-maestro-janitor. batch B1-B3 merged on main, gated
+
+## STATE
+
+2026-10-07 merged on main (0ec8951b): the auth finding is worded by HTTP status (402 out of credits, 403 refused, 401 or none as before) and deduplicated on the status instead of the reason text; test failed before (assert 2 == 1). Known gap, follow-up: the dedupe key is stored once and never cleared, so a second, different 401 (for example after a key rotation) is no longer surfaced; clear the stored key on the next successful probe. Not in a release yet.

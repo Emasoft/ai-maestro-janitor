@@ -1,9 +1,9 @@
 ---
 trdd-id: JZPYMTE0
 title: the GitHub config of Emasoft/ai-maestro-janitor is off-baseline — NO_PR_REVIEW
-column: proposal
+column: refused
 created: 2026-10-06T17:51:07+0200
-updated: 2026-10-06T17:51:07+0200
+updated: 2026-10-07T06:24:49+0200
 current-owner: janitor
 task-type: bugfix
 severity: medium
@@ -18,7 +18,9 @@ ticket-origin: fleet-github-config
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-06
 
-**PROPOSED BY THE JANITOR — awaiting approval. NOT authorized to execute.**
+**WITHDRAWN BY THE JANITOR — the finding is GONE. No human declined this.**
+
+The condition this proposal described is no longer detectable as of 2026-10-07 (fixed by hand, or it was transient). It is kept in place as a record, never deleted or moved. If the same condition reappears, the janitor proposes it again with a NEW id — this one is closed.
 
 The janitor detected this in code the **USER owns**, so it may only propose. It has NOT touched
 anything and will not, until a human or the main Claude approves by running:
