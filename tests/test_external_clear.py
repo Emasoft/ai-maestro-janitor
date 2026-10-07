@@ -1391,22 +1391,38 @@ def test_with_measured_facts_stays_unknown_when_the_transcript_is_absent(tmp_pat
 
 
 
-def test_with_measured_facts_idle_unknown_when_transcript_has_no_human_turn(tmp_path: Path):
-    """TRDD-QONEBKGK: assistant/tool-only transcript -> idle unknown; with a human turn -> measured."""
+def test_with_measured_facts_idle_is_exact_for_a_human_turn_and_a_lower_bound_otherwise(tmp_path: Path):
+    """TRDD-QONEBKGK: human turn -> exact "idle ~2h"; heartbeat-only window -> "idle >="; no prompt -> "idle >=" from the oldest line; agent-typed prompt counts as activity."""
     now = int(time.time())
 
     def stamp(age_s: int) -> str:
         return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now - age_s))
 
-    unattended_reply = {"type": "assistant", "timestamp": stamp(60), "message": {"content": "working"}}
-    unattended = tmp_path / "unattended.jsonl"
-    unattended.write_text(json.dumps(unattended_reply) + "\n", encoding="utf-8")
-    got = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(unattended), now)
-    assert got.idle_seconds is None
+    def measure(name: str, records: list[dict]) -> tuple[ec.HandoffInputs, str]:
+        p = tmp_path / name
+        p.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+        got = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(p), now)
+        return got, ec.compose_template_handoff(got, now_iso=NOW_ISO)
 
-    prompt = {"type": "user", "timestamp": stamp(7200), "message": {"content": "hi"}}
-    reply = {"type": "assistant", "timestamp": stamp(7190), "message": {"content": "done"}}
-    attended = tmp_path / "attended.jsonl"
-    attended.write_text(json.dumps(prompt) + "\n" + json.dumps(reply) + "\n", encoding="utf-8")
-    got = ec.with_measured_facts(ec.HandoffInputs(trigger="t"), str(attended), now)
-    assert got.idle_seconds is not None and 7000 <= got.idle_seconds <= 7300
+    # The exact age is that of the human turn newest record (the reply), so keep both past 2h.
+    prompt = {"type": "user", "timestamp": stamp(8000), "message": {"content": "hi"}}
+    reply = {"type": "assistant", "timestamp": stamp(7990), "message": {"content": "done"}}
+    got, text = measure("attended.jsonl", [prompt, reply])
+    assert got.idle_seconds is not None and 7900 <= got.idle_seconds <= 8100
+    assert "idle ~2h" in text and "≥" not in text
+
+    beat = {"type": "user", "scheduledFireId": "f1", "timestamp": stamp(10800), "message": {"content": "tick"}}
+    beat_reply = {"type": "assistant", "timestamp": stamp(10790), "message": {"content": "ok"}}
+    got, text = measure("heartbeat.jsonl", [beat, beat_reply])
+    assert got.idle_seconds is not None and 10700 <= got.idle_seconds <= 10900
+    assert "idle ≥ ~3h" in text
+
+    unattended = {"type": "assistant", "timestamp": stamp(3700), "message": {"content": "working"}}
+    got, text = measure("unattended.jsonl", [unattended])
+    assert got.idle_seconds is not None and 3600 <= got.idle_seconds <= 3800
+    assert "idle ≥ ~1h" in text
+
+    agent_prompt = {"type": "user", "timestamp": stamp(60), "message": {"content": "agent typed this"}}
+    got, text = measure("agent.jsonl", [beat, agent_prompt])
+    assert got.idle_seconds is not None and got.idle_seconds < 120
+    assert "≥" not in text

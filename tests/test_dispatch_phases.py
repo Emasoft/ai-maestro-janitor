@@ -4324,35 +4324,46 @@ def test_outcome_stamp_distinguishes_decline_from_completion(
     assert " ok" in _outcome("fake-quiet")
     assert "error:rc=3" in _outcome("fake-broken")
 
-
-
-def test_drift_line_reprints_after_the_condition_cleared_for_a_fire(
-    env_isolation: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_drift_line_dedupe_is_per_local_day_and_prunes_old_days(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """TRDD-37H7QFSF: present,present,present prints the line once (consecutive repeats stay
-    deduped); present,ABSENT,present prints it twice (absence is detected per fire, never by
-    time). Driven through `_run_detector`, the production path."""
+    """TRDD-37H7QFSF: a non-exempt detector's line prints once per local day; yesterday's
+    seen keys are pruned, today's survive."""
     dispatch = _import_dispatch()
-    monkeypatch.setattr(dispatch, "_HERE", tmp_path)
-    monkeypatch.setattr(dispatch, "_detector_is_due", lambda name, interval: True)
-    flag = tmp_path / "present.flag"
-    _fake_detector(
-        tmp_path / "detectors", "fake-drift",
-        f"import os\nif os.path.exists({str(flag)!r}):\n    print('[fake] thing is wrong')",
-    )
+    import state as _st
 
-    def fire(present: bool) -> str:
-        flag.unlink(missing_ok=True)
-        if present:
-            flag.write_text("x", encoding="utf-8")
-        return _capture_stdout(lambda: dispatch._run_detector("fake-drift", interval=1))
+    line = "[fake] thing is wrong\n"
+    monkeypatch.setattr(dispatch, "_local_day", lambda: "2026-10-06")
+    assert dispatch._dedupe_drift_text("fake-drift", line) == line
+    assert dispatch._dedupe_drift_text("fake-drift", line) != line  # same day: suppressed
+    monkeypatch.setattr(dispatch, "_local_day", lambda: "2026-10-07")
+    assert dispatch._dedupe_drift_text("fake-drift", line) == line  # new day: printed again
+    seen = (_st.state_dir() / dispatch._DRIFT_SEEN_FILE_NAME).read_text(encoding="utf-8")
+    assert "fake-drift:2026-10-07:" in seen
+    assert "2026-10-06" not in seen
 
-    line = "[fake] thing is wrong"
-    steady = [fire(True) for _ in range(3)]
-    assert sum(line in out for out in steady) == 1, steady
 
-    flapping = [fire(False), fire(True)]
-    assert line in flapping[1], "a line that cleared for a fire must print again when it returns"
+def test_self_deduping_detector_line_passes_the_dispatcher_unchanged(
+    env_isolation: dict,
+) -> None:
+    """TRDD-37H7QFSF: an exempt detector dedupes itself, so the dispatcher never swallows a
+    returning line: the same line twice is printed twice."""
+    dispatch = _import_dispatch()
+    line = "[stale-index-lock] stuck\n"
+    assert "stale-index-lock" in dispatch._SELF_DEDUPING_DETECTORS
+    assert dispatch._dedupe_drift_text("stale-index-lock", line) == line
+    assert dispatch._dedupe_drift_text("stale-index-lock", line) == line
+
+
+def test_every_self_deduping_detector_is_on_the_roster_and_uses_emit_once() -> None:
+    """TRDD-37H7QFSF: the exempt set cannot name a detector that does not exist or that
+    does not dedupe itself."""
+    dispatch = _import_dispatch()
+    roster = {n for n, _, _ in dispatch._DETECTORS}
+    for name in dispatch._SELF_DEDUPING_DETECTORS:
+        assert name in roster, name
+        src = (_PROJECT_ROOT / "scripts" / "detectors" / f"{name}.py").read_text(encoding="utf-8")
+        assert "emit_once" in src, name
 
 
 def test_keep_going_nudge_payload_carries_the_board(env_isolation: dict) -> None:

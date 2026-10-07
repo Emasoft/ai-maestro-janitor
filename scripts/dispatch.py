@@ -881,15 +881,17 @@ _DRIFT_SEEN_FILE_NAME = "drift-lines-seen.txt"
 
 
 def _dedupe_drift_line(name: str, line: str) -> str | None:
-    """Return `line` the first time its normalized form is seen, else None (suppressed).
+    """Return `line` the first time its normalized form is seen TODAY, else None (suppressed).
 
-    Reuses `dedupe.emit_once` (the same permanent, key-based primitive every other
-    per-detector dedup in this file already uses) rather than a bespoke last-fire
-    window -- a repeat suppressed once stays suppressed until the underlying line
-    (post-normalization) actually changes. Bare `[janitor-...]` action markers are
-    NEVER suppressed -- they are the authorization channel, not a drift finding.
-    The key is namespaced by `name` so two different detectors that happen to emit
-    the same normalized text never dedupe against each other.
+    Reuses `dedupe.emit_once` (the same key-based primitive every other per-detector dedup
+    in this file already uses). Bare `[janitor-...]` action markers are NEVER suppressed --
+    they are the authorization channel, not a drift finding. The key is namespaced by `name`
+    so two different detectors that happen to emit the same normalized text never dedupe
+    against each other, and carries the local date so a condition that cleared and returned
+    is re-announced at most a day late (TRDD-37H7QFSF: a permanent key silenced it forever,
+    and the dispatcher cannot observe clearance reliably -- a detector may exit 0 with no
+    output for reasons other than the condition clearing). Detectors in
+    `_SELF_DEDUPING_DETECTORS` dedupe themselves and pass through unchanged.
 
     A suppressed repeat is NOT written to the findings ledger -- that would
     reclassify human-facing drift as an advisory. The seen-file itself already
@@ -900,29 +902,47 @@ def _dedupe_drift_line(name: str, line: str) -> str | None:
         return line
     if _RESERVED_MARKER_RE.fullmatch(stripped):
         return line
+    if name in _SELF_DEDUPING_DETECTORS:
+        return line
     seen_file = state.state_dir() / _DRIFT_SEEN_FILE_NAME
-    key = f"{name}:{_drift_dedupe_key(stripped)}"
+    key = f"{name}:{_local_day()}:{_drift_dedupe_key(stripped)}"
     if dedupe.emit_once(seen_file, key, stripped) is not None:
         return line
     return None
 
 
 
-def _forget_absent_drift_keys(name: str, present: set[str]) -> None:
-    """Forget every seen key of detector `name` that this fire did not emit.
+# Detectors whose EVERY printed drift line is gated by their own `dedupe.emit_once` and which
+# `emit_forget` on clearance. WHY exempt (TRDD-37H7QFSF): the dispatcher cross-fire dedupe
+# cannot see that such a condition cleared, so it swallowed the line when it returned; the
+# detector already prints each (re)appearance exactly once, so a second dedupe here only hides
+# it. Detectors with any ungated print (orphaned-memory-maint) stay out.
+_SELF_DEDUPING_DETECTORS = frozenset({
+    "oauth-login-needed",
+    "stale-index-lock",
+    "system-daemon-runaway",
+    "trdd-cross-card-blindspot",
+})
 
-    WHY (TRDD-37H7QFSF): `emit_once` is permanent by key, so a line that printed, cleared for
-    a fire, then came back stayed silent forever -- the reader never learned it had returned.
-    Absence is detected per fire (the detector ran and did not emit the line), never by a
-    time-based expiry, so consecutive repeats stay deduped."""
+
+def _local_day() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
+def _prune_old_drift_keys(name: str) -> None:
+    """Forget the seen keys of detector `name` that are not from today.
+
+    WHY (TRDD-37H7QFSF): the key carries the local date, so yesterday keys can never match
+    again; without pruning the seen-file would grow forever."""
     seen_file = state.state_dir() / _DRIFT_SEEN_FILE_NAME
     try:
         seen = seen_file.read_text(encoding="utf-8").splitlines()
     except OSError:
         return
     prefix = f"{name}:"
+    today = f"{name}:{_local_day()}:"
     for key in seen:
-        if key.startswith(prefix) and key not in present:
+        if key.startswith(prefix) and not key.startswith(today):
             dedupe.emit_forget(seen_file, key)
 
 
@@ -934,21 +954,19 @@ def _dedupe_drift_text(name: str, text: str) -> str:
     INCREASED versus the previous fire -- never at zero, never when a condition cleared
     (the count going down or staying flat says nothing new the reader needs). The
     previous count is read from and written to a per-detector state file so the
-    comparison survives across fires (TRDD-7ZMQSXO6). `text` may be empty: a detector that
-    ran and emitted nothing clears its seen keys (TRDD-37H7QFSF)."""
+    comparison survives across fires (TRDD-7ZMQSXO6)."""
+    if not text:
+        return text
+    if name not in _SELF_DEDUPING_DETECTORS:
+        _prune_old_drift_keys(name)
     kept: list[str] = []
     suppressed = 0
-    present: set[str] = set()
     for line in text.splitlines():
-        stripped = line.strip()
-        if stripped and not _RESERVED_MARKER_RE.fullmatch(stripped):
-            present.add(f"{name}:{_drift_dedupe_key(stripped)}")
         out_line = _dedupe_drift_line(name, line)
         if out_line is not None:
             kept.append(out_line)
         else:
             suppressed += 1
-    _forget_absent_drift_keys(name, present)
     count_file = state.state_dir() / f"drift-lines-suppressed-count-{name}.txt"
     previous = state.read_int_state(count_file, 0)
     if suppressed > previous:
@@ -1284,11 +1302,6 @@ def _run_detector(name: str, interval: int, *, cooldown_active: bool = False) ->
             out = _suppress_stale_memory_markers(out, force=cooldown_active)
         sys.stdout.write(_dedupe_drift_text(name, _quiet_filter(name, _defang_foreign_markers(name, out))))
         sys.stdout.flush()
-    elif proc.returncode == 0:
-        # WHY (TRDD-37H7QFSF): a detector that ran cleanly and emitted nothing is the "condition
-        # cleared" fire -- forget its seen keys so the same line prints again if it returns.
-        # A non-zero exit or a timeout is NOT proof of absence, so those never clear.
-        _dedupe_drift_text(name, "")
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")
         _record_default_outcome(name, f"error:rc={proc.returncode}", started)

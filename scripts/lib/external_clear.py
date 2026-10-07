@@ -1627,6 +1627,9 @@ class HandoffInputs:
     memory_dir: str = ""
     trigger: str = ""
     idle_seconds: int | None = None
+    # True when `idle_seconds` is only a LOWER BOUND (the read window held no human turn): the
+    # handoff then says "idle >= ~Nh" instead of claiming an exact figure (TRDD-QONEBKGK).
+    idle_is_lower_bound: bool = False
     context_tokens: int | None = None
     # The clear path's NEXT ACTION sentence (`session_continuity.next_action`): it quotes the
     # last human message and the reply that answered it. None keeps the generic card-STATE text.
@@ -1637,13 +1640,16 @@ def with_measured_facts(inputs: HandoffInputs, transcript_path: str, now: int) -
     """`inputs` with `idle_seconds` / `context_tokens` measured from the cleared session's own
     transcript. TRDD-QONEBKGK: no caller ever filled them, so every handoff said "idle unknown,
     context unknown" although both are readable from the transcript; each stays None (and the
-    text keeps saying "unknown") only when its source is genuinely absent."""
+    text keeps saying "unknown") only when its source is genuinely absent. A window with no human
+    turn yields a LOWER BOUND (`idle_is_lower_bound`), not "unknown"."""
     import cold_cache_compact  # noqa: PLC0415 -- heavy sibling lib, only this path needs it
     import fleet_scan  # noqa: PLC0415
 
+    idle = fleet_scan.transcript_human_idle(transcript_path, now)
     return dataclasses.replace(
         inputs,
-        idle_seconds=fleet_scan.transcript_human_idle(transcript_path, now),
+        idle_seconds=None if idle is None else idle[0],
+        idle_is_lower_bound=idle is not None and not idle[1],
         context_tokens=cold_cache_compact.context_tokens_for(transcript_path),
     )
 
@@ -1669,7 +1675,12 @@ def compose_template_handoff(
     findings = list(inputs.findings)
 
     def render(n_cards: int, n_commits: int, n_findings: int, show_other_ids: bool) -> str:
-        idle_h = "unknown" if inputs.idle_seconds is None else f"~{inputs.idle_seconds // 3600}h"
+        # TRDD-QONEBKGK: a lower-bound idle (the window held no human turn) renders "≥ ~Nh",
+        # never an exact claim.
+        idle_h = "unknown"
+        if inputs.idle_seconds is not None:
+            bound = "≥ " if inputs.idle_is_lower_bound else ""
+            idle_h = f"{bound}~{inputs.idle_seconds // 3600}h"
         ctx = "unknown" if inputs.context_tokens is None else f"~{inputs.context_tokens // 1000}k"
         out = [
             f"# Handoff — {now_iso} (auto-composed, no model turn — TRDD-PXP08ZQC)",
