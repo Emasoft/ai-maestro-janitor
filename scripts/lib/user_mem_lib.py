@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
@@ -23,6 +22,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+import jsonl_walk  # sibling in scripts/lib: the hook puts that dir on sys.path before importing this module; stdlib-only
 
 try:
     import fcntl  # POSIX only (macOS + linux — the declared runtime targets)
@@ -426,6 +427,7 @@ def _content_to_text(content: object) -> str:
     return ""
 
 
+
 def previous_user_message(transcript_path: Path | str) -> Optional[str]:
     """Return the text of the user message immediately BEFORE the save-command line.
 
@@ -440,34 +442,20 @@ def previous_user_message(transcript_path: Path | str) -> Optional[str]:
     transcript is missing/unreadable or holds no eligible user message (the hook
     then reports nothing-to-save instead of crashing).
     """
-    path = Path(transcript_path)
     try:
         # F10 (wikimem audit 2026-07-07): read only the TAIL, never the whole
         # file — long-session transcripts reach hundreds of MB, and blowing the
         # hook's time budget makes the harness kill it NON-blocking, leaking the
         # private prompt to the model. The wanted message is the one immediately
-        # before the save command, so the last 512 KB always contains it; a
-        # mid-line start is harmless (that partial line fails json.loads and is
-        # skipped).
-        tail_bytes = 512 * 1024
-        size = path.stat().st_size
-        with path.open("rb") as fh:
-            if size > tail_bytes:
-                fh.seek(size - tail_bytes)
-            raw = fh.read().decode("utf-8", errors="replace")
-    except (FileNotFoundError, OSError):
+        # before the save command, so the last 512 KB always contains it.
+        # jsonl_walk.read_jsonl_tail drops the line the seek cut and splits on
+        # "\n" only (TRDD-A8DRRW0I): str.splitlines() also broke on a raw U+2028
+        # inside a message, which Claude Code writes unescaped, losing that record.
+        entries = jsonl_walk.read_jsonl_tail(Path(transcript_path), 512 * 1024, malformed_lines=[])
+    except OSError:
         return None
     last_text: Optional[str] = None
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(entry, dict):
-            continue
+    for entry in entries:
         if entry.get("type") != "user":
             continue
         if entry.get("isMeta"):

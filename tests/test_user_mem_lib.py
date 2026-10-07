@@ -436,3 +436,38 @@ def test_resolve_user_mem_dir_is_sibling_of_agent_corpus(tmp_path, monkeypatch):
     # parent is the per-project memory dir under ~/.claude/projects/<slug>/memory
     assert d.parent.name == "memory"
     assert "Demo-Project" in str(d) or "demo" in str(d)
+
+
+def _user_line(text: str) -> bytes:
+    # ensure_ascii=False: Claude Code writes U+2028 raw, which str.splitlines() treats as a line break.
+    entry = {"type": "user", "message": {"role": "user", "content": text}}
+    return json.dumps(entry, ensure_ascii=False).encode("utf-8")
+
+
+def test_previous_user_message_survives_damaged_tail(tmp_path):
+    """A raw 0xFF line, a non-object line and a half-written last line never hide the real previous message."""
+    tr = tmp_path / "t.jsonl"
+    lines = [
+        _user_line("the fact to remember"),
+        b'{"type": "assistant", "text": "bad \xff byte"}',
+        b"[1, 2, 3]",
+        _user_line("/to-user-mem"),
+        b'{"type": "user", "message": {"role": "us',
+    ]
+    tr.write_bytes(b"\n".join(lines))
+    assert user_mem_lib.previous_user_message(tr) == "the fact to remember"
+
+
+def test_previous_user_message_keeps_a_message_holding_a_raw_line_separator(tmp_path):
+    """A message containing a raw U+2028 is one JSONL record, not two lines."""
+    tr = tmp_path / "t.jsonl"
+    tr.write_bytes(b"\n".join([_user_line("first part second part"), _user_line("/to-user-mem")]) + b"\n")
+    assert user_mem_lib.previous_user_message(tr) == "first part second part"
+
+
+def test_previous_user_message_ignores_the_record_cut_by_the_window(tmp_path):
+    """On a file larger than the 512 KB window the cut fragment is skipped and a later whole message is returned."""
+    tr = tmp_path / "t.jsonl"
+    filler = _user_line("x" * 600_000)  # one record longer than the window: the seek lands inside it
+    tr.write_bytes(b"\n".join([filler, _user_line("whole message after the cut"), _user_line("/to-user-mem")]) + b"\n")
+    assert user_mem_lib.previous_user_message(tr) == "whole message after the cut"
