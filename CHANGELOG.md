@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.4] — 2026-10-07
+
+### Bug Fixes
+
+- **jev-compaction:** Word and dedupe the auth finding by HTTP status (TRDD-JIYBKY27) (0ec8951)
+- **dispatch:** Log "interrupt check skipped, session unknown" once per episode (TRDD-W3ERQIB9) (056a0be)
+- **skills:** Portable newest-mtime and date in janitor-memory-record-recent (TRDD-7YEVICVU) (e15775d)
+- **memgrep:** Lint reads a single-quoted description scalar (TRDD-GTP15HRC) (b6d5db5)
+- **handoff:** Fill idle and context in the post-clear handoff header (TRDD-QONEBKGK) (87d754e)
+- **memgrep:** Refuse a dedup fix when the description quotes do not match (TRDD-GTP15HRC follow-up) (1f4b143)
+- **handoff:** Idle is unknown when the cleared transcript has no human turn (TRDD-QONEBKGK) (4c582d5)
+- **jev-compaction:** Re-surface an auth failure after a successful compaction (TRDD-JIYBKY27) (cdde522)
+- **dispatch:** Reprint a drift line that returns after clearing for a fire (TRDD-37H7QFSF) (a3583bb)
+- **dispatch:** Per-day drift dedupe key plus self-deduping exemption, replacing the per-fire forget (TRDD-37H7QFSF) (876296d)
+- **handoff:** A window with only heartbeat prompts renders idle as a lower bound, not unknown (TRDD-QONEBKGK) (dabcc33)
+- **handoff:** Render a sub-hour idle in minutes; document the dedupe exemption contract (TRDD-QONEBKGK, TRDD-37H7QFSF) (dfc15e8)
+
+### Documentation
+
+- **spec:** Renumber the update-mem-atom clause to WM-CLI-26 (TRDD-P2XDI38R) (80276fb)
+- **spec:** Record the WM-CLI-26 renumber, resolve the duplicate WM-CLI-18 (TRDD-P2XDI38R) (e4b5906)
+- **trdd:** Record batches B1 to B3 on their cards (TRDD-FQVEILVK) (3175250)
+- **trdd:** Record batches B4 and B5 on their cards (TRDD-FQVEILVK) (c133883)
+- **trdd:** Verify the exempt detectors, close EMMXG7GW, refresh the FQVEILVK state (TRDD-FQVEILVK) (527b037)
+
+### Refactor
+
+- **rotator-alert:** Name the all-accounts-maxed stuck text once (TRDD-5CCRBM1H) (ff6f0b9)
+
+### Styling
+
+- **handoff:** Restore docstring wording and signature layout (TRDD-QONEBKGK) (ca45b0e)
+
+### Testing
+
+- **rotator-alert:** Use a stuck kind the rotator really writes (TRDD-ZQ3GVI9Q) (33734cd)
+- **dispatch:** Pin the re-arm of the session-unknown log line (TRDD-W3ERQIB9) (8bc1d4b)
+- **jev-compaction:** Drop the stale handoff between runs so the third run reaches the lane (TRDD-JIYBKY27) (80c0628)
 ## [3.8.3] — 2026-10-07
 
 ### Bug Fixes
@@ -29,6 +67,10 @@ All notable changes to this project will be documented in this file.
 - **trdd:** Record the merged fixes and the hook response; card for hook start-up cost (TRDD-FQVEILVK) (714f72c)
 - **trdd:** Pre-publish pass — owner directive, dev column emptied, validate result (TRDD-FQVEILVK) (bcc0229)
 - **trdd:** Correct the 328 record, gate and validate results, iTerm ladder consequences (TRDD-FQVEILVK) (3718a1d)
+
+### Miscellaneous Tasks
+
+- Bump version to 3.8.3 (6377ff9)
 
 ### Styling
 
