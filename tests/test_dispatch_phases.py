@@ -3532,6 +3532,28 @@ def test_background_worker_progress_dead_worker_is_not_counted_as_running(env_is
     assert "silent" in out, "the stall finding line must still surface"
 
 
+
+def test_background_worker_progress_stalled_worker_excluded_from_count_still_prints_silent_line(env_isolation: dict) -> None:
+    """TRDD-4P8R2JLQ: with one running and one stalled worker, the count says 1 AND the
+    stalled worker still surfaces through its own "silent for N min" line (dispatch.py
+    `_record_worker_stall`), so excluding it from the count never hides it."""
+    dispatch = _import_dispatch()
+    import pending_agents
+
+    sd = _seed_state_dir(dispatch)
+    fresh = sd / "agent-fresh.jsonl"
+    _touch_transcript(fresh, mtime=time.time())
+    pending_agents.add("agent-fresh", description="live worker", transcript=str(fresh))
+    old = int(time.time()) - (20 * 60)
+    stale = sd / "agent-stale.jsonl"
+    _touch_transcript(stale, mtime=old, tool_use=False)
+    pending_agents.add("agent-stale", description="stuck worker", transcript=str(stale), now=old)
+
+    lines = _capture_stdout(dispatch._phase_background_worker_progress).splitlines()
+    assert any(ln.startswith("1 background worker running") for ln in lines), lines
+    assert any("silent for" in ln and "/janitor-findings" in ln for ln in lines), lines
+
+
 def _isolate_home(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point HOME at a tmp dir so a full/maintenance main() fire's user-presence
     breadcrumb (~/.aimaestro) never writes to the real home — keeps these tests
