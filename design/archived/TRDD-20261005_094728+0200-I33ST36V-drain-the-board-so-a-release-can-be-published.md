@@ -1,10 +1,10 @@
 ---
 trdd-id: I33ST36V
 title: drain the board so a release can be published
-column: todo
-status: tasked
+column: complete
+status: archived
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-07T03:12:27+0200
+updated: 2026-10-07T03:13:24+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -73,3 +73,4 @@ An agent must not mark other projects' findings ledgers as read, and must not si
 ## Approval log
 
 - 2026-10-05T09:47:28+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T03:13:24+0200 — COMPLETE by main-agent@ai-maestro-janitor. release published, installed, daemon on the new version.
