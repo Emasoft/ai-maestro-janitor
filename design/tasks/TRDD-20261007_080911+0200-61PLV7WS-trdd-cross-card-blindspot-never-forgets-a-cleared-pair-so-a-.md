@@ -1,0 +1,26 @@
+---
+trdd-id: 61PLV7WS
+title: trdd-cross-card-blindspot never forgets a cleared pair, so a pair that returns stays silent forever
+column: dev
+status: tasked
+created: 2026-10-07T08:09:11+0200
+updated: 2026-10-07T08:09:11+0200
+current-owner: main-agent@ai-maestro-janitor
+created-by: main-agent@ai-maestro-janitor
+task-type: bugfix
+min-approval-requirement: none
+assignee: main-agent@ai-maestro-janitor
+mandate: true
+mandated-by: none
+approved: true
+approval-judge: main-agent@ai-maestro-janitor
+approval-datetime: 2026-10-07T08:09:11+0200
+---
+
+# trdd-cross-card-blindspot never forgets a cleared pair, so a pair that returns stays silent forever
+
+Found by the per-key forget check on TRDD-37H7QFSF (2026-10-07): scripts/detectors/trdd-cross-card-blindspot.py gates its prints on dedupe.emit_once keys of the form blindspot plus the shared reference plus the two card ids, and blindspot-content plus the two card ids plus the shared words, and calls emit_forget only for pairs dropped by the display cap, so a pair that is cross-linked and later un-linked (or reappears) is never reported again. Fix: forget seen pair keys not found in the current run, ONLY after a complete successful scan (any read error, empty listing, truncation or early exit forgets nothing). Acceptance: full scan with the pair gone forgets it; a scan with a read error keeps it; a returning pair prints again; a pair present on two scans prints once. Being built in batch B6.
+
+## Approval log
+
+- 2026-10-07T08:09:11+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
