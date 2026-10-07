@@ -15,8 +15,11 @@ STALE only when the installed commit is `ahead` of (or `diverged` from) the stam
 `scripts/memgrep/` changed between them. A plugin update that touched no memgrep source leaves the
 binary current; `behind` means a dev build newer than the release, also fine.
 
-CAN'T TELL (no memgrep, stamp `unknown`, no user-scope entry, gh missing or failing): ONE advisory
-line, never a fixable proposal — guessing "stale" would send people rebuilding a binary that is fine.
+CAN'T TELL (no memgrep, stamp `unknown`, no user-scope entry, gh missing or failing, a truncated
+compare, a build commit GitHub does not know): ONE advisory line, never a fixable proposal —
+guessing "stale" would send people rebuilding a binary that is fine. A cargo build from the plugin
+cache (which has no .git) is stamped `unknown` and therefore reads as can't-tell; only the
+user-scope install is compared. Can't-tell lines dedupe per (reason, stamp, installed sha).
 
 The binary is MACHINE-GLOBAL, so everything is per (stamp, installed sha) in the global state dir:
 the line prints once per pair, and the `gh` compare result is cached per pair (asked at most once).
@@ -26,6 +29,7 @@ Fail-open: any unreadable input is a "can't tell", never a crash.
 from __future__ import annotations
 
 import json
+import platform
 import re
 import sys
 from pathlib import Path
@@ -45,6 +49,10 @@ _SRC_PREFIX = "scripts/memgrep/"
 _STAMP_RE = re.compile(r"\(([0-9a-f]{7,40}|unknown),")
 _CACHE_FILE = "memgrep-binary-stale-compare.json"
 _SEEN_FILE = "memgrep-binary-stale-seen.txt"
+_FILES_CAP = 300  # GitHub's compare lists at most 300 files; at the cap the list may be cut short
+_REASON_GH = "the GitHub compare failed (gh missing or erroring)"
+_REASON_404 = "the build commit is not on GitHub (local or fork build)"
+_REASON_TRUNCATED = "the GitHub compare is truncated"
 
 
 def parse_stamp(version_output: str) -> str | None:
@@ -53,8 +61,8 @@ def parse_stamp(version_output: str) -> str | None:
     return m.group(1) if m and m.group(1) != "unknown" else None
 
 
-def installed_sha() -> str | None:
-    """The user-scope janitor entry's gitCommitSha in installed_plugins.json, or None."""
+def installed_entry() -> tuple[str, str] | None:
+    """The user-scope janitor entry in installed_plugins.json as (gitCommitSha, version), or None."""
     path = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
     try:
         entries = json.loads(path.read_text(encoding="utf-8"))["plugins"][_PLUGIN_KEY]
@@ -62,7 +70,7 @@ def installed_sha() -> str | None:
         return None
     for e in entries:
         if isinstance(e, dict) and e.get("scope") == "user" and e.get("gitCommitSha"):
-            return str(e["gitCommitSha"])
+            return str(e["gitCommitSha"]), str(e.get("version", ""))
     return None
 
 
@@ -76,9 +84,20 @@ def classify(compare: dict) -> int:
         return 0
     return sum(1 for f in compare.get("files", []) if str(f.get("filename", "")).startswith(_SRC_PREFIX))
 
+def is_truncated(data: dict) -> bool:
+    """True when an ahead/diverged compare cannot be trusted: no `files` key, or GitHub's 300-file cap hit."""
+    if data.get("status") not in ("ahead", "diverged"):
+        return False
+    files = data.get("files")
+    return not isinstance(files, list) or len(files) >= _FILES_CAP
 
-def _compare(stamp: str, sha: str) -> dict | None:
-    """The gh compare for the pair, cached per pair in the global state dir; None when gh fails."""
+
+def _compare(stamp: str, sha: str) -> dict | str:
+    """The gh compare for the pair (cached per pair in the global state dir), or a can't-tell reason string.
+
+    Truncated responses are never cached: a verdict from a partial file list would stick forever.
+    A 404 is cached: GitHub will keep not knowing a local/fork build commit.
+    """
     cache_path = gs.global_state_dir() / _CACHE_FILE
     key = f"{stamp}...{sha}"
     try:
@@ -86,24 +105,35 @@ def _compare(stamp: str, sha: str) -> dict | None:
     except (OSError, ValueError):
         cache = {}
     if key in cache:
+        if cache[key]["status"] == "not-found":
+            return _REASON_404
         return {"status": cache[key]["status"], "files": [{"filename": f} for f in cache[key]["memgrep_files"]]}
     proc = state.run_subprocess(
         ["gh", "api", f"repos/{_REPO}/compare/{key}"], timeout=60, capture=True, detector_name=_NAME
     )
-    if proc is None or proc.returncode != 0:
-        return None
-    try:
-        data = json.loads(proc.stdout)
-    except ValueError:
-        return None
-    # Cache only what classify needs: the full response runs to ~1 MB.
-    cache[key] = {
-        "status": data.get("status"),
-        "memgrep_files": [f["filename"] for f in data.get("files", []) if str(f.get("filename", "")).startswith(_SRC_PREFIX)],
-    }
+    if proc is None:
+        return _REASON_GH
+    data: dict = {}
+    if proc.returncode != 0:
+        # gh prints "gh: Not Found (HTTP 404)" on stderr when the base commit is unknown to GitHub.
+        if "HTTP 404" not in (proc.stderr or ""):
+            return _REASON_GH
+        cache[key] = {"status": "not-found"}
+    else:
+        try:
+            data = json.loads(proc.stdout)
+        except ValueError:
+            return _REASON_GH
+        if is_truncated(data):
+            return _REASON_TRUNCATED
+        # Cache only what classify needs: the full response runs to ~1 MB.
+        cache[key] = {
+            "status": data.get("status"),
+            "memgrep_files": [f["filename"] for f in data.get("files", []) if str(f.get("filename", "")).startswith(_SRC_PREFIX)],
+        }
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     state.atomic_write(cache_path, json.dumps(cache))
-    return data
+    return _REASON_404 if cache[key]["status"] == "not-found" else data
 
 
 def _emit(key: str, line: str) -> None:
@@ -112,36 +142,41 @@ def _emit(key: str, line: str) -> None:
         print(seen, flush=True)
 
 
-def _cant_tell(why: str) -> int:
-    _emit(f"cant-tell:{why}", f"[{_NAME}] cannot tell whether the memgrep binary is current: {why} (advisory)")
+def _cant_tell(why: str, stamp: str | None = None, sha: str | None = None) -> int:
+    # Keyed per (reason, stamp, installed sha): emit_once never expires a key, so a reason-only key
+    # would hide that advisory for the machine's lifetime, across every later plugin update.
+    _emit(f"cant-tell:{why}:{stamp or ''}:{sha or ''}", f"[{_NAME}] cannot tell whether the memgrep binary is current: {why} (advisory)")
     return 0
 
 
 def main() -> int:
     state.init_state()
 
+    entry = installed_entry()
+    sha, version = entry if entry else (None, "")
     memgrep = user_mem_lib.find_memgrep()
     if not memgrep:
-        return _cant_tell("no memgrep binary found")
+        return _cant_tell("no memgrep binary found", None, sha)
     proc = state.run_subprocess([memgrep, "--version"], timeout=10, capture=True, detector_name=_NAME)
     stamp = parse_stamp(proc.stdout if proc else "")
     if not stamp:
-        return _cant_tell("the memgrep build carries no commit stamp")
-    sha = installed_sha()
+        return _cant_tell("the memgrep build carries no commit stamp", None, sha)
     if not sha:
-        return _cant_tell("no user-scope janitor install found")
+        return _cant_tell("no user-scope janitor install found", stamp)
     if sha.startswith(stamp):
         return 0
     data = _compare(stamp, sha)
-    if data is None:
-        return _cant_tell("the GitHub compare failed (gh missing or erroring)")
+    if isinstance(data, str):
+        return _cant_tell(data, stamp, sha)
     changed = classify(data)
     if changed:
+        arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64"}.get(platform.machine().lower(), platform.machine().lower())
         _emit(
             f"stale:{stamp}:{sha}",
             f"[{_NAME}] the memgrep binary was built from {stamp} but the installed plugin is at {sha[:7]}; "
-            f"{changed} memgrep source file(s) changed since — rebuild with `cargo install --path scripts/memgrep` "
-            f"from a janitor checkout, or install the release binary",
+            f"{changed} memgrep source file(s) changed since — fix: `gh release download v{version} "
+            f"-R {_REPO} -p memgrep-{platform.system().lower()}-{arch}` and put it on PATH, "
+            f"or `cargo install --path scripts/memgrep` from a janitor git checkout",
         )
     return 0
 

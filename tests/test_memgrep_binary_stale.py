@@ -38,12 +38,12 @@ def _fixture(name: str) -> dict:
     return json.loads((FIX / f"{name}.json").read_text(encoding="utf-8"))
 
 
-def _run(tmp_path: Path, *, path: str, memgrep: str | None, installed: str | None = "288a2777387c5aa106fbd0ba722e5aea4bec7ff5") -> str:
+def _run(tmp_path: Path, *, path: str, memgrep: str | None, installed: str | None = "288a2777387c5aa106fbd0ba722e5aea4bec7ff5", version: str = "3.8.7", extra_env: dict[str, str] | None = None) -> str:
     """Run the detector as the dispatcher does, in an isolated HOME / project / global-state dir."""
     home = tmp_path / "home"
     (home / ".claude" / "plugins").mkdir(parents=True, exist_ok=True)
     if installed:
-        entry = [{"scope": "user", "gitCommitSha": installed}]
+        entry = [{"scope": "user", "gitCommitSha": installed, "version": version}]
         (home / ".claude" / "plugins" / "installed_plugins.json").write_text(
             json.dumps({"plugins": {det._PLUGIN_KEY: entry}}), encoding="utf-8"
         )
@@ -55,6 +55,7 @@ def _run(tmp_path: Path, *, path: str, memgrep: str | None, installed: str | Non
     }
     if memgrep:
         env["MEMGREP_BIN"] = memgrep
+    env.update(extra_env or {})
     (tmp_path / "proj").mkdir(exist_ok=True)
     proc = subprocess.run([sys.executable, str(DETECTOR)], env=env, capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
@@ -69,6 +70,13 @@ def test_ahead_with_memgrep_changes_is_stale() -> None:
 def test_behind_is_quiet() -> None:
     """A dev build newer than the release (status behind) is not stale."""
     assert det.classify(_fixture("behind")) == 0
+
+
+def test_behind_with_memgrep_files_is_quiet() -> None:
+    """Only ahead/diverged can be stale: a `behind` compare that lists memgrep files is still not stale."""
+    data = _fixture("ahead")
+    data["status"] = "behind"
+    assert det.classify(data) == 0
 
 
 def test_identical_is_quiet() -> None:
@@ -135,15 +143,74 @@ def test_cached_pair_needs_no_gh(tmp_path: Path) -> None:
     assert str(Path.home()) not in out
 
 
+def test_truncated_compare_is_not_a_verdict() -> None:
+    """A compare with no `files` key, or 300 files (GitHub's cap), is truncated: can't tell, never current."""
+    assert det.is_truncated({"status": "ahead"})
+    assert det.is_truncated({"status": "diverged", "files": [{"filename": "x"}] * 300})
+    assert not det.is_truncated({"status": "ahead", "files": [{"filename": "x"}] * 299})
+    assert not det.is_truncated({"status": "behind"})
+    assert not det.is_truncated(_fixture("ahead"))
+
+
+def test_cached_404_has_its_own_reason(tmp_path: Path) -> None:
+    """A cached 404 (build commit unknown to GitHub) reads as local/fork build, not as 'gh missing'."""
+    stub = tmp_path / "memgrep"
+    stub.write_text("#!/bin/sh\necho 'memgrep 0.2.0 (abc1234, 2026-10-07)'\n", encoding="utf-8")
+    stub.chmod(0o755)
+    sha = "d" * 40
+    (tmp_path / "gs").mkdir()
+    (tmp_path / "gs" / det._CACHE_FILE).write_text(json.dumps({f"abc1234...{sha}": {"status": "not-found"}}), encoding="utf-8")
+    out = _run(tmp_path, path=str(tmp_path / "empty"), memgrep=str(stub), installed=sha)
+    assert "the build commit is not on GitHub (local or fork build)" in out
+    assert "gh missing" not in out
+
+
+@pytest.mark.real_subprocess("gh")
+@pytest.mark.skipif(shutil.which("gh") is None, reason="gh not installed")
+def test_real_404_has_its_own_reason(tmp_path: Path) -> None:
+    """Real gh against GitHub: a stamp that is no commit there gives the local/fork-build reason."""
+    stub = tmp_path / "memgrep"
+    stub.write_text("#!/bin/sh\necho 'memgrep 0.2.0 (abc1234, 2026-10-07)'\n", encoding="utf-8")
+    stub.chmod(0o755)
+    # _run isolates HOME, so hand gh its credential explicitly.
+    token = subprocess.run(
+        ["gh", "auth", "token"], capture_output=True, text=True, env={**os.environ, "HOME": pwd.getpwuid(os.getuid()).pw_dir}
+    ).stdout.strip()
+    out = _run(tmp_path, path=os.environ["PATH"], memgrep=str(stub), installed="f" * 40, extra_env={"GH_TOKEN": token} if token else None)
+    assert "the build commit is not on GitHub (local or fork build)" in out, out
+
+
+def test_cant_tell_dedupes_per_installed_sha(tmp_path: Path) -> None:
+    """The same reason for two different installed shas is two advisories (the seen file never expires)."""
+    first = _run(tmp_path, path=str(tmp_path / "empty"), memgrep=None, installed="a" * 40)
+    second = _run(tmp_path, path=str(tmp_path / "empty"), memgrep=None, installed="b" * 40)
+    assert first and second
+
+
+def test_stale_line_names_the_release_download(tmp_path: Path) -> None:
+    """The STALE advice is concrete: `gh release download v<version>` for the installed version."""
+    stub = tmp_path / "memgrep"
+    stub.write_text("#!/bin/sh\necho 'memgrep 0.2.0 (abc1234, 2026-10-07)'\n", encoding="utf-8")
+    stub.chmod(0o755)
+    sha = "c" * 40
+    (tmp_path / "gs").mkdir()
+    (tmp_path / "gs" / det._CACHE_FILE).write_text(
+        json.dumps({f"abc1234...{sha}": {"status": "ahead", "memgrep_files": ["scripts/memgrep/src/a.rs"]}}), encoding="utf-8"
+    )
+    out = _run(tmp_path, path=str(tmp_path / "empty"), memgrep=str(stub), installed=sha, version="3.8.7")
+    assert "gh release download v3.8.7 -R Emasoft/ai-maestro-janitor -p memgrep-" in out
+    assert "cargo install --path scripts/memgrep" in out
+
+
 @needs_memgrep
 @pytest.mark.real_subprocess("gh")
 @pytest.mark.skipif(shutil.which("gh") is None, reason="gh not installed")
-def test_live_machine_reports_stale(tmp_path: Path) -> None:
-    """LIVE: this machine's PATH memgrep (built 5497043) is behind the installed plugin's memgrep source."""
+def test_live_machine_run_is_clean(tmp_path: Path) -> None:
+    """LIVE: this machine's real memgrep and plugin install give no output or one detector line, exit 0."""
     # conftest points $HOME at a fake tree; the live run needs the OS-recorded real home.
     real_home = pwd.getpwuid(os.getuid()).pw_dir
     env = {**os.environ, "HOME": real_home, "CLAUDE_PROJECT_DIR": str(tmp_path), "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "gs")}
     proc = subprocess.run([sys.executable, str(DETECTOR)], env=env, capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
-    assert "memgrep binary was built from" in proc.stdout, proc.stdout
-    assert "cargo install --path scripts/memgrep" in proc.stdout
+    lines = proc.stdout.splitlines()
+    assert len(lines) <= 1 and all(line.startswith("[memgrep-binary-stale]") for line in lines), proc.stdout
