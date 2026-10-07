@@ -1,10 +1,10 @@
 ---
 trdd-id: IN4493LC
 title: Carry the owner last assignment across consecutive clears (GitHub issue 338)
-column: dev
+column: testing
 status: tasked
 created: 2026-10-07T22:37:16+0200
-updated: 2026-10-07T22:43:52+0200
+updated: 2026-10-07T23:41:59+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -38,3 +38,13 @@ PARKED: TRDD-A8DRRW0I wave 2 until 3.8.11 is out; wave 1 commits 1c045352 and 22
 
 2026-10-07 — review of this plan (adopted; build these into the worker brief): (1) keep the LAST THREE human messages with timestamps, oldest first, not one, and call them 'the owner's most recent messages', never 'standing assignment' — the last message is often a question or a stop order (this session's last two were questions; the assignment was 'check the issues on github. in particular issue 338. and fix that NOW'); (2) key the record PER SESSION LINEAGE, not per project: two sessions of one project share .janitor/state, so store it under the cleared session id and carry it to the new id at each clear (the hook already has old and new ids, see carry_task_dir); (3) show the age in words and say 'at that time' for the carried reply; (4) take test record shapes for /janitor-arm, /janitor-resume, command-name and local-command-caveat records from a REAL cleared-and-resumed transcript, and confirm transcript_roles.classify_record does not class them human; (5) clip the nudge quote to about 160 chars; (6) the full worker brief is in this session's transcript (eb2288ee, the refused Agent call 'Fix issue 338 carry owner assignment'): reuse its sanitizer, one-reader-function and atomic-write requirements; (7) OWNER DECISION to put in the closing report, not to act on: the global rule 'no work without an explicit assignment' treats a quoted message from an earlier session as context, so some agents will still decline; one sentence in that rule saying a janitor handoff quoting the owner's verbatim message counts as that assignment would settle it; (8) two clears in a row: measure per clear in the ai-maestro project's clear-trigger.log the timestamp, trigger, context size and idle time, and each resumed session's context at its first turn against min_context; (9) 3.8.11 will be the first full-suite run over a8 stage A, wave 0, 1c045352 and 22c798b4 together.
 2026-10-07 — fix landed in 6da0149f: lineage record, carry across clears, next_action both forms, hook and nudge wired, 8+1 tests, ruff/mypy/pyright clean. Still owed: publish 3.8.11, install, the issue 338 comment, the two-clears measurement.
+
+## Release 3.8.11 (2026-10-07)
+
+Published as 3.8.11: release commit cf2842573c9e732b4ea95d5f5f52ecbf81b1eb4e, tag v3.8.11; all five workflows (CI, Release, zizmor security audit, Notify Marketplace, memgrep release binaries) succeeded on it.
+Installed at user scope (3.8.10 to 3.8.11) on the owner's typed "install it", before CI and Release had finished; both passed afterwards.
+Release notes added on GitHub above the generated changelog, then corrected after review: they state that no real clear had been observed under 3.8.11 when written, that the carry is the last three messages whatever they say, and the integrity-pin caveat.
+Comment posted on issue 338 (issuecomment-6046964307), edited after review; the issue is left open for proposals 2 (partly done), 3 and 5. The comment promises to link the follow-up card once it is pushed: TRDD-HKUOS0DV is that card, and the link is owed after the next publish.
+Known flaws, not fixed: a typed /login is classed as an owner message and can take one of the three slots; the owner-messages record files in .janitor/state/owner-messages/ are never pruned; replace the `assert` in `_merge_owner_messages` with an explicit `if stored is None: return` at the next touch (python -O strips asserts).
+Not verified: no real clear has yet run under 3.8.11, so the carried messages have not been seen in a live handoff; whether a plain clear (without a process restart) loads the new SessionStart hook is untested.
+Field check to move this card to complete: after one real janitor clear of a session whose cleared transcript has no human message, the new session's handoff quotes the owner's earlier messages verbatim with their age.

@@ -4,7 +4,7 @@ title: Session intent is carried by the TRDD underway and injected by a SessionS
 column: backburner
 status: tasked
 created: 2026-10-07T23:03:20+0200
-updated: 2026-10-07T23:05:17+0200
+updated: 2026-10-07T23:41:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -67,3 +67,4 @@ Stale STATE blocks; without enforcement the problem moves from the handoff to th
 
 TRDD-IN4493LC (issue 338, the owner-messages record this design keeps); TRDD-D7RLXAN1 (the "read this first" redesign this overlaps); TRDD-FQVEILVK (an example of a stale STATE block); TRDD-HIZ9ODVX (cost comparison).
 The scratch copy reports_dev/20261007-owner-directive-intent-in-trdd.md is superseded by this card.
+TRDD-LP8NDBPL (the two failed post-clear checks of 2026-10-07)
