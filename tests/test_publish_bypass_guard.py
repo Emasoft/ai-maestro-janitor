@@ -49,3 +49,17 @@ def test_exemption_does_not_widen(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_no_bypass_variable_passes() -> None:
     """With no bypass variable set the guard returns normally."""
     publish.stage_bypass_guard()
+
+
+
+def test_install_smoke_opt_out_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PLUGIN_SKIP_INSTALL_SMOKE=1 is refused with SystemExit (documents why the opt-out was dead)."""
+    monkeypatch.setenv("PLUGIN_SKIP_INSTALL_SMOKE", "1")
+    with pytest.raises(SystemExit):
+        publish.stage_bypass_guard()
+
+
+def test_dead_install_smoke_opt_out_is_gone() -> None:
+    """publish.py must not read PLUGIN_SKIP_INSTALL_SMOKE: the guard refuses it at launch, so a read is dead code that advertises a bypass."""
+    text = Path(publish.__file__).resolve().read_text(encoding="utf-8")
+    assert "PLUGIN_SKIP_INSTALL_SMOKE" not in text

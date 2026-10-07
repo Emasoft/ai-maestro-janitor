@@ -3233,10 +3233,10 @@ def stage_install_smoke(root: Path, new_ver: str, dry_run: bool) -> None:
     if dry_run:
         cprint(f"  {YELLOW}(dry-run) skipped.{NC}")
         return
-    if os.environ.get("PLUGIN_SKIP_INSTALL_SMOKE") == "1":
-        cprint(f"  {YELLOW}SKIPPED - PLUGIN_SKIP_INSTALL_SMOKE=1{NC}")
-        return
-    strict = os.environ.get("PLUGIN_REQUIRE_INSTALL_SMOKE") == "1"
+    # WHY no skip variable here: stage_bypass_guard refuses every PLUGIN_SKIP_*
+    # variable at launch, so an opt-out read here could never take effect and
+    # only advertised a bypass the owner's rules forbid (TRDD-LA4MGOJN).
+    strict =os.environ.get("PLUGIN_REQUIRE_INSTALL_SMOKE") == "1"
     claude_bin = shutil.which("claude")
     if claude_bin is None:
         cprint(f"  {YELLOW}SKIPPED - the `claude` CLI is not on PATH (normal on a CI runner).{NC}")
