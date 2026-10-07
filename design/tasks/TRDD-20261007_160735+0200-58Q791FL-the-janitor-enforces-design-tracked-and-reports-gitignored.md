@@ -4,7 +4,7 @@ title: The janitor enforces design tracked and reports gitignored
 column: testing
 status: tasked
 created: 2026-10-07T16:07:35+0200
-updated: 2026-10-07T16:21:50+0200
+updated: 2026-10-07T17:56:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -33,3 +33,7 @@ Plan: new detector design-tracked (probe design paths with check-ignore --no-ind
 ## Approval log
 
 - 2026-10-07T16:07:35+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Corrections
+
+2026-10-07: when design/ is hidden because a parent folder is excluded, the append path still writes !/design/ and !/design/** to the root .gitignore, re-probes, finds it still hidden and warns, leaving a .gitignore edit that achieves nothing. Fix: check that the negations would take effect (or revert the append) before keeping it.
