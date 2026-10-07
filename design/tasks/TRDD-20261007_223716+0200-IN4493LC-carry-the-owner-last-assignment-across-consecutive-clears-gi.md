@@ -4,7 +4,7 @@ title: Carry the owner last assignment across consecutive clears (GitHub issue 3
 column: testing
 status: tasked
 created: 2026-10-07T22:37:16+0200
-updated: 2026-10-07T23:41:59+0200
+updated: 2026-10-07T23:44:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -19,6 +19,12 @@ implementation-commits: [6da0149f]
 ---
 
 # Carry the owner last assignment across consecutive clears (GitHub issue 338)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
+
+- Column testing. The fix shipped in 3.8.11 (6da0149f, release cf284257, all five workflows green), installed at user scope.
+- NEXT ACTION: run the two-clear field check in the Release 3.8.11 section; after the next publish, link TRDD-HKUOS0DV on issue 338 (comment 6046964307 promises it).
+- Open owner decision: whether a janitor handoff quoting the owner's message verbatim counts as the assignment under the owner's global rule (also on TRDD-HKUOS0DV).
 
 OWNER, verbatim, 2026-10-07: 'check the issues on github. in particular issue 338. and fix that NOW. because is stalling my entire fleet.' and 'and why the hell there are two clear in a row?' (second question NOT yet answered: measure it from the ai-maestro project's .janitor/logs/clear-trigger.log before answering).
 
@@ -42,9 +48,10 @@ PARKED: TRDD-A8DRRW0I wave 2 until 3.8.11 is out; wave 1 commits 1c045352 and 22
 ## Release 3.8.11 (2026-10-07)
 
 Published as 3.8.11: release commit cf2842573c9e732b4ea95d5f5f52ecbf81b1eb4e, tag v3.8.11; all five workflows (CI, Release, zizmor security audit, Notify Marketplace, memgrep release binaries) succeeded on it.
-Installed at user scope (3.8.10 to 3.8.11) on the owner's typed "install it", before CI and Release had finished; both passed afterwards.
-Release notes added on GitHub above the generated changelog, then corrected after review: they state that no real clear had been observed under 3.8.11 when written, that the carry is the last three messages whatever they say, and the integrity-pin caveat.
+Installed at user scope (3.8.10 to 3.8.11) on the owner's typed "install it", before CI, Release and memgrep release binaries had finished; all three passed afterwards.
+Release notes added on GitHub above the generated changelog, then corrected after review: they state that no real clear had run under 3.8.11 when written (true for this project's session only; other projects were not checked), that the carry is the last three messages whatever they say, and the integrity-pin caveat.
 Comment posted on issue 338 (issuecomment-6046964307), edited after review; the issue is left open for proposals 2 (partly done), 3 and 5. The comment promises to link the follow-up card once it is pushed: TRDD-HKUOS0DV is that card, and the link is owed after the next publish.
-Known flaws, not fixed: a typed /login is classed as an owner message and can take one of the three slots; the owner-messages record files in .janitor/state/owner-messages/ are never pruned; replace the `assert` in `_merge_owner_messages` with an explicit `if stored is None: return` at the next touch (python -O strips asserts).
+Known flaws, not fixed: a typed /login is classed as an owner message and can take one of the three slots (the fix worker's side finding, not re-checked by the main agent); the owner-messages record files in .janitor/state/owner-messages/ are never pruned; replace the `assert` in `_merge_owner_messages` with an explicit `if stored is None: return` at the next touch (python -O strips asserts).
 Not verified: no real clear has yet run under 3.8.11, so the carried messages have not been seen in a live handoff; whether a plain clear (without a process restart) loads the new SessionStart hook is untested.
-Field check to move this card to complete: after one real janitor clear of a session whose cleared transcript has no human message, the new session's handoff quotes the owner's earlier messages verbatim with their age.
+Field check to move this card to complete (outcome, not mechanism; issue 338 itself reported 5/5 PASS on an idle agent): under 3.8.11, clear 1 is of a session where the owner typed a message (this writes the record), and clear 2 is of the next session after it ran with no owner message. Pass when, after clear 2, the new session's handoff quotes the owner's messages from before clear 1 (clipped long messages count) and the session either continues work with no typed owner message or, if it declines, states the open-board counts by column. A clear of a session begun under 3.8.10 tests only the single hop and does not count.
+Items that must outlive this card when it closes: the three known flaws above, issue 338 proposals 2 (partly done), 3 and 5, and the owed issue link. Move them to their own cards before this card goes to complete.
