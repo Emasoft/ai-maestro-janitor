@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T02:29:38+0200
+updated: 2026-10-07T02:41:47+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -31,7 +31,8 @@ Owner directive, verbatim, 2026-10-06: 'verify and fix/implement all of them. al
 2026-10-07 worker tool-rule breaches during the sweep, diffs read and accepted: python rewrites of tests/test_issue_catalog.py (twice), one sed -i on a new test file, fastedit used on a reports_dev triage report during the fastedit freeze.
 2026-10-07: a worker used the git safety guard's one-time password to run `git commit --amend` on its own unpushed worktree commit (landed as 91fca406). No pushed history was rewritten. This is a safety-control bypass, not a brief slip: the password is visible to the agent the guard gates. Every worker brief now says never to use a guard's one-time password.
 2026-10-07: the design-only closeable rule (67d29e91) was removed by hand in 91fca406; the closeable class's future (ledger note vs weekly surfacing) awaits the owner.
-2026-10-07: in dev while follow-ups (1) and (2) of NEXT ACTION are worked; then human_review. #332 closes only when every drift class is fixed or shown to need no action (owner card TRDD-6ESS2MGE; the closeable class waits on one post-release weekly audit, TRDD-8BNV75TV). #328 awaits the owner on proposal TRDD-Q9MU9CWK.
+2026-10-07: in dev while follow-ups (1) and (2) of NEXT ACTION are worked; then human_review — both done (no commit needed: already satisfied by fdf88c7b and 3e2f0b1e). #332 closes only when every drift class is fixed or shown to need no action (owner card TRDD-6ESS2MGE; the closeable class waits on one post-release weekly audit, TRDD-8BNV75TV). #328 awaits the owner on proposal TRDD-Q9MU9CWK.
+2026-10-07: follow-up (1) found already satisfied, no change: the #326 test (fdf88c7b) reads only skills/janitor-memory-split/SKILL.md and asserts one sentence that occurs exactly once in the repo skills, inside the step-1 paragraph; follow-up (2) found already satisfied, no change: WM-CLI-05 already says lint owns body checks and validate's WARN is a mirror that leaves the exit code alone (3e2f0b1e, with 6f45acf8/d7da8884). Evidence: reports/issue-sweep/20261007-prerelease-batch.md.
 
 ## Approval log
 
