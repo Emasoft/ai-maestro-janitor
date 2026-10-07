@@ -33,6 +33,9 @@ _ACTIONS = {
     "tick-stalled": "the account rotator has stopped ticking - run /janitor-doctor",
     "rotation-stuck": "account rotation is stuck - run /janitor-capture-all-logins",
 }
+# WHY (TRDD-5CCRBM1H): one name for the all-accounts-maxed stuck text, so the test imports it
+# instead of repeating the literal and the two cannot drift.
+_STUCK_ALL_MAXED_TEXT = "every account is at its usage limit - waiting for a window to reset"
 
 
 REPEAT_S = 86400  # after the 2nd notification, repeat an unchanged condition at most daily
@@ -192,7 +195,7 @@ def active_conditions(root: Path, now: float, claude_running: bool) -> dict[str,
         # generic text sent the owner to /janitor-capture-all-logins for hours (TRDD-QHACQPPG).
         kind = _read_json(root / "rotation-stuck.json").get("kind")
         out["rotation-stuck"] = (
-            "every account is at its usage limit - waiting for a window to reset"
+            _STUCK_ALL_MAXED_TEXT
             if kind == "all-accounts-maxed"
             else _ACTIONS["rotation-stuck"]
         )

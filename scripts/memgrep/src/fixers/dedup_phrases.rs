@@ -53,11 +53,14 @@ fn fix_description_line(line: &str) -> Option<String> {
     let v = val.trim();
     // WHY: the whitespace after the value is content-free but byte-significant; keep it untouched.
     let trail = &val[val.trim_end().len()..];
-    let (open, r) = v.strip_prefix('"').map_or(("", v), |r| ("\"", r));
+    // WHY (TRDD-GTP15HRC): lint now reads a single-quoted scalar, so the fixer must keep its quotes
+    // too; a `''` escape stays inside `inner` untouched.
+    let q = if v.starts_with('\'') { '\'' } else { '"' };
+    let (open, r) = v.strip_prefix(q).map_or(("", v), |r| (if q == '\'' { "'" } else { "\"" }, r));
     let (inner, close) = if open.is_empty() {
         (r, "")
     } else {
-        r.strip_suffix('"').map_or((r, ""), |r| (r, "\""))
+        r.strip_suffix(q).map_or((r, ""), |r| (r, open))
     };
     let new_inner = dedup_value(inner)?;
     // Lossless: the phrase list is exactly the old one with repeats removed.
@@ -161,12 +164,14 @@ mod tests {
 
 
     #[test]
-    fn single_quoted_value_is_fixed_correctly_or_refused() {
-        // WHY: lint keeps the single quotes inside the first phrase ('a b != a b), so it reports no
-        // duplicate here and the fixer must leave the page alone.
+    fn single_quoted_value_is_linted_and_fixed_keeping_its_quotes() {
+        // WHY (TRDD-GTP15HRC): lint used to keep the single quotes inside the first phrase
+        // ('a b != a b) and so reported no duplicate; a single-quoted YAML scalar is now read as one.
         let before = page("'a b / c d / a b / e f'");
-        assert!(!has_code(Path::new(P), &before, CODE));
-        assert_eq!(fix(Path::new(P), &before), None);
+        assert!(has_code(Path::new(P), &before, CODE));
+        let fixed = fix(Path::new(P), &before).expect("fixed");
+        assert_eq!(fixed, page("'a b / c d / e f'"));
+        assert!(!has_code(Path::new(P), &fixed, CODE));
     }
 
 

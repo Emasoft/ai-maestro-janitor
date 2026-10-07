@@ -1166,16 +1166,16 @@ prop of the atom or of a lesson addressed by its own `ATOM-…` id (janitor#331)
 flag and no `--desc`/`--keywords`/`--trdd`/`--status` changes nothing and is refused rather than
 reported as an update (janitor#322). `--dry-run` prints the rewritten marker + body
 and writes nothing — the preview every mutating verb below also carries, because a corpus-mutating
-command that changes structure (not just one field) earns a look-before-you-leap.
+command that changes structure (not just one field) earns a look-before-you-leap. (Numbered WM-CLI-17 until 2026-10-07; the archived cards 8COB99QQ and ZNCH1MUT cite it under the old number.)
 
-`WM-CLI-18` **delete-mem-topic** — `memgrep delete-mem-topic --page <PAGE> --force` retires a page
+`WM-CLI-27` **delete-mem-topic** — `memgrep delete-mem-topic --page <PAGE> --force` retires a page
 to `.trashcan/`; it `MUST NOT` ever unlink the file (RULE 0 — knowledge is relocated, never
 destroyed). `--force` is REQUIRED even outside the referrer case: deleting knowledge is not a
 routine operation, so the flag alone is the deliberateness gate. When another page's `## See
 also`/wikilink refers to the target, the command REFUSES unless `--force` is also overriding that
 refusal (the same flag serves both gates — requiring two different flags would let a caller
 satisfy one without ever seeing the other's warning). `--dry-run` previews the destination path
-and any referrer warnings without writing.
+and any referrer warnings without writing. (Numbered WM-CLI-18 until 2026-10-07, when the duplicate with find-trdd was resolved; no citation meant this clause.)
 
 `WM-CLI-19` **delete-mem-atom** — `memgrep delete-mem-atom --page <PAGE> --atom <ID>` removes one
 atom and renumbers the `[^N]` footnotes that follow it, keeping the corpus's numbering contiguous.
