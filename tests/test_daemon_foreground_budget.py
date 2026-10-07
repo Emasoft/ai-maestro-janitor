@@ -292,3 +292,61 @@ def test_start_sweep_removes_stamp_with_dead_pid_keeps_own(isolated_env: Path) -
     daemon._overrun_sweep_stale()
     assert not dead.exists()
     assert mine.exists()
+
+
+def test_elapsed_comes_from_monotonic_not_wall_clock(overrun_watch: Any) -> None:
+    """A wall clock far in the past or future must not change the logged elapsed figure."""
+    import threading
+
+    for wall_skew, name in ((-40000, "wake"), (+1_000_000, "backstep")):
+        done = threading.Event()
+        mono = time.monotonic() - 3  # fresh per run, so the elapsed figure stays at 3s
+
+        def reg(n: str = name, skew: int = wall_skew, m: float = mono) -> None:
+            daemon._overrun_register(n, time.time() + skew, m)
+            done.wait(10)
+            daemon._overrun_clear(n)
+
+        th = threading.Thread(target=reg)
+        th.start()
+        try:
+            assert _wait_for(lambda n=name: f"task '{n}' still running after 3s" in _log_text())  # type: ignore[misc]
+        finally:
+            done.set()
+            th.join(5)
+    assert "40000s" not in _log_text()
+    assert daemon._overrun_runs == {}
+
+
+def test_stalled_stamp_write_does_not_block_another_task_exit(
+    overrun_watch: Any, isolated_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While the watch is stuck writing a stamp, a Task.run on another thread still returns."""
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+    real = state.atomic_write
+
+    def slow(path: Any, text: str, *a: Any, **k: Any) -> Any:
+        if "task-overrun." in str(path):
+            entered.set()
+            release.wait(10)  # the test releases this in its finally; bounded anyway
+        return real(path, text, *a, **k)
+
+    monkeypatch.setattr(state, "atomic_write", slow)
+    first = threading.Thread(target=daemon.Task("stall-a", 0, lambda: release.wait(10)).run)
+    second_done = threading.Event()
+    second = threading.Thread(
+        target=lambda: (daemon.Task("stall-b", 0, lambda: None).run(), second_done.set())
+    )
+    first.start()
+    try:
+        assert entered.wait(10), "watch must reach the (blocked) stamp write"
+        second.start()
+        assert second_done.wait(5), "a task exit must not wait behind the watch's disk write"
+    finally:
+        release.set()
+        first.join(5)
+        second.join(5)
+    assert _wait_for(lambda: not list(isolated_env.glob("task-overrun.*")))

@@ -2923,7 +2923,8 @@ class Task:
         # WHY (6CF3L7IJ): lets `_OverrunWatchThread` report this run WHILE it is going; the
         # budget line in `_run_due_tasks` only appears after the body returns. Bulk-lane
         # children never come through here (`_run_task_child` calls `fn()`), so they are excluded.
-        _overrun_register(self.name, t0)
+        # The monotonic start rides along: the watch measures elapsed with it, not the wall clock.
+        _overrun_register(self.name, t0, time.monotonic())
         try:
             self.fn()
         except Exception as exc:  # noqa: BLE001 - never propagate a task error
@@ -3570,8 +3571,11 @@ class _ProcessSizeWatchThread(threading.Thread):
                 state.log_line("daemon", f"process-size-watch: pass failed: {exc}")
 
 _OVERRUN_WATCH_INTERVAL_S = 5.0
-# thread id -> (task name, start epoch) of every `Task.run` in flight; guarded by the lock.
-_overrun_runs: dict[int, tuple[str, float]] = {}
+# thread id -> (task name, start epoch, start monotonic) of every `Task.run` in flight. The
+# lock guards ONLY this dict. WHY (6CF3L7IJ): every Task.run takes the lock in its `finally`
+# (main loop + rotator-tick thread), so disk I/O under it would let a stalled disk block every
+# task's exit behind the watch: the observer would lengthen the stall it records.
+_overrun_runs: dict[int, tuple[str, float, float]] = {}
 _overrun_lock = threading.Lock()
 
 
@@ -3579,9 +3583,9 @@ def _overrun_stamp_path(name: str) -> Path:
     return gs.global_state_dir() / f"task-overrun.{name}.ts"
 
 
-def _overrun_register(name: str, t0: float) -> None:
+def _overrun_register(name: str, t0: float, m0: float) -> None:
     with _overrun_lock:
-        _overrun_runs[threading.get_ident()] = (name, t0)
+        _overrun_runs[threading.get_ident()] = (name, t0, m0)
 
 
 def _overrun_clear(name: str) -> None:
@@ -3589,8 +3593,11 @@ def _overrun_clear(name: str) -> None:
     never raise: a stamp that cannot be removed is only a stale diagnostic file."""
     with _overrun_lock:
         _overrun_runs.pop(threading.get_ident(), None)
-        with contextlib.suppress(OSError):
-            _overrun_stamp_path(name).unlink()
+    # WHY unlink outside the lock: disk I/O under `_overrun_lock` would stall every task's exit
+    # (see the registry comment). A stamp the watch writes after this pop is removed by the
+    # watch's own re-check; a rare leftover is swept at the next daemon start.
+    with contextlib.suppress(OSError):
+        _overrun_stamp_path(name).unlink()
 
 def _overrun_sweep_stale() -> None:
     """At daemon start, drop stamps left by a previous daemon (first field is its pid).
@@ -3626,25 +3633,36 @@ class _OverrunWatchThread(threading.Thread):
         self.join(timeout)
 
     def _pass(self) -> None:
-        now = time.time()
+        # WHY monotonic (not time.time()): after a sleep/wake the wall clock jumps, so every
+        # in-flight run would log "still running after ~40000s", and a backward step would
+        # silence the line. The wall-clock epoch is kept only for the stamp content. On macOS
+        # time.monotonic does not advance during system sleep, so elapsed time after a wake
+        # excludes the sleep: that is intended (a sleeping laptop is not a stalled task).
+        now = time.monotonic()
         with _overrun_lock:
             snapshot = dict(_overrun_runs)
-        self._reported.intersection_update({(ident, t0) for ident, (_, t0) in snapshot.items()})
-        for ident, (name, t0) in snapshot.items():
-            if now - t0 < _FOREGROUND_BUDGET_SEC:
+        self._reported.intersection_update({(ident, m0) for ident, (_, _, m0) in snapshot.items()})
+        for ident, entry in snapshot.items():
+            name, t0, m0 = entry
+            if now - m0 < _FOREGROUND_BUDGET_SEC:
                 continue
-            # Re-check under the lock `_overrun_clear` takes: a run that ended after the
-            # snapshot must not get a stamp written after its removal (stale stamp).
+            # WHY write outside the lock, then re-check: disk I/O under `_overrun_lock` would
+            # block every Task.run exit on a stalled disk. If the run ended during the write,
+            # `_overrun_clear` may already have unlinked, so remove the stamp we just wrote.
+            stamp = _overrun_stamp_path(name)
+            state.atomic_write(stamp, f"{os.getpid()} {name} {int(t0)}")
             with _overrun_lock:
-                if _overrun_runs.get(ident) != (name, t0):
-                    continue
-                state.atomic_write(_overrun_stamp_path(name), f"{os.getpid()} {name} {int(t0)}")
-            if (ident, t0) in self._reported:
+                still_running = _overrun_runs.get(ident) == entry
+            if not still_running:
+                with contextlib.suppress(OSError):
+                    stamp.unlink()
                 continue
-            self._reported.add((ident, t0))
+            if (ident, m0) in self._reported:
+                continue
+            self._reported.add((ident, m0))
             state.log_line(
                 "daemon",
-                f"task '{name}' still running after {int(now - t0)}s "
+                f"task '{name}' still running after {int(now - m0)}s "
                 f"(budget {_FOREGROUND_BUDGET_SEC}s)",
             )
 
