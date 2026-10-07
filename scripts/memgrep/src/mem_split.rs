@@ -1281,8 +1281,6 @@ mod tests {
         ]
     }
 
-    #[test]
-
     // Unix-only by construction: the pin needs symlink(2) to build a raw spelling with no
     // scope substrings. `#[ignore]` (not a cfg'd no-op) so non-unix runs REPORT the skip
     // instead of counting fake coverage.
@@ -1327,10 +1325,12 @@ mod tests {
         let local_dir = local_root.join(".claude/projects/y/memory");
         std::fs::create_dir_all(&local_dir).unwrap();
         let args = cross_scope_split_args(&user_page, &local_dir.join("split-off.md"));
-        let res;
-        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir); }
-        res = cmd_split_topic_cli(&args);
-        unsafe { crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR"); }
+        let res = {
+            unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir); }
+            let r = cmd_split_topic_cli(&args);
+            unsafe { crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR"); }
+            r
+        };
         #[cfg(unix)]
         let after = std::fs::read_to_string(&user_page_real).unwrap();
         let _ = std::fs::remove_dir_all(&user_root);
