@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T04:31:38+0200
+updated: 2026-10-07T04:44:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,6 +36,9 @@ Owner directive, verbatim, 2026-10-06: 'verify and fix/implement all of them. al
 2026-10-07: v3.8.2 published with the #332 closeable change and the board re-column; 28 of 30 issues closed; #328 waits on the owner (proposal TRDD-Q9MU9CWK); #332 waits on the first weekly audit on 3.8.2 and the other drift classes (TRDD-6ESS2MGE).
 NEXT ACTION: #332's drift classes, card by card (idle cards, reminders, check3, testing past 40 days, ledger-note routing), owned by TRDD-6ESS2MGE; #328 waits on the owner; the closeable class waits on the first weekly audit on 3.8.2.
 2026-10-07: live checks run for the testing cards the 3.8.2 handoff called runnable: HSRERK5S proven and closed (4640474b); KE88RIKX, HYTKG53C partly proven; KVUVV9D2, 9438CGJZ, Y6WFN5L9, D5BPUFIV, C7M4RXQ2 wait on an event that has not occurred; D7RLXAN1 failed and returned to todo. Bug filed upstream as Emasoft/ai-maestro issue 176 (trddgrep why tree).
+2026-10-07: the card that the superseded TRDD-BMITQ2MN named as its blocker, TRDD-UIDK2SDL in the ai-maestro repo, is still in todo there and still expects janitor involvement (it names the janitor's server_tick_holder reader and the removed setup-token importer). Nothing was changed in that repo; the owner or that project's session should be told the importer is gone. Evidence comment posted on ai-maestro issue 176 after a rerun confirmed all four points.
+2026-10-07: owner decision still open; nothing changed today; the git guard's one-time password stays visible to subagents and the brief rule (never use it) stays; no guard change until the owner answers.
+2026-10-07: TRDD-OOZP38MN and TRDD-TK529Q0F stay closed on code and tests; neither path has been seen in the surviving rotator logs; reopening would be a new card, the owner's call.
 
 ## Approval log
 

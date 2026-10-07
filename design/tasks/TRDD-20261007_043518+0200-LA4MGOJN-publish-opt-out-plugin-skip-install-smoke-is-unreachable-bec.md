@@ -4,7 +4,7 @@ title: publish opt-out PLUGIN_SKIP_INSTALL_SMOKE is unreachable because the bypa
 column: todo
 status: tasked
 created: 2026-10-07T04:35:18+0200
-updated: 2026-10-07T04:35:22+0200
+updated: 2026-10-07T04:44:15+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,3 +33,4 @@ Acceptance: one test showing the chosen behaviour.
 ## STATE
 
 2026-10-07: found while fixing the exemption rename (TRDD-CWKM5218, commit 52eb054e). NEXT ACTION: decide exempt or delete; the owner rule against bypasses favours delete.
+2026-10-07 correction: the publish.py line references above are off; the audit read them at line 3236 (the PLUGIN_SKIP_INSTALL_SMOKE read in stage_install_smoke) and line 3483 (the stage_bypass_guard call in main), not 3229 and 3476.

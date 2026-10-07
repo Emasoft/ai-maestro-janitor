@@ -4,7 +4,7 @@ title: Summary hold ends once its handoff is on disk and is never re-taken over 
 column: human_review
 status: tasked
 created: 2026-10-03T03:41:42+0200
-updated: 2026-10-06T23:10:54+0200
+updated: 2026-10-07T04:44:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -47,6 +47,7 @@ Parent plan: TRDD-K9AHY1ZB
 2026-10-05 — correction on the test evidence: the four tests named above were picked by a worker, one per listed file. The stronger evidence is the full suite, which contains every test in those files and passed (17951 passed, 2 skipped) in the publish dry-run on commit c576a7ad. What this card's live event must show, as distinct from TRDD-PHS3DIBD's: the resume after the clear is emitted with no wait on a summary hold, i.e. the dispatcher log of that fire carries no summary-hold line.
 2026-10-06 FIELD CHECK: the evidence condition is met as far as the logs show (no summary-hold line was logged; the 19:27:44 clear on 3.7.4 shows no 'summary hold active' line, the last ones are from 2026-10-03, and chain OK at 19:28:06), but the card still waits on the owner's decision about the template-ends-hold default, so it moved to human_review. Source: reports/board/20261006_210400+0200-testing-field-check.md.
 - 2026-10-06 correction: _release_summary_hold no longer exists (zero hits under scripts/ and tests/ on 2026-10-06); step 3 of the C1 list needs no deletion of it.
+2026-10-07: owner decision still open; nothing changed today; the shipped default stands (a template handoff also ends the hold).
 
 ## Approval log
 

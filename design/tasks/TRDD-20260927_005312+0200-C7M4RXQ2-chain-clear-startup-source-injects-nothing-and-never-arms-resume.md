@@ -3,7 +3,7 @@ trdd-id: C7M4RXQ2
 title: Chain-clear birthing a startup-source process injects nothing — post-clear handoff and resume flag gated on source=clear only
 column: testing
 created: 2026-09-27T00:53:12+0200
-updated: 2026-10-07T04:34:42+0200
+updated: 2026-10-07T04:44:15+0200
 current-owner: ai-maestro-plugin-orchestrator
 task-type: bugfix
 relevant-rules: [S2.1]
@@ -139,3 +139,4 @@ BANNER FOR THE NEXT SESSION: the adversarial-review loop on this card is CLOSED 
 ## STATE
 
 2026-10-07 live check (a worker's read of the logs, not re-read by the main agent): requirements 1 and 6 NOT YET OBSERVABLE, 2 proven only indirectly, 3 and 4 proven by reading _startup_chain_clear_service, 5 decided 2026-10-05; since 3.7.0, 20 sessions logged source=clear and 1 source=startup (2026-10-05T01:12:29, a plain fresh start with no chain in flight; clear-trigger.log has no line in that window), 7 'chain: OK' lines all re-entered as source=clear; the card still waits on a chain clear that re-enters as source=startup (pass = new context opens with handoff body or pointer, and clear-observed.ts is stamped).
+2026-10-07 caveats the line above dropped (quoted from the live-check report): requirement 4 'PROVEN by reading the function (no unlink call in it); I did not grep all of scripts/ for other unlinks'; the unit test tests/test_on_session_start_post_clear_compact.py:1065 test_startup_source_with_fresh_sidecar_consumes_and_injects exists and was 'not run by me'; the 7 'chain: OK' lines do not by themselves discriminate, the report gives one example pair, not a per-line match.

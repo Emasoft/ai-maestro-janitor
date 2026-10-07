@@ -4,7 +4,7 @@ title: trdd-state-reconciliation flags testing cards that are correctly waiting 
 column: testing
 status: tasked
 created: 2026-10-07T00:45:39+0200
-updated: 2026-10-07T04:30:21+0200
+updated: 2026-10-07T04:44:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,7 @@ The detector's closeable-candidate class means only that a commit citing the car
 
 Proposed fix, tests first: skip a testing card whose STATE names a pending live event and records a field check within the last N days; keep flagging cards with no recent field check.
 2026-10-07 (sizing report, not on any other card): false-positive root causes outside check3/check4. R2 partially-shipped-review fires on any open card with a released commit plus a remaining-work marker (56 rows, 19 carry a next step, 37 need none): fire only when the column asserts no work and the card is idle. R5 check5 dead-symbol: a wrapped obituary sentence escapes the line-scoped exemption and the imperative 'Delete' is not an exempt verb (2 of 3 cards: AR9IUGIJ, 5MOX0FPO). R1 trdd-drift: 51 of 53 idle rows are backburner cards; options are exempt backburner or stamp a default review-after on entry; owner decision.
+2026-10-07: owner decision (A) or (B) still open; nothing changed today; neither merges new code, main keeps the narrower check3 and check4 of 3.8.2, and the rejected branch stays unmerged.
 
 ## Approval log
 

@@ -3,7 +3,7 @@ trdd-id: D7RLXAN1
 title: Jev keeps every owner and assistant message since the last compaction verbatim and never scores it
 column: todo
 created: 2026-09-24T13:53:03+0200
-updated: 2026-10-07T04:31:24+0200
+updated: 2026-10-07T04:44:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: feature
@@ -122,3 +122,7 @@ TRDD-IYNS7H83 -- the shared heartbeat-reply predicate (transcript_roles.is_heart
 - (d) full copy: b2bf5b7b 126,204 B (~31.5k tokens, 1,155 lines, 2 Reads), d30bf250 169,035 B (~42k tokens, 1,942 lines, 2 Reads), 4eb7bf5d 65,136 B (~16k, 1 Read), fd5cc3e0 61,669 B (~15k, 1 Read). d30bf250 exceeds the 20-35k estimate: its 188 live messages alone are 124.5 KB; the unbuilt two-file option would take the ~35 KB of kept items and pointers out of the mandatory read.
 - (e) PASS: the real hook (run_hook.py) printed 6,683 B on accccb8b (46 s) and 5,903 B on fd5cc3e0 (22 s), Jev really ran, no truncation marker; the accccb8b injection opens its exchanges with the owner's directive itself, verbatim.
 - (f) compose() stays pure; byte identity with HEAD's output is retired by this design.
+
+## Notes and lessons learned
+
+2026-10-07 correction to the two 2026-10-07 lines above. Counts from the live-check report: of 9 resumed sessions, 1 read the full copy, 2 read part of it, 6 never opened it; the report lists 8 actions before the first read, not 7. The main agent's own account was wrong: in the session resumed at 03:52 it read the first 170 lines of the 988-line handoff file that the resume directive named, and never opened the copy that the READ FIRST line named. So that session counts among the 6. The conclusion stands and is stronger: the READ FIRST line was not followed in 8 of 9 cases.

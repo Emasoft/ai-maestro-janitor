@@ -3,7 +3,7 @@ trdd-id: BUR8AW77
 title: Dependency and tool updates wait out a release-age observation period before install
 column: human_review
 created: 2026-09-24T08:11:55+0200
-updated: 2026-10-05T11:12:34+0200
+updated: 2026-10-07T04:44:34+0200
 current-owner: janitor-main-session
 created-by: janitor-main-session
 task-type: feature
@@ -45,3 +45,4 @@ REVIEW ROUND 1 CURES (2026-09-27, adversarial fork on fd1e39c5) — (a) knob def
 
 2026-10-05 — Hook and tests are published in v3.7.0 but the hook is not registered in hooks.json, so it does not run; the registration is development work that can be done now, with the restart needed only to activate it. DECIDED 2026-10-05 (owner delegated decisions): the card returns to todo.
 2026-10-05 — correction to the line above: the registration is not simply development work. Registering the hook makes it act on every install, and the card says the 7200-minute window is still provisional. WAITING ON THE OWNER: register the release-age guard hook, and is 7200 minutes the window wanted? The hook file and its tests already ship; unregistered, it does nothing.
+2026-10-07: owner decision still open; nothing changed today; the release-age hook stays unregistered and the 7,200-minute window stays provisional.

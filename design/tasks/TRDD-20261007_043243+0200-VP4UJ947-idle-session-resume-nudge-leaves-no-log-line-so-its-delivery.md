@@ -20,7 +20,7 @@ approval-datetime: 2026-10-07T04:32:43+0200
 # Idle-session resume nudge leaves no log line so its delivery cannot be verified
 
 ## Problem
-The idle-session resume nudge (the [janitor-resume] cue the quiet heartbeat emits to a session that sits idle, TRDD-HYTKG53C) is emitted without writing any log line. In installed 3.8.2 scripts/dispatch.py the keep-going gate logs only through three log_line calls (lines 3928, 3948, 3960: the suppressed and unchanged cases); the emit branch goes through `_emit_decision("[janitor-resume]", ...)` and logs nothing.
+The idle-session resume nudge (the [janitor-resume] cue the quiet heartbeat emits to a session that sits idle, TRDD-HYTKG53C) is emitted without writing any log line. In installed 3.8.2 scripts/dispatch.py the keep-going gate logs only through four log_line calls (lines 3928, 3948, 3954, 3960: the suppressed and unchanged cases); the emit branch goes through `_emit_decision("[janitor-resume]", ...)` and logs nothing.
 
 ## Why it matters
 TRDD-HYTKG53C second acceptance item (an idle session receives [janitor-resume] within two fires) cannot be confirmed from dispatch.log: delivery is unobservable there and has to be inferred from the receiving session transcript. No nudge has ever been logged anywhere, so absence of a line proves nothing either way.

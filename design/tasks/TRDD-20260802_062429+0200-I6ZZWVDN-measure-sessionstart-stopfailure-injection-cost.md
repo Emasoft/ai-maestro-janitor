@@ -4,7 +4,7 @@ title: Measure the janitor's remaining two injected blocks — SessionStart comp
 column: todo
 
 created: 2026-08-02T06:24:29+0200
-updated: 2026-10-07T04:30:11+0200
+updated: 2026-10-07T04:43:54+0200
 current-owner: claude-ai-maestro-janitor
 task-type: spike
 severity: MEDIUM
@@ -145,3 +145,4 @@ the named block has LEFT `topOffenders`.
 ## Approval log
 
 - 2026-10-07T04:30:11+0200 — column → todo by main-agent@ai-maestro-janitor. premise stale: the blocking event (a same-day rate-limit fire) has occurred; measurement can proceed
+- 2026-10-07 correction: the move reason overstated; whether the rate-limit lines are the StopFailure rate_limit matcher this card measures is not verified
