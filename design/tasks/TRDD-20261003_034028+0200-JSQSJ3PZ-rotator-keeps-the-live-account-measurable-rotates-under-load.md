@@ -4,7 +4,7 @@ title: Rotator keeps the live account measurable, rotates under load, and warns 
 column: blocked
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-07T02:29:36+0200
+updated: 2026-10-07T04:18:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -342,6 +342,10 @@ TRDD-L2CCH9D5 and TRDD-JW8CWWNH (filed 2026-10-03 from R8) are non-blocking back
 2026-10-05 later: column dev (was blocked since 2026-10-04). The line above saying the probe was measured is WRONG: BHIS99XE was not a blocked card. Valid test on two scratch cards: after the blocker was closed, trddgrep why on the blocked card printed BLOCKED with no locally-resolvable blocker, never READY, and the card stayed in blocked, so the probe would never clear. blocked-by is cleared; npt still lists the prerequisite cards. dev here means waiting on those cards, not code in flight. The NEXT ACTION above is unchanged.
 2026-10-07: moved dev -> blocked before the 3.8.2 release; open blockers JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ; the shipped parts of this umbrella ship independently.
 2026-10-07: This card does not gate the 3.8.2 release: it is blocked, not in a work column. Restore to dev is manual: clear blocked-by when the children finish. Direct blockers: JY0OBQZ4, G9Z8PXCM (human_review), HL3WBA2Q (testing; trddgrep why shows it blocked by NGLPQ7SW, todo), IT5GEZDZ (blocked; trddgrep why IT5GEZDZ shows it blocked by NGLPQ7SW, todo; trddgrep why JSQSJ3PZ does not list IT5GEZDZ in its tree although it is in blocked-by). Roots per trddgrep why JSQSJ3PZ: JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, NGLPQ7SW.
+2026-10-07: effects card TRDD-HSRERK5S (R5) is complete, commit 4640474b, so it no longer holds this card open; the remaining effects card is TRDD-3OS6AXV3. The earlier lines here that call HSRERK5S parked or in testing are superseded by this one.
+2026-10-07: durable copy of the HSRERK5S evidence, because the rotated daemon log is outside git. Two lines, quoted: '[2026-10-05T14:41:58+0200] [s:79d33458] rotator tick rc=1 stderr: icate' and '[2026-10-05T15:56:37+0200] [s:79d33458] rotator tick rc=1 stderr: icate', each followed by a traceback tail ending 'subprocess.TimeoutExpired: Command ps -eo args= timed out after 10 seconds'. The emitting line exists once in scripts/ (daemon.py, _log_rotator_tick_result) and is the same in the 3.7.0 and 3.8.2 installs.
+2026-10-07: correction to the HSRERK5S checklist, which is frozen: its first item cites 5 lines with rc=0 and a stderr tail; the count measured today is 37 (31 in the rotated log, 6 in the current one). Its claim of 0 such lines before the 3.7.0 release cannot be checked any more, because the oldest surviving log line is from 2026-10-05.
+2026-10-07: two open observations from the HSRERK5S review, neither owned by a card yet. (a) R5 logs the LAST 300 characters of stderr; for a Python traceback that is where the exception sits, but a failure whose cause is printed earlier would be logged without it. (b) The two rc=1 ticks were a ps call timing out after 10 seconds inside the rotator on 2026-10-05; whether that is the load problem this card tracks has not been checked.
 
 ## Release status
 
