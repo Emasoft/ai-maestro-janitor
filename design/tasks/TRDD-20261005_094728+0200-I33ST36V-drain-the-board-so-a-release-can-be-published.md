@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-07T02:32:35+0200
+updated: 2026-10-07T02:33:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -56,6 +56,7 @@ Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages an
 - [ ] Before 3.8.2: know whether publish.py's CPV --strict step needs CPV_SKIP_GITHUB_INTEGRITY=1 and whether that exemption is an allowed one.
 - [ ] Before 3.8.2: release notes name every behaviour change: closeable class leaves the reconciliation report and ~34 TRDD-CLOSEABLE ledger notes land once (ledger keeps 500 lines, oldest evicted); ~3 drift lines repeat once; memgrep 0.2.0 needs cargo install; the #331 repair rule is skill text only; decide --patch vs --minor.
 - [ ] After 3.8.2: confirm the commit SHAs cited in the 2026-10-07 #332 comment resolve on GitHub; correct the comment (re-record only on a new released citing commit; triage 32 vs recount 34).
+- [ ] Before 3.8.2: copy reports/ from every agent worktree under .claude/worktrees/ into the main repo's reports/, then have the main session remove the merged worktrees (never by deleting their folders by hand).
 
 ## Order of work adopted on 2026-10-05
 
