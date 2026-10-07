@@ -4,7 +4,7 @@ title: Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a h
 column: dev
 status: tasked
 created: 2026-09-24T19:20:05+0200
-updated: 2026-10-07T22:21:19+0200
+updated: 2026-10-07T22:29:53+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: emanuelesabetta
 task-type: bugfix
@@ -16,7 +16,7 @@ approved: true
 approval-judge: emanuelesabetta
 approval-datetime: 2026-09-24T19:20:05+0200
 npt: []
-implementation-commits: [2325c39b]
+implementation-commits: [2325c39b, 675739c3]
 ---
 
 # Transcript JSONL readers outside Jev may crash on a non-UTF-8 byte or a half-written line
@@ -51,3 +51,4 @@ Design constraint: the shared walk lives in a NEW stdlib-only module, scripts/li
 TRDD-DQXMND59 -- Jev's own reader (extract_items/expand) was fixed there in 73df900b and 2729b1cb with the shared iter_jsonl_entries walk this card generalizes to the readers outside Jev.
 The dependency on TRDD-DQXMND59 stage 3 (jsonl_walk.py) lives only in prose because npt is a derived-child link (GRAPH-TWO-PARENTS). When this card leaves backburner, record it as `unblock-when: [trdd:DQXMND59 ...]` or `blocked-by`, so it cannot be pulled before jsonl_walk.py exists.
 2026-10-07 — dependency met: scripts/lib/jsonl_walk.py exists (since 2026-09-25) and TRDD-DQXMND59 is complete; stage A (tail walk + shared fixtures) landed in 2325c39b; stage B moves the readers one by one
+2026-10-07 — wave 0: read_jsonl_tail replaces iter_jsonl_tail (list, errors at the call); mutation check M1 M2 M3 each caught; fixtures moved to tests/_transcript_fixtures.py; stage B plan: external_clear, user_mem_lib, pre-compact-handoff, token_meter move to the tail read; fleet_scan and user_intent consumers take parsed entries; pending_agents (both functions) and jev_compaction_lane stay on a whole-file walk via iter_jsonl_entries or parse_jsonl_line; session_continuity.py already safe, left alone; every reader keeps its current missing-file result.
