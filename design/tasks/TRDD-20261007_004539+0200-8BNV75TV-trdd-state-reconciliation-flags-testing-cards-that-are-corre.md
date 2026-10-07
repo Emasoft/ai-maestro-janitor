@@ -1,10 +1,10 @@
 ---
 trdd-id: 8BNV75TV
 title: trdd-state-reconciliation flags testing cards that are correctly waiting on a live event
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-07T00:45:39+0200
-updated: 2026-10-07T01:53:33+0200
+updated: 2026-10-07T01:58:56+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,9 +15,20 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T00:45:39+0200
+implementation-commits: [8d1f1929, 9bc0cf20, a5930dfc, 39434f3d, 6958622d]
 ---
 
 # trdd-state-reconciliation flags testing cards that are correctly waiting on a live event
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
+
+- Code merged on main: closeable becomes a one-time TRDD-CLOSEABLE ledger note, re-recorded only on a new citing SHA; it is no longer in the report or the drift line.
+- Recount on the real board with main's code: old detector 96 rows including 34 closeable-candidate; new 65 rows plus 34 ledger notes; a second run is silent.
+- 3 cards that were closeable plus another class re-emit one drift line once.
+- NEXT ACTION: after 3.8.2 is released and installed, confirm one live weekly audit run shows no closeable list, then complete this card.
+- Owner of GitHub #332 is TRDD-6ESS2MGE.
+- TRDD-9UVLOHED (the one card triage found really closeable) still needs an acceptance checklist.
+- Nobody yet reads TRDD-CLOSEABLE notes; that routing belongs to TRDD-6ESS2MGE.
 
 The detector's closeable-candidate class means only that a commit citing the card is in a released tag. On 2026-10-07 a triage of 32 such candidates found 1 closeable, 16 waiting on a live event that cannot be forced, 7 open and 8 owner decisions (the 2026-10-07 triage report). GitHub #332 therefore re-surfaces the same cards every week.
 
