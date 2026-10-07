@@ -4,7 +4,7 @@ title: The lint-code drift guard reads codes from the rule registry instead of s
 column: backburner
 status: tasked
 created: 2026-10-04T15:47:32+0200
-updated: 2026-10-04T15:48:05+0200
+updated: 2026-10-07T08:19:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: refactor
@@ -16,6 +16,9 @@ approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-04T15:47:32+0200
 parent-trdd: BHIS99XE
+pre-block-column: 
+blocked-by: []
+unblock-when: []
 ---
 
 # The lint-code drift guard reads codes from the rule registry instead of scraping memory.rs
@@ -35,7 +38,13 @@ Not before. 3.7.1 is published and C21 has landed, so the registry shape is fina
 ## Approval log
 
 - 2026-10-04T15:47:32+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T08:19:09+0200 — column → blocked by main-agent@ai-maestro-janitor. waits on owner decision: plain edits for module-level constants fastedit cannot target
+- 2026-10-07T08:19:38+0200 — column → backburner by main-agent@ai-maestro-janitor. reverted: blocked-by naming a decision gives lint errors; owner question recorded in body Cleared blocked-by (--clear-blocker override).
 
 ## Open defects carried here
 
 The comment above _PUSH_BLOCK_RE (commit bc2bfb65) says the run-on 'only adds text that is itself a later push block'. That is false - it takes in everything between two pushes, including the next arm's let binding. Comment only, the test behaves correctly. Not fixed on 2026-10-04 because fastedit cannot target module-level comment lines (refusals - Symbol '_PUSH_BLOCK_RE' not found - Whole-file merge rejected, 364 lines exceeds 150-line safety limit). This card deletes that comment.
+2026-10-07: fastedit refusals, verbatim: "Error: Symbol _PUSH_BLOCK_RE not found in tests/test_memory_lint_gate_coverage.py" and "Chunk 9-46 rejected after 9 attempt(s) (merged output does not parse as python) — keeping the original chunk / Error: edit rejected — model hallucinated on 1 chunk(s). File unchanged."
+2026-10-07: worker finding: the registry in scripts/memgrep/src/rules_gen.rs has 47 names, the table 39; 8 unclassified: blanket-noqa, index-stale-rebuild, lint-over-budget, publish-globally-conflict, publish-globally-missing, publish-globally-not-symlinked, recall-over-budget, unused-noqa.
+2026-10-07: blocked-by names the owner decision, not a card, so trddgrep lint reports BLOCKED-WITHOUT-PROBE, BLOCKER-UNRESOLVED and GRAPH-UNKNOWN-BLOCKER on this card; unblock-when carries the decision predicate (not rejected). The block clears when the owner allows plain edits for module-level constants.
+2026-10-07: BLOCKED-ON-DECISION: may plain edits be used for module-level constants fastedit cannot target? asked 2026-10-07

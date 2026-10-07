@@ -1,10 +1,10 @@
 ---
 trdd-id: BRW49ELM
 title: A memory atomize chore was dispatched for an empty stub page and cost a full agent run
-column: todo
+column: testing
 status: tasked
 created: 2026-10-05T22:08:50+0200
-updated: 2026-10-05T22:08:50+0200
+updated: 2026-10-07T08:19:09+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:08:50+0200
+implementation-commits: [c2840ecc, e64e584a, 6e623375]
 ---
 
 # A memory atomize chore was dispatched for an empty stub page and cost a full agent run
@@ -26,3 +27,8 @@ Observed: the heartbeat emitted the atomize marker, the memory agent claimed the
 ## Approval log
 
 - 2026-10-05T22:08:50+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T08:19:09+0200 — column → testing by main-agent@ai-maestro-janitor. implemented in batch B6, merged 6e623375, awaiting verification
+
+## Implementation notes
+
+2026-10-07: atomize_defect strips the SessionStart seed lines (one constant _SEED_STUB_PARTS in scripts/lib/memory_content_precheck.py; a test checks the hook text) before the substance check; a pure stub declines, a filled stub still atomizes.
