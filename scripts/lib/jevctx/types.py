@@ -399,7 +399,14 @@ class JevError(Exception):
 
 
 class JevAuthError(JevError):
-    """401 -- bad or missing API key."""
+    """401 -- bad or missing API key; OpenRouter also raises it for 402 (out of credits) and
+    403 (forbidden). ``status`` is the HTTP status when a response produced it, else ``None``
+    (TRDD-JIYBKY27: the stamp carries it so the finding headline and dedupe key can tell a
+    credits problem from a bad key without parsing the message)."""
+
+    def __init__(self, message: str = "", *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class JevValidationError(JevError):

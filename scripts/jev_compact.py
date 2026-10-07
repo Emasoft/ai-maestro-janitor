@@ -210,7 +210,7 @@ def read_probe_stamp() -> dict[str, Any] | None:
 
 def write_probe_stamp(
     *, ok: bool, reason: str | None, cost: float | None, model: str | None, provider: str,
-    kind: str, retry_after_s: float | None = None,
+    kind: str, retry_after_s: float | None = None, status: int | None = None,
 ) -> None:
     """Atomically write the probe stamp — see module docstring for the shape/TTLs.
 
@@ -229,11 +229,13 @@ def write_probe_stamp(
     way should not hammer it either. ``rate_limited`` (a 429, retries exhausted) DOES
     decline a later attempt, but only briefly (see `cmd_compact`) — a per-key rate limit,
     not an outage. ``retry_after_s`` carries the server's own ``Retry-After`` value in
-    seconds for a ``rate_limited`` stamp; ``None`` for every other ``kind``.
+    seconds for a ``rate_limited`` stamp; ``None`` for every other ``kind``. ``status`` is the
+    HTTP status of a ``kind="auth"`` failure (401/402/403, TRDD-JIYBKY27) so the lane can word
+    and dedupe the finding by status; ``None`` otherwise.
     """
     stamp = {"ok": ok, "reason": reason, "ts": time.time(), "cost": cost,
               "model": model, "provider": provider, "kind": kind,
-              "retry_after_s": retry_after_s}
+              "retry_after_s": retry_after_s, "status": status}
     state.atomic_write(_probe_stamp_path(), json.dumps(stamp))
 
 
@@ -290,6 +292,11 @@ def _retry_after_for_stamp(exc: JevError) -> float | None:
     return exc.retry_after if isinstance(exc, JevUnavailableError) else None
 
 
+def _status_for_stamp(exc: JevError) -> int | None:
+    """`exc.status` when `exc` is a `JevAuthError` (TRDD-JIYBKY27); `None` for every other kind."""
+    return exc.status if isinstance(exc, JevAuthError) else None
+
+
 def _current_provider() -> str:
     return (os.environ.get(PROVIDER_ENV) or DEFAULT_PROVIDER).strip() or DEFAULT_PROVIDER
 
@@ -322,7 +329,8 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
         write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider,
-                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc))
+                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc),
+                           status=_status_for_stamp(exc))
         return 2
 
     start = time.monotonic()
@@ -334,7 +342,8 @@ def cmd_probe(_args: argparse.Namespace) -> int:
     except JevError as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
         write_probe_stamp(ok=False, reason=str(exc), cost=None, model=None, provider=provider,
-                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc))
+                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc),
+                           status=_status_for_stamp(exc))
         return 2
     finally:
         close = getattr(client, "close", None)
@@ -701,7 +710,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
         reason = str(exc)
         print(f"compact failed: {reason}", file=sys.stderr)
         write_probe_stamp(ok=False, reason=reason, cost=None, model=None, provider=provider,
-                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc))
+                           kind=_stamp_kind_for_error(exc), retry_after_s=_retry_after_for_stamp(exc),
+                           status=_status_for_stamp(exc))
         return 7
     finally:
         if client is not None:

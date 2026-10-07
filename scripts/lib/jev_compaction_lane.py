@@ -1000,8 +1000,10 @@ def handle_nonzero_exit(
             )
             return
         if kind == "auth":
-            key = hashlib.sha256(reason.encode("utf-8")).hexdigest()[:16]
-            msg = record_once_per_reason(sd, key, reason)
+            # TRDD-JIYBKY27: the stamp's HTTP status (not the raw reason text) picks the
+            # headline and keys the dedupe; an absent/non-int status keeps the legacy wording.
+            status = stamp.get("status")
+            msg = record_once_per_reason(sd, status if isinstance(status, int) else None, reason)
             if msg:
                 record_finding(sev="HIGH", code="JEV-AUTH-REJECTED", msg=msg)
             return
@@ -1032,14 +1034,31 @@ def handle_nonzero_exit(
     )
 
 
-def record_once_per_reason(sd: Path, key: str, reason: str) -> str | None:
-    """The `kind=auth` finding text, or `None` when this exact reason was already surfaced
+def record_once_per_reason(sd: Path, status: int | None, reason: str) -> str | None:
+    """The `kind=auth` finding text, or `None` when this HTTP status was already surfaced
     (coordinator amendment: dedupe auth-rejection findings, not every other kind — an auth
-    failure is a standing config problem, not a fresh event each SessionStart)."""
-    msg = (
-        f"[jev-compaction] provider key rejected: {reason} — set OPENROUTER_API_KEY / "
-        "CLAUDE_PLUGIN_OPTION_JEV_PROVIDER"
-    )
+    failure is a standing config problem, not a fresh event each SessionStart).
+
+    TRDD-JIYBKY27: JevAuthError covers 401 (bad key), 402 (out of credits) and 403 (forbidden),
+    so the headline is chosen from the status, and the dedupe key is the status, not the raw
+    reason — a 402 body carries a changing balance figure that would re-fire the finding every
+    run. `status is None` (a stamp from before the field existed) keeps the original wording."""
+    if status == 402:
+        msg = (
+            f"[jev-compaction] provider account out of credits (HTTP 402): {reason} — top up "
+            "the OpenRouter credits"
+        )
+    elif status == 403:
+        msg = (
+            f"[jev-compaction] provider refused the request (HTTP 403): {reason} — check key "
+            "permissions / guardrails"
+        )
+    else:
+        msg = (
+            f"[jev-compaction] provider key rejected: {reason} — set OPENROUTER_API_KEY / "
+            "CLAUDE_PLUGIN_OPTION_JEV_PROVIDER"
+        )
+    key = hashlib.sha256(f"auth-status:{status}".encode()).hexdigest()[:16]
     seen_file = sd / AUTH_SEEN_FILE
     return dedupe.emit_once(seen_file, key, msg)
 
