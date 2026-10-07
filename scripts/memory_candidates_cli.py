@@ -223,6 +223,31 @@ def relocate_candidates(
         out.append((f"{_rel(root, p)}#{footnote}", f"lesson-uncited at :{line} — move or link"))
     return sorted(out)
 
+def resolve_max_bytes() -> int:
+    """The scheduler's own `split_max_bytes` knob (review 2026-08-08: the SKILL used to say
+    `--max-bytes <split_max_bytes>` with no way to resolve the placeholder, so an agent could
+    run the CLI under a different cap than the scheduler's gate used). Unresolvable → 0, the
+    size check skipped (fail-open, as `main` always did)."""
+    try:
+        import memory_settings  # noqa: PLC0415
+
+        return int(memory_settings.get("split_max_bytes") or 0)
+    except Exception:  # noqa: BLE001 - unresolvable knob → size check skipped (fail-open)
+        return 0
+
+
+def candidates_for(
+    intervention: str, root: Path, *, scope: str, now: int | None
+) -> list[tuple[str, str]] | None:
+    """The candidates `main` would print for `intervention`, or None when this CLI has no
+    candidate predicate for it (a chore the claim step cannot judge). Shared with
+    `memory_dispatch_claim` (TRDD-K5F7US68) so the drain check and the agent's own listing
+    can never disagree about whether a record still has work."""
+    fn = _INTERVENTIONS.get(intervention)
+    if fn is None:
+        return None
+    return fn(root, scope=scope, now=now, max_bytes=resolve_max_bytes())
+
 
 _INTERVENTIONS = {
     "repair": repair_candidates,
@@ -248,15 +273,7 @@ def main() -> int:
     )
     args = ap.parse_args()
     if args.max_bytes is None:
-        # Resolve from the shared knob (review 2026-08-08): the SKILL used to say
-        # `--max-bytes <split_max_bytes>` with no way to resolve the placeholder, so an
-        # agent could run the CLI under a different cap than the scheduler's gate used.
-        try:
-            import memory_settings  # noqa: PLC0415
-
-            args.max_bytes = int(memory_settings.get("split_max_bytes") or 0)
-        except Exception:  # noqa: BLE001 - unresolvable knob → size check skipped (fail-open)
-            args.max_bytes = 0
+        args.max_bytes = resolve_max_bytes()
 
     fn = _INTERVENTIONS.get(args.intervention)
     if fn is None:

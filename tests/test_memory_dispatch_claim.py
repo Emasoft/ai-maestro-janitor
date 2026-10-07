@@ -1567,3 +1567,63 @@ def test_plain_peek_of_the_oldest_chore_is_unchanged(tmp_path):
     proc = _run_cli(["--chore", "conflict", "--state-dir", str(tmp_path), "--peek"])
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == str(first)
+
+def _dispatch_at(sd: Path, epoch: int, intervention: str, root: Path) -> Path:
+    """A pending record whose `root` is a REAL directory, so the drain check can measure it."""
+    p = sd / f"{mdc.PENDING_PREFIX}{epoch}-abcd1234.json"
+    p.write_text(json.dumps({
+        "marker": f"[janitor-memory-{intervention}]", "intervention": intervention,
+        "scope": "LOCAL", "root": str(root), "stamped_at": epoch,
+        "dispatch_id": f"{epoch}-abcd1234",
+    }), encoding="utf-8")
+    return p
+
+
+# ---------------------------------------------------------------------------
+# TRDD-K5F7US68 — the queue DRAINS: an aged-out record whose candidates a later pass
+# already repaired must not be handed to an agent (each such spawn cost ~200k tokens to
+# discover a zero). Duplicates already collapse at emit time (TRDD-Q7X4M2KP,
+# tests/test_memory_maintenance.py), so only the drain lives here.
+# ---------------------------------------------------------------------------
+
+
+def test_an_aged_out_record_whose_candidates_were_repaired_is_dropped_not_claimed(tmp_path):
+    """Stamped long ago, and the root now has nothing left to repair: claim returns None and
+    the record moves to the expired pool instead of costing an agent spawn."""
+    sd, root = tmp_path / "state", tmp_path / "mem"
+    sd.mkdir()
+    root.mkdir()
+    pending = _dispatch_at(sd, 1000, "repair", root)
+    assert mdc.claim_one(sd, "repair") is None
+    assert not pending.exists(), "the drained record must leave the claim pool"
+    assert (sd / f"{mdc.EXPIRED_PREFIX}1000-abcd1234.json").is_file(), "kept for audit, not deleted"
+
+
+def test_an_aged_out_record_that_still_has_candidates_is_claimed(tmp_path):
+    """Age alone never drops a record: the root still holds a page needing repair."""
+    sd, root = tmp_path / "state", tmp_path / "mem"
+    sd.mkdir()
+    root.mkdir()
+    (root / "broken.md").write_text("no frontmatter at all\n", encoding="utf-8")
+    _dispatch_at(sd, 1000, "repair", root)
+    got = mdc.claim_one(sd, "repair")
+    assert got is not None and got["dispatch_id"] == "1000-abcd1234"
+
+
+def test_a_fresh_record_with_no_candidates_is_still_claimed(tmp_path):
+    """Only an AGED record is judged against today's candidates: a measurement taken now cannot
+    falsify a decision taken minutes ago (the card's own retraction)."""
+    sd, root = tmp_path / "state", tmp_path / "mem"
+    sd.mkdir()
+    root.mkdir()
+    _dispatch_at(sd, int(datetime.now().timestamp()), "repair", root)
+    assert mdc.claim_one(sd, "repair") is not None
+
+
+def test_peek_does_not_offer_a_drained_record(tmp_path):
+    """Peek and claim must agree, or a peek promises work the claim then refuses."""
+    sd, root = tmp_path / "state", tmp_path / "mem"
+    sd.mkdir()
+    root.mkdir()
+    _dispatch_at(sd, 1000, "repair", root)
+    assert mdc.peek_one(sd, "repair") is None
