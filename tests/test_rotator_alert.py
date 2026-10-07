@@ -163,7 +163,7 @@ def test_stuck_alert_for_all_accounts_maxed_says_wait_not_capture(root: Path) ->
         json.dumps({"kind": "all-accounts-maxed", "detail": "x", "first_seen_epoch": 1, "last_seen_epoch": 1})
     )
     text = ra.active_conditions(root, NOW, False)["rotation-stuck"]
-    assert text == "every account is at its usage limit - waiting for a window to reset"
+    assert text == ra._STUCK_ALL_MAXED_TEXT
     assert "capture-all-logins" not in text
 
 
