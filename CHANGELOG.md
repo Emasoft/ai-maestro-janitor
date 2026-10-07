@@ -35,12 +35,14 @@ All notable changes to this project will be documented in this file.
 - **trdd:** KPS76TQ3 orphan index.lock from timed-out git calls (TRDD-KPS76TQ3) (e33e876)
 - **trdd:** FQVEILVK records the 9KKPFYTP edit-rule breach (TRDD-FQVEILVK) (7ddaea3)
 - Bump version to 3.8.10 (ddfde60)
+- Bump version to 3.8.10 (c533d1a)
 
 ### Testing
 
 - **jev:** Assert scoring overlap instead of wall-clock speedup (TRDD-KJAFABDU) (80af265)
 - **jev:** Make the scoring-overlap test deterministic with a barrier (TRDD-KJAFABDU) (0b5b93e)
 - Bound freshness assertions by the run's own start, not a fixed window (45dd32f)
+- Wait for the pgid file's content, not its existence (TRDD-9KKPFYTP) (94ff7c0)
 ## [3.8.9] — 2026-10-07
 
 ### Documentation
