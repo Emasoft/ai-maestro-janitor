@@ -4,7 +4,7 @@ title: CI skips the real GitHub 404 test because the test step has no gh token
 column: testing
 status: tasked
 created: 2026-10-07T18:40:03+0200
-updated: 2026-10-07T19:27:29+0200
+updated: 2026-10-07T19:29:58+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -15,7 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T18:40:03+0200
-implementation-commits: [7f8c27af]
+implementation-commits: [7f8c27af, 29c685a4]
 ---
 
 # CI skips the real GitHub 404 test because the test step has no gh token
