@@ -89,6 +89,7 @@ AND stage_validate / stage_tests / stage_lint all succeed.
 """
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -357,15 +358,28 @@ def run_pytest_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> int:
     every descendant. Scoped to the pytest calls: the shared run() helper serves every
     publish command and must not change. Raises TimeoutExpired after the kill.
     """
+    def _raise_interrupt(signum: int, frame: object) -> None:
+        # WHY: a child in its own session gets neither the terminal's hangup nor a group
+        # signal, so SIGTERM/SIGHUP must become KeyboardInterrupt to reach the killpg below.
+        raise KeyboardInterrupt
+
     proc = subprocess.Popen(cmd, cwd=str(cwd), start_new_session=True)
+    old_term = signal.signal(signal.SIGTERM, _raise_interrupt)
+    old_hup = signal.signal(signal.SIGHUP, _raise_interrupt)
     try:
         return proc.wait(timeout=timeout)
     except BaseException:
         # BaseException: a Ctrl-C no longer reaches a child in another session, so it
         # must reap the group too, not just a timeout.
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
+        # WHY suppress: the group may already be gone (child exited just before the signal).
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        # WHY bounded: an unkillable (D-state) child must not hang the publisher forever.
+        proc.wait(timeout=30)
         raise
+    finally:
+        signal.signal(signal.SIGTERM, old_term)
+        signal.signal(signal.SIGHUP, old_hup)
 
 
 def _git_write_or_recover_lock(cmd: list[str], root: Path) -> None:
