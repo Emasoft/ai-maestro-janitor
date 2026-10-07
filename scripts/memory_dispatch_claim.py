@@ -49,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import re
 import subprocess  # noqa: E402 (module-level statements above force this out of top-of-file order)
 
+import memory_candidates_cli  # noqa: E402
 import memory_settings  # noqa: E402
 import orphaned_memory_maint as omm  # noqa: E402
 import state  # noqa: E402
@@ -105,6 +106,56 @@ def payload_matches_chore(payload: object, chore: str) -> bool:
         return False
     return str(payload.get("intervention") or "") == chore
 
+def is_drained(payload: dict, now: int) -> bool:
+    """True iff this PENDING record (already validated by `omm.read_record`) is aged out AND
+    its root has no candidates left (TRDD-K5F7US68).
+
+    WHY: the queue never drained. Dispatches pile up faster than agents consume them, so by
+    the time an old record is worked a later pass has already repaired its pages, and the
+    agent spawns (~200k tokens) only to discover a zero the candidates CLI answers in under
+    a second. "Aged out" is the orphan detector's own bound (cadence x scope factor), so a
+    young record is never judged: a measurement taken NOW cannot falsify a decision taken
+    minutes ago (the card's retraction). A chore the candidates CLI has no predicate for, an
+    unknown/disabled cadence, or a root that is not a readable directory is NOT drained —
+    absence of evidence must keep the record claimable, never drop it."""
+    chore, scope = str(payload["intervention"]), str(payload["scope"])
+    try:
+        cadence_s = memory_settings.interval_s_for(chore)
+    except ValueError:
+        return False
+    age_s = omm.pending_age_s(payload, now=now)
+    if not omm.is_orphaned(age_s, cadence_s, factor=omm.factor_for_scope(scope)):
+        return False
+    root = Path(str(payload["root"])).expanduser()
+    if not root.is_dir():
+        return False
+    try:
+        found = memory_candidates_cli.candidates_for(chore, root, scope=scope, now=now)
+    except Exception:  # noqa: BLE001
+        # WHY: an expired record is lost work; any failure to measure (unresolvable size
+        # knob, unreadable tree, ...) is an UNKNOWN answer and must keep the record claimable.
+        return False
+    return found is not None and not found
+
+
+def expire_drained(state_dir: Path, now: int) -> list[str]:
+    """Rename every drained pending record (see `is_drained`) into the expired pool — renamed,
+    never deleted, so the audit trail survives and the keep-20 prune ages it out. Returns the
+    dispatch ids acted on."""
+    dropped: list[str] = []
+    for path in candidates(state_dir):
+        payload, malformed = omm.read_record(path)
+        if malformed or payload is None or not is_drained(payload, now):
+            continue
+        target = state_dir / f"{EXPIRED_PREFIX}{path.name[len(PENDING_PREFIX):]}"
+        try:
+            os.rename(path, target)
+        except OSError:
+            continue  # a peer claimed or swept it first
+        dropped.append(path.name[len(PENDING_PREFIX):-len(".json")])
+        state.log_line("memory_dispatch_claim", f"drained {dropped[-1]}: aged out and no candidates left")
+    return dropped
+
 
 def is_claimable(state_dir: Path, dispatch_id: str, chore: str) -> bool:
     """Read-only: would `claim_one(state_dir, chore)` be ABLE to claim the
@@ -128,21 +179,27 @@ def is_claimable(state_dir: Path, dispatch_id: str, chore: str) -> bool:
     return payload_matches_chore(payload, chore)
 
 
-def peek_one(state_dir: Path, chore: str) -> Path | None:
+def peek_one(state_dir: Path, chore: str, now: int | None = None) -> Path | None:
     """Read-only: the oldest unclaimed dispatch `claim_one(state_dir, chore)` would claim.
 
     janitor#319: `--peek` printed `candidates()[0]` — chore-blind — so a peek of
     `consolidate` reported a `conflict` record as available work, the exact overstatement
     `payload_matches_chore` exists to prevent on the claim path. Peek and claim now apply
-    the same predicate to the same oldest-first pool, so they cannot disagree.
+    the same predicate to the same oldest-first pool, so they cannot disagree. A record
+    `claim_one` would drain (`is_drained`, TRDD-K5F7US68) is skipped here for the same reason.
     """
+    now = int(datetime.now().timestamp()) if now is None else now
     for path in candidates(state_dir):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue  # unreadable matches no chore — same treatment claim_one gives it
-        if payload_matches_chore(payload, chore):
-            return path
+        if not payload_matches_chore(payload, chore):
+            continue
+        well_formed, _malformed = omm.read_record(path)
+        if well_formed is not None and is_drained(well_formed, now):
+            continue
+        return path
     return None
 
 
@@ -335,7 +392,10 @@ class StateDirMismatch(Exception):
 
 
 def claim_one(
-    state_dir: Path, chore: str, expected_state_dir: Path | None = None
+    state_dir: Path,
+    chore: str,
+    expected_state_dir: Path | None = None,
+    now: int | None = None,
 ) -> dict | None:
     """Atomically claim the oldest unclaimed dispatch matching `chore`, else None.
 
@@ -353,7 +413,11 @@ def claim_one(
 
     Reads BEFORE renaming: a rename we won is unrecoverable for anyone else, so if the read
     then failed the assignment would be lost with nothing left to point at it.
+
+    Drains the pool FIRST (`expire_drained`, TRDD-K5F7US68): aged-out records whose
+    candidates are already gone are moved to the expired pool, so they are never handed out.
     """
+    expire_drained(state_dir, int(datetime.now().timestamp()) if now is None else now)
     for path in candidates(state_dir):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))

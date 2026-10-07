@@ -500,6 +500,32 @@ fn extract_marker_value(marker_line: &str, key: &str) -> Option<String> {
     Some(caps[1].trim().trim_matches('"').to_string())
 }
 
+/// The stderr warning for a split that leaves the ORIGINAL atom's `desc:`/`keywords:` as they were.
+///
+/// WHY (TRDD-J6BET92S): a topic split narrows the first atom's body, but with `--orig-desc` /
+/// `--orig-keywords` omitted its recall surface is kept byte-for-byte, so it keeps advertising
+/// (and `recall` keeps returning it for) the topic that just moved out. Neither `validate` nor
+/// `lint` can see that, and a size-only split legitimately omits both, so the verb cannot refuse
+/// — it can only say so, once, at write time. `None` when both were supplied.
+fn orig_retune_warning(orig_keywords_given: bool, orig_desc_given: bool) -> Option<String> {
+    let missing: Vec<&str> = [
+        (!orig_desc_given).then_some("--orig-desc"),
+        (!orig_keywords_given).then_some("--orig-keywords"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "warning: the original atom keeps its old desc/keywords ({} omitted). If this split was by \
+         TOPIC, re-run with them or the first atom will keep answering recall queries for the topic \
+         that moved out.",
+        missing.join(" and ")
+    ))
+}
+
 /// Everything the split needs to know about the TWO resulting atoms, so `split_atom_build` takes
 /// one plan instead of a dozen positional strings nobody can read at the call site.
 pub(crate) struct AtomSplitPlan<'a> {
@@ -697,6 +723,9 @@ pub fn cmd_split_atom_cli(args: &[String]) -> Result<()> {
         std::iter::once("memgrep split-mem-atom".to_string()).chain(args.iter().cloned()),
     );
     check_desc(Some(&a.desc), "atom")?;
+    if let Some(w) = orig_retune_warning(a.orig_keywords.is_some(), a.orig_desc.is_some()) {
+        eprintln!("{w}");
+    }
 
     let _guard = write_gate::acquire(&write_gate::scope_root_for(&a.page))?;
     if let Some(base) = a.base_sha256.as_deref() {
@@ -1212,4 +1241,17 @@ mod tests {
         let after = out.split_once("^ATOM-6666-6666").unwrap().1;
         assert!(after.contains("second [^3] half"), "mid-prose ref stays put:\n{out}");
     }
+
+    /// TRDD-J6BET92S: omitting `--orig-desc`/`--orig-keywords` leaves the original atom's recall
+    /// surface byte-for-byte unchanged, so the caller must be TOLD — silently going stale was the
+    /// defect. Supplying both is silent.
+    #[test]
+    fn omitting_orig_retune_warns_and_supplying_both_does_not() {
+        let w = orig_retune_warning(false, false).expect("both omitted must warn");
+        assert!(w.contains("--orig-desc") && w.contains("--orig-keywords"), "{w}");
+        assert!(orig_retune_warning(true, false).expect("desc omitted must warn").contains("--orig-desc"));
+        assert!(orig_retune_warning(false, true).expect("keywords omitted must warn").contains("--orig-keywords"));
+        assert!(orig_retune_warning(true, true).is_none());
+    }
+
 }
