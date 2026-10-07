@@ -78,6 +78,31 @@ def _t(seconds: float) -> float:
     """
     return seconds * state.timeout_scale()
 
+def _local_prrd_text(slug: str) -> str | None:
+    """This checkout's PRRD text, or None when it cannot be read FOR THIS SLUG.
+
+    Split out so the tri-state `require_pull_request_tristate` can tell "the PRRD was read and
+    states nothing" from "the PRRD could not be read from here" — `prrd_pull_request_requirement`
+    returns None for both, and the two must not be treated alike.
+    """
+    text: str | None = None
+    # The local checkout first: no network, and it is the common case (a repo applying its
+    # own baseline). Only trust it when the slug really is THIS repo, or a fleet audit would
+    # read one project's governance for another's.
+    try:
+        import state as _st  # noqa: PLC0415 -- local, same reason as the imports below
+
+        local = _st.project_root() / "design" / "requirements" / "PRRD.md"
+        # casefold both sides (issue 327): a repo slug and its checkout directory that differ
+        # only by case (ai-maestro-webdesign vs AI-MAESTRO-WEBDESIGN-AGENT-style names) must
+        # match, or the repo's own PRRD is never read and the audit re-fires a false finding.
+        # Comparison only — nothing returned or stored changes spelling.
+        if local.is_file() and slug.split("/")[-1].casefold() == _st.project_root().name.casefold():
+            text = local.read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 -- a local-read fault must fall through to the network
+        text = None
+    return text
+
 # NOTE (TRDD-157OH2D7): `yaml` is imported LAZILY inside detect_required_status_checks (the ONLY
 # function that parses workflow YAML), NOT at module top. This lets lightweight importers of this
 # module — the `uv run --script` detectors branch-protection.py and fleet-github-config.py, which
@@ -163,22 +188,7 @@ def prrd_pull_request_requirement(slug: str | None) -> bool | None:
     """
     if not slug:
         return None
-    text: str | None = None
-    # The local checkout first: no network, and it is the common case (a repo applying its
-    # own baseline). Only trust it when the slug really is THIS repo, or a fleet audit would
-    # read one project's governance for another's.
-    try:
-        import state as _st  # noqa: PLC0415 -- local, same reason as the imports below
-
-        local = _st.project_root() / "design" / "requirements" / "PRRD.md"
-        # casefold both sides (issue 327): a repo slug and its checkout directory that differ
-        # only by case (ai-maestro-webdesign vs AI-MAESTRO-WEBDESIGN-AGENT-style names) must
-        # match, or the repo's own PRRD is never read and the audit re-fires a false finding.
-        # Comparison only — nothing returned or stored changes spelling.
-        if local.is_file() and slug.split("/")[-1].casefold() == _st.project_root().name.casefold():
-            text = local.read_text(encoding="utf-8", errors="replace")
-    except Exception:  # noqa: BLE001 -- a local-read fault must fall through to the network
-        text = None
+    text = _local_prrd_text(slug)
     # NO REMOTE FETCH, on two grounds — and the second one is not the one it first looked like.
     #
     # 1. It is UNNECESSARY. The flip-flop this predicate was changed to fix came from
@@ -262,6 +272,37 @@ def require_pull_request_for(slug: str | None = None) -> bool:
         return bool(login) and not cpi.is_owned_by(slug, login)
     except Exception:  # noqa: BLE001
         return False
+
+def require_pull_request_tristate(slug: str | None) -> bool | None:
+    """Does this repo require a pull request: True, False, or None when that CANNOT be determined.
+
+    A tri-state sibling of `require_pull_request_for`, which stays untouched because it is
+    deliberately fail-open (unknown login or any error -> False, so a baseline never DEMANDS a
+    PR it cannot justify). A caller that must not ACT on a guess — the fleet detector deciding
+    whether to drop a finding — needs the third answer, and the bool cannot give it
+    (TRDD-6L7OEJ8C: False meant both "stated false" and "could not tell", so a finding could be
+    dropped on a failed lookup). That is also why the bool is not built on this one: for a slug
+    whose PRRD is unreadable the bool still resolves by ownership, this returns None.
+
+    1. the repo's own PRRD states it -> that answer;
+    2. the PRRD cannot be read from here (slug is not this checkout) -> None;
+    3. the PRRD was read but states nothing: someone else's repo -> True, own repo -> False;
+       unknown login or any error -> None.
+    """
+    if not slug or _local_prrd_text(slug) is None:
+        return None
+    stated = prrd_pull_request_requirement(slug)
+    if stated is not None:
+        return stated
+    try:
+        import cross_project_issue as cpi  # noqa: PLC0415 -- local, same reason as above
+
+        login = cpi.gh_login()
+        if not login:
+            return None
+        return not cpi.is_owned_by(slug, login)
+    except Exception:  # noqa: BLE001 -- an error is "undetermined", never a verdict
+        return None
 
 
 def require_pull_request_default() -> bool:

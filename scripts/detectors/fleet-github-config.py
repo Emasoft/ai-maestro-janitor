@@ -37,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import branch_protection_lib as bpl  # noqa: E402
 import dedupe  # noqa: E402
 import env_detect  # noqa: E402
 import github_config_audit as gca  # noqa: E402
@@ -123,6 +124,54 @@ def _load(path: Path) -> dict | None:
         return None
     return payload if isinstance(payload, dict) else None
 
+def _apply_pr_requirement(payload: dict) -> tuple[dict, int, set[str]]:
+    """Judge every NO_PR_REVIEW finding against its repo's own pull-request requirement.
+
+    Returns (payload without the dropped and undetermined findings, number dropped, slugs whose
+    finding is undetermined). Tri-state, because the bool `require_pull_request_for` fails open to
+    False on an unknown login or any error, so a failed lookup would look like "stated false" and
+    silently drop a real finding. Only a determined False drops; a determined True stays; None
+    (cannot be determined from here, including every repo whose PRRD is not this checkout's) leaves
+    the confirmed set and is reported as an advisory only.
+    """
+    kept: list = []
+    dropped = 0
+    undetermined: set[str] = set()
+    verdicts: dict[str, bool | None] = {}
+    for f in payload.get("findings", []):
+        if isinstance(f, dict) and f.get("code") == "NO_PR_REVIEW":
+            s = f.get("slug")
+            key = s if isinstance(s, str) else ""
+            if key not in verdicts:
+                verdicts[key] = bpl.require_pull_request_tristate(key)
+            if verdicts[key] is False:
+                dropped += 1
+                continue
+            if verdicts[key] is None:
+                undetermined.add(key)
+                continue
+        kept.append(f)
+    return {**payload, "findings": kept}, dropped, undetermined
+
+
+def _advise_undetermined(slug: str, undetermined: bool, age_s: int | None) -> None:
+    """One advisory line when the audit's NO_PR_REVIEW for THIS repo could not be judged.
+
+    Deliberately carries NO fix-skill pointer, proposal or approval command: acting on a finding
+    whose premise is unknown could re-impose the pull-request rule the owner ruling removed.
+    Withheld when the payload is stale, like every other claim from it.
+    """
+    if not undetermined or gca.payload_is_stale(age_s):
+        return
+    msg = (
+        f"[github-config] advisory (undetermined): the audit reports NO_PR_REVIEW for {slug}, but whether "
+        "this repo requires pull requests cannot be determined from here, so nothing is proposed. "
+        "State `require-pull-request:` in its PRRD to settle it." + gca.age_label(age_s)
+    )
+    out = dedupe.emit_once(state.state_dir() / "fleet-github-config-advisory-seen.txt", f"undetermined:{slug}", msg)
+    if out is not None:
+        print(out)
+
 
 def _read_findings() -> dict | None:
     """The freshest fleet-audit payload: ours, or the server's when it owns the chore.
@@ -141,8 +190,18 @@ def _read_findings() -> dict | None:
                               _load(_server_findings_path())) if p is not None]
     if not candidates:
         return None
-    # `generated_at` is ISO-8601 UTC from both writers, so lexical order is chronological.
-    return max(candidates, key=lambda p: str(p.get("generated_at", "")))
+    # WHY epoch comparison: `generated_at` is an epoch INTEGER in both writers' files measured on
+    # this host, but an ISO-8601 string is also accepted. A text compare ranks "2026-..." above
+    # any 10-digit epoch and "garbage" above both, so a stale or corrupt file could mask the
+    # fresher one. `payload_age_seconds` parses both shapes; the smaller age is the newer
+    # payload, and an unparseable value (None) loses.
+    now = int(time.time())
+
+    def newness(p: dict) -> float:
+        age = gca.payload_age_seconds(p, now=now)
+        return float("-inf") if age is None else -float(age)
+
+    return max(candidates, key=newness)
 
 
 def main() -> int:
@@ -161,6 +220,15 @@ def main() -> int:
     if not slug:
         return 0
 
+    # TRDD-6L7OEJ8C: the server audit (and a stale local one) flags NO_PR_REVIEW without applying
+    # the 2026-08-13 owner ruling that a repo whose own rule says "no pull request" must not be
+    # told to require one — acting on it would RE-IMPOSE the rule the ruling removed. The
+    # filter runs over EVERY slug in this shared payload, in this one place, but everything
+    # printed or proposed below is still scoped to THIS repo; the drop count is logged only.
+    payload, dropped, undetermined = _apply_pr_requirement(payload)
+    if dropped:
+        state.log_line(_NAME, f"dropped {dropped} NO_PR_REVIEW finding(s): pull-request requirement determined false")
+
     # AGE GATE (TRDD-88ZVEQY7 / janitor#244). The peer nearly mutated a compliant repo on an
     # 18-day-old claim, stopped only by their own verify-before-acting habit. Two rules, in
     # this order:
@@ -173,6 +241,7 @@ def main() -> int:
     # second is evidence about this repo.
     age_s = gca.payload_age_seconds(payload, now=int(time.time()))
     line = gca.summarize_for_slug(payload, slug)
+    _advise_undetermined(slug, slug in undetermined, age_s)
 
     # The staleness line REPLACES withheld findings — it does not appear where there were
     # none. Ordering matters: asking "is it stale?" before "does it say anything about us?"
