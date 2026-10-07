@@ -95,11 +95,30 @@ def test_trigger_thresholds_are_unchanged() -> None:
 
 
 
+_CHILD = (
+    "import select, sys, time\n"
+    "n = 0\n"
+    "while True:\n"
+    "    n += 1\n"
+    "    if n % 20000 == 0 and select.select([sys.stdin], [], [], 0)[0]:\n"
+    "        sys.stdin.readline()\n"
+    "        print(time.process_time(), flush=True)\n"
+)
+
+
+def test_a_sub_second_window_keeps_its_precision() -> None:
+    """The persisted sample epoch is a float: a 0.5s window yields 200%, not a rounded-second figure."""
+    assert dr.measured_burn([1.0, 1000.25], 1.5, 1000.75) == (100.0, 0.5)
+
+
 def test_detector_reports_measured_burn_on_the_second_fire_of_a_real_busy_process(tmp_path: Path) -> None:
-    """E2E: fire 1 stores the sample, fire 2 reports a burn differenced from real `ps` CPU time."""
+    """E2E: fire 2 reports a burn matching the child's self-reported CPU time over the wall time between fires."""
+    import re
     import time
 
-    busy = subprocess.Popen([sys.executable, "-c", "while True: pass"])
+    busy = subprocess.Popen([sys.executable, "-c", _CHILD], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    assert busy.stdin is not None and busy.stdout is not None
     try:
         # %cpu column is a fixture (161); the CPU `time` the delta uses comes from the real ps.
         snap = f"{busy.pid} 1 1024 161.0 busyproc\n"
@@ -107,16 +126,36 @@ def test_detector_reports_measured_burn_on_the_second_fire_of_a_real_busy_proces
                "CLAUDE_PROJECT_DIR": str(tmp_path), "JANITOR_PS_SNAPSHOT": snap}
         (tmp_path / "home").mkdir()
 
+        def cpu_secs() -> float:
+            # Ground truth from the child itself (time.process_time), not from ps/parse_cpu_time.
+            busy.stdin.write("\n")  # type: ignore[union-attr]
+            busy.stdin.flush()  # type: ignore[union-attr]
+            return float(busy.stdout.readline())  # type: ignore[union-attr]
+
         def fire() -> str:
             return subprocess.run([sys.executable, str(_DETECTOR)], cwd=str(tmp_path), env=env,
-                                  capture_output=True, text=True, timeout=30, check=True).stdout
+                                  capture_output=True, text=True, timeout=60, check=True).stdout
 
+        a0 = cpu_secs()
         assert fire().strip() == ""  # first fire: streak 1, nothing reportable yet
+        a1 = cpu_secs()
         time.sleep(2.0)
+        b0 = cpu_secs()
         out = fire()
+        b1 = cpu_secs()
         assert "measured over the last" in out, out
         pct = float(out.split("CPU ", 1)[1].split("%", 1)[0])
-        assert 40.0 <= pct <= 130.0, out  # one busy thread is ~100%; the 161 fixture must NOT appear
+        window = float(re.search(r"measured over the last (\d+)s", out).group(1))  # type: ignore[union-attr]
+        # The detector's two ps reads fall inside [a0,a1] and [b0,b1], so its CPU delta lies in
+        # [b0-a1, b1-a0] (+-0.02s: ps reports centiseconds). The window is printed as a whole
+        # second, so the true one is within +-0.5s; the percent is printed rounded (+-1 incl.
+        # slack). A wrong figure (the 161 fixture, or a wrong formula) falls outside this band
+        # whatever the host load, because the band scales with the child's real CPU share.
+        lo = (b0 - a1 - 0.02) / (window + 0.5) * 100.0 - 1.0
+        hi = (b1 - a0 + 0.02) / max(window - 0.5, 0.5) * 100.0 + 1.0
+        assert lo <= pct <= hi, (pct, lo, hi, out)
     finally:
         busy.kill()
         busy.wait(timeout=10)
+        busy.stdin.close()
+        busy.stdout.close()
