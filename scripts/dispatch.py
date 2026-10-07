@@ -34,6 +34,7 @@ unrecoverable errors.
 from __future__ import annotations
 
 import contextlib
+import filecmp
 import hashlib
 import json
 import os
@@ -2039,11 +2040,14 @@ def _fresh_summary_note(sd: Path, clear_ts: int | None = None) -> str:
     if not candidates:
         return ""
     latest = _latest_handoff(candidates)
-    # A failed Jev attempt followed by an llm-ext fallback for the same key leaves an OLDER
-    # jev-compacted file beside a newer handoff; naming it would send the resumed session to
-    # stale context. Prefer the Jev file only when it is not older than the newest handoff.
+    # A failed Jev attempt followed by an llm-ext fallback for the same key leaves a jev-compacted
+    # file whose CONTENT differs from the newest handoff; naming it would send the resumed session
+    # to stale context. Compare content, not mtime: the post-clear hook writes the handoff as a
+    # copy of the Jev file AFTER it, so the handoff is always newer on the normal path (measured
+    # 37 ms newer, session 74047cb8) and an mtime test disabled this preference exactly when it
+    # must apply.
     jev = sd / f"jev-compacted-{key}.md"
-    if jev.is_file() and jev.stat().st_mtime >= latest.stat().st_mtime:
+    if jev.is_file() and filecmp.cmp(jev, latest, shallow=False):
         return f"Read {jev.resolve()} FIRST — the compacted context of the cleared session."
     return f"Read {latest.resolve()} FIRST — the compacted context of the cleared session."
 

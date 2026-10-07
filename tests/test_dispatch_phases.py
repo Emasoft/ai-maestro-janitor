@@ -1221,7 +1221,8 @@ def test_fresh_summary_note_names_the_jev_compacted_file_over_the_handoff_copy(
     env_isolation: dict,
 ) -> None:
     """TRDD-D7RLXAN1: SessionStart names jev-compacted-<key>.md as READ FIRST; the resume cue must
-    name that same file, not the byte-identical agent-handoff copy (one clear, one target)."""
+    name that same file, not the byte-identical agent-handoff copy (one clear, one target). The
+    hook writes the copy AFTER the Jev file, so the handoff is the newer one (hook order)."""
     import handoff_files
 
     dispatch = _import_dispatch()
@@ -1230,13 +1231,14 @@ def test_fresh_summary_note_names_the_jev_compacted_file_over_the_handoff_copy(
     sd = state.state_dir()
     sd.mkdir(parents=True, exist_ok=True)
     _arm_summary_hold(sd, expires_in_s=900, key="aaaa0001")
-    handoff = handoff_files.write(sd, "aaaa0001", "synthetic compacted context")
     jev = sd / "jev-compacted-aaaa0001.md"
     jev.write_text("synthetic compacted context", encoding="utf-8")
+    os.utime(jev, (time.time() - 5, time.time() - 5))
+    handoff = handoff_files.write(sd, "aaaa0001", "synthetic compacted context")
+    assert handoff.stat().st_mtime > jev.stat().st_mtime
     note = dispatch._fresh_summary_note(sd)
     assert str(jev.resolve()) in note, note
     assert str(handoff.resolve()) not in note, note
-    assert "older handoff" not in note, note
 
 def test_fresh_summary_note_is_empty_when_a_jev_file_exists_without_a_keyed_handoff(
     env_isolation: dict,
