@@ -1,8 +1,8 @@
 ---
 name: project_janitor_publish_blocked_cpv_fps
-description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it / how is the CPV version pinned across publish.py and the two workflows / why did bumping CPV from v2.153.1 to v2.153.2 break the release / what is RC-DEP-TAG-PIPELINE false positive / are exempt lists allowed to suppress a CPV finding / why must a load-bearing persistence feature be separated into its own release instead of exempted / what does a Release job cancelled at exactly the timeout mean / how many attempts and timeout does cpv-remote-validate get / publish blocked again after fixing every reported finding / the cpv gate reveals a new demoted nit on every attempt / how to find which fragment trips skillaudit / leave one fragment out / run the scanner over the whole page not the reported lines / separate is the third devitalize verb / push cannot contain secrets GH013 blocked the publish / a redaction placeholder was flagged as a secret / redacting in a new commit does not unblock push protection / the tag push was refused but it was not the tag ruleset / allow-secret url vs rewrite history is the owner decision / CPV credential_theft rule flags claude setup-token in skill prose / how to unblock a skill that mentions setup-token from CPV strict"
+description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it / how is the CPV version pinned across publish.py and the two workflows / why did bumping CPV from v2.153.1 to v2.153.2 break the release / what is RC-DEP-TAG-PIPELINE false positive / are exempt lists allowed to suppress a CPV finding / why must a load-bearing persistence feature be separated into its own release instead of exempted / what does a Release job cancelled at exactly the timeout mean / how many attempts and timeout does cpv-remote-validate get / publish blocked again after fixing every reported finding / the cpv gate reveals a new demoted nit on every attempt / how to find which fragment trips skillaudit / leave one fragment out / run the scanner over the whole page not the reported lines / separate is the third devitalize verb / push cannot contain secrets GH013 blocked the publish / a redaction placeholder was flagged as a secret / redacting in a new commit does not unblock push protection / the tag push was refused but it was not the tag ruleset / allow-secret url vs rewrite history is the owner decision / CPV credential_theft rule flags claude setup-token in skill prose / how to unblock a skill that mentions setup-token from CPV strict / CPV --strict blocks the janitor publish on .gitignore missing coverage for .claude / why can't the .claude gitignore MINOR be satisfied / is this a filed false positive not something to fix in our gitignore / claude-plugins-validation issue 120 / does git check-ignore .claude exit 0 when we track .claude / project / memory / can git re-include a path under an excluded parent directory / why not add a bare .claude / gitignore line / would a bare .claude / line untrack the memory corpus / when does this publish block auto-unblock / should PROJECT memory move out from under .claude to dodge this check / validate_skill.py broken file reference two different fence handling checks / why does a markdown link example inside a fenced template still trip validate_supporting_files / how to clear a Referenced file not found finding in SKILL.md / does a fenced bash block strip literal paths from the check"
 ocd: 2026-06-11
-lmd: 2026-09-17
+lmd: 2026-10-07
 metadata:
   node_type: memory
   type: project
@@ -155,9 +155,37 @@ Publish #5 (3.4.4, 2026-09-02) failed at the remote CPV gate with ONE MAJOR: `sk
 
 
 
+
+^1LNXSGZG [desc: "CPV --strict flags .gitignore missing coverage for .claude/ as a filed false-positive (CPV#120), unsatisfiable while PROJECT memory is tracked under .claude/project/memory/", keywords: cpv_strict_gitignore_claude_minor_false_positive git_check-ignore_claude_exits_1_by_design cannot_reinclude_path_under_excluded_parent memory_tracked_under_claude_project_memory publish_blocked_on_gitignore_coverage_finding auto_unblocks_when_cpv_120_ships do_not_add_bare_claude_gitignore_line move_project_memory_out_of_claude_to_dodge_check claude-plugins-validation_issue_120 mathematically_unsatisfiable_gitignore_coverage, ocd: 2026-06-14, lmd: 2026-06-14]
+
+CPV `--strict` emits **`[MINOR] .gitignore missing coverage for: Claude Code cache
+directory (.claude/)`** and blocks the janitor publish (exit ≥2). This is a **filed
+false positive — `claude-plugins-validation#120`** — do NOT try to "fix" it in our
+`.gitignore`; it is **mathematically unsatisfiable** alongside our memory design.
+
+**Root cause (verified in CPV source):** `validate_plugin.py:3970`
+`_gitignore_covers_category` decides coverage by running `git check-ignore -q -- .claude`
+(covered ⇔ exit 0). `git check-ignore .claude` only exits 0 if the **`.claude` directory
+entry itself** is ignored. But we DELIBERATELY track `<repo>/.claude/project/memory/**`
+(the PROJECT memory scope), which forces the deep gitignore form `.claude/**` +
+`!.claude/project/memory/**` — and `git` **cannot re-include a path under an excluded
+parent** (`man gitignore`). So `git check-ignore .claude` necessarily exits 1 → CPV
+flags it. No gitignore both (a) makes `git check-ignore .claude` exit 0 AND (b) keeps the
+memory dir trackable; the two are mutually exclusive.
+
+**How to apply:** when a janitor publish fails CPV `--strict` with ONLY this `.claude/`
+MINOR, the plugin is otherwise clean — the publish **auto-unblocks when CPV ships the #120
+fix** (the pipeline fetches CPV fresh via `uvx --from git+…`). The alternative (the USER's
+call) is to move PROJECT memory out from under `.claude/` to dodge the check entirely. Do
+NOT add a bare `.claude/` gitignore line (it prunes the dir and silently un-tracks the
+memory corpus). See [[project_janitor_publish_blocked_cpv_fps]] for the broader CPV
+publish-gate FP history and [[memory-system]] for why memory lives under `.claude/`.[^9]
+
 ## See also
 
+- [[reference_cpv_dotclaude_gitignore_fp]]
 - See [[janitor-publish-pipeline-address-lint]] when the flagged path is a REAL private identifier (a home path, an e-mail) rather than a scanner needle — that page owns the true-positive case.
+- [[memory-system]]
 
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0001, status:valid, keywords:"publish_blocked_claim_superseded cpv_major_fp_era_over dont_carry_blocked_forward", ocd:2026-06-11, lmd:2026-06-12] SUPERSEDED original note: "the publish is
@@ -225,3 +253,13 @@ Publish #5 (3.4.4, 2026-09-02) failed at the remote CPV gate with ONE MAJOR: `sk
   local gate is green on the same commit.
 [^7]: [id: ATOM-A116-LMAT, status: valid, keywords: "CPV_strict_exit_4_on_demoted_NITs credential_theft_CLAUDE_CLI_TOKEN_THEFT claude_setup-token_bigram_in_SKILL.md publish_blocked_by_CPV_NIT skillaudit_fires_on_setup-token_mention reword_mint_as_human_step_not_plugin_step devitalize_or_remove_never_exempt why_is_setup-token_flagged_as_credential_theft skill_mentions_claude_setup-token_and_publish_fails CLAUDE_CLI_TOKEN_THEFT_false_positive", ocd: 2026-09-10, lmd: 2026-09-10] DO NOT exempt or suppress CPV's skillaudit:credential_theft CLAUDE_CLI_TOKEN_THEFT rule when a skill's prose contains the `setup-token` subcommand of the `claude` CLI, BECAUSE demoted NITs still block under --strict (exit 4) and the policy is devitalize-or-remove, never exempt. DO reword the prose so the mint is the human's own step ("run claude with the setup-token subcommand, in your own terminal") — the plugin never executes it, so the meaning is unchanged and the scanner finds nothing (landed 2026-09-10 in 1c797cfe, release 3.5.0).
 [^8]: [id: ATOM-XVF7-LSH6, status: valid, keywords: "publish_blocked_by_my_own_memory_note cpv_strict_gate_blocked_publish_again cpv_flags_the_scanner's_own_lesson_text setup-token_keyword_tripped_skillaudit_again lesson_quoting_the_flagged_phrase_blocks_publish how_to_unblock_a_skill_that_mentions_setup-token_from_CPV_strict publish_blocked_again_after_fixing_every_reported_finding memory_page_itself_trips_CPV_skillaudit_finding scanner_does_not_read_frontmatter_description_today devitalized_specimen_still_matched_the_CPV_rule", ocd: 2026-09-15, lmd: 2026-09-15] DO NOT assume devitalizing the specimen in lesson [^7]'s prose is free of the very rule it warns about, BECAUSE that lesson's quoted setup-token specimen itself tripped CPV strict on the 3.5.1 publish (publish blocked by its own memory note). DO keep the exact two-word string only in the keywords block (underscored) and the frontmatter description, which the scanner does not read today — a CPV that scans frontmatter will re-flag it.
+[^9]: [id:ATOM-MG05-0018, status:valid, keywords:"validate_skill_no_fence_exemption two_skill_reference_checks_differ broken_file_reference_markdown_link", ocd:2026-06-14, lmd:2026-06-14] the CPV publish gate has TWO separate skill-reference
+  checks with DIFFERENT fence handling: `validate_skill.py:680` (`validate_supporting_files`)
+  regex-flags ANY non-resolving `[text](path)` markdown link in SKILL.md with **no fence or
+  placeholder exemption** (a `[architecture](architecture.md)` example inside a ```` ```markdown ````
+  template fence still trips it); the comprehensive validator's "Broken file reference" check
+  is the lenient one that DOES strip fences and honor `<path>`/`{path}`/`example-` placeholders.
+  Lesson: to clear a `validate_skill.py` "Referenced file not found", the `[](…)` pattern must
+  not appear at all unless it resolves — describe the format in prose, keep literal paths inside
+  fenced **bash** (stripped). Don't trust the "fenced content is stripped" hint; it's only one
+  of the two checks.
