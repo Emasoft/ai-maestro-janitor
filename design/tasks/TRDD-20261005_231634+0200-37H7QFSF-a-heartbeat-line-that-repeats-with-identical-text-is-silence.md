@@ -4,7 +4,7 @@ title: A heartbeat line that repeats with identical text is silenced for ever by
 column: testing
 status: tasked
 created: 2026-10-05T23:16:34+0200
-updated: 2026-10-07T08:20:05+0200
+updated: 2026-10-07T08:21:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,6 +36,7 @@ Goal: investigate, verify and fix the root cause. READ in scripts/dispatch.py (t
 2026-10-06: the memory guard's alert key, named in the body as related, is fixed by removing its deduplication (485596ca, TRDD-BZ3BT0NJ). Its seen file memory-guard-alert-seen.txt in the machine-wide state folder is now a leftover that nothing reads, to remove with the two others listed above. That fix is specific to a branch that runs rarely; it is not the general rule this card still needs.
 2026-10-07: detector read-only check (emit_once/emit_forget), result: stale-index-lock and system-daemon-runaway are fixed (self-dedupe with per-key forget verified: stale-index-lock keys removed/no-probe/error/no-snapshot forgotten at scripts/detectors/stale-index-lock.py:97-100 when the lock is gone; system-daemon-runaway key runaway forgotten at system-daemon-runaway.py:188,236,249). oauth-login-needed: stuck-<kind>-<detail> fixed (forgotten at oauth-login-needed.py:225 via _forget_resolved_stuck, called at 253 and 426); but keys due-<day>-<sig> (:287), stalled-<day>-<sig2> (:341) and topup-<day> (:468) have no forget, so a condition that clears and recurs the same day with the same signature stays silent until the next day, still silent until the day rolls over for those keys - not forever, follow-up needed if same-day re-alarm is wanted. trdd-cross-card-blindspot: GAP, keys blindspot@<ref>@<a>@<b> (:346) and blindspot-content@<a>@<b>@<words> (:365) are forgotten only for pairs dropped by the display cap (:379), never when a pair is cross-linked and later un-linked, so still silent forever for those keys - follow-up needed.
 2026-10-07: a3583bbf listed in implementation-commits was reverted by 876296de.
+2026-10-07: the 'exemption contract' correction appears twice above with the same meaning (two worker runs appended it); trdd-cross-card-blindspot stays exempt.
 
 ## Implementation notes
 
