@@ -33,3 +33,27 @@ def test_session_start_hook_timeout_at_least_30s(name: str) -> None:
     ]
     assert len(entries) == 1
     assert entries[0]["timeout"] >= 30
+
+
+def test_pretooluse_guard_hooks_get_more_time_than_advisory_hooks() -> None:
+    """Guard PreToolUse hooks get timeout >= 30 s and advisory ones a strictly lower limit (TRDD-U32EVMI9)."""
+    # Guard hooks get more time than advisory hooks so that a slow host is less likely to cut a guard short.
+    guards = [
+        "pre-tool-pkg-guard.py",
+        "pre-bash-safety.py",
+        "pre-tool-agent-generator-guard.py",
+        "pre-tool-publish-lock.py",
+        "pre-tool-wikimem-write-path.py",
+    ]
+    advisory = ["pre-tool-context-usage.py", "pre-tool-token-budget.py"]
+    data = json.loads(HOOKS_JSON.read_text())
+    hooks = [h for group in data["hooks"]["PreToolUse"] for h in group["hooks"]]
+
+    def timeout_of(name: str) -> int:
+        found = [h for h in hooks if re.search(rf"{re.escape(name)}\b", h["command"])]
+        assert len(found) == 1
+        return int(found[0]["timeout"])
+
+    guard_timeouts = [timeout_of(n) for n in guards]
+    assert min(guard_timeouts) >= 30
+    assert all(timeout_of(n) < min(guard_timeouts) for n in advisory)
