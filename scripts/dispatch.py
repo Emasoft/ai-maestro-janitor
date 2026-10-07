@@ -4059,6 +4059,13 @@ def _phase_keep_going_nudge() -> None:
             "or you are blocked on a human decision, say so briefly and stop; there is no "
             "off-switch to run and none is needed"
         )
+    # WHY: the suppressed/unchanged branches log but this emit branch did not, so a
+    # delivered nudge was invisible in dispatch.log and TRDD-HYTKG53C could not be
+    # verified from logs (TRDD-VP4UJ947). Log to the file only: stdout is the token stream.
+    state.log_line(
+        "dispatch",
+        f"keep-going: nudge emitted ({agent_total} pending agents, board signature {attn_signature})",
+    )
     _emit_decision("[janitor-resume]", [note])
 
 
