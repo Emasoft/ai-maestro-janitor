@@ -3596,6 +3596,8 @@ def _overrun_clear(name: str) -> None:
     # WHY unlink outside the lock: disk I/O under `_overrun_lock` would stall every task's exit
     # (see the registry comment). A stamp the watch writes after this pop is removed by the
     # watch's own re-check; a rare leftover is swept at the next daemon start.
+    # Concurrent same-name runs could remove each other's stamp; the next pass rewrites it within
+    # one interval, acceptable because each task name runs on one thread.
     with contextlib.suppress(OSError):
         _overrun_stamp_path(name).unlink()
 
@@ -3626,6 +3628,7 @@ class _OverrunWatchThread(threading.Thread):
         super().__init__(name="overrun-watch", daemon=True)
         self._stop_evt = threading.Event()
         self._reported: set[tuple[int, float]] = set()
+        self._write_failed: set[tuple[int, float]] = set()
         self._failure_logged = False
 
     def shutdown(self, timeout: float) -> None:
@@ -3641,7 +3644,9 @@ class _OverrunWatchThread(threading.Thread):
         now = time.monotonic()
         with _overrun_lock:
             snapshot = dict(_overrun_runs)
-        self._reported.intersection_update({(ident, m0) for ident, (_, _, m0) in snapshot.items()})
+        live = {(ident, m0) for ident, (_, _, m0) in snapshot.items()}
+        self._reported.intersection_update(live)
+        self._write_failed.intersection_update(live)
         for ident, entry in snapshot.items():
             name, t0, m0 = entry
             if now - m0 < _FOREGROUND_BUDGET_SEC:
@@ -3650,7 +3655,17 @@ class _OverrunWatchThread(threading.Thread):
             # block every Task.run exit on a stalled disk. If the run ended during the write,
             # `_overrun_clear` may already have unlinked, so remove the stamp we just wrote.
             stamp = _overrun_stamp_path(name)
-            state.atomic_write(stamp, f"{os.getpid()} {name} {int(t0)}")
+            # WHY catch OSError around the write only: the stamp is a secondary artefact, the
+            # "still running" log line is the signal. An uncaught write failure (missing folder,
+            # full disk, permissions) used to end the whole pass, so this run's line and every
+            # later entry's line were never written, and `_failure_logged` silenced the rest.
+            # Logged once per run, not per pass, to avoid a line every interval.
+            try:
+                state.atomic_write(stamp, f"{os.getpid()} {name} {int(t0)}")
+            except OSError as exc:
+                if (ident, m0) not in self._write_failed:
+                    self._write_failed.add((ident, m0))
+                    state.log_line("daemon", f"overrun-watch: stamp write failed for '{name}': {exc}")
             with _overrun_lock:
                 still_running = _overrun_runs.get(ident) == entry
             if not still_running:

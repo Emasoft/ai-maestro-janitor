@@ -350,3 +350,37 @@ def test_stalled_stamp_write_does_not_block_another_task_exit(
         first.join(5)
         second.join(5)
     assert _wait_for(lambda: not list(isolated_env.glob("task-overrun.*")))
+
+def test_failing_stamp_write_still_logs_every_over_budget_run(
+    overrun_watch: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stamp write that raises OSError must not hide the 'still running' line of any run."""
+    import threading
+
+    real = state.atomic_write
+
+    def failing(path: Any, text: str, *a: Any, **k: Any) -> Any:
+        if "task-overrun." in str(path):
+            raise OSError("no space left")
+        return real(path, text, *a, **k)
+
+    monkeypatch.setattr(state, "atomic_write", failing)
+    release = threading.Event()
+    threads = [
+        threading.Thread(target=daemon.Task(n, 0, lambda: release.wait(10)).run)
+        for n in ("wfail-a", "wfail-b")
+    ]
+    for t in threads:
+        t.start()
+    try:
+        assert _wait_for(
+            lambda: all(f"task '{n}' still running" in _log_text() for n in ("wfail-a", "wfail-b"))
+        ), "both over-budget runs must be logged although the stamp write fails"
+        time.sleep(0.3)  # several more passes: the write failure must not be logged again
+        for n in ("wfail-a", "wfail-b"):
+            assert _log_text().count(f"stamp write failed for '{n}'") == 1
+    finally:
+        release.set()
+        for t in threads:
+            t.join(5)
+    assert "overrun-watch: pass failed" not in _log_text()
