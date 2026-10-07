@@ -4,7 +4,7 @@ title: drain the board so a release can be published
 column: todo
 status: tasked
 created: 2026-10-05T09:47:28+0200
-updated: 2026-10-07T03:00:02+0200
+updated: 2026-10-07T03:12:27+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: infra
@@ -35,7 +35,7 @@ The project rule blocks a publish while work columns claim activity nobody is do
 - [x] Run the owed full Python test run with no Rust build running.
 - [x] For every card in testing, list its named live event from its STATE block; a card with none is a defect to judge one by one, never by a scripted mass change.
 - [x] Confirm the working tree is clean, then publish a patch release through scripts/publish.py (never git push).
-- [ ] After CI passes (3.8.1, and now 3.8.2), update the installed plugin; then confirm from the daemon log that the running daemon is on the new version before judging any daemon-side fix; an agent must not signal the daemon.
+- [x] After CI passes (3.8.1, and now 3.8.2), update the installed plugin; then confirm from the daemon log that the running daemon is on the new version before judging any daemon-side fix; an agent must not signal the daemon.
 Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages and exits for respawn when a newer plugin version is cached (scripts/daemon.py, function _keepalive_self_heal); a session-spawned daemon does not replace itself. Which kind runs on a given host was NOT read from its log on 2026-10-05. TRDD-LRGZV19Z (the daemon inherits a session's working directory) suggests a session-spawned one on the host where these fixes were made; that is inferred. If so, the daemon-side fixes of TRDD-0QCRG2YX do not run after a publish until the owner restarts the daemon.
 2026-10-05 — the 17 testing cards without a named event, plus TRDD-A70YJLXN, were judged one by one: 4 returned to todo, 11 keep a named event, 1 moved to human_review for an owner question, 0 closed (the closes of TRDD-PWIAEW40 and TRDD-FWDZDB7W were attempted and stopped, see those cards; both remain in testing), 3 new cards minted for split-off work (TRDD-D10JB26H, TRDD-ASHLUQ6O, TRDD-2MU62A5F). The other 24 testing cards were classified from their STATE tails only and were not re-read; any whose wait was written before v3.7.0 went out on 2026-10-04 may already be past its event.
 2026-10-05 — closes: TRDD-PWIAEW40 not closed: the card tool refused the move to complete because the card has no acceptance checklist (the close text and implementation-commits are recorded on it; a checklist must be written first), by self-approval of this session's agent — the card tool accepts a named approver without checking it, so this is recorded as self-approval, not as a second party's. TRDD-FWDZDB7W is blocked on TRDD-ASHLUQ6O, not closed. Known and unresolved: the card linter reports 67 error-level findings across the corpus, none on the cards changed on 2026-10-05; the publish gate tolerates them. The dry-run's plugin validation carried 42 warnings and the CI-parity check 3. The assignee change on four cards makes this session's agent the nominal owner of work it has not touched.
@@ -57,8 +57,9 @@ Daemon fact for the last task: only the OS-spawned keepalive daemon re-stages an
 - [x] Before 3.8.2: release notes name every behaviour change: closeable class leaves the reconciliation report and ~34 TRDD-CLOSEABLE ledger notes land once (ledger keeps 500 lines, oldest evicted); ~3 drift lines repeat once; memgrep 0.2.0 needs cargo install; the #331 repair rule is skill text only; decide --patch vs --minor.
 - [x] After 3.8.2: confirm the commit SHAs cited in the 2026-10-07 #332 comment resolve on GitHub; correct the comment (re-record only on a new released citing commit; triage 32 vs recount 34).
 - [x] Before 3.8.2: copy reports/ from every agent worktree under .claude/worktrees/ into the main repo's reports/, then have the main session remove the merged worktrees (never by deleting their folders by hand).
-2026-10-07: v3.8.2 published (36f87b4a); remaining: CI result, installed-plugin update, and the daemon running 3.8.2 (needs a daemon restart; the owner decides).
-2026-10-07: 28 merged agent worktrees were removed after their reports were copied into the main repo's reports/; 4 locked worktrees were left (locked by an earlier agent process).
+2026-10-07: v3.8.2 published (36f87b4a); CI passed; installed plugin updated 3.8.1 -> 3.8.2; the daemon respawned at 03:02:30 on 'newer version staged' and its staged tree matches the 3.8.2 cache (64/64 .py files) — no agent signalled it.
+2026-10-07: the release-notes box text predates the shipped wording; the release says 'about 34 or more' ledger notes and 'a few cards' repeat one drift line.
+2026-10-07: 28 merged agent worktrees were removed after their reports were copied into the main repo's reports/; 4 locked worktrees were left (locked by pid 34268, this session's own Claude Code process; they free up when it ends).
 
 ## Order of work adopted on 2026-10-05
 
