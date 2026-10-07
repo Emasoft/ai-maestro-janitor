@@ -643,6 +643,28 @@ def test_auth_finding_deduped_on_the_same_reason(tmp_path, monkeypatch, _isolate
     assert len(auth_hits) == 1, f"expected exactly one dedup'd auth finding, got {auth_hits}"
 
 
+def test_auth_402_credits_headline_and_dedupe_keyed_on_status(tmp_path, monkeypatch, _isolated_env):
+    """A 402 stamp reads as out-of-credits (not "key rejected"), and two 402s whose error text
+    differs (a changing balance figure) are still surfaced once (TRDD-JIYBKY27)."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    _write_probe_stamp(kind="auth", status=402, reason="Jev (OpenRouter) returned 402: balance 0.12 credits")
+    assert sps.main() == 0
+    _write_probe_stamp(kind="auth", status=402, reason="Jev (OpenRouter) returned 402: balance 0.07 credits")
+    assert sps.main() == 0
+
+    auth_hits = [e for e in _ledger_entries() if e["code"] == "JEV-AUTH-REJECTED"]
+    assert len(auth_hits) == 1, auth_hits
+    assert "credits" in auth_hits[0]["msg"]
+    assert "key rejected" not in auth_hits[0]["msg"]
+
+
 # --- TRDD-1ETALGDG followup item 2(b): blocked=N visibility on an exit-0 compaction -------
 
 

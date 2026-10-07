@@ -262,7 +262,7 @@ class OpenRouterJevClient:
                 if response.status_code == 200:
                     return self._parse_response(response, questions)
                 if response.status_code == 401:
-                    raise JevAuthError(_error_detail(response))
+                    raise JevAuthError(_error_detail(response), status=401)
                 # 402 = insufficient credits; 403 = forbidden (bad key permissions, a
                 # guardrail block, or a moderation flag) -- OpenRouter's own error
                 # reference (openrouter.ai/docs/api-reference/errors). Neither is a
@@ -293,7 +293,10 @@ class OpenRouterJevClient:
                             body_sha256=hashlib.sha256(response.content).hexdigest(),
                         )
                 if response.status_code in (402, 403):
-                    raise JevAuthError(f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}")
+                    raise JevAuthError(
+                        f"Jev (OpenRouter) returned {response.status_code}: {_error_detail(response)}",
+                        status=response.status_code,
+                    )
                 if response.status_code == 422:
                     raise JevValidationError(_error_detail(response))
                 # 408 = "Your request timed out" (OpenRouter's own error reference) -- retryable

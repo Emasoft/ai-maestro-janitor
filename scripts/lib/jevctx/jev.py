@@ -385,7 +385,7 @@ class HttpJevClient:
                 if response.status_code == 200:
                     return self._parse_response(response, questions)
                 if response.status_code == 401:
-                    raise JevAuthError(_error_detail(response))
+                    raise JevAuthError(_error_detail(response), status=401)
                 if response.status_code == 422:
                     raise JevValidationError(_error_detail(response))
                 if response.status_code == 429 or response.status_code >= 500:
