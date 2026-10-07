@@ -2212,38 +2212,37 @@ def test_blocked_item_pointer_is_marked_unscored_provider_firewall() -> None:
     assert lines[skipped_idx + 1] != "unscored (provider firewall)"
 
 
-def test_score_items_parallel_is_faster_than_serial() -> None:
+def test_score_items_parallel_overlaps_requests() -> None:
     """Card 3 (TRDD-CC0CZLMO): jevctx's own `scorer.py` fans batches out on a
     `ThreadPoolExecutor` (`scorer.py:149-154`); ours must too, or a large transcript's serial
     for-loop exceeds both compaction-lane timeouts (the bug this card fixes -- measured: a
     49 MB transcript took 168 s on HEAD, over the 60 s sync AND the 120 s detached timeouts).
-    160 non-"user" items pack 32-per-batch (card 5's non-"user" batch size) into 5 batches; a
-    client that sleeps 0.2 s per request makes the serial time ~1.0 s and the max_workers=8
-    time close to 0.2 s -- assert a CLEAR speedup, not an exact ratio (thread-scheduling
-    jitter makes an exact number flaky)."""
+    160 non-"user" items pack 32-per-batch (card 5's non-"user" batch size) into 5 batches.
+    Asserts OVERLAP (requests in flight at once), not a wall-clock speedup: at host load ~127
+    a timing ratio failed (parallel 1.01 s vs serial 1.05 s, TRDD-KJAFABDU) although the code
+    path was right, whereas a request that sleeps keeps its slot, so overlap is load-proof."""
     items = [_item(f"i{i}:0", "assistant", f"text {i}", turn=i, tokens=10) for i in range(160)]
 
-    def sleepy_client() -> Any:
+    def max_in_flight(workers: int) -> int:
+        lock = threading.Lock()
+        counts = {"now": 0, "max": 0}
         inner = FakeJevClient.constant(0.9)
 
-        class _SleepyClient:
+        class _CountingClient:
             def ask(self, state: Any, questions: Any) -> dict[str, Any]:
+                with lock:
+                    counts["now"] += 1
+                    counts["max"] = max(counts["max"], counts["now"])
                 time.sleep(0.2)
+                with lock:
+                    counts["now"] -= 1
                 return inner.ask(state, questions)
 
-        return _SleepyClient()
+        jc.score_items(items, "digest", _CountingClient(), max_workers=workers)
+        return counts["max"]
 
-    start = time.monotonic()
-    jc.score_items(items, "digest", sleepy_client(), max_workers=1)
-    serial_elapsed = time.monotonic() - start
-
-    start = time.monotonic()
-    jc.score_items(items, "digest", sleepy_client(), max_workers=8)
-    parallel_elapsed = time.monotonic() - start
-
-    assert parallel_elapsed < serial_elapsed / 2, (
-        f"expected a clear speedup: serial={serial_elapsed:.2f}s parallel={parallel_elapsed:.2f}s"
-    )
+    assert max_in_flight(1) == 1
+    assert max_in_flight(8) >= 2
 
 
 def test_no_batch_exceeds_32_questions() -> None:
