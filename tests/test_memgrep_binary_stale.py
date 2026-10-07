@@ -176,7 +176,11 @@ def test_real_404_has_its_own_reason(tmp_path: Path) -> None:
     token = subprocess.run(
         ["gh", "auth", "token"], capture_output=True, text=True, env={**os.environ, "HOME": pwd.getpwuid(os.getuid()).pw_dir}
     ).stdout.strip()
-    out = _run(tmp_path, path=os.environ["PATH"], memgrep=str(stub), installed="f" * 40, extra_env={"GH_TOKEN": token} if token else None)
+    # Why: a CI runner has gh installed but not logged in; the unauthenticated compare call errors
+    # instead of returning the 404 this test asserts, so without a token there is nothing to test.
+    if not token:
+        pytest.skip("gh not authenticated")
+    out = _run(tmp_path, path=os.environ["PATH"], memgrep=str(stub), installed="f" * 40, extra_env={"GH_TOKEN": token})
     assert "the build commit is not on GitHub (local or fork build)" in out, out
 
 
