@@ -1969,18 +1969,22 @@ def _phase_compact_resume() -> bool:
 
 
 def _keyed_handoffs(sd: Path, clear_ts: int | None = None) -> list[Path]:
-    """Every handoff file of the cleared session's key (`pending_summary_key`), [] when none.
+    """Every handoff file of the cleared session's key, [] when none."""
+    key = _cleared_key(sd, clear_ts)
+    return _handoffs_for_key(sd, key) if key else []
+
+
+
+def _cleared_key(sd: Path, clear_ts: int | None = None) -> str:
+    """The cleared session's key (`pending_summary_key`), "" when none.
 
     `clear_ts` (the resume flag's timestamp) lets the key come from the clear's own sidecar
     instead of a guess (TRDD-PHS3DIBD)."""
     try:
         import external_handoff_clear as _ehc  # noqa: PLC0415 - lazy: absence must not break here
     except ImportError:
-        return []
-    key = _ehc.pending_summary_key(sd, int(time.time()), clear_ts)
-    if not key:
-        return []
-    return _handoffs_for_key(sd, key)
+        return ""
+    return _ehc.pending_summary_key(sd, int(time.time()), clear_ts) or ""
 
 def _handoffs_for_key(sd: Path, key: str) -> list[Path]:
     """Every handoff file of one session key."""
@@ -2027,14 +2031,18 @@ def _fresh_summary_note(sd: Path, clear_ts: int | None = None) -> str:
     back to the generic "read the injected SessionStart handoff summary" directive alone.
     `clear_ts` is forwarded so the cleared session is identified, not guessed (TRDD-PHS3DIBD).
     """
+    # TRDD-D7RLXAN1: one clear must name ONE read-first file. SessionStart's READ FIRST line names
+    # jev-compacted-<key>.md and the hook writes a byte-identical agent-handoff copy; naming the
+    # copy here sent the resumed session to a second file. Prefer the READ FIRST file; the
+    # keyed handoff is only the fallback when no Jev document exists (llm-ext, summarizer lane).
+    key = _cleared_key(sd, clear_ts)
+    if key and (jev := sd / f"jev-compacted-{key}.md").is_file():
+        return f"Read {jev.resolve()} FIRST — the compacted context of the cleared session."
     candidates = _keyed_handoffs(sd, clear_ts)
     if not candidates:
         return ""
     latest = _latest_handoff(candidates)
-    return (
-        f"Read {latest.resolve()} FIRST — the compacted context of the cleared session (it "
-        "landed after SessionStart injected the older handoff)."
-    )
+    return f"Read {latest.resolve()} FIRST — the compacted context of the cleared session."
 
 _LATE_SUMMARY_STAMP_PREFIX = "late-summary-noted-"
 
