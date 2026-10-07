@@ -22,6 +22,7 @@ approval-datetime: 2026-09-24T08:11:58+0200
 
 GitHub #332 (weekly audit drift) is owned by this card and STAYS OPEN after the sweep release as the board-hygiene tracker, never closed by the release. Open items, to be worked per card and never by script: trdd-drift reports about 60 idle cards, trdd-reminder has 43 active, trdd-state-reconciliation has 80 candidates of which 35 are closeable.
 NEXT ACTION: after the sweep release ships, work the board-hygiene items card by card; close #332 only when each class is fixed or shown to need no action. The routing design in the body is still undecided (column design).
+- 2026-10-07: the reconciliation detector now records closeable candidates as one-time TRDD-CLOSEABLE findings-ledger notes (TRDD-8BNV75TV); nothing routes those notes to the agent or owner yet, which is this card's routing design to decide.
 
 dispatch.py's _ADVISORY_DETECTORS (trdd-reminder, dirty-tree, gitignore-coverage, github-issues-watch, gh-reply-watch, and others) are quiet-filtered to the findings ledger, so new GitHub issues #306 and #307 (2026-09-22/23), 29 dirty-tree hits and 15 trdd-reminder hits in one week (ledger counts, 2026-09-17 to 2026-09-24) never reached anyone. The 2026-08-12 owner rule ("a fire prints janitor heartbeat, and ONLY adds to it when something genuinely needs the human") and the 2026-09-24 directive (TRDD-WZKFSQ2N) now conflict. OWNER DECISION needed on routing. TRDD-ADIGRD0T is the agent-facing half.
 v3.8.0 shipped the weekly re-report fix (abee9ac5, 14db6c88, afc8e000); remaining audit items tracked on #332
