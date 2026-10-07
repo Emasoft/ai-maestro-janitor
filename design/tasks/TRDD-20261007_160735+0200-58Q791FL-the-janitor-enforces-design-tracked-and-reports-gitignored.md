@@ -1,10 +1,10 @@
 ---
 trdd-id: 58Q791FL
 title: The janitor enforces design tracked and reports gitignored
-column: dev
+column: testing
 status: tasked
 created: 2026-10-07T16:07:35+0200
-updated: 2026-10-07T16:07:35+0200
+updated: 2026-10-07T16:21:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-07T16:07:35+0200
+implementation-commits: [de7475f3]
 ---
 
 # The janitor enforces design tracked and reports gitignored
