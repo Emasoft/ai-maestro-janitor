@@ -1,10 +1,10 @@
 ---
 trdd-id: LA4MGOJN
 title: publish opt-out PLUGIN_SKIP_INSTALL_SMOKE is unreachable because the bypass guard refuses it
-column: todo
+column: testing
 status: tasked
 created: 2026-10-07T04:35:18+0200
-updated: 2026-10-07T04:44:15+0200
+updated: 2026-10-07T04:57:08+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,8 +29,10 @@ Acceptance: one test showing the chosen behaviour.
 
 - 2026-10-07T04:35:18+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T04:35:22+0200 — column → todo by main-agent@ai-maestro-janitor. triaged: developable bugfix
+- 2026-10-07T04:57:08+0200 — column → testing by main-agent@ai-maestro-janitor. merged on main; waits for a release
 
 ## STATE
 
 2026-10-07: found while fixing the exemption rename (TRDD-CWKM5218, commit 52eb054e). NEXT ACTION: decide exempt or delete; the owner rule against bypasses favours delete.
 2026-10-07 correction: the publish.py line references above are off; the audit read them at line 3236 (the PLUGIN_SKIP_INSTALL_SMOKE read in stage_install_smoke) and line 3483 (the stage_bypass_guard call in main), not 3229 and 3476.
+2026-10-07: decided delete (the owner's rule forbids bypasses) and merged on main (295b48c1, merge f0c15f0b): the read of the variable is gone and a test asserts it does not come back. Not yet in a release.

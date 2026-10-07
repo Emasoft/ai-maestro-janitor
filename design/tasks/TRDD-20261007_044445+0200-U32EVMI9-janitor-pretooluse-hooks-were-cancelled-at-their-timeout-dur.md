@@ -1,10 +1,10 @@
 ---
 trdd-id: U32EVMI9
 title: Janitor PreToolUse hooks were cancelled at their timeout during host stalls
-column: backburner
+column: dev
 status: tasked
 created: 2026-10-07T04:44:45+0200
-updated: 2026-10-07T04:44:55+0200
+updated: 2026-10-07T04:57:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -34,7 +34,9 @@ TRDD-QX59MA4H (the detector half), TRDD-9438CGJZ.
 ## Approval log
 
 - 2026-10-07T04:44:45+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T04:57:25+0200 — column → dev by main-agent@ai-maestro-janitor. first step merged; detector and lighter start-up path pending
 
 ## STATE
 
 2026-10-07: not started; held in the default column until the security agent's verdict exists. NEXT ACTION: record that verdict privately, then state the chosen response here in neutral terms.
+The security agent's verdict on the harness behaviour is recorded in a private report. The chosen response is to give the guard hooks more time than the advisory hooks, to have the planned detector report every cancelled guard hook as a finding, and to track a lighter start-up path for the hooks on a separate card. The janitor's hooks stay best-effort by design; hard guarantees remain with the publish gate, the pre-push hook and the repository rulesets. Step one is merged on main (d28f3127, merge cd6f7119). Earlier count corrected: 87 cancellations of janitor pre-tool hooks across 22 tool calls, because subagent transcripts were not counted before.

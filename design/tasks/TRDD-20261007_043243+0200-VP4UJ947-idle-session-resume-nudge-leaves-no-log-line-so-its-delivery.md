@@ -1,10 +1,10 @@
 ---
 trdd-id: VP4UJ947
 title: Idle-session resume nudge leaves no log line so its delivery cannot be verified
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-07T04:32:43+0200
-updated: 2026-10-07T04:32:43+0200
+updated: 2026-10-07T04:57:14+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -33,7 +33,9 @@ Source: reports/board/20261007_042215+0200-live-check-HYTKG53C.md (gitignored). 
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
 2026-10-07: not started. NEXT ACTION: add the log line on the emit branch of the keep-going path in scripts/dispatch.py, failing test first.
+2026-10-07: merged on main (decb827b, merge f0c15f0b): the emit branch of the keep-going nudge writes one line to dispatch.log; test added. Not yet in a release; then TRDD-HYTKG53C's second acceptance item becomes observable.
 
 ## Approval log
 
 - 2026-10-07T04:32:43+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T04:57:14+0200 — column → testing by main-agent@ai-maestro-janitor. merged on main; waits for a release

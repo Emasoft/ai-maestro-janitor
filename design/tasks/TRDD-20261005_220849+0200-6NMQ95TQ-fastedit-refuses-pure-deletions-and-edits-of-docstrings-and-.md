@@ -4,7 +4,7 @@ title: fastedit refuses pure deletions and edits of docstrings and module consta
 column: blocked
 status: tasked
 created: 2026-10-05T22:08:49+0200
-updated: 2026-10-07T04:44:17+0200
+updated: 2026-10-07T04:57:54+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -17,8 +17,9 @@ approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-05T22:08:49+0200
 blocked-by: [fastedit#14, fastedit#15]
 pre-block-column: todo
-blocker-probe: gh issue view 14 --repo Emasoft/fastedit --json state --jq .state
+blocker-probe: gh issue view 14 --repo Emasoft/fastedit --json state
 blocker-holds-if: match:OPEN
+blocker-probe-canary: match:state
 ---
 
 # fastedit refuses pure deletions and edits of docstrings and module constants and workers then edit by script

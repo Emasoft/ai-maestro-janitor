@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: todo
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-07T04:44:14+0200
+updated: 2026-10-07T04:57:28+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -46,3 +46,4 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 2026-10-07 investigation (reports/board/20261007_042510+0200-tooling-problems.md, gitignored; facts copied here): the validator pinned at v5.16.2 in publish.py and both workflows reads PLUGIN_SKIP_GITHUB_INTEGRITY first and still honours CPV_SKIP_GITHUB_INTEGRITY with a deprecation notice; publish.py's bypass guard exempted only the old name and refused the new one at step 0. Fix in progress on a worktree branch: exempt the new name, refuse the old one, four tests for the guard, which had none. Believed cause of the 3446-file mismatch, from reading the validator's code only: run through uvx it takes the install directory as the plugin root, so every manifest file reads as deleted locally. STILL UNEXPLAINED: why CI passes the same command with no exemption. Do not publish with the new name until one validate run shows steps 0 and 4 pass.
 2026-10-07: the exemption rename is merged on main (52eb054e, merge 328bfa30); its four guard tests pass on main. Not yet in a release.
 2026-10-07 correction: the publish.py line reference 1503-1516 above is stale; the guard is now at about 1495-1520 of scripts/publish.py
+2026-10-07: full gate on main at 328bfa30 (the exemption rename): ruff, mypy, pyright exit 0; pytest 18072 passed, 2 skipped.

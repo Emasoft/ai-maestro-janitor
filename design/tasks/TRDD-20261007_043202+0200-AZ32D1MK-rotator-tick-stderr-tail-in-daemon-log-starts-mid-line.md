@@ -1,10 +1,10 @@
 ---
 trdd-id: AZ32D1MK
 title: Rotator tick stderr tail in daemon log starts mid-line
-column: dev
+column: testing
 status: tasked
 created: 2026-10-07T04:32:02+0200
-updated: 2026-10-07T04:32:24+0200
+updated: 2026-10-07T04:57:06+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -27,8 +27,8 @@ parent-trdd: JSQSJ3PZ
 Cut at a line boundary and prefix "..." when something was cut; keep the 300 constant and the mask-before-cut order.
 
 ## Acceptance
-- [ ] A 40-line stderr logs a complete first line after "...".
-- [ ] A single 400-character line still logs text.
+- [x] A 40-line stderr logs a complete first line after "...".
+- [x] A single 400-character line still logs text.
 
 Related: TRDD-JSQSJ3PZ (observation (a) of its live check is owned here). Code is on a worktree branch, not merged yet.
 
@@ -36,7 +36,9 @@ Related: TRDD-JSQSJ3PZ (observation (a) of its live check is owned here). Code i
 
 - 2026-10-07T04:32:02+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-07T04:32:24+0200 — column → dev by main-agent@ai-maestro-janitor. code is on a worktree branch, not merged yet
+- 2026-10-07T04:57:06+0200 — column → testing by main-agent@ai-maestro-janitor. merged on main; waits for a release and one live log line
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
 
 2026-10-07: code is on a worktree branch, not merged yet; moving to dev. NEXT ACTION: merge the branch, then tick both acceptance boxes.
+2026-10-07: merged on main (4e58200d, merge d8281627); both acceptance tests exist and failed before the fix; the existing token-truncation test passes unmodified. Limit, by design: a cause printed earlier than the last 300 characters is still not kept; only the first logged line is now complete. Not yet in a release.

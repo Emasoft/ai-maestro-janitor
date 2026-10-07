@@ -4,7 +4,7 @@ title: The janitor clear-then-reload chain runs SessionStart from the old plugin
 column: todo
 status: tasked
 created: 2026-10-07T04:44:45+0200
-updated: 2026-10-07T04:44:54+0200
+updated: 2026-10-07T04:57:31+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -47,3 +47,4 @@ Reload before the clear; or a second SessionStart-equivalent step after the relo
 ## STATE
 
 2026-10-07: not started. NEXT ACTION: read the SessionStart log entry after the next clear-then-reload of a janitor-armed session; if it names 3.7.0, reorder the chain per the options above.
+2026-10-07 wording correction: the sentence saying the injection ran as 3.7.0 means only that its log entry names root 3.7.0; whether the harness ran the hook from there is the open point listed under not established.
