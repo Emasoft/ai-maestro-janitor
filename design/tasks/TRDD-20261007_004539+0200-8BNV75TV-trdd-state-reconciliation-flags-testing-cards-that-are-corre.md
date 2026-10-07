@@ -29,7 +29,7 @@ implementation-commits: [b9a2377e, b0247a30, dab24584, 67d29e91, 91fca406, 8b587
 - 3 cards that were closeable plus another class re-emit one drift line once.
 - NEXT ACTION: after 3.8.2 is released and installed, confirm one live weekly audit run shows no closeable list, then complete this card.
 - Owner of GitHub #332 is TRDD-6ESS2MGE.
-- TRDD-9UVLOHED (the one card triage found really closeable) still needs an acceptance checklist.
+- TRDD-9UVLOHED, the one card the triage found really closeable, was closed with its acceptance checklist in 2587a694.
 - Nobody yet reads TRDD-CLOSEABLE notes; that routing belongs to TRDD-6ESS2MGE.
 
 The detector's closeable-candidate class means only that a commit citing the card is in a released tag. On 2026-10-07 a triage of 32 such candidates found 1 closeable, 16 waiting on a live event that cannot be forced, 7 open and 8 owner decisions (the 2026-10-07 triage report). GitHub #332 therefore re-surfaces the same cards every week.
