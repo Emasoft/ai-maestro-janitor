@@ -3608,8 +3608,8 @@ def test_claude_running_assumes_true_when_ps_times_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A ps slower than the timeout yields True (assume running) instead of raising."""
-    _fake_ps(tmp_path, monkeypatch, "sleep 5")
-    monkeypatch.setattr(rotator, "_PS_TIMEOUT_S", 1, raising=False)
+    _fake_ps(tmp_path, monkeypatch, "exec sleep 5")  # exec: no orphan child keeps the pipes open after the kill
+    monkeypatch.setattr(rotator, "_PS_TIMEOUT_S", 1)
     assert rotator.claude_running() is True
     assert "assuming Claude is running" in capsys.readouterr().err
 
