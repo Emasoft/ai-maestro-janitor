@@ -93,6 +93,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -223,7 +224,10 @@ _TEST_SUITE_TIMEOUT_SEC = 3600
 # exit 4 — turning the gate into a hard publish failure on any host whose venv
 # was not synced with the extra. CI passes `--extra dev` for the same reason.
 _PYTEST_CMD = ["uv", "run", "--extra", "dev", "pytest", "tests/", "-x", "-q", "--tb=short",
-               "-n", "auto", "--dist", "loadgroup", "--timeout=300", "--timeout-method=thread"]
+               "-n", "auto", "--dist", "loadgroup", "--timeout=300", "--timeout-method=thread",
+               # A crashed xdist worker must fail the run, not be replaced: with the default
+               # restart the 2026-10-07 13:43 run hung for 120 s+ (reproduced, TRDD-9KKPFYTP).
+               "--max-worker-restart=0"]
 
 # Wall-clock bound for every remote-CPV invocation, for the same reason as above.
 # MEASURED: `cpv-remote-validate plugin . --strict` on this plugin takes ~237 s on
@@ -341,6 +345,27 @@ def run(
         cprint(f"  {RED}Command failed (exit {result.returncode}){NC}")
         sys.exit(result.returncode)
     return result
+
+
+def run_pytest_in_own_session(cmd: list[str], cwd: Path, timeout: int) -> int:
+    """Run the pytest suite in its own session; on timeout kill the whole process group.
+
+    WHY (2026-10-07 13:43 hang, TRDD-9KKPFYTP): `subprocess.run(timeout=)` kills only
+    its direct child, `uv`, and orphans the pytest controller and its xdist workers
+    (a crashed worker had left them all blocked reading each other, at 0% CPU). A
+    session of its own makes the group id equal the child pid, so `killpg` reaches
+    every descendant. Scoped to the pytest calls: the shared run() helper serves every
+    publish command and must not change. Raises TimeoutExpired after the kill.
+    """
+    proc = subprocess.Popen(cmd, cwd=str(cwd), start_new_session=True)
+    try:
+        return proc.wait(timeout=timeout)
+    except BaseException:
+        # BaseException: a Ctrl-C no longer reaches a child in another session, so it
+        # must reap the group too, not just a timeout.
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        raise
 
 
 def _git_write_or_recover_lock(cmd: list[str], root: Path) -> None:
@@ -1471,8 +1496,7 @@ def run_gate(root: Path) -> int:
         cprint(f"  {RED}Every CPV plugin MUST ship tests.{NC}")
         return 1
     try:
-        te = subprocess.run(
-            _PYTEST_CMD, cwd=str(root), timeout=_TEST_SUITE_TIMEOUT_SEC).returncode
+        te = run_pytest_in_own_session(_PYTEST_CMD, root, _TEST_SUITE_TIMEOUT_SEC)
     except subprocess.TimeoutExpired:
         cprint(f"  {RED}BLOCKED: Tests timed out after {_TEST_SUITE_TIMEOUT_SEC}s.{NC}")
         return 1
@@ -1728,21 +1752,24 @@ def stage_tests(root: Path) -> None:
         cprint(f"  {RED}Every CPV plugin MUST ship a tests/ directory.{NC}")
         sys.exit(1)
     baseline_browser_pids = _snapshot_browser_pids()
+    cprint(f"  {BLUE}$ {' '.join(_PYTEST_CMD)}{NC}")
     try:
-        r = run(_PYTEST_CMD, cwd=root, check=False,
-                timeout=_TEST_SUITE_TIMEOUT_SEC)
+        returncode = run_pytest_in_own_session(_PYTEST_CMD, root, _TEST_SUITE_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}Tests timed out after {_TEST_SUITE_TIMEOUT_SEC}s.{NC}")
+        sys.exit(1)
     finally:
         killed = _cleanup_browser_orphans(baseline_browser_pids)
         if killed:
             cprint(f"  {YELLOW}Cleaned up {killed} orphaned browser process(es) spawned by pytest.{NC}")
-    if r.returncode == 5:
+    if returncode == 5:
         # pytest exit 5 = no tests collected. This is ALSO a block — no exceptions.
         cprint(f"  {RED}BLOCKED: pytest collected 0 tests.{NC}")
         cprint(f"  {RED}Every CPV plugin MUST ship at least one test.{NC}")
         sys.exit(1)
-    if r.returncode != 0:
-        cprint(f"  {RED}BLOCKED: tests failed (exit {r.returncode}).{NC}")
-        sys.exit(r.returncode)
+    if returncode != 0:
+        cprint(f"  {RED}BLOCKED: tests failed (exit {returncode}).{NC}")
+        sys.exit(returncode)
     cprint(f"  {GREEN}Tests passed.{NC}")
 
 
