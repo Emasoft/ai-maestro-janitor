@@ -222,6 +222,9 @@ def _read_findings() -> dict | None:
         big = 10**11
         ts = now + big - (gca.payload_age_seconds(p, now=now + big) or 0)
         if ts - now > 300:
+            # WHY (6CF3L7IJ): this file silently loses the ranking; without a line a corrupt
+            # or clock-skewed writer is invisible. Seconds only: no path, no stamp value.
+            state.log_line(_NAME, f"ignoring a future-dated findings payload ({ts - now}s ahead)")
             return float("-inf")
         return -float(age)
 
@@ -253,6 +256,8 @@ def main() -> int:
     # WHY: _apply_pr_requirement returns a non-list `findings` payload unchanged; the summarizers
     # in github_config_audit iterate it, so a corrupt file must end here, silently.
     if not isinstance(payload.get("findings"), list):
+        # WHY (6CF3L7IJ): a corrupt payload ended the detector with no trace at all.
+        state.log_line(_NAME, "findings payload is not a list; nothing to report")
         return 0
     if dropped:
         state.log_line(_NAME, f"dropped {dropped} NO_PR_REVIEW finding(s): pull-request requirement determined false")

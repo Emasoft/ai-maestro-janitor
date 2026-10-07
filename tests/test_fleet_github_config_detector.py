@@ -10,7 +10,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -414,11 +414,34 @@ def test_generated_at_is_compared_as_time_not_as_text(tmp_path, monkeypatch) -> 
     mod = _stage(tmp_path / "b", monkeypatch, ours=_payload("garbage"), theirs={"generated_at": epoch_new, "findings": []})
     assert mod._read_findings()["generated_at"] == epoch_new, "an unparseable generated_at loses"
 
-    # WHY 10-06, not 10-07: a fixed stamp later than the run time is "future" and now loses (B10c-2),
-    # so the fixture must stay in the past of every run.
-    mod = _stage(tmp_path / "c", monkeypatch, ours=_payload("2026-10-06T12:00:00+00:00"),
+    # WHY relative to now: a fixed stamp would become "future" for a run before it (B10c-2) and
+    # would stop being the newest once the 2026-08 epoch ages; one day ago is in the past of any run.
+    iso_yesterday = datetime.fromtimestamp(time.time() - 86400, tz=timezone.utc).isoformat()
+    mod = _stage(tmp_path / "c", monkeypatch, ours=_payload(iso_yesterday),
                  theirs={"generated_at": _epoch("2026-08-05T12:00:00+00:00"), "findings": []})
-    assert mod._read_findings()["generated_at"] == "2026-10-06T12:00:00+00:00", "newer ISO beats an older epoch"
+    assert mod._read_findings()["generated_at"] == iso_yesterday, "newer ISO beats an older epoch"
+
+def test_a_future_dated_payload_is_logged_when_it_loses(tmp_path: Path) -> None:
+    """6CF3L7IJ: a payload a day ahead loses the ranking and one log line says so, seconds only."""
+    _with_origin(tmp_path, "o/proj")
+    r = _run(tmp_path, [], age_s=-86400, server=[], server_age_s=3600)
+    assert r.returncode == 0, r.stderr
+    log = (tmp_path / "proj" / ".janitor" / "logs" / "fleet-github-config.log").read_text(encoding="utf-8")
+    assert log.count("ignoring a future-dated findings payload") == 1
+    assert "s ahead)" in log and "global-state" not in log
+
+
+def test_a_non_list_findings_payload_is_logged_before_the_silent_exit(tmp_path: Path) -> None:
+    """6CF3L7IJ: the early return on `findings: null` leaves one log line, still no stdout."""
+    _with_origin(tmp_path, "o/proj")
+    gsd = tmp_path / "global-state"
+    gsd.mkdir(parents=True)
+    (gsd / "github-config-findings.json").write_text(
+        json.dumps({"generated_at": int(time.time()), "findings": None}), encoding="utf-8")
+    r = _run(tmp_path, None)
+    assert r.returncode == 0 and r.stdout == ""
+    log = (tmp_path / "proj" / ".janitor" / "logs" / "fleet-github-config.log").read_text(encoding="utf-8")
+    assert log.count("findings payload is not a list") == 1
 
 
 def test_a_payload_whose_findings_is_not_a_list_is_silent_not_a_crash(tmp_path: Path) -> None:
