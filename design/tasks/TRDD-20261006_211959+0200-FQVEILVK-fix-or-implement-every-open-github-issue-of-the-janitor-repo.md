@@ -4,7 +4,7 @@ title: Fix or implement every open GitHub issue of the janitor repo (30 issues, 
 column: dev
 status: tasked
 created: 2026-10-06T21:19:59+0200
-updated: 2026-10-07T04:44:33+0200
+updated: 2026-10-07T05:15:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -39,6 +39,7 @@ NEXT ACTION: #332's drift classes, card by card (idle cards, reminders, check3, 
 2026-10-07: the card that the superseded TRDD-BMITQ2MN named as its blocker, TRDD-UIDK2SDL in the ai-maestro repo, is still in todo there and still expects janitor involvement (it names the janitor's server_tick_holder reader and the removed setup-token importer). Nothing was changed in that repo; the owner or that project's session should be told the importer is gone. Evidence comment posted on ai-maestro issue 176 after a rerun confirmed all four points.
 2026-10-07: owner decision still open; nothing changed today; the git guard's one-time password stays visible to subagents and the brief rule (never use it) stays; no guard change until the owner answers.
 2026-10-07: TRDD-OOZP38MN and TRDD-TK529Q0F stay closed on code and tests; neither path has been seen in the surviving rotator logs; reopening would be a new card, the owner's call.
+2026-10-07 owner directive, verbatim: 'finish to implement all TRDDs and to fix all issues on github, publish and install.' The session publishes the merged fixes through scripts/publish.py and installs them, then continues through the todo column.
 
 ## Approval log
 

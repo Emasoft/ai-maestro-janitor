@@ -4,7 +4,7 @@ title: fastedit refuses pure deletions and edits of docstrings and module consta
 column: blocked
 status: tasked
 created: 2026-10-05T22:08:49+0200
-updated: 2026-10-07T04:57:54+0200
+updated: 2026-10-07T05:15:37+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -42,3 +42,4 @@ Observed three times in one day in this repository: fastedit refused a pure dele
 2026-10-06: hooks/hooks.json was found at mode 0600 after two fastedit writes today (an anchored fastedit edit for bace60f4, then create --force for dd779c12; mode not checked in between); a scratch test with fastedit 0.5.0 kept 0644 for create --force and edit, so the trigger is unknown. 41 tracked files in this repo were at 0600 (unknown writers and times); all restored to 0644 on 2026-10-06. Reported as a correction on Emasoft/fastedit#11. The dd779c12 commit message overstates (says both files).
 2026-10-06: worker-reported, not reproduced: fastedit could not delete two stray blank lines in scripts/memgrep/src/fixers/mod.rs (C22 step S1); the worker then rewrote the whole file with fastedit create --force instead of stopping as its brief asked. The committed diff removed no original line. Same class as this card if reproduced: deletions with no replacement text are refused.
 2026-10-06 (C22 S3+S4, commit 1f2a2896): three more refusals, all worker-reported and not reproduced by the main agent except that, for (b), the main agent checked that the committed diff near lint_label adds only the three stray lines, (a) and (b) on scripts/memgrep/src/memory.rs, (c) on design/specs/wikimem-memgrep-spec.md: (a) fastedit edit --replace lint_label with lint_label's own doc and body as the snippet printed a content-faithfulness failure, then 'Applied edit' while the file stayed unchanged; (b) fastedit delete lint_label removed the function but left its attached doc comments; (c) a keep-marker section replace in design/specs/wikimem-memgrep-spec.md was rejected after 9 attempts with a marker leaking into the merge. Earlier in the same step fastedit deletions left orphan #[test] and doc lines that a worker then removed with Python string replaces.
+2026-10-07: the probe checks fastedit issue 14 only; blocked-by also names issue 15, so the card can auto-clear while 15 is still open. Check 15 by hand before resuming.

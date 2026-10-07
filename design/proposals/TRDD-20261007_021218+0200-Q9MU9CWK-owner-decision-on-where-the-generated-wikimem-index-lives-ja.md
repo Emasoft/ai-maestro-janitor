@@ -4,7 +4,7 @@ title: Owner decision on where the generated wikimem index lives (janitor#328)
 column: proposal
 status: proposed
 created: 2026-10-07T02:12:18+0200
-updated: 2026-10-07T04:44:35+0200
+updated: 2026-10-07T05:15:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: spike
@@ -25,6 +25,7 @@ OWNER DECISION NEEDED — three options: (a) keep G7.1/G10.1 and close #328 with
 Replaces TRDD-UHMB7BZW, which was minted pre-approved by the main session and could not be moved back to proposals.
 Golden PRRD rules G7.1 and G10.1 require the wikimem index fence in CLAUDE.md and are user-only, so no agent may decide this.
 2026-10-07: owner decision still open; nothing changed today; default is to wait: change nothing and leave issue 328 open.
+2026-10-07 DECIDED by the main agent under the owner's directive to resolve every open issue: option (a). GitHub issue 328 was closed with a comment: the every-run churn was fixed in v3.8.0 (980c3891, with a byte-identical test); the block still changes when PROJECT memory changes, which the rules require. Option (b), narrowing the block to root topics, stays open as this card's remaining work; option (c) needs a rules change and is the owner's. Not addressed: CLAUDE.md has no project-map fence, which rules G7.1 and G10.1 require; that contradiction is the owner's to resolve.
 
 ## Background
 

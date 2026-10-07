@@ -4,7 +4,7 @@ title: C33 — hook-timeout-scan detector
 column: blocked
 status: tasked
 created: 2026-10-01T19:45:20+0200
-updated: 2026-10-07T04:57:38+0200
+updated: 2026-10-07T05:15:50+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -42,3 +42,4 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 ## STATE
 
 2026-10-07: requirement added from TRDD-U32EVMI9: every cancelled guard hook must become a recorded finding, and where possible the guard's own check is replayed afterwards over the recorded input so that a harmless cancellation is told apart from a real miss.
+2026-10-07: the dangling-blocker finding on B9YPSF02 is pre-existing: blocked-by: [B9YPSF02] is identical in this card at 714f72c9^ and now, and B9YPSF02 was superseded and archived on 2026-10-01 (a5d99c10), before today's work; the blocker was not changed.

@@ -4,7 +4,7 @@ title: trddgrep why omits intermediate blocked cards and double-lists blockers
 column: blocked
 status: tasked
 created: 2026-10-07T04:32:25+0200
-updated: 2026-10-07T04:57:53+0200
+updated: 2026-10-07T05:15:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -46,6 +46,7 @@ Filed as Emasoft/ai-maestro issue 176 on 2026-10-07; the fix belongs in that rep
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
 2026-10-07: blocked on the external issue Emasoft/ai-maestro#176. NEXT ACTION: re-run the reproducer on each new trddgrep release.
+2026-10-07: the probe canary is the bare word state because a quoted JSON form made this card unparseable by the board tool; note for the upstream issue.
 
 ## Approval log
 
