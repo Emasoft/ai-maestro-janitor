@@ -3513,6 +3513,24 @@ def test_background_worker_progress_running_tool_call_is_not_stalled(env_isolati
         entries = [json.loads(ln) for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
         assert not any(e.get("code") == "WORKER-STALLED" for e in entries), entries
 
+def test_background_worker_progress_dead_worker_is_not_counted_as_running(env_isolation: dict) -> None:
+    """TRDD-4P8R2JLQ: a worker silent for hours with no tool call in flight is dead; the
+    progress line must not claim it is running (it did, for ~8 h, on every fire)."""
+    dispatch = _import_dispatch()
+    import pending_agents
+
+    sd = _seed_state_dir(dispatch)
+    transcript = sd / "agent-dead.jsonl"
+    old = int(time.time()) - (3 * 3600)
+    _touch_transcript(transcript, mtime=old, tool_use=False)
+    pending_agents.add("agent-dead", description="dead worker", transcript=str(transcript), now=old)
+    # One spent nudge keeps the entry past the 1 h never-nudged sweep, as in the field report.
+    pending_agents.spend_nudges(now=old)
+
+    out = _capture_stdout(dispatch._phase_background_worker_progress)
+    assert "worker running" not in out, out
+    assert "silent" in out, "the stall finding line must still surface"
+
 
 def _isolate_home(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point HOME at a tmp dir so a full/maintenance main() fire's user-presence

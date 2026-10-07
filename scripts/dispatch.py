@@ -1676,13 +1676,13 @@ def _phase_background_worker_progress() -> None:
     Three outcomes:
       * no pending agents at all → print nothing (the zero-noise contract for a genuinely
         idle session — acceptance box step 3).
-      * at least one pending agent → exactly ONE progress line: a count and how long ago the
-        newest activity was, no ids, no paths, no file names (the protocol's "never print a
-        path, an id, or a state-file name" line applies here same as anywhere else on a quiet
-        fire) — acceptance box step 1.
-      * a stalled worker on top of that → ALSO one findings-ledger line per stalled worker
-        (deduped per day) — acceptance box step 2. The progress line above still covers the
-        whole set; the stall line is additional, not a replacement.
+      * at least one RUNNING (not stalled) agent → exactly ONE progress line: a count and how
+        long ago the newest activity was, no ids, no paths, no file names (the protocol's
+        "never print a path, an id, or a state-file name" line applies here same as anywhere
+        else on a quiet fire) — acceptance box step 1. A stalled worker is NOT counted as
+        running (TRDD-4P8R2JLQ).
+      * a stalled worker → one findings-ledger line per stalled worker (deduped per day) —
+        acceptance box step 2.
 
     Reuses `pending_agents.load_pending` (read-only) — NOT `_pending_agent_directive_lines`
     (which spends a nudge from the resume budget on every listing, see its own docstring):
@@ -1713,16 +1713,21 @@ def _phase_background_worker_progress() -> None:
     if not entries:
         return
 
-    n = len(entries)
-    newest_age = min(_worker_reported_activity_age_s(e, now) for e in entries)
-    print(
-        f"{n} background worker{'s' if n != 1 else ''} running; "
-        f"newest activity {_minutes_ago_phrase(newest_age)} ago"
-    )
+    # WHY only non-stalled workers are counted (TRDD-4P8R2JLQ): this quiet-fire phase never
+    # spends nudges, so a dead worker with one spent nudge sat in the manifest for hours and
+    # every fire told the owner "1 background worker running" about a corpse. A stalled
+    # worker is reported through the stall finding below, never as running.
+    stalled = [e for e in entries if _worker_is_stalled(e, now)]
+    running = [e for e in entries if e not in stalled]
+    if running:
+        n = len(running)
+        newest_age = min(_worker_reported_activity_age_s(e, now) for e in running)
+        print(
+            f"{n} background worker{'s' if n != 1 else ''} running; "
+            f"newest activity {_minutes_ago_phrase(newest_age)} ago"
+        )
 
-    for entry in entries:
-        if not _worker_is_stalled(entry, now):
-            continue
+    for entry in stalled:
         agent_id = str(entry.get("agentId", "") or "")
         _record_worker_stall(_worker_reported_activity_age_s(entry, now), agent_id)
 
