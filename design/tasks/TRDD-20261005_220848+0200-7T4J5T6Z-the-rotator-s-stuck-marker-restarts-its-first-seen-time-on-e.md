@@ -4,7 +4,7 @@ title: The rotator's stuck marker restarts its first-seen time on every tick so 
 column: todo
 status: tasked
 created: 2026-10-05T22:08:48+0200
-updated: 2026-10-05T22:08:48+0200
+updated: 2026-10-07T22:06:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -21,8 +21,12 @@ approval-datetime: 2026-10-05T22:08:48+0200
 
 Goal: investigate, verify and fix the root cause. Found on 2026-10-05; not investigated beyond what is written here.
 
-Observed: a marker read during a stuck episode had first_seen_epoch equal to last_seen_epoch. From reading the code, on a tick that works from the mirror copy the marker is cleared when the beacon fingerprint matches and written again at the end of a still-stuck tick, so first-seen never accumulates. Consequences to verify: the detector that reports 'rotation impossible for N hours' can never reach its hours; the alert reader only tests that the file exists and has no check on the marker's age, so a marker left by a rotator that stopped ticking would alert forever. Also seen: the kind all-accounts-maxed is written for a token that is only close to its expiry.
+Observed: a marker read during a stuck episode had first_seen_epoch equal to last_seen_epoch. From reading the code, on a tick that works from the mirror copy the marker is cleared when the beacon fingerprint matches and written again at the end of a still-stuck tick, so first-seen never accumulates on mirror-sourced ticks only. Consequences to verify: the detector that reports 'rotation impossible for N hours' can never reach its hours; the alert reader only tests that the file exists and has no check on the marker's age, so a marker left by a rotator that stopped ticking would alert forever. Also seen: the kind all-accounts-maxed is written for a token that is only close to its expiry.
 
 ## Approval log
 
 - 2026-10-05T22:08:48+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation notes
+
+2026-10-07 — wording corrected per the 2026-10-05 review recorded on TRDD-P9D6QWMU ('first-seen never accumulates' to 'first-seen never accumulates on mirror-sourced ticks only'); the correction was not re-measured.

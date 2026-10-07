@@ -4,7 +4,7 @@ title: The rotator alert evaluation fails when ps is slow and a load stall is re
 column: testing
 status: tasked
 created: 2026-10-05T22:08:50+0200
-updated: 2026-10-07T05:15:55+0200
+updated: 2026-10-07T22:06:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -21,7 +21,7 @@ approval-datetime: 2026-10-05T22:08:50+0200
 
 Goal: investigate, verify and fix the root cause. Found on 2026-10-05; not investigated beyond what is written here.
 
-Observed under very high load: the daemon logged 'rotator-alert: evaluation failed: Command ps -eo args= timed out after 10 seconds', one rotator tick took 717 s, and the next heartbeat showed 'the account rotator has stopped ticking - run /janitor-doctor' although the rotator ticked normally a minute later. To do: decide what the alert evaluation does when ps is slow (the evaluation is lost exactly when the host is in trouble), and whether a single late tick under load deserves the doctor remedy. Related: TRDD-JY0OBQZ4.
+Observed under very high load: the daemon logged 'rotator-alert: evaluation failed: Command ps -eo args= timed out after 10 seconds', one rotator tick took 717 s, and the next heartbeat showed 'the account rotator has stopped ticking - run /janitor-doctor' although the rotator tick a minute later completed but took 18 s against the usual 1 to 3 s. To do: decide what the alert evaluation does when ps is slow (the evaluation is lost exactly when the host is in trouble), and whether a single late tick under load deserves the doctor remedy. Related: TRDD-JY0OBQZ4.
 
 ## Approval log
 
@@ -36,3 +36,4 @@ Observed under very high load: the daemon logged 'rotator-alert: evaluation fail
 2026-10-07: the fix is merged on main (9377073e, test hardening cc40a249, merge d8281627). Proof by mutation: with the catch replaced by a re-raise the timeout test fails with subprocess.TimeoutExpired. The line above saying the code is not merged is superseded. The daemon's own stderr, where the new line also lands on the alert path, goes to an unrotated file: TRDD-OEGPT048. Not yet in a release. Remaining on this card: whether one late tick under load deserves the tick-stalled alarm.
 2026-10-07: the merged part waits for a release; the open question about the tick-stalled alarm moves to its own card (see below).
 2026-10-07: the tick-stalled alarm question is now TRDD-VN2ASDKJ (todo).
+2026-10-07 — wording corrected per the 2026-10-05 review recorded on TRDD-P9D6QWMU ('ticked normally a minute later' to 'tick a minute later completed but took 18 s against the usual 1 to 3 s'); the correction was not re-measured.

@@ -4,7 +4,7 @@ title: A rotator tick exited with status 1 at 20h45 and nothing says why
 column: testing
 status: tasked
 created: 2026-10-05T22:08:59+0200
-updated: 2026-10-07T09:35:18+0200
+updated: 2026-10-07T22:06:23+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -22,7 +22,7 @@ implementation-commits: [01c663e6, b175178f]
 
 Goal: investigate, verify and fix the root cause. Found on 2026-10-05; not investigated beyond what is written here.
 
-Observed in the daemon log during a memory spike, at 20h45: the rotator tick command 'exited 1 (attempt 1 of N)' and the task then finished in 52 s. No reason was logged at the daemon level and the rotator log was not checked for that minute. To do: read both logs for that tick, find the failing step, and make the daemon line carry the reason.
+Observed in the daemon log between two memory spikes, at 20h45: the rotator tick command 'exited 1 (attempt 1 of N)' and the task then finished in 52 s. No reason was logged at the daemon level and the rotator log was not checked for that minute. To do: read both logs for that tick, find the failing step, and make the daemon line carry the reason.
 
 ## Approval log
 
@@ -33,3 +33,4 @@ Observed in the daemon log during a memory spike, at 20h45: the rotator tick com
 
 2026-10-07: cause of the original failure unprovable (no daemon log from that day); only the retry log line improved: it now carries the failed attempt's masked stderr tail.
 2026-10-07: shipped in v3.8.5; release observation starts.
+2026-10-07 — wording corrected per the 2026-10-05 review recorded on TRDD-P9D6QWMU ('during a memory spike' to 'between two memory spikes'); the correction was not re-measured.

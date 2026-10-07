@@ -4,7 +4,7 @@ title: Four cards from 2026-10-05 carry wording stronger than their evidence
 column: todo
 status: tasked
 created: 2026-10-05T22:11:22+0200
-updated: 2026-10-05T22:11:22+0200
+updated: 2026-10-07T22:06:33+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: docs
@@ -26,3 +26,7 @@ A review found: TRDD-4P8R2JLQ says 'every fire' and 'eight hours' (the line appe
 ## Approval log
 
 - 2026-10-05T22:11:22+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Implementation notes
+
+2026-10-07 — per target: 4P8R2JLQ corrected; 7T4J5T6Z corrected; JOXQQL4J corrected; 45ZUV5ZD corrected; QHACQPPG implementation-commits set to [5bdb9521] (the only code commit citing it; the others are docs(trdd)); Y8HAQJZY left open: its task-type bugfix is not plainly contradicted by its body (a false stuck alert is a defect, though the body also holds an investigation and an open design question), and its frontmatter title differs from its H1. Card stays in todo until the owner settles Y8HAQJZY's wording and task type.

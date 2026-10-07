@@ -4,7 +4,7 @@ title: The heartbeat reports a background worker as running for hours after it s
 column: testing
 status: tasked
 created: 2026-10-05T22:08:48+0200
-updated: 2026-10-07T09:35:38+0200
+updated: 2026-10-07T22:06:22+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -22,7 +22,7 @@ implementation-commits: [edcb2a9f, 2d306d7c]
 
 Goal: investigate, verify and fix the root cause. Found on 2026-10-05; not investigated beyond what is written here.
 
-Observed: for about eight hours every heartbeat fire printed '1 background worker running; newest activity N h ago', and two resume cues named a worker to resume through SendMessage. The worker was not among the session's live agents. Its entry in pending-agents.json carried stopped false and three nudges. To do: find why a finished or dead worker stays listed, when an entry is dropped, and whether the count line should exclude an entry with no activity for hours.
+Observed: for about four hours, though not on every fire, the heartbeat printed '1 background worker running; newest activity N h ago', and one resume cue named a worker to resume through SendMessage. The worker was not among the session's live agents. Its entry in pending-agents.json carried stopped false and three nudges. To do: find why a finished or dead worker stays listed, when an entry is dropped, and whether the count line should exclude an entry with no activity for hours.
 
 ## Approval log
 
@@ -32,3 +32,4 @@ Observed: for about eight hours every heartbeat fire printed '1 background worke
 ## Implementation notes
 
 2026-10-07: stalled workers are not counted as running; their 'silent for N min' line still prints (scripts/dispatch.py:1651), pinned by a test. Merged at 1296ccde.
+2026-10-07 — wording corrected per the 2026-10-05 review recorded on TRDD-P9D6QWMU ('eight hours' and 'every heartbeat fire' to 'about four hours, though not on every fire'; 'two resume cues' to 'one resume cue'); the correction was not re-measured.
