@@ -1,10 +1,10 @@
 ---
 trdd-id: V5V1CBLM
 title: Nothing installs or updates the memgrep binary after a plugin update, so a machine keeps a stale build
-column: backburner
+column: testing
 status: tasked
 created: 2026-10-06T20:14:55+0200
-updated: 2026-10-06T20:14:55+0200
+updated: 2026-10-07T15:20:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -15,6 +15,7 @@ mandated-by: none
 approved: true
 approval-judge: main-agent@ai-maestro-janitor
 approval-datetime: 2026-10-06T20:14:55+0200
+implementation-commits: [42a8fdea]
 ---
 
 # Nothing installs or updates the memgrep binary after a plugin update, so a machine keeps a stale build
@@ -24,3 +25,7 @@ The plugin ships the Rust source and plugin.json tells the user to run cargo ins
 ## Approval log
 
 - 2026-10-06T20:14:55+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Design
+
+2026-10-07 design: a new detector scripts/detectors/memgrep-binary-stale.py. Inputs: `memgrep --version` stamp (build.rs already prints '<ver> (<commit7>, <date>)'), and the user-scope janitor entry's gitCommitSha in ~/.claude/plugins/installed_plugins.json. Equal commits, or the stamp an ancestor-equal of the installed sha with no memgrep change: quiet. Different: ask `gh api repos/Emasoft/ai-maestro-janitor/compare/<stamp>...<installed>` and report STALE only when status is 'ahead' or 'diverged' AND some file under scripts/memgrep/ changed; status 'behind' (a dev build newer than the release) is quiet. Can't tell (memgrep absent, stamp 'unknown', gh missing or failing, no user-scope entry): one advisory line, never a fixable proposal. Machine-global binary: dedupe machine-wide per (stamp, installed sha), never once per project. No Rust and no publish.py change.

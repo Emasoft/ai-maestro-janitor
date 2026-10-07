@@ -387,6 +387,10 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # a failure still there on the next probe means it is being RE-manufactured, and
     # a freshly built index that fails validation is a CODE bug.
     ("memgrep-index-health", 1800, "CLAUDE_PLUGIN_OPTION_MEMGREP_HEALTH_INTERVAL"),
+    # memgrep-binary-stale reports a memgrep BUILD older than the installed plugin's memgrep
+    # source (TRDD-V5V1CBLM): nothing updates the binary after a plugin update. Machine-global,
+    # so it dedupes itself per (stamp, installed sha); 6h, one cached `gh compare` per pair.
+    ("memgrep-binary-stale", 21600, "CLAUDE_PLUGIN_OPTION_MEMGREP_BINARY_STALE_INTERVAL"),
     # project-map-drift nudges when the fenced CLAUDE.md project map is stale
     # (TRDD-e247a349). DETECTION ONLY — digest-compare against the fence
     # header, zero extraction — and it NEVER writes CLAUDE.md: the write busts
@@ -926,6 +930,7 @@ def _dedupe_drift_line(name: str, line: str) -> str | None:
 # `emit_once`), so adding an ungated print to a member makes that line print on EVERY fire --
 # re-verify membership whenever a member detector is edited.
 _SELF_DEDUPING_DETECTORS = frozenset({
+    "memgrep-binary-stale",
     "oauth-login-needed",
     "stale-index-lock",
     "system-daemon-runaway",

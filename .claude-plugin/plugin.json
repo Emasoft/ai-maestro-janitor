@@ -1024,6 +1024,13 @@
       "type": "number",
       "default": 1800,
       "sensitive": false
+    },
+    "memgrep_binary_stale_interval": {
+      "title": "Memgrep Binary-Stale Cadence (seconds)",
+      "description": "Minimum seconds between `memgrep-binary-stale` checks of the installed memgrep build against the installed plugin's memgrep source. Default: 21600 (6 h). Each (build, plugin commit) pair is announced once and its GitHub compare is cached.",
+      "type": "number",
+      "default": 21600,
+      "sensitive": false
     }
   },
   "cpv": {
