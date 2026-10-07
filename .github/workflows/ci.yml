@@ -108,11 +108,11 @@ jobs:
         # --dist loadgroup: same as the default `load` for ungrouped tests, but keeps
         # xdist_group-marked tests (the order-dependent state-cache-isolation pair) on
         # one worker — plain `load` split them and failed a publish gate on 2026-08-18.
-        # GH_TOKEN: test_real_404_has_its_own_reason calls GitHub for real and skips when
-        # gh has no login (559f6102), so without a token CI never checks that path.
+        # JANITOR_TEST_GH_TOKEN: only test_real_404_has_its_own_reason reads it (it calls GitHub
+        # for real and skips without a login, 559f6102); every other test keeps the no-login env.
         # contents: read (workflow-level) is enough for compare on a public repo.
         env:
-          GH_TOKEN: ${{ github.token }}
+          JANITOR_TEST_GH_TOKEN: ${{ github.token }}
         run: uv run --extra dev pytest -q -rs -n auto --dist loadgroup -m "not integration" --timeout=300 --timeout-method=thread
 
       # The real-daemon-spawn integration suite — SERIAL (no -n), its own
