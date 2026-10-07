@@ -1454,3 +1454,38 @@ def test_with_measured_facts_idle_is_exact_for_a_human_turn_and_a_lower_bound_ot
     got, text = measure("agent.jsonl", [beat, agent_prompt])
     assert got.idle_seconds is not None and got.idle_seconds < 120
     assert "≥" not in text
+
+
+def _user_line(text):
+    return json.dumps({"type": "user", "message": {"role": "user", "content": text}}).encode()
+
+
+def test_recent_messages_survives_a_damaged_tail_and_keeps_text_on_both_sides(tmp_path):
+    """A raw 0xFF byte, a non-object line and a half-written last line never raise or hide the good turns."""
+    t = tmp_path / "s.jsonl"
+    t.write_bytes(b"\n".join([
+        _user_line("BEFORE_DAMAGE"),
+        b'{"type": "user", "message": {"role": "user", "content": "bad \xff byte"}}',
+        b"[1, 2, 3]",
+        _user_line("AFTER_DAMAGE"),
+        b'{"type": "user", "message": {"role": "user", "content": "half writ',
+    ]))
+    got = ec.recent_messages(str(t))
+    assert "USER: BEFORE_DAMAGE" in got
+    assert "USER: AFTER_DAMAGE" in got
+
+
+
+def test_classified_tail_lines_keeps_the_first_line_when_the_seek_lands_on_a_boundary(tmp_path):
+    """A window starting exactly at a line start loses no whole line."""
+    t = tmp_path / "s.jsonl"
+    first, second = _user_line("FIRST_WHOLE") + b"\n", _user_line("SECOND") + b"\n"
+    t.write_bytes(_user_line("OLDEST") + b"\n" + first + second)
+    got = ec._classified_tail_lines(t, len(first) + len(second))
+    assert got == ["USER: FIRST_WHOLE", "USER: SECOND"]
+
+
+def test_classified_tail_lines_of_a_missing_file_is_empty(tmp_path):
+    """An unreadable transcript yields no lines instead of raising (SessionStart injection path)."""
+    assert ec._classified_tail_lines(tmp_path / "nope.jsonl", 1000) == []
+    assert ec.recent_messages(str(tmp_path / "nope.jsonl")) == [ec._NO_HUMAN_IN_WINDOW]

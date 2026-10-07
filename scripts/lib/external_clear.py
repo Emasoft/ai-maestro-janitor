@@ -52,6 +52,7 @@ if str(_HERE) not in sys.path:
 
 import agentlens_probe as alp  # noqa: E402  -- sibling lib (the reactive expiry read)
 import cron_period  # noqa: E402  -- sibling lib (shared */N + staggered {offset}-59/N parse)
+import jsonl_walk  # noqa: E402  -- sibling lib (stdlib-only byte-safe tail read, TRDD-A8DRRW0I)
 import state  # noqa: E402  -- sibling lib
 
 # TRDD-0UQSAFCW: the ONE shared classifier `recent_messages` uses to tell a human turn apart
@@ -525,27 +526,6 @@ def await_fleet_lease(
 _RECENT_MESSAGES_TAIL_BYTES = 524_288
 
 
-def _tail_text_lines(path: Path, max_bytes: int) -> list[str]:
-    """Text lines of the last `max_bytes` of `path`. [] on any I/O failure (never raises --
-    `recent_messages` is on the SessionStart injection path and a bad transcript must not
-    block it, matching the OSError handling this replaces)."""
-    try:
-        size = path.stat().st_size
-        with path.open("rb") as fh:
-            if size > max_bytes:
-                fh.seek(size - max_bytes)
-            data = fh.read(max_bytes + 1)
-    except OSError:
-        return []
-    lines = data.decode("utf-8", errors="replace").splitlines()
-    if len(lines) > 1 and size > max_bytes:
-        # The seek almost certainly landed mid-record; that partial first line fails
-        # json.loads on its own, but dropping it explicitly documents why rather than
-        # relying on the parse error to silently absorb it.
-        lines = lines[1:]
-    return lines
-
-
 def _record_text(content: Any, *, drop_heartbeat_reply: bool = False) -> str:
     """Join a `message.content`'s `text`-type blocks (or return a plain string as-is).
 
@@ -629,19 +609,20 @@ def _classify_line(rec: dict[str, Any]) -> tuple[str, str] | None:
     return (role_label, text) if text else None
 
 
+
 def _classified_tail_lines(path: Path, max_bytes: int) -> list[str]:
     """`f"{role}: {text}"` for every kept record in the last `max_bytes` of `path`, oldest to
     newest. The one shared parse+classify loop both `recent_messages` and
-    `_recent_human_lines` build on."""
+    `_recent_human_lines` build on. [] on a missing/unreadable file (never raises --
+    `recent_messages` is on the SessionStart injection path). The byte-safe tail read and its
+    partial-first-line rule live in `jsonl_walk.read_jsonl_tail` (TRDD-A8DRRW0I): it never
+    raises on a non-UTF-8 byte, a non-object line or a half-written last line."""
+    try:
+        entries = jsonl_walk.read_jsonl_tail(path, max_bytes, malformed_lines=[])
+    except OSError:
+        return []
     out: list[str] = []
-    for raw in _tail_text_lines(path, max_bytes):
-        line = raw.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for rec in entries:
         classified = _classify_line(rec)
         if classified is not None:
             out.append(f"{classified[0]}: {classified[1]}")
