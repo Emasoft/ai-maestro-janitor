@@ -1,9 +1,9 @@
 ---
 trdd-id: QJ5LP4W2
 title: bound total foreground occupancy per daemon beat so a run of long bodies cannot skip a cycle
-column: testing
+column: todo
 created: 2026-09-04T05:29:46+0200
-updated: 2026-10-05T11:12:05+0200
+updated: 2026-10-07T02:38:37+0200
 current-owner: janitor-main-session
 task-type: refactor
 priority: medium
@@ -19,6 +19,7 @@ eht: [9FONCK33]
 implementation-commits: [5f7f3dba, 57a7f267]
 external-refs: [TRDD-8BXMNQ4T]
 review-after: 2026-09-17
+status: tasked
 ---
 
 # Bound total foreground occupancy per daemon beat
@@ -132,6 +133,7 @@ review-after: 2026-09-17
   before the loop) is settled below. The consult is for choosing between 3 and 4 and for
   designing the priority floor, which has no precedent in `daemon.py`.
 2026-10-05 — FIELD CHECK, from a worker's read of the logs, not re-read by the main agent: Re-measure (window 2026-10-04T00:53 to 2026-10-05T11:07, about 34 h): foreground budget exceeded 60 times in the 10 h before 11:07 on 10-04 (about 6/h) and 26 times in the 22.5 h after the 3.7.0 daemon start (about 1.2/h); rotator tick gaps over 120 s: 39 of 472 before 11:07, 1 of 1312 after the 3.7.0 start (max 228 s). The replay-harness box is still open. The re-measure box is met. The card stays in testing only for its replay-harness box, which belongs to TRDD-9FONCK33.
+2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: box 4, re-measure stall count, beat lengths and 'foreground budget exceeded' lines from daemon.log, which now holds days of data since the 3.7.0 daemon start; EHT 9FONCK33 is already complete.
 
 ## Why this exists — a measurement exists, the decision does not
 
@@ -519,3 +521,4 @@ answer is not a better guess; it is naming the missing artifact.**
 
 - 2026-09-05T10:40:00+0200 — box 1 RULED by main-session under the USER's standing autonomous-drain permission (memory ATOM-CCRI-ZRT2, 2026-09-03; re-issued as today's session goal): the advisor consult is satisfied by the standing rule's both-paths-failed exemption, stated explicitly. Column todo -> dev; candidate 3 (per-beat foreground budget with a survival-floor) is being drafted as a reviewable patch first, candidate 4 (cap session-liveness alone) held as the fallback because the 100 s+ beats it would truncate are still unexplained.
 - 2026-09-16T13:05:00+0200 — stays in testing: box 4 needs a 24h daemon.log window under 3.5.5 to re-run the stall analysis against the 12-stalls/6h22m baseline; review-after 2026-09-17.
+- 2026-10-07T02:38:37+0200 — column → todo. re-columned before 3.8.2: developable, not a live event

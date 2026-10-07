@@ -1,10 +1,10 @@
 ---
 trdd-id: 0QCRG2YX
 title: The iTerm Automation alert tells the human to enable a list entry that macOS may never have created and repeats on every heartbeat
-column: testing
+column: todo
 status: tasked
 created: 2026-10-05T04:48:26+0200
-updated: 2026-10-05T11:17:46+0200
+updated: 2026-10-07T02:38:39+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -61,6 +61,7 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 
 - 2026-10-05T04:48:26+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-05T08:55:50+0200 — column → testing. no work in progress; waits on the first recurrence under a release carrying the probe logging
+- 2026-10-07T02:38:39+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
 
 ## STATE
 
@@ -124,3 +125,4 @@ Read the alert builder in scripts/dispatch.py and the launch-context branch adde
 2026-10-05 — RESUME POINT (supersedes the earlier one). Column testing. Landed and unpublished, six code commits: probe failure logging (three), the repetition fix, the recovery line, the second view. NAMED LIVE EVENT this card waits on: the first time the probe fails on a host running a release that carries these commits — then read the daemon log lines starting iterm-probe and agent-roster, which will state the real error. Remaining, none in progress: (1) alert wording — state the measured outcome, give the Automation advice only when the recorded error is a permission refusal, and say that an iTerm restart by the owner cleared it once; (2) the fleet-size decision — whether a changed fleet size is a new observation; (3) the resolved ledger entry described above; (4) the interpreter-path point — the allowed Apple-events entry names a different path from the binary that executes; (5) the per-project acknowledgement store against the governing card's once-per-session wording. The cause of the original failure is NOT established. Root cause of the second-view failure is tracked separately on TRDD-LRGZV19Z.
 2026-10-05 — review findings NOT applied, with reasons: (a) restricting the probe failure logger to the daemon — the two short-lived callers are rare (one on demand, one only while the daemon is dead), at most three lines per run; side effect accepted: a status command then writes a log line in that project's own log under the name daemon. (b) probe log volume on a marginal host — judged small next to the routine daemon log traffic, from reading one log tail, not measured.
 2026-10-05 — bearing on the cause: the daemon log shows the daemon exiting for an OS respawn when 3.7.0 was staged on 2026-10-04 and starting again a minute later, so the daemon whose probe failed on 2026-10-05 was under a day old, not a long-lived process from before the release. And TRDD-LRGZV19Z's premise (the daemon inherits a session's working directory) needs re-reading against that: an OS-spawned daemon gets its directory from the launch agent. What decides it, not yet read: the running daemon's parent process and its working directory.
+2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: the card's own list (1) alert wording, (2) fleet-size decision, (3) resolved ledger entry, (4) interpreter-path point, (5) per-project acknowledgement store, none in progress; the live event named above (first probe failure on a release carrying the logging) gates only the root-cause diagnosis, not these.

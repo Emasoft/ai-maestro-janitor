@@ -1,10 +1,10 @@
 ---
 trdd-id: CWKM5218
 title: Clear the strict-validator findings that block the 3.7.0 publish
-column: testing
+column: todo
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-06T19:23:51+0200
+updated: 2026-10-07T02:38:35+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -26,6 +26,7 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 
 - 2026-10-04T11:25:52+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
 - 2026-10-04T20:10:59+0200 — column → testing. 3.7.0 was published on 6157e726 with all strict-validator findings cleared; no code is being written for this card. Awaiting proof: the macOS test fix 37d72fcd needs a green GitHub CI run on 3.7.1. Strict validator re-run 2026-10-04 on HEAD: 0 critical, major, minor, nit.
+- 2026-10-07T02:38:35+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
 
 ## Outcome
 
@@ -39,3 +40,4 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 2026-10-06: v3.7.2 and v3.7.3 were also published with CPV_SKIP_GITHUB_INTEGRITY=1 (three releases so far); the cause of the abort on this host is still unknown.
 2026-10-06 NEXT ACTION: find why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI: add a diagnostic CI step that prints the uvx install path and the ~/.cache/cpv manifest names, or reproduce here with ~/.cache/cpv moved aside; or close this point if Emasoft/claude-plugins-validation#243 resolves it.
 2026-10-06: v3.7.4 and v3.7.5 were also published with the integrity exemption (five releases so far).
+2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: find why cpv-remote-validate under uvx aborts on its self-integrity check on this host but not in CI (diagnostic CI step, or reproduce with ~/.cache/cpv moved aside); the 3.7.1 CI run that was awaited has long since happened.

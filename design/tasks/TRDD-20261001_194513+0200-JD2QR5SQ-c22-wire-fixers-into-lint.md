@@ -1,10 +1,10 @@
 ---
 trdd-id: JD2QR5SQ
 title: C22 — wire fixers into lint
-column: testing
+column: todo
 status: tasked
 created: 2026-10-01T19:45:13+0200
-updated: 2026-10-06T21:00:59+0200
+updated: 2026-10-07T02:38:32+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -49,6 +49,7 @@ Verify: CLI: a SAFE page gets fixed; a floor-error page stays byte-identical wit
 Depends on: C21, C13, C14, C15, C16, C17, C18, C19
 Conflict rule: this card may write ONLY the files listed under Writes.
 2026-10-06: S1 committed as b7a22bb4. Correction to its commit message: the 431 unit and 224 cli counts were the worker's at commit time and were re-run by the main agent afterwards with the same result; the Python suite passed (17,992) on the first version and again on the committed revision, but the Python tests prefer scripts/memgrep/target/release/memgrep, which was still the pre-S1 build 4daacfd, so those runs show only that nothing regressed; S1 has no caller yet. The worker rewrote scripts/memgrep/src/fixers/mod.rs once with fastedit create --force because fastedit refused to delete two blank lines, instead of stopping as briefed; the committed diff has 0 deleted original lines.
+2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: field use of lint --apply-fixes by C30, C31, C32 and removal of the known residue (stale allow(dead_code) attributes, three stray /// lines near lint_label); no code edit until the owner lifts the fastedit freeze of 2026-10-06 (a freeze is not a card, so blocked-by cannot name it; trddgrep has no park field for it, review-after only mutes drift detection).
 
 ## Approval log
 
@@ -57,6 +58,7 @@ Conflict rule: this card may write ONLY the files listed under Writes.
 - 2026-10-06T20:03:31+0200 — column → todo by main-agent@ai-maestro-janitor. only blocker 3HLI7DMK complete Cleared blocked-by (--clear-blocker override).
 - 2026-10-06T20:14:44+0200 — column → dev. plan v2 settled, work starts
 - 2026-10-06T21:00:59+0200 — column → testing. S1 to S4 committed, S6 passed, binary installed; field use remains
+- 2026-10-07T02:38:32+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
 
 ## STATE
 

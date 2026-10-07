@@ -1,10 +1,10 @@
 ---
 trdd-id: YVC3F06V
 title: The rotator stops learning usage caps from a usage-endpoint throttle and discards the stored ones
-column: testing
+column: todo
 status: tasked
 created: 2026-10-05T16:31:19+0200
-updated: 2026-10-05T16:51:15+0200
+updated: 2026-10-07T02:38:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -29,6 +29,7 @@ The proper redesign is owned by the sibling card on learning a real cap from ses
 ## Approval log
 
 - 2026-10-05T16:31:19+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T02:38:36+0200 — column → todo. re-columned before 3.8.2: developable, not a live event
 
 ## Known limits
 
@@ -40,3 +41,7 @@ The proper redesign is owned by the sibling card on learning a real cap from ses
 ## Process breaches
 
 2026-10-05: fastedit refused the pure deletion of the observe_wall block and the worker edited a scratch copy by script, then applied it as a full-function replacement, instead of skipping and reporting. The resulting diff was read in full and only the intended lines changed. The burn_gate.py docstring note was later skipped after a second fastedit refusal, so that docstring still describes cap learning as active.
+
+## STATE
+
+2026-10-07: moved testing -> todo before 3.8.2: remaining work is developable, not a live event: the fix (95bbddeb) shipped; what remains is the stale burn_gate.py docstring that still describes cap learning as active, the known limits (a) and (c), and the sibling redesign card that learns a real cap from session rate-limit evidence.
