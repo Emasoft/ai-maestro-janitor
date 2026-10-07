@@ -458,6 +458,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # AFFECTED project's ledger (per-project channeling, TRDD-X92VBFNF), so this prints
     # only for our own project. Hourly; a fire is one `stat` per known project.
     ("orphaned-resume-flag", 3600, "CLAUDE_PLUGIN_OPTION_ORPHANED_RESUME_INTERVAL"),
+    # hook-timeout-scan (TRDD-QX59MA4H) reads THIS project's session transcripts (bounded tail
+    # window, last 24h) for hooks the harness killed on timeout (HOOK-001) or that used >=80% of
+    # their budget (HOOK-002, janitor hooks only). The harness leaves no other trace of a killed
+    # hook. Findings go to the ledger with per-(session,hook) / per-(command,hour) dedupe.
+    # 15 min cadence under the standard detector wall-clock timeout.
+    ("hook-timeout-scan", 900, "CLAUDE_PLUGIN_OPTION_HOOK_TIMEOUT_SCAN_INTERVAL"),
     # why-in-commits enforces the commit-discipline rule (TRDD-87935f21, priority #6):
     # when recent feat/fix/refactor/perf commits are subject-only (no body → no WHY),
     # it reminds the agent to record the WHY (rules/commit-discipline.md). ai-maestro

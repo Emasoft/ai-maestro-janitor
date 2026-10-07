@@ -112,6 +112,9 @@ def test_every_walking_detector_is_classified() -> None:
         "orphaned-resume-flag.py", "ticket-dispatch.py", "mcp-rugpull.py",
         "workflow-security.py", "provenance-audit.py", "package-manager-policy.py",
         "project-memory-tracked.py",
+        # hook-timeout-scan.py glob()s the session-transcript folder under ~/.claude/projects —
+        # not the project tree; no supply-chain verdict to make (TRDD-QX59MA4H).
+        "hook-timeout-scan.py",
     }
     unclassified = sorted(walkers - _MUST_FILTER - set(_EXEMPT) - out_of_scope)
     assert not unclassified, (
