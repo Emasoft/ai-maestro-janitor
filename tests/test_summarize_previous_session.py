@@ -694,6 +694,10 @@ def test_auth_finding_refires_after_a_successful_compaction(tmp_path, monkeypatc
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
     assert sps.main() == 0
     assert len(auth_hits()) == 1
+    # The successful run left a ready handoff for this transcript, which makes the next run a
+    # no-op; drop it so the third run actually reaches the compaction lane again.
+    for stale in handoff_files.newest_group(state.state_dir()):
+        stale.unlink()
 
     _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
     assert sps.main() == 0
