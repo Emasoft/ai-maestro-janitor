@@ -21,7 +21,7 @@ thin startup budget is still the wrong place to add a dependency nothing in the 
 
 WHAT'S HERE, and what's deliberately NOT here (YAGNI, TRDD-DQXMND59 stage 3 item M):
 ``parse_jsonl_line`` and ``iter_jsonl_entries`` (a from-byte-0, whole-file walk), plus
-``drop_lone_surrogates``, plus (TRDD-A8DRRW0I stage A) ``iter_jsonl_tail``. TRDD-A8DRRW0I's own
+``drop_lone_surrogates``, plus (TRDD-A8DRRW0I stage A) ``read_jsonl_tail``. TRDD-A8DRRW0I's own
 survey found that most transcript readers OUTSIDE Jev only need a TAIL read (seek N bytes before
 EOF, not a full 258 MB transcript read from the front), hence the tail variant. Its constraint:
 the first line after a tail seek is, by construction, a PARTIAL line the seek cut mid-record.
@@ -128,22 +128,26 @@ def iter_jsonl_entries(path: Path, *, malformed_lines: list[int]) -> Iterator[tu
                 yield line_no, entry
 
 
-def iter_jsonl_tail(path: Path, tail_bytes: int, *, malformed_lines: list[int]) -> Iterator[dict[str, Any]]:
-    """Walk the LAST ``tail_bytes`` bytes of one transcript JSONL, yielding every line that parses
-    to a JSON OBJECT, in file order (TRDD-A8DRRW0I stage A).
+def read_jsonl_tail(path: Path, tail_bytes: int, *, malformed_lines: list[int]) -> list[dict[str, Any]]:
+    """Read the LAST ``tail_bytes`` bytes of one transcript JSONL; return every line that parses
+    to a JSON OBJECT, in file order (TRDD-A8DRRW0I). Returns a list, not a generator: the data is
+    already fully in memory before the first entry, so laziness saved nothing, and a caller's
+    ``try/except OSError`` around a generator's call caught nothing (it raised at first iteration).
 
     The read starts ``tail_bytes`` before EOF (or at byte 0 when the file is shorter). When it did
     not start at byte 0 the seek may have cut a record in half: the byte just BEFORE the start is
     read too, and if it is not a newline the first line is that partial fragment and is dropped
     WITHOUT being recorded in ``malformed_lines`` (a seek that lands exactly on a line boundary
     drops nothing). Every remaining line goes through ``parse_jsonl_line``, so a non-UTF-8 byte,
-    a non-object line or a half-written last line never raises.
+    a non-object line or a half-written last line never raises. A half-written LAST line is
+    recorded in ``malformed_lines`` like any malformed line. A tail holding no newline at all (one
+    record longer than the window) returns ``[]`` and records nothing.
 
     ``malformed_lines`` receives 1-based positions WITHIN THE TAIL READ (after the dropped
     fragment), not file line numbers -- a tail read cannot know how many lines precede it.
 
-    A missing or unreadable file raises ``OSError`` to the caller (fail fast; each caller decides
-    whether that means "skip" or "abort"). It surfaces on the first ``next()``, not at call time.
+    A missing or unreadable file raises ``OSError``, and ``tail_bytes < 1`` raises ``ValueError``,
+    both AT THE CALL (fail fast; each caller decides whether that means "skip" or "abort").
     """
     if tail_bytes < 1:
         raise ValueError(f"tail_bytes must be >= 1, got {tail_bytes}")
@@ -159,7 +163,9 @@ def iter_jsonl_tail(path: Path, tail_bytes: int, *, malformed_lines: list[int]) 
         else:
             nl = data.find(b"\n")
             data = data[nl + 1:] if nl != -1 else b""
+    entries: list[dict[str, Any]] = []
     for line_no, raw_line in enumerate(data.split(b"\n"), start=1):
         entry = parse_jsonl_line(raw_line, line_no, malformed_lines)
         if entry is not None:
-            yield entry
+            entries.append(entry)
+    return entries
