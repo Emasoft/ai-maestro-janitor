@@ -4,7 +4,7 @@ title: Clear the strict-validator findings that block the 3.7.0 publish
 column: todo
 status: tasked
 created: 2026-10-04T11:25:52+0200
-updated: 2026-10-07T05:15:37+0200
+updated: 2026-10-07T05:35:13+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -48,3 +48,4 @@ The 3.7.0 dry run (2026-10-04) failed at step 4: cpv-remote-validate plugin . --
 2026-10-07 correction: the publish.py line reference 1503-1516 above is stale; the guard is now at about 1495-1520 of scripts/publish.py
 2026-10-07: full gate on main at 328bfa30 (the exemption rename): ruff, mypy, pyright exit 0; pytest 18072 passed, 2 skipped.
 2026-10-07 local validate, no publish, at 714f72c9, run beside the test suite: with PLUGIN_SKIP_GITHUB_INTEGRITY=1 the pinned validator (v5.16.2, --strict) completed with Summary CRITICAL 0, MAJOR 0 and raised nothing about the 30 s guard hooks (its only hook-timeout warning is about a 2800 s hook that predates this work); without the variable it stops at the integrity manifest mismatch again, so the mismatch reproduces locally. Still not done: one real publish.py run through steps 0 and 4 with the new name, and an explanation of why CI passes without the exemption.
+2026-10-07: full gate on main at 714f72c9 (all six merged fixes): ruff, mypy, pyright exit 0; pytest 18081 passed, 2 skipped, 0 failed in 31 min. The local validate recorded above had exit code 0 with the new exemption name (final line 'All checks passed', 42 warnings) and exit code 2 without it; the working tree was unchanged by both runs. The next publish runs under the exemption for a mismatch that is still unexplained, so a green publish does not mean the validator's integrity check passed.
