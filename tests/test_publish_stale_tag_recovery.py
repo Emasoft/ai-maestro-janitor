@@ -14,6 +14,7 @@ and a mock of git cannot have that bug.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -293,6 +294,10 @@ def test_unreadable_comparison_leaves_the_tag_alone(repo_with_origin, monkeypatc
     assert publish._rev_parse_commit(repo, "v1.0.0") == first
 
 
+_needs_git_cliff = pytest.mark.skipif(shutil.which("git-cliff") is None, reason="git-cliff not installed")
+
+
+@_needs_git_cliff
 @pytest.mark.real_subprocess("git-cliff")
 def test_changelog_has_one_section_when_a_stale_unpublished_tag_exists(repo_with_origin) -> None:
     """TNNII9S8: git-cliff must not see an unpublished stale tag and emit two `## [1.0.0]` sections."""
@@ -306,6 +311,7 @@ def test_changelog_has_one_section_when_a_stale_unpublished_tag_exists(repo_with
     assert not publish._local_tag_exists(repo, "v1.0.0"), "stale tag must be dropped for step 10 to re-mint"
 
 
+@_needs_git_cliff
 @pytest.mark.real_subprocess("git-cliff")
 def test_changelog_step_keeps_a_tag_that_is_published_on_origin(repo_with_origin) -> None:
     """Only PROVEN-unpublished tags are dropped; a published tag stays for step 10 to BLOCK on."""
