@@ -4,7 +4,7 @@ title: Session intent is carried by the TRDD underway and injected by a SessionS
 column: backburner
 status: tasked
 created: 2026-10-07T23:03:20+0200
-updated: 2026-10-07T23:03:20+0200
+updated: 2026-10-07T23:05:17+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -33,6 +33,7 @@ Context, the owner's two preceding messages in the same exchange, verbatim: "and
 - With no card underway: inject board counts and the workable list as data. Never name a picked next card.
 - Inject the STATE block first with a size cap and a pointer to the file; show how old the STATE block is relative to the session's last activity.
 - Nothing is retired by this card. The owner-messages record from issue 338 (3.8.11) stays as the carrier for work that has no card.
+The bullets "no per-session marker", "never name a picked next card" and "nothing is retired" are the reviewer's suggestions adopted by the main agent on 2026-10-07; the owner was told and has not answered.
 
 ## Measure before building
 
@@ -44,6 +45,7 @@ Context, the owner's two preceding messages in the same exchange, verbatim: "and
 ## Open decision (owner)
 
 Whether a card in a work column assigned to the agent, or a janitor handoff quoting the owner's message verbatim, counts as the assignment under the owner's global no-work-without-assignment rule. Asked several times, unanswered.
+The phrase in the directive closest to an answer is "with the kanban metadata instructing the agent implicitly"; it is the main agent's reading, not an owner ruling, that this may mean a work-column card assigned to the agent is the assignment.
 
 ## Known risk
 
@@ -51,10 +53,17 @@ Stale STATE blocks; without enforcement the problem moves from the handoff to th
 
 ## Acceptance checklist
 
-- [ ] The four measurements are recorded on this card.
+- [ ] The four measurements are recorded on this card, each with its sample size and who judged it; a measurement that could not be taken is recorded as not taken and leaves this box unticked.
 - [ ] A failing test exists first for the injection script.
-- [ ] A field check is done after one real clear and one real restart.
+- [ ] Field check, clear: after one real janitor clear the new session's first reply names the card underway and continues it with no typed message.
+- [ ] Field check, restart: the same after one real Claude restart.
+- [ ] Field check, API error: the same after one turn killed by an API error, or a recorded reason why this case could not be produced.
 
 ## Approval log
 
 - 2026-10-07T23:03:20+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+
+## Related
+
+TRDD-IN4493LC (issue 338, the owner-messages record this design keeps); TRDD-D7RLXAN1 (the "read this first" redesign this overlaps); TRDD-FQVEILVK (an example of a stale STATE block); TRDD-HIZ9ODVX (cost comparison).
+The scratch copy reports_dev/20261007-owner-directive-intent-in-trdd.md is superseded by this card.
