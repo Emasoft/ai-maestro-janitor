@@ -4,7 +4,7 @@ title: The memgrep cross-scope guard still lets a split into a relative not-yet-
 column: todo
 status: tasked
 created: 2026-10-07T11:50:57+0200
-updated: 2026-10-07T11:52:11+0200
+updated: 2026-10-07T12:46:25+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -36,6 +36,7 @@ Public issue 330 and commits 31c2e3b0, b5e8ae5c, 2a600afb. Found by a read-only 
 These commits were made in this checkout by a writer the main session could not identify. Do not start this card while that writer is still editing scripts/memgrep; coordinate through the owner.
 2026-10-07 review corrections: (a) evidence level is INFERRED, not VERIFIED: only the guard's diff in 2a600afb was read; scope_layer's body and the path from cmd_split_topic_cli to the guard were not, so first confirm by a failing test that --into is not made absolute earlier. (b) The gap is narrower: a spelling with a slash before the scope segment (./.claude/project/memory/new.md) classifies; only spellings like .claude/project/memory/new.md or memory/new.md from inside a scope fail open; the test must use one of those. (c) Fix: canonicalize the nearest EXISTING ancestor and append the remaining components (canonicalizing only the parent fails for a new subfolder; std::path::absolute does not resolve symlinks). (d) The guard's doc comment in 2a600afb claims the fallback closes the relative-path hole; correct it with the fix. (e) Startable when scripts/memgrep has no uncommitted change and no new memgrep commit for 24 hours, or when the owner says go.
 2026-10-07 second correction: point (b) above is also INFERRED (scope_layer's body was not read in this session). Test spelling: use .claude/project/memory/new.md with the process cwd set to a scratch project root and every scope override pointed at scratch; do not use memory/new.md, which only adds a cwd dependency.
+2026-10-07: commit dbf2f0c9 cites this card in its subject but is NOT this card's fix: it only clears two clippy errors in b69a5d32's symlink-alias test so the release gate passes. Do not list it under implementation-commits.
 
 ## Approval log
 
