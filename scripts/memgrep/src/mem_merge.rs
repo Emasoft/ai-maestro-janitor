@@ -11,10 +11,10 @@
 use crate::md;
 use crate::memory::{
     append_footnote_defs, atom_id_matches, atomic_write_page, bump_page_lmd,
-    footer_section_line, footnote_integrity_violations, insert_atom_block_before,
-    locate_atom_body_matching, next_footnote_label, normalize_keywords, page_description_phrases,
-    read_page_for_write, reindex_owning_scope, rel, rewrite_footnote_labels, today_date,
-    unique_phrases,
+    footer_section_line, footnote_integrity_violations, guard_downward_cross_scope,
+    insert_atom_block_before, locate_atom_body_matching, next_footnote_label, normalize_keywords,
+    page_description_phrases, read_page_for_write, reindex_owning_scope, rel,
+    rewrite_footnote_labels, today_date, unique_phrases,
 };
 use crate::write_gate;
 use anyhow::{Context, Result};
@@ -362,6 +362,9 @@ pub fn cmd_merge_topic_cli(args: &[String]) -> Result<()> {
     if a.from == a.into {
         anyhow::bail!("--from and --into are the same page — nothing to merge");
     }
+    // TRDD-DAL802TI: the tombstone links [[into]] and the survivor links back [[from]] — a
+    // cross-scope pair always lands exactly one downward edge, so the pair is refused whole.
+    guard_downward_cross_scope(&a.from, &a.into)?;
 
     // Deadlock-free two-scope lock, shared with migrate/split/reference — see `write_gate::acquire_two`.
     let (_g1, _g2) = write_gate::acquire_two(&a.from, &a.into)?;
@@ -626,6 +629,7 @@ pub fn cmd_merge_atom_cli(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn tmpdir(label: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -784,4 +788,88 @@ mod tests {
         let fm = md::parse_frontmatter(&r.new_text);
         assert_eq!(fm.get("lmd").map(String::as_str), Some("2026-02-01"));
     }
+    // ── TRDD-DAL802TI: cross-scope merge pairs are refused whole. Test paths carry the
+    // scope substrings scope_layer matches (/.claude/plugins/data/ → USER,
+    // /.claude/projects/ + /memory → LOCAL), so no env overrides are needed.
+
+    fn uniq(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static C: AtomicU64 = AtomicU64::new(0);
+        let n = C.fetch_add(1, Ordering::SeqCst);
+        std::env::temp_dir().join(format!("memgrep-{tag}-{}-{n}", std::process::id()))
+    }
+
+    fn scoped_page(dir: &Path, name: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(
+            &p,
+            "---\nname: scope-test-page\ndescription: \"cross-scope guard fixture\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             ^ATOM-GUARD-001 [keywords: guard_fixture]\n\nguard fixture body\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        p
+    }
+
+    #[test]
+    fn merge_topic_refuses_a_downward_cross_scope_merge_and_writes_nothing() {
+        let user_root = uniq("merge-down-user");
+        let local_root = uniq("merge-down-local");
+        let user_dir = user_root.join(".claude/plugins/data/x/memory");
+        let local_dir = local_root.join(".claude/projects/y/memory");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::create_dir_all(&local_dir).unwrap();
+        let state_dir = user_root.join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let user_page = scoped_page(&user_dir, "user-page.md");
+        let local_page = scoped_page(&local_dir, "local-page.md");
+        let user_before = std::fs::read_to_string(&user_page).unwrap();
+        let local_before = std::fs::read_to_string(&local_page).unwrap();
+        let args = vec![
+            "--from".to_string(), user_page.to_str().unwrap().to_string(),
+            "--into".to_string(), local_page.to_str().unwrap().to_string(),
+        ];
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir); }
+        let res = cmd_merge_topic_cli(&args);
+        unsafe { crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR"); }
+        let user_after = std::fs::read_to_string(&user_page).unwrap();
+        let local_after = std::fs::read_to_string(&local_page).unwrap();
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+        let err = res.expect_err("USER -> LOCAL merge must be refused");
+        assert!(err.to_string().contains("link DOWN"), "must name the downward link: {err}");
+        assert_eq!(user_after, user_before, "user page must be untouched");
+        assert_eq!(local_after, local_before, "local page must be untouched");
+    }
+
+    #[test]
+    fn merge_topic_refuses_the_upward_merge_whose_reciprocal_lands_down() {
+        let user_root = uniq("merge-up-user");
+        let local_root = uniq("merge-up-local");
+        let user_dir = user_root.join(".claude/plugins/data/x/memory");
+        let local_dir = local_root.join(".claude/projects/y/memory");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::create_dir_all(&local_dir).unwrap();
+        let state_dir = user_root.join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let user_page = scoped_page(&user_dir, "user-page.md");
+        let local_page = scoped_page(&local_dir, "local-page.md");
+        let user_before = std::fs::read_to_string(&user_page).unwrap();
+        let local_before = std::fs::read_to_string(&local_page).unwrap();
+        let args = vec![
+            "--from".to_string(), local_page.to_str().unwrap().to_string(),
+            "--into".to_string(), user_page.to_str().unwrap().to_string(),
+        ];
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir); }
+        let res = cmd_merge_topic_cli(&args);
+        unsafe { crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR"); }
+        let user_after = std::fs::read_to_string(&user_page).unwrap();
+        let local_after = std::fs::read_to_string(&local_page).unwrap();
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+        let err = res.expect_err("LOCAL -> USER merge must be refused (reciprocal lands DOWN)");
+        assert!(err.to_string().contains("link DOWN"), "must name the downward link: {err}");
+        assert_eq!(user_after, user_before, "user page must be untouched");
+        assert_eq!(local_after, local_before, "local page must be untouched");
+    }
+
 }

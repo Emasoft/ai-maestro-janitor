@@ -11,9 +11,9 @@
 
 use crate::md;
 use crate::memory::{
-    atom_id_matches, atomic_write_page, bump_page_lmd, downward_reason, fence_step,
-    footer_section_line, locate_atom_body_matching, read_page_for_write, reindex_owning_scope, rel,
-    scope_layer, today_date, Fence,
+    atom_id_matches, atomic_write_page, bump_page_lmd, fence_step, footer_section_line,
+    locate_atom_body_matching, read_page_for_write, reindex_owning_scope, rel, today_date,
+    Fence,
 };
 use crate::write_gate;
 use anyhow::{Context, Result};
@@ -159,50 +159,6 @@ struct ReferenceTopicArgs {
     dry_run: bool,
 }
 
-/// TRDD-7KAL6PNB (ai-maestro-janitor#330): THE LINK LAW is a WITHIN-LAYER law — across layers
-/// references go strictly UPWARD (LOCAL 0 < PROJECT 1 < USER 2), and a downward edge is what
-/// `lint` reports as `link-downward-cross-scope` ERROR (privacy for USER→LOCAL, portability for
-/// USER→PROJECT). The reference verbs wire BOTH ends in one edit, so a pair straddling two
-/// layers ALWAYS lands a link on the upper page pointing at the lower one — the pair must be
-/// refused whole, before any lock or read (fail-open on `None`: an unmapped path is not proof of
-/// a violation — a test fixture or relocated root must stay linkable, as migrate already rules).
-/// KNOWN CEILING (shared with migrate): when exactly ONE side classifies and the other is `None`,
-/// the guard fails open and the pair proceeds — a future hardening can fail closed on that shape.
-fn guard_downward_cross_scope(page: &Path, to: &Path) -> Result<()> {
-    let (Some(from_s), Some(to_s)) = (
-        page.canonicalize().ok().and_then(|p| scope_layer(&p)),
-        to.canonicalize().ok().and_then(|p| scope_layer(&p)),
-    ) else {
-        return Ok(());
-    };
-    if to_s.rank < from_s.rank {
-        anyhow::bail!(
-            "would link DOWN from {} page `{}` to {} page `{}` — {}. Cross-scope references go strictly upward; record the pointer on the {} page some other way.",
-            from_s.name,
-            rel(page),
-            to_s.name,
-            rel(to),
-            downward_reason(to_s),
-            from_s.name
-        );
-    }
-    if from_s.rank < to_s.rank {
-        // The reciprocal half writes a link ONTO the upper page pointing down (an edge the lint
-        // flags from the UPPER page's side), so the pair is refused from this direction too. The
-        // upper page leads the message so the pair's roles read the same in both arms.
-        anyhow::bail!(
-            "would link DOWN from {} page `{}` to {} page `{}` — {}. Cross-scope references go strictly upward; record the pointer on the {} page some other way.",
-            to_s.name,
-            rel(to),
-            from_s.name,
-            rel(page),
-            downward_reason(from_s),
-            to_s.name
-        );
-    }
-    Ok(())
-}
-
 /// `memgrep reference-mem-topic --page A --to B` — wire `[[B]]` into A's `## See also` and
 /// `[[A]]` into B's, in one edit. Idempotent (a link that already exists is a no-op, never
 /// duplicated); refuses when either page does not exist, so the link can never dangle.
@@ -214,7 +170,7 @@ pub fn cmd_reference_topic_cli(args: &[String]) -> Result<()> {
     if a.page == a.to {
         anyhow::bail!("--page and --to are the same page — nothing to link");
     }
-    guard_downward_cross_scope(&a.page, &a.to)?;
+    crate::memory::guard_downward_cross_scope(&a.page, &a.to)?;
 
     // Deadlock-free two-scope lock, shared with migrate/merge/split — see `write_gate::acquire_two`.
     let (_g1, _g2) = write_gate::acquire_two(&a.page, &a.to)?;
@@ -330,7 +286,7 @@ pub fn cmd_reference_atom_cli(args: &[String]) -> Result<()> {
     if a.page == a.to {
         anyhow::bail!("--page and --to are the same page — nothing to link");
     }
-    guard_downward_cross_scope(&a.page, &a.to)?;
+    crate::memory::guard_downward_cross_scope(&a.page, &a.to)?;
 
     // Deadlock-free two-scope lock, shared with migrate/merge/split — see `write_gate::acquire_two`.
     let (_g1, _g2) = write_gate::acquire_two(&a.page, &a.to)?;

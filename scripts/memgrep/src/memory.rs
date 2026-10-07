@@ -6744,6 +6744,60 @@ pub(crate) fn downward_reason(to: ScopeLayer) -> &'static str {
     }
 }
 
+/// THE cross-scope pair guard (TRDD-7KAL6PNB / #330, shared by reference/migrate/split/merge
+/// after TRDD-DAL802TI): THE LINK LAW is a WITHIN-LAYER law — across layers references go
+/// strictly UPWARD (LOCAL 0 < PROJECT 1 < USER 2), and a downward edge is what `lint` reports
+/// as `link-downward-cross-scope` ERROR (privacy for USER→LOCAL, portability for USER→PROJECT).
+/// Every verb that wires BOTH ends of a link pair in one edit (reference verbs, merge/split
+/// tombstone+survivor pairs) lands exactly one downward edge on ANY rank-mismatched pair,
+/// whichever invocation order the caller picks — so the pair is refused whole, before any lock
+/// or read. POLICY NOTE (TRDD-DAL802TI): refusing the pair retires whole-page cross-scope
+/// merge/split in both directions (including promote-up with a tombstone — the normal
+/// knowledge-flow direction). That is a deliberate capability narrowing, chosen for consistency
+/// with the reference verbs and to avoid direction-dependent tombstone text-shaping; bulk
+/// cross-scope moves still go through `migrate-mem-atom`, one atom at a time. NOT a gate
+/// constraint: the pre-write gate's link arm deliberately skips cross-scope edges, and a
+/// plain-words tombstone would be gate-clean — refusing is the stricter policy the verbs choose.
+/// Classifies the RAW paths — `scope_layer` itself canonicalizes with a literal-prefix fallback
+/// and matches nonexistent paths (split's `--into` must not exist yet, so an outer
+/// `.canonicalize().ok()` here would fail open exactly on the dangerous case). Fail-open on
+/// `None`: an unmapped path is not proof of a violation — a test fixture or relocated root must
+/// stay linkable, as migrate already rules. KNOWN CEILING (shared with migrate): when exactly
+/// ONE side classifies and the other is `None`, the guard fails open and the pair proceeds — a
+/// future hardening can fail closed on that shape.
+pub(crate) fn guard_downward_cross_scope(page: &Path, to: &Path) -> Result<()> {
+    let (Some(from_s), Some(to_s)) = (scope_layer(page), scope_layer(to)) else {
+        return Ok(());
+    };
+    if to_s.rank < from_s.rank {
+        anyhow::bail!(
+            "would link DOWN from {} page `{}` to {} page `{}` — {}. Cross-scope references go strictly upward; record the pointer on the {} page some other way.",
+            from_s.name,
+            rel(page),
+            to_s.name,
+            rel(to),
+            downward_reason(to_s),
+            from_s.name
+        );
+    }
+    if from_s.rank < to_s.rank {
+        // The reciprocal half writes a link ONTO the upper page pointing down (an edge the lint
+        // flags from the UPPER page's side), so the pair is refused from this direction too. The
+        // upper page leads the message so the pair's roles read the same in both arms.
+        anyhow::bail!(
+            "would link DOWN from {} page `{}` to {} page `{}` — {}. Cross-scope references go strictly upward; record the pointer on the {} page some other way.",
+            to_s.name,
+            rel(to),
+            from_s.name,
+            rel(page),
+            downward_reason(from_s),
+            to_s.name
+        );
+    }
+    Ok(())
+}
+
+
 // ─────────────────────── `publish-globally:` reconciliation ───────────────────────
 //
 // A PROJECT-scope page may flag `publish-globally: true` to be recalled from every project on the

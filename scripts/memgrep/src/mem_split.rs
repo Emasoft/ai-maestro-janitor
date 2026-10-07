@@ -21,8 +21,8 @@ use crate::md;
 use crate::memory::{
     append_footnote_defs, atom_id_matches, atomic_write_page, build_atom_marker, bump_page_lmd,
     check_desc, check_keyword_floor, duplicate_phrases, footer_section_line,
-    footnote_integrity_violations, generate_unique_atom_id, insert_atom_block_before,
-    locate_atom_body_matching, next_footnote_label, normalize_keywords,
+    footnote_integrity_violations, generate_unique_atom_id, guard_downward_cross_scope,
+    insert_atom_block_before, locate_atom_body_matching, next_footnote_label, normalize_keywords,
     page_description_phrases, read_page_for_write, reindex_owning_scope, rel,
     rewrite_footnote_labels, today_date, unique_phrases,
 };
@@ -331,6 +331,11 @@ pub fn cmd_split_topic_cli(args: &[String]) -> Result<()> {
     if a.page == a.into {
         anyhow::bail!("--page and --into are the same path — nothing to split");
     }
+    // TRDD-DAL802TI: the split wires See-also links BOTH ways between the existing source and
+    // the not-yet-existing destination — a cross-scope pair always lands exactly one downward
+    // edge, so the pair is refused whole. The guard classifies the raw paths: `--into` does not
+    // exist yet, so anything that canonicalized before classifying would fail open here.
+    guard_downward_cross_scope(&a.page, &a.into)?;
     check_page_description(&a.description)?;
 
     // Deadlock-free two-scope lock, shared with migrate/merge/reference — see `write_gate::acquire_two`.
@@ -1252,6 +1257,90 @@ mod tests {
         assert!(orig_retune_warning(true, false).expect("desc omitted must warn").contains("--orig-desc"));
         assert!(orig_retune_warning(false, true).expect("keywords omitted must warn").contains("--orig-keywords"));
         assert!(orig_retune_warning(true, true).is_none());
+    }
+
+    // ── TRDD-DAL802TI: cross-scope split pairs are refused whole. The destination does not
+    // exist yet, so the guard must classify RAW paths (its own canonicalize would fail open);
+    // test paths carry the scope substrings scope_layer matches.
+
+    fn uniq_split(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static C: AtomicU64 = AtomicU64::new(0);
+        let n = C.fetch_add(1, Ordering::SeqCst);
+        std::env::temp_dir().join(format!("memgrep-{tag}-{}-{n}", std::process::id()))
+    }
+
+    fn cross_scope_split_args(src: &Path, into: &Path) -> Vec<String> {
+        vec![
+            "--page".to_string(), src.to_str().unwrap().to_string(),
+            "--atoms".to_string(), "ATOM-GUARD-001".to_string(),
+            "--into".to_string(), into.to_str().unwrap().to_string(),
+            "--name".to_string(), "split-off-page".to_string(),
+            "--description".to_string(),
+            "cross-scope guard fixture / refusal test description / padded to floor one / padded to floor two".to_string(),
+        ]
+    }
+
+    #[test]
+    fn split_topic_refuses_a_downward_cross_scope_split_and_writes_nothing() {
+        let user_root = uniq_split("split-down-user");
+        let local_root = uniq_split("split-down-local");
+        let user_dir = user_root.join(".claude/plugins/data/x/memory");
+        let local_dir = local_root.join(".claude/projects/y/memory");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let state_dir = user_root.join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let user_page = user_dir.join("user-page.md");
+        std::fs::write(
+            &user_page,
+            "---\nname: scope-test-page\ndescription: \"cross-scope guard fixture\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             ^ATOM-GUARD-001 [keywords: guard_fixture]\n\nguard fixture body\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let local_dest = local_dir.join("split-off.md"); // LOCAL (rank 0) — DOWN, does NOT exist
+        let before = std::fs::read_to_string(&user_page).unwrap();
+        let args = cross_scope_split_args(&user_page, &local_dest);
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir); }
+        let res = cmd_split_topic_cli(&args);
+        unsafe { crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR"); }
+        let after = std::fs::read_to_string(&user_page).unwrap();
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+        let err = res.expect_err("USER -> LOCAL split must be refused");
+        assert!(err.to_string().contains("link DOWN"), "must name the downward link: {err}");
+        assert_eq!(after, before, "user page must be untouched");
+        assert!(!local_dest.exists(), "the split destination must not be created");
+    }
+
+    #[test]
+    fn split_topic_refuses_the_upward_split_whose_reciprocal_lands_down() {
+        let user_root = uniq_split("split-up-user");
+        let local_root = uniq_split("split-up-local");
+        let local_dir = local_root.join(".claude/projects/y/memory");
+        let user_dir = user_root.join(".claude/plugins/data/x/memory");
+        std::fs::create_dir_all(&local_dir).unwrap();
+        let state_dir = local_root.join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let local_page = local_dir.join("local-page.md");
+        std::fs::write(
+            &local_page,
+            "---\nname: scope-test-page\ndescription: \"cross-scope guard fixture\"\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n\
+             ^ATOM-GUARD-001 [keywords: guard_fixture]\n\nguard fixture body\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let user_dest = user_dir.join("split-off.md"); // USER (rank 2) — reciprocal lands DOWN here
+        let before = std::fs::read_to_string(&local_page).unwrap();
+        let args = cross_scope_split_args(&local_page, &user_dest);
+        unsafe { crate::scoped_env::set_var("JANITOR_GLOBAL_STATE_DIR", &state_dir); }
+        let res = cmd_split_topic_cli(&args);
+        unsafe { crate::scoped_env::remove_var("JANITOR_GLOBAL_STATE_DIR"); }
+        let after = std::fs::read_to_string(&local_page).unwrap();
+        let _ = std::fs::remove_dir_all(&user_root);
+        let _ = std::fs::remove_dir_all(&local_root);
+        let err = res.expect_err("LOCAL -> USER split must be refused (reciprocal lands DOWN)");
+        assert!(err.to_string().contains("link DOWN"), "must name the downward link: {err}");
+        assert_eq!(after, before, "local page must be untouched");
+        assert!(!user_dest.exists(), "the split destination must not be created");
     }
 
 }
