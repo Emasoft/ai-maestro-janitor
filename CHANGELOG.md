@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.8] — 2026-10-07
+
+### Bug Fixes
+
+- **detectors:** Memgrep-binary-stale treats truncated or unknown compares as can't-tell and names the release download (TRDD-V5V1CBLM) (3eeaf8e)
+
+### Documentation
+
+- **trdd:** Record the 3.8.7 install, the watchdog discriminator and the xdist push-gate deadlock (TRDD-FQVEILVK) (d57da38)
+- **trdd:** Bound the watchdog discriminator, park 6CF3L7IJ, complete the deadlock card (TRDD-FQVEILVK) (08fe80c)
+- **trdd:** Tighten 9KKPFYTP to the measured gate facts, date the 6CF3L7IJ park (TRDD-9KKPFYTP) (eff2c7f)
+- **trdd:** Give 6CF3L7IJ a runnable stall probe and correct its park trigger (TRDD-6CF3L7IJ) (27e133b)
+- **trdd:** Raise 6CF3L7IJ stall probe to 300 s, add the log-gap test, scope 9KKPFYTP (TRDD-6CF3L7IJ) (18f3d3d)
+- **trdd:** Record a third READ FIRST observation, two targets from one clear (TRDD-D7RLXAN1) (42a8fde)
+- **trdd:** V5V1CBLM records its implementation commit and moves to testing (TRDD-V5V1CBLM) (4504f65)
+- **trdd:** Record B10b plain-Edit breach accepted, follow-up 3eeaf8e6 (TRDD-FQVEILVK) (8732ad0)
+- **trdd:** Add TRDD-58Q791FL - enforce design tracked and reports gitignored (e7068d7)
+- **trdd:** TRDD-58Q791FL records implementation commit de7475f3 and moves to testing (66fc7bf)
+
+### Features
+
+- **detectors:** Memgrep-binary-stale reports a memgrep build older than the installed plugin's memgrep source (TRDD-V5V1CBLM) (c5ec956)
+- **detectors:** Enforce design/ tracked and reports/ gitignored (TRDD-58Q791FL) (de7475f)
 ## [3.8.7] — 2026-10-07
 
 ### Bug Fixes
@@ -50,6 +73,7 @@ All notable changes to this project will be documented in this file.
 - **memory:** Drop memory-system's duplicate See also heading and retitle the CPV line in MEMORY.md (927288d)
 - **memory:** Give the merged CPV gitignore stub page its metadata block (280b6f2)
 - Bump version to 3.8.7 (ec37068)
+- Bump version to 3.8.7 (288a277)
 
 ### Testing
 
