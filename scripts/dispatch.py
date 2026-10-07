@@ -1790,9 +1790,18 @@ def _phase_interrupt_cooldown() -> bool:
     defer for, and MUST NOT be silenced forever by a missing env var.
     """
     transcript = _session_transcript_path()
+    # TRDD-W3ERQIB9: an unknown session is the common cron-fire shape, so logging it on every
+    # fire buried the log. Log it once per episode: the seen-file key is forgotten as soon as
+    # a fire HAS a session again, so the next unknown stretch is logged anew.
+    unknown_seen = state.state_dir() / "interrupt-check-unknown-seen.txt"
     if transcript is None:
-        state.log_line("dispatch", "heartbeat: interrupt check skipped, session unknown")
+        msg = dedupe.emit_once(
+            unknown_seen, "session-unknown", "heartbeat: interrupt check skipped, session unknown"
+        )
+        if msg is not None:
+            state.log_line("dispatch", msg)
         return False
+    dedupe.emit_forget(unknown_seen, "session-unknown")
     age = user_intent.recently_interrupted(
         os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(),
         transcript_path=transcript,

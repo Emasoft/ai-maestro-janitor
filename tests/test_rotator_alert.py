@@ -146,9 +146,13 @@ def test_tick_stalled_only_while_claude_runs(root: Path) -> None:
 def test_rotation_stuck_file_alerts_even_without_claude(root: Path) -> None:
     """rotation-stuck.json present: alert regardless of the session (it is already a verdict)."""
     _write_state(root, live_exp_s=NOW + 3600, spare_exp_s=NOW + 7200)
-    (root / "rotation-stuck.json").write_text(json.dumps({"kind": "all-exhausted", "detail": SPARE}))
+    # TRDD-ZQ3GVI9Q: use a kind the rotator really writes (rotator.py _mark_stuck); the old
+    # 'all-exhausted' is never produced, so the test passed on a value production never emits.
+    (root / "rotation-stuck.json").write_text(json.dumps({"kind": "no-usable-slot-twin", "detail": SPARE}))
     run = Runner()
     assert ra.evaluate(root, now=NOW, claude_running=False, runner=run) == ["rotation-stuck"]
+    assert ra.active_conditions(root, NOW, False)["rotation-stuck"] == ra._ACTIONS["rotation-stuck"]
+    assert ra._ACTIONS["rotation-stuck"] in (root / ra.ALERT_NAME).read_text()
     assert SPARE not in json.dumps(run.argvs) and SPARE not in (root / ra.ALERT_NAME).read_text()
 
 

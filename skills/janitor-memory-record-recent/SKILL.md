@@ -56,13 +56,14 @@ ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && RO
 # (a) The floor — newest memory mtime tells you "changes since when". 0 = no memory yet.
 LAST_MEM_TS=0
 for d in "${ROOTS[@]}"; do
-  # L3: BSD stat first, GNU fallback per-file — the BSD-only form broke on Linux.
-  t=$(find "$d" -name '*.md' -not -name 'MEMORY.md' \( -exec stat -f %m {} \; -o -exec stat -c %Y {} \; \) 2>/dev/null | sort -rn | head -1)
+  # L3 / TRDD-7YEVICVU: python3 for the newest mtime — the BSD stat format flag is BSD-only and on GNU
+  # coreutils it succeeds printing file-system info, so a fallback chain never ran.
+  t=$(python3 -c 'import sys,pathlib; print(max((int(p.stat().st_mtime) for p in pathlib.Path(sys.argv[1]).rglob("*.md") if p.name != "MEMORY.md"), default=""))' "$d" 2>/dev/null)
   [ -n "$t" ] && [ "$t" -gt "$LAST_MEM_TS" ] && LAST_MEM_TS=$t
 done
 
 # (b) The surface — substantive commits since that floor + the working-tree diff.
-SINCE_ISO=$( [ "$LAST_MEM_TS" -gt 0 ] && { date -r "$LAST_MEM_TS" +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -d "@$LAST_MEM_TS" +%Y-%m-%dT%H:%M:%S; } || echo "24 hours ago" )  # L3: BSD date -r, GNU date -d fallback
+SINCE_ISO=$( [ "$LAST_MEM_TS" -gt 0 ] && python3 -c 'import sys,datetime; print(datetime.datetime.fromtimestamp(int(sys.argv[1])).strftime("%Y-%m-%dT%H:%M:%S"))' "$LAST_MEM_TS" || echo "24 hours ago" )  # L3 / TRDD-7YEVICVU: python3, not the BSD-only date reference-file flag
 git log --since="$SINCE_ISO" --pretty='%h %s' --no-merges      # recent landed work
 GIT_OPTIONAL_LOCKS=0 git diff --stat                           # uncommitted changes
 ```
