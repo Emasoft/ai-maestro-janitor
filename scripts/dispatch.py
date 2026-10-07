@@ -3881,6 +3881,14 @@ def _board_nudge_signature_changed(
     Fail-open toward nudging: an unreadable/corrupt stamp reads as "no prior nudge",
     never as "already nudged", and a failed write is swallowed — costs one extra nudge
     next fire, never a silenced one."""
+    # TRDD-LH84WTL5: one session per project root gets the board nudge. Asked BEFORE the stamp
+    # is read or written, so a session that loses the lease cannot consume the stamp the
+    # holder still needs in order to be re-nudged on its next board change.
+    if not _board_nudge_lease_acquire(sd, int(time.time())):
+        state.log_line(
+            "dispatch", "keep-going: another session of this project holds the board nudge lease"
+        )
+        return False
     stamp_file = sd / _BOARD_NUDGE_STAMP_FILE
     signature = ",".join(sorted(ids)) + "|attn=" + attn_signature
     prompt_epoch = _last_user_prompt_epoch()
@@ -3909,6 +3917,56 @@ def _board_nudge_signature_changed(
         except OSError:
             pass
     return changed
+
+_BOARD_NUDGE_LEASE_FILE = "keep-going-board-nudge-lease.json"
+# Three missed ~15-minute heartbeats: long enough that a holder merely between fires keeps
+# its lease, short enough that a dead or user-active holder frees the board within the hour.
+_BOARD_NUDGE_LEASE_TTL_S = 2700
+
+
+def _board_nudge_lease_acquire(sd: Path, now: int) -> bool:
+    """True iff THIS session may receive the zero-agent board nudge (TRDD-LH84WTL5).
+
+    WHY: the board is per project root, so two sessions sharing a root both read the same
+    `dev`/`todo` cards and both get told "finishing a card means pulling the next" — they
+    then work the same card in one tree. The stamp in `_board_nudge_signature_changed` does
+    not prevent it: its `prompt_epoch` is PER PANE, so a second pane's newer prompt re-arms
+    the shared stamp and nudges that session too. The lease serialises it: one holder per
+    root, renewed on each of its own fires, taken over by another session only once the
+    holder has not renewed for `_BOARD_NUDGE_LEASE_TTL_S` (dead session, or one the user is
+    working in so it no longer reaches this branch). It must expire, or a dead holder would
+    silence the board for everyone. A lease, not a "recent presence" mute: a mute would
+    re-create at project scope what 79255d6e removed.
+
+    Fail OPEN toward nudging on every uncertainty (no session id, lock or file fault, corrupt
+    lease): the nudge is the night-survival pulse, and a duplicate is cheaper than silence.
+    The read-decide-write runs under an exclusive flock so two simultaneous fires cannot both win.
+    """
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not sid:
+        return True
+    lease_file = sd / _BOARD_NUDGE_LEASE_FILE
+    try:
+        import fcntl  # noqa: PLC0415 - POSIX only; a platform without it fails open below
+
+        with open(sd / (_BOARD_NUDGE_LEASE_FILE + ".lock"), "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            holder: str | None = None
+            epoch = 0
+            try:
+                raw = json.loads(lease_file.read_text(encoding="utf-8"))
+                if isinstance(raw, dict) and isinstance(raw.get("holder"), str):
+                    holder = raw["holder"]
+                    e = raw.get("epoch")
+                    epoch = e if isinstance(e, int) and not isinstance(e, bool) else 0
+            except (OSError, ValueError):
+                pass
+            if holder is not None and holder != sid and now - epoch <= _BOARD_NUDGE_LEASE_TTL_S:
+                return False
+            state.atomic_write(lease_file, json.dumps({"holder": sid, "epoch": now}))
+            return True
+    except (OSError, ImportError):
+        return True
 
 
 def _phase_keep_going_nudge() -> None:
