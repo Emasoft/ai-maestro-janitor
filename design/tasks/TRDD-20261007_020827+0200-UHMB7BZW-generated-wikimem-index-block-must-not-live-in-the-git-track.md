@@ -1,10 +1,10 @@
 ---
 trdd-id: UHMB7BZW
 title: Generated wikimem index block must not live in the git-tracked CLAUDE.md
-column: todo
+column: approval
 status: tasked
 created: 2026-10-07T02:08:27+0200
-updated: 2026-10-07T02:10:08+0200
+updated: 2026-10-07T02:10:38+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: bugfix
@@ -24,6 +24,7 @@ unblock-when: [decision:owner-rules-on-G7.1-G10.1-amendment]
 ## Approval log
 
 - 2026-10-07T02:08:27+0200 — MANDATE issued by main-agent@ai-maestro-janitor (min-approval-requirement: none). Pre-approved: issuer authority >= required approver. No approval request was sent.
+- 2026-10-07T02:10:38+0200 — column → approval. owner decision on golden PRRD rules G7.1/G10.1
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-10-07
 
