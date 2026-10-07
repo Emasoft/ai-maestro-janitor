@@ -4,7 +4,7 @@ title: Rotator keeps the live account measurable, rotates under load, and warns 
 column: blocked
 status: tasked
 created: 2026-10-03T03:40:28+0200
-updated: 2026-10-07T02:27:25+0200
+updated: 2026-10-07T02:29:36+0200
 current-owner: main-agent@ai-maestro-janitor
 created-by: main-agent@ai-maestro-janitor
 task-type: feature
@@ -341,6 +341,7 @@ TRDD-L2CCH9D5 and TRDD-JW8CWWNH (filed 2026-10-03 from R8) are non-blocking back
 2026-10-05 column blocked (was testing for about two hours on 2026-10-04; that move raised ORDER-NPT-VIOLATED because a parent may not pass dev while its prerequisite cards are unfinished). blocked-by lists the same cards as npt. pre-block-column set to dev, the lint-clean place for a parent to wait. Probe measured 2026-10-05: trddgrep why prints the word READY for a card whose prerequisites are satisfied (seen on BHIS99XE) and does not print it for a blocked card (seen on 3HLI7DMK). The NEXT ACTION above is unchanged.
 2026-10-05 later: column dev (was blocked since 2026-10-04). The line above saying the probe was measured is WRONG: BHIS99XE was not a blocked card. Valid test on two scratch cards: after the blocker was closed, trddgrep why on the blocked card printed BLOCKED with no locally-resolvable blocker, never READY, and the card stayed in blocked, so the probe would never clear. blocked-by is cleared; npt still lists the prerequisite cards. dev here means waiting on those cards, not code in flight. The NEXT ACTION above is unchanged.
 2026-10-07: moved dev -> blocked before the 3.8.2 release; open blockers JY0OBQZ4, G9Z8PXCM, HL3WBA2Q, IT5GEZDZ; the shipped parts of this umbrella ship independently.
+2026-10-07: This card does not gate the 3.8.2 release: its blockers are released or wait on the release themselves. Restore to dev is manual (no unblock-when): clear blocked-by when the children finish. Root of the chain: JY0OBQZ4 and G9Z8PXCM (human_review), HL3WBA2Q (testing), and NGLPQ7SW (todo, the root behind IT5GEZDZ).
 
 ## Release status
 
