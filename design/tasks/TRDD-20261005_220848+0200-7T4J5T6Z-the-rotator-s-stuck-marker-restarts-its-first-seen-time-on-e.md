@@ -21,7 +21,7 @@ approval-datetime: 2026-10-05T22:08:48+0200
 
 Goal: investigate, verify and fix the root cause. Found on 2026-10-05; not investigated beyond what is written here.
 
-Observed: a marker read during a stuck episode had first_seen_epoch equal to last_seen_epoch. From reading the code, on a tick that works from the mirror copy the marker is cleared when the beacon fingerprint matches and written again at the end of a still-stuck tick, so first-seen never accumulates on mirror-sourced ticks only. Consequences to verify: the detector that reports 'rotation impossible for N hours' can never reach its hours; the alert reader only tests that the file exists and has no check on the marker's age, so a marker left by a rotator that stopped ticking would alert forever. Also seen: the kind all-accounts-maxed is written for a token that is only close to its expiry.
+Observed: a marker read during a stuck episode had first_seen_epoch equal to last_seen_epoch. From reading the code, on a tick that works from the mirror copy the marker is cleared when the beacon fingerprint matches and written again at the end of a still-stuck tick, so on mirror-sourced ticks first-seen never accumulates. Consequences to verify: the detector that reports 'rotation impossible for N hours' can never reach its hours; the alert reader only tests that the file exists and has no check on the marker's age, so a marker left by a rotator that stopped ticking would alert forever. Also seen: the kind all-accounts-maxed is written for a token that is only close to its expiry.
 
 ## Approval log
 
