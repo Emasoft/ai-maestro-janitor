@@ -122,6 +122,21 @@ def _references(card: _Card, target_uid: str) -> bool:
     return any(uid.upper() == t for uid in trdd_common.extract_trdd_refs(card.body))
 
 
+
+def _ref_pair_key(ref_key: str, a: str, b: str) -> str:
+    """Seen-file dedupe key of a signal-1 pair (a < b, ref already normalized)."""
+    return f"blindspot@{ref_key}@{a}@{b}"
+
+
+def _content_pair_key(a: str, b: str, shared_words: set[str]) -> str:
+    """Seen-file dedupe key of a signal-2 pair (a < b)."""
+    return f"blindspot-content@{a}@{b}@{'-'.join(sorted(shared_words))}"
+
+# Every key this detector writes starts with one of these; the stale-key sweep in main()
+# touches nothing else in the seen file.
+_KEY_PREFIXES = ("blindspot@", "blindspot-content@")
+
+
 # ── Signal 2: shared rare vocabulary (TRDD-4EKZ81MV) ──────────────────────
 #
 # Two cards that never shared an `external-refs:` value are structurally
@@ -241,7 +256,10 @@ def _find_content_similarity_pairs(
 
 
 def _parse_card(path: Path, scope: str) -> _Card | None:
-    """Parse one TRDD file into a `_Card`, or None when it has no usable id."""
+    """Parse one TRDD file into a `_Card`, or None when it has no usable id or is closed.
+
+    Raises OSError when the file cannot be read: main() treats that as an INCOMPLETE scan.
+    """
     uid = trdd_common.extract_uid(path.name)
     if uid is None:
         return None
@@ -251,10 +269,10 @@ def _parse_card(path: Path, scope: str) -> _Card | None:
     # cannot silence it. Measured on this board: 11 of 274 cards exceed the 24 KB cap, and the
     # longest cards are precisely the most cross-referenced ones. The frontmatter parse below
     # is unaffected (it is anchored at the top of the file either way).
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
+    # WHY no OSError handler (TRDD-61PLV7WS): an unreadable card is NOT "a card that left the
+    # board". main() catches it per card and marks the scan incomplete, so a transient read
+    # failure can never make a live pair look cleared and get its seen-key forgotten.
+    text = path.read_text(encoding="utf-8", errors="replace")
     fm = trdd_common.FRONTMATTER_RE.match(text)
     if not fm:
         return None
@@ -293,8 +311,16 @@ def main() -> int:
         return 0
 
     cards: dict[str, _Card] = {}
+    # False as soon as ANY card cannot be read: a pair involving it may still be live, so the
+    # stale-key sweep below must not run (TRDD-61PLV7WS).
+    scan_complete = True
     for scope, path in trdds:
-        card = _parse_card(path, scope)
+        try:
+            card = _parse_card(path, scope)
+        except OSError as exc:
+            scan_complete = False
+            state.log_line("trdd-cross-card-blindspot", f"unreadable card {path.name}: {exc}")
+            continue
         if card is not None:
             cards[card.uid] = card
 
@@ -331,6 +357,9 @@ def main() -> int:
     # The dedupe key of each newly-emitted pair, in the SAME order as `new_pairs`, so the
     # ones the display cap drops can have their seen-mark rolled back below.
     new_keys: list[str] = []
+    # Every pair key still DETECTED this run (new or already seen). Seen keys outside this set
+    # are pairs that cleared; see the sweep below (TRDD-61PLV7WS).
+    detected_keys: set[str] = set()
     for key, uids in ref_to_uids.items():
         if len(uids) < 2:
             continue
@@ -341,7 +370,8 @@ def main() -> int:
             # signal, and cross-linking is exactly how that signal is cleared.
             if _references(card_a, b) or _references(card_b, a):
                 continue
-            dedupe_key = f"blindspot@{key}@{a}@{b}"
+            dedupe_key = _ref_pair_key(key, a, b)
+            detected_keys.add(dedupe_key)
             msg = f"TRDD-{a} & TRDD-{b} (shared ref: {state.sanitize_for_drift_line(ref_display[key])})"
             if dedupe.emit_once(seen, dedupe_key, msg) is not None:
                 new_pairs.append(msg)
@@ -360,11 +390,22 @@ def main() -> int:
         if _references(card_a, b) or _references(card_b, a):
             continue
         words_shown = ", ".join(sorted(shared_words)[:4])
-        dedupe_key = f"blindspot-content@{a}@{b}@{'-'.join(sorted(shared_words))}"
+        dedupe_key = _content_pair_key(a, b, shared_words)
+        detected_keys.add(dedupe_key)
         msg = f"TRDD-{a} & TRDD-{b} (shared vocabulary: {state.sanitize_for_drift_line(words_shown)})"
         if dedupe.emit_once(seen, dedupe_key, msg) is not None:
             new_pairs.append(msg)
             new_keys.append(dedupe_key)
+
+    # STALE-KEY SWEEP (TRDD-61PLV7WS, TRDD-37H7QFSF). A seen key outlived its pair forever, so a
+    # pair that was cross-linked (or dropped off the board) and later came back stayed silent.
+    # Forget every seen pair key this run did not detect. ONLY after a complete scan: an
+    # unreadable card, or a capped display (the cap rolls its own keys back below and must not
+    # be mixed with this sweep), means "not detected" does not prove "cleared".
+    if scan_complete and len(new_pairs) <= _MAX_LISTED and seen.exists():
+        for stale in seen.read_text(encoding="utf-8").splitlines():
+            if stale.startswith(_KEY_PREFIXES) and stale not in detected_keys:
+                dedupe.emit_forget(seen, stale)
 
     if not new_pairs:
         state.rotate_log_if_big("trdd-cross-card-blindspot")

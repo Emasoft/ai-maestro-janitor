@@ -411,3 +411,51 @@ def test_min_shared_words_gate_falsified_single_rare_word_would_pair_without_it(
         mod._MIN_SHARED_CONTENT_WORDS = original  # restore — GREEN again
 
     assert frozenset({"a", "b"}) not in mod._find_content_similarity_pairs(cards)
+
+
+
+def _seen_keys(root: Path) -> list[str]:
+    seen = root / ".janitor" / "state" / "trdd-cross-card-blindspot-seen.txt"
+    return seen.read_text().splitlines() if seen.exists() else []
+
+
+def test_a_cleared_pair_is_forgotten_and_reported_again_when_it_returns(repo: Path):
+    """TRDD-61PLV7WS: present -> printed once; present again -> silent; cross-linked (cleared)
+    run forgets the seen key; the pair returning is printed again."""
+    mod = _load_blindspot_module()
+    uid_a, uid_b = "aaaaaaaa", "bbbbbbbb"
+    key = mod._ref_pair_key("janitor#241", uid_a, uid_b)
+    _write_trdd(repo, uid_a, external_refs="[janitor#241]")
+    _write_trdd(repo, uid_b, external_refs="[janitor#241]")
+
+    assert f"TRDD-{uid_a} & TRDD-{uid_b}" in _run(repo)  # printed once
+    assert _run(repo).strip() == ""  # present again: silent
+    assert key in _seen_keys(repo)
+
+    _write_trdd(repo, uid_a, external_refs=f"[janitor#241, TRDD-{uid_b}]")  # cross-link: cleared
+    assert _run(repo).strip() == ""
+    assert key not in _seen_keys(repo)  # forgotten
+
+    _write_trdd(repo, uid_a, external_refs="[janitor#241]")  # the pair returns
+    assert f"TRDD-{uid_a} & TRDD-{uid_b}" in _run(repo)
+
+
+def test_a_scan_with_an_unreadable_card_forgets_nothing(repo: Path):
+    """TRDD-61PLV7WS: when any card cannot be read the scan is incomplete, so a pair that
+    merely LOOKS cleared keeps its seen key (not detected != cleared)."""
+    mod = _load_blindspot_module()
+    uid_a, uid_b, uid_c = "aaaaaaaa", "bbbbbbbb", "cccccccc"
+    key = mod._ref_pair_key("janitor#241", uid_a, uid_b)
+    _write_trdd(repo, uid_a, external_refs="[janitor#241]")
+    _write_trdd(repo, uid_b, external_refs="[janitor#241]")
+    unreadable = _write_trdd(repo, uid_c)
+    _run(repo)
+    assert key in _seen_keys(repo)
+
+    _write_trdd(repo, uid_a, external_refs=f"[janitor#241, TRDD-{uid_b}]")  # would clear the pair
+    unreadable.chmod(0)
+    try:
+        _run(repo)
+    finally:
+        unreadable.chmod(0o644)
+    assert key in _seen_keys(repo)
