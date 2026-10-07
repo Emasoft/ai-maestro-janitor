@@ -2033,15 +2033,18 @@ def _fresh_summary_note(sd: Path, clear_ts: int | None = None) -> str:
     """
     # TRDD-D7RLXAN1: one clear must name ONE read-first file. SessionStart's READ FIRST line names
     # jev-compacted-<key>.md and the hook writes a byte-identical agent-handoff copy; naming the
-    # copy here sent the resumed session to a second file. Prefer the READ FIRST file; the
-    # keyed handoff is only the fallback when no Jev document exists (llm-ext, summarizer lane).
+    # copy here sent the resumed session to a second file. Prefer the READ FIRST file.
     key = _cleared_key(sd, clear_ts)
-    if key and (jev := sd / f"jev-compacted-{key}.md").is_file():
-        return f"Read {jev.resolve()} FIRST — the compacted context of the cleared session."
     candidates = _keyed_handoffs(sd, clear_ts)
     if not candidates:
         return ""
     latest = _latest_handoff(candidates)
+    # A failed Jev attempt followed by an llm-ext fallback for the same key leaves an OLDER
+    # jev-compacted file beside a newer handoff; naming it would send the resumed session to
+    # stale context. Prefer the Jev file only when it is not older than the newest handoff.
+    jev = sd / f"jev-compacted-{key}.md"
+    if jev.is_file() and jev.stat().st_mtime >= latest.stat().st_mtime:
+        return f"Read {jev.resolve()} FIRST — the compacted context of the cleared session."
     return f"Read {latest.resolve()} FIRST — the compacted context of the cleared session."
 
 _LATE_SUMMARY_STAMP_PREFIX = "late-summary-noted-"

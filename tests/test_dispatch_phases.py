@@ -1238,6 +1238,42 @@ def test_fresh_summary_note_names_the_jev_compacted_file_over_the_handoff_copy(
     assert str(handoff.resolve()) not in note, note
     assert "older handoff" not in note, note
 
+def test_fresh_summary_note_is_empty_when_a_jev_file_exists_without_a_keyed_handoff(
+    env_isolation: dict,
+) -> None:
+    """TRDD-D7RLXAN1: a Jev file alone cannot be attributed to this clear; the note stays empty
+    (the Jev branch must not fire before the no-handoff guard)."""
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    _arm_summary_hold(sd, expires_in_s=900, key="aaaa0001")
+    (sd / "jev-compacted-aaaa0001.md").write_text("orphan", encoding="utf-8")
+    assert dispatch._fresh_summary_note(sd) == ""
+
+
+def test_fresh_summary_note_names_the_handoff_when_the_jev_file_is_older(
+    env_isolation: dict,
+) -> None:
+    """TRDD-D7RLXAN1: an older Jev file plus a newer handoff (failed Jev attempt, llm-ext
+    fallback) names the handoff, not the stale Jev file."""
+    import handoff_files
+
+    dispatch = _import_dispatch()
+    import state
+
+    sd = state.state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    _arm_summary_hold(sd, expires_in_s=900, key="aaaa0001")
+    jev = sd / "jev-compacted-aaaa0001.md"
+    jev.write_text("stale", encoding="utf-8")
+    os.utime(jev, (time.time() - 300, time.time() - 300))
+    handoff = handoff_files.write(sd, "aaaa0001", "newer fallback summary")
+    note = dispatch._fresh_summary_note(sd)
+    assert str(handoff.resolve()) in note, note
+    assert str(jev.resolve()) not in note, note
+
 
 def test_stamp_late_summary_uses_the_newest_group_when_the_record_expired(
     env_isolation: dict,
