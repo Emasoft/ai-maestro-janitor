@@ -213,7 +213,7 @@ def _user_memdir() -> Path:
     return memory_scopes.resolve_user_dir()
 
 
-def _recall(memgrep: str, query: str, note_paths: list[str]) -> str:
+def _recall(memgrep: str, query: str, note_paths: list[str], project_dir: str | None = None) -> str:
     """Run `memgrep recall <query> <note-files…> --top N --use-index` and return
     its stdout (the `path — description` lines) — or "" on any failure/timeout/
     no-hit. `note_paths` are explicit top-level FILES (never the dir), so recall
@@ -240,7 +240,25 @@ def _recall(memgrep: str, query: str, note_paths: list[str]) -> str:
             timeout=_TIMEOUT_S,
             check=False,
         )
-    except (subprocess.TimeoutExpired, OSError, ValueError):
+    except subprocess.TimeoutExpired:
+        # WHY (TRDD-QXG8SRVD, F13): a tripped limit used to degrade to "no recall" with no
+        # trace, so the feature could be dead on every prompt unnoticed. Recorded only on
+        # this branch, so the normal path does no extra I/O; any ledger fault is swallowed
+        # because a bookkeeping failure must never break the user prompt.
+        try:
+            import findings_ledger  # noqa: PLC0415 -- only on the timeout path
+
+            findings_ledger.record(
+                sev="MEDIUM",
+                code="HOOK-003",
+                src="janitor:autorecall",
+                msg=f"memgrep recall exceeded its {_TIMEOUT_S:g}s internal limit",
+                project_dir=project_dir,
+            )
+        except Exception:  # noqa: BLE001 -- fail open, see WHY above
+            pass
+        return ""
+    except (OSError, ValueError):
         return ""
     if proc.returncode != 0:
         return ""
@@ -388,7 +406,7 @@ def main() -> int:
         # user-mem store) → nothing the agent may recall.
         return 0
 
-    recall_out = _recall(memgrep, stripped, note_paths)
+    recall_out = _recall(memgrep, stripped, note_paths, project_dir)
     context = _format_context(recall_out)
 
     # TRDD-7B1THXTB: the invite fires on hit AND miss — the miss is exactly the
