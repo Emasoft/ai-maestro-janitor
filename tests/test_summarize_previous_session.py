@@ -670,6 +670,36 @@ def test_auth_402_credits_headline_and_dedupe_keyed_on_status(tmp_path, monkeypa
     assert "key rejected" not in auth_hits[0]["msg"]
 
 
+
+def test_auth_finding_refires_after_a_successful_compaction(tmp_path, monkeypatch, _isolated_env):
+    """TRDD-JIYBKY27: fail(401) -> recorded; a successful compaction clears the dedupe key;
+    fail(401) again -> recorded again. Driven through `sps.main` (the production entry point),
+    so the clear must live on the real success path, not in a helper the test calls itself.
+    A flapping 401/ok/401 therefore re-fires on every 401 that follows a success."""
+    project_dir = _isolated_env
+    prev = _make_prev_transcript(project_dir)
+    monkeypatch.setattr(jcl, "previous_transcript", lambda root, sid: prev)
+    plugin_root = tmp_path / "plugin"
+    monkeypatch.setattr(sps, "PLUGIN_ROOT", plugin_root)
+    monkeypatch.setattr(jcl, "state_head_paths", lambda root, sd, transcript="": ([], False, [], ""))
+
+    def auth_hits() -> list[dict]:
+        return [e for e in _ledger_entries() if e["code"] == "JEV-AUTH-REJECTED"]
+
+    _write_probe_stamp(kind="auth", status=401, reason="401 invalid key")
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
+    assert sps.main() == 0
+    assert len(auth_hits()) == 1
+
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=0, out_text=_COMPACTED_DOC)
+    assert sps.main() == 0
+    assert len(auth_hits()) == 1
+
+    _stub_jev_compact(plugin_root, tmp_path / "argv.json", exit_code=7)
+    assert sps.main() == 0
+    assert len(auth_hits()) == 2, "a 401 after a recovery must be surfaced again"
+
+
 # --- TRDD-1ETALGDG followup item 2(b): blocked=N visibility on an exit-0 compaction -------
 
 
