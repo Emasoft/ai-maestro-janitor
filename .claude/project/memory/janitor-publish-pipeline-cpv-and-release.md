@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline-cpv-and-release
 description: "the release tag points at an old commit / tag and HEAD disagree after publish / duplicate chore bump version commits on main / publish exited 0 but the tag is wrong / CPV flagged a finding / Malformed YAML frontmatter on a SKILL.md / publish blocked by a MAJOR about a non-resolvable CPV ref / a card cannot be completed before release / publish is a mid-pipeline step not the finish line / publish said green but CI went red / is publish.py the same as CI / a green publish is not evidence the release is good / which checks does the publish gate actually run / bumping the CPV version / how do I dry-run the candidate CPV pin before publishing / interrupted-publish recovery left a stale tag"
 ocd: 2026-08-01
-lmd: 2026-09-10
+lmd: 2026-10-07
 metadata:
   node_type: memory
   type: project
@@ -24,7 +24,7 @@ CPV `--strict` raised `[CRITICAL] Malformed YAML frontmatter (missing closing --
 
 
 
-^ATOM-VA75-PD8K [desc: "A card whose last acceptance box is 'observe it live' is unblocked BY the release, so publish is a mid-pipeline step, not the finish line", keywords: card_cannot_be_completed_before_release blocked-live_acceptance_box observe_it_live_in_production publish_before_completing_all_TRDDs board_will_not_drain_before_publish last_box_needs_a_live_run rc=0_only_after_publish waiting_for_a_live_wall unpublished_fix_still_failing why_is_the_card_stuck_at_testing complete_all_cards_then_publish chicken_and_egg_publish_gate, type: project, ocd: 2026-09-03, lmd: 2026-09-03]
+^ATOM-VA75-PD8K [desc: "A card whose last acceptance box is 'observe it live' is unblocked BY the release, so publish is a mid-pipeline step, not the finish line", keywords: card_cannot_be_completed_before_release blocked-live_acceptance_box observe_it_live_in_production publish_before_completing_all_TRDDs board_will_not_drain_before_publish last_box_needs_a_live_run rc=0_only_after_publish waiting_for_a_live_wall unpublished_fix_still_failing why_is_the_card_stuck_at_testing complete_all_cards_then_publish chicken_and_egg_publish_gate, type: project, ocd: 2026-09-03, lmd: 2026-10-07]
 Several janitor cards carry a final acceptance box that can only be ticked by OBSERVING the
 shipped code run on this machine — a `marketplace-refresh` run that exits `rc=0`, a rotation
 that ends with the pane back at `idle`, a `/model` switch that fires the hook. The daemon runs
@@ -34,6 +34,9 @@ a published version.
 So "finish every card, then publish" is unsatisfiable as stated: the release is what makes the
 last box observable. The correct order is to complete every box that code and tests can close,
 publish, then let the live boxes tick on their own evidence afterwards.
+
+
+^ATOM-MKRZ-B0ED [desc: "how to tell whether a BLOCKED-LIVE card's fix is actually published: the 2026-09-03 sample (10 of 16 blocked-live) and checking tag containment against the remote", keywords: how_many_testing_cards_are_blocked_live is_the_fix_commit_in_a_published_tag git_tag_--contains_says_unpublished git_ls-remote_--tags_origin unfetched_release_reads_as_unpublished git_log_-1_--grep_returns_docs_commit newest_commit_mentioning_the_card testing_column_cards_waiting_on_publish BLOCKED-LIVE_triage_sample fix_commit_tag_containment_check card_waiting_on_event_not_on_publish publish-gated_is_common_not_universal, type: project, ocd: 2026-10-07, lmd: 2026-10-07]
 
 What was actually measured, 2026-09-03 (state the sample, not a round number): of 16 cards at
 `column: testing`, subagent triage judged 10 BLOCKED-LIVE; of 8 fix commits whose tag
